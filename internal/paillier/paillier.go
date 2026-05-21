@@ -2,7 +2,9 @@ package paillier
 
 import (
 	"crypto/rand"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 )
@@ -19,6 +21,19 @@ type PrivateKey struct {
 	Mu     *big.Int
 	P      *big.Int
 	Q      *big.Int
+}
+
+type publicKeyWire struct {
+	N string `json:"n"`
+	G string `json:"g"`
+}
+
+type privateKeyWire struct {
+	PublicKey publicKeyWire `json:"public_key"`
+	Lambda    string        `json:"lambda"`
+	Mu        string        `json:"mu"`
+	P         string        `json:"p"`
+	Q         string        `json:"q"`
 }
 
 func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
@@ -66,8 +81,15 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 }
 
 func (pk PublicKey) Validate() error {
+	return pk.ValidateBits(0)
+}
+
+func (pk PublicKey) ValidateBits(minBits int) error {
 	if pk.N == nil || pk.N.Sign() <= 0 {
 		return errors.New("invalid modulus")
+	}
+	if minBits > 0 && pk.N.BitLen() < minBits {
+		return fmt.Errorf("paillier modulus has %d bits, need at least %d", pk.N.BitLen(), minBits)
 	}
 	if pk.NSquared == nil || pk.NSquared.Cmp(new(big.Int).Mul(pk.N, pk.N)) != 0 {
 		return errors.New("invalid n squared")
@@ -78,6 +100,102 @@ func (pk PublicKey) Validate() error {
 	return nil
 }
 
+func (pk PublicKey) MarshalBinary() ([]byte, error) {
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(publicKeyWire{
+		N: pk.N.Text(16),
+		G: pk.G.Text(16),
+	})
+}
+
+func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
+	var w publicKeyWire
+	if err := json.Unmarshal(in, &w); err != nil {
+		return nil, err
+	}
+	n, err := parseHex(w.N)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public modulus: %w", err)
+	}
+	g, err := parseHex(w.G)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public generator: %w", err)
+	}
+	pk := &PublicKey{
+		N:        n,
+		NSquared: new(big.Int).Mul(n, n),
+		G:        g,
+	}
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
+	return pk, nil
+}
+
+func (sk PrivateKey) MarshalBinary() ([]byte, error) {
+	if err := sk.Validate(); err != nil {
+		return nil, err
+	}
+	return json.Marshal(privateKeyWire{
+		PublicKey: publicKeyWire{
+			N: sk.N.Text(16),
+			G: sk.G.Text(16),
+		},
+		Lambda: sk.Lambda.Text(16),
+		Mu:     sk.Mu.Text(16),
+		P:      sk.P.Text(16),
+		Q:      sk.Q.Text(16),
+	})
+}
+
+func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
+	var w privateKeyWire
+	if err := json.Unmarshal(in, &w); err != nil {
+		return nil, err
+	}
+	n, err := parseHex(w.PublicKey.N)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public modulus: %w", err)
+	}
+	g, err := parseHex(w.PublicKey.G)
+	if err != nil {
+		return nil, fmt.Errorf("invalid public generator: %w", err)
+	}
+	lambda, err := parseHex(w.Lambda)
+	if err != nil {
+		return nil, fmt.Errorf("invalid lambda: %w", err)
+	}
+	mu, err := parseHex(w.Mu)
+	if err != nil {
+		return nil, fmt.Errorf("invalid mu: %w", err)
+	}
+	p, err := parseHex(w.P)
+	if err != nil {
+		return nil, fmt.Errorf("invalid p: %w", err)
+	}
+	q, err := parseHex(w.Q)
+	if err != nil {
+		return nil, fmt.Errorf("invalid q: %w", err)
+	}
+	sk := &PrivateKey{
+		PublicKey: PublicKey{
+			N:        n,
+			NSquared: new(big.Int).Mul(n, n),
+			G:        g,
+		},
+		Lambda: lambda,
+		Mu:     mu,
+		P:      p,
+		Q:      q,
+	}
+	if err := sk.Validate(); err != nil {
+		return nil, err
+	}
+	return sk, nil
+}
+
 func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, nil, err
@@ -85,17 +203,34 @@ func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.
 	if message == nil {
 		return nil, nil, errors.New("nil message")
 	}
-	m := mod(message, pk.N)
 	// r must be invertible modulo n; otherwise encryption is not in Z*_n^2.
 	r, err := randomCoprime(reader, pk.N)
 	if err != nil {
 		return nil, nil, err
 	}
+	c, err := pk.EncryptWithRandomness(message, r)
+	if err != nil {
+		return nil, nil, err
+	}
+	return c, r, nil
+}
+
+func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error) {
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
+	if message == nil || r == nil {
+		return nil, errors.New("nil encryption input")
+	}
+	if new(big.Int).GCD(nil, nil, r, pk.N).Cmp(big.NewInt(1)) != 0 {
+		return nil, errors.New("paillier randomness is not invertible")
+	}
+	m := mod(message, pk.N)
 	gm := new(big.Int).Exp(pk.G, m, pk.NSquared)
 	rn := new(big.Int).Exp(r, pk.N, pk.NSquared)
 	c := new(big.Int).Mul(gm, rn)
 	c.Mod(c, pk.NSquared)
-	return c, r, nil
+	return c, nil
 }
 
 func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
@@ -113,6 +248,16 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	m.Mul(m, sk.Mu)
 	m.Mod(m, sk.N)
 	return m, nil
+}
+
+func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
+	if err := pk.Validate(); err != nil {
+		return err
+	}
+	if ciphertext == nil || ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
+		return errors.New("ciphertext out of range")
+	}
+	return nil
 }
 
 func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
@@ -189,4 +334,18 @@ func mod(x, m *big.Int) *big.Int {
 		out.Add(out, m)
 	}
 	return out
+}
+
+func parseHex(s string) (*big.Int, error) {
+	if s == "" {
+		return nil, errors.New("empty integer")
+	}
+	x, ok := new(big.Int).SetString(s, 16)
+	if !ok {
+		return nil, errors.New("invalid hex integer")
+	}
+	if x.Sign() <= 0 {
+		return nil, errors.New("integer must be positive")
+	}
+	return x, nil
 }

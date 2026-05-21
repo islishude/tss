@@ -42,3 +42,32 @@ func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 		t.Fatalf("scaled = %s, want 36", got)
 	}
 }
+
+func TestMarshalRoundTrip(t *testing.T) {
+	sk, err := GenerateKey(nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pubRaw, err := sk.PublicKey.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub, err := UnmarshalPublicKey(pubRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pub.N.Cmp(sk.N) != 0 || pub.G.Cmp(sk.G) != 0 {
+		t.Fatal("public key mismatch after round trip")
+	}
+	privRaw, err := sk.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	priv, err := UnmarshalPrivateKey(privRaw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if priv.N.Cmp(sk.N) != 0 || priv.Lambda.Cmp(sk.Lambda) != 0 {
+		t.Fatal("private key mismatch after round trip")
+	}
+}

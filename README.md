@@ -11,7 +11,7 @@ This repository is an early library implementation, not a production audited TSS
 
 The Ed25519 package implements a usable FROST-style flow: dealerless DKG, two-round signing, partial signature verification, and aggregation into signatures accepted by `crypto/ed25519.Verify`.
 
-The secp256k1 package currently exposes the planned GG20 API shape, but its signing path is explicitly experimental. It reconstructs signing secret and nonce shares from a threshold subset, and does not yet implement the full GG20 Paillier MtA and zero-knowledge proof machinery. Do not use `gg20/secp256k1` as production GG20 threshold ECDSA until that MPC path is completed and independently audited.
+The secp256k1 package exposes a GG20-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing with simplified proof coverage, so it remains explicitly experimental until the proof system and implementation have been independently audited.
 
 ## Packages
 
@@ -22,7 +22,9 @@ The secp256k1 package currently exposes the planned GG20 API shape, but its sign
 | `github.com/islishude/tss/gg20/secp256k1` | Experimental secp256k1 threshold ECDSA API with GG20 package shape.                     |
 | `internal/shamir`                         | Shamir sharing and interpolation helpers.                                               |
 | `internal/curve/*`                        | Minimal curve helpers used by the protocol packages.                                    |
-| `internal/paillier`                       | Paillier primitives for the future GG20 signing path.                                   |
+| `internal/mta`                            | Paillier MtA product-share protocol helpers.                                            |
+| `internal/paillier`                       | Paillier primitives used by the GG20-style signing path.                                |
+| `internal/zk/paillier`                    | Simplified Paillier encryption and MtA response proofs.                                 |
 | `internal/zk/schnorr`                     | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
 
 ## Transport Model
@@ -56,7 +58,7 @@ The secp256k1 package follows the same session-state pattern:
 3. Run `secp256k1.StartSignDigest` with a 32-byte digest and a one-use presign record.
 4. Verify the `(r, s)` result with `secp256k1.VerifyDigest`.
 
-`Presign.Used` is consumed at signing start to catch nonce reuse. This is still an experimental implementation and leaks threshold material to participating signers during signing.
+`Presign.Consumed` is set before any online signing envelope is emitted to catch nonce reuse. The online signing message contains only a partial `s_i`, not the local private-key share or local nonce share.
 
 ## Development
 

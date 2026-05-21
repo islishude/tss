@@ -2,6 +2,10 @@ package secp256k1
 
 import (
 	"crypto/sha256"
+	"encoding/json"
+	"math/big"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -36,37 +40,29 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSASignerSubsets(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	for _, signers := range [][]tss.PartyID{{1, 2}, {1, 3}, {2, 3}} {
+		selected := make([]*KeyShare, 0, len(signers))
+		for _, id := range signers {
+			selected = append(selected, shares[id])
+		}
+		digest := sha256.Sum256([]byte("subset"))
+		pub, sig, err := SignDigest(digest[:], selected)
+		if err != nil {
+			t.Fatalf("signers %v: %v", signers, err)
+		}
+		if !VerifyDigest(pub, digest[:], sig) {
+			t.Fatalf("signers %v: signature did not verify", signers)
+		}
+	}
+}
+
 func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
 	signers := []tss.PartyID{1, 2}
-	presignSessions := map[tss.PartyID]*PresignSession{}
-	messages := make([]tss.Envelope, 0)
-	for _, id := range signers {
-		session, out, err := StartPresign(shares[id], sessionID, signers)
-		if err != nil {
-			t.Fatal(err)
-		}
-		presignSessions[id] = session
-		messages = append(messages, out...)
-	}
-	for _, env := range messages {
-		for _, id := range signers {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			if _, err := presignSessions[id].HandlePresignMessage(env); err != nil {
-				t.Fatal(err)
-			}
-		}
-	}
-	presign, ok := presignSessions[1].Presign()
-	if !ok {
-		t.Fatal("presign not complete")
-	}
+	presigns := secpPresign(t, shares, signers)
+	presign := presigns[1]
 	digest := sha256.Sum256([]byte("reuse"))
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -77,6 +73,85 @@ func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
 	}
 	if _, _, err := StartSignDigest(shares[1], presign, signID, digest[:]); err == nil {
 		t.Fatal("expected presign reuse rejection")
+	}
+}
+
+func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	digest := sha256.Sum256([]byte("online tamper"))
+	signID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := map[tss.PartyID]*SignSession{}
+	messages := make([]tss.Envelope, 0, len(signers))
+	for _, id := range signers {
+		session, out, err := StartSignDigest(shares[id], presigns[id], signID, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		messages = append(messages, out...)
+	}
+	var payload signPartialPayload
+	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.S = scalarBytes(bigOne())
+	mutated, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	messages[0].Payload = mutated
+	messages[0] = messages[0].WithTranscriptHash()
+	delivered := false
+	for _, id := range signers {
+		if id == messages[0].From {
+			continue
+		}
+		delivered = true
+		if _, err := sessions[id].HandleSignMessage(messages[0]); err == nil {
+			t.Fatal("expected tampered partial rejection")
+		}
+	}
+	if !delivered {
+		t.Fatal("tampered partial was not delivered")
+	}
+}
+
+func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, _, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[0].Payload[0] ^= 1
+	out2[0] = out2[0].WithTranscriptHash()
+	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
+		t.Fatal("expected tampered EncK rejection")
+	}
+}
+
+func TestThresholdECDSAStaticNoSecretShareRegression(t *testing.T) {
+	body, err := os.ReadFile("sign.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	text := string(body)
+	for _, forbidden := range []string{"SecretShare", "NonceShare", "InterpolateConstant"} {
+		if strings.Contains(text, forbidden) {
+			t.Fatalf("sign.go still contains forbidden regression marker %q", forbidden)
+		}
 	}
 }
 
@@ -95,7 +170,7 @@ func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
 	}
 }
 
-func secpKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
+func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	session, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -143,4 +218,49 @@ func secpKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		out[id] = share
 	}
 	return out
+}
+
+func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID) map[tss.PartyID]*Presign {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presignSessions := map[tss.PartyID]*PresignSession{}
+	messages := make([]tss.Envelope, 0)
+	for _, id := range signers {
+		session, out, err := StartPresign(shares[id], sessionID, signers)
+		if err != nil {
+			t.Fatal(err)
+		}
+		presignSessions[id] = session
+		messages = append(messages, out...)
+	}
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
+		for _, id := range signers {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			out, err := presignSessions[id].HandlePresignMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			messages = append(messages, out...)
+		}
+	}
+	out := make(map[tss.PartyID]*Presign, len(signers))
+	for _, id := range signers {
+		presign, ok := presignSessions[id].Presign()
+		if !ok {
+			t.Fatalf("presign not complete for %d", id)
+		}
+		out[id] = presign
+	}
+	return out
+}
+
+func bigOne() *big.Int {
+	return big.NewInt(1)
 }

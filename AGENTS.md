@@ -27,7 +27,9 @@ Run both test commands before handing off substantial changes.
 - `internal/shamir`: Shamir sharing and interpolation over caller-provided prime-order fields.
 - `internal/curve/edwards25519`: Ed25519 scalar/point helpers and commitment verification.
 - `internal/curve/secp256k1`: SEC 2 curve constants, point operations, ECDSA helpers.
-- `internal/paillier`: Paillier primitives for future GG20 work.
+- `internal/mta`: Paillier MtA product-share helpers for GG20-style signing.
+- `internal/paillier`: Paillier primitives used by GG20-style MtA signing.
+- `internal/zk/paillier`: Simplified Paillier encryption and MtA response proofs.
 - `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
 
 ## Coding Rules

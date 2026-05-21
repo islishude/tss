@@ -1,6 +1,8 @@
 package secp256k1
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,6 +10,8 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/mta"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
 )
 
@@ -17,8 +21,12 @@ type Presign struct {
 	Threshold      int           `json:"threshold"`
 	Signers        []tss.PartyID `json:"signers"`
 	R              []byte        `json:"r"`
-	NonceShare     []byte        `json:"nonce_share"`
-	Used           bool          `json:"used"` // local nonce-reuse guard
+	LittleR        []byte        `json:"little_r"`
+	KShare         []byte        `json:"k_share"`
+	SigmaShare     []byte        `json:"sigma_share"`
+	Delta          []byte        `json:"delta"`
+	TranscriptHash []byte        `json:"transcript_hash"`
+	Consumed       bool          `json:"consumed"`
 	SecurityNotice string        `json:"security_notice"`
 }
 
@@ -27,10 +35,27 @@ type PresignSession struct {
 	sessionID tss.SessionID
 	config    tss.ThresholdConfig
 	signers   []tss.PartyID
-	commits   map[tss.PartyID][][]byte
-	shares    map[tss.PartyID]*big.Int
-	completed bool
-	presign   *Presign
+	paillier  *pai.PrivateKey
+
+	kShare    *big.Int
+	gamma     *big.Int
+	xBar      *big.Int
+	gammaComm []byte
+	xBarComm  []byte
+
+	round1 map[tss.PartyID]presignRound1Payload
+	round2 map[tss.PartyID]presignRound2Payload
+	deltas map[tss.PartyID]*big.Int
+
+	alphaDelta map[tss.PartyID]*big.Int
+	betaDelta  map[tss.PartyID]*big.Int
+	alphaSigma map[tss.PartyID]*big.Int
+	betaSigma  map[tss.PartyID]*big.Int
+
+	round2Sent bool
+	round3Sent bool
+	completed  bool
+	presign    *Presign
 }
 
 type SignSession struct {
@@ -39,26 +64,34 @@ type SignSession struct {
 	sessionID tss.SessionID
 	digest    []byte
 	lowS      bool
-	shares    map[tss.PartyID]signShare
+	partials  map[tss.PartyID]*big.Int
 	completed bool
 	signature *Signature
 }
 
-type presignCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments"`
+type presignRound1Payload struct {
+	Gamma             []byte `json:"gamma"`
+	EncK              []byte `json:"enc_k"`
+	EncKProof         []byte `json:"enc_k_proof"`
+	PaillierPublicKey []byte `json:"paillier_public_key"`
 }
 
-type presignSharePayload struct {
-	Share []byte `json:"share"`
+type presignRound2Payload struct {
+	Delta mta.ResponseMessage `json:"delta"`
+	Sigma mta.ResponseMessage `json:"sigma"`
 }
 
-type signShare struct {
-	SecretShare []byte `json:"secret_share"`
-	NonceShare  []byte `json:"nonce_share"`
+type presignRound3Payload struct {
+	Delta []byte `json:"delta"`
+}
+
+type signPartialPayload struct {
+	S                 []byte `json:"s"`
+	PresignTranscript []byte `json:"presign_transcript"`
 }
 
 func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID) (*PresignSession, []tss.Envelope, error) {
-	if err := key.Validate(); err != nil {
+	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
 	signers = tss.SortParties(signers)
@@ -68,49 +101,92 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	if !tss.ContainsParty(signers, key.Party) {
 		return nil, nil, errors.New("local party is not in signer set")
 	}
+	if err := validateSignerSet(key, signers); err != nil {
+		return nil, nil, err
+	}
+	paillierKey, err := key.paillierPrivate()
+	if err != nil {
+		return nil, nil, err
+	}
+	kShare, err := secp.RandomScalar(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	gamma, err := secp.RandomScalar(nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	gammaComm, err := secp.PointBytes(secp.ScalarBaseMult(gamma))
+	if err != nil {
+		return nil, nil, err
+	}
+	lambda, err := shamir.LagrangeCoefficient(key.Party, signers, secp.Order())
+	if err != nil {
+		return nil, nil, err
+	}
+	secret, err := key.secretBig()
+	if err != nil {
+		return nil, nil, err
+	}
+	xBar := new(big.Int).Mul(lambda, secret)
+	xBar.Mod(xBar, secp.Order())
+	localVerificationShare, ok := key.verificationShare(key.Party)
+	if !ok {
+		return nil, nil, errors.New("missing local verification share")
+	}
+	localVerificationPoint, err := secp.PointFromBytes(localVerificationShare)
+	if err != nil {
+		return nil, nil, err
+	}
+	xBarComm, err := secp.PointBytes(secp.ScalarMult(localVerificationPoint, lambda))
+	if err != nil {
+		return nil, nil, err
+	}
+	startMsg, err := mta.Start(nil, mtaStartDomain(sessionID, signers, key.Party), kShare, &paillierKey.PublicKey)
+	if err != nil {
+		return nil, nil, err
+	}
 	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
-	// This experimental presign creates a Shamir-shared ECDSA nonce. Full GG20
-	// would replace the later reconstruction path with Paillier MtA and ZK proofs.
-	poly, err := shamir.RandomPolynomial(nil, secp.Order(), key.Threshold, nil)
+	payload, err := json.Marshal(presignRound1Payload{
+		Gamma:             gammaComm,
+		EncK:              startMsg.Ciphertext,
+		EncKProof:         startMsg.Proof,
+		PaillierPublicKey: append([]byte(nil), key.PaillierPublicKey...),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
-	commitments := make([][]byte, len(poly))
-	for i, coeff := range poly {
-		enc, err := secp.PointBytes(secp.ScalarBaseMult(coeff))
-		if err != nil {
-			return nil, nil, err
-		}
-		commitments[i] = enc
-	}
+	env := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
 	s := &PresignSession{
-		key:       key,
-		sessionID: sessionID,
-		config:    config,
-		signers:   signers,
-		commits:   map[tss.PartyID][][]byte{key.Party: commitments},
-		shares:    map[tss.PartyID]*big.Int{key.Party: shamir.Eval(poly, key.Party, secp.Order())},
+		key:        key,
+		sessionID:  sessionID,
+		config:     config,
+		signers:    signers,
+		paillier:   paillierKey,
+		kShare:     kShare,
+		gamma:      gamma,
+		xBar:       xBar,
+		gammaComm:  gammaComm,
+		xBarComm:   xBarComm,
+		round1:     map[tss.PartyID]presignRound1Payload{key.Party: mustRound1(payload)},
+		round2:     make(map[tss.PartyID]presignRound2Payload),
+		deltas:     make(map[tss.PartyID]*big.Int),
+		alphaDelta: make(map[tss.PartyID]*big.Int),
+		betaDelta:  make(map[tss.PartyID]*big.Int),
+		alphaSigma: make(map[tss.PartyID]*big.Int),
+		betaSigma:  make(map[tss.PartyID]*big.Int),
 	}
-	out := make([]tss.Envelope, 0, len(signers))
-	payload, err := json.Marshal(presignCommitmentsPayload{Commitments: commitments})
+	out := []tss.Envelope{env}
+	round2, err := s.tryEmitRound2()
 	if err != nil {
 		return nil, nil, err
 	}
-	out = append(out, envelope(config, 1, key.Party, 0, payloadPresignCommitment, payload, false))
-	for _, id := range signers {
-		if id == key.Party {
-			continue
-		}
-		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := json.Marshal(presignSharePayload{Share: scalarBytes(share)})
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, envelope(config, 1, key.Party, id, payloadPresignShare, payload, true))
-	}
-	if err := s.tryComplete(); err != nil {
+	out = append(out, round2...)
+	round3, err := s.tryEmitRound3()
+	if err != nil {
 		return nil, nil, err
 	}
+	out = append(out, round3...)
 	return s, out, nil
 }
 
@@ -127,39 +203,59 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 	if env.To != 0 && env.To != s.key.Party {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("presign only accepts round 1 messages"))
-	}
 	switch env.PayloadType {
-	case payloadPresignCommitment:
-		if _, ok := s.commits[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
+	case payloadPresignRound1:
+		if env.Round != 1 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 payload in wrong round"))
 		}
-		var p presignCommitmentsPayload
+		if _, ok := s.round1[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))
+		}
+		var p presignRound1Payload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := validateCommitments(p.Commitments, s.key.Threshold); err != nil {
+		if err := s.validateRound1(env.From, p); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		s.commits[env.From] = p.Commitments
-	case payloadPresignShare:
-		if _, ok := s.shares[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
+		s.round1[env.From] = p
+		return s.tryEmitRound2()
+	case payloadPresignRound2:
+		if env.Round != 2 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round2 payload in wrong round"))
 		}
-		var p presignSharePayload
+		if _, ok := s.round2[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round2"))
+		}
+		var p presignRound2Payload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		share, err := secp.ParseScalar(p.Share)
+		if err := s.finishRound2(env.From, p); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+		s.round2[env.From] = p
+		return s.tryEmitRound3()
+	case payloadPresignRound3:
+		if env.Round != 3 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round3 payload in wrong round"))
+		}
+		if _, ok := s.deltas[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate delta share"))
+		}
+		var p presignRound3Payload
+		if err := json.Unmarshal(env.Payload, &p); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		delta, err := secp.ParseScalar(p.Delta)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.shares[env.From] = share
+		s.deltas[env.From] = delta
+		return nil, s.tryComplete()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
-	return nil, s.tryComplete()
 }
 
 func (s *PresignSession) Presign() (*Presign, bool) {
@@ -169,53 +265,195 @@ func (s *PresignSession) Presign() (*Presign, bool) {
 	return s.presign, true
 }
 
-func (s *PresignSession) tryComplete() error {
-	if s.completed {
-		return nil
+func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload) error {
+	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
+		return fmt.Errorf("invalid gamma: %w", err)
 	}
-	if len(s.commits) != len(s.signers) || len(s.shares) != len(s.signers) {
-		return nil
-	}
-	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.key.Party), share); err != nil {
-			return &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: 1,
-				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid presign nonce share", Parties: []tss.PartyID{dealer}},
-				Err:   err,
-			}
-		}
-	}
-	order := secp.Order()
-	nonceShare := new(big.Int)
-	for _, dealer := range s.signers {
-		nonceShare.Add(nonceShare, s.shares[dealer])
-		nonceShare.Mod(nonceShare, order)
-	}
-	constantPoints := make([]*secp.Point, 0, len(s.signers))
-	for _, dealer := range s.signers {
-		p, err := secp.PointFromBytes(s.commits[dealer][0])
-		if err != nil {
-			return err
-		}
-		constantPoints = append(constantPoints, p)
-	}
-	R, err := secp.PointBytes(secp.AddPoints(constantPoints...))
+	expectedPK, err := s.key.paillierPublicFor(from)
 	if err != nil {
 		return err
 	}
+	expectedPKBytes, err := expectedPK.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(expectedPKBytes, p.PaillierPublicKey) {
+		return errors.New("round1 Paillier public key does not match keygen")
+	}
+	start := mta.StartMessage{Ciphertext: p.EncK, Proof: p.EncKProof}
+	if !mta.VerifyStart(mtaStartDomain(s.sessionID, s.signers, from), start, expectedPK) {
+		return errors.New("invalid encrypted nonce proof")
+	}
+	return nil
+}
+
+func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
+	if s.round2Sent || len(s.round1) != len(s.signers) {
+		return nil, nil
+	}
+	out := make([]tss.Envelope, 0, len(s.signers)-1)
+	for _, peer := range s.signers {
+		if peer == s.key.Party {
+			continue
+		}
+		peerPK, err := s.key.paillierPublicFor(peer)
+		if err != nil {
+			return nil, err
+		}
+		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, Proof: s.round1[peer].EncKProof}
+		deltaResp, betaDelta, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "delta"), start, s.gamma, s.gammaComm, peerPK)
+		if err != nil {
+			return nil, err
+		}
+		sigmaResp, betaSigma, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "sigma"), start, s.xBar, s.xBarComm, peerPK)
+		if err != nil {
+			return nil, err
+		}
+		s.betaDelta[peer] = betaDelta
+		s.betaSigma[peer] = betaSigma
+		payload, err := json.Marshal(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp})
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, envelope(s.config, 2, s.key.Party, peer, payloadPresignRound2, payload, true))
+	}
+	s.round2Sent = true
+	return out, nil
+}
+
+func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) error {
+	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, Proof: s.round1[s.key.Party].EncKProof}
+	gammaCommit := s.round1[from].Gamma
+	alphaDelta, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "delta"), start, p.Delta, gammaCommit, s.paillier)
+	if err != nil {
+		return err
+	}
+	xBarCommit, err := s.xBarCommitment(from)
+	if err != nil {
+		return err
+	}
+	alphaSigma, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "sigma"), start, p.Sigma, xBarCommit, s.paillier)
+	if err != nil {
+		return err
+	}
+	s.alphaDelta[from] = alphaDelta
+	s.alphaSigma[from] = alphaSigma
+	return nil
+}
+
+func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
+	if s.round3Sent || len(s.round2) != len(s.signers)-1 {
+		return nil, nil
+	}
+	deltaShare := new(big.Int).Mul(s.kShare, s.gamma)
+	sigmaShare := new(big.Int).Mul(s.kShare, s.xBar)
+	order := secp.Order()
+	for _, peer := range s.signers {
+		if peer == s.key.Party {
+			continue
+		}
+		deltaShare.Add(deltaShare, s.alphaDelta[peer])
+		deltaShare.Add(deltaShare, s.betaDelta[peer])
+		sigmaShare.Add(sigmaShare, s.alphaSigma[peer])
+		sigmaShare.Add(sigmaShare, s.betaSigma[peer])
+	}
+	deltaShare.Mod(deltaShare, order)
+	sigmaShare.Mod(sigmaShare, order)
+	s.deltas[s.key.Party] = deltaShare
+	payload, err := json.Marshal(presignRound3Payload{Delta: scalarBytes(deltaShare)})
+	if err != nil {
+		return nil, err
+	}
+	s.round3Sent = true
 	s.presign = &Presign{
 		Version:        tss.Version,
 		Party:          s.key.Party,
 		Threshold:      s.key.Threshold,
 		Signers:        append([]tss.PartyID(nil), s.signers...),
-		R:              R,
-		NonceShare:     scalarBytes(nonceShare),
+		KShare:         scalarBytes(s.kShare),
+		SigmaShare:     scalarBytes(sigmaShare),
 		SecurityNotice: ExperimentalSecurityNotice,
 	}
+	if err := s.tryComplete(); err != nil {
+		return nil, err
+	}
+	return []tss.Envelope{envelope(s.config, 3, s.key.Party, 0, payloadPresignRound3, payload, false)}, nil
+}
+
+func (s *PresignSession) tryComplete() error {
+	if s.completed || len(s.deltas) != len(s.signers) {
+		return nil
+	}
+	order := secp.Order()
+	delta := new(big.Int)
+	gammaPoints := make([]*secp.Point, 0, len(s.signers))
+	for _, id := range s.signers {
+		delta.Add(delta, s.deltas[id])
+		delta.Mod(delta, order)
+		gammaPoint, err := secp.PointFromBytes(s.round1[id].Gamma)
+		if err != nil {
+			return err
+		}
+		gammaPoints = append(gammaPoints, gammaPoint)
+	}
+	if delta.Sign() == 0 {
+		return errors.New("zero presign delta")
+	}
+	deltaInv := new(big.Int).ModInverse(delta, order)
+	if deltaInv == nil {
+		return errors.New("non-invertible presign delta")
+	}
+	gamma := secp.AddPoints(gammaPoints...)
+	RPoint := secp.ScalarMult(gamma, deltaInv)
+	R, err := secp.PointBytes(RPoint)
+	if err != nil {
+		return err
+	}
+	littleR := new(big.Int).Mod(RPoint.X, order)
+	if littleR.Sign() == 0 {
+		return errors.New("zero ECDSA r")
+	}
+	if s.presign == nil {
+		return errors.New("local presign shares not computed")
+	}
+	s.presign.R = R
+	s.presign.LittleR = scalarBytes(littleR)
+	s.presign.Delta = scalarBytes(delta)
+	s.presign.TranscriptHash = s.presignTranscriptHash(R, littleR, delta)
 	s.completed = true
 	return nil
+}
+
+func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
+	verificationShare, ok := s.key.verificationShare(id)
+	if !ok {
+		return nil, fmt.Errorf("missing verification share for %d", id)
+	}
+	point, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return nil, err
+	}
+	lambda, err := shamir.LagrangeCoefficient(id, s.signers, secp.Order())
+	if err != nil {
+		return nil, err
+	}
+	return secp.PointBytes(secp.ScalarMult(point, lambda))
+}
+
+func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("gg20-secp256k1-presign-transcript-v1"))
+	writeHashPart(h, s.sessionID[:])
+	for _, id := range s.signers {
+		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		writeHashPart(h, s.round1[id].Gamma)
+		writeHashPart(h, s.round1[id].EncK)
+		writeHashPart(h, scalarBytes(s.deltas[id]))
+	}
+	writeHashPart(h, R)
+	writeHashPart(h, scalarBytes(littleR))
+	writeHashPart(h, scalarBytes(delta))
+	return h.Sum(nil)
 }
 
 func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte) (*SignSession, []tss.Envelope, error) {
@@ -226,7 +464,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 }
 
 func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
-	if err := key.Validate(); err != nil {
+	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
 	if err := validatePresign(key, presign); err != nil {
@@ -235,24 +473,39 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	if len(digest32) != 32 {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
-	if presign.Used {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 2, key.Party, errors.New("presign already used"))
+	if presign.Consumed {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
 	}
-	// Consume before emitting any share so retries cannot accidentally reuse a nonce.
-	presign.Used = true
-	payload, err := json.Marshal(signShare{SecretShare: key.Secret, NonceShare: presign.NonceShare})
+	presign.Consumed = true
+	kShare, err := secp.ParseScalar(presign.KShare)
+	if err != nil {
+		return nil, nil, err
+	}
+	sigmaShare, err := secp.ParseScalar(presign.SigmaShare)
+	if err != nil {
+		return nil, nil, err
+	}
+	littleR, err := secp.ParseScalar(presign.LittleR)
+	if err != nil {
+		return nil, nil, err
+	}
+	z := new(big.Int).SetBytes(digest32)
+	partial := new(big.Int).Mul(z, kShare)
+	rs := new(big.Int).Mul(littleR, sigmaShare)
+	partial.Add(partial, rs)
+	partial.Mod(partial, secp.Order())
+	payload, err := json.Marshal(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
 	if err != nil {
 		return nil, nil, err
 	}
 	env := tss.Envelope{
-		Protocol:             protocol,
-		Version:              tss.Version,
-		SessionID:            sessionID,
-		Round:                2,
-		From:                 key.Party,
-		PayloadType:          payloadSignShare,
-		Payload:              payload,
-		ConfidentialRequired: true,
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   sessionID,
+		Round:       1,
+		From:        key.Party,
+		PayloadType: payloadSignPartial,
+		Payload:     payload,
 	}.WithTranscriptHash()
 	s := &SignSession{
 		key:       key,
@@ -260,7 +513,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		sessionID: sessionID,
 		digest:    append([]byte(nil), digest32...),
 		lowS:      lowS,
-		shares:    map[tss.PartyID]signShare{key.Party: {SecretShare: append([]byte(nil), key.Secret...), NonceShare: append([]byte(nil), presign.NonceShare...)}},
+		partials:  map[tss.PartyID]*big.Int{key.Party: partial},
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, nil, err
@@ -281,23 +534,24 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	if env.To != 0 && env.To != s.key.Party {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
-	if env.Round != 2 || env.PayloadType != payloadSignShare {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("expected round 2 sign share"))
+	if env.Round != 1 || env.PayloadType != payloadSignPartial {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("expected round 1 sign partial"))
 	}
-	if _, ok := s.shares[env.From]; ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate sign share"))
+	if _, ok := s.partials[env.From]; ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate sign partial"))
 	}
-	var p signShare
+	var p signPartialPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if _, err := secp.ParseScalar(p.SecretShare); err != nil {
+	if !bytes.Equal(p.PresignTranscript, s.presign.TranscriptHash) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign transcript mismatch"))
+	}
+	partial, err := secp.ParseScalar(p.S)
+	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if _, err := secp.ParseScalar(p.NonceShare); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	s.shares[env.From] = p
+	s.partials[env.From] = partial
 	return nil, s.tryComplete()
 }
 
@@ -309,35 +563,21 @@ func (s *SignSession) Signature() (*Signature, bool) {
 }
 
 func (s *SignSession) tryComplete() error {
-	if s.completed || len(s.shares) != len(s.presign.Signers) {
+	if s.completed || len(s.partials) != len(s.presign.Signers) {
 		return nil
 	}
-	secretShares := make([]shamir.Share, 0, len(s.presign.Signers))
-	nonceShares := make([]shamir.Share, 0, len(s.presign.Signers))
+	sigS := new(big.Int)
 	for _, id := range s.presign.Signers {
-		share := s.shares[id]
-		secret, err := secp.ParseScalar(share.SecretShare)
-		if err != nil {
-			return err
-		}
-		nonce, err := secp.ParseScalar(share.NonceShare)
-		if err != nil {
-			return err
-		}
-		secretShares = append(secretShares, shamir.Share{ID: id, Value: secret})
-		nonceShares = append(nonceShares, shamir.Share{ID: id, Value: nonce})
+		sigS.Add(sigS, s.partials[id])
+		sigS.Mod(sigS, secp.Order())
 	}
-	// Experimental shortcut: reconstruct threshold secret and nonce locally.
-	// This is intentionally not a production GG20 signing step.
-	secret, err := shamir.InterpolateConstant(secretShares, secp.Order())
-	if err != nil {
-		return err
+	if sigS.Sign() == 0 {
+		return errors.New("zero ECDSA s")
 	}
-	nonce, err := shamir.InterpolateConstant(nonceShares, secp.Order())
-	if err != nil {
-		return err
+	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.N), 1)) > 0 {
+		sigS.Sub(secp.N, sigS)
 	}
-	r, sigS, err := secp.SignECDSAWithNonce(s.digest, secret, nonce, s.lowS)
+	r, err := secp.ParseScalar(s.presign.LittleR)
 	if err != nil {
 		return err
 	}
@@ -346,7 +586,12 @@ func (s *SignSession) tryComplete() error {
 		return err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, sigS) {
-		return errors.New("ECDSA signature failed verification")
+		return &tss.ProtocolError{
+			Code:  tss.ErrCodeVerification,
+			Round: 1,
+			Blame: &tss.Blame{Reason: "aggregated ECDSA signature failed verification", Parties: append([]tss.PartyID(nil), s.presign.Signers...)},
+			Err:   errors.New("ECDSA signature failed verification"),
+		}
 	}
 	s.signature = &Signature{R: scalarBytes(r), S: scalarBytes(sigS)}
 	s.completed = true
@@ -379,7 +624,7 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 	ids := make([]tss.PartyID, len(signers))
 	shares := make(map[tss.PartyID]*KeyShare, len(signers))
 	for i, share := range signers {
-		if err := share.Validate(); err != nil {
+		if err := share.requireMPCMaterial(); err != nil {
 			return nil, nil, err
 		}
 		ids[i] = share.Party
@@ -391,26 +636,27 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 		return nil, nil, err
 	}
 	presignSessions := make(map[tss.PartyID]*PresignSession, len(ids))
-	presignMessages := make([]tss.Envelope, 0)
+	presignQueue := make([]tss.Envelope, 0)
 	for _, id := range ids {
 		session, out, err := StartPresign(shares[id], presignID, ids)
 		if err != nil {
 			return nil, nil, err
 		}
 		presignSessions[id] = session
-		presignMessages = append(presignMessages, out...)
+		presignQueue = append(presignQueue, out...)
 	}
-	for _, env := range presignMessages {
+	for len(presignQueue) > 0 {
+		env := presignQueue[0]
+		presignQueue = presignQueue[1:]
 		for _, id := range ids {
-			if id == env.From {
+			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			if env.To != 0 && env.To != id {
-				continue
-			}
-			if _, err := presignSessions[id].HandlePresignMessage(env); err != nil {
+			out, err := presignSessions[id].HandlePresignMessage(env)
+			if err != nil {
 				return nil, nil, err
 			}
+			presignQueue = append(presignQueue, out...)
 		}
 	}
 	signID, err := tss.NewSessionID(nil)
@@ -468,8 +714,64 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	if _, err := secp.PointFromBytes(presign.R); err != nil {
 		return fmt.Errorf("invalid presign R: %w", err)
 	}
-	if _, err := secp.ParseScalar(presign.NonceShare); err != nil {
-		return fmt.Errorf("invalid nonce share: %w", err)
+	if _, err := secp.ParseScalar(presign.LittleR); err != nil {
+		return fmt.Errorf("invalid little r: %w", err)
+	}
+	if _, err := secp.ParseScalar(presign.KShare); err != nil {
+		return fmt.Errorf("invalid k share: %w", err)
+	}
+	if _, err := secp.ParseScalar(presign.SigmaShare); err != nil {
+		return fmt.Errorf("invalid sigma share: %w", err)
+	}
+	if _, err := secp.ParseScalar(presign.Delta); err != nil {
+		return fmt.Errorf("invalid delta: %w", err)
+	}
+	if len(presign.TranscriptHash) != sha256.Size {
+		return errors.New("invalid presign transcript hash")
 	}
 	return nil
+}
+
+func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
+	seen := make(map[tss.PartyID]struct{}, len(signers))
+	for _, id := range signers {
+		if !tss.ContainsParty(key.Parties, id) {
+			return fmt.Errorf("signer %d is not a participant", id)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("duplicate signer %d", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
+}
+
+func mtaStartDomain(sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID) []byte {
+	return domainBytes("mta-start", sessionID, signers, owner, 0, "")
+}
+
+func mtaResponseDomain(sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, kind string) []byte {
+	return domainBytes("mta-response", sessionID, signers, initiator, responder, kind)
+}
+
+func domainBytes(label string, sessionID tss.SessionID, signers []tss.PartyID, a, b tss.PartyID, kind string) []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("gg20-secp256k1"))
+	writeHashPart(h, []byte(label))
+	writeHashPart(h, sessionID[:])
+	for _, id := range signers {
+		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+	}
+	writeHashPart(h, []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
+	writeHashPart(h, []byte{byte(b >> 24), byte(b >> 16), byte(b >> 8), byte(b)})
+	writeHashPart(h, []byte(kind))
+	return h.Sum(nil)
+}
+
+func mustRound1(payload []byte) presignRound1Payload {
+	var p presignRound1Payload
+	if err := json.Unmarshal(payload, &p); err != nil {
+		panic(err)
+	}
+	return p
 }

@@ -1,6 +1,8 @@
 package secp256k1
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,19 +10,30 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
+	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
+type KeygenOptions struct {
+	PaillierBits int
+}
+
 type KeygenSession struct {
-	cfg       tss.ThresholdConfig
-	commits   map[tss.PartyID][][]byte
-	shares    map[tss.PartyID]*big.Int
-	completed bool
-	keyShare  *KeyShare
+	cfg          tss.ThresholdConfig
+	commits      map[tss.PartyID][][]byte
+	shares       map[tss.PartyID]*big.Int
+	paillier     *pai.PrivateKey
+	paillierPubs map[tss.PartyID]PaillierPublicShare
+	completed    bool
+	keyShare     *KeyShare
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments"`
+	Commitments       [][]byte `json:"commitments"`
+	PaillierPublicKey []byte   `json:"paillier_public_key"`
+	PaillierProof     []byte   `json:"paillier_proof"`
 }
 
 type keygenSharePayload struct {
@@ -28,11 +41,35 @@ type keygenSharePayload struct {
 }
 
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
+	return StartKeygenWithOptions(config, KeygenOptions{})
+}
+
+func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
 	if err := config.Validate(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := config.SortedParties()
 	config.Parties = parties
+	paillierBits := opts.PaillierBits
+	if paillierBits == 0 {
+		paillierBits = DefaultPaillierBits
+	}
+	paillierKey, err := pai.GenerateKey(config.Reader(), paillierBits)
+	if err != nil {
+		return nil, nil, err
+	}
+	paillierPubBytes, err := paillierKey.PublicKey.MarshalBinary()
+	if err != nil {
+		return nil, nil, err
+	}
+	modProof, err := zkpai.ProveModulus(config.SessionID[:], &paillierKey.PublicKey, uint32(config.Self))
+	if err != nil {
+		return nil, nil, err
+	}
+	modProofBytes, err := zkpai.Marshal(modProof)
+	if err != nil {
+		return nil, nil, err
+	}
 	poly, err := shamir.RandomPolynomial(config.Reader(), secp.Order(), config.Threshold, nil)
 	if err != nil {
 		return nil, nil, err
@@ -47,12 +84,20 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 		commitments[i] = enc
 	}
 	s := &KeygenSession{
-		cfg:     config,
-		commits: map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		cfg:      config,
+		commits:  map[tss.PartyID][][]byte{config.Self: commitments},
+		shares:   map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		paillier: paillierKey,
+		paillierPubs: map[tss.PartyID]PaillierPublicShare{
+			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
+		},
 	}
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := json.Marshal(keygenCommitmentsPayload{Commitments: commitments})
+	commitPayload, err := json.Marshal(keygenCommitmentsPayload{
+		Commitments:       commitments,
+		PaillierPublicKey: paillierPubBytes,
+		PaillierProof:     modProofBytes,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +144,19 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
+		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if !zkpai.VerifyModulus(s.cfg.SessionID[:], pk, uint32(env.From), proof) {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("invalid Paillier modulus proof"))
+		}
 		s.commits[env.From] = p.Commitments
+		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 	case payloadKeygenShare:
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
@@ -130,7 +187,7 @@ func (s *KeygenSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) {
+	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -178,19 +235,103 @@ func (s *KeygenSession) tryComplete() error {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
+	transcriptHash := s.keygenTranscriptHash(groupCommitments)
+	localVerificationShare, ok := verificationShareFor(verificationShares, s.cfg.Self)
+	if !ok {
+		return errors.New("missing local verification share")
+	}
+	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, secret)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(proofPublic, localVerificationShare) {
+		return errors.New("local share proof public key mismatch")
+	}
+	shareProofBytes, err := json.Marshal(shareProof)
+	if err != nil {
+		return err
+	}
+	localPaillierPub, err := s.paillier.PublicKey.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	localPaillierPriv, err := s.paillier.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	localPaillierProof, err := zkpai.ProveModulus(transcriptHash, &s.paillier.PublicKey, uint32(s.cfg.Self))
+	if err != nil {
+		return err
+	}
+	localPaillierProofBytes, err := zkpai.Marshal(localPaillierProof)
+	if err != nil {
+		return err
+	}
 	s.keyShare = &KeyShare{
-		Version:            tss.Version,
-		Party:              s.cfg.Self,
-		Threshold:          s.cfg.Threshold,
-		Parties:            append([]tss.PartyID(nil), s.cfg.Parties...),
-		PublicKey:          append([]byte(nil), groupCommitments[0]...),
-		Secret:             scalarBytes(secret),
-		GroupCommitments:   groupCommitments,
-		VerificationShares: verificationShares,
-		SecurityNotice:     ExperimentalSecurityNotice,
+		Version:              tss.Version,
+		Party:                s.cfg.Self,
+		Threshold:            s.cfg.Threshold,
+		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
+		PublicKey:            append([]byte(nil), groupCommitments[0]...),
+		Secret:               scalarBytes(secret),
+		GroupCommitments:     groupCommitments,
+		VerificationShares:   verificationShares,
+		PaillierPublicKey:    localPaillierPub,
+		PaillierPrivateKey:   localPaillierPriv,
+		PaillierProof:        localPaillierProofBytes,
+		PaillierPublicKeys:   s.sortedPaillierPublicKeys(),
+		ShareProof:           shareProofBytes,
+		KeygenTranscriptHash: transcriptHash,
+		SecurityNotice:       ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	return s.keyShare.Validate()
+}
+
+func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
+	out := make([]PaillierPublicShare, 0, len(s.cfg.Parties))
+	for _, id := range s.cfg.Parties {
+		item := s.paillierPubs[id]
+		out = append(out, PaillierPublicShare{
+			Party:     item.Party,
+			PublicKey: append([]byte(nil), item.PublicKey...),
+			Proof:     append([]byte(nil), item.Proof...),
+		})
+	}
+	return out
+}
+
+func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("gg20-secp256k1-keygen-transcript-v1"))
+	writeHashPart(h, s.cfg.SessionID[:])
+	for _, id := range s.cfg.Parties {
+		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		for _, commitment := range s.commits[id] {
+			writeHashPart(h, commitment)
+		}
+		item := s.paillierPubs[id]
+		writeHashPart(h, item.PublicKey)
+		writeHashPart(h, item.Proof)
+	}
+	for _, commitment := range groupCommitments {
+		writeHashPart(h, commitment)
+	}
+	return h.Sum(nil)
+}
+
+func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, bool) {
+	for _, share := range shares {
+		if share.Party == id {
+			return share.PublicKey, true
+		}
+	}
+	return nil, false
+}
+
+func writeHashPart(h interface{ Write([]byte) (int, error) }, part []byte) {
+	_, _ = h.Write([]byte{byte(len(part) >> 24), byte(len(part) >> 16), byte(len(part) >> 8), byte(len(part))})
+	_, _ = h.Write(part)
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {
