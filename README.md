@@ -11,7 +11,7 @@ This repository is an early library implementation, not a production audited TSS
 
 The Ed25519 package implements a usable FROST-style flow: dealerless DKG, two-round signing, partial signature verification, and aggregation into signatures accepted by `crypto/ed25519.Verify`.
 
-The secp256k1 package exposes a GG20-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing with simplified proof coverage, so it remains explicitly experimental until the proof system and implementation have been independently audited.
+The secp256k1 package exposes a GG20-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing with an unaudited proof implementation, so it remains explicitly experimental until independent cryptographic review is complete.
 
 ## Packages
 
@@ -24,7 +24,7 @@ The secp256k1 package exposes a GG20-style API and now signs without transmittin
 | `internal/curve/*`                        | Minimal curve helpers used by the protocol packages.                                    |
 | `internal/mta`                            | Paillier MtA product-share protocol helpers.                                            |
 | `internal/paillier`                       | Paillier primitives used by the GG20-style signing path.                                |
-| `internal/zk/paillier`                    | Simplified Paillier encryption and MtA response proofs.                                 |
+| `internal/zk/paillier`                    | Paillier encryption, range, modulus, and MtA response proofs.                           |
 | `internal/zk/schnorr`                     | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
 
 ## Transport Model
@@ -85,4 +85,4 @@ The test suite covers:
 - Always destroy no-longer-needed key shares with `Destroy()` when practical.
 - Treat `ConfidentialRequired` envelopes as secret-bearing messages.
 - Keep signer sets sorted before interpolation; helper APIs do this where needed.
-- Full GG20 security still requires Paillier MtA, range/proof systems, identifiable abort, and audit work.
+- Full GG20 security still requires identifiable abort hardening and independent audit work.

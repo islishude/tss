@@ -25,7 +25,7 @@ const (
 	payloadSignPartial       = "gg20.secp256k1.sign.partial"
 )
 
-const ExperimentalSecurityNotice = "experimental GG20-style threshold ECDSA path: Paillier MtA is implemented with simplified proof coverage; independent audit required"
+const ExperimentalSecurityNotice = "experimental GG20-style threshold ECDSA path: Paillier MtA/ZK proof implementation is unaudited; independent audit required"
 
 const DefaultPaillierBits = 2048
 

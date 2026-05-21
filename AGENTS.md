@@ -29,7 +29,7 @@ Run both test commands before handing off substantial changes.
 - `internal/curve/secp256k1`: SEC 2 curve constants, point operations, ECDSA helpers.
 - `internal/mta`: Paillier MtA product-share helpers for GG20-style signing.
 - `internal/paillier`: Paillier primitives used by GG20-style MtA signing.
-- `internal/zk/paillier`: Simplified Paillier encryption and MtA response proofs.
+- `internal/zk/paillier`: Paillier encryption, range, modulus, and MtA response proofs.
 - `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
 
 ## Coding Rules

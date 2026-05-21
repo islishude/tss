@@ -9,6 +9,8 @@ import (
 )
 
 func TestMTAProductShares(t *testing.T) {
+	restore := pai.SetMinimumModulusBitsForTesting(1024)
+	defer restore()
 	sk, err := pai.GenerateKey(nil, 1024)
 	if err != nil {
 		t.Fatal(err)

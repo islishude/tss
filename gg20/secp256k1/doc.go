@@ -3,6 +3,6 @@
 // Keygen uses Shamir shares, public commitments, Paillier key material, and
 // proof bindings. Signing avoids reconstructing private key or nonce shares and
 // uses Paillier MtA/MtAwc-style product sharing. The package remains marked
-// experimental because the proof system is intentionally minimal and still
-// requires independent cryptographic review before production use.
+// experimental because the proof system is unaudited and still requires
+// independent cryptographic review before production use.
 package secp256k1

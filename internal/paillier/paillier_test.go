@@ -6,6 +6,8 @@ import (
 )
 
 func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
+	restore := SetMinimumModulusBitsForTesting(512)
+	defer restore()
 	sk, err := GenerateKey(nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -44,6 +46,8 @@ func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 }
 
 func TestMarshalRoundTrip(t *testing.T) {
+	restore := SetMinimumModulusBitsForTesting(512)
+	defer restore()
 	sk, err := GenerateKey(nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -69,5 +73,40 @@ func TestMarshalRoundTrip(t *testing.T) {
 	}
 	if priv.N.Cmp(sk.N) != 0 || priv.Lambda.Cmp(sk.Lambda) != 0 {
 		t.Fatal("private key mismatch after round trip")
+	}
+}
+
+func TestRejectsNonCanonicalPublicKey(t *testing.T) {
+	restore := SetMinimumModulusBitsForTesting(512)
+	defer restore()
+	sk, err := GenerateKey(nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := sk.PublicKey.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonCanonical := append([]byte(" "), raw...)
+	if _, err := UnmarshalPublicKey(nonCanonical); err == nil {
+		t.Fatal("expected non-canonical public key rejection")
+	}
+}
+
+func TestValidateCiphertextGroup(t *testing.T) {
+	restore := SetMinimumModulusBitsForTesting(512)
+	defer restore()
+	sk, err := GenerateKey(nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sk.PublicKey.ValidateCiphertext(big.NewInt(0)); err == nil {
+		t.Fatal("expected zero ciphertext rejection")
+	}
+	if err := sk.PublicKey.ValidateCiphertext(sk.NSquared); err == nil {
+		t.Fatal("expected n^2 ciphertext rejection")
+	}
+	if err := sk.PublicKey.ValidateCiphertext(new(big.Int).Set(sk.N)); err == nil {
+		t.Fatal("expected non-invertible ciphertext rejection")
 	}
 }

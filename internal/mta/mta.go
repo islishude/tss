@@ -14,7 +14,8 @@ import (
 
 type StartMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
-	Proof      []byte `json:"proof"`
+	EncProof   []byte `json:"enc_proof"`
+	RangeProof []byte `json:"range_proof"`
 }
 
 type ResponseMessage struct {
@@ -33,24 +34,32 @@ func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*Sta
 	if err != nil {
 		return nil, err
 	}
-	proof, err := zkpai.ProveEncryptedScalar(reader, domain, pk, c, a, r)
+	encProof, rangeProof, err := zkpai.ProveEncScalarAndRange(reader, domain, pk, c, a, r)
 	if err != nil {
 		return nil, err
 	}
-	proofBytes, err := zkpai.Marshal(proof)
+	encProofBytes, err := zkpai.Marshal(encProof)
 	if err != nil {
 		return nil, err
 	}
-	return &StartMessage{Ciphertext: c.Bytes(), Proof: proofBytes}, nil
+	rangeProofBytes, err := zkpai.Marshal(rangeProof)
+	if err != nil {
+		return nil, err
+	}
+	return &StartMessage{Ciphertext: c.Bytes(), EncProof: encProofBytes, RangeProof: rangeProofBytes}, nil
 }
 
 func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 	c := new(big.Int).SetBytes(msg.Ciphertext)
-	proof, err := zkpai.UnmarshalEncryptedScalarProof(msg.Proof)
+	encProof, err := zkpai.UnmarshalEncScalarProof(msg.EncProof)
 	if err != nil {
 		return false
 	}
-	return zkpai.VerifyEncryptedScalar(domain, pk, c, proof)
+	rangeProof, err := zkpai.UnmarshalEncRangeProof(msg.RangeProof)
+	if err != nil {
+		return false
+	}
+	return zkpai.VerifyEncScalarAndRange(domain, pk, c, encProof, rangeProof)
 }
 
 func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMessage, b *big.Int, bCommitment []byte, pkA *pai.PublicKey) (*ResponseMessage, *big.Int, error) {

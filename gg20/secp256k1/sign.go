@@ -73,6 +73,7 @@ type presignRound1Payload struct {
 	Gamma             []byte `json:"gamma"`
 	EncK              []byte `json:"enc_k"`
 	EncKProof         []byte `json:"enc_k_proof"`
+	EncKRangeProof    []byte `json:"enc_k_range_proof"`
 	PaillierPublicKey []byte `json:"paillier_public_key"`
 }
 
@@ -150,7 +151,8 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	payload, err := json.Marshal(presignRound1Payload{
 		Gamma:             gammaComm,
 		EncK:              startMsg.Ciphertext,
-		EncKProof:         startMsg.Proof,
+		EncKProof:         startMsg.EncProof,
+		EncKRangeProof:    startMsg.RangeProof,
 		PaillierPublicKey: append([]byte(nil), key.PaillierPublicKey...),
 	})
 	if err != nil {
@@ -280,7 +282,7 @@ func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload
 	if !bytes.Equal(expectedPKBytes, p.PaillierPublicKey) {
 		return errors.New("round1 Paillier public key does not match keygen")
 	}
-	start := mta.StartMessage{Ciphertext: p.EncK, Proof: p.EncKProof}
+	start := mta.StartMessage{Ciphertext: p.EncK, EncProof: p.EncKProof, RangeProof: p.EncKRangeProof}
 	if !mta.VerifyStart(mtaStartDomain(s.sessionID, s.signers, from), start, expectedPK) {
 		return errors.New("invalid encrypted nonce proof")
 	}
@@ -300,7 +302,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, Proof: s.round1[peer].EncKProof}
+		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncProof: s.round1[peer].EncKProof, RangeProof: s.round1[peer].EncKRangeProof}
 		deltaResp, betaDelta, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "delta"), start, s.gamma, s.gammaComm, peerPK)
 		if err != nil {
 			return nil, err
@@ -322,7 +324,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 }
 
 func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) error {
-	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, Proof: s.round1[s.key.Party].EncKProof}
+	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncProof: s.round1[s.key.Party].EncKProof, RangeProof: s.round1[s.key.Party].EncKRangeProof}
 	gammaCommit := s.round1[from].Gamma
 	alphaDelta, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "delta"), start, p.Delta, gammaCommit, s.paillier)
 	if err != nil {
@@ -448,6 +450,8 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		writeHashPart(h, s.round1[id].Gamma)
 		writeHashPart(h, s.round1[id].EncK)
+		writeHashPart(h, s.round1[id].EncKProof)
+		writeHashPart(h, s.round1[id].EncKRangeProof)
 		writeHashPart(h, scalarBytes(s.deltas[id]))
 	}
 	writeHashPart(h, R)

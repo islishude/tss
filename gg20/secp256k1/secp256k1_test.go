@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"os"
 	"strings"
@@ -139,6 +140,121 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	out2[0] = out2[0].WithTranscriptHash()
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected tampered EncK rejection")
+	}
+}
+
+func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*presignRound2Payload)
+	}{
+		{name: "delta", mutate: func(p *presignRound2Payload) { p.Delta.Proof[0] ^= 1 }},
+		{name: "sigma", mutate: func(p *presignRound2Payload) { p.Sigma.Proof[0] ^= 1 }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID, err := tss.NewSessionID(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			s1, out1, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			s2, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
+				t.Fatal(err)
+			}
+			round2, err := s2.HandlePresignMessage(out1[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(round2) != 1 || round2[0].To != 1 {
+				t.Fatalf("unexpected round2 messages: %#v", round2)
+			}
+			var payload presignRound2Payload
+			if err := json.Unmarshal(round2[0].Payload, &payload); err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(&payload)
+			mutated, err := json.Marshal(payload)
+			if err != nil {
+				t.Fatal(err)
+			}
+			round2[0].Payload = mutated
+			round2[0] = round2[0].WithTranscriptHash()
+			_, err = s1.HandlePresignMessage(round2[0])
+			if err == nil {
+				t.Fatal("expected tampered round2 proof rejection")
+			}
+			var protocolErr *tss.ProtocolError
+			if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeVerification || protocolErr.Party != 2 {
+				t.Fatalf("unexpected error: %v", err)
+			}
+		})
+	}
+}
+
+func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, _, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload presignRound1Payload
+	if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.PaillierPublicKey = shares[1].PaillierPublicKey
+	mutated, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[0].Payload = mutated
+	out2[0] = out2[0].WithTranscriptHash()
+	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
+		t.Fatal("expected presign Paillier key mismatch rejection")
+	}
+}
+
+func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var payload keygenCommitmentsPayload
+	if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
+		t.Fatal(err)
+	}
+	payload.PaillierPublicKey = []byte(`{"n":"3","g":"4"}`)
+	mutated, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[0].Payload = mutated
+	out2[0] = out2[0].WithTranscriptHash()
+	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+		t.Fatal("expected keygen Paillier key mismatch rejection")
 	}
 }
 

@@ -1,6 +1,7 @@
 package paillier
 
 import (
+	"bytes"
 	"crypto/rand"
 	"encoding/json"
 	"errors"
@@ -8,6 +9,10 @@ import (
 	"io"
 	"math/big"
 )
+
+const DefaultMinModulusBits = 2048
+
+var minModulusBits = DefaultMinModulusBits
 
 type PublicKey struct {
 	N        *big.Int
@@ -80,16 +85,28 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	}
 }
 
+func SetMinimumModulusBitsForTesting(bits int) func() {
+	old := minModulusBits
+	minModulusBits = bits
+	return func() { minModulusBits = old }
+}
+
 func (pk PublicKey) Validate() error {
-	return pk.ValidateBits(0)
+	return pk.ValidateBits(minModulusBits)
 }
 
 func (pk PublicKey) ValidateBits(minBits int) error {
 	if pk.N == nil || pk.N.Sign() <= 0 {
 		return errors.New("invalid modulus")
 	}
+	if pk.N.Bit(0) == 0 {
+		return errors.New("paillier modulus must be odd")
+	}
 	if minBits > 0 && pk.N.BitLen() < minBits {
 		return fmt.Errorf("paillier modulus has %d bits, need at least %d", pk.N.BitLen(), minBits)
+	}
+	if pk.N.ProbablyPrime(64) {
+		return errors.New("paillier modulus must be composite")
 	}
 	if pk.NSquared == nil || pk.NSquared.Cmp(new(big.Int).Mul(pk.N, pk.N)) != 0 {
 		return errors.New("invalid n squared")
@@ -130,6 +147,13 @@ func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 	}
 	if err := pk.Validate(); err != nil {
 		return nil, err
+	}
+	canonical, err := pk.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(in, canonical) {
+		return nil, errors.New("non-canonical public key encoding")
 	}
 	return pk, nil
 }
@@ -192,6 +216,13 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	}
 	if err := sk.Validate(); err != nil {
 		return nil, err
+	}
+	canonical, err := sk.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	if !bytes.Equal(in, canonical) {
+		return nil, errors.New("non-canonical private key encoding")
 	}
 	return sk, nil
 }
@@ -256,6 +287,9 @@ func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
 	}
 	if ciphertext == nil || ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
 		return errors.New("ciphertext out of range")
+	}
+	if new(big.Int).GCD(nil, nil, ciphertext, pk.NSquared).Cmp(big.NewInt(1)) != 0 {
+		return errors.New("ciphertext is not in Z*_{n^2}")
 	}
 	return nil
 }

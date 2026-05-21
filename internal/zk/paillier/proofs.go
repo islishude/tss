@@ -14,19 +14,38 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 )
 
+const proofVersion = 1
+
 type ModulusProof struct {
-	Digest []byte `json:"digest"`
+	Version          uint16 `json:"version"`
+	NBits            int    `json:"n_bits"`
+	SmallFactorCheck []byte `json:"small_factor_check"`
+	TranscriptHash   []byte `json:"transcript_hash"`
+	Digest           []byte `json:"digest"`
 }
 
-type EncryptedScalarProof struct {
+type EncScalarProof struct {
+	Version          uint16 `json:"version"`
 	ScalarCommitment []byte `json:"scalar_commitment"`
 	CipherCommitment []byte `json:"cipher_commitment"`
 	PointCommitment  []byte `json:"point_commitment"`
 	Response         []byte `json:"response"`
 	Randomness       []byte `json:"randomness"`
+	TranscriptHash   []byte `json:"transcript_hash"`
+}
+
+type EncRangeProof struct {
+	Version        uint16 `json:"version"`
+	Bound          []byte `json:"bound"`
+	Challenge      []byte `json:"challenge"`
+	Response       []byte `json:"response"`
+	TranscriptHash []byte `json:"transcript_hash"`
+	Digest         []byte `json:"digest"`
 }
 
 type MTAResponseProof struct {
+	Version          uint16 `json:"version"`
+	TranscriptHash   []byte `json:"transcript_hash"`
 	BetaCommitment   []byte `json:"beta_commitment"`
 	CipherCommitment []byte `json:"cipher_commitment"`
 	BCommitment      []byte `json:"b_commitment"`
@@ -40,22 +59,44 @@ func ProveModulus(domain []byte, pk *pai.PublicKey, party uint32) (*ModulusProof
 	if pk == nil {
 		return nil, errors.New("nil paillier public key")
 	}
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
 	raw, err := pk.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-	return &ModulusProof{Digest: hashParts([]byte("paillier-modulus-proof-v1"), domain, partyBytes(party), raw)}, nil
+	transcript := hashParts([]byte("paillier-modulus-transcript-v2"), domain, partyBytes(party), raw)
+	smallFactors := smallFactorDigest(pk.N)
+	return &ModulusProof{
+		Version:          proofVersion,
+		NBits:            pk.N.BitLen(),
+		SmallFactorCheck: smallFactors,
+		TranscriptHash:   transcript,
+		Digest:           hashParts([]byte("paillier-modulus-proof-v2"), transcript, smallFactors),
+	}, nil
 }
 
 func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *ModulusProof) bool {
-	if proof == nil || len(proof.Digest) != sha256.Size || pk == nil {
+	if proof == nil || proof.Version != proofVersion || len(proof.Digest) != sha256.Size || pk == nil {
+		return false
+	}
+	if err := pk.Validate(); err != nil {
+		return false
+	}
+	if proof.NBits != pk.N.BitLen() {
+		return false
+	}
+	if pk.N.ProbablyPrime(64) || pk.N.Bit(0) == 0 {
 		return false
 	}
 	want, err := ProveModulus(domain, pk, party)
 	if err != nil {
 		return false
 	}
-	return bytes.Equal(want.Digest, proof.Digest)
+	return bytes.Equal(want.SmallFactorCheck, proof.SmallFactorCheck) &&
+		bytes.Equal(want.TranscriptHash, proof.TranscriptHash) &&
+		bytes.Equal(want.Digest, proof.Digest)
 }
 
 func Marshal(v any) ([]byte, error) {
@@ -67,19 +108,30 @@ func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
 	if err := json.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if len(p.Digest) != sha256.Size {
+	if p.Version != proofVersion || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size || len(p.SmallFactorCheck) != sha256.Size {
 		return nil, errors.New("invalid modulus proof")
 	}
 	return &p, nil
 }
 
-func UnmarshalEncryptedScalarProof(in []byte) (*EncryptedScalarProof, error) {
-	var p EncryptedScalarProof
+func UnmarshalEncScalarProof(in []byte) (*EncScalarProof, error) {
+	var p EncScalarProof
 	if err := json.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 {
+	if p.Version != proofVersion || len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
 		return nil, errors.New("incomplete encrypted scalar proof")
+	}
+	return &p, nil
+}
+
+func UnmarshalEncRangeProof(in []byte) (*EncRangeProof, error) {
+	var p EncRangeProof
+	if err := json.Unmarshal(in, &p); err != nil {
+		return nil, err
+	}
+	if p.Version != proofVersion || len(p.Bound) == 0 || len(p.Challenge) == 0 || len(p.Response) == 0 || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size {
+		return nil, errors.New("incomplete encrypted range proof")
 	}
 	return &p, nil
 }
@@ -89,62 +141,96 @@ func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 	if err := json.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if len(p.BetaCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.BCommitment) == 0 || len(p.BetaNonce) == 0 || len(p.BResponse) == 0 || len(p.BetaResponse) == 0 || len(p.Randomness) == 0 {
+	if p.Version != proofVersion || len(p.TranscriptHash) != sha256.Size || len(p.BetaCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.BCommitment) == 0 || len(p.BetaNonce) == 0 || len(p.BResponse) == 0 || len(p.BetaResponse) == 0 || len(p.Randomness) == 0 {
 		return nil, errors.New("incomplete MtA response proof")
 	}
 	return &p, nil
 }
 
-func ProveEncryptedScalar(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int) (*EncryptedScalarProof, error) {
+func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int) (*EncScalarProof, *EncRangeProof, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
 	if err := pk.Validate(); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if err := pk.ValidateCiphertext(ciphertext); err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	if scalar == nil || scalar.Sign() <= 0 || scalar.Cmp(secp.Order()) >= 0 {
-		return nil, errors.New("scalar out of range")
+		return nil, nil, errors.New("scalar out of range")
 	}
 	scalarCommitment, err := secp.PointBytes(secp.ScalarBaseMult(scalar))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	alpha, err := randomScalar(reader)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	rho, err := randomCoprime(reader, pk.N)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	cipherCommitment, err := pk.EncryptWithRandomness(alpha, rho)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	pointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(alpha))
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	e := encryptedScalarChallenge(domain, pk, ciphertext, scalarCommitment, cipherCommitment, pointCommitment)
+	transcript := encScalarTranscript(domain, pk, ciphertext, scalarCommitment, cipherCommitment, pointCommitment)
+	e := challenge([]byte("paillier-enc-scalar-challenge-v2"), transcript)
 	z := new(big.Int).Mul(e, scalar)
 	z.Add(z, alpha)
 	u := new(big.Int).Exp(randomness, e, pk.N)
 	u.Mul(u, rho)
 	u.Mod(u, pk.N)
-	return &EncryptedScalarProof{
+	encProof := &EncScalarProof{
+		Version:          proofVersion,
 		ScalarCommitment: scalarCommitment,
 		CipherCommitment: intBytes(cipherCommitment),
 		PointCommitment:  pointCommitment,
 		Response:         intBytes(z),
 		Randomness:       intBytes(u),
-	}, nil
+		TranscriptHash:   transcript,
+	}
+	rangeProof := &EncRangeProof{
+		Version:        proofVersion,
+		Bound:          secp.Order().Bytes(),
+		Challenge:      intBytes(e),
+		Response:       intBytes(z),
+		TranscriptHash: transcript,
+	}
+	rangeProof.Digest = encRangeDigest(rangeProof)
+	return encProof, rangeProof, nil
 }
 
-func VerifyEncryptedScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *EncryptedScalarProof) bool {
-	if proof == nil || pk == nil || pk.ValidateCiphertext(ciphertext) != nil {
+func VerifyEncScalarAndRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, encProof *EncScalarProof, rangeProof *EncRangeProof) bool {
+	if !VerifyEncScalar(domain, pk, ciphertext, encProof) || rangeProof == nil || rangeProof.Version != proofVersion {
+		return false
+	}
+	if !bytes.Equal(rangeProof.TranscriptHash, encProof.TranscriptHash) || !bytes.Equal(rangeProof.Response, encProof.Response) {
+		return false
+	}
+	if new(big.Int).SetBytes(rangeProof.Bound).Cmp(secp.Order()) != 0 {
+		return false
+	}
+	if !bytes.Equal(rangeProof.Digest, encRangeDigest(rangeProof)) {
+		return false
+	}
+	e := challenge([]byte("paillier-enc-scalar-challenge-v2"), encProof.TranscriptHash)
+	if new(big.Int).SetBytes(rangeProof.Challenge).Cmp(e) != 0 {
+		return false
+	}
+	z := new(big.Int).SetBytes(rangeProof.Response)
+	maxResponse := new(big.Int).Lsh(big.NewInt(1), uint(secp.Order().BitLen()*2+2))
+	return z.Sign() > 0 && z.Cmp(maxResponse) < 0
+}
+
+func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *EncScalarProof) bool {
+	if proof == nil || pk == nil || proof.Version != proofVersion || pk.ValidateCiphertext(ciphertext) != nil {
 		return false
 	}
 	scalarCommitment, err := secp.PointFromBytes(proof.ScalarCommitment)
@@ -152,8 +238,15 @@ func VerifyEncryptedScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int
 		return false
 	}
 	cipherCommitment := new(big.Int).SetBytes(proof.CipherCommitment)
+	if pk.ValidateCiphertext(cipherCommitment) != nil {
+		return false
+	}
 	pointCommitment, err := secp.PointFromBytes(proof.PointCommitment)
 	if err != nil {
+		return false
+	}
+	transcript := encScalarTranscript(domain, pk, ciphertext, proof.ScalarCommitment, cipherCommitment, proof.PointCommitment)
+	if !bytes.Equal(transcript, proof.TranscriptHash) {
 		return false
 	}
 	z := new(big.Int).SetBytes(proof.Response)
@@ -161,7 +254,7 @@ func VerifyEncryptedScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int
 	if z.Sign() <= 0 || u.Sign() <= 0 {
 		return false
 	}
-	e := encryptedScalarChallenge(domain, pk, ciphertext, proof.ScalarCommitment, cipherCommitment, proof.PointCommitment)
+	e := challenge([]byte("paillier-enc-scalar-challenge-v2"), transcript)
 	encZ, err := pk.EncryptWithRandomness(z, u)
 	if err != nil {
 		return false
@@ -235,7 +328,8 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	if err != nil {
 		return nil, err
 	}
-	e := mtaChallenge(domain, pk, encA, response, expectedBCommit, betaCommitment, cipherCommitment, bNonce, betaNonce)
+	transcript := mtaTranscript(domain, pk, encA, response, expectedBCommit, betaCommitment, cipherCommitment, bNonce, betaNonce)
+	e := challenge([]byte("paillier-mta-response-challenge-v2"), transcript)
 	zB := new(big.Int).Mul(e, b)
 	zB.Add(zB, mu)
 	zBeta := new(big.Int).Mul(e, betaMod)
@@ -244,6 +338,8 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	u.Mul(u, rho)
 	u.Mod(u, pk.N)
 	return &MTAResponseProof{
+		Version:          proofVersion,
+		TranscriptHash:   transcript,
 		BetaCommitment:   betaCommitment,
 		CipherCommitment: intBytes(cipherCommitment),
 		BCommitment:      bNonce,
@@ -255,7 +351,7 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 }
 
 func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitmentBytes []byte, proof *MTAResponseProof) bool {
-	if proof == nil || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
+	if proof == nil || proof.Version != proofVersion || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
 		return false
 	}
 	bCommitment, err := secp.PointFromBytes(bCommitmentBytes)
@@ -275,13 +371,20 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 		return false
 	}
 	cipherCommitment := new(big.Int).SetBytes(proof.CipherCommitment)
+	if pk.ValidateCiphertext(cipherCommitment) != nil {
+		return false
+	}
 	zB := new(big.Int).SetBytes(proof.BResponse)
 	zBeta := new(big.Int).SetBytes(proof.BetaResponse)
 	u := new(big.Int).SetBytes(proof.Randomness)
 	if zB.Sign() <= 0 || zBeta.Sign() <= 0 || u.Sign() <= 0 {
 		return false
 	}
-	e := mtaChallenge(domain, pk, encA, response, bCommitmentBytes, proof.BetaCommitment, cipherCommitment, proof.BCommitment, proof.BetaNonce)
+	transcript := mtaTranscript(domain, pk, encA, response, bCommitmentBytes, proof.BetaCommitment, cipherCommitment, proof.BCommitment, proof.BetaNonce)
+	if !bytes.Equal(transcript, proof.TranscriptHash) {
+		return false
+	}
+	e := challenge([]byte("paillier-mta-response-challenge-v2"), transcript)
 
 	encZBeta, err := pk.EncryptWithRandomness(zBeta, u)
 	if err != nil {
@@ -306,14 +409,21 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	return secp.Equal(leftBeta, rightBeta)
 }
 
-func encryptedScalarChallenge(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment []byte, cipherCommitment *big.Int, pointCommitment []byte) *big.Int {
+func encScalarTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {
 	pkBytes, _ := pk.MarshalBinary()
-	return challenge([]byte("paillier-encrypted-scalar-v1"), domain, pkBytes, intBytes(ciphertext), scalarCommitment, intBytes(cipherCommitment), pointCommitment)
+	return hashParts([]byte("paillier-enc-scalar-transcript-v2"), domain, pkBytes, intBytes(ciphertext), scalarCommitment, intBytes(cipherCommitment), pointCommitment)
 }
 
-func mtaChallenge(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) *big.Int {
+func mtaTranscript(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) []byte {
 	pkBytes, _ := pk.MarshalBinary()
-	return challenge([]byte("paillier-mta-response-v1"), domain, pkBytes, intBytes(encA), intBytes(response), bCommitment, betaCommitment, intBytes(cipherCommitment), bNonce, betaNonce)
+	return hashParts([]byte("paillier-mta-response-transcript-v2"), domain, pkBytes, intBytes(encA), intBytes(response), bCommitment, betaCommitment, intBytes(cipherCommitment), bNonce, betaNonce)
+}
+
+func encRangeDigest(proof *EncRangeProof) []byte {
+	if proof == nil {
+		return nil
+	}
+	return hashParts([]byte("paillier-enc-range-proof-v2"), proof.Bound, proof.Challenge, proof.Response, proof.TranscriptHash)
 }
 
 func challenge(parts ...[]byte) *big.Int {
@@ -323,6 +433,15 @@ func challenge(parts ...[]byte) *big.Int {
 		out.SetInt64(1)
 	}
 	return out
+}
+
+func smallFactorDigest(n *big.Int) []byte {
+	h := sha256.New()
+	for _, p := range []int64{3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37, 41, 43, 47} {
+		rem := new(big.Int).Mod(n, big.NewInt(p)).Int64()
+		_, _ = h.Write([]byte{byte(p), byte(rem)})
+	}
+	return h.Sum(nil)
 }
 
 func hashParts(parts ...[]byte) []byte {
