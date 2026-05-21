@@ -1,0 +1,50 @@
+# AGENTS.md
+
+This repository contains a Go TSS library under module `github.com/islishude/tss`.
+
+## Non-Negotiable Constraints
+
+- Do not read, copy, port, or derive code from public TSS implementations in Go or any other language.
+- It is acceptable to use papers, RFCs, standards, and public test vectors or test scenarios.
+- Keep the protocol boundary honest: GG20 applies to ECDSA/secp256k1; Ed25519 uses FROST-style EdDSA.
+- Do not remove the experimental warning from `gg20/secp256k1` until the full Paillier MtA/ZK GG20 signing path exists and has been reviewed.
+
+## Useful Commands
+
+```sh
+go test ./...
+go test -race ./...
+gofmt -w <changed-go-files>
+```
+
+Run both test commands before handing off substantial changes.
+
+## Architecture Map
+
+- Root package `tss`: transport-neutral session ids, envelopes, errors, blame, common interfaces.
+- `frost/ed25519`: DKG, two-round signing, partial verification, Ed25519-compatible aggregation.
+- `gg20/secp256k1`: planned GG20 API shape and experimental threshold ECDSA flow.
+- `internal/shamir`: Shamir sharing and interpolation over caller-provided prime-order fields.
+- `internal/curve/edwards25519`: Ed25519 scalar/point helpers and commitment verification.
+- `internal/curve/secp256k1`: SEC 2 curve constants, point operations, ECDSA helpers.
+- `internal/paillier`: Paillier primitives for future GG20 work.
+- `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
+
+## Coding Rules
+
+- Prefer small, protocol-local helpers over broad abstractions.
+- Keep message decoding fail-closed: wrong session, round, sender, recipient, duplicate message, malformed scalar/point, or transcript mismatch must error.
+- Preserve deterministic `MarshalBinary` / `UnmarshalBinary` behavior for key-share types.
+- Add comments around protocol equations, transcript/domain separation, and security-sensitive shortcuts.
+- Avoid comments that restate the line; explain why the check or formula exists.
+- Never log or format secret scalar, nonce, or key-share bytes.
+
+## Testing Expectations
+
+When changing protocol behavior, add or update tests for:
+
+- success paths for `1-of-1`, `2-of-3`, and `3-of-5`;
+- duplicate/replayed messages;
+- malformed scalar/point payloads;
+- incorrect session id or signer set;
+- signature verification failure and blame attribution when applicable.
