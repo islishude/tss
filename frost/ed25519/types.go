@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -54,21 +53,11 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 }
 
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
-	if err := k.Validate(); err != nil {
-		return nil, err
-	}
-	return json.Marshal(k)
+	return marshalKeyShare(k)
 }
 
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	var k KeyShare
-	if err := json.Unmarshal(in, &k); err != nil {
-		return nil, err
-	}
-	if err := k.Validate(); err != nil {
-		return nil, err
-	}
-	return &k, nil
+	return unmarshalKeyShare(in)
 }
 
 func (k *KeyShare) Validate() error {
@@ -80,6 +69,9 @@ func (k *KeyShare) Validate() error {
 	}
 	if k.Threshold <= 0 || k.Threshold > len(k.Parties) {
 		return errors.New("invalid threshold")
+	}
+	if err := validateStrictSortedParties(k.Parties); err != nil {
+		return err
 	}
 	if !tss.ContainsParty(k.Parties, k.Party) {
 		return errors.New("key share party is not in participant set")
@@ -93,11 +85,25 @@ func (k *KeyShare) Validate() error {
 	if len(k.GroupCommitments) != k.Threshold {
 		return errors.New("group commitments length must equal threshold")
 	}
+	for i, commitment := range k.GroupCommitments {
+		if i == 0 {
+			if _, err := edcurve.PointFromBytes(commitment); err != nil {
+				return fmt.Errorf("invalid group commitment %d: %w", i, err)
+			}
+			continue
+		}
+		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
+			return fmt.Errorf("invalid group commitment %d: %w", i, err)
+		}
+	}
 	if len(k.VerificationShares) != len(k.Parties) {
 		return errors.New("verification share count must equal party count")
 	}
 	seen := make(map[tss.PartyID]struct{}, len(k.VerificationShares))
-	for _, vs := range k.VerificationShares {
+	for i, vs := range k.VerificationShares {
+		if vs.Party != k.Parties[i] {
+			return errors.New("verification shares must follow party order")
+		}
 		if !tss.ContainsParty(k.Parties, vs.Party) {
 			return fmt.Errorf("verification share for non-participant %d", vs.Party)
 		}

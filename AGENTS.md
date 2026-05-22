@@ -29,6 +29,7 @@ Run both test commands before handing off substantial changes.
 - `internal/curve/secp256k1`: SEC 2 curve constants, point operations, ECDSA helpers.
 - `internal/mta`: Paillier MtA product-share helpers for GG20-style signing.
 - `internal/paillier`: Paillier primitives used by GG20-style MtA signing.
+- `internal/wire`: strict TLV encoding for binary envelopes, key shares, and presign records.
 - `internal/zk/paillier`: Paillier encryption, range, modulus, and MtA response proofs.
 - `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
 
@@ -37,6 +38,7 @@ Run both test commands before handing off substantial changes.
 - Prefer small, protocol-local helpers over broad abstractions.
 - Keep message decoding fail-closed: wrong session, round, sender, recipient, duplicate message, malformed scalar/point, or transcript mismatch must error.
 - Preserve deterministic `MarshalBinary` / `UnmarshalBinary` behavior for key-share types.
+- Do not add JSON fallback to binary decoders; use migration helpers separately if legacy data is ever needed.
 - Preserve deterministic `BlameEvidence` encoding; never place private shares, nonces, or Paillier private-key material in blame evidence.
 - GG20 verification failures that can identify a sender or signer set should populate `ProtocolError.Blame.Evidence` unless the failure is duplicate/replay handling.
 - Add comments around protocol equations, transcript/domain separation, and security-sensitive shortcuts.

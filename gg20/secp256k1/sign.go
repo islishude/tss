@@ -838,11 +838,8 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 }
 
 func validatePresign(key *KeyShare, presign *Presign) error {
-	if presign == nil {
-		return errors.New("nil presign")
-	}
-	if presign.Version != tss.Version {
-		return fmt.Errorf("unexpected presign version %d", presign.Version)
+	if err := presign.Validate(); err != nil {
+		return err
 	}
 	if presign.Party != key.Party {
 		return errors.New("presign party mismatch")
@@ -852,24 +849,6 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	}
 	if len(presign.Signers) < key.Threshold || !tss.ContainsParty(presign.Signers, key.Party) {
 		return errors.New("invalid presign signer set")
-	}
-	if _, err := secp.PointFromBytes(presign.R); err != nil {
-		return fmt.Errorf("invalid presign R: %w", err)
-	}
-	if _, err := secp.ParseScalar(presign.LittleR); err != nil {
-		return fmt.Errorf("invalid little r: %w", err)
-	}
-	if _, err := secp.ParseScalar(presign.KShare); err != nil {
-		return fmt.Errorf("invalid k share: %w", err)
-	}
-	if _, err := secp.ParseScalar(presign.SigmaShare); err != nil {
-		return fmt.Errorf("invalid sigma share: %w", err)
-	}
-	if _, err := secp.ParseScalar(presign.Delta); err != nil {
-		return fmt.Errorf("invalid delta: %w", err)
-	}
-	if len(presign.TranscriptHash) != sha256.Size {
-		return errors.New("invalid presign transcript hash")
 	}
 	return nil
 }

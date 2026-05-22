@@ -82,21 +82,11 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 }
 
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
-	if err := k.Validate(); err != nil {
-		return nil, err
-	}
-	return json.Marshal(k)
+	return marshalKeyShare(k)
 }
 
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	var k KeyShare
-	if err := json.Unmarshal(in, &k); err != nil {
-		return nil, err
-	}
-	if err := k.Validate(); err != nil {
-		return nil, err
-	}
-	return &k, nil
+	return unmarshalKeyShare(in)
 }
 
 func (k *KeyShare) Validate() error {
@@ -108,6 +98,9 @@ func (k *KeyShare) Validate() error {
 	}
 	if k.Threshold <= 0 || k.Threshold > len(k.Parties) {
 		return errors.New("invalid threshold")
+	}
+	if err := validateStrictSortedParties(k.Parties); err != nil {
+		return err
 	}
 	if !tss.ContainsParty(k.Parties, k.Party) {
 		return errors.New("key share party is not in participant set")
@@ -121,11 +114,19 @@ func (k *KeyShare) Validate() error {
 	if len(k.GroupCommitments) != k.Threshold {
 		return errors.New("group commitments length must equal threshold")
 	}
+	for i, commitment := range k.GroupCommitments {
+		if _, err := secp.PointFromBytes(commitment); err != nil {
+			return fmt.Errorf("invalid group commitment %d: %w", i, err)
+		}
+	}
 	if len(k.VerificationShares) != len(k.Parties) {
 		return errors.New("verification share count must equal party count")
 	}
 	seen := make(map[tss.PartyID]struct{}, len(k.VerificationShares))
-	for _, vs := range k.VerificationShares {
+	for i, vs := range k.VerificationShares {
+		if vs.Party != k.Parties[i] {
+			return errors.New("verification shares must follow party order")
+		}
 		if !tss.ContainsParty(k.Parties, vs.Party) {
 			return fmt.Errorf("verification share for non-participant %d", vs.Party)
 		}
@@ -135,6 +136,22 @@ func (k *KeyShare) Validate() error {
 		seen[vs.Party] = struct{}{}
 		if _, err := secp.PointFromBytes(vs.PublicKey); err != nil {
 			return fmt.Errorf("invalid verification share for %d: %w", vs.Party, err)
+		}
+	}
+	if len(k.PaillierPublicKeys) > 0 {
+		if len(k.PaillierPublicKeys) != len(k.Parties) {
+			return errors.New("paillier public key count must equal party count")
+		}
+		for i, item := range k.PaillierPublicKeys {
+			if item.Party != k.Parties[i] {
+				return errors.New("paillier public keys must follow party order")
+			}
+			if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
+				return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
+			}
+			if _, err := pai.UnmarshalPublicKey(item.PublicKey); err != nil {
+				return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
+			}
 		}
 	}
 	if len(k.PaillierPublicKey) > 0 {

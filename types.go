@@ -3,15 +3,32 @@ package tss
 import (
 	"crypto/rand"
 	"crypto/sha256"
+	"encoding/binary"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
+
+	"github.com/islishude/tss/internal/wire"
 )
 
 const Version = 1
+
+const envelopeWireType = "tss.envelope"
+
+const (
+	envelopeFieldProtocol uint16 = iota + 1
+	envelopeFieldVersion
+	envelopeFieldSessionID
+	envelopeFieldRound
+	envelopeFieldFrom
+	envelopeFieldTo
+	envelopeFieldPayloadType
+	envelopeFieldPayload
+	envelopeFieldTranscriptHash
+	envelopeFieldConfidentialRequired
+)
 
 type PartyID uint32
 
@@ -138,11 +155,128 @@ type Envelope struct {
 }
 
 func (e Envelope) MarshalBinary() ([]byte, error) {
-	return json.Marshal(e)
+	if e.Protocol == "" {
+		return nil, errors.New("envelope protocol is empty")
+	}
+	if e.Version != Version {
+		return nil, fmt.Errorf("unexpected envelope version %d", e.Version)
+	}
+	if e.PayloadType == "" {
+		return nil, errors.New("envelope payload type is empty")
+	}
+	if len(e.TranscriptHash) != 0 && len(e.TranscriptHash) != sha256.Size {
+		return nil, errors.New("invalid envelope transcript hash")
+	}
+	return wire.Marshal(Version, envelopeWireType, []wire.Field{
+		{Tag: envelopeFieldProtocol, Value: []byte(e.Protocol)},
+		{Tag: envelopeFieldVersion, Value: marshalUint16(e.Version)},
+		{Tag: envelopeFieldSessionID, Value: e.SessionID[:]},
+		{Tag: envelopeFieldRound, Value: []byte{e.Round}},
+		{Tag: envelopeFieldFrom, Value: marshalUint32(uint32(e.From))},
+		{Tag: envelopeFieldTo, Value: marshalUint32(uint32(e.To))},
+		{Tag: envelopeFieldPayloadType, Value: []byte(e.PayloadType)},
+		{Tag: envelopeFieldPayload, Value: nonNilBytes(e.Payload)},
+		{Tag: envelopeFieldTranscriptHash, Value: nonNilBytes(e.TranscriptHash)},
+		{Tag: envelopeFieldConfidentialRequired, Value: marshalBool(e.ConfidentialRequired)},
+	})
 }
 
 func (e *Envelope) UnmarshalBinary(in []byte) error {
-	return json.Unmarshal(in, e)
+	version, fields, err := wire.Unmarshal(in, envelopeWireType)
+	if err != nil {
+		return err
+	}
+	if version != Version {
+		return fmt.Errorf("unexpected envelope wire version %d", version)
+	}
+	protocol, err := wire.Require(fields, envelopeFieldProtocol)
+	if err != nil {
+		return err
+	}
+	versionBytes, err := wire.Require(fields, envelopeFieldVersion)
+	if err != nil {
+		return err
+	}
+	envVersion, err := unmarshalUint16(versionBytes)
+	if err != nil {
+		return fmt.Errorf("invalid envelope version field: %w", err)
+	}
+	if envVersion != Version {
+		return fmt.Errorf("unexpected envelope version %d", envVersion)
+	}
+	sessionBytes, err := wire.Require(fields, envelopeFieldSessionID)
+	if err != nil {
+		return err
+	}
+	session, err := SessionIDFromBytes(sessionBytes)
+	if err != nil {
+		return err
+	}
+	round, err := wire.Require(fields, envelopeFieldRound)
+	if err != nil {
+		return err
+	}
+	if len(round) != 1 {
+		return errors.New("invalid envelope round")
+	}
+	fromBytes, err := wire.Require(fields, envelopeFieldFrom)
+	if err != nil {
+		return err
+	}
+	from, err := unmarshalUint32(fromBytes)
+	if err != nil {
+		return fmt.Errorf("invalid envelope sender: %w", err)
+	}
+	toBytes, err := wire.Require(fields, envelopeFieldTo)
+	if err != nil {
+		return err
+	}
+	to, err := unmarshalUint32(toBytes)
+	if err != nil {
+		return fmt.Errorf("invalid envelope recipient: %w", err)
+	}
+	payloadType, err := wire.Require(fields, envelopeFieldPayloadType)
+	if err != nil {
+		return err
+	}
+	payload, err := wire.Require(fields, envelopeFieldPayload)
+	if err != nil {
+		return err
+	}
+	transcript, err := wire.Require(fields, envelopeFieldTranscriptHash)
+	if err != nil {
+		return err
+	}
+	if len(transcript) != 0 && len(transcript) != sha256.Size {
+		return errors.New("invalid envelope transcript hash")
+	}
+	confidentialBytes, err := wire.Require(fields, envelopeFieldConfidentialRequired)
+	if err != nil {
+		return err
+	}
+	confidential, err := unmarshalBool(confidentialBytes)
+	if err != nil {
+		return err
+	}
+	if len(protocol) == 0 {
+		return errors.New("envelope protocol is empty")
+	}
+	if len(payloadType) == 0 {
+		return errors.New("envelope payload type is empty")
+	}
+	*e = Envelope{
+		Protocol:             string(protocol),
+		Version:              envVersion,
+		SessionID:            session,
+		Round:                round[0],
+		From:                 PartyID(from),
+		To:                   PartyID(to),
+		PayloadType:          string(payloadType),
+		Payload:              payload,
+		TranscriptHash:       transcript,
+		ConfidentialRequired: confidential,
+	}
+	return nil
 }
 
 func (e Envelope) DomainSeparatedHash() []byte {
@@ -225,4 +359,58 @@ func SortParties(parties []PartyID) []PartyID {
 
 func writeUint32(w io.Writer, v uint32) {
 	_, _ = w.Write([]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
+}
+
+func marshalUint16(v uint16) []byte {
+	var out [2]byte
+	binary.BigEndian.PutUint16(out[:], v)
+	return out[:]
+}
+
+func marshalUint32(v uint32) []byte {
+	var out [4]byte
+	binary.BigEndian.PutUint32(out[:], v)
+	return out[:]
+}
+
+func unmarshalUint16(in []byte) (uint16, error) {
+	if len(in) != 2 {
+		return 0, errors.New("uint16 must be 2 bytes")
+	}
+	return binary.BigEndian.Uint16(in), nil
+}
+
+func unmarshalUint32(in []byte) (uint32, error) {
+	if len(in) != 4 {
+		return 0, errors.New("uint32 must be 4 bytes")
+	}
+	return binary.BigEndian.Uint32(in), nil
+}
+
+func marshalBool(v bool) []byte {
+	if v {
+		return []byte{1}
+	}
+	return []byte{0}
+}
+
+func unmarshalBool(in []byte) (bool, error) {
+	if len(in) != 1 {
+		return false, errors.New("bool must be 1 byte")
+	}
+	switch in[0] {
+	case 0:
+		return false, nil
+	case 1:
+		return true, nil
+	default:
+		return false, errors.New("bool must be 0 or 1")
+	}
+}
+
+func nonNilBytes(in []byte) []byte {
+	if in == nil {
+		return []byte{}
+	}
+	return in
 }

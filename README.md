@@ -24,6 +24,7 @@ The secp256k1 package exposes a GG20-style API and now signs without transmittin
 | `internal/curve/*`                        | Minimal curve helpers used by the protocol packages.                                    |
 | `internal/mta`                            | Paillier MtA product-share protocol helpers.                                            |
 | `internal/paillier`                       | Paillier primitives used by the GG20-style signing path.                                |
+| `internal/wire`                           | Strict TLV encoding used by binary envelopes and key-share records.                     |
 | `internal/zk/paillier`                    | Paillier encryption, range, modulus, and MtA response proofs.                           |
 | `internal/zk/schnorr`                     | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
 
@@ -41,6 +42,12 @@ Protocol sessions return `tss.Envelope` values. The library is transport-neutral
 Verification failures can attach `tss.Blame.Evidence` with a deterministic `tss.BlameEvidence` record. Evidence binds the public protocol context, sender, round, payload type, payload hash, transcript hash, reason, and selected public input hashes. Confidential payloads are represented by hashes rather than plaintext.
 
 The secp256k1 package exposes `secp256k1.VerifyBlameEvidence` for validating GG20 evidence against public session context such as parties, signer set, group public key, Paillier public keys, and transcript hashes. This improves blame attribution for malformed proofs and failed aggregate signatures, but it is not a substitute for a full GG20 identifiable-abort security review.
+
+## Canonical Encoding
+
+`tss.Envelope`, GG20/FROST key shares, and GG20 presign records use a strict TLV binary format through `MarshalBinary` / `Unmarshal...`. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
+
+For GG20, old-style key shares without Paillier/ZK material can still be represented as canonical key-share records, but `StartPresign` rejects them and requires rerunning keygen.
 
 ## Basic Ed25519 Flow
 
@@ -83,6 +90,7 @@ The test suite covers:
 - Paillier encryption/decryption and homomorphic operations.
 - Schnorr proof verification.
 - deterministic blame evidence encoding and tamper rejection.
+- canonical TLV encoding for envelopes, key shares, and GG20 presigns.
 - `1-of-1`, `2-of-3`, and `3-of-5` protocol simulations.
 - duplicate messages, bad partial signatures, key-share round trips, and presign reuse rejection.
 
