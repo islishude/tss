@@ -21,7 +21,7 @@ Run both test commands before handing off substantial changes.
 
 ## Architecture Map
 
-- Root package `tss`: transport-neutral session ids, envelopes, errors, blame, common interfaces.
+- Root package `tss`: transport-neutral session ids, envelopes, errors, blame evidence, common interfaces.
 - `frost/ed25519`: DKG, two-round signing, partial verification, Ed25519-compatible aggregation.
 - `gg20/secp256k1`: planned GG20 API shape and experimental threshold ECDSA flow.
 - `internal/shamir`: Shamir sharing and interpolation over caller-provided prime-order fields.
@@ -37,6 +37,8 @@ Run both test commands before handing off substantial changes.
 - Prefer small, protocol-local helpers over broad abstractions.
 - Keep message decoding fail-closed: wrong session, round, sender, recipient, duplicate message, malformed scalar/point, or transcript mismatch must error.
 - Preserve deterministic `MarshalBinary` / `UnmarshalBinary` behavior for key-share types.
+- Preserve deterministic `BlameEvidence` encoding; never place private shares, nonces, or Paillier private-key material in blame evidence.
+- GG20 verification failures that can identify a sender or signer set should populate `ProtocolError.Blame.Evidence` unless the failure is duplicate/replay handling.
 - Add comments around protocol equations, transcript/domain separation, and security-sensitive shortcuts.
 - Avoid comments that restate the line; explain why the check or formula exists.
 - Never log or format secret scalar, nonce, or key-share bytes.

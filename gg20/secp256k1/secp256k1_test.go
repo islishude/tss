@@ -115,6 +115,8 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		delivered = true
 		if _, err := sessions[id].HandleSignMessage(messages[0]); err == nil {
 			t.Fatal("expected tampered partial rejection")
+		} else {
+			assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))
 		}
 	}
 	if !delivered {
@@ -140,6 +142,8 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	out2[0] = out2[0].WithTranscriptHash()
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected tampered EncK rejection")
+	} else {
+		assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 	}
 }
 
@@ -194,6 +198,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeVerification || protocolErr.Party != 2 {
 				t.Fatalf("unexpected error: %v", err)
 			}
+			assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 		})
 	}
 }
@@ -225,6 +230,8 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	out2[0] = out2[0].WithTranscriptHash()
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
+	} else {
+		assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 	}
 }
 
@@ -255,6 +262,8 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	out2[0] = out2[0].WithTranscriptHash()
 	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
 		t.Fatal("expected keygen Paillier key mismatch rejection")
+	} else {
+		assertBlameEvidence(t, err, EvidenceContext{Parties: parties})
 	}
 }
 
@@ -379,4 +388,51 @@ func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.P
 
 func bigOne() *big.Int {
 	return big.NewInt(1)
+}
+
+func secpEvidenceContext(share *KeyShare, signers []tss.PartyID, presign *Presign) EvidenceContext {
+	ctx := EvidenceContext{
+		Parties:              append([]tss.PartyID(nil), share.Parties...),
+		PublicKey:            append([]byte(nil), share.PublicKey...),
+		PaillierPublicKeys:   append([]PaillierPublicShare(nil), share.PaillierPublicKeys...),
+		Signers:              append([]tss.PartyID(nil), signers...),
+		KeygenTranscriptHash: append([]byte(nil), share.KeygenTranscriptHash...),
+	}
+	if presign != nil {
+		ctx.PresignTranscriptHash = append([]byte(nil), presign.TranscriptHash...)
+	}
+	return ctx
+}
+
+func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.ProtocolError {
+	t.Helper()
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) {
+		t.Fatalf("expected ProtocolError, got %T: %v", err, err)
+	}
+	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
+		t.Fatalf("missing blame evidence: %v", err)
+	}
+	if verifyErr := VerifyBlameEvidence(protocolErr.Blame.Evidence, ctx); verifyErr != nil {
+		t.Fatalf("blame evidence did not verify: %v", verifyErr)
+	}
+	lower := strings.ToLower(string(protocolErr.Blame.Evidence))
+	for _, forbidden := range []string{"secret", "nonce", "k_share", "sigma_share", "paillier_private"} {
+		if strings.Contains(lower, forbidden) {
+			t.Fatalf("evidence contains sensitive field marker %q: %s", forbidden, protocolErr.Blame.Evidence)
+		}
+	}
+	decoded, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded.Protocol = "wrong-protocol"
+	mutated, err := decoded.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if VerifyBlameEvidence(mutated, ctx) == nil {
+		t.Fatal("tampered blame evidence verified")
+	}
+	return protocolErr
 }

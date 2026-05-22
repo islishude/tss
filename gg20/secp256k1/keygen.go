@@ -142,18 +142,52 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenCommitment,
+				"invalid keygen commitment",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("gg20-secp256k1-keygen-commitments-v1", p.Commitments)),
+			)
 		}
 		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"malformed Paillier public key",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"malformed Paillier modulus proof",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		if !zkpai.VerifyModulus(s.cfg.SessionID[:], pk, uint32(env.From), proof) {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("invalid Paillier modulus proof"))
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid Paillier modulus proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid Paillier modulus proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		s.commits[env.From] = p.Commitments
 		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
@@ -193,12 +227,23 @@ func (s *KeygenSession) tryComplete() error {
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
+			evidenceEnv := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid DKG share", Parties: []tss.PartyID{dealer}},
-				Err:   err,
+				Blame: &tss.Blame{
+					Reason:  "invalid DKG share",
+					Parties: []tss.PartyID{dealer},
+					Evidence: marshalEvidence(
+						evidenceEnv,
+						tss.EvidenceKindKeygenShare,
+						"invalid DKG share",
+						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("gg20-secp256k1-keygen-commitments-v1", s.commits[dealer])),
+					),
+				},
+				Err: err,
 			}
 		}
 	}

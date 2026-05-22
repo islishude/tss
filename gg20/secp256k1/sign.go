@@ -215,10 +215,26 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		}
 		var p presignRound1Payload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindPresignRound1,
+				"malformed presign round1 payload",
+				[]tss.PartyID{env.From},
+				err,
+				fields...,
+			)
 		}
 		if err := s.validateRound1(env.From, p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindPresignRound1,
+				"invalid presign round1 proof",
+				[]tss.PartyID{env.From},
+				err,
+				s.presignRound1EvidenceFields(env.From, p)...,
+			)
 		}
 		s.round1[env.From] = p
 		return s.tryEmitRound2()
@@ -231,10 +247,26 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		}
 		var p presignRound2Payload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindPresignRound2,
+				"malformed presign round2 payload",
+				[]tss.PartyID{env.From},
+				err,
+				fields...,
+			)
 		}
 		if err := s.finishRound2(env.From, p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindPresignRound2,
+				"invalid presign round2 proof",
+				[]tss.PartyID{env.From},
+				err,
+				s.presignRound2EvidenceFields(p)...,
+			)
 		}
 		s.round2[env.From] = p
 		return s.tryEmitRound3()
@@ -247,11 +279,28 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		}
 		var p presignRound3Payload
 		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindPresignRound3,
+				"malformed presign round3 payload",
+				[]tss.PartyID{env.From},
+				err,
+				fields...,
+			)
 		}
 		delta, err := secp.ParseScalar(p.Delta)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindPresignRound3,
+				"malformed presign delta",
+				[]tss.PartyID{env.From},
+				err,
+				s.presignRound3EvidenceFields(p)...,
+			)
 		}
 		s.deltas[env.From] = delta
 		return nil, s.tryComplete()
@@ -265,6 +314,34 @@ func (s *PresignSession) Presign() (*Presign, bool) {
 		return nil, false
 	}
 	return s.presign, true
+}
+
+func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+	fields = append(fields,
+		hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		hashEvidenceField("gamma_hash", p.Gamma),
+		hashEvidenceField("enc_k_hash", p.EncK),
+	)
+	if expected, err := s.key.paillierPublicFor(from); err == nil {
+		if encoded, err := expected.MarshalBinary(); err == nil {
+			fields = append(fields, hashEvidenceField(evidenceFieldExpectedPaillierKeyHash, encoded))
+		}
+	}
+	return fields
+}
+
+func (s *PresignSession) presignRound2EvidenceFields(p presignRound2Payload) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+	return append(fields,
+		rawEvidenceField(evidenceFieldDeltaResponseHash, mtaResponseHash("delta", p.Delta)),
+		rawEvidenceField(evidenceFieldSigmaResponseHash, mtaResponseHash("sigma", p.Sigma)),
+	)
+}
+
+func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+	return append(fields, hashEvidenceField("delta_hash", p.Delta))
 }
 
 func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload) error {
@@ -546,14 +623,39 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	}
 	var p signPartialPayload
 	if err := json.Unmarshal(env.Payload, &p); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
+		return nil, protocolErrorWithEvidence(
+			tss.ErrCodeInvalidMessage,
+			env,
+			tss.EvidenceKindSignPartial,
+			"malformed sign partial payload",
+			[]tss.PartyID{env.From},
+			err,
+			fields...,
+		)
 	}
 	if !bytes.Equal(p.PresignTranscript, s.presign.TranscriptHash) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign transcript mismatch"))
+		return nil, protocolErrorWithEvidence(
+			tss.ErrCodeInvalidMessage,
+			env,
+			tss.EvidenceKindSignPartial,
+			"presign transcript mismatch",
+			[]tss.PartyID{env.From},
+			errors.New("presign transcript mismatch"),
+			s.signPartialEvidenceFields(p)...,
+		)
 	}
 	partial, err := secp.ParseScalar(p.S)
 	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		return nil, protocolErrorWithEvidence(
+			tss.ErrCodeInvalidMessage,
+			env,
+			tss.EvidenceKindSignPartial,
+			"malformed sign partial",
+			[]tss.PartyID{env.From},
+			err,
+			s.signPartialEvidenceFields(p)...,
+		)
 	}
 	s.partials[env.From] = partial
 	return nil, s.tryComplete()
@@ -564,6 +666,25 @@ func (s *SignSession) Signature() (*Signature, bool) {
 		return nil, false
 	}
 	return &Signature{R: append([]byte(nil), s.signature.R...), S: append([]byte(nil), s.signature.S...)}, true
+}
+
+func (s *SignSession) signPartialEvidenceFields(p signPartialPayload) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
+	return append(fields,
+		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
+		hashEvidenceField("observed_presign_transcript_hash", p.PresignTranscript),
+		hashEvidenceField("sign_partial_hash", p.S),
+	)
+}
+
+func (s *SignSession) aggregateEvidenceFields(r, sigS *big.Int) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
+	return append(fields,
+		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
+		hashEvidenceField(evidenceFieldDigestHash, s.digest),
+		hashEvidenceField(evidenceFieldRHash, scalarBytes(r)),
+		hashEvidenceField(evidenceFieldSHash, scalarBytes(sigS)),
+	)
 }
 
 func (s *SignSession) tryComplete() error {
@@ -590,11 +711,28 @@ func (s *SignSession) tryComplete() error {
 		return err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, sigS) {
+		env := tss.Envelope{
+			Protocol:    protocol,
+			Version:     tss.Version,
+			SessionID:   s.sessionID,
+			Round:       1,
+			PayloadType: payloadSignPartial,
+			Payload:     aggregateEvidencePayload(s.digest, scalarBytes(r), scalarBytes(sigS), s.presign.TranscriptHash),
+		}.WithTranscriptHash()
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: 1,
-			Blame: &tss.Blame{Reason: "aggregated ECDSA signature failed verification", Parties: append([]tss.PartyID(nil), s.presign.Signers...)},
-			Err:   errors.New("ECDSA signature failed verification"),
+			Blame: &tss.Blame{
+				Reason:  "aggregated ECDSA signature failed verification",
+				Parties: append([]tss.PartyID(nil), s.presign.Signers...),
+				Evidence: marshalEvidence(
+					env,
+					tss.EvidenceKindAggregateSign,
+					"aggregated ECDSA signature failed verification",
+					s.aggregateEvidenceFields(r, sigS)...,
+				),
+			},
+			Err: errors.New("ECDSA signature failed verification"),
 		}
 	}
 	s.signature = &Signature{R: scalarBytes(r), S: scalarBytes(sigS)}
@@ -769,6 +907,25 @@ func domainBytes(label string, sessionID tss.SessionID, signers []tss.PartyID, a
 	writeHashPart(h, []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
 	writeHashPart(h, []byte{byte(b >> 24), byte(b >> 16), byte(b >> 8), byte(b)})
 	writeHashPart(h, []byte(kind))
+	return h.Sum(nil)
+}
+
+func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("gg20-secp256k1-mta-response-evidence-v1"))
+	writeHashPart(h, []byte(label))
+	writeHashPart(h, response.Ciphertext)
+	writeHashPart(h, response.Proof)
+	return h.Sum(nil)
+}
+
+func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("gg20-secp256k1-aggregate-sign-evidence-v1"))
+	writeHashPart(h, digest)
+	writeHashPart(h, r)
+	writeHashPart(h, sValue)
+	writeHashPart(h, transcript)
 	return h.Sum(nil)
 }
 
