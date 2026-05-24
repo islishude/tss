@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/json"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
@@ -12,9 +12,52 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const proofVersion = 1
+
+const (
+	modulusProofWireType     = "zk.paillier.modulus-proof"
+	encScalarProofWireType   = "zk.paillier.enc-scalar-proof"
+	encRangeProofWireType    = "zk.paillier.enc-range-proof"
+	mtaResponseProofWireType = "zk.paillier.mta-response-proof"
+)
+
+const (
+	modulusProofFieldNBits uint16 = iota + 1
+	modulusProofFieldSmallFactorCheck
+	modulusProofFieldTranscriptHash
+	modulusProofFieldDigest
+)
+
+const (
+	encScalarProofFieldScalarCommitment uint16 = iota + 1
+	encScalarProofFieldCipherCommitment
+	encScalarProofFieldPointCommitment
+	encScalarProofFieldResponse
+	encScalarProofFieldRandomness
+	encScalarProofFieldTranscriptHash
+)
+
+const (
+	encRangeProofFieldBound uint16 = iota + 1
+	encRangeProofFieldChallenge
+	encRangeProofFieldResponse
+	encRangeProofFieldTranscriptHash
+	encRangeProofFieldDigest
+)
+
+const (
+	mtaResponseProofFieldTranscriptHash uint16 = iota + 1
+	mtaResponseProofFieldBetaCommitment
+	mtaResponseProofFieldCipherCommitment
+	mtaResponseProofFieldBCommitment
+	mtaResponseProofFieldBetaNonce
+	mtaResponseProofFieldBResponse
+	mtaResponseProofFieldBetaResponse
+	mtaResponseProofFieldRandomness
+)
 
 // ModulusProof binds a Paillier modulus to a session transcript.
 type ModulusProof struct {
@@ -105,57 +148,139 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 		bytes.Equal(want.Digest, proof.Digest)
 }
 
-// Marshal returns deterministic JSON for proof payloads.
+// Marshal returns deterministic canonical binary proof payloads.
 func Marshal(v any) ([]byte, error) {
-	return json.Marshal(v)
+	switch p := v.(type) {
+	case *ModulusProof:
+		return marshalModulusProof(p)
+	case ModulusProof:
+		return marshalModulusProof(&p)
+	case *EncScalarProof:
+		return marshalEncScalarProof(p)
+	case EncScalarProof:
+		return marshalEncScalarProof(&p)
+	case *EncRangeProof:
+		return marshalEncRangeProof(p)
+	case EncRangeProof:
+		return marshalEncRangeProof(&p)
+	case *MTAResponseProof:
+		return marshalMTAResponseProof(p)
+	case MTAResponseProof:
+		return marshalMTAResponseProof(&p)
+	default:
+		return nil, fmt.Errorf("unsupported Paillier proof type %T", v)
+	}
 }
 
 // UnmarshalModulusProof decodes and structurally validates a modulus proof.
 func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
-	var p ModulusProof
-	if err := json.Unmarshal(in, &p); err != nil {
+	version, fields, err := wire.Unmarshal(in, modulusProofWireType)
+	if err != nil {
 		return nil, err
 	}
-	if p.Version != proofVersion || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size || len(p.SmallFactorCheck) != sha256.Size {
-		return nil, errors.New("invalid modulus proof")
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected modulus proof version %d", version)
 	}
-	return &p, nil
+	if err := requireExactProofTags(fields, modulusProofFieldNBits, modulusProofFieldSmallFactorCheck, modulusProofFieldTranscriptHash, modulusProofFieldDigest); err != nil {
+		return nil, err
+	}
+	nBits, err := decodeUint32ProofField(fields, modulusProofFieldNBits)
+	if err != nil {
+		return nil, err
+	}
+	p := &ModulusProof{
+		Version:          proofVersion,
+		NBits:            int(nBits),
+		SmallFactorCheck: mustProofField(fields, modulusProofFieldSmallFactorCheck),
+		TranscriptHash:   mustProofField(fields, modulusProofFieldTranscriptHash),
+		Digest:           mustProofField(fields, modulusProofFieldDigest),
+	}
+	if err := validateModulusProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // UnmarshalEncScalarProof decodes and validates an encrypted scalar proof shell.
 func UnmarshalEncScalarProof(in []byte) (*EncScalarProof, error) {
-	var p EncScalarProof
-	if err := json.Unmarshal(in, &p); err != nil {
+	version, fields, err := wire.Unmarshal(in, encScalarProofWireType)
+	if err != nil {
 		return nil, err
 	}
-	if p.Version != proofVersion || len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
-		return nil, errors.New("incomplete encrypted scalar proof")
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected encrypted scalar proof version %d", version)
 	}
-	return &p, nil
+	if err := requireExactProofTags(fields, encScalarProofFieldScalarCommitment, encScalarProofFieldCipherCommitment, encScalarProofFieldPointCommitment, encScalarProofFieldResponse, encScalarProofFieldRandomness, encScalarProofFieldTranscriptHash); err != nil {
+		return nil, err
+	}
+	p := &EncScalarProof{
+		Version:          proofVersion,
+		ScalarCommitment: mustProofField(fields, encScalarProofFieldScalarCommitment),
+		CipherCommitment: mustProofField(fields, encScalarProofFieldCipherCommitment),
+		PointCommitment:  mustProofField(fields, encScalarProofFieldPointCommitment),
+		Response:         mustProofField(fields, encScalarProofFieldResponse),
+		Randomness:       mustProofField(fields, encScalarProofFieldRandomness),
+		TranscriptHash:   mustProofField(fields, encScalarProofFieldTranscriptHash),
+	}
+	if err := validateEncScalarProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // UnmarshalEncRangeProof decodes and validates an encrypted range proof shell.
 func UnmarshalEncRangeProof(in []byte) (*EncRangeProof, error) {
-	var p EncRangeProof
-	if err := json.Unmarshal(in, &p); err != nil {
+	version, fields, err := wire.Unmarshal(in, encRangeProofWireType)
+	if err != nil {
 		return nil, err
 	}
-	if p.Version != proofVersion || len(p.Bound) == 0 || len(p.Challenge) == 0 || len(p.Response) == 0 || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size {
-		return nil, errors.New("incomplete encrypted range proof")
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected encrypted range proof version %d", version)
 	}
-	return &p, nil
+	if err := requireExactProofTags(fields, encRangeProofFieldBound, encRangeProofFieldChallenge, encRangeProofFieldResponse, encRangeProofFieldTranscriptHash, encRangeProofFieldDigest); err != nil {
+		return nil, err
+	}
+	p := &EncRangeProof{
+		Version:        proofVersion,
+		Bound:          mustProofField(fields, encRangeProofFieldBound),
+		Challenge:      mustProofField(fields, encRangeProofFieldChallenge),
+		Response:       mustProofField(fields, encRangeProofFieldResponse),
+		TranscriptHash: mustProofField(fields, encRangeProofFieldTranscriptHash),
+		Digest:         mustProofField(fields, encRangeProofFieldDigest),
+	}
+	if err := validateEncRangeProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // UnmarshalMTAResponseProof decodes and validates an MtA response proof shell.
 func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
-	var p MTAResponseProof
-	if err := json.Unmarshal(in, &p); err != nil {
+	version, fields, err := wire.Unmarshal(in, mtaResponseProofWireType)
+	if err != nil {
 		return nil, err
 	}
-	if p.Version != proofVersion || len(p.TranscriptHash) != sha256.Size || len(p.BetaCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.BCommitment) == 0 || len(p.BetaNonce) == 0 || len(p.BResponse) == 0 || len(p.BetaResponse) == 0 || len(p.Randomness) == 0 {
-		return nil, errors.New("incomplete MtA response proof")
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected MtA response proof version %d", version)
 	}
-	return &p, nil
+	if err := requireExactProofTags(fields, mtaResponseProofFieldTranscriptHash, mtaResponseProofFieldBetaCommitment, mtaResponseProofFieldCipherCommitment, mtaResponseProofFieldBCommitment, mtaResponseProofFieldBetaNonce, mtaResponseProofFieldBResponse, mtaResponseProofFieldBetaResponse, mtaResponseProofFieldRandomness); err != nil {
+		return nil, err
+	}
+	p := &MTAResponseProof{
+		Version:          proofVersion,
+		TranscriptHash:   mustProofField(fields, mtaResponseProofFieldTranscriptHash),
+		BetaCommitment:   mustProofField(fields, mtaResponseProofFieldBetaCommitment),
+		CipherCommitment: mustProofField(fields, mtaResponseProofFieldCipherCommitment),
+		BCommitment:      mustProofField(fields, mtaResponseProofFieldBCommitment),
+		BetaNonce:        mustProofField(fields, mtaResponseProofFieldBetaNonce),
+		BResponse:        mustProofField(fields, mtaResponseProofFieldBResponse),
+		BetaResponse:     mustProofField(fields, mtaResponseProofFieldBetaResponse),
+		Randomness:       mustProofField(fields, mtaResponseProofFieldRandomness),
+	}
+	if err := validateMTAResponseProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
 }
 
 // ProveEncScalarAndRange proves ciphertext encrypts a secp256k1 scalar.
@@ -423,6 +548,160 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	leftBeta := secp.ScalarBaseMult(zBeta)
 	rightBeta := secp.Add(betaNonce, secp.ScalarMult(betaCommitment, e))
 	return secp.Equal(leftBeta, rightBeta)
+}
+
+func marshalModulusProof(p *ModulusProof) ([]byte, error) {
+	if err := validateModulusProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, modulusProofWireType, []wire.Field{
+		{Tag: modulusProofFieldNBits, Value: encodeUint32Proof(uint32(p.NBits))},
+		{Tag: modulusProofFieldSmallFactorCheck, Value: bytesOrEmpty(p.SmallFactorCheck)},
+		{Tag: modulusProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
+		{Tag: modulusProofFieldDigest, Value: bytesOrEmpty(p.Digest)},
+	})
+}
+
+func marshalEncScalarProof(p *EncScalarProof) ([]byte, error) {
+	if err := validateEncScalarProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, encScalarProofWireType, []wire.Field{
+		{Tag: encScalarProofFieldScalarCommitment, Value: bytesOrEmpty(p.ScalarCommitment)},
+		{Tag: encScalarProofFieldCipherCommitment, Value: bytesOrEmpty(p.CipherCommitment)},
+		{Tag: encScalarProofFieldPointCommitment, Value: bytesOrEmpty(p.PointCommitment)},
+		{Tag: encScalarProofFieldResponse, Value: bytesOrEmpty(p.Response)},
+		{Tag: encScalarProofFieldRandomness, Value: bytesOrEmpty(p.Randomness)},
+		{Tag: encScalarProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
+	})
+}
+
+func marshalEncRangeProof(p *EncRangeProof) ([]byte, error) {
+	if err := validateEncRangeProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, encRangeProofWireType, []wire.Field{
+		{Tag: encRangeProofFieldBound, Value: bytesOrEmpty(p.Bound)},
+		{Tag: encRangeProofFieldChallenge, Value: bytesOrEmpty(p.Challenge)},
+		{Tag: encRangeProofFieldResponse, Value: bytesOrEmpty(p.Response)},
+		{Tag: encRangeProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
+		{Tag: encRangeProofFieldDigest, Value: bytesOrEmpty(p.Digest)},
+	})
+}
+
+func marshalMTAResponseProof(p *MTAResponseProof) ([]byte, error) {
+	if err := validateMTAResponseProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, mtaResponseProofWireType, []wire.Field{
+		{Tag: mtaResponseProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
+		{Tag: mtaResponseProofFieldBetaCommitment, Value: bytesOrEmpty(p.BetaCommitment)},
+		{Tag: mtaResponseProofFieldCipherCommitment, Value: bytesOrEmpty(p.CipherCommitment)},
+		{Tag: mtaResponseProofFieldBCommitment, Value: bytesOrEmpty(p.BCommitment)},
+		{Tag: mtaResponseProofFieldBetaNonce, Value: bytesOrEmpty(p.BetaNonce)},
+		{Tag: mtaResponseProofFieldBResponse, Value: bytesOrEmpty(p.BResponse)},
+		{Tag: mtaResponseProofFieldBetaResponse, Value: bytesOrEmpty(p.BetaResponse)},
+		{Tag: mtaResponseProofFieldRandomness, Value: bytesOrEmpty(p.Randomness)},
+	})
+}
+
+func validateModulusProof(p *ModulusProof) error {
+	if p == nil {
+		return errors.New("nil modulus proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected modulus proof version %d", p.Version)
+	}
+	if p.NBits <= 0 {
+		return errors.New("invalid modulus proof bit length")
+	}
+	if uint64(p.NBits) > uint64(^uint32(0)) {
+		return errors.New("modulus proof bit length too large")
+	}
+	if len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size || len(p.SmallFactorCheck) != sha256.Size {
+		return errors.New("invalid modulus proof")
+	}
+	return nil
+}
+
+func validateEncScalarProof(p *EncScalarProof) error {
+	if p == nil {
+		return errors.New("nil encrypted scalar proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected encrypted scalar proof version %d", p.Version)
+	}
+	if len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
+		return errors.New("incomplete encrypted scalar proof")
+	}
+	return nil
+}
+
+func validateEncRangeProof(p *EncRangeProof) error {
+	if p == nil {
+		return errors.New("nil encrypted range proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected encrypted range proof version %d", p.Version)
+	}
+	if len(p.Bound) == 0 || len(p.Challenge) == 0 || len(p.Response) == 0 || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size {
+		return errors.New("incomplete encrypted range proof")
+	}
+	return nil
+}
+
+func validateMTAResponseProof(p *MTAResponseProof) error {
+	if p == nil {
+		return errors.New("nil MtA response proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected MtA response proof version %d", p.Version)
+	}
+	if len(p.TranscriptHash) != sha256.Size || len(p.BetaCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.BCommitment) == 0 || len(p.BetaNonce) == 0 || len(p.BResponse) == 0 || len(p.BetaResponse) == 0 || len(p.Randomness) == 0 {
+		return errors.New("incomplete MtA response proof")
+	}
+	return nil
+}
+
+func requireExactProofTags(fields []wire.Field, tags ...uint16) error {
+	if len(fields) != len(tags) {
+		return fmt.Errorf("unexpected proof field count %d", len(fields))
+	}
+	for i, tag := range tags {
+		if fields[i].Tag != tag {
+			return fmt.Errorf("unexpected proof field tag %d", fields[i].Tag)
+		}
+	}
+	return nil
+}
+
+func mustProofField(fields []wire.Field, tag uint16) []byte {
+	value, _ := wire.Require(fields, tag)
+	return value
+}
+
+func decodeUint32ProofField(fields []wire.Field, tag uint16) (uint32, error) {
+	value, err := wire.Require(fields, tag)
+	if err != nil {
+		return 0, err
+	}
+	if len(value) != 4 {
+		return 0, fmt.Errorf("invalid uint32 proof field %d", tag)
+	}
+	return binary.BigEndian.Uint32(value), nil
+}
+
+func encodeUint32Proof(v uint32) []byte {
+	var out [4]byte
+	binary.BigEndian.PutUint32(out[:], v)
+	return out[:]
+}
+
+func bytesOrEmpty(in []byte) []byte {
+	if in == nil {
+		return []byte{}
+	}
+	return in
 }
 
 func encScalarTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

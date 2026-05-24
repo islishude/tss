@@ -6,11 +6,17 @@ The `cggmp21/secp256k1` package implements an experimental CGGMP21-style thresho
 
 Each party generates a Shamir polynomial and broadcasts secp256k1 commitments. Private Shamir shares are sent point-to-point in confidential envelopes. Receivers verify shares against commitments before deriving the local aggregated share.
 
-Each party also generates Paillier material and a modulus proof. When `KeygenOptions.EnableHD` is set, parties contribute 32-byte chain-code shares that are XOR-aggregated into the key share. The group public key is the sum of degree-zero commitments.
+Each party also generates Paillier material and a modulus proof. The proof is
+encoded as canonical binary TLV and bound to the keygen transcript. When
+`KeygenOptions.EnableHD` is set, parties contribute 32-byte chain-code shares
+that are XOR-aggregated into the key share. The group public key is the sum of
+degree-zero commitments.
 
 ## Presign
 
-Presign is the offline phase. Each signer samples local `k_i` and `gamma_i`, broadcasts `Gamma_i = gamma_i*G`, and publishes `Enc_i(k_i)` with proof material.
+Presign is the offline phase. Each signer samples local `k_i` and `gamma_i`,
+broadcasts `Gamma_i = gamma_i*G`, and publishes `Enc_i(k_i)` with canonical
+binary encrypted-scalar and range proof material.
 
 Pairwise MtA exchanges produce additive shares for:
 
@@ -25,6 +31,11 @@ chi_i   = k_i*x_i     + sum(alphaHat_ij) + sum(betaHat_ji)
 ```
 
 Round 2 includes a hash of the complete round 1 broadcast view. A mismatch aborts with blame evidence before pairwise MtA output is accepted.
+
+Round 2 MtA response proofs are also canonical binary payloads. They bind the
+response ciphertext to the encrypted input scalar, the responder scalar
+commitment, and the beta-share commitment under a domain separated by session
+id, signer set, initiator, responder, and MtA kind.
 
 After all `delta_i` values are broadcast:
 
@@ -61,4 +72,4 @@ Malformed commitments, Paillier mismatches, invalid MtA responses, malformed onl
 
 ## Unsupported
 
-The package does not implement network transport, persistent storage encryption, resharing, proactive refresh, BIP32 path derivation, or production-audited proofs. The experimental security notice remains part of generated artifacts.
+The package does not implement network transport, persistent storage encryption, resharing, proactive refresh, BIP32 path derivation, or production-audited proofs. Canonical proof encoding is a wire-safety improvement, not an external cryptographic audit. The experimental security notice remains part of generated artifacts.

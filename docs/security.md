@@ -23,7 +23,7 @@ Never log secret scalar, nonce, Paillier private-key, key-share, or presign byte
 
 ## CGGMP21 Status
 
-`cggmp21/secp256k1` remains experimental. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, and supports caller-provided additive public-key shifts. The Paillier/ZK proof layer and identifiable-abort behavior still require independent cryptographic audit before production use.
+`cggmp21/secp256k1` remains experimental. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts, and encodes Paillier/ZK proof payloads as canonical binary TLV records. The Paillier/ZK proof layer and identifiable-abort behavior still require independent cryptographic audit before production use.
 
 Unsupported in v1:
 

@@ -28,9 +28,21 @@ These rules ensure one semantic record has one binary representation. This matte
 - `cggmp21/secp256k1.KeyShare`
 - `cggmp21/secp256k1.Presign`
 - `frost/ed25519.KeyShare`
+- `internal/zk/paillier.ModulusProof`
+- `internal/zk/paillier.EncScalarProof`
+- `internal/zk/paillier.EncRangeProof`
+- `internal/zk/paillier.MTAResponseProof`
 
-Paillier and proof payloads currently retain their deterministic JSON encodings because they are nested protocol proof payloads, not top-level share/envelope records.
+Paillier public and private keys still use deterministic JSON inside the
+canonical top-level records. Paillier proof payloads use the same strict TLV
+encoding as other binary records so presign and keygen proof bytes reject JSON
+fallback, trailing bytes, duplicate tags, and wrong proof type identifiers.
 
 ## Migration Policy
 
 Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. CGGMP21 decoders do not accept old GG20 type identifiers. If legacy data migration is needed later, add explicit migration helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.
+
+Paillier proof decoders also do not accept the earlier nested JSON proof
+payloads. Shares or protocol fixtures carrying those old proof bytes should be
+migrated by an explicit offline helper rather than by `StartKeygen`,
+`StartPresign`, or `UnmarshalKeyShare`.

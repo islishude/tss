@@ -81,8 +81,8 @@ func checkDocStartsWith(t *testing.T, fset *token.FileSet, path string, doc *ast
 }
 
 func firstDocLine(text string) string {
-	if i := strings.IndexByte(text, '\n'); i >= 0 {
-		return text[:i]
+	if before, _, ok := strings.Cut(text, "\n"); ok {
+		return before
 	}
 	return text
 }
