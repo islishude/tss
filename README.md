@@ -15,18 +15,18 @@ The secp256k1 package exposes a CGGMP21-style API and now signs without transmit
 
 ## Packages
 
-| Package                                   | Purpose                                                                                 |
-| ----------------------------------------- | --------------------------------------------------------------------------------------- |
-| `github.com/islishude/tss`                | Shared types: parties, sessions, envelopes, errors, key-share and signature interfaces. |
-| `github.com/islishude/tss/frost/ed25519`  | FROST-style Ed25519 DKG and signing.                                                    |
-| `github.com/islishude/tss/cggmp21/secp256k1` | Experimental secp256k1 threshold ECDSA API with CGGMP21 package shape.                     |
-| `internal/shamir`                         | Shamir sharing and interpolation helpers.                                               |
-| `internal/curve/*`                        | Curve helpers with fiat-crypto backed scalar/field wrappers.                            |
-| `internal/mta`                            | Paillier MtA product-share protocol helpers.                                            |
-| `internal/paillier`                       | Paillier primitives used by the CGGMP21-style signing path.                                |
-| `internal/wire`                           | Strict TLV encoding used by binary envelopes and key-share records.                     |
-| `internal/zk/paillier`                    | Paillier encryption, range, modulus, and MtA response proofs.                           |
-| `internal/zk/schnorr`                     | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
+| Package                                      | Purpose                                                                                 |
+| -------------------------------------------- | --------------------------------------------------------------------------------------- |
+| `github.com/islishude/tss`                   | Shared types: parties, sessions, envelopes, errors, key-share and signature interfaces. |
+| `github.com/islishude/tss/frost/ed25519`     | FROST-style Ed25519 DKG and signing.                                                    |
+| `github.com/islishude/tss/cggmp21/secp256k1` | Experimental secp256k1 threshold ECDSA API with CGGMP21 package shape.                  |
+| `internal/shamir`                            | Shamir sharing and interpolation helpers.                                               |
+| `internal/curve/*`                           | Curve helpers with fiat-crypto backed scalar/field wrappers.                            |
+| `internal/mta`                               | Paillier MtA product-share protocol helpers.                                            |
+| `internal/paillier`                          | Paillier primitives used by the CGGMP21-style signing path.                             |
+| `internal/wire`                              | Strict TLV encoding used by binary envelopes and key-share records.                     |
+| `internal/zk/paillier`                       | Paillier encryption, range, modulus, and MtA response proofs.                           |
+| `internal/zk/schnorr`                        | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
 
 ## Transport Model
 
@@ -80,8 +80,7 @@ For additive-shift signing, pass `secp256k1.SignOptions{LowS: true, AdditiveShif
 Run:
 
 ```sh
-golangci-lint run ./...
-go test ./...
+golangci-lint run --fix
 go test -race ./...
 ```
 

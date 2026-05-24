@@ -21,6 +21,11 @@ field      = tag:uint16 || value_len:uint32 || value
 - Higher-level decoders require exact field sets for fixed records.
 - Proof integer fields use minimal positive big-endian encoding; leading-zero
   aliases are rejected.
+- Proof secp256k1 point fields must pass the curve package's canonical point
+  decoder before the proof is accepted.
+- Proof transcript and challenge labels are fixed constants in the proof
+  package; changing them is a protocol-domain change and must be reviewed with
+  the corresponding transcript tests.
 
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 
@@ -42,9 +47,11 @@ fallback, trailing bytes, duplicate tags, and wrong proof type identifiers.
 
 ## Migration Policy
 
-Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. CGGMP21 decoders do not accept old GG20 type identifiers. If legacy data migration is needed later, add explicit migration helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.
+Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. CGGMP21 decoders do not accept old GG20 type identifiers. Legacy migration must use explicit helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.
 
 Paillier proof decoders also do not accept the earlier nested JSON proof
 payloads. Shares or protocol fixtures carrying those old proof bytes should be
-migrated by an explicit offline helper rather than by `StartKeygen`,
-`StartPresign`, or `UnmarshalKeyShare`.
+migrated by the explicit `internal/zk/paillier.MigrateJSON*Proof` helpers rather
+than by `StartKeygen`, `StartPresign`, or `UnmarshalKeyShare`. See
+[`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the proof inventory,
+review gaps, and migration boundary.

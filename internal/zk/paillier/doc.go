@@ -17,5 +17,8 @@
 // These proof structures are still explicitly unaudited. They are designed to
 // keep protocol transcripts deterministic and fail closed while the full
 // CGGMP21 proof set is reviewed. Integer fields are encoded as minimal
-// positive big-endian values so equivalent leading-zero aliases are rejected.
+// positive big-endian values so equivalent leading-zero aliases are rejected,
+// and curve point fields must be accepted by the secp256k1 point decoder.
+// Transcript and challenge labels are fixed package constants so changes to
+// proof domains are explicit review points.
 package paillier
