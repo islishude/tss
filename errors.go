@@ -3,16 +3,25 @@ package tss
 import "fmt"
 
 const (
-	ErrCodeInvalidConfig  = "invalid_config"
+	// ErrCodeInvalidConfig marks invalid local protocol configuration.
+	ErrCodeInvalidConfig = "invalid_config"
+	// ErrCodeInvalidMessage marks malformed or cross-session protocol messages.
 	ErrCodeInvalidMessage = "invalid_message"
-	ErrCodeDuplicate      = "duplicate_message"
-	ErrCodeRound          = "wrong_round"
-	ErrCodeVerification   = "verification_failed"
-	ErrCodeNotReady       = "not_ready"
-	ErrCodeConsumed       = "consumed"
+	// ErrCodeDuplicate marks replayed or repeated messages for a round.
+	ErrCodeDuplicate = "duplicate_message"
+	// ErrCodeRound marks a message delivered to the wrong protocol round.
+	ErrCodeRound = "wrong_round"
+	// ErrCodeVerification marks a failed cryptographic or transcript check.
+	ErrCodeVerification = "verification_failed"
+	// ErrCodeNotReady marks a protocol state that has not collected enough messages.
+	ErrCodeNotReady = "not_ready"
+	// ErrCodeConsumed marks one-use material that has already been consumed.
+	ErrCodeConsumed = "consumed"
+	// ErrCodeNotImplemented marks intentionally unsupported protocol features.
 	ErrCodeNotImplemented = "not_implemented"
 )
 
+// ProtocolError is the stable error shape returned by protocol state machines.
 type ProtocolError struct {
 	Code  string
 	Round uint8
@@ -21,6 +30,7 @@ type ProtocolError struct {
 	Err   error
 }
 
+// Error formats the protocol code with optional round, party, and wrapped error.
 func (e *ProtocolError) Error() string {
 	if e == nil {
 		return "<nil>"
@@ -38,6 +48,7 @@ func (e *ProtocolError) Error() string {
 	return msg
 }
 
+// Unwrap returns the underlying error for errors.Is/errors.As callers.
 func (e *ProtocolError) Unwrap() error {
 	if e == nil {
 		return nil
@@ -45,6 +56,7 @@ func (e *ProtocolError) Unwrap() error {
 	return e.Err
 }
 
+// NewProtocolError constructs a ProtocolError without blame evidence.
 func NewProtocolError(code string, round uint8, party PartyID, err error) *ProtocolError {
 	return &ProtocolError{Code: code, Round: round, Party: party, Err: err}
 }

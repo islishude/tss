@@ -13,6 +13,7 @@ import (
 	"github.com/islishude/tss/internal/shamir"
 )
 
+// SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
 	key           *KeyShare
 	sessionID     tss.SessionID
@@ -37,6 +38,7 @@ type signPartialPayload struct {
 	Z []byte `json:"z"`
 }
 
+// StartSign starts a FROST signing session over the raw message.
 func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte) (*SignSession, []tss.Envelope, error) {
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
@@ -102,6 +104,7 @@ func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, me
 	return s, out, nil
 }
 
+// HandleSignMessage validates and applies one FROST signing envelope.
 func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")
@@ -157,6 +160,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	}
 }
 
+// Signature returns the completed RFC 8032-compatible Ed25519 signature.
 func (s *SignSession) Signature() ([]byte, bool) {
 	if s == nil || !s.completed {
 		return nil, false
@@ -363,6 +367,7 @@ func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
 	return nil
 }
 
+// Sign runs an in-memory FROST signing exchange for tests and simple integrations.
 func Sign(message []byte, signers []*KeyShare) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")

@@ -13,6 +13,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+// Version is the library wire/protocol version used by current messages.
 const Version = 1
 
 const envelopeWireType = "tss.envelope"
@@ -30,17 +31,23 @@ const (
 	envelopeFieldConfidentialRequired
 )
 
+// PartyID identifies one protocol participant; zero is reserved as "unset".
 type PartyID uint32
 
+// Algorithm names a threshold signature algorithm implemented by this module.
 type Algorithm string
 
 const (
+	// AlgorithmGG20Secp256k1 identifies the GG20-style threshold ECDSA package.
 	AlgorithmGG20Secp256k1 Algorithm = "gg20-secp256k1"
-	AlgorithmFROSTEd25519  Algorithm = "frost-ed25519"
+	// AlgorithmFROSTEd25519 identifies the FROST-style threshold Ed25519 package.
+	AlgorithmFROSTEd25519 Algorithm = "frost-ed25519"
 )
 
+// SessionID is a 32-byte nonce that separates independent protocol executions.
 type SessionID [32]byte
 
+// NewSessionID returns a random session identifier from reader or crypto/rand.
 func NewSessionID(reader io.Reader) (SessionID, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -52,6 +59,7 @@ func NewSessionID(reader io.Reader) (SessionID, error) {
 	return id, nil
 }
 
+// SessionIDFromBytes parses a 32-byte session identifier.
 func SessionIDFromBytes(in []byte) (SessionID, error) {
 	var id SessionID
 	if len(in) != len(id) {
@@ -61,22 +69,26 @@ func SessionIDFromBytes(in []byte) (SessionID, error) {
 	return id, nil
 }
 
+// Bytes returns a copy of the session identifier bytes.
 func (id SessionID) Bytes() []byte {
 	out := make([]byte, len(id))
 	copy(out, id[:])
 	return out
 }
 
+// String returns the hex encoding of the session identifier.
 func (id SessionID) String() string {
 	return hex.EncodeToString(id[:])
 }
 
+// MarshalText encodes the session identifier as hex text.
 func (id SessionID) MarshalText() ([]byte, error) {
 	out := make([]byte, hex.EncodedLen(len(id)))
 	hex.Encode(out, id[:])
 	return out, nil
 }
 
+// UnmarshalText decodes a hex session identifier.
 func (id *SessionID) UnmarshalText(text []byte) error {
 	raw, err := hex.DecodeString(string(text))
 	if err != nil {
@@ -90,6 +102,7 @@ func (id *SessionID) UnmarshalText(text []byte) error {
 	return nil
 }
 
+// ThresholdConfig contains local participant configuration for a protocol run.
 type ThresholdConfig struct {
 	Threshold int
 	Parties   []PartyID
@@ -98,6 +111,7 @@ type ThresholdConfig struct {
 	Rand      io.Reader `json:"-"`
 }
 
+// Validate checks threshold, party-set, and local-party invariants.
 func (c ThresholdConfig) Validate() error {
 	if c.Threshold <= 0 {
 		return errors.New("threshold must be positive")
@@ -128,12 +142,14 @@ func (c ThresholdConfig) Validate() error {
 	return nil
 }
 
+// SortedParties returns the configured party set in ascending order.
 func (c ThresholdConfig) SortedParties() []PartyID {
 	out := append([]PartyID(nil), c.Parties...)
 	slices.Sort(out)
 	return out
 }
 
+// Reader returns the configured randomness source or crypto/rand.
 func (c ThresholdConfig) Reader() io.Reader {
 	if c.Rand != nil {
 		return c.Rand
@@ -141,6 +157,7 @@ func (c ThresholdConfig) Reader() io.Reader {
 	return rand.Reader
 }
 
+// Envelope is a transport-neutral protocol message.
 type Envelope struct {
 	Protocol             string    `json:"protocol"`
 	Version              uint16    `json:"version"`
@@ -154,6 +171,7 @@ type Envelope struct {
 	ConfidentialRequired bool      `json:"confidential_required,omitempty"` // transport must encrypt/authenticate this envelope
 }
 
+// MarshalBinary encodes the envelope using strict canonical TLV wire format.
 func (e Envelope) MarshalBinary() ([]byte, error) {
 	if e.Protocol == "" {
 		return nil, errors.New("envelope protocol is empty")
@@ -181,6 +199,7 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	})
 }
 
+// UnmarshalBinary decodes a canonical TLV envelope and rejects JSON fallback.
 func (e *Envelope) UnmarshalBinary(in []byte) error {
 	version, fields, err := wire.Unmarshal(in, envelopeWireType)
 	if err != nil {
@@ -279,6 +298,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	return nil
 }
 
+// DomainSeparatedHash hashes the public envelope metadata and payload.
 func (e Envelope) DomainSeparatedHash() []byte {
 	h := sha256.New()
 	// The protocol/version/session/round tuple keeps transcripts from one
@@ -296,11 +316,13 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	return h.Sum(nil)
 }
 
+// WithTranscriptHash returns a copy of the envelope with its transcript hash set.
 func (e Envelope) WithTranscriptHash() Envelope {
 	e.TranscriptHash = e.DomainSeparatedHash()
 	return e
 }
 
+// ValidateBasic checks envelope metadata before protocol-specific decoding.
 func (e Envelope) ValidateBasic(protocol string, session SessionID, parties []PartyID) error {
 	// Validate common envelope metadata before protocol-specific decoding. This
 	// keeps malformed or cross-session messages from reaching state machines.
@@ -325,6 +347,7 @@ func (e Envelope) ValidateBasic(protocol string, session SessionID, parties []Pa
 	return nil
 }
 
+// KeyShare is the common interface implemented by algorithm-specific shares.
 type KeyShare interface {
 	Algorithm() Algorithm
 	PartyID() PartyID
@@ -333,6 +356,7 @@ type KeyShare interface {
 	Destroy()
 }
 
+// Signature is the common transport shape for algorithm-specific signatures.
 type Signature struct {
 	Algorithm Algorithm `json:"algorithm"`
 	PublicKey []byte    `json:"public_key"`
@@ -341,16 +365,19 @@ type Signature struct {
 	S         []byte    `json:"s,omitempty"`
 }
 
+// Blame identifies parties and public evidence associated with a protocol failure.
 type Blame struct {
 	Reason   string    `json:"reason"`
 	Parties  []PartyID `json:"parties"`
 	Evidence []byte    `json:"evidence,omitempty"`
 }
 
+// ContainsParty reports whether id appears in parties.
 func ContainsParty(parties []PartyID, id PartyID) bool {
 	return slices.Contains(parties, id)
 }
 
+// SortParties returns a sorted copy of parties.
 func SortParties(parties []PartyID) []PartyID {
 	out := append([]PartyID(nil), parties...)
 	slices.Sort(out)

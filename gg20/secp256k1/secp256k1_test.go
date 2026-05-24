@@ -116,7 +116,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		if _, err := sessions[id].HandleSignMessage(messages[0]); err == nil {
 			t.Fatal("expected tampered partial rejection")
 		} else {
-			assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))
+			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))
 		}
 	}
 	if !delivered {
@@ -143,7 +143,7 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected tampered EncK rejection")
 	} else {
-		assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 	}
 }
 
@@ -198,7 +198,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeVerification || protocolErr.Party != 2 {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 		})
 	}
 }
@@ -231,7 +231,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {
-		assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 	}
 }
 
@@ -263,7 +263,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
 		t.Fatal("expected keygen Paillier key mismatch rejection")
 	} else {
-		assertBlameEvidence(t, err, EvidenceContext{Parties: parties})
+		_ = assertBlameEvidence(t, err, EvidenceContext{Parties: parties})
 	}
 }
 

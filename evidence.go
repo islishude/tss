@@ -9,19 +9,29 @@ import (
 	"slices"
 )
 
+// EvidenceKind names the protocol failure class captured in blame evidence.
 type EvidenceKind string
 
 const (
+	// EvidenceKindKeygenCommitment marks an invalid keygen public commitment.
 	EvidenceKindKeygenCommitment EvidenceKind = "keygen_commitment"
-	EvidenceKindKeygenPaillier   EvidenceKind = "keygen_paillier"
-	EvidenceKindKeygenShare      EvidenceKind = "keygen_share"
-	EvidenceKindPresignRound1    EvidenceKind = "presign_round1"
-	EvidenceKindPresignRound2    EvidenceKind = "presign_round2"
-	EvidenceKindPresignRound3    EvidenceKind = "presign_round3"
-	EvidenceKindSignPartial      EvidenceKind = "sign_partial"
-	EvidenceKindAggregateSign    EvidenceKind = "aggregate_signature"
+	// EvidenceKindKeygenPaillier marks invalid Paillier key material or proof.
+	EvidenceKindKeygenPaillier EvidenceKind = "keygen_paillier"
+	// EvidenceKindKeygenShare marks a DKG share that does not match commitments.
+	EvidenceKindKeygenShare EvidenceKind = "keygen_share"
+	// EvidenceKindPresignRound1 marks invalid presign nonce commitment material.
+	EvidenceKindPresignRound1 EvidenceKind = "presign_round1"
+	// EvidenceKindPresignRound2 marks invalid pairwise MtA response material.
+	EvidenceKindPresignRound2 EvidenceKind = "presign_round2"
+	// EvidenceKindPresignRound3 marks invalid presign delta broadcast material.
+	EvidenceKindPresignRound3 EvidenceKind = "presign_round3"
+	// EvidenceKindSignPartial marks invalid online signing partial material.
+	EvidenceKindSignPartial EvidenceKind = "sign_partial"
+	// EvidenceKindAggregateSign marks a final aggregate signature verification failure.
+	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
 )
 
+// EvidenceField carries one public input or public-input hash for blame evidence.
 type EvidenceField struct {
 	Key   string `json:"key"`
 	Value []byte `json:"value"`
@@ -44,6 +54,7 @@ type BlameEvidence struct {
 	PublicInputs   []EvidenceField `json:"public_inputs,omitempty"`
 }
 
+// NewBlameEvidence builds a public evidence record bound to an envelope hash.
 func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []EvidenceField) (*BlameEvidence, error) {
 	payloadHash := sha256.Sum256(env.Payload)
 	evidence := &BlameEvidence{
@@ -55,7 +66,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		To:             env.To,
 		PayloadType:    env.PayloadType,
 		PayloadHash:    payloadHash[:],
-		TranscriptHash: CloneBytes(env.TranscriptHash),
+		TranscriptHash: slices.Clone(env.TranscriptHash),
 		Kind:           kind,
 		Reason:         reason,
 		PublicInputs:   cloneEvidenceFields(inputs),
@@ -66,6 +77,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 	return evidence, nil
 }
 
+// Validate checks structural invariants for a public blame evidence record.
 func (e *BlameEvidence) Validate() error {
 	if e == nil {
 		return errors.New("nil blame evidence")
@@ -97,13 +109,14 @@ func (e *BlameEvidence) Validate() error {
 	return nil
 }
 
+// MarshalBinary returns deterministic JSON for public blame evidence.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
 	canonical := *e
-	canonical.PayloadHash = CloneBytes(e.PayloadHash)
-	canonical.TranscriptHash = CloneBytes(e.TranscriptHash)
+	canonical.PayloadHash = slices.Clone(e.PayloadHash)
+	canonical.TranscriptHash = slices.Clone(e.TranscriptHash)
 	canonical.PublicInputs = cloneEvidenceFields(e.PublicInputs)
 	if err := normalizeEvidenceFields(canonical.PublicInputs); err != nil {
 		return nil, err
@@ -111,13 +124,14 @@ func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 	return json.Marshal(canonical)
 }
 
+// UnmarshalBlameEvidence decodes and validates public blame evidence.
 func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
 	var evidence BlameEvidence
 	if err := json.Unmarshal(in, &evidence); err != nil {
 		return nil, err
 	}
-	evidence.PayloadHash = CloneBytes(evidence.PayloadHash)
-	evidence.TranscriptHash = CloneBytes(evidence.TranscriptHash)
+	evidence.PayloadHash = slices.Clone(evidence.PayloadHash)
+	evidence.TranscriptHash = slices.Clone(evidence.TranscriptHash)
 	evidence.PublicInputs = cloneEvidenceFields(evidence.PublicInputs)
 	if err := evidence.Validate(); err != nil {
 		return nil, err
@@ -128,6 +142,7 @@ func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
 	return &evidence, nil
 }
 
+// Hash returns the SHA-256 digest of the deterministic evidence encoding.
 func (e *BlameEvidence) Hash() ([]byte, error) {
 	encoded, err := e.MarshalBinary()
 	if err != nil {
@@ -137,13 +152,14 @@ func (e *BlameEvidence) Hash() ([]byte, error) {
 	return digest[:], nil
 }
 
+// Field returns a copy of a named public input field.
 func (e *BlameEvidence) Field(key string) ([]byte, bool) {
 	if e == nil {
 		return nil, false
 	}
 	for _, field := range e.PublicInputs {
 		if field.Key == key {
-			return CloneBytes(field.Value), true
+			return slices.Clone(field.Value), true
 		}
 	}
 	return nil, false
@@ -155,7 +171,7 @@ func cloneEvidenceFields(in []EvidenceField) []EvidenceField {
 	}
 	out := make([]EvidenceField, len(in))
 	for i, field := range in {
-		out[i] = EvidenceField{Key: field.Key, Value: CloneBytes(field.Value)}
+		out[i] = EvidenceField{Key: field.Key, Value: slices.Clone(field.Value)}
 	}
 	return out
 }

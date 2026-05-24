@@ -16,10 +16,12 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
+// KeygenOptions controls non-default GG20 keygen parameters.
 type KeygenOptions struct {
 	PaillierBits int
 }
 
+// KeygenSession tracks GG20-style DKG state for one local party.
 type KeygenSession struct {
 	cfg          tss.ThresholdConfig
 	commits      map[tss.PartyID][][]byte
@@ -40,10 +42,12 @@ type keygenSharePayload struct {
 	Share []byte `json:"share"`
 }
 
+// StartKeygen starts GG20-style threshold ECDSA key generation.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
 
+// StartKeygenWithOptions starts keygen with explicit Paillier key-size options.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
 	if err := config.Validate(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
@@ -119,6 +123,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	return s, out, nil
 }
 
+// HandleKeygenMessage validates and applies one keygen envelope.
 func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
@@ -210,6 +215,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 	return nil, s.tryComplete()
 }
 
+// KeyShare returns the completed local key share when DKG has finished.
 func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false

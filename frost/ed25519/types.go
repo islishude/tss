@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
@@ -18,11 +19,13 @@ const (
 	payloadSignPartial       = "frost.ed25519.sign.partial"
 )
 
+// VerificationShare is a participant public share derived from DKG commitments.
 type VerificationShare struct {
 	Party     tss.PartyID `json:"party"`
 	PublicKey []byte      `json:"public_key"`
 }
 
+// KeyShare is one local FROST Ed25519 signing share.
 type KeyShare struct {
 	Version            uint16              `json:"version"`
 	Party              tss.PartyID         `json:"party"`
@@ -34,10 +37,12 @@ type KeyShare struct {
 	VerificationShares []VerificationShare `json:"verification_shares"`
 }
 
+// Algorithm returns the common algorithm identifier.
 func (k *KeyShare) Algorithm() tss.Algorithm {
 	return tss.AlgorithmFROSTEd25519
 }
 
+// PartyID returns the owner party of this key share.
 func (k *KeyShare) PartyID() tss.PartyID {
 	if k == nil {
 		return 0
@@ -45,21 +50,25 @@ func (k *KeyShare) PartyID() tss.PartyID {
 	return k.Party
 }
 
+// PublicKeyBytes returns a copy of the group Ed25519 public key.
 func (k *KeyShare) PublicKeyBytes() []byte {
 	if k == nil {
 		return nil
 	}
-	return tss.CloneBytes(k.PublicKey)
+	return slices.Clone(k.PublicKey)
 }
 
+// MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
 }
 
+// UnmarshalKeyShare decodes a canonical FROST key-share record.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShare(in)
 }
 
+// Validate checks share structure and canonical scalar/point encodings.
 func (k *KeyShare) Validate() error {
 	if k == nil {
 		return errors.New("nil key share")
@@ -118,11 +127,12 @@ func (k *KeyShare) Validate() error {
 	return nil
 }
 
+// Destroy zeros the local scalar share bytes in place.
 func (k *KeyShare) Destroy() {
 	if k == nil {
 		return
 	}
-	tss.SensitiveBytes(k.Secret).Destroy()
+	clear(k.Secret)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {

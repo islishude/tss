@@ -94,6 +94,18 @@ The test suite covers:
 - `1-of-1`, `2-of-3`, and `3-of-5` protocol simulations.
 - duplicate messages, bad partial signatures, key-share round trips, and presign reuse rejection.
 
+## Documentation
+
+The design notes are kept under `docs/` and should be updated with protocol or wire-format changes:
+
+- `docs/architecture.md`: package boundaries and state-machine responsibilities.
+- `docs/security.md`: caller responsibilities, threat model limits, and audit status.
+- `docs/wire.md`: canonical TLV encoding rules and compatibility policy.
+- `docs/gg20-secp256k1.md`: GG20-style secp256k1 equations and message flow.
+- `docs/frost-ed25519.md`: FROST Ed25519 DKG/signing equations and message flow.
+
+New exported Go identifiers require doc comments. Protocol equations, transcript/domain separation, and sensitive scalar or nonce handling also need explanatory comments. Examples in `examples_test.go` files exercise the public API and should be kept current with API changes.
+
 ## Security Notes
 
 - Do not log secret scalar, nonce, Paillier private-key, or key-share bytes.

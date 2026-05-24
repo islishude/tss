@@ -11,11 +11,13 @@ import (
 
 var magic = []byte{'T', 'S', 'S', '1'}
 
+// Field is one canonical TLV field with a strictly increasing tag.
 type Field struct {
 	Tag   uint16
 	Value []byte
 }
 
+// Marshal encodes a typed message and rejects unsorted or duplicate tags.
 func Marshal(version uint16, typeID string, fields []Field) ([]byte, error) {
 	if typeID == "" {
 		return nil, errors.New("empty wire type id")
@@ -60,6 +62,7 @@ func Marshal(version uint16, typeID string, fields []Field) ([]byte, error) {
 	return out, nil
 }
 
+// Unmarshal decodes a typed message and rejects trailing or non-canonical data.
 func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 	if expectedTypeID == "" {
 		return 0, nil, errors.New("empty expected wire type id")
@@ -128,6 +131,7 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 	return version, fields, nil
 }
 
+// Find returns a copy of a field value by tag.
 func Find(fields []Field, tag uint16) ([]byte, bool) {
 	for _, field := range fields {
 		if field.Tag == tag {
@@ -139,6 +143,7 @@ func Find(fields []Field, tag uint16) ([]byte, bool) {
 	return nil, false
 }
 
+// Require returns a field value or an error when the tag is absent.
 func Require(fields []Field, tag uint16) ([]byte, error) {
 	value, ok := Find(fields, tag)
 	if !ok {

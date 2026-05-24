@@ -10,11 +10,13 @@ import (
 	"github.com/islishude/tss"
 )
 
+// Share is one Shamir evaluation point over a caller-supplied field order.
 type Share struct {
 	ID    tss.PartyID
 	Value *big.Int
 }
 
+// RandomScalar returns a non-zero scalar modulo order.
 func RandomScalar(reader io.Reader, order *big.Int) (*big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -33,6 +35,7 @@ func RandomScalar(reader io.Reader, order *big.Int) (*big.Int, error) {
 	}
 }
 
+// RandomPolynomial returns coefficients for a degree threshold-1 polynomial.
 func RandomPolynomial(reader io.Reader, order *big.Int, threshold int, constant *big.Int) ([]*big.Int, error) {
 	if threshold <= 0 {
 		return nil, errors.New("threshold must be positive")
@@ -58,6 +61,7 @@ func RandomPolynomial(reader io.Reader, order *big.Int, threshold int, constant 
 	return coeffs, nil
 }
 
+// Eval evaluates a polynomial at the participant identifier modulo order.
 func Eval(coeffs []*big.Int, id tss.PartyID, order *big.Int) *big.Int {
 	x := new(big.Int).SetUint64(uint64(id))
 	acc := new(big.Int)
@@ -70,6 +74,7 @@ func Eval(coeffs []*big.Int, id tss.PartyID, order *big.Int) *big.Int {
 	return acc
 }
 
+// LagrangeCoefficient returns the coefficient for reconstructing at x=0.
 func LagrangeCoefficient(id tss.PartyID, ids []tss.PartyID, order *big.Int) (*big.Int, error) {
 	if id == 0 {
 		return nil, errors.New("party id 0 is reserved")
@@ -111,6 +116,7 @@ func LagrangeCoefficient(id tss.PartyID, ids []tss.PartyID, order *big.Int) (*bi
 	return out, nil
 }
 
+// InterpolateConstant reconstructs the polynomial constant from shares.
 func InterpolateConstant(shares []Share, order *big.Int) (*big.Int, error) {
 	if len(shares) == 0 {
 		return nil, errors.New("no shares")
@@ -137,6 +143,7 @@ func InterpolateConstant(shares []Share, order *big.Int) (*big.Int, error) {
 	return acc, nil
 }
 
+// Normalize reduces x into [0, order).
 func Normalize(x, order *big.Int) *big.Int {
 	out := new(big.Int).Mod(new(big.Int).Set(x), order)
 	if out.Sign() < 0 {
@@ -145,24 +152,28 @@ func Normalize(x, order *big.Int) *big.Int {
 	return out
 }
 
+// Add returns a+b modulo order.
 func Add(a, b, order *big.Int) *big.Int {
 	out := new(big.Int).Add(a, b)
 	out.Mod(out, order)
 	return out
 }
 
+// Sub returns a-b modulo order.
 func Sub(a, b, order *big.Int) *big.Int {
 	out := new(big.Int).Sub(a, b)
 	out.Mod(out, order)
 	return out
 }
 
+// Mul returns a*b modulo order.
 func Mul(a, b, order *big.Int) *big.Int {
 	out := new(big.Int).Mul(a, b)
 	out.Mod(out, order)
 	return out
 }
 
+// BytesFixed returns x as an n-byte big-endian value.
 func BytesFixed(x *big.Int, n int) []byte {
 	out := make([]byte, n)
 	if x == nil {

@@ -59,28 +59,28 @@ func TestGG20KeygenEnvelopeFailClosed(t *testing.T) {
 		}
 		mutated = mutated.WithTranscriptHash()
 		_, err = kg1.HandleKeygenMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong protocol", func(t *testing.T) {
 		mutated := commit
 		mutated.Protocol = "wrong-protocol"
 		mutated = mutated.WithTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := commit
 		mutated.Round = 2
 		mutated = mutated.WithTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := share
 		mutated.To = 3
 		mutated = mutated.WithTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate commitment", func(t *testing.T) {
 		kg, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
@@ -91,7 +91,7 @@ func TestGG20KeygenEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = kg.HandleKeygenMessage(commit)
-		assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
 	})
 }
 
@@ -121,7 +121,7 @@ func TestGG20KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	out2[0].Payload = mutated
 	out2[0] = out2[0].WithTranscriptHash()
 	_, err = kg1.HandleKeygenMessage(out2[0])
-	assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
+	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
 func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
@@ -146,7 +146,7 @@ func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.From = 3
 		mutated = mutated.WithTranscriptHash()
 		_, err := s1.HandlePresignMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong session", func(t *testing.T) {
 		mutated := round1
@@ -156,21 +156,21 @@ func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
 		}
 		mutated = mutated.WithTranscriptHash()
 		_, err = s1.HandlePresignMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := round1
 		mutated.Round = 2
 		mutated = mutated.WithTranscriptHash()
 		_, err := s1.HandlePresignMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := round1
 		mutated.To = 3
 		mutated = mutated.WithTranscriptHash()
 		_, err := s1.HandlePresignMessage(mutated)
-		assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate round1", func(t *testing.T) {
 		session, _, err := StartPresign(h.shares[1], sessionID, signers)
@@ -181,7 +181,7 @@ func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = session.HandlePresignMessage(round1)
-		assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
 	})
 }
 
@@ -219,7 +219,7 @@ func TestGG20PresignRound1MalformedEvidence(t *testing.T) {
 			out2[0].Payload = mutated
 			out2[0] = out2[0].WithTranscriptHash()
 			_, err = s1.HandlePresignMessage(out2[0])
-			assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
+			_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 		})
 	}
 }
@@ -248,7 +248,7 @@ func TestGG20PresignRound2WrongRecipientRejected(t *testing.T) {
 	round2[0].To = 3
 	round2[0] = round2[0].WithTranscriptHash()
 	_, err = s1.HandlePresignMessage(round2[0])
-	assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 }
 
 func TestGG20PresignRound3MalformedDeltaEvidence(t *testing.T) {
@@ -299,7 +299,7 @@ func TestGG20PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	round3From2[0].Payload = mutated
 	round3From2[0] = round3From2[0].WithTranscriptHash()
 	_, err = s1.HandlePresignMessage(round3From2[0])
-	assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
+	_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 }
 
 func TestGG20SignerSetOrderCanonicalized(t *testing.T) {
@@ -349,7 +349,7 @@ func TestGG20SignFailClosedAndEvidence(t *testing.T) {
 		env.Payload = mutated
 		env = env.WithTranscriptHash()
 		_, err = s1.HandleSignMessage(env)
-		assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
+		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("malformed scalar", func(t *testing.T) {
 		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
@@ -369,14 +369,14 @@ func TestGG20SignFailClosedAndEvidence(t *testing.T) {
 		env.Payload = mutated
 		env = env.WithTranscriptHash()
 		_, err = session.HandleSignMessage(env)
-		assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
+		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		env := out2[0]
 		env.Round = 2
 		env = env.WithTranscriptHash()
 		_, err := s1.HandleSignMessage(env)
-		assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
 		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
@@ -387,7 +387,7 @@ func TestGG20SignFailClosedAndEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = session.HandleSignMessage(out2[0])
-		assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
 	})
 }
 

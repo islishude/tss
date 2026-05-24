@@ -10,16 +10,19 @@ import (
 	"math/big"
 )
 
+// DefaultMinModulusBits is the minimum modulus size accepted outside tests.
 const DefaultMinModulusBits = 2048
 
 var minModulusBits = DefaultMinModulusBits
 
+// PublicKey contains Paillier public parameters and cached n^2.
 type PublicKey struct {
 	N        *big.Int
 	NSquared *big.Int
 	G        *big.Int
 }
 
+// PrivateKey contains Paillier secret factors and decryption exponents.
 type PrivateKey struct {
 	PublicKey
 	Lambda *big.Int
@@ -41,6 +44,7 @@ type privateKeyWire struct {
 	Q         string        `json:"q"`
 }
 
+// GenerateKey creates a Paillier key using the g=n+1 variant.
 func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -85,16 +89,19 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	}
 }
 
+// SetMinimumModulusBitsForTesting overrides validation policy for tests.
 func SetMinimumModulusBitsForTesting(bits int) func() {
 	old := minModulusBits
 	minModulusBits = bits
 	return func() { minModulusBits = old }
 }
 
+// Validate checks the public key against the package minimum modulus size.
 func (pk PublicKey) Validate() error {
 	return pk.ValidateBits(minModulusBits)
 }
 
+// ValidateBits checks public key structure against an explicit minimum size.
 func (pk PublicKey) ValidateBits(minBits int) error {
 	if pk.N == nil || pk.N.Sign() <= 0 {
 		return errors.New("invalid modulus")
@@ -117,6 +124,7 @@ func (pk PublicKey) ValidateBits(minBits int) error {
 	return nil
 }
 
+// MarshalBinary returns deterministic public-key JSON used inside transcripts.
 func (pk PublicKey) MarshalBinary() ([]byte, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -127,6 +135,7 @@ func (pk PublicKey) MarshalBinary() ([]byte, error) {
 	})
 }
 
+// UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 	var w publicKeyWire
 	if err := json.Unmarshal(in, &w); err != nil {
@@ -158,6 +167,7 @@ func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 	return pk, nil
 }
 
+// MarshalBinary returns deterministic private-key JSON for local key shares.
 func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
@@ -174,6 +184,7 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	})
 }
 
+// UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
 func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	var w privateKeyWire
 	if err := json.Unmarshal(in, &w); err != nil {
@@ -227,6 +238,7 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	return sk, nil
 }
 
+// Encrypt encrypts message with fresh random invertible Paillier randomness.
 func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, nil, err
@@ -246,6 +258,7 @@ func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.
 	return c, r, nil
 }
 
+// EncryptWithRandomness encrypts message using caller-provided randomness r.
 func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -264,6 +277,7 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 	return c, nil
 }
 
+// Decrypt recovers a plaintext representative from a Paillier ciphertext.
 func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
@@ -281,6 +295,7 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	return m, nil
 }
 
+// ValidateCiphertext checks ciphertext membership in Z*_{n^2}.
 func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
 	if err := pk.Validate(); err != nil {
 		return err
@@ -294,6 +309,7 @@ func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
 	return nil
 }
 
+// AddCiphertexts homomorphically adds two encrypted plaintexts.
 func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -306,6 +322,7 @@ func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
 	return out, nil
 }
 
+// AddPlaintext homomorphically adds plaintext to an encrypted value.
 func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -319,6 +336,7 @@ func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 	return out, nil
 }
 
+// MulPlaintext homomorphically multiplies an encrypted value by plaintext.
 func (pk PublicKey) MulPlaintext(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -330,6 +348,7 @@ func (pk PublicKey) MulPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 	return out, nil
 }
 
+// L computes Paillier's L(u) = (u - 1) / n helper.
 func L(u, n *big.Int) *big.Int {
 	// L(u) = (u - 1) / n in Paillier decryption.
 	out := new(big.Int).Sub(u, big.NewInt(1))

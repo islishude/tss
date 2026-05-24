@@ -15,6 +15,7 @@ import (
 	"github.com/islishude/tss/internal/shamir"
 )
 
+// Presign contains one local offline signing record and must be consumed once.
 type Presign struct {
 	Version        uint16        `json:"version"`
 	Party          tss.PartyID   `json:"party"`
@@ -30,6 +31,7 @@ type Presign struct {
 	SecurityNotice string        `json:"security_notice"`
 }
 
+// PresignSession tracks the GG20-style offline presign exchange.
 type PresignSession struct {
 	key       *KeyShare
 	sessionID tss.SessionID
@@ -58,6 +60,7 @@ type PresignSession struct {
 	presign    *Presign
 }
 
+// SignSession tracks the online threshold ECDSA signing exchange.
 type SignSession struct {
 	key       *KeyShare
 	presign   *Presign
@@ -91,6 +94,7 @@ type signPartialPayload struct {
 	PresignTranscript []byte `json:"presign_transcript"`
 }
 
+// StartPresign starts the offline GG20-style presign protocol for signers.
 func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID) (*PresignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
@@ -109,6 +113,8 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	if err != nil {
 		return nil, nil, err
 	}
+	// k_i and gamma_i are local nonce scalars. Only Enc(k_i) and Gamma_i leave
+	// the process; the raw nonce scalars stay inside the local presign record.
 	kShare, err := secp.RandomScalar(nil)
 	if err != nil {
 		return nil, nil, err
@@ -129,6 +135,8 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	if err != nil {
 		return nil, nil, err
 	}
+	// xBar is lambda_i*x_i, the signer-set-adjusted secret share used in
+	// sigma = k*x. The public commitment is derived from the verification share.
 	xBar := new(big.Int).Mul(lambda, secret)
 	xBar.Mod(xBar, secp.Order())
 	localVerificationShare, ok := key.verificationShare(key.Party)
@@ -143,6 +151,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	if err != nil {
 		return nil, nil, err
 	}
+	// Round 1 starts MtA by publishing Enc_i(k_i) with scalar/range proofs.
 	startMsg, err := mta.Start(nil, mtaStartDomain(sessionID, signers, key.Party), kShare, &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
@@ -192,6 +201,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	return s, out, nil
 }
 
+// HandlePresignMessage validates and applies one presign envelope.
 func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope, error) {
 	if s == nil {
 		return nil, errors.New("nil presign session")
@@ -309,6 +319,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 	}
 }
 
+// Presign returns the completed local presign record.
 func (s *PresignSession) Presign() (*Presign, bool) {
 	if s == nil || !s.completed {
 		return nil, false
@@ -380,10 +391,13 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncProof: s.round1[peer].EncKProof, RangeProof: s.round1[peer].EncKRangeProof}
+		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "delta"), start, s.gamma, s.gammaComm, peerPK)
 		if err != nil {
 			return nil, err
 		}
+		// The sigma MtA instance creates additive shares of k_i*x_j, where x_j
+		// is already adjusted by the signer-set Lagrange coefficient.
 		sigmaResp, betaSigma, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "sigma"), start, s.xBar, s.xBarComm, peerPK)
 		if err != nil {
 			return nil, err
@@ -431,8 +445,10 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		if peer == s.key.Party {
 			continue
 		}
+		// delta_i = k_i*gamma_i + sum_j alpha_ij + sum_j beta_ji.
 		deltaShare.Add(deltaShare, s.alphaDelta[peer])
 		deltaShare.Add(deltaShare, s.betaDelta[peer])
+		// sigma_i = k_i*x_i + sum_j alphaHat_ij + sum_j betaHat_ji.
 		sigmaShare.Add(sigmaShare, s.alphaSigma[peer])
 		sigmaShare.Add(sigmaShare, s.betaSigma[peer])
 	}
@@ -495,6 +511,7 @@ func (s *PresignSession) tryComplete() error {
 	if s.presign == nil {
 		return errors.New("local presign shares not computed")
 	}
+	// R = delta^{-1} * Gamma, with Gamma=sum_i Gamma_i. LittleR is the ECDSA r.
 	s.presign.R = R
 	s.presign.LittleR = scalarBytes(littleR)
 	s.presign.Delta = scalarBytes(delta)
@@ -524,6 +541,8 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	writeHashPart(h, []byte("gg20-secp256k1-presign-transcript-v1"))
 	writeHashPart(h, s.sessionID[:])
 	for _, id := range s.signers {
+		// Binding every signer id, nonce commitment, encrypted nonce proof, and
+		// delta share prevents replaying presign material across signer sets.
 		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		writeHashPart(h, s.round1[id].Gamma)
 		writeHashPart(h, s.round1[id].EncK)
@@ -537,6 +556,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	return h.Sum(nil)
 }
 
+// StartSignDigest starts online signing for a 32-byte digest using a presign.
 func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte) (*SignSession, []tss.Envelope, error) {
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
@@ -544,6 +564,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 	return StartSignDigestWithOptions(key, presign, sessionID, digest32, true)
 }
 
+// StartSignDigestWithOptions starts online signing with configurable low-S normalization.
 func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
@@ -557,6 +578,8 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	if presign.Consumed {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
 	}
+	// Mark the presign consumed before constructing the outbound sign envelope
+	// so accidental reuse fails before any new partial signature can leave.
 	presign.Consumed = true
 	kShare, err := secp.ParseScalar(presign.KShare)
 	if err != nil {
@@ -571,6 +594,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		return nil, nil, err
 	}
 	z := new(big.Int).SetBytes(digest32)
+	// Online ECDSA partial: s_i = m*k_i + r*sigma_i mod q.
 	partial := new(big.Int).Mul(z, kShare)
 	rs := new(big.Int).Mul(littleR, sigmaShare)
 	partial.Add(partial, rs)
@@ -602,6 +626,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	return s, []tss.Envelope{env}, nil
 }
 
+// HandleSignMessage validates and applies one online signing envelope.
 func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")
@@ -661,6 +686,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	return nil, s.tryComplete()
 }
 
+// Signature returns the completed ECDSA signature.
 func (s *SignSession) Signature() (*Signature, bool) {
 	if s == nil || !s.completed {
 		return nil, false
@@ -740,6 +766,7 @@ func (s *SignSession) tryComplete() error {
 	return nil
 }
 
+// VerifyDigest verifies a secp256k1 ECDSA signature over a 32-byte digest.
 func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	public, err := secp.PointFromBytes(publicKey)
 	if err != nil {
@@ -759,6 +786,7 @@ func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	return secp.VerifyECDSA(public, digest32, r, s)
 }
 
+// SignDigest runs an in-memory presign and signing exchange for convenience.
 func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")

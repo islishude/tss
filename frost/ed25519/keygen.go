@@ -12,6 +12,7 @@ import (
 	"github.com/islishude/tss/internal/shamir"
 )
 
+// KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
 	cfg         tss.ThresholdConfig
 	commits     map[tss.PartyID][][]byte
@@ -30,6 +31,7 @@ type keygenSharePayload struct {
 	Share []byte `json:"share"`
 }
 
+// StartKeygen starts dealerless DKG and returns outbound round-one envelopes.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
 	if err := config.Validate(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
@@ -85,6 +87,7 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	return s, out, nil
 }
 
+// HandleKeygenMessage validates and applies one DKG envelope.
 func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
@@ -130,6 +133,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 	return nil, s.tryComplete()
 }
 
+// KeyShare returns the completed local key share when DKG has finished.
 func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false

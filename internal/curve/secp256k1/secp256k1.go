@@ -8,18 +8,25 @@ import (
 	"math/big"
 )
 
+// Point is an affine secp256k1 point with an explicit infinity marker.
 type Point struct {
 	X, Y *big.Int
 	Inf  bool
 }
 
 var (
-	P  = mustHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
-	N  = mustHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	// P is the secp256k1 base-field prime.
+	P = mustHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
+	// N is the secp256k1 prime subgroup order.
+	N = mustHex("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
+	// Gx is the x-coordinate of the SEC 2 base point.
 	Gx = mustHex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")
+	// Gy is the y-coordinate of the SEC 2 base point.
 	Gy = mustHex("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8")
-	B  = big.NewInt(7)
-	G  = &Point{X: new(big.Int).Set(Gx), Y: new(big.Int).Set(Gy)}
+	// B is the curve constant in y^2 = x^3 + B.
+	B = big.NewInt(7)
+	// G is the SEC 2 base point.
+	G = &Point{X: new(big.Int).Set(Gx), Y: new(big.Int).Set(Gy)}
 )
 
 func mustHex(s string) *big.Int {
@@ -30,18 +37,22 @@ func mustHex(s string) *big.Int {
 	return x
 }
 
+// Order returns a copy of the secp256k1 subgroup order.
 func Order() *big.Int {
 	return new(big.Int).Set(N)
 }
 
+// FieldPrime returns a copy of the secp256k1 base-field prime.
 func FieldPrime() *big.Int {
 	return new(big.Int).Set(P)
 }
 
+// NewInfinity returns the point at infinity.
 func NewInfinity() *Point {
 	return &Point{Inf: true}
 }
 
+// Clone returns a deep copy of p.
 func Clone(p *Point) *Point {
 	if p == nil || p.Inf {
 		return NewInfinity()
@@ -49,6 +60,7 @@ func Clone(p *Point) *Point {
 	return &Point{X: new(big.Int).Set(p.X), Y: new(big.Int).Set(p.Y)}
 }
 
+// IsOnCurve reports whether p satisfies the secp256k1 curve equation.
 func IsOnCurve(p *Point) bool {
 	if p == nil {
 		return false
@@ -67,6 +79,7 @@ func IsOnCurve(p *Point) bool {
 	return lhs.Cmp(rhs) == 0
 }
 
+// Add returns the elliptic-curve group sum of a and b.
 func Add(a, b *Point) *Point {
 	if a == nil || a.Inf {
 		return Clone(b)
@@ -97,6 +110,7 @@ func Add(a, b *Point) *Point {
 	return &Point{X: x3, Y: y3}
 }
 
+// Double returns 2*a in the secp256k1 group.
 func Double(a *Point) *Point {
 	if a == nil || a.Inf || a.Y.Sign() == 0 {
 		return NewInfinity()
@@ -116,10 +130,12 @@ func Double(a *Point) *Point {
 	return &Point{X: x3, Y: y3}
 }
 
+// ScalarBaseMult returns k*G modulo the subgroup order.
 func ScalarBaseMult(k *big.Int) *Point {
 	return ScalarMult(G, k)
 }
 
+// ScalarMult returns k*p using a simple double-and-add routine.
 func ScalarMult(p *Point, k *big.Int) *Point {
 	if k == nil || k.Sign() == 0 || p == nil || p.Inf {
 		return NewInfinity()
@@ -136,6 +152,7 @@ func ScalarMult(p *Point, k *big.Int) *Point {
 	return acc
 }
 
+// RandomScalar returns a non-zero scalar in [1, N).
 func RandomScalar(reader io.Reader) (*big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -151,6 +168,7 @@ func RandomScalar(reader io.Reader) (*big.Int, error) {
 	}
 }
 
+// ParseScalar parses a canonical 32-byte non-zero scalar.
 func ParseScalar(in []byte) (*big.Int, error) {
 	if len(in) != 32 {
 		return nil, errors.New("secp256k1 scalar must be 32 bytes")
@@ -162,10 +180,12 @@ func ParseScalar(in []byte) (*big.Int, error) {
 	return x, nil
 }
 
+// ScalarBytes returns x modulo N as a fixed-width 32-byte big-endian scalar.
 func ScalarBytes(x *big.Int) []byte {
 	return bytesFixed(mod(x, N), 32)
 }
 
+// PointBytes encodes p in canonical compressed SEC 1 form.
 func PointBytes(p *Point) ([]byte, error) {
 	if p == nil || p.Inf || !IsOnCurve(p) {
 		return nil, errors.New("invalid secp256k1 point")
@@ -180,6 +200,7 @@ func PointBytes(p *Point) ([]byte, error) {
 	return out, nil
 }
 
+// PointFromBytes parses canonical compressed SEC 1 point bytes.
 func PointFromBytes(in []byte) (*Point, error) {
 	if len(in) != 33 || (in[0] != 0x02 && in[0] != 0x03) {
 		return nil, errors.New("secp256k1 point must be compressed")
@@ -210,6 +231,7 @@ func PointFromBytes(in []byte) (*Point, error) {
 	return p, nil
 }
 
+// VerifyShare checks a Shamir share against Feldman-style commitments.
 func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 	left := ScalarBaseMult(share)
 	right, err := EvalCommitments(commitments, id)
@@ -222,6 +244,7 @@ func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 	return nil
 }
 
+// EvalCommitments evaluates public polynomial commitments at participant id.
 func EvalCommitments(commitments [][]byte, id uint32) (*Point, error) {
 	x := big.NewInt(int64(id))
 	pow := big.NewInt(1)
@@ -239,6 +262,7 @@ func EvalCommitments(commitments [][]byte, id uint32) (*Point, error) {
 	return acc, nil
 }
 
+// Equal reports whether a and b encode the same curve point.
 func Equal(a, b *Point) bool {
 	if a == nil || b == nil {
 		return a == nil && b == nil
@@ -249,6 +273,7 @@ func Equal(a, b *Point) bool {
 	return a.X.Cmp(b.X) == 0 && a.Y.Cmp(b.Y) == 0
 }
 
+// SignECDSA signs a 32-byte digest with a fresh random nonce.
 func SignECDSA(reader io.Reader, digest []byte, secret *big.Int, lowS bool) (r, s *big.Int, err error) {
 	if len(digest) != 32 {
 		return nil, nil, errors.New("ECDSA digest must be 32 bytes")
@@ -285,6 +310,7 @@ func SignECDSA(reader io.Reader, digest []byte, secret *big.Int, lowS bool) (r, 
 	}
 }
 
+// SignECDSAWithNonce signs with caller-provided nonce material for tests only.
 func SignECDSAWithNonce(digest []byte, secret, nonce *big.Int, lowS bool) (r, s *big.Int, err error) {
 	if len(digest) != 32 {
 		return nil, nil, errors.New("ECDSA digest must be 32 bytes")
@@ -319,6 +345,7 @@ func SignECDSAWithNonce(digest []byte, secret, nonce *big.Int, lowS bool) (r, s 
 	return r, s, nil
 }
 
+// VerifyECDSA verifies a secp256k1 ECDSA signature over a 32-byte digest.
 func VerifyECDSA(public *Point, digest []byte, r, s *big.Int) bool {
 	if len(digest) != 32 || public == nil || public.Inf || !IsOnCurve(public) {
 		return false
@@ -343,6 +370,7 @@ func VerifyECDSA(public *Point, digest []byte, r, s *big.Int) bool {
 	return v.Cmp(r) == 0
 }
 
+// AddPoints returns the sum of all non-nil points.
 func AddPoints(points ...*Point) *Point {
 	acc := NewInfinity()
 	for _, p := range points {

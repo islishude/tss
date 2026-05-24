@@ -8,11 +8,13 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
+// Proof is a Schnorr proof of knowledge over secp256k1.
 type Proof struct {
 	Commitment []byte
 	Response   []byte
 }
 
+// Prove creates a Fiat-Shamir Schnorr proof for secret and returns its public key.
 func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	if secret == nil || secret.Sign() == 0 {
 		return nil, nil, errors.New("secret must be non-zero")
@@ -37,6 +39,7 @@ func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	return &Proof{Commitment: commitment, Response: secp.ScalarBytes(response)}, public, nil
 }
 
+// Verify checks a Fiat-Shamir Schnorr proof against public key bytes.
 func Verify(domain, public []byte, proof *Proof) bool {
 	if proof == nil {
 		return false

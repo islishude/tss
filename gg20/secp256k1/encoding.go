@@ -129,6 +129,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return k, nil
 }
 
+// MarshalBinary encodes the presign record using canonical TLV wire format.
 func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -148,6 +149,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	})
 }
 
+// UnmarshalPresign decodes a canonical GG20 presign record.
 func UnmarshalPresign(in []byte) (*Presign, error) {
 	version, fields, err := wire.Unmarshal(in, presignWireType)
 	if err != nil {
@@ -198,6 +200,7 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 	return p, nil
 }
 
+// Validate checks local presign structure and scalar/point encodings.
 func (p *Presign) Validate() error {
 	if p == nil {
 		return errors.New("nil presign")

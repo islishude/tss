@@ -12,17 +12,20 @@ import (
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
+// StartMessage carries an encrypted multiplicand and its public proofs.
 type StartMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
 	EncProof   []byte `json:"enc_proof"`
 	RangeProof []byte `json:"range_proof"`
 }
 
+// ResponseMessage carries an MtA ciphertext response and transcript proof.
 type ResponseMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
 	Proof      []byte `json:"proof"`
 }
 
+// Start encrypts scalar a and proves it is a valid secp256k1 scalar.
 func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*StartMessage, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -49,6 +52,7 @@ func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*Sta
 	return &StartMessage{Ciphertext: c.Bytes(), EncProof: encProofBytes, RangeProof: rangeProofBytes}, nil
 }
 
+// VerifyStart checks the encrypted scalar and range proofs from Start.
 func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 	c := new(big.Int).SetBytes(msg.Ciphertext)
 	encProof, err := zkpai.UnmarshalEncScalarProof(msg.EncProof)
@@ -62,6 +66,7 @@ func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 	return zkpai.VerifyEncScalarAndRange(domain, pk, c, encProof, rangeProof)
 }
 
+// Respond creates Enc(a*b+beta) and returns the local beta share as -beta.
 func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMessage, b *big.Int, bCommitment []byte, pkA *pai.PublicKey) (*ResponseMessage, *big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -97,6 +102,7 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: proofBytes}, betaShare, nil
 }
 
+// Finish verifies the response proof and decrypts the alpha share.
 func Finish(startDomain, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey) (*big.Int, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")

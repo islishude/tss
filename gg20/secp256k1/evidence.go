@@ -28,6 +28,7 @@ const (
 	evidenceFieldSigmaResponseHash       = "sigma_response_hash"
 )
 
+// EvidenceContext is the public context used to verify GG20 blame evidence.
 type EvidenceContext struct {
 	SessionID             tss.SessionID
 	Parties               []tss.PartyID

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -25,21 +26,26 @@ const (
 	payloadSignPartial       = "gg20.secp256k1.sign.partial"
 )
 
+// ExperimentalSecurityNotice is attached to GG20 artifacts until external audit.
 const ExperimentalSecurityNotice = "experimental GG20-style threshold ECDSA path: Paillier MtA/ZK proof implementation is unaudited; independent audit required"
 
+// DefaultPaillierBits is the production default Paillier modulus size.
 const DefaultPaillierBits = 2048
 
+// VerificationShare is one participant public ECDSA verification share.
 type VerificationShare struct {
 	Party     tss.PartyID `json:"party"`
 	PublicKey []byte      `json:"public_key"`
 }
 
+// PaillierPublicShare records a participant Paillier public key and proof.
 type PaillierPublicShare struct {
 	Party     tss.PartyID `json:"party"`
 	PublicKey []byte      `json:"public_key"`
 	Proof     []byte      `json:"proof"`
 }
 
+// KeyShare is one local GG20-style secp256k1 ECDSA signing share.
 type KeyShare struct {
 	Version              uint16                `json:"version"`
 	Party                tss.PartyID           `json:"party"`
@@ -58,15 +64,18 @@ type KeyShare struct {
 	SecurityNotice       string                `json:"security_notice"`
 }
 
+// Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
 type Signature struct {
 	R []byte `json:"r"`
 	S []byte `json:"s"`
 }
 
+// Algorithm returns the common algorithm identifier.
 func (k *KeyShare) Algorithm() tss.Algorithm {
 	return tss.AlgorithmGG20Secp256k1
 }
 
+// PartyID returns the owner party of this key share.
 func (k *KeyShare) PartyID() tss.PartyID {
 	if k == nil {
 		return 0
@@ -74,21 +83,25 @@ func (k *KeyShare) PartyID() tss.PartyID {
 	return k.Party
 }
 
+// PublicKeyBytes returns a copy of the group secp256k1 public key.
 func (k *KeyShare) PublicKeyBytes() []byte {
 	if k == nil {
 		return nil
 	}
-	return tss.CloneBytes(k.PublicKey)
+	return slices.Clone(k.PublicKey)
 }
 
+// MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
 }
 
+// UnmarshalKeyShare decodes a canonical GG20 key-share record.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShare(in)
 }
 
+// Validate checks share structure and canonical secp256k1/Paillier material.
 func (k *KeyShare) Validate() error {
 	if k == nil {
 		return errors.New("nil key share")
@@ -175,12 +188,13 @@ func (k *KeyShare) Validate() error {
 	return nil
 }
 
+// Destroy zeros local secret scalar and Paillier private-key bytes in place.
 func (k *KeyShare) Destroy() {
 	if k == nil {
 		return
 	}
-	tss.SensitiveBytes(k.Secret).Destroy()
-	tss.SensitiveBytes(k.PaillierPrivateKey).Destroy()
+	clear(k.Secret)
+	clear(k.PaillierPrivateKey)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {

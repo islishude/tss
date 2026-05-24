@@ -16,6 +16,7 @@ import (
 
 const proofVersion = 1
 
+// ModulusProof binds a Paillier modulus to a session transcript.
 type ModulusProof struct {
 	Version          uint16 `json:"version"`
 	NBits            int    `json:"n_bits"`
@@ -24,6 +25,7 @@ type ModulusProof struct {
 	Digest           []byte `json:"digest"`
 }
 
+// EncScalarProof proves a ciphertext encrypts a committed scalar.
 type EncScalarProof struct {
 	Version          uint16 `json:"version"`
 	ScalarCommitment []byte `json:"scalar_commitment"`
@@ -34,6 +36,7 @@ type EncScalarProof struct {
 	TranscriptHash   []byte `json:"transcript_hash"`
 }
 
+// EncRangeProof records the range check paired with EncScalarProof.
 type EncRangeProof struct {
 	Version        uint16 `json:"version"`
 	Bound          []byte `json:"bound"`
@@ -43,6 +46,7 @@ type EncRangeProof struct {
 	Digest         []byte `json:"digest"`
 }
 
+// MTAResponseProof binds an MtA response to ciphertexts and commitments.
 type MTAResponseProof struct {
 	Version          uint16 `json:"version"`
 	TranscriptHash   []byte `json:"transcript_hash"`
@@ -55,6 +59,7 @@ type MTAResponseProof struct {
 	Randomness       []byte `json:"randomness"`
 }
 
+// ProveModulus creates the current unaudited modulus proof structure.
 func ProveModulus(domain []byte, pk *pai.PublicKey, party uint32) (*ModulusProof, error) {
 	if pk == nil {
 		return nil, errors.New("nil paillier public key")
@@ -77,6 +82,7 @@ func ProveModulus(domain []byte, pk *pai.PublicKey, party uint32) (*ModulusProof
 	}, nil
 }
 
+// VerifyModulus checks a modulus proof against a public key and transcript.
 func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *ModulusProof) bool {
 	if proof == nil || proof.Version != proofVersion || len(proof.Digest) != sha256.Size || pk == nil {
 		return false
@@ -99,10 +105,12 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 		bytes.Equal(want.Digest, proof.Digest)
 }
 
+// Marshal returns deterministic JSON for proof payloads.
 func Marshal(v any) ([]byte, error) {
 	return json.Marshal(v)
 }
 
+// UnmarshalModulusProof decodes and structurally validates a modulus proof.
 func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
 	var p ModulusProof
 	if err := json.Unmarshal(in, &p); err != nil {
@@ -114,6 +122,7 @@ func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
 	return &p, nil
 }
 
+// UnmarshalEncScalarProof decodes and validates an encrypted scalar proof shell.
 func UnmarshalEncScalarProof(in []byte) (*EncScalarProof, error) {
 	var p EncScalarProof
 	if err := json.Unmarshal(in, &p); err != nil {
@@ -125,6 +134,7 @@ func UnmarshalEncScalarProof(in []byte) (*EncScalarProof, error) {
 	return &p, nil
 }
 
+// UnmarshalEncRangeProof decodes and validates an encrypted range proof shell.
 func UnmarshalEncRangeProof(in []byte) (*EncRangeProof, error) {
 	var p EncRangeProof
 	if err := json.Unmarshal(in, &p); err != nil {
@@ -136,6 +146,7 @@ func UnmarshalEncRangeProof(in []byte) (*EncRangeProof, error) {
 	return &p, nil
 }
 
+// UnmarshalMTAResponseProof decodes and validates an MtA response proof shell.
 func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 	var p MTAResponseProof
 	if err := json.Unmarshal(in, &p); err != nil {
@@ -147,6 +158,7 @@ func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 	return &p, nil
 }
 
+// ProveEncScalarAndRange proves ciphertext encrypts a secp256k1 scalar.
 func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int) (*EncScalarProof, *EncRangeProof, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -207,6 +219,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 	return encProof, rangeProof, nil
 }
 
+// VerifyEncScalarAndRange verifies the paired encrypted scalar and range proofs.
 func VerifyEncScalarAndRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, encProof *EncScalarProof, rangeProof *EncRangeProof) bool {
 	if !VerifyEncScalar(domain, pk, ciphertext, encProof) || rangeProof == nil || rangeProof.Version != proofVersion {
 		return false
@@ -229,6 +242,7 @@ func VerifyEncScalarAndRange(domain []byte, pk *pai.PublicKey, ciphertext *big.I
 	return z.Sign() > 0 && z.Cmp(maxResponse) < 0
 }
 
+// VerifyEncScalar verifies the encryption and public scalar commitment relation.
 func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *EncScalarProof) bool {
 	if proof == nil || pk == nil || proof.Version != proofVersion || pk.ValidateCiphertext(ciphertext) != nil {
 		return false
@@ -270,6 +284,7 @@ func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proo
 	return secp.Equal(leftPoint, rightPoint)
 }
 
+// ProveMTAResponse proves response encrypts a*b+beta for committed b.
 func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment []byte, b, beta, betaRandomness *big.Int) (*MTAResponseProof, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -350,6 +365,7 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	}, nil
 }
 
+// VerifyMTAResponse checks the MtA response proof and transcript binding.
 func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitmentBytes []byte, proof *MTAResponseProof) bool {
 	if proof == nil || proof.Version != proofVersion || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
 		return false

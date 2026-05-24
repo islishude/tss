@@ -17,10 +17,12 @@ func init() {
 	order.SetString("7237005577332262213973186563042994240857116359379907606001950938285454250989", 10)
 }
 
+// Order returns a copy of the Ed25519 prime subgroup order.
 func Order() *big.Int {
 	return new(big.Int).Set(order)
 }
 
+// RandomScalar returns a non-zero scalar and its big.Int representation.
 func RandomScalar(reader io.Reader) (*fed.Scalar, *big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -41,6 +43,7 @@ func RandomScalar(reader io.Reader) (*fed.Scalar, *big.Int, error) {
 	}
 }
 
+// ScalarFromBig reduces x modulo the subgroup order and returns a scalar.
 func ScalarFromBig(x *big.Int) (*fed.Scalar, error) {
 	if x == nil {
 		return nil, errors.New("nil scalar")
@@ -53,6 +56,7 @@ func ScalarFromBig(x *big.Int) (*fed.Scalar, error) {
 	return fed.NewScalar().SetCanonicalBytes(buf)
 }
 
+// ScalarToBig converts a scalar to a big.Int using little-endian scalar bytes.
 func ScalarToBig(s *fed.Scalar) *big.Int {
 	if s == nil {
 		return new(big.Int)
@@ -60,6 +64,7 @@ func ScalarToBig(s *fed.Scalar) *big.Int {
 	return littleToBig(s.Bytes())
 }
 
+// ScalarFromCanonical parses a canonical 32-byte Ed25519 scalar.
 func ScalarFromCanonical(in []byte) (*fed.Scalar, error) {
 	if len(in) != 32 {
 		return nil, errors.New("edwards25519 scalar must be 32 bytes")
@@ -67,6 +72,7 @@ func ScalarFromCanonical(in []byte) (*fed.Scalar, error) {
 	return fed.NewScalar().SetCanonicalBytes(in)
 }
 
+// ScalarBaseMultBig returns x times the Ed25519 base point.
 func ScalarBaseMultBig(x *big.Int) (*fed.Point, error) {
 	s, err := ScalarFromBig(x)
 	if err != nil {
@@ -75,6 +81,7 @@ func ScalarBaseMultBig(x *big.Int) (*fed.Point, error) {
 	return fed.NewIdentityPoint().ScalarBaseMult(s), nil
 }
 
+// PointFromBytes parses a point and rejects the identity.
 func PointFromBytes(in []byte) (*fed.Point, error) {
 	p, err := PointFromBytesAllowIdentity(in)
 	if err != nil {
@@ -86,6 +93,7 @@ func PointFromBytes(in []byte) (*fed.Point, error) {
 	return p, nil
 }
 
+// PointFromBytesAllowIdentity parses a point while allowing the identity.
 func PointFromBytesAllowIdentity(in []byte) (*fed.Point, error) {
 	if len(in) != 32 {
 		return nil, errors.New("edwards25519 point must be 32 bytes")
@@ -97,10 +105,12 @@ func PointFromBytesAllowIdentity(in []byte) (*fed.Point, error) {
 	return p, nil
 }
 
+// IsIdentity reports whether p is the group identity.
 func IsIdentity(p *fed.Point) bool {
 	return p != nil && p.Equal(fed.NewIdentityPoint()) == 1
 }
 
+// AddPoints returns the sum of all non-nil Edwards points.
 func AddPoints(points ...*fed.Point) *fed.Point {
 	acc := fed.NewIdentityPoint()
 	for _, p := range points {
@@ -112,6 +122,7 @@ func AddPoints(points ...*fed.Point) *fed.Point {
 	return acc
 }
 
+// EvalCommitments evaluates public polynomial commitments at participant id.
 func EvalCommitments(commitments [][]byte, id uint32) ([]byte, error) {
 	x := big.NewInt(int64(id))
 	pow := big.NewInt(1)
@@ -133,6 +144,7 @@ func EvalCommitments(commitments [][]byte, id uint32) ([]byte, error) {
 	return acc.Bytes(), nil
 }
 
+// VerifyShare checks a private Shamir share against public commitments.
 func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 	left, err := ScalarBaseMultBig(share)
 	if err != nil {
@@ -152,6 +164,7 @@ func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 	return nil
 }
 
+// HashToScalar hashes length-delimited parts into a prime-order scalar.
 func HashToScalar(parts ...[]byte) (*fed.Scalar, *big.Int) {
 	h := sha512.New()
 	for _, p := range parts {
@@ -163,6 +176,7 @@ func HashToScalar(parts ...[]byte) (*fed.Scalar, *big.Int) {
 	return s, ScalarToBig(s)
 }
 
+// Ed25519Challenge computes the RFC 8032 challenge H(R || A || msg).
 func Ed25519Challenge(R, A, msg []byte) (*fed.Scalar, *big.Int) {
 	h := sha512.New()
 	h.Write(R)
