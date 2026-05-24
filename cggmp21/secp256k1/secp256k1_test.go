@@ -59,6 +59,89 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	shift := scalarBytes(big.NewInt(17))
+	derived, err := DerivePublicKey(shares[1].PublicKey, shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("hd additive shift"))
+	signID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := make(map[tss.PartyID]*SignSession, len(signers))
+	messages := make([]tss.Envelope, 0, len(signers))
+	for _, id := range signers {
+		session, out, err := StartSignDigestWithOptions(shares[id], presigns[id], signID, digest[:], SignOptions{LowS: true, AdditiveShift: shift})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		messages = append(messages, out...)
+	}
+	for _, env := range messages {
+		for _, id := range signers {
+			if id == env.From {
+				continue
+			}
+			if _, err := sessions[id].HandleSignMessage(env); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	sig, ok := sessions[1].Signature()
+	if !ok {
+		t.Fatal("signature not completed")
+	}
+	if !VerifyDigest(derived, digest[:], sig) {
+		t.Fatal("shifted signature did not verify against derived key")
+	}
+	if VerifyDigest(shares[1].PublicKey, digest[:], sig) {
+		t.Fatal("shifted signature verified against unshifted key")
+	}
+}
+
+func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
+	messages := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID}, KeygenOptions{EnableHD: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = kg
+		messages = append(messages, out...)
+	}
+	for _, env := range messages {
+		for _, id := range parties {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for _, id := range parties {
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("keygen not complete for %d", id)
+		}
+		if len(share.ChainCode) != 32 {
+			t.Fatalf("party %d missing chain code", id)
+		}
+	}
+}
+
 func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
@@ -155,6 +238,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 	}{
 		{name: "delta", mutate: func(p *presignRound2Payload) { p.Delta.Proof[0] ^= 1 }},
 		{name: "sigma", mutate: func(p *presignRound2Payload) { p.Sigma.Proof[0] ^= 1 }},
+		{name: "echo", mutate: func(p *presignRound2Payload) { p.Round1Echo[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			sessionID, err := tss.NewSessionID(nil)
@@ -417,7 +501,7 @@ func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.Prot
 		t.Fatalf("blame evidence did not verify: %v", verifyErr)
 	}
 	lower := strings.ToLower(string(protocolErr.Blame.Evidence))
-	for _, forbidden := range []string{"secret", "nonce", "k_share", "sigma_share", "paillier_private"} {
+	for _, forbidden := range []string{"secret", "nonce", "k_share", "chi_share", "paillier_private"} {
 		if strings.Contains(lower, forbidden) {
 			t.Fatalf("evidence contains sensitive field marker %q: %s", forbidden, protocolErr.Blame.Evidence)
 		}

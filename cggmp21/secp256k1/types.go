@@ -15,19 +15,19 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
-const protocol = "gg20-secp256k1"
+const protocol = "cggmp21-secp256k1"
 
 const (
-	payloadKeygenCommitments = "gg20.secp256k1.keygen.commitments"
-	payloadKeygenShare       = "gg20.secp256k1.keygen.share"
-	payloadPresignRound1     = "gg20.secp256k1.presign.round1"
-	payloadPresignRound2     = "gg20.secp256k1.presign.round2"
-	payloadPresignRound3     = "gg20.secp256k1.presign.round3"
-	payloadSignPartial       = "gg20.secp256k1.sign.partial"
+	payloadKeygenCommitments = "cggmp21.secp256k1.keygen.commitments"
+	payloadKeygenShare       = "cggmp21.secp256k1.keygen.share"
+	payloadPresignRound1     = "cggmp21.secp256k1.presign.round1"
+	payloadPresignRound2     = "cggmp21.secp256k1.presign.round2"
+	payloadPresignRound3     = "cggmp21.secp256k1.presign.round3"
+	payloadSignPartial       = "cggmp21.secp256k1.sign.partial"
 )
 
-// ExperimentalSecurityNotice is attached to GG20 artifacts until external audit.
-const ExperimentalSecurityNotice = "experimental GG20-style threshold ECDSA path: Paillier MtA/ZK proof implementation is unaudited; independent audit required"
+// ExperimentalSecurityNotice is attached to CGGMP21 artifacts until external audit.
+const ExperimentalSecurityNotice = "experimental CGGMP21-style threshold ECDSA path: Paillier MtA/ZK proof implementation is unaudited; independent audit required"
 
 // DefaultPaillierBits is the production default Paillier modulus size.
 const DefaultPaillierBits = 2048
@@ -45,13 +45,14 @@ type PaillierPublicShare struct {
 	Proof     []byte      `json:"proof"`
 }
 
-// KeyShare is one local GG20-style secp256k1 ECDSA signing share.
+// KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 type KeyShare struct {
 	Version              uint16                `json:"version"`
 	Party                tss.PartyID           `json:"party"`
 	Threshold            int                   `json:"threshold"`
 	Parties              []tss.PartyID         `json:"parties"`
 	PublicKey            []byte                `json:"public_key"`
+	ChainCode            []byte                `json:"chain_code,omitempty"`
 	Secret               []byte                `json:"secret"`
 	GroupCommitments     [][]byte              `json:"group_commitments"`
 	VerificationShares   []VerificationShare   `json:"verification_shares"`
@@ -72,7 +73,7 @@ type Signature struct {
 
 // Algorithm returns the common algorithm identifier.
 func (k *KeyShare) Algorithm() tss.Algorithm {
-	return tss.AlgorithmGG20Secp256k1
+	return tss.AlgorithmCGGMP21Secp256k1
 }
 
 // PartyID returns the owner party of this key share.
@@ -91,12 +92,28 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 	return slices.Clone(k.PublicKey)
 }
 
+// DerivePublicKey applies a secp256k1 additive scalar shift to publicKey.
+func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
+	base, err := secp.PointFromBytes(publicKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(additiveShift) == 0 {
+		return secp.PointBytes(base)
+	}
+	shift, err := secp.ParseScalar(additiveShift)
+	if err != nil {
+		return nil, fmt.Errorf("invalid additive shift: %w", err)
+	}
+	return secp.PointBytes(secp.Add(base, secp.ScalarBaseMult(shift)))
+}
+
 // MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
 }
 
-// UnmarshalKeyShare decodes a canonical GG20 key-share record.
+// UnmarshalKeyShare decodes a canonical CGGMP21 key-share record.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShare(in)
 }
@@ -120,6 +137,9 @@ func (k *KeyShare) Validate() error {
 	}
 	if _, err := secp.PointFromBytes(k.PublicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
+	}
+	if len(k.ChainCode) != 0 && len(k.ChainCode) != 32 {
+		return errors.New("chain code must be 32 bytes")
 	}
 	if _, err := secp.ParseScalar(k.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)

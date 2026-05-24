@@ -24,14 +24,20 @@ type Presign struct {
 	R              []byte        `json:"r"`
 	LittleR        []byte        `json:"little_r"`
 	KShare         []byte        `json:"k_share"`
-	SigmaShare     []byte        `json:"sigma_share"`
+	ChiShare       []byte        `json:"chi_share"`
 	Delta          []byte        `json:"delta"`
 	TranscriptHash []byte        `json:"transcript_hash"`
 	Consumed       bool          `json:"consumed"`
 	SecurityNotice string        `json:"security_notice"`
 }
 
-// PresignSession tracks the GG20-style offline presign exchange.
+// SignOptions controls online signature aggregation behavior.
+type SignOptions struct {
+	LowS          bool
+	AdditiveShift []byte
+}
+
+// PresignSession tracks the CGGMP21-style offline presign exchange.
 type PresignSession struct {
 	key       *KeyShare
 	sessionID tss.SessionID
@@ -67,6 +73,7 @@ type SignSession struct {
 	sessionID tss.SessionID
 	digest    []byte
 	lowS      bool
+	publicKey []byte
 	partials  map[tss.PartyID]*big.Int
 	completed bool
 	signature *Signature
@@ -81,8 +88,9 @@ type presignRound1Payload struct {
 }
 
 type presignRound2Payload struct {
-	Delta mta.ResponseMessage `json:"delta"`
-	Sigma mta.ResponseMessage `json:"sigma"`
+	Delta      mta.ResponseMessage `json:"delta"`
+	Sigma      mta.ResponseMessage `json:"sigma"`
+	Round1Echo []byte              `json:"round1_echo"`
 }
 
 type presignRound3Payload struct {
@@ -94,7 +102,7 @@ type signPartialPayload struct {
 	PresignTranscript []byte `json:"presign_transcript"`
 }
 
-// StartPresign starts the offline GG20-style presign protocol for signers.
+// StartPresign starts the offline CGGMP21-style presign protocol for signers.
 func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID) (*PresignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
@@ -136,7 +144,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, err
 	}
 	// xBar is lambda_i*x_i, the signer-set-adjusted secret share used in
-	// sigma = k*x. The public commitment is derived from the verification share.
+	// chi = k*x. The public commitment is derived from the verification share.
 	xBar := new(big.Int).Mul(lambda, secret)
 	xBar.Mod(xBar, secp.Order())
 	localVerificationShare, ok := key.verificationShare(key.Party)
@@ -347,6 +355,7 @@ func (s *PresignSession) presignRound2EvidenceFields(p presignRound2Payload) []t
 	return append(fields,
 		rawEvidenceField(evidenceFieldDeltaResponseHash, mtaResponseHash("delta", p.Delta)),
 		rawEvidenceField(evidenceFieldSigmaResponseHash, mtaResponseHash("sigma", p.Sigma)),
+		hashEvidenceField("round1_echo_hash", p.Round1Echo),
 	)
 }
 
@@ -404,7 +413,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 		s.betaDelta[peer] = betaDelta
 		s.betaSigma[peer] = betaSigma
-		payload, err := json.Marshal(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp})
+		payload, err := json.Marshal(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp, Round1Echo: s.round1Echo()})
 		if err != nil {
 			return nil, err
 		}
@@ -415,6 +424,9 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 }
 
 func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) error {
+	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
+		return errors.New("presign round1 echo mismatch")
+	}
 	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncProof: s.round1[s.key.Party].EncKProof, RangeProof: s.round1[s.key.Party].EncKRangeProof}
 	gammaCommit := s.round1[from].Gamma
 	alphaDelta, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "delta"), start, p.Delta, gammaCommit, s.paillier)
@@ -439,7 +451,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	deltaShare := new(big.Int).Mul(s.kShare, s.gamma)
-	sigmaShare := new(big.Int).Mul(s.kShare, s.xBar)
+	chiShare := new(big.Int).Mul(s.kShare, s.xBar)
 	order := secp.Order()
 	for _, peer := range s.signers {
 		if peer == s.key.Party {
@@ -448,12 +460,12 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		// delta_i = k_i*gamma_i + sum_j alpha_ij + sum_j beta_ji.
 		deltaShare.Add(deltaShare, s.alphaDelta[peer])
 		deltaShare.Add(deltaShare, s.betaDelta[peer])
-		// sigma_i = k_i*x_i + sum_j alphaHat_ij + sum_j betaHat_ji.
-		sigmaShare.Add(sigmaShare, s.alphaSigma[peer])
-		sigmaShare.Add(sigmaShare, s.betaSigma[peer])
+		// chi_i = k_i*x_i + sum_j alphaHat_ij + sum_j betaHat_ji.
+		chiShare.Add(chiShare, s.alphaSigma[peer])
+		chiShare.Add(chiShare, s.betaSigma[peer])
 	}
 	deltaShare.Mod(deltaShare, order)
-	sigmaShare.Mod(sigmaShare, order)
+	chiShare.Mod(chiShare, order)
 	s.deltas[s.key.Party] = deltaShare
 	payload, err := json.Marshal(presignRound3Payload{Delta: scalarBytes(deltaShare)})
 	if err != nil {
@@ -466,7 +478,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		Threshold:      s.key.Threshold,
 		Signers:        append([]tss.PartyID(nil), s.signers...),
 		KShare:         scalarBytes(s.kShare),
-		SigmaShare:     scalarBytes(sigmaShare),
+		ChiShare:       scalarBytes(chiShare),
 		SecurityNotice: ExperimentalSecurityNotice,
 	}
 	if err := s.tryComplete(); err != nil {
@@ -538,7 +550,7 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 
 func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-presign-transcript-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-presign-transcript-v1"))
 	writeHashPart(h, s.sessionID[:])
 	for _, id := range s.signers {
 		// Binding every signer id, nonce commitment, encrypted nonce proof, and
@@ -556,16 +568,32 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	return h.Sum(nil)
 }
 
+func (s *PresignSession) round1Echo() []byte {
+	h := sha256.New()
+	writeHashPart(h, []byte("cggmp21-secp256k1-presign-round1-echo-v1"))
+	writeHashPart(h, s.sessionID[:])
+	for _, id := range s.signers {
+		p := s.round1[id]
+		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		writeHashPart(h, p.Gamma)
+		writeHashPart(h, p.EncK)
+		writeHashPart(h, p.EncKProof)
+		writeHashPart(h, p.EncKRangeProof)
+		writeHashPart(h, p.PaillierPublicKey)
+	}
+	return h.Sum(nil)
+}
+
 // StartSignDigest starts online signing for a 32-byte digest using a presign.
 func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte) (*SignSession, []tss.Envelope, error) {
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
 	}
-	return StartSignDigestWithOptions(key, presign, sessionID, digest32, true)
+	return StartSignDigestWithOptions(key, presign, sessionID, digest32, SignOptions{LowS: true})
 }
 
-// StartSignDigestWithOptions starts online signing with configurable low-S normalization.
-func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
+// StartSignDigestWithOptions starts online signing with configurable options.
+func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, opts SignOptions) (*SignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -585,18 +613,36 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	if err != nil {
 		return nil, nil, err
 	}
-	sigmaShare, err := secp.ParseScalar(presign.SigmaShare)
+	chiShare, err := secp.ParseScalar(presign.ChiShare)
 	if err != nil {
 		return nil, nil, err
+	}
+	if len(opts.AdditiveShift) > 0 {
+		shift, err := secp.ParseScalar(opts.AdditiveShift)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
+		}
+		// CGGMP21 HD signing applies the additive public-key shift by adding
+		// k_i*shift to each local chi share, so aggregation adds k*shift once.
+		shiftTerm := new(big.Int).Mul(kShare, shift)
+		chiShare.Add(chiShare, shiftTerm)
+		chiShare.Mod(chiShare, secp.Order())
+	}
+	verifyKey := append([]byte(nil), key.PublicKey...)
+	if len(opts.AdditiveShift) > 0 {
+		verifyKey, err = DerivePublicKey(key.PublicKey, opts.AdditiveShift)
+		if err != nil {
+			return nil, nil, err
+		}
 	}
 	littleR, err := secp.ParseScalar(presign.LittleR)
 	if err != nil {
 		return nil, nil, err
 	}
 	z := new(big.Int).SetBytes(digest32)
-	// Online ECDSA partial: s_i = m*k_i + r*sigma_i mod q.
+	// Online ECDSA partial: s_i = m*k_i + r*chi_i mod q.
 	partial := new(big.Int).Mul(z, kShare)
-	rs := new(big.Int).Mul(littleR, sigmaShare)
+	rs := new(big.Int).Mul(littleR, chiShare)
 	partial.Add(partial, rs)
 	partial.Mod(partial, secp.Order())
 	payload, err := json.Marshal(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
@@ -617,7 +663,8 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		presign:   presign,
 		sessionID: sessionID,
 		digest:    append([]byte(nil), digest32...),
-		lowS:      lowS,
+		lowS:      opts.LowS,
+		publicKey: verifyKey,
 		partials:  map[tss.PartyID]*big.Int{key.Party: partial},
 	}
 	if err := s.tryComplete(); err != nil {
@@ -732,7 +779,7 @@ func (s *SignSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
-	public, err := secp.PointFromBytes(s.key.PublicKey)
+	public, err := secp.PointFromBytes(s.publicKey)
 	if err != nil {
 		return err
 	}
@@ -905,7 +952,7 @@ func mtaResponseDomain(sessionID tss.SessionID, signers []tss.PartyID, initiator
 
 func domainBytes(label string, sessionID tss.SessionID, signers []tss.PartyID, a, b tss.PartyID, kind string) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1"))
 	writeHashPart(h, []byte(label))
 	writeHashPart(h, sessionID[:])
 	for _, id := range signers {
@@ -919,7 +966,7 @@ func domainBytes(label string, sessionID tss.SessionID, signers []tss.PartyID, a
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-mta-response-evidence-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-mta-response-evidence-v1"))
 	writeHashPart(h, []byte(label))
 	writeHashPart(h, response.Ciphertext)
 	writeHashPart(h, response.Proof)
@@ -928,7 +975,7 @@ func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
 
 func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-aggregate-sign-evidence-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-aggregate-sign-evidence-v1"))
 	writeHashPart(h, digest)
 	writeHashPart(h, r)
 	writeHashPart(h, sValue)

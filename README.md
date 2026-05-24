@@ -3,7 +3,7 @@
 Go threshold-signature building blocks for:
 
 - `frost/ed25519`: dealerless FROST-style threshold Ed25519.
-- `gg20/secp256k1`: GG20-shaped secp256k1 threshold ECDSA API.
+- `cggmp21/secp256k1`: CGGMP21-shaped secp256k1 threshold ECDSA API.
 
 ## Status
 
@@ -11,7 +11,7 @@ This repository is an early library implementation, not a production audited TSS
 
 The Ed25519 package implements a usable FROST-style flow: dealerless DKG, two-round signing, partial signature verification, and aggregation into signatures accepted by `crypto/ed25519.Verify`.
 
-The secp256k1 package exposes a GG20-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing with an unaudited proof implementation, so it remains explicitly experimental until independent cryptographic review is complete.
+The secp256k1 package exposes a CGGMP21-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing, round-1 echo checks, optional additive-shift signing, and an unaudited proof implementation, so it remains explicitly experimental until independent cryptographic review is complete.
 
 ## Packages
 
@@ -19,11 +19,11 @@ The secp256k1 package exposes a GG20-style API and now signs without transmittin
 | ----------------------------------------- | --------------------------------------------------------------------------------------- |
 | `github.com/islishude/tss`                | Shared types: parties, sessions, envelopes, errors, key-share and signature interfaces. |
 | `github.com/islishude/tss/frost/ed25519`  | FROST-style Ed25519 DKG and signing.                                                    |
-| `github.com/islishude/tss/gg20/secp256k1` | Experimental secp256k1 threshold ECDSA API with GG20 package shape.                     |
+| `github.com/islishude/tss/cggmp21/secp256k1` | Experimental secp256k1 threshold ECDSA API with CGGMP21 package shape.                     |
 | `internal/shamir`                         | Shamir sharing and interpolation helpers.                                               |
-| `internal/curve/*`                        | Minimal curve helpers used by the protocol packages.                                    |
+| `internal/curve/*`                        | Curve helpers with fiat-crypto backed scalar/field wrappers.                            |
 | `internal/mta`                            | Paillier MtA product-share protocol helpers.                                            |
-| `internal/paillier`                       | Paillier primitives used by the GG20-style signing path.                                |
+| `internal/paillier`                       | Paillier primitives used by the CGGMP21-style signing path.                                |
 | `internal/wire`                           | Strict TLV encoding used by binary envelopes and key-share records.                     |
 | `internal/zk/paillier`                    | Paillier encryption, range, modulus, and MtA response proofs.                           |
 | `internal/zk/schnorr`                     | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
@@ -41,13 +41,13 @@ Protocol sessions return `tss.Envelope` values. The library is transport-neutral
 
 Verification failures can attach `tss.Blame.Evidence` with a deterministic `tss.BlameEvidence` record. Evidence binds the public protocol context, sender, round, payload type, payload hash, transcript hash, reason, and selected public input hashes. Confidential payloads are represented by hashes rather than plaintext.
 
-The secp256k1 package exposes `secp256k1.VerifyBlameEvidence` for validating GG20 evidence against public session context such as parties, signer set, group public key, Paillier public keys, and transcript hashes. This improves blame attribution for malformed proofs and failed aggregate signatures, but it is not a substitute for a full GG20 identifiable-abort security review.
+The secp256k1 package exposes `secp256k1.VerifyBlameEvidence` for validating CGGMP21 evidence against public session context such as parties, signer set, group public key, Paillier public keys, and transcript hashes. This improves blame attribution for malformed proofs and failed aggregate signatures, but it is not a substitute for a full CGGMP21 identifiable-abort security review.
 
 ## Canonical Encoding
 
-`tss.Envelope`, GG20/FROST key shares, and GG20 presign records use a strict TLV binary format through `MarshalBinary` / `Unmarshal...`. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
+`tss.Envelope`, CGGMP21/FROST key shares, and CGGMP21 presign records use a strict TLV binary format through `MarshalBinary` / `Unmarshal...`. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
 
-For GG20, old-style key shares without Paillier/ZK material can still be represented as canonical key-share records, but `StartPresign` rejects them and requires rerunning keygen.
+For CGGMP21, old-style key shares without Paillier/ZK material can still be represented as canonical key-share records, but `StartPresign` rejects them and requires rerunning keygen. Old GG20 wire type identifiers are not accepted.
 
 ## Basic Ed25519 Flow
 
@@ -73,6 +73,8 @@ The secp256k1 package follows the same session-state pattern:
 
 `Presign.Consumed` is set before any online signing envelope is emitted to catch nonce reuse. The online signing message contains only a partial `s_i`, not the local private-key share or local nonce share.
 
+For additive-shift signing, pass `secp256k1.SignOptions{LowS: true, AdditiveShift: shift}` to `StartSignDigestWithOptions` and verify against `secp256k1.DerivePublicKey(publicKey, shift)`.
+
 ## Development
 
 Run:
@@ -86,13 +88,14 @@ The test suite covers:
 
 - Shamir interpolation and duplicate-party rejection.
 - secp256k1 point encoding and ECDSA verification.
+- fiat-crypto backed secp256k1 and Ed25519 scalar/field arithmetic wrappers.
 - Ed25519 scalar/point consistency and VSS verification.
 - Paillier encryption/decryption and homomorphic operations.
 - Schnorr proof verification.
 - deterministic blame evidence encoding and tamper rejection.
-- canonical TLV encoding for envelopes, key shares, and GG20 presigns.
+- canonical TLV encoding for envelopes, key shares, and CGGMP21 presigns.
 - `1-of-1`, `2-of-3`, and `3-of-5` protocol simulations.
-- duplicate messages, bad partial signatures, key-share round trips, and presign reuse rejection.
+- duplicate messages, bad partial signatures, echo mismatches, additive-shift signatures, key-share round trips, and presign reuse rejection.
 
 ## Documentation
 
@@ -101,7 +104,7 @@ The design notes are kept under `docs/` and should be updated with protocol or w
 - `docs/architecture.md`: package boundaries and state-machine responsibilities.
 - `docs/security.md`: caller responsibilities, threat model limits, and audit status.
 - `docs/wire.md`: canonical TLV encoding rules and compatibility policy.
-- `docs/gg20-secp256k1.md`: GG20-style secp256k1 equations and message flow.
+- `docs/cggmp21-secp256k1.md`: CGGMP21-style secp256k1 equations and message flow.
 - `docs/frost-ed25519.md`: FROST Ed25519 DKG/signing equations and message flow.
 
 New exported Go identifiers require doc comments. Protocol equations, transcript/domain separation, and sensitive scalar or nonce handling also need explanatory comments. Examples in `examples_test.go` files exercise the public API and should be kept current with API changes.
@@ -113,4 +116,4 @@ New exported Go identifiers require doc comments. Protocol equations, transcript
 - Treat `ConfidentialRequired` envelopes as secret-bearing messages.
 - Treat `Blame.Evidence` as public diagnostic material: it should contain hashes and public inputs only.
 - Keep signer sets sorted before interpolation; helper APIs do this where needed.
-- Full GG20 security still requires independent audit work.
+- Full CGGMP21 security still requires independent audit work.

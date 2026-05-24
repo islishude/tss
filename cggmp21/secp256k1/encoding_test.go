@@ -8,9 +8,10 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire"
 )
 
-func TestGG20KeyShareCanonicalEncoding(t *testing.T) {
+func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	raw1, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -39,7 +40,24 @@ func TestGG20KeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
-func TestGG20KeyShareRejectsNonCanonicalFields(t *testing.T) {
+func TestCGGMP21RejectsOldGG20WireTypes(t *testing.T) {
+	oldKeyShare, err := wire.Marshal(tss.Version, "gg20.secp256k1.keyshare", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalKeyShare(oldKeyShare); err == nil {
+		t.Fatal("old GG20 key share wire type accepted")
+	}
+	oldPresign, err := wire.Marshal(tss.Version, "gg20.secp256k1.presign", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalPresign(oldPresign); err == nil {
+		t.Fatal("old GG20 presign wire type accepted")
+	}
+}
+
+func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	unsorted := cloneKeyShare(shares[1])
 	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
@@ -53,7 +71,7 @@ func TestGG20KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	}
 }
 
-func TestGG20OldStyleKeyShareCannotPresign(t *testing.T) {
+func TestCGGMP21OldStyleKeyShareCannotPresign(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	old := cloneKeyShare(shares[1])
 	old.PaillierPublicKey = nil
@@ -79,7 +97,7 @@ func TestGG20OldStyleKeyShareCannotPresign(t *testing.T) {
 	}
 }
 
-func TestGG20PresignCanonicalEncoding(t *testing.T) {
+func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	raw1, err := presigns[1].MarshalBinary()
@@ -109,7 +127,7 @@ func TestGG20PresignCanonicalEncoding(t *testing.T) {
 	}
 }
 
-func TestGG20PresignRejectsUnsortedSigners(t *testing.T) {
+func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	unsorted := clonePresign(presigns[1])
@@ -122,8 +140,8 @@ func TestGG20PresignRejectsUnsortedSigners(t *testing.T) {
 	}
 }
 
-func FuzzGG20KeyShareUnmarshal(f *testing.F) {
-	share := minimalGG20KeyShare(f)
+func FuzzCGGMP21KeyShareUnmarshal(f *testing.F) {
+	share := minimalCGGMP21KeyShare(f)
 	raw, err := share.MarshalBinary()
 	if err != nil {
 		f.Fatal(err)
@@ -135,8 +153,8 @@ func FuzzGG20KeyShareUnmarshal(f *testing.F) {
 	})
 }
 
-func FuzzGG20PresignUnmarshal(f *testing.F) {
-	presign := minimalGG20Presign(f)
+func FuzzCGGMP21PresignUnmarshal(f *testing.F) {
+	presign := minimalCGGMP21Presign(f)
 	raw, err := presign.MarshalBinary()
 	if err != nil {
 		f.Fatal(err)
@@ -148,7 +166,7 @@ func FuzzGG20PresignUnmarshal(f *testing.F) {
 	})
 }
 
-func minimalGG20KeyShare(tb testing.TB) *KeyShare {
+func minimalCGGMP21KeyShare(tb testing.TB) *KeyShare {
 	tb.Helper()
 	secret := big.NewInt(1)
 	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secret))
@@ -168,7 +186,7 @@ func minimalGG20KeyShare(tb testing.TB) *KeyShare {
 	}
 }
 
-func minimalGG20Presign(tb testing.TB) *Presign {
+func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	tb.Helper()
 	one := big.NewInt(1)
 	RPoint := secp.ScalarBaseMult(one)
@@ -186,7 +204,7 @@ func minimalGG20Presign(tb testing.TB) *Presign {
 		R:              R,
 		LittleR:        scalarBytes(littleR),
 		KShare:         scalarBytes(one),
-		SigmaShare:     scalarBytes(one),
+		ChiShare:       scalarBytes(one),
 		Delta:          scalarBytes(one),
 		TranscriptHash: transcript[:],
 		SecurityNotice: ExperimentalSecurityNotice,
@@ -200,6 +218,7 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out := *in
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
+	out.ChainCode = append([]byte(nil), in.ChainCode...)
 	out.Secret = append([]byte(nil), in.Secret...)
 	out.GroupCommitments = cloneByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)

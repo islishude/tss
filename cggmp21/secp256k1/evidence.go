@@ -28,7 +28,7 @@ const (
 	evidenceFieldSigmaResponseHash       = "sigma_response_hash"
 )
 
-// EvidenceContext is the public context used to verify GG20 blame evidence.
+// EvidenceContext is the public context used to verify CGGMP21 blame evidence.
 type EvidenceContext struct {
 	SessionID             tss.SessionID
 	Parties               []tss.PartyID
@@ -39,7 +39,7 @@ type EvidenceContext struct {
 	PresignTranscriptHash []byte
 }
 
-// VerifyBlameEvidence checks that a public blame record belongs to the GG20
+// VerifyBlameEvidence checks that a public blame record belongs to the CGGMP21
 // session context the caller already trusts. It does not authenticate transport
 // delivery; callers still need authenticated envelopes.
 func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
@@ -169,7 +169,7 @@ func hashBytes(value []byte) []byte {
 
 func partySetHash(parties []tss.PartyID) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-party-set-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-party-set-v1"))
 	sorted := tss.SortParties(parties)
 	for _, id := range sorted {
 		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
@@ -179,7 +179,7 @@ func partySetHash(parties []tss.PartyID) []byte {
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-paillier-public-shares-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-paillier-public-shares-v1"))
 	sorted := clonePaillierPublicShares(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return int(a.Party) - int(b.Party)
@@ -194,7 +194,7 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 
 func verificationSharesHash(shares []VerificationShare) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-verification-shares-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-verification-shares-v1"))
 	sorted := append([]VerificationShare(nil), shares...)
 	slices.SortFunc(sorted, func(a, b VerificationShare) int {
 		return int(a.Party) - int(b.Party)

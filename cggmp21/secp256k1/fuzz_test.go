@@ -10,7 +10,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 )
 
-func FuzzGG20EnvelopeValidateBasic(f *testing.F) {
+func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
 	sessionID := fuzzSessionID()
 	seed := envelope(
 		tss.ThresholdConfig{Threshold: 2, Parties: []tss.PartyID{1, 2}, Self: 1, SessionID: sessionID},
@@ -26,7 +26,7 @@ func FuzzGG20EnvelopeValidateBasic(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(encoded)
-	f.Add([]byte(`{"protocol":"gg20-secp256k1","version":1,"round":1}`))
+	f.Add([]byte(`{"protocol":"cggmp21-secp256k1","version":1,"round":1}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var env tss.Envelope
 		if err := env.UnmarshalBinary(data); err != nil {
@@ -36,7 +36,7 @@ func FuzzGG20EnvelopeValidateBasic(f *testing.F) {
 	})
 }
 
-func FuzzGG20BlameEvidenceUnmarshal(f *testing.F) {
+func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 	sessionID := fuzzSessionID()
 	env := envelope(
 		tss.ThresholdConfig{Threshold: 2, Parties: []tss.PartyID{1, 2}, Self: 1, SessionID: sessionID},
@@ -58,7 +58,7 @@ func FuzzGG20BlameEvidenceUnmarshal(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(encoded)
-	f.Add([]byte(`{"version":1,"protocol":"gg20-secp256k1"}`))
+	f.Add([]byte(`{"version":1,"protocol":"cggmp21-secp256k1"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		decoded, err := tss.UnmarshalBlameEvidence(data)
 		if err != nil {
@@ -72,7 +72,7 @@ func FuzzGG20BlameEvidenceUnmarshal(f *testing.F) {
 	})
 }
 
-func FuzzGG20PresignRound1Decode(f *testing.F) {
+func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 	seed, err := json.Marshal(presignRound1Payload{
 		Gamma:             []byte{0x02},
 		EncK:              []byte{0x01},
@@ -98,7 +98,7 @@ func FuzzGG20PresignRound1Decode(f *testing.F) {
 	})
 }
 
-func FuzzGG20SignPartialDecode(f *testing.F) {
+func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 	seed, err := json.Marshal(signPartialPayload{
 		S:                 []byte{0x01},
 		PresignTranscript: make([]byte, sha256.Size),

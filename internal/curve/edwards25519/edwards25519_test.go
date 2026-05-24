@@ -41,6 +41,17 @@ func TestScalarAdditionMatchesPointAddition(t *testing.T) {
 	}
 }
 
+func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
+	a := FiatScalarFromBig(big.NewInt(7))
+	b := FiatScalarFromBig(big.NewInt(11))
+	got := ScalarMul(ScalarAdd(a, b), b).Big()
+	want := new(big.Int).Mul(big.NewInt(18), big.NewInt(11))
+	want.Mod(want, Order())
+	if got.Cmp(want) != 0 {
+		t.Fatalf("fiat scalar arithmetic mismatch: got %s want %s", got, want)
+	}
+}
+
 func TestVerifyShare(t *testing.T) {
 	order := Order()
 	coeffs, err := shamir.RandomPolynomial(nil, order, 3, nil)

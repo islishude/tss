@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 
 	"github.com/islishude/tss"
@@ -16,16 +17,19 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
-// KeygenOptions controls non-default GG20 keygen parameters.
+// KeygenOptions controls non-default CGGMP21 keygen parameters.
 type KeygenOptions struct {
-	PaillierBits int
+	PaillierBits  int
+	SecurityLevel int
+	EnableHD      bool
 }
 
-// KeygenSession tracks GG20-style DKG state for one local party.
+// KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
 	cfg          tss.ThresholdConfig
 	commits      map[tss.PartyID][][]byte
 	shares       map[tss.PartyID]*big.Int
+	chainCodes   map[tss.PartyID][]byte
 	paillier     *pai.PrivateKey
 	paillierPubs map[tss.PartyID]PaillierPublicShare
 	completed    bool
@@ -36,13 +40,14 @@ type keygenCommitmentsPayload struct {
 	Commitments       [][]byte `json:"commitments"`
 	PaillierPublicKey []byte   `json:"paillier_public_key"`
 	PaillierProof     []byte   `json:"paillier_proof"`
+	ChainCode         []byte   `json:"chain_code,omitempty"`
 }
 
 type keygenSharePayload struct {
 	Share []byte `json:"share"`
 }
 
-// StartKeygen starts GG20-style threshold ECDSA key generation.
+// StartKeygen starts CGGMP21-style threshold ECDSA key generation.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
@@ -57,6 +62,13 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	paillierBits := opts.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = DefaultPaillierBits
+	}
+	var chainCode []byte
+	if opts.EnableHD {
+		chainCode = make([]byte, 32)
+		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+			return nil, nil, err
+		}
 	}
 	paillierKey, err := pai.GenerateKey(config.Reader(), paillierBits)
 	if err != nil {
@@ -88,9 +100,12 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		commitments[i] = enc
 	}
 	s := &KeygenSession{
-		cfg:      config,
-		commits:  map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:   map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		cfg:     config,
+		commits: map[tss.PartyID][][]byte{config.Self: commitments},
+		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		chainCodes: map[tss.PartyID][]byte{
+			config.Self: append([]byte(nil), chainCode...),
+		},
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
@@ -101,6 +116,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		Commitments:       commitments,
 		PaillierPublicKey: paillierPubBytes,
 		PaillierProof:     modProofBytes,
+		ChainCode:         chainCode,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -154,7 +170,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 				[]tss.PartyID{env.From},
 				err,
 				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("gg20-secp256k1-keygen-commitments-v1", p.Commitments)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("cggmp21-secp256k1-keygen-commitments-v1", p.Commitments)),
 			)
 		}
 		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
@@ -195,6 +211,10 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 			)
 		}
 		s.commits[env.From] = p.Commitments
+		if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("chain code must be 32 bytes"))
+		}
+		s.chainCodes[env.From] = append([]byte(nil), p.ChainCode...)
 		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 	case payloadKeygenShare:
 		if _, ok := s.shares[env.From]; ok {
@@ -227,7 +247,7 @@ func (s *KeygenSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) {
+	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -246,7 +266,7 @@ func (s *KeygenSession) tryComplete() error {
 						tss.EvidenceKindKeygenShare,
 						"invalid DKG share",
 						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("gg20-secp256k1-keygen-commitments-v1", s.commits[dealer])),
+						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("cggmp21-secp256k1-keygen-commitments-v1", s.commits[dealer])),
 					),
 				},
 				Err: err,
@@ -257,6 +277,10 @@ func (s *KeygenSession) tryComplete() error {
 	for _, dealer := range s.cfg.Parties {
 		secret.Add(secret, s.shares[dealer])
 		secret.Mod(secret, order)
+	}
+	chainCode, err := aggregateChainCode(s.cfg.Parties, s.chainCodes)
+	if err != nil {
+		return err
 	}
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
@@ -324,6 +348,7 @@ func (s *KeygenSession) tryComplete() error {
 		Threshold:            s.cfg.Threshold,
 		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:            append([]byte(nil), groupCommitments[0]...),
+		ChainCode:            chainCode,
 		Secret:               scalarBytes(secret),
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
@@ -354,7 +379,7 @@ func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
 
 func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("gg20-secp256k1-keygen-transcript-v1"))
+	writeHashPart(h, []byte("cggmp21-secp256k1-keygen-transcript-v1"))
 	writeHashPart(h, s.cfg.SessionID[:])
 	for _, id := range s.cfg.Parties {
 		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
@@ -364,11 +389,38 @@ func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 		item := s.paillierPubs[id]
 		writeHashPart(h, item.PublicKey)
 		writeHashPart(h, item.Proof)
+		writeHashPart(h, s.chainCodes[id])
 	}
 	for _, commitment := range groupCommitments {
 		writeHashPart(h, commitment)
 	}
 	return h.Sum(nil)
+}
+
+func aggregateChainCode(parties []tss.PartyID, chainCodes map[tss.PartyID][]byte) ([]byte, error) {
+	enabled := false
+	for _, id := range parties {
+		switch len(chainCodes[id]) {
+		case 0:
+		case 32:
+			enabled = true
+		default:
+			return nil, fmt.Errorf("invalid chain code for party %d", id)
+		}
+	}
+	if !enabled {
+		return nil, nil
+	}
+	out := make([]byte, 32)
+	for _, id := range parties {
+		if len(chainCodes[id]) != 32 {
+			return nil, fmt.Errorf("missing chain code for party %d", id)
+		}
+		for i := range out {
+			out[i] ^= chainCodes[id][i]
+		}
+	}
+	return out, nil
 }
 
 func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, bool) {

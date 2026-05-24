@@ -34,7 +34,7 @@ func (h *protocolHarness) evidenceContext(sessionID tss.SessionID, receiver tss.
 	return ctx
 }
 
-func TestGG20KeygenEnvelopeFailClosed(t *testing.T) {
+func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -95,7 +95,7 @@ func TestGG20KeygenEnvelopeFailClosed(t *testing.T) {
 	})
 }
 
-func TestGG20KeygenMalformedCommitmentHasEvidence(t *testing.T) {
+func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +124,7 @@ func TestGG20KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
-func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
+func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -185,7 +185,7 @@ func TestGG20PresignEnvelopeFailClosed(t *testing.T) {
 	})
 }
 
-func TestGG20PresignRound1MalformedEvidence(t *testing.T) {
+func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	for _, tc := range []struct {
 		name   string
@@ -224,7 +224,7 @@ func TestGG20PresignRound1MalformedEvidence(t *testing.T) {
 	}
 }
 
-func TestGG20PresignRound2WrongRecipientRejected(t *testing.T) {
+func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -251,7 +251,7 @@ func TestGG20PresignRound2WrongRecipientRejected(t *testing.T) {
 	_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 }
 
-func TestGG20PresignRound3MalformedDeltaEvidence(t *testing.T) {
+func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -302,7 +302,7 @@ func TestGG20PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 }
 
-func TestGG20SignerSetOrderCanonicalized(t *testing.T) {
+func TestCGGMP21SignerSetOrderCanonicalized(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -317,7 +317,7 @@ func TestGG20SignerSetOrderCanonicalized(t *testing.T) {
 	}
 }
 
-func TestGG20SignFailClosedAndEvidence(t *testing.T) {
+func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, h.shares, signers)
@@ -391,7 +391,7 @@ func TestGG20SignFailClosedAndEvidence(t *testing.T) {
 	})
 }
 
-func TestGG20SignRejectsBadDigestAndPresignReuseBeforeOutbound(t *testing.T) {
+func TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	presigns := secpPresign(t, h.shares, []tss.PartyID{1, 2})
 	signID, err := tss.NewSessionID(nil)
@@ -431,7 +431,7 @@ func clonePresign(in *Presign) *Presign {
 	out.R = append([]byte(nil), in.R...)
 	out.LittleR = append([]byte(nil), in.LittleR...)
 	out.KShare = append([]byte(nil), in.KShare...)
-	out.SigmaShare = append([]byte(nil), in.SigmaShare...)
+	out.ChiShare = append([]byte(nil), in.ChiShare...)
 	out.Delta = append([]byte(nil), in.Delta...)
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
 	out.Consumed = false

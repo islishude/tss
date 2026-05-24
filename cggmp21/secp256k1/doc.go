@@ -1,4 +1,4 @@
-// Package secp256k1 exposes the planned GG20/secp256k1 threshold ECDSA API.
+// Package secp256k1 exposes the planned CGGMP21/secp256k1 threshold ECDSA API.
 //
 // Keygen uses Shamir shares, public commitments, Paillier key material, and
 // proof bindings. Signing avoids reconstructing private key or nonce shares and

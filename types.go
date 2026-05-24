@@ -38,8 +38,8 @@ type PartyID uint32
 type Algorithm string
 
 const (
-	// AlgorithmGG20Secp256k1 identifies the GG20-style threshold ECDSA package.
-	AlgorithmGG20Secp256k1 Algorithm = "gg20-secp256k1"
+	// AlgorithmCGGMP21Secp256k1 identifies the CGGMP21-style threshold ECDSA package.
+	AlgorithmCGGMP21Secp256k1 Algorithm = "cggmp21-secp256k1"
 	// AlgorithmFROSTEd25519 identifies the FROST-style threshold Ed25519 package.
 	AlgorithmFROSTEd25519 Algorithm = "frost-ed25519"
 )

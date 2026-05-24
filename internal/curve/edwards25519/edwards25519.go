@@ -48,12 +48,7 @@ func ScalarFromBig(x *big.Int) (*fed.Scalar, error) {
 	if x == nil {
 		return nil, errors.New("nil scalar")
 	}
-	n := new(big.Int).Mod(new(big.Int).Set(x), order)
-	if n.Sign() < 0 {
-		n.Add(n, order)
-	}
-	buf := bigToLittle(n, 32)
-	return fed.NewScalar().SetCanonicalBytes(buf)
+	return fed.NewScalar().SetCanonicalBytes(FiatScalarFromBig(x).Bytes())
 }
 
 // ScalarToBig converts a scalar to a big.Int using little-endian scalar bytes.

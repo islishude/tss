@@ -25,12 +25,12 @@ These rules ensure one semantic record has one binary representation. This matte
 ## Current Records
 
 - `tss.Envelope`
-- `gg20/secp256k1.KeyShare`
-- `gg20/secp256k1.Presign`
+- `cggmp21/secp256k1.KeyShare`
+- `cggmp21/secp256k1.Presign`
 - `frost/ed25519.KeyShare`
 
 Paillier and proof payloads currently retain their deterministic JSON encodings because they are nested protocol proof payloads, not top-level share/envelope records.
 
 ## Migration Policy
 
-Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. If legacy data migration is needed later, add explicit migration helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.
+Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. CGGMP21 decoders do not accept old GG20 type identifiers. If legacy data migration is needed later, add explicit migration helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.

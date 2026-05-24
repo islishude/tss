@@ -71,11 +71,10 @@ func IsOnCurve(p *Point) bool {
 	if p.X.Sign() < 0 || p.X.Cmp(P) >= 0 || p.Y.Sign() < 0 || p.Y.Cmp(P) >= 0 {
 		return false
 	}
-	lhs := mod(new(big.Int).Mul(p.Y, p.Y), P)
-	x3 := mod(new(big.Int).Mul(p.X, p.X), P)
-	x3.Mul(x3, p.X)
-	x3.Add(x3, B)
-	rhs := mod(x3, P)
+	y := FieldElementFromBig(p.Y)
+	x := FieldElementFromBig(p.X)
+	lhs := FieldSquare(y).Big()
+	rhs := FieldAdd(FieldMul(FieldSquare(x), x), FieldElementFromBig(B)).Big()
 	return lhs.Cmp(rhs) == 0
 }
 
@@ -96,17 +95,11 @@ func Add(a, b *Point) *Point {
 	}
 	lambdaNum := new(big.Int).Sub(b.Y, a.Y)
 	lambdaDen := new(big.Int).Sub(b.X, a.X)
-	lambda := divMod(lambdaNum, lambdaDen, P)
+	lambda := divField(lambdaNum, lambdaDen)
 
-	x3 := new(big.Int).Mul(lambda, lambda)
-	x3.Sub(x3, a.X)
-	x3.Sub(x3, b.X)
-	x3 = mod(x3, P)
+	x3 := FieldSub(FieldSub(FieldSquare(FieldElementFromBig(lambda)), FieldElementFromBig(a.X)), FieldElementFromBig(b.X)).Big()
 
-	y3 := new(big.Int).Sub(a.X, x3)
-	y3.Mul(lambda, y3)
-	y3.Sub(y3, a.Y)
-	y3 = mod(y3, P)
+	y3 := FieldSub(FieldMul(FieldElementFromBig(lambda), FieldSub(FieldElementFromBig(a.X), FieldElementFromBig(x3))), FieldElementFromBig(a.Y)).Big()
 	return &Point{X: x3, Y: y3}
 }
 
@@ -117,16 +110,11 @@ func Double(a *Point) *Point {
 	}
 	num := new(big.Int).Mul(big.NewInt(3), new(big.Int).Mul(a.X, a.X))
 	den := new(big.Int).Mul(big.NewInt(2), a.Y)
-	lambda := divMod(num, den, P)
+	lambda := divField(num, den)
 
-	x3 := new(big.Int).Mul(lambda, lambda)
-	x3.Sub(x3, new(big.Int).Mul(big.NewInt(2), a.X))
-	x3 = mod(x3, P)
+	x3 := FieldSub(FieldSquare(FieldElementFromBig(lambda)), FieldElementFromBig(new(big.Int).Mul(big.NewInt(2), a.X))).Big()
 
-	y3 := new(big.Int).Sub(a.X, x3)
-	y3.Mul(lambda, y3)
-	y3.Sub(y3, a.Y)
-	y3 = mod(y3, P)
+	y3 := FieldSub(FieldMul(FieldElementFromBig(lambda), FieldSub(FieldElementFromBig(a.X), FieldElementFromBig(x3))), FieldElementFromBig(a.Y)).Big()
 	return &Point{X: x3, Y: y3}
 }
 
@@ -292,14 +280,11 @@ func SignECDSA(reader io.Reader, digest []byte, secret *big.Int, lowS bool) (r, 
 		if r.Sign() == 0 {
 			continue
 		}
-		kinv := new(big.Int).ModInverse(k, N)
-		if kinv == nil {
+		kinv, err := ScalarInvert(ScalarFromBig(k))
+		if err != nil {
 			continue
 		}
-		s = new(big.Int).Mul(r, secret)
-		s.Add(s, z)
-		s.Mul(s, kinv)
-		s.Mod(s, N)
+		s = ScalarMul(ScalarAdd(ScalarMul(ScalarFromBig(r), ScalarFromBig(secret)), ScalarFromBig(z)), kinv).Big()
 		if s.Sign() == 0 {
 			continue
 		}
@@ -328,14 +313,11 @@ func SignECDSAWithNonce(digest []byte, secret, nonce *big.Int, lowS bool) (r, s 
 	if r.Sign() == 0 {
 		return nil, nil, errors.New("nonce produced zero r")
 	}
-	kinv := new(big.Int).ModInverse(k, N)
-	if kinv == nil {
+	kinv, err := ScalarInvert(ScalarFromBig(k))
+	if err != nil {
 		return nil, nil, errors.New("nonce is not invertible")
 	}
-	s = new(big.Int).Mul(r, secret)
-	s.Add(s, z)
-	s.Mul(s, kinv)
-	s.Mod(s, N)
+	s = ScalarMul(ScalarAdd(ScalarMul(ScalarFromBig(r), ScalarFromBig(secret)), ScalarFromBig(z)), kinv).Big()
 	if s.Sign() == 0 {
 		return nil, nil, errors.New("zero s")
 	}
@@ -354,12 +336,12 @@ func VerifyECDSA(public *Point, digest []byte, r, s *big.Int) bool {
 		return false
 	}
 	z := new(big.Int).SetBytes(digest)
-	w := new(big.Int).ModInverse(s, N)
-	if w == nil {
+	w, err := ScalarInvert(ScalarFromBig(s))
+	if err != nil {
 		return false
 	}
-	u1 := mod(new(big.Int).Mul(z, w), N)
-	u2 := mod(new(big.Int).Mul(r, w), N)
+	u1 := ScalarMul(ScalarFromBig(z), w).Big()
+	u2 := ScalarMul(ScalarFromBig(r), w).Big()
 	p1 := ScalarBaseMult(u1)
 	p2 := ScalarMult(public, u2)
 	x := Add(p1, p2)
@@ -387,13 +369,12 @@ func mod(x, m *big.Int) *big.Int {
 	return out
 }
 
-func divMod(num, den, m *big.Int) *big.Int {
-	inv := new(big.Int).ModInverse(mod(den, m), m)
-	if inv == nil {
+func divField(num, den *big.Int) *big.Int {
+	inv, err := FieldInvert(FieldElementFromBig(den))
+	if err != nil {
 		panic(fmt.Sprintf("non-invertible denominator %s", den))
 	}
-	out := new(big.Int).Mul(num, inv)
-	return mod(out, m)
+	return FieldMul(FieldElementFromBig(num), inv).Big()
 }
 
 func bytesFixed(x *big.Int, size int) []byte {
