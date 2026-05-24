@@ -1,5 +1,5 @@
 #!/bin/sh
-set -eu
+set -eux -o pipefail
 
 docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   word-by-word-montgomery --lang Go --no-wide-int \
@@ -14,6 +14,8 @@ docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   mul square add sub opp from_montgomery to_montgomery nonzero selectznz \
   to_bytes from_bytes one msat divstep divstep_precomp \
   > secp256k1field/secp256k1field.go
+
+chmod 644 secp256k1field/secp256k1field.go
 
 docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   word-by-word-montgomery --lang Go --no-wide-int \
@@ -30,6 +32,8 @@ docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   to_bytes from_bytes one msat divstep divstep_precomp \
   > secp256k1scalar/secp256k1scalar.go
 
+chmod 644 secp256k1scalar/secp256k1scalar.go
+
 docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   word-by-word-montgomery --lang Go --no-wide-int \
   --relax-primitive-carry-to-bitwidth 32,64 --cmovznz-by-mul \
@@ -44,3 +48,7 @@ docker run --rm --entrypoint fiat_crypto ghcr.io/islishude/fiat-crypto-go-tool \
   mul square add sub opp from_montgomery to_montgomery nonzero selectznz \
   to_bytes from_bytes one msat divstep divstep_precomp \
   > ed25519scalar/ed25519scalar.go
+
+chmod 644 ed25519scalar/ed25519scalar.go
+
+gofmt -w .
