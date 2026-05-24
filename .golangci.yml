@@ -1,0 +1,31 @@
+version: "2"
+
+run:
+  timeout: 5m
+  modules-download-mode: readonly
+  relative-path-mode: gomod
+
+linters:
+  default: standard
+  enable:
+    - errorlint
+    - gosec
+    - misspell
+    - nilerr
+    - nilnil
+    - nolintlint
+    - unconvert
+    - wastedassign
+    - whitespace
+  settings:
+    gosec:
+      excludes:
+        - G115
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0

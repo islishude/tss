@@ -20,7 +20,6 @@ const (
 	evidenceFieldExpectedPaillierKeyHash = "expected_paillier_public_key_hash"
 	evidenceFieldObservedPaillierKeyHash = "observed_paillier_public_key_hash"
 	evidenceFieldCommitmentsHash         = "commitments_hash"
-	evidenceFieldVerificationSharesHash  = "verification_shares_hash"
 	evidenceFieldDigestHash              = "digest_hash"
 	evidenceFieldRHash                   = "r_hash"
 	evidenceFieldSHash                   = "s_hash"
@@ -90,18 +89,6 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 		}
 	}
 	return nil
-}
-
-func keyEvidenceContext(key *KeyShare) EvidenceContext {
-	if key == nil {
-		return EvidenceContext{}
-	}
-	return EvidenceContext{
-		Parties:              append([]tss.PartyID(nil), key.Parties...),
-		PublicKey:            append([]byte(nil), key.PublicKey...),
-		PaillierPublicKeys:   clonePaillierPublicShares(key.PaillierPublicKeys),
-		KeygenTranscriptHash: append([]byte(nil), key.KeygenTranscriptHash...),
-	}
 }
 
 func verificationErrorWithEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
@@ -188,20 +175,6 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 		writeHashPart(h, []byte{byte(share.Party >> 24), byte(share.Party >> 16), byte(share.Party >> 8), byte(share.Party)})
 		writeHashPart(h, share.PublicKey)
 		writeHashPart(h, share.Proof)
-	}
-	return h.Sum(nil)
-}
-
-func verificationSharesHash(shares []VerificationShare) []byte {
-	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-verification-shares-v1"))
-	sorted := append([]VerificationShare(nil), shares...)
-	slices.SortFunc(sorted, func(a, b VerificationShare) int {
-		return int(a.Party) - int(b.Party)
-	})
-	for _, share := range sorted {
-		writeHashPart(h, []byte{byte(share.Party >> 24), byte(share.Party >> 16), byte(share.Party >> 8), byte(share.Party)})
-		writeHashPart(h, share.PublicKey)
 	}
 	return h.Sum(nil)
 }

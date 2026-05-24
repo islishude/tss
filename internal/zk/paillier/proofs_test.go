@@ -18,7 +18,7 @@ func TestEncryptedScalarProofTamper(t *testing.T) {
 		t.Fatal(err)
 	}
 	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.PublicKey.Encrypt(nil, scalar)
+	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	}
 
 	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.PublicKey.Encrypt(nil, scalar)
+	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +108,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.PublicKey.Encrypt(nil, beta)
+	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +136,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	a := big.NewInt(23)
 	b := big.NewInt(29)
 	beta := big.NewInt(31)
-	encA, _, err := sk.PublicKey.Encrypt(nil, a)
+	encA, _, err := sk.Encrypt(nil, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -144,7 +144,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.PublicKey.Encrypt(nil, beta)
+	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,7 +189,7 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	a := big.NewInt(23)
 	b := big.NewInt(29)
 	beta := big.NewInt(31)
-	encA, randomness, err := sk.PublicKey.Encrypt(nil, a)
+	encA, randomness, err := sk.Encrypt(nil, a)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.PublicKey.Encrypt(nil, beta)
+	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
 	if err != nil {
 		t.Fatal(err)
 	}

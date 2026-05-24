@@ -12,11 +12,8 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 ## Useful Commands
 
 ```sh
-go test ./...
 go test -race ./...
-go test -run TestExportedIdentifiersHaveDocComments
-go test -run Example ./...
-gofmt -w <changed-go-files>
+golangci-lint run --fix
 ```
 
 Run both test commands before handing off substantial changes.

@@ -100,13 +100,13 @@ func TestValidateCiphertextGroup(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sk.PublicKey.ValidateCiphertext(big.NewInt(0)); err == nil {
+	if err := sk.ValidateCiphertext(big.NewInt(0)); err == nil {
 		t.Fatal("expected zero ciphertext rejection")
 	}
-	if err := sk.PublicKey.ValidateCiphertext(sk.NSquared); err == nil {
+	if err := sk.ValidateCiphertext(sk.NSquared); err == nil {
 		t.Fatal("expected n^2 ciphertext rejection")
 	}
-	if err := sk.PublicKey.ValidateCiphertext(new(big.Int).Set(sk.N)); err == nil {
+	if err := sk.ValidateCiphertext(new(big.Int).Set(sk.N)); err == nil {
 		t.Fatal("expected non-invertible ciphertext rejection")
 	}
 }
