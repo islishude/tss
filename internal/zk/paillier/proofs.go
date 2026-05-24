@@ -127,7 +127,7 @@ func ProveModulus(domain []byte, pk *pai.PublicKey, party uint32) (*ModulusProof
 
 // VerifyModulus checks a modulus proof against a public key and transcript.
 func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *ModulusProof) bool {
-	if proof == nil || proof.Version != proofVersion || len(proof.Digest) != sha256.Size || pk == nil {
+	if validateModulusProof(proof) != nil || pk == nil {
 		return false
 	}
 	if err := pk.Validate(); err != nil {
@@ -346,7 +346,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 
 // VerifyEncScalarAndRange verifies the paired encrypted scalar and range proofs.
 func VerifyEncScalarAndRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, encProof *EncScalarProof, rangeProof *EncRangeProof) bool {
-	if !VerifyEncScalar(domain, pk, ciphertext, encProof) || rangeProof == nil || rangeProof.Version != proofVersion {
+	if !VerifyEncScalar(domain, pk, ciphertext, encProof) || validateEncRangeProof(rangeProof) != nil {
 		return false
 	}
 	if !bytes.Equal(rangeProof.TranscriptHash, encProof.TranscriptHash) || !bytes.Equal(rangeProof.Response, encProof.Response) {
@@ -369,7 +369,7 @@ func VerifyEncScalarAndRange(domain []byte, pk *pai.PublicKey, ciphertext *big.I
 
 // VerifyEncScalar verifies the encryption and public scalar commitment relation.
 func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *EncScalarProof) bool {
-	if proof == nil || pk == nil || proof.Version != proofVersion || pk.ValidateCiphertext(ciphertext) != nil {
+	if validateEncScalarProof(proof) != nil || pk == nil || pk.ValidateCiphertext(ciphertext) != nil {
 		return false
 	}
 	scalarCommitment, err := secp.PointFromBytes(proof.ScalarCommitment)
@@ -492,7 +492,7 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 
 // VerifyMTAResponse checks the MtA response proof and transcript binding.
 func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitmentBytes []byte, proof *MTAResponseProof) bool {
-	if proof == nil || proof.Version != proofVersion || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
+	if validateMTAResponseProof(proof) != nil || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
 		return false
 	}
 	bCommitment, err := secp.PointFromBytes(bCommitmentBytes)
@@ -634,6 +634,15 @@ func validateEncScalarProof(p *EncScalarProof) error {
 	if len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
 		return errors.New("incomplete encrypted scalar proof")
 	}
+	if err := validatePositiveIntBytes("cipher commitment", p.CipherCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("randomness", p.Randomness); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -647,6 +656,15 @@ func validateEncRangeProof(p *EncRangeProof) error {
 	if len(p.Bound) == 0 || len(p.Challenge) == 0 || len(p.Response) == 0 || len(p.TranscriptHash) != sha256.Size || len(p.Digest) != sha256.Size {
 		return errors.New("incomplete encrypted range proof")
 	}
+	if err := validatePositiveIntBytes("bound", p.Bound); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("challenge", p.Challenge); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -659,6 +677,28 @@ func validateMTAResponseProof(p *MTAResponseProof) error {
 	}
 	if len(p.TranscriptHash) != sha256.Size || len(p.BetaCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.BCommitment) == 0 || len(p.BetaNonce) == 0 || len(p.BResponse) == 0 || len(p.BetaResponse) == 0 || len(p.Randomness) == 0 {
 		return errors.New("incomplete MtA response proof")
+	}
+	if err := validatePositiveIntBytes("cipher commitment", p.CipherCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("b response", p.BResponse); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("beta response", p.BetaResponse); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("randomness", p.Randomness); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validatePositiveIntBytes(name string, in []byte) error {
+	if len(in) == 0 {
+		return fmt.Errorf("%s is empty", name)
+	}
+	if in[0] == 0 {
+		return fmt.Errorf("%s is not minimally encoded", name)
 	}
 	return nil
 }

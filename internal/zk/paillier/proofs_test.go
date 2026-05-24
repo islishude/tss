@@ -7,6 +7,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/wire"
 )
 
 func TestEncryptedScalarProofTamper(t *testing.T) {
@@ -177,6 +178,109 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	}
 }
 
+func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
+	restore := pai.SetMinimumModulusBitsForTesting(1024)
+	defer restore()
+	sk, err := pai.GenerateKey(nil, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := []byte("minimal integers")
+	a := big.NewInt(23)
+	b := big.NewInt(29)
+	beta := big.NewInt(31)
+	encA, randomness, err := sk.PublicKey.Encrypt(nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encProof, rangeProof, err := ProveEncScalarAndRange(nil, domain, &sk.PublicKey, encA, a, randomness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encBeta, betaRandomness, err := sk.PublicKey.Encrypt(nil, beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := new(big.Int).Exp(encA, b, sk.NSquared)
+	response.Mul(response, encBeta)
+	response.Mod(response, sk.NSquared)
+	mtaProof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	t.Run("encrypted scalar", func(t *testing.T) {
+		tampered := *encProof
+		tampered.CipherCommitment = prependZero(tampered.CipherCommitment)
+		if VerifyEncScalar(domain, &sk.PublicKey, encA, &tampered) {
+			t.Fatal("non-minimal encrypted scalar proof verified")
+		}
+		if _, err := Marshal(&tampered); err == nil {
+			t.Fatal("non-minimal encrypted scalar proof marshaled")
+		}
+		raw := mustWireProof(t, encScalarProofWireType, []wire.Field{
+			{Tag: encScalarProofFieldScalarCommitment, Value: tampered.ScalarCommitment},
+			{Tag: encScalarProofFieldCipherCommitment, Value: tampered.CipherCommitment},
+			{Tag: encScalarProofFieldPointCommitment, Value: tampered.PointCommitment},
+			{Tag: encScalarProofFieldResponse, Value: tampered.Response},
+			{Tag: encScalarProofFieldRandomness, Value: tampered.Randomness},
+			{Tag: encScalarProofFieldTranscriptHash, Value: tampered.TranscriptHash},
+		})
+		if _, err := UnmarshalEncScalarProof(raw); err == nil {
+			t.Fatal("non-minimal encrypted scalar proof decoded")
+		}
+	})
+
+	t.Run("encrypted range", func(t *testing.T) {
+		tampered := *rangeProof
+		tampered.Response = prependZero(tampered.Response)
+		if VerifyEncScalarAndRange(domain, &sk.PublicKey, encA, encProof, &tampered) {
+			t.Fatal("non-minimal range proof verified")
+		}
+		if _, err := Marshal(&tampered); err == nil {
+			t.Fatal("non-minimal range proof marshaled")
+		}
+		raw := mustWireProof(t, encRangeProofWireType, []wire.Field{
+			{Tag: encRangeProofFieldBound, Value: tampered.Bound},
+			{Tag: encRangeProofFieldChallenge, Value: tampered.Challenge},
+			{Tag: encRangeProofFieldResponse, Value: tampered.Response},
+			{Tag: encRangeProofFieldTranscriptHash, Value: tampered.TranscriptHash},
+			{Tag: encRangeProofFieldDigest, Value: tampered.Digest},
+		})
+		if _, err := UnmarshalEncRangeProof(raw); err == nil {
+			t.Fatal("non-minimal range proof decoded")
+		}
+	})
+
+	t.Run("mta response", func(t *testing.T) {
+		tampered := cloneMTAResponseProof(mtaProof)
+		tampered.BResponse = prependZero(tampered.BResponse)
+		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
+			t.Fatal("non-minimal MtA response proof verified")
+		}
+		if _, err := Marshal(tampered); err == nil {
+			t.Fatal("non-minimal MtA response proof marshaled")
+		}
+		raw := mustWireProof(t, mtaResponseProofWireType, []wire.Field{
+			{Tag: mtaResponseProofFieldTranscriptHash, Value: tampered.TranscriptHash},
+			{Tag: mtaResponseProofFieldBetaCommitment, Value: tampered.BetaCommitment},
+			{Tag: mtaResponseProofFieldCipherCommitment, Value: tampered.CipherCommitment},
+			{Tag: mtaResponseProofFieldBCommitment, Value: tampered.BCommitment},
+			{Tag: mtaResponseProofFieldBetaNonce, Value: tampered.BetaNonce},
+			{Tag: mtaResponseProofFieldBResponse, Value: tampered.BResponse},
+			{Tag: mtaResponseProofFieldBetaResponse, Value: tampered.BetaResponse},
+			{Tag: mtaResponseProofFieldRandomness, Value: tampered.Randomness},
+		})
+		if _, err := UnmarshalMTAResponseProof(raw); err == nil {
+			t.Fatal("non-minimal MtA response proof decoded")
+		}
+	})
+}
+
 func assertModulusProofRoundTrip(t *testing.T, proof *ModulusProof) {
 	t.Helper()
 	raw, err := Marshal(proof)
@@ -279,4 +383,20 @@ func cloneMTAResponseProof(in *MTAResponseProof) *MTAResponseProof {
 	out.BetaResponse = append([]byte(nil), in.BetaResponse...)
 	out.Randomness = append([]byte(nil), in.Randomness...)
 	return &out
+}
+
+func prependZero(in []byte) []byte {
+	out := make([]byte, 0, len(in)+1)
+	out = append(out, 0)
+	out = append(out, in...)
+	return out
+}
+
+func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
+	t.Helper()
+	raw, err := wire.Marshal(proofVersion, typeID, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

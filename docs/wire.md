@@ -19,6 +19,8 @@ field      = tag:uint16 || value_len:uint32 || value
 - Nil field values are rejected by the encoder.
 - Decoders reject trailing bytes.
 - Higher-level decoders require exact field sets for fixed records.
+- Proof integer fields use minimal positive big-endian encoding; leading-zero
+  aliases are rejected.
 
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 
