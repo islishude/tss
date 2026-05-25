@@ -34,11 +34,19 @@ These rules ensure one semantic record has one binary representation. This matte
 - `tss.Envelope`
 - `cggmp21/secp256k1.KeyShare`
 - `cggmp21/secp256k1.Presign`
+- `cggmp21/secp256k1` keygen commitments payload
+- `cggmp21/secp256k1` keygen share payload
+- `cggmp21/secp256k1` presign round 1 payload
+- `cggmp21/secp256k1` presign round 2 payload
+- `cggmp21/secp256k1` presign round 3 payload
+- `cggmp21/secp256k1` online signing partial payload
 - `frost/ed25519.KeyShare`
 - `frost/ed25519` keygen commitments payload
 - `frost/ed25519` keygen share payload
 - `frost/ed25519` signing nonce commitment payload
 - `frost/ed25519` signing partial payload
+- `internal/mta.StartMessage`
+- `internal/mta.ResponseMessage`
 - `internal/paillier.PublicKey`
 - `internal/paillier.PrivateKey`
 - `internal/zk/paillier.ModulusProof`
@@ -47,11 +55,12 @@ These rules ensure one semantic record has one binary representation. This matte
 - `internal/zk/paillier.MTAResponseProof`
 - `internal/zk/schnorr.Proof`
 
-Paillier public keys, Paillier private keys, Paillier proof payloads, and
-Schnorr share proofs all use the same strict TLV encoding as other binary
-records. Keygen and presign proof bytes reject JSON fallback, trailing bytes,
-duplicate tags, wrong type identifiers, malformed curve points, and
-non-minimal integer encodings where integers appear.
+Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
+Paillier proof payloads, and Schnorr share proofs all use the same strict TLV
+encoding as other binary records. Keygen, presign, and signing payloads reject
+JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
+malformed curve points, malformed scalars, and non-minimal integer encodings
+where integers appear.
 
 ## Decoder Policy
 

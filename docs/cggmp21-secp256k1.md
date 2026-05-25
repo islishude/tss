@@ -2,6 +2,11 @@
 
 The `cggmp21/secp256k1` package implements an experimental CGGMP21-style threshold ECDSA flow. CGGMP21 is an ECDSA protocol; Ed25519 support lives in the FROST package.
 
+All keygen, presign, and online signing payloads are exact-field TLV records.
+Decoders reject JSON fallback, wrong payload type identifiers, duplicate or
+unsorted fields, trailing bytes, malformed points, malformed scalars, and
+non-minimal integer encodings.
+
 ## Keygen
 
 Each party generates a Shamir polynomial and broadcasts secp256k1 commitments. Private Shamir shares are sent point-to-point in confidential envelopes. Receivers verify shares against commitments before deriving the local aggregated share.

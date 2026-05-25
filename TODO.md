@@ -7,7 +7,6 @@ Current status from local inspection:
 
 - `go test ./...` passes.
 - `cggmp21/secp256k1` is still explicitly experimental.
-- Protocol payloads still use JSON in multiple state machines.
 - `docs/paillier-zk-proofs.md` states that the Paillier/ZK proof layer is not
   production-audited.
 
@@ -80,43 +79,6 @@ review.
   appear in evidence, logs, formatted errors, examples, or docs.
 - `go test -race ./...` and `golangci-lint run` pass.
 - The experimental warning remains until independent review is complete.
-
-## P0: Convert Protocol Payloads and Nested Key Material to Strict TLV
-
-### Goal
-
-Remove JSON from transcript-bound and secret-bearing protocol payloads. All
-protocol messages and nested cryptographic records should use deterministic,
-exact-field TLV encodings.
-
-### Detailed Process
-
-1. Define fixed TLV type ids and exact field sets for all CGGMP21 payloads:
-   keygen commitments, keygen shares, presign round 1, presign round 2, presign
-   round 3, and online signing partials.
-2. Convert `internal/mta` start and response messages to canonical binary
-   payloads. Their nested proof bytes must remain exact proof records, not ad hoc
-   byte blobs with ambiguous shape.
-3. For every decoder, require exact field sets, strictly increasing tags, no
-   duplicate tags, no trailing bytes, canonical scalar encodings, canonical point
-   encodings, and minimal positive integer encodings.
-4. Replace tests that mutate JSON payload structs with tests that mutate TLV
-   fields and raw bytes.
-5. Update `docs/wire.md` with the complete wire inventory and the exact
-   production rule: no automatic fallback and no proof-conversion helper.
-
-### Acceptance Criteria
-
-- Protocol packages no longer use JSON to encode or decode secret-bearing or
-  transcript-bound payloads.
-- `rg "encoding/json|json.Marshal|json.Unmarshal"` in protocol packages returns
-  only allowed public diagnostic encodings, if any.
-- All new payload decoders have fuzz tests.
-- Wrong type id, wrong field set, duplicate field, unsorted field, trailing
-  bytes, malformed scalar, malformed point, and non-minimal integer encodings
-  are rejected.
-- `docs/wire.md` lists every production TLV record.
-- `go test -race ./...` and `golangci-lint run` pass.
 
 ## P0: Harden Secret-Material Lifecycle and Misuse Resistance
 

@@ -45,7 +45,7 @@ The secp256k1 package exposes `secp256k1.VerifyBlameEvidence` for validating CGG
 
 ## Canonical Encoding
 
-`tss.Envelope`, CGGMP21/FROST key shares, and CGGMP21 presign records use a strict TLV binary format through `MarshalBinary` / `Unmarshal...`. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
+`tss.Envelope`, CGGMP21/FROST key shares, CGGMP21 presign records, protocol payloads, MtA messages, Paillier keys, and proof records use strict TLV binary formats. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
 
 CGGMP21 key-share decoders require complete Paillier/ZK keygen material, including the local Paillier keypair, modulus proof, full public Paillier-key set, share proof, and keygen transcript hash. Shares missing that material are rejected during decode or validation. Unexpected wire type identifiers are not accepted.
 

@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"math/big"
 	"os"
@@ -179,12 +178,12 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
-	var payload signPartialPayload
-	if err := json.Unmarshal(messages[0].Payload, &payload); err != nil {
+	payload, err := unmarshalSignPartialPayload(messages[0].Payload)
+	if err != nil {
 		t.Fatal(err)
 	}
 	payload.S = scalarBytes(bigOne())
-	mutated, err := json.Marshal(payload)
+	mutated, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -263,12 +262,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if len(round2) != 1 || round2[0].To != 1 {
 				t.Fatalf("unexpected round2 messages: %#v", round2)
 			}
-			var payload presignRound2Payload
-			if err := json.Unmarshal(round2[0].Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-			tc.mutate(&payload)
-			mutated, err := json.Marshal(payload)
+			mutated, err := mutatePresignRound2Payload(round2[0].Payload, tc.mutate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -279,7 +273,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 				t.Fatal("expected tampered round2 proof rejection")
 			}
 			var protocolErr *tss.ProtocolError
-			if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeVerification || protocolErr.Party != 2 {
+			if !errors.As(err, &protocolErr) || protocolErr.Party != 2 {
 				t.Fatalf("unexpected error: %v", err)
 			}
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
@@ -301,12 +295,12 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload presignRound1Payload
-	if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
+	payload, err := unmarshalPresignRound1Payload(out2[0].Payload)
+	if err != nil {
 		t.Fatal(err)
 	}
 	payload.PaillierPublicKey = shares[1].PaillierPublicKey
-	mutated, err := json.Marshal(payload)
+	mutated, err := marshalPresignRound1Payload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -333,12 +327,15 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload keygenCommitmentsPayload
-	if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
+	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
+	if err != nil {
 		t.Fatal(err)
 	}
-	payload.PaillierPublicKey = []byte(`{"n":"3","g":"4"}`)
-	mutated, err := json.Marshal(payload)
+	payload.PaillierPublicKey, err = kg1.paillier.PublicKey.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}

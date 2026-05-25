@@ -172,6 +172,70 @@ func FuzzCGGMP21PresignUnmarshal(f *testing.F) {
 	})
 }
 
+func FuzzCGGMP21KeygenCommitmentsPayloadUnmarshal(f *testing.F) {
+	shares := secpKeygen(f, 1, 1)
+	payload := keygenCommitmentsPayload{
+		Commitments:       shares[1].GroupCommitments,
+		PaillierPublicKey: shares[1].PaillierPublicKey,
+		PaillierProof:     shares[1].PaillierProof,
+	}
+	raw, err := marshalKeygenCommitmentsPayload(payload)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"commitments":[]}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalKeygenCommitmentsPayload(data)
+	})
+}
+
+func FuzzCGGMP21KeygenSharePayloadUnmarshal(f *testing.F) {
+	raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: scalarBytes(big.NewInt(1))})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"share":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalKeygenSharePayload(data)
+	})
+}
+
+func FuzzCGGMP21PresignRound3PayloadUnmarshal(f *testing.F) {
+	raw, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(big.NewInt(1))})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"delta":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalPresignRound3Payload(data)
+	})
+}
+
+func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
+	shares := secpKeygen(f, 2, 2)
+	sessionID := fuzzSessionID()
+	_, out1, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		f.Fatal(err)
+	}
+	s2, _, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	if err != nil {
+		f.Fatal(err)
+	}
+	round2, err := s2.HandlePresignMessage(out1[0])
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(round2[0].Payload)
+	f.Add([]byte(`{"delta":{},"sigma":{}}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalPresignRound2Payload(data)
+	})
+}
+
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	tb.Helper()
 	one := big.NewInt(1)
@@ -233,7 +297,11 @@ func cloneByteSlices(in [][]byte) [][]byte {
 }
 
 func rewriteKeyShareField(raw []byte, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, keyShareWireType)
+	return rewriteWireField(raw, keyShareWireType, tag, value)
+}
+
+func rewriteWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
+	version, fields, err := wire.Unmarshal(raw, wireType)
 	if err != nil {
 		return nil, err
 	}
@@ -241,8 +309,88 @@ func rewriteKeyShareField(raw []byte, tag uint16, value []byte) ([]byte, error) 
 		if fields[i].Tag == tag {
 			fields[i].Value = make([]byte, len(value))
 			copy(fields[i].Value, value)
-			return wire.Marshal(version, keyShareWireType, fields)
+			return wire.Marshal(version, wireType, fields)
 		}
 	}
-	return nil, fmt.Errorf("missing key share field %d", tag)
+	return nil, fmt.Errorf("missing wire field %d", tag)
+}
+
+func rewriteNestedWireField(raw []byte, outerType string, outerTag uint16, innerType string, innerTag uint16, value []byte) ([]byte, error) {
+	version, fields, err := wire.Unmarshal(raw, outerType)
+	if err != nil {
+		return nil, err
+	}
+	for i := range fields {
+		if fields[i].Tag != outerTag {
+			continue
+		}
+		inner, err := rewriteWireField(fields[i].Value, innerType, innerTag, value)
+		if err != nil {
+			return nil, err
+		}
+		fields[i].Value = inner
+		return wire.Marshal(version, outerType, fields)
+	}
+	return nil, fmt.Errorf("missing outer wire field %d", outerTag)
+}
+
+func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) ([]byte, error) {
+	original, err := unmarshalPresignRound1Payload(raw)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := unmarshalPresignRound1Payload(raw)
+	if err != nil {
+		return nil, err
+	}
+	mutate(&payload)
+	if !bytes.Equal(original.Gamma, payload.Gamma) {
+		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldGamma, payload.Gamma)
+	}
+	if !bytes.Equal(original.EncK, payload.EncK) {
+		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncK, payload.EncK)
+	}
+	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
+		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncKProof, payload.EncKProof)
+	}
+	if !bytes.Equal(original.EncKRangeProof, payload.EncKRangeProof) {
+		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncKRangeProof, payload.EncKRangeProof)
+	}
+	if !bytes.Equal(original.PaillierPublicKey, payload.PaillierPublicKey) {
+		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
+	}
+	return marshalPresignRound1Payload(payload)
+}
+
+func mutatePresignRound2Payload(raw []byte, mutate func(*presignRound2Payload)) ([]byte, error) {
+	original, err := unmarshalPresignRound2Payload(raw)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := unmarshalPresignRound2Payload(raw)
+	if err != nil {
+		return nil, err
+	}
+	mutate(&payload)
+	const mtaResponseWireType = "mta.response-message"
+	const (
+		mtaResponseFieldCiphertext uint16 = 1
+		mtaResponseFieldProof      uint16 = 2
+	)
+	if !bytes.Equal(original.Delta.Ciphertext, payload.Delta.Ciphertext) {
+		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Delta.Ciphertext)
+	}
+	if !bytes.Equal(original.Delta.Proof, payload.Delta.Proof) {
+		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldProof, payload.Delta.Proof)
+	}
+	if !bytes.Equal(original.Sigma.Ciphertext, payload.Sigma.Ciphertext) {
+		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Sigma.Ciphertext)
+	}
+	if !bytes.Equal(original.Sigma.Proof, payload.Sigma.Proof) {
+		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldProof, payload.Sigma.Proof)
+	}
+	if !bytes.Equal(original.Round1Echo, payload.Round1Echo) {
+		return rewriteWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldRound1Echo, payload.Round1Echo)
+	}
+	return marshalPresignRound2Payload(payload)
 }

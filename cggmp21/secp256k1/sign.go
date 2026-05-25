@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -165,7 +164,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, err
 	}
 	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
-	payload, err := json.Marshal(presignRound1Payload{
+	payload, err := marshalPresignRound1Payload(presignRound1Payload{
 		Gamma:             gammaComm,
 		EncK:              startMsg.Ciphertext,
 		EncKProof:         startMsg.EncProof,
@@ -231,8 +230,8 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		if _, ok := s.round1[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))
 		}
-		var p presignRound1Payload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalPresignRound1Payload(env.Payload)
+		if err != nil {
 			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 			return nil, protocolErrorWithEvidence(
 				tss.ErrCodeInvalidMessage,
@@ -263,8 +262,8 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		if _, ok := s.round2[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round2"))
 		}
-		var p presignRound2Payload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalPresignRound2Payload(env.Payload)
+		if err != nil {
 			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 			return nil, protocolErrorWithEvidence(
 				tss.ErrCodeInvalidMessage,
@@ -295,8 +294,8 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope,
 		if _, ok := s.deltas[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate delta share"))
 		}
-		var p presignRound3Payload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalPresignRound3Payload(env.Payload)
+		if err != nil {
 			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 			return nil, protocolErrorWithEvidence(
 				tss.ErrCodeInvalidMessage,
@@ -413,7 +412,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 		s.betaDelta[peer] = betaDelta
 		s.betaSigma[peer] = betaSigma
-		payload, err := json.Marshal(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp, Round1Echo: s.round1Echo()})
+		payload, err := marshalPresignRound2Payload(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp, Round1Echo: s.round1Echo()})
 		if err != nil {
 			return nil, err
 		}
@@ -467,7 +466,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	deltaShare.Mod(deltaShare, order)
 	chiShare.Mod(chiShare, order)
 	s.deltas[s.key.Party] = deltaShare
-	payload, err := json.Marshal(presignRound3Payload{Delta: scalarBytes(deltaShare)})
+	payload, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(deltaShare)})
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +644,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	rs := new(big.Int).Mul(littleR, chiShare)
 	partial.Add(partial, rs)
 	partial.Mod(partial, secp.Order())
-	payload, err := json.Marshal(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
+	payload, err := marshalSignPartialPayload(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -693,8 +692,8 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	if _, ok := s.partials[env.From]; ok {
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate sign partial"))
 	}
-	var p signPartialPayload
-	if err := json.Unmarshal(env.Payload, &p); err != nil {
+	p, err := unmarshalSignPartialPayload(env.Payload)
+	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -984,8 +983,8 @@ func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
 }
 
 func mustRound1(payload []byte) presignRound1Payload {
-	var p presignRound1Payload
-	if err := json.Unmarshal(payload, &p); err != nil {
+	p, err := unmarshalPresignRound1Payload(payload)
+	if err != nil {
 		panic(err)
 	}
 	return p

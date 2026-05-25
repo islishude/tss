@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"testing"
 
@@ -109,12 +108,7 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var payload keygenCommitmentsPayload
-	if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	payload.Commitments[0] = []byte{0x02}
-	mutated, err := json.Marshal(payload)
+	mutated, err := rewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, encodeBytesList([][]byte{{0x02}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -207,12 +201,7 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			var payload presignRound1Payload
-			if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
-				t.Fatal(err)
-			}
-			tc.mutate(&payload)
-			mutated, err := json.Marshal(payload)
+			mutated, err := mutatePresignRound1Payload(out2[0].Payload, tc.mutate)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -287,12 +276,7 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if len(round3From2) != 1 {
 		t.Fatalf("expected one round3 message, got %d", len(round3From2))
 	}
-	var payload presignRound3Payload
-	if err := json.Unmarshal(round3From2[0].Payload, &payload); err != nil {
-		t.Fatal(err)
-	}
-	payload.Delta = []byte{0}
-	mutated, err := json.Marshal(payload)
+	mutated, err := rewriteWireField(round3From2[0].Payload, presignRound3PayloadWireType, presignRound3PayloadFieldDelta, []byte{0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -336,12 +320,12 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	}
 
 	t.Run("transcript mismatch", func(t *testing.T) {
-		var payload signPartialPayload
-		if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
+		payload, err := unmarshalSignPartialPayload(out2[0].Payload)
+		if err != nil {
 			t.Fatal(err)
 		}
 		payload.PresignTranscript = make([]byte, sha256.Size)
-		mutated, err := json.Marshal(payload)
+		mutated, err := marshalSignPartialPayload(payload)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -356,12 +340,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var payload signPartialPayload
-		if err := json.Unmarshal(out2[0].Payload, &payload); err != nil {
-			t.Fatal(err)
-		}
-		payload.S = []byte{0}
-		mutated, err := json.Marshal(payload)
+		mutated, err := rewriteWireField(out2[0].Payload, signPartialPayloadWireType, signPartialPayloadFieldS, []byte{0})
 		if err != nil {
 			t.Fatal(err)
 		}

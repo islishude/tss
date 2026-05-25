@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -112,7 +111,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		},
 	}
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := json.Marshal(keygenCommitmentsPayload{
+	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
 		Commitments:       commitments,
 		PaillierPublicKey: paillierPubBytes,
 		PaillierProof:     modProofBytes,
@@ -127,7 +126,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := json.Marshal(keygenSharePayload{Share: scalarBytes(share)})
+		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: scalarBytes(share)})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -158,9 +157,17 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
 		}
-		var p keygenCommitmentsPayload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
+		if err != nil {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenCommitment,
+				"malformed keygen commitment payload",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+			)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, verificationErrorWithEvidence(
@@ -220,8 +227,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 		}
-		var p keygenSharePayload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalKeygenSharePayload(env.Payload)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		share, err := secp.ParseScalar(p.Share)

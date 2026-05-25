@@ -2,7 +2,7 @@ package secp256k1
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -73,21 +73,17 @@ func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 }
 
 func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
-	seed, err := json.Marshal(presignRound1Payload{
-		Gamma:             []byte{0x02},
-		EncK:              []byte{0x01},
-		EncKProof:         []byte(`{}`),
-		EncKRangeProof:    []byte(`{}`),
-		PaillierPublicKey: []byte(`{"n":"3","g":"4"}`),
-	})
+	share := secpKeygen(f, 1, 1)[1]
+	sessionID := fuzzSessionID()
+	_, out, err := StartPresign(share, sessionID, []tss.PartyID{1})
 	if err != nil {
 		f.Fatal(err)
 	}
-	f.Add(seed)
+	f.Add(out[0].Payload)
 	f.Add([]byte(`{"gamma":"AQ==","enc_k":"Ag=="}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		var payload presignRound1Payload
-		if err := json.Unmarshal(data, &payload); err != nil {
+		payload, err := unmarshalPresignRound1Payload(data)
+		if err != nil {
 			return
 		}
 		_, _ = secp.PointFromBytes(payload.Gamma)
@@ -99,8 +95,8 @@ func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 }
 
 func FuzzCGGMP21SignPartialDecode(f *testing.F) {
-	seed, err := json.Marshal(signPartialPayload{
-		S:                 []byte{0x01},
+	seed, err := marshalSignPartialPayload(signPartialPayload{
+		S:                 scalarBytes(big.NewInt(1)),
 		PresignTranscript: make([]byte, sha256.Size),
 	})
 	if err != nil {
@@ -109,8 +105,8 @@ func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 	f.Add(seed)
 	f.Add([]byte(`{"s":"AQ==","presign_transcript":"Ag=="}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		var payload signPartialPayload
-		if err := json.Unmarshal(data, &payload); err != nil {
+		payload, err := unmarshalSignPartialPayload(data)
+		if err != nil {
 			return
 		}
 		_, _ = secp.ParseScalar(payload.S)

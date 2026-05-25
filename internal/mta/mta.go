@@ -9,7 +9,26 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
+)
+
+const messageVersion = 1
+
+const (
+	startMessageWireType    = "mta.start-message"
+	responseMessageWireType = "mta.response-message"
+)
+
+const (
+	startMessageFieldCiphertext uint16 = iota + 1
+	startMessageFieldEncProof
+	startMessageFieldRangeProof
+)
+
+const (
+	responseMessageFieldCiphertext uint16 = iota + 1
+	responseMessageFieldProof
 )
 
 // StartMessage carries an encrypted multiplicand and its public proofs.
@@ -23,6 +42,99 @@ type StartMessage struct {
 type ResponseMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
 	Proof      []byte `json:"proof"`
+}
+
+// MarshalBinary encodes the MtA start message as an exact-field TLV record.
+func (m StartMessage) MarshalBinary() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
+		{Tag: startMessageFieldCiphertext, Value: m.Ciphertext},
+		{Tag: startMessageFieldEncProof, Value: m.EncProof},
+		{Tag: startMessageFieldRangeProof, Value: m.RangeProof},
+	})
+}
+
+// UnmarshalStartMessage decodes an exact-field TLV MtA start message.
+func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
+	version, fields, err := wire.Unmarshal(in, startMessageWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != messageVersion {
+		return nil, fmt.Errorf("unexpected MtA start message version %d", version)
+	}
+	if err := requireExactMessageTags(fields, startMessageFieldCiphertext, startMessageFieldEncProof, startMessageFieldRangeProof); err != nil {
+		return nil, err
+	}
+	msg := &StartMessage{
+		Ciphertext: mustMessageField(fields, startMessageFieldCiphertext),
+		EncProof:   mustMessageField(fields, startMessageFieldEncProof),
+		RangeProof: mustMessageField(fields, startMessageFieldRangeProof),
+	}
+	if err := msg.Validate(); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+// Validate checks the canonical proof records and ciphertext integer.
+func (m StartMessage) Validate() error {
+	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
+		return fmt.Errorf("invalid MtA start ciphertext: %w", err)
+	}
+	if _, err := zkpai.UnmarshalEncScalarProof(m.EncProof); err != nil {
+		return fmt.Errorf("invalid MtA encrypted scalar proof: %w", err)
+	}
+	if _, err := zkpai.UnmarshalEncRangeProof(m.RangeProof); err != nil {
+		return fmt.Errorf("invalid MtA range proof: %w", err)
+	}
+	return nil
+}
+
+// MarshalBinary encodes the MtA response message as an exact-field TLV record.
+func (m ResponseMessage) MarshalBinary() ([]byte, error) {
+	if err := m.Validate(); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(messageVersion, responseMessageWireType, []wire.Field{
+		{Tag: responseMessageFieldCiphertext, Value: m.Ciphertext},
+		{Tag: responseMessageFieldProof, Value: m.Proof},
+	})
+}
+
+// UnmarshalResponseMessage decodes an exact-field TLV MtA response message.
+func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
+	version, fields, err := wire.Unmarshal(in, responseMessageWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != messageVersion {
+		return nil, fmt.Errorf("unexpected MtA response message version %d", version)
+	}
+	if err := requireExactMessageTags(fields, responseMessageFieldCiphertext, responseMessageFieldProof); err != nil {
+		return nil, err
+	}
+	msg := &ResponseMessage{
+		Ciphertext: mustMessageField(fields, responseMessageFieldCiphertext),
+		Proof:      mustMessageField(fields, responseMessageFieldProof),
+	}
+	if err := msg.Validate(); err != nil {
+		return nil, err
+	}
+	return msg, nil
+}
+
+// Validate checks the canonical proof record and ciphertext integer.
+func (m ResponseMessage) Validate() error {
+	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
+		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
+	}
+	if _, err := zkpai.UnmarshalMTAResponseProof(m.Proof); err != nil {
+		return fmt.Errorf("invalid MtA response proof: %w", err)
+	}
+	return nil
 }
 
 // Start encrypts scalar a and proves it is a valid secp256k1 scalar.
@@ -137,4 +249,34 @@ func randomScalar(reader io.Reader) (*big.Int, error) {
 			return x, nil
 		}
 	}
+}
+
+func requireExactMessageTags(fields []wire.Field, tags ...uint16) error {
+	if len(fields) != len(tags) {
+		return fmt.Errorf("got %d fields, want %d", len(fields), len(tags))
+	}
+	for i, tag := range tags {
+		if fields[i].Tag != tag {
+			return fmt.Errorf("unexpected field tag %d at index %d", fields[i].Tag, i)
+		}
+	}
+	return nil
+}
+
+func mustMessageField(fields []wire.Field, tag uint16) []byte {
+	value, _ := wire.Require(fields, tag)
+	return value
+}
+
+func validatePositiveIntegerBytes(in []byte) error {
+	if len(in) == 0 {
+		return errors.New("empty integer")
+	}
+	if in[0] == 0 {
+		return errors.New("non-minimal integer encoding")
+	}
+	if new(big.Int).SetBytes(in).Sign() <= 0 {
+		return errors.New("integer must be positive")
+	}
+	return nil
 }
