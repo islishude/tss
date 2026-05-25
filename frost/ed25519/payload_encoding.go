@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/codec"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -28,7 +29,7 @@ const signPartialPayloadFieldZ uint16 = 1
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
 	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
-		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: encodeBytesList(p.Commitments)},
+		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: codec.EncodeBytesList(p.Commitments)},
 	})
 }
 
@@ -40,10 +41,10 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if version != tss.Version {
 		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
 	}
-	if err := requireExactTags(fields, keygenCommitmentsPayloadFieldCommitments); err != nil {
+	if err := codec.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	commitments, err := decodeBytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
+	commitments, err := codec.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
@@ -55,7 +56,7 @@ func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, keygenSharePayloadWireType, []wire.Field{
-		{Tag: keygenSharePayloadFieldShare, Value: bytesOrEmpty(p.Share)},
+		{Tag: keygenSharePayloadFieldShare, Value: codec.NonNilBytes(p.Share)},
 	})
 }
 
@@ -67,10 +68,10 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 	if version != tss.Version {
 		return keygenSharePayload{}, fmt.Errorf("unexpected keygen share payload version %d", version)
 	}
-	if err := requireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
+	if err := codec.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := mustWireField(fields, keygenSharePayloadFieldShare)
+	share := codec.MustField(fields, keygenSharePayloadFieldShare)
 	if _, err := edcurve.ScalarFromCanonical(share); err != nil {
 		return keygenSharePayload{}, err
 	}
@@ -85,8 +86,8 @@ func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, nonceCommitmentPayloadWireType, []wire.Field{
-		{Tag: nonceCommitmentPayloadFieldD, Value: bytesOrEmpty(p.D)},
-		{Tag: nonceCommitmentPayloadFieldE, Value: bytesOrEmpty(p.E)},
+		{Tag: nonceCommitmentPayloadFieldD, Value: codec.NonNilBytes(p.D)},
+		{Tag: nonceCommitmentPayloadFieldE, Value: codec.NonNilBytes(p.E)},
 	})
 }
 
@@ -98,12 +99,12 @@ func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
 	if version != tss.Version {
 		return nonceCommitment{}, fmt.Errorf("unexpected nonce commitment payload version %d", version)
 	}
-	if err := requireExactTags(fields, nonceCommitmentPayloadFieldD, nonceCommitmentPayloadFieldE); err != nil {
+	if err := codec.RequireExactTags(fields, nonceCommitmentPayloadFieldD, nonceCommitmentPayloadFieldE); err != nil {
 		return nonceCommitment{}, err
 	}
 	p := nonceCommitment{
-		D: mustWireField(fields, nonceCommitmentPayloadFieldD),
-		E: mustWireField(fields, nonceCommitmentPayloadFieldE),
+		D: codec.MustField(fields, nonceCommitmentPayloadFieldD),
+		E: codec.MustField(fields, nonceCommitmentPayloadFieldE),
 	}
 	if _, err := edcurve.PointFromBytes(p.D); err != nil {
 		return nonceCommitment{}, err
@@ -119,7 +120,7 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
-		{Tag: signPartialPayloadFieldZ, Value: bytesOrEmpty(p.Z)},
+		{Tag: signPartialPayloadFieldZ, Value: codec.NonNilBytes(p.Z)},
 	})
 }
 
@@ -131,10 +132,10 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if version != tss.Version {
 		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
 	}
-	if err := requireExactTags(fields, signPartialPayloadFieldZ); err != nil {
+	if err := codec.RequireExactTags(fields, signPartialPayloadFieldZ); err != nil {
 		return signPartialPayload{}, err
 	}
-	z := mustWireField(fields, signPartialPayloadFieldZ)
+	z := codec.MustField(fields, signPartialPayloadFieldZ)
 	if _, err := edcurve.ScalarFromCanonical(z); err != nil {
 		return signPartialPayload{}, err
 	}

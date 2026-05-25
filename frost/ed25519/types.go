@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/codec"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
@@ -84,7 +85,7 @@ func (k *KeyShare) Validate() error {
 	if k.Threshold <= 0 || k.Threshold > len(k.Parties) {
 		return errors.New("invalid threshold")
 	}
-	if err := validateStrictSortedParties(k.Parties); err != nil {
+	if err := codec.ValidateStrictSortedIDs(k.Parties); err != nil {
 		return err
 	}
 	if !tss.ContainsParty(k.Parties, k.Party) {

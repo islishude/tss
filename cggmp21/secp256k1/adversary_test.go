@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/codec"
 )
 
 type protocolHarness struct {
@@ -108,7 +109,7 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := rewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, encodeBytesList([][]byte{{0x02}}))
+	mutated, err := rewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, codec.EncodeBytesList([][]byte{{0x02}}))
 	if err != nil {
 		t.Fatal(err)
 	}

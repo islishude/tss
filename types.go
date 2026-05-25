@@ -3,13 +3,13 @@ package tss
 import (
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
 
+	"github.com/islishude/tss/internal/codec"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -187,15 +187,15 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	}
 	return wire.Marshal(Version, envelopeWireType, []wire.Field{
 		{Tag: envelopeFieldProtocol, Value: []byte(e.Protocol)},
-		{Tag: envelopeFieldVersion, Value: marshalUint16(e.Version)},
+		{Tag: envelopeFieldVersion, Value: codec.Uint16(e.Version)},
 		{Tag: envelopeFieldSessionID, Value: e.SessionID[:]},
 		{Tag: envelopeFieldRound, Value: []byte{e.Round}},
-		{Tag: envelopeFieldFrom, Value: marshalUint32(uint32(e.From))},
-		{Tag: envelopeFieldTo, Value: marshalUint32(uint32(e.To))},
+		{Tag: envelopeFieldFrom, Value: codec.Uint32(uint32(e.From))},
+		{Tag: envelopeFieldTo, Value: codec.Uint32(uint32(e.To))},
 		{Tag: envelopeFieldPayloadType, Value: []byte(e.PayloadType)},
-		{Tag: envelopeFieldPayload, Value: nonNilBytes(e.Payload)},
-		{Tag: envelopeFieldTranscriptHash, Value: nonNilBytes(e.TranscriptHash)},
-		{Tag: envelopeFieldConfidentialRequired, Value: marshalBool(e.ConfidentialRequired)},
+		{Tag: envelopeFieldPayload, Value: codec.NonNilBytes(e.Payload)},
+		{Tag: envelopeFieldTranscriptHash, Value: codec.NonNilBytes(e.TranscriptHash)},
+		{Tag: envelopeFieldConfidentialRequired, Value: codec.Bool(e.ConfidentialRequired)},
 	})
 }
 
@@ -216,7 +216,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	envVersion, err := unmarshalUint16(versionBytes)
+	envVersion, err := codec.DecodeUint16(versionBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope version field: %w", err)
 	}
@@ -242,7 +242,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	from, err := unmarshalUint32(fromBytes)
+	from, err := codec.DecodeUint32(fromBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope sender: %w", err)
 	}
@@ -250,7 +250,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	to, err := unmarshalUint32(toBytes)
+	to, err := codec.DecodeUint32(toBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope recipient: %w", err)
 	}
@@ -273,7 +273,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	confidential, err := unmarshalBool(confidentialBytes)
+	confidential, err := codec.DecodeBool(confidentialBytes)
 	if err != nil {
 		return err
 	}
@@ -308,8 +308,8 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	h.Write([]byte(e.Protocol))
 	h.Write([]byte{0, byte(e.Version >> 8), byte(e.Version), e.Round})
 	h.Write(e.SessionID[:])
-	writeUint32(h, uint32(e.From))
-	writeUint32(h, uint32(e.To))
+	codec.WriteUint32(h, uint32(e.From))
+	codec.WriteUint32(h, uint32(e.To))
 	h.Write([]byte(e.PayloadType))
 	h.Write([]byte{0})
 	h.Write(e.Payload)
@@ -382,62 +382,4 @@ func SortParties(parties []PartyID) []PartyID {
 	out := append([]PartyID(nil), parties...)
 	slices.Sort(out)
 	return out
-}
-
-func writeUint32(w io.Writer, v uint32) {
-	_, _ = w.Write([]byte{byte(v >> 24), byte(v >> 16), byte(v >> 8), byte(v)})
-}
-
-func marshalUint16(v uint16) []byte {
-	var out [2]byte
-	binary.BigEndian.PutUint16(out[:], v)
-	return out[:]
-}
-
-func marshalUint32(v uint32) []byte {
-	var out [4]byte
-	binary.BigEndian.PutUint32(out[:], v)
-	return out[:]
-}
-
-func unmarshalUint16(in []byte) (uint16, error) {
-	if len(in) != 2 {
-		return 0, errors.New("uint16 must be 2 bytes")
-	}
-	return binary.BigEndian.Uint16(in), nil
-}
-
-func unmarshalUint32(in []byte) (uint32, error) {
-	if len(in) != 4 {
-		return 0, errors.New("uint32 must be 4 bytes")
-	}
-	return binary.BigEndian.Uint32(in), nil
-}
-
-func marshalBool(v bool) []byte {
-	if v {
-		return []byte{1}
-	}
-	return []byte{0}
-}
-
-func unmarshalBool(in []byte) (bool, error) {
-	if len(in) != 1 {
-		return false, errors.New("bool must be 1 byte")
-	}
-	switch in[0] {
-	case 0:
-		return false, nil
-	case 1:
-		return true, nil
-	default:
-		return false, errors.New("bool must be 0 or 1")
-	}
-}
-
-func nonNilBytes(in []byte) []byte {
-	if in == nil {
-		return []byte{}
-	}
-	return in
 }
