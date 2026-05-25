@@ -45,13 +45,14 @@ canonical top-level records. Paillier proof payloads use the same strict TLV
 encoding as other binary records so presign and keygen proof bytes reject JSON
 fallback, trailing bytes, duplicate tags, and wrong proof type identifiers.
 
-## Migration Policy
+## Decoder Policy
 
-Default `UnmarshalBinary` methods do not auto-detect JSON or legacy encodings. CGGMP21 decoders do not accept old GG20 type identifiers. Legacy migration must use explicit helpers with names that make the unsafe boundary clear. Do not add automatic fallback to production decoders.
+Default `UnmarshalBinary` methods do not auto-detect JSON or any prior wire
+shape. CGGMP21 decoders require the expected type identifier and exact field
+set. Do not add automatic fallback or proof-conversion helpers to production
+decoders.
 
-Paillier proof decoders also do not accept the earlier nested JSON proof
-payloads. Shares or protocol fixtures carrying those old proof bytes should be
-migrated by the explicit `internal/zk/paillier.MigrateJSON*Proof` helpers rather
-than by `StartKeygen`, `StartPresign`, or `UnmarshalKeyShare`. See
-[`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the proof inventory,
-review gaps, and migration boundary.
+Paillier proof decoders also reject nested JSON proof payloads, wrong proof type
+identifiers, duplicate or unsorted fields, trailing bytes, non-minimal integers,
+and malformed curve points. See [`paillier-zk-proofs.md`](paillier-zk-proofs.md)
+for the proof inventory and review gaps.

@@ -171,39 +171,70 @@ func (k *KeyShare) Validate() error {
 			return fmt.Errorf("invalid verification share for %d: %w", vs.Party, err)
 		}
 	}
-	if len(k.PaillierPublicKeys) > 0 {
-		if len(k.PaillierPublicKeys) != len(k.Parties) {
-			return errors.New("paillier public key count must equal party count")
+	if len(k.PaillierPublicKey) == 0 {
+		return errors.New("missing paillier public key")
+	}
+	if len(k.PaillierPrivateKey) == 0 {
+		return errors.New("missing paillier private key")
+	}
+	if len(k.PaillierProof) == 0 {
+		return errors.New("missing paillier proof")
+	}
+	if len(k.PaillierPublicKeys) != len(k.Parties) {
+		return errors.New("paillier public key count must equal party count")
+	}
+	if len(k.ShareProof) == 0 {
+		return errors.New("missing share proof")
+	}
+	if len(k.KeygenTranscriptHash) == 0 {
+		return errors.New("missing keygen transcript hash")
+	}
+	pk, err := pai.UnmarshalPublicKey(k.PaillierPublicKey)
+	if err != nil {
+		return fmt.Errorf("invalid paillier public key: %w", err)
+	}
+	sk, err := pai.UnmarshalPrivateKey(k.PaillierPrivateKey)
+	if err != nil {
+		return fmt.Errorf("invalid paillier private key: %w", err)
+	}
+	pub, err := sk.PublicKey.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(pub, k.PaillierPublicKey) {
+		return errors.New("paillier public/private key mismatch")
+	}
+	modProof, err := zkpai.UnmarshalModulusProof(k.PaillierProof)
+	if err != nil {
+		return fmt.Errorf("invalid paillier proof: %w", err)
+	}
+	if !zkpai.VerifyModulus(k.KeygenTranscriptHash, pk, uint32(k.Party), modProof) {
+		return errors.New("invalid local paillier proof")
+	}
+	for i, item := range k.PaillierPublicKeys {
+		if item.Party != k.Parties[i] {
+			return errors.New("paillier public keys must follow party order")
 		}
-		for i, item := range k.PaillierPublicKeys {
-			if item.Party != k.Parties[i] {
-				return errors.New("paillier public keys must follow party order")
-			}
-			if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
-				return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
-			}
-			if _, err := pai.UnmarshalPublicKey(item.PublicKey); err != nil {
-				return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
-			}
+		if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
+			return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
+		}
+		if _, err := pai.UnmarshalPublicKey(item.PublicKey); err != nil {
+			return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
+		}
+		if _, err := zkpai.UnmarshalModulusProof(item.Proof); err != nil {
+			return fmt.Errorf("invalid paillier proof for party %d: %w", item.Party, err)
 		}
 	}
-	if len(k.PaillierPublicKey) > 0 {
-		if _, err := pai.UnmarshalPublicKey(k.PaillierPublicKey); err != nil {
-			return fmt.Errorf("invalid paillier public key: %w", err)
-		}
+	shareProof := new(schnorr.Proof)
+	if err := json.Unmarshal(k.ShareProof, shareProof); err != nil {
+		return fmt.Errorf("invalid share proof: %w", err)
 	}
-	if len(k.PaillierPrivateKey) > 0 {
-		sk, err := pai.UnmarshalPrivateKey(k.PaillierPrivateKey)
-		if err != nil {
-			return fmt.Errorf("invalid paillier private key: %w", err)
-		}
-		pub, err := sk.PublicKey.MarshalBinary()
-		if err != nil {
-			return err
-		}
-		if len(k.PaillierPublicKey) > 0 && !bytes.Equal(pub, k.PaillierPublicKey) {
-			return errors.New("paillier public/private key mismatch")
-		}
+	verificationShare, ok := k.verificationShare(k.Party)
+	if !ok {
+		return errors.New("missing local verification share")
+	}
+	if !schnorr.Verify(k.KeygenTranscriptHash, verificationShare, shareProof) {
+		return errors.New("invalid local share proof")
 	}
 	return nil
 }
@@ -228,34 +259,6 @@ func scalarBytes(x *big.Int) []byte {
 func (k *KeyShare) requireMPCMaterial() error {
 	if err := k.Validate(); err != nil {
 		return err
-	}
-	if len(k.PaillierPublicKey) == 0 || len(k.PaillierPrivateKey) == 0 || len(k.PaillierProof) == 0 || len(k.ShareProof) == 0 || len(k.KeygenTranscriptHash) == 0 {
-		return errors.New("secp256k1 key share is missing Paillier/ZK material; rerun keygen")
-	}
-	pk, err := k.paillierPublic()
-	if err != nil {
-		return err
-	}
-	if _, err := k.paillierPrivate(); err != nil {
-		return err
-	}
-	modProof, err := zkpai.UnmarshalModulusProof(k.PaillierProof)
-	if err != nil {
-		return err
-	}
-	if !zkpai.VerifyModulus(k.KeygenTranscriptHash, pk, uint32(k.Party), modProof) {
-		return errors.New("invalid local Paillier proof")
-	}
-	shareProof := new(schnorr.Proof)
-	if err := json.Unmarshal(k.ShareProof, shareProof); err != nil {
-		return fmt.Errorf("invalid share proof: %w", err)
-	}
-	verificationShare, ok := k.verificationShare(k.Party)
-	if !ok {
-		return errors.New("missing local verification share")
-	}
-	if !schnorr.Verify(k.KeygenTranscriptHash, verificationShare, shareProof) {
-		return errors.New("invalid local share proof")
 	}
 	for _, id := range k.Parties {
 		if _, err := k.paillierPublicFor(id); err != nil {

@@ -25,23 +25,13 @@ CGGMP21 proof set.
 | `EncRangeProof`    | The encrypted scalar response is paired with the secp256k1 order bound.                           | Same response as `EncScalarProof`.             | Bound, challenge, response, encrypted-scalar transcript hash.                                                             | Transcript linkage, response linkage, order bound, digest, challenge, response size cap.                         | The range shell is a consistency check and does not replace a reviewed range proof.      |
 | `MTAResponseProof` | An MtA response encrypts the responder product share plus beta and matches public commitments.    | Responder scalar, beta share, beta randomness. | Domain, public key, input ciphertext, response ciphertext, scalar commitment, beta commitment, cipher commitment, nonces. | Ciphertext validity, point decoding, transcript hash, Fiat-Shamir challenge, Paillier relation, curve relations. | Needs independent review for identifiable abort and complete CGGMP21 MtA proof coverage. |
 
-## Migration Boundary
+## Decoder Boundary
 
-Production proof decoders only accept TLV. They reject legacy JSON payloads,
-wrong proof type identifiers, duplicate or unsorted fields, trailing bytes,
-non-minimal integers, and malformed curve points.
-
-Legacy JSON conversion is intentionally explicit and offline-only:
-
-- `MigrateJSONModulusProof`
-- `MigrateJSONEncScalarProof`
-- `MigrateJSONEncRangeProof`
-- `MigrateJSONMTAResponseProof`
-
-The migration helpers decode strict JSON with unknown-field and trailing-data
-rejection, then re-encode through the canonical TLV marshaler. They do not add
-JSON fallback to `StartKeygen`, `StartPresign`, key-share decoding, presign
-decoding, or any proof `Unmarshal` function.
+Production proof decoders only accept TLV. They reject JSON payloads, wrong
+proof type identifiers, duplicate or unsorted fields, trailing bytes,
+non-minimal integers, and malformed curve points. There is no proof conversion
+helper in the production package; callers must regenerate unsupported proof
+bytes through the current keygen and presign flows.
 
 ## Blockers Before Production Use
 

@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -40,20 +41,20 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
-func TestCGGMP21RejectsOldGG20WireTypes(t *testing.T) {
-	oldKeyShare, err := wire.Marshal(tss.Version, "gg20.secp256k1.keyshare", nil)
+func TestCGGMP21RejectsWrongWireTypes(t *testing.T) {
+	wrongKeyShare, err := wire.Marshal(tss.Version, "wrong.secp256k1.keyshare", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalKeyShare(oldKeyShare); err == nil {
-		t.Fatal("old GG20 key share wire type accepted")
+	if _, err := UnmarshalKeyShare(wrongKeyShare); err == nil {
+		t.Fatal("wrong key share wire type accepted")
 	}
-	oldPresign, err := wire.Marshal(tss.Version, "gg20.secp256k1.presign", nil)
+	wrongPresign, err := wire.Marshal(tss.Version, "wrong.secp256k1.presign", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalPresign(oldPresign); err == nil {
-		t.Fatal("old GG20 presign wire type accepted")
+	if _, err := UnmarshalPresign(wrongPresign); err == nil {
+		t.Fatal("wrong presign wire type accepted")
 	}
 }
 
@@ -71,29 +72,34 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	}
 }
 
-func TestCGGMP21OldStyleKeyShareCannotPresign(t *testing.T) {
+func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
-	old := cloneKeyShare(shares[1])
-	old.PaillierPublicKey = nil
-	old.PaillierPrivateKey = nil
-	old.PaillierProof = nil
-	old.PaillierPublicKeys = nil
-	old.ShareProof = nil
-	old.KeygenTranscriptHash = nil
-	raw, err := old.MarshalBinary()
+	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := StartPresign(decoded, sessionID, []tss.PartyID{1, 2}); err == nil {
-		t.Fatal("old-style key share entered presign")
+
+	for _, tc := range []struct {
+		name  string
+		tag   uint16
+		value []byte
+	}{
+		{name: "paillier public key", tag: keyShareFieldPaillierPublicKey, value: []byte{}},
+		{name: "paillier private key", tag: keyShareFieldPaillierPrivateKey, value: []byte{}},
+		{name: "paillier proof", tag: keyShareFieldPaillierProof, value: []byte{}},
+		{name: "paillier public key set", tag: keyShareFieldPaillierPublicKeys, value: encodeUint32(0)},
+		{name: "share proof", tag: keyShareFieldShareProof, value: []byte{}},
+		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated, err := rewriteKeyShareField(raw, tc.tag, tc.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UnmarshalKeyShare(mutated); err == nil {
+				t.Fatalf("key share missing %s decoded", tc.name)
+			}
+		})
 	}
 }
 
@@ -141,7 +147,7 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 }
 
 func FuzzCGGMP21KeyShareUnmarshal(f *testing.F) {
-	share := minimalCGGMP21KeyShare(f)
+	share := secpKeygen(f, 1, 1)[1]
 	raw, err := share.MarshalBinary()
 	if err != nil {
 		f.Fatal(err)
@@ -164,26 +170,6 @@ func FuzzCGGMP21PresignUnmarshal(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = UnmarshalPresign(data)
 	})
-}
-
-func minimalCGGMP21KeyShare(tb testing.TB) *KeyShare {
-	tb.Helper()
-	secret := big.NewInt(1)
-	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secret))
-	if err != nil {
-		tb.Fatal(err)
-	}
-	return &KeyShare{
-		Version:            tss.Version,
-		Party:              1,
-		Threshold:          1,
-		Parties:            []tss.PartyID{1},
-		PublicKey:          publicKey,
-		Secret:             scalarBytes(secret),
-		GroupCommitments:   [][]byte{publicKey},
-		VerificationShares: []VerificationShare{{Party: 1, PublicKey: publicKey}},
-		SecurityNotice:     ExperimentalSecurityNotice,
-	}
 }
 
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
@@ -244,4 +230,19 @@ func cloneByteSlices(in [][]byte) [][]byte {
 		out[i] = append([]byte(nil), in[i]...)
 	}
 	return out
+}
+
+func rewriteKeyShareField(raw []byte, tag uint16, value []byte) ([]byte, error) {
+	version, fields, err := wire.Unmarshal(raw, keyShareWireType)
+	if err != nil {
+		return nil, err
+	}
+	for i := range fields {
+		if fields[i].Tag == tag {
+			fields[i].Value = make([]byte, len(value))
+			copy(fields[i].Value, value)
+			return wire.Marshal(version, keyShareWireType, fields)
+		}
+	}
+	return nil, fmt.Errorf("missing key share field %d", tag)
 }

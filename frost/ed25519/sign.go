@@ -160,7 +160,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 	}
 }
 
-// Signature returns the completed RFC 8032-compatible Ed25519 signature.
+// Signature returns the completed RFC 8032 Ed25519 signature.
 func (s *SignSession) Signature() ([]byte, bool) {
 	if s == nil || !s.completed {
 		return nil, false

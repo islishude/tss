@@ -22,7 +22,7 @@ CGGMP21 key shares include Paillier private material, proof data, and optional H
 
 ## Signing Lifecycle
 
-FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature compatible with `crypto/ed25519.Verify`.
+FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature accepted by `crypto/ed25519.Verify`.
 
 CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `StartSignDigest` marks a presign consumed before producing any outbound online signing message. `StartSignDigestWithOptions` can apply a caller-provided additive public-key shift during online signing.
 

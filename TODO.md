@@ -7,7 +7,6 @@ Current status from local inspection:
 
 - `go test ./...` passes.
 - `cggmp21/secp256k1` is still explicitly experimental.
-- `internal/zk/paillier/migration.go` exposes JSON proof migration helpers.
 - Protocol payloads still use JSON in multiple state machines.
 - `docs/paillier-zk-proofs.md` states that the Paillier/ZK proof layer is not
   production-audited.
@@ -23,9 +22,9 @@ References:
   or any other language.
 - It is acceptable to use papers, RFCs, standards, and public test vectors or
   test scenarios.
-- Do not preserve compatibility paths while moving toward the production target.
-  Existing compatibility and migration code must be removed rather than
-  supported.
+- Do not preserve prior-format fallback paths while moving toward the
+  production target. Existing conversion code for retired wire shapes must be
+  removed rather than supported.
 - CGGMP21 applies only to ECDSA over secp256k1. Ed25519 must stay on the
   FROST-style EdDSA path.
 - Do not remove the experimental warning from `cggmp21/secp256k1` until the full
@@ -82,40 +81,6 @@ review.
 - `go test -race ./...` and `golangci-lint run` pass.
 - The experimental warning remains until independent review is complete.
 
-## P0: Remove All Compatibility and Migration Code
-
-### Goal
-
-Move to a production target with no legacy migration, JSON proof conversion, or
-old wire-shape compatibility paths.
-
-### Detailed Process
-
-1. Delete `internal/zk/paillier/migration.go`.
-2. Delete tests that exercise JSON proof migration helpers.
-3. Remove all public or internal references to JSON proof conversion helpers,
-   including `MigrateJSONModulusProof`, `MigrateJSONEncScalarProof`,
-   `MigrateJSONEncRangeProof`, and `MigrateJSONMTAResponseProof`.
-4. Update docs so they no longer describe migration boundaries, legacy payloads,
-   old proof bytes, or compatibility policy as a supported path.
-5. Tighten CGGMP21 `KeyShare.Validate` and key-share decoding so a share missing
-   Paillier public key, Paillier private key, Paillier proof, Paillier public-key
-   set, share proof, or keygen transcript hash is rejected immediately.
-6. Remove the current "old-style key share can decode but cannot presign" path.
-   Invalid production shares should fail at decode or validation time.
-7. Keep tests that prove unknown or wrong wire type identifiers fail closed, but
-   do not name or support old protocols as compatibility targets.
-
-### Acceptance Criteria
-
-- `rg "MigrateJSON|migration|legacy|old-style|compat"` has no hits in
-  production code or production docs, except this TODO entry until the task is
-  completed.
-- There is no helper that converts JSON proof payloads into TLV proof payloads.
-- CGGMP21 key-share decoding rejects incomplete production material directly.
-- JSON proof bytes cannot be accepted by any proof decoder or migration helper.
-- `go test -race ./...` and `golangci-lint run` pass.
-
 ## P0: Convert Protocol Payloads and Nested Key Material to Strict TLV
 
 ### Goal
@@ -144,7 +109,7 @@ exact-field TLV encodings.
 7. Replace tests that mutate JSON payload structs with tests that mutate TLV
    fields and raw bytes.
 8. Update `docs/wire.md` with the complete wire inventory and the exact
-   production rule: no automatic fallback and no migration helper.
+   production rule: no automatic fallback and no proof-conversion helper.
 
 ### Acceptance Criteria
 
@@ -219,7 +184,7 @@ traceable to RFC 9591 and reviewable as FROST Ed25519.
 
 ### Acceptance Criteria
 
-- Produced signatures remain compatible with `crypto/ed25519.Verify`.
+- Produced signatures are accepted by `crypto/ed25519.Verify`.
 - RFC-derived vectors or scenarios pass.
 - `1-of-1`, `2-of-3`, and `3-of-5` FROST signing scenarios pass.
 - All protocol equations and domain-separation choices have useful comments and
@@ -339,15 +304,13 @@ claims are communicated.
    status.
 3. Document the external cryptographic audit scope for CGGMP21, Paillier/ZK,
    identifiable abort, FROST/RFC 9591 conformance, and wire-format canonicality.
-4. Remove compatibility and migration commitments from production docs.
-5. Keep `ExperimentalSecurityNotice` until the final CGGMP21 implementation and
+4. Keep `ExperimentalSecurityNotice` until the final CGGMP21 implementation and
    audit results justify removing it.
-6. Ensure every exported identifier has a Go doc comment starting with the
+5. Ensure every exported identifier has a Go doc comment starting with the
    identifier name.
 
 ### Acceptance Criteria
 
-- Production docs contain no migration or compatibility promise.
 - The README accurately distinguishes reviewed production behavior from
   unsupported or unaudited behavior.
 - Audit scope and unresolved risks are explicit.

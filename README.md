@@ -47,7 +47,7 @@ The secp256k1 package exposes `secp256k1.VerifyBlameEvidence` for validating CGG
 
 `tss.Envelope`, CGGMP21/FROST key shares, and CGGMP21 presign records use a strict TLV binary format through `MarshalBinary` / `Unmarshal...`. The default decoders reject JSON fallback, trailing bytes, duplicate or unsorted wire tags, malformed curve/scalar encodings, and non-canonical nested Paillier keys.
 
-For CGGMP21, old-style key shares without Paillier/ZK material can still be represented as canonical key-share records, but `StartPresign` rejects them and requires rerunning keygen. Old GG20 wire type identifiers are not accepted.
+CGGMP21 key-share decoders require complete Paillier/ZK keygen material, including the local Paillier keypair, modulus proof, full public Paillier-key set, share proof, and keygen transcript hash. Shares missing that material are rejected during decode or validation. Unexpected wire type identifiers are not accepted.
 
 ## Basic Ed25519 Flow
 
@@ -103,7 +103,7 @@ The design notes are kept under `docs/` and should be updated with protocol or w
 
 - `docs/architecture.md`: package boundaries and state-machine responsibilities.
 - `docs/security.md`: caller responsibilities, threat model limits, and audit status.
-- `docs/wire.md`: canonical TLV encoding rules and compatibility policy.
+- `docs/wire.md`: canonical TLV encoding rules and decoder policy.
 - `docs/cggmp21-secp256k1.md`: CGGMP21-style secp256k1 equations and message flow.
 - `docs/frost-ed25519.md`: FROST Ed25519 DKG/signing equations and message flow.
 
