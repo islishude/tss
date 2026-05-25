@@ -15,6 +15,10 @@ Signing has two rounds:
 1. Each signer broadcasts hiding and binding nonce commitments.
 2. After all commitments are known, each signer computes the binding factor, group nonce, Ed25519 challenge, and local partial signature.
 
+Keygen and signing payloads are encoded as exact-field TLV records. Decoders
+reject JSON fallback, wrong payload type identifiers, duplicate or unsorted
+fields, trailing bytes, malformed points, and non-canonical scalar encodings.
+
 The local partial equation is:
 
 ```text

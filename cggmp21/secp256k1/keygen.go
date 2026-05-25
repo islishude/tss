@@ -322,7 +322,7 @@ func (s *KeygenSession) tryComplete() error {
 	if !bytes.Equal(proofPublic, localVerificationShare) {
 		return errors.New("local share proof public key mismatch")
 	}
-	shareProofBytes, err := json.Marshal(shareProof)
+	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
 		return err
 	}

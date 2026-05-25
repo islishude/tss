@@ -2,7 +2,6 @@ package ed25519
 
 import (
 	stded25519 "crypto/ed25519"
-	"encoding/json"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -106,12 +105,12 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 	if len(round2) == 0 {
 		t.Fatal("expected partial signatures")
 	}
-	var payload signPartialPayload
-	if err := json.Unmarshal(round2[0].Payload, &payload); err != nil {
+	payload, err := unmarshalSignPartialPayload(round2[0].Payload)
+	if err != nil {
 		t.Fatal(err)
 	}
 	payload.Z[0] ^= 1
-	mutated, err := json.Marshal(payload)
+	mutated, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}

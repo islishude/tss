@@ -10,7 +10,8 @@ Each party also generates Paillier material and a modulus proof. The proof is
 encoded as canonical binary TLV and bound to the keygen transcript. When
 `KeygenOptions.EnableHD` is set, parties contribute 32-byte chain-code shares
 that are XOR-aggregated into the key share. The group public key is the sum of
-degree-zero commitments.
+degree-zero commitments. Local Paillier keys and secp256k1 Schnorr share
+proofs are also persisted as canonical TLV records inside the key share.
 
 ## Presign
 

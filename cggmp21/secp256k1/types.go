@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"bytes"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -225,8 +224,8 @@ func (k *KeyShare) Validate() error {
 			return fmt.Errorf("invalid paillier proof for party %d: %w", item.Party, err)
 		}
 	}
-	shareProof := new(schnorr.Proof)
-	if err := json.Unmarshal(k.ShareProof, shareProof); err != nil {
+	shareProof, err := schnorr.UnmarshalProof(k.ShareProof)
+	if err != nil {
 		return fmt.Errorf("invalid share proof: %w", err)
 	}
 	verificationShare, ok := k.verificationShare(k.Party)

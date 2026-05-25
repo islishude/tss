@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -59,7 +58,7 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := json.Marshal(keygenCommitmentsPayload{Commitments: commitments})
+	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -73,7 +72,7 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 		if err != nil {
 			return nil, nil, err
 		}
-		payload, err := json.Marshal(keygenSharePayload{Share: shareBytes})
+		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: shareBytes})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -106,8 +105,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
 		}
-		var p keygenCommitmentsPayload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
@@ -118,8 +117,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 		}
-		var p keygenSharePayload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalKeygenSharePayload(env.Payload)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		scalar, err := edcurve.ScalarFromCanonical(p.Share)

@@ -2,7 +2,6 @@ package ed25519
 
 import (
 	stded25519 "crypto/ed25519"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"math/big"
@@ -71,7 +70,7 @@ func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, me
 	if err != nil {
 		return nil, nil, err
 	}
-	payload, err := json.Marshal(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes()})
+	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes()})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -126,14 +125,8 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 		if _, ok := s.commitments[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate nonce commitment"))
 		}
-		var p nonceCommitment
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if _, err := edcurve.PointFromBytes(p.D); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if _, err := edcurve.PointFromBytes(p.E); err != nil {
+		p, err := unmarshalNonceCommitmentPayload(env.Payload)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		s.commitments[env.From] = p
@@ -145,8 +138,8 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error
 		if _, ok := s.partials[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate partial signature"))
 		}
-		var p signPartialPayload
-		if err := json.Unmarshal(env.Payload, &p); err != nil {
+		p, err := unmarshalSignPartialPayload(env.Payload)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		scalar, err := edcurve.ScalarFromCanonical(p.Z)
@@ -199,7 +192,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	payload, err := json.Marshal(signPartialPayload{Z: zBytes})
+	payload, err := marshalSignPartialPayload(signPartialPayload{Z: zBytes})
 	if err != nil {
 		return nil, err
 	}

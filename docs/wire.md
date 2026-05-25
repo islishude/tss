@@ -35,15 +35,23 @@ These rules ensure one semantic record has one binary representation. This matte
 - `cggmp21/secp256k1.KeyShare`
 - `cggmp21/secp256k1.Presign`
 - `frost/ed25519.KeyShare`
+- `frost/ed25519` keygen commitments payload
+- `frost/ed25519` keygen share payload
+- `frost/ed25519` signing nonce commitment payload
+- `frost/ed25519` signing partial payload
+- `internal/paillier.PublicKey`
+- `internal/paillier.PrivateKey`
 - `internal/zk/paillier.ModulusProof`
 - `internal/zk/paillier.EncScalarProof`
 - `internal/zk/paillier.EncRangeProof`
 - `internal/zk/paillier.MTAResponseProof`
+- `internal/zk/schnorr.Proof`
 
-Paillier public and private keys still use deterministic JSON inside the
-canonical top-level records. Paillier proof payloads use the same strict TLV
-encoding as other binary records so presign and keygen proof bytes reject JSON
-fallback, trailing bytes, duplicate tags, and wrong proof type identifiers.
+Paillier public keys, Paillier private keys, Paillier proof payloads, and
+Schnorr share proofs all use the same strict TLV encoding as other binary
+records. Keygen and presign proof bytes reject JSON fallback, trailing bytes,
+duplicate tags, wrong type identifiers, malformed curve points, and
+non-minimal integer encodings where integers appear.
 
 ## Decoder Policy
 

@@ -2,9 +2,11 @@ package ed25519
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
 func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
@@ -60,6 +62,59 @@ func FuzzFROSTKeyShareUnmarshal(f *testing.F) {
 	f.Add([]byte(`{"version":1}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		_, _ = UnmarshalKeyShare(data)
+	})
+}
+
+func FuzzFROSTKeygenCommitmentsPayloadUnmarshal(f *testing.F) {
+	raw, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
+		Commitments: [][]byte{seedFROSTPoint(f)},
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"commitments":[]}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalKeygenCommitmentsPayload(data)
+	})
+}
+
+func FuzzFROSTKeygenSharePayloadUnmarshal(f *testing.F) {
+	raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: seedFROSTScalar(f)})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"share":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalKeygenSharePayload(data)
+	})
+}
+
+func FuzzFROSTNonceCommitmentPayloadUnmarshal(f *testing.F) {
+	raw, err := marshalNonceCommitmentPayload(nonceCommitment{
+		D: seedFROSTPoint(f),
+		E: seedFROSTPoint(f),
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"d":"x","e":"y"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalNonceCommitmentPayload(data)
+	})
+}
+
+func FuzzFROSTSignPartialPayloadUnmarshal(f *testing.F) {
+	raw, err := marshalSignPartialPayload(signPartialPayload{Z: seedFROSTScalar(f)})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"z":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		_, _ = unmarshalSignPartialPayload(data)
 	})
 }
 
@@ -124,6 +179,24 @@ func cloneFROSTByteSlices(in [][]byte) [][]byte {
 	out := make([][]byte, len(in))
 	for i := range in {
 		out[i] = append([]byte(nil), in[i]...)
+	}
+	return out
+}
+
+func seedFROSTPoint(tb testing.TB) []byte {
+	tb.Helper()
+	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return point.Bytes()
+}
+
+func seedFROSTScalar(tb testing.TB) []byte {
+	tb.Helper()
+	out, err := scalarBytes(big.NewInt(1))
+	if err != nil {
+		tb.Fatal(err)
 	}
 	return out
 }

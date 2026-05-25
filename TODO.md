@@ -91,24 +91,18 @@ exact-field TLV encodings.
 
 ### Detailed Process
 
-1. Define fixed TLV type ids and exact field sets for all FROST payloads:
-   keygen commitments, keygen shares, signing nonce commitments, and signing
-   partials.
-2. Define fixed TLV type ids and exact field sets for all CGGMP21 payloads:
+1. Define fixed TLV type ids and exact field sets for all CGGMP21 payloads:
    keygen commitments, keygen shares, presign round 1, presign round 2, presign
    round 3, and online signing partials.
-3. Convert `internal/mta` start and response messages to canonical binary
+2. Convert `internal/mta` start and response messages to canonical binary
    payloads. Their nested proof bytes must remain exact proof records, not ad hoc
    byte blobs with ambiguous shape.
-4. Convert Paillier public and private key encodings away from deterministic JSON
-   and into strict TLV records with canonical integer encoding.
-5. Convert Schnorr share proof encoding away from JSON and into strict TLV.
-6. For every decoder, require exact field sets, strictly increasing tags, no
+3. For every decoder, require exact field sets, strictly increasing tags, no
    duplicate tags, no trailing bytes, canonical scalar encodings, canonical point
    encodings, and minimal positive integer encodings.
-7. Replace tests that mutate JSON payload structs with tests that mutate TLV
+4. Replace tests that mutate JSON payload structs with tests that mutate TLV
    fields and raw bytes.
-8. Update `docs/wire.md` with the complete wire inventory and the exact
+5. Update `docs/wire.md` with the complete wire inventory and the exact
    production rule: no automatic fallback and no proof-conversion helper.
 
 ### Acceptance Criteria

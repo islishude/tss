@@ -1,13 +1,13 @@
 package paillier
 
 import (
-	"bytes"
 	"crypto/rand"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
+
+	"github.com/islishude/tss/internal/wire"
 )
 
 // DefaultMinModulusBits is the minimum modulus size accepted outside tests.
@@ -31,18 +31,26 @@ type PrivateKey struct {
 	Q      *big.Int
 }
 
-type publicKeyWire struct {
-	N string `json:"n"`
-	G string `json:"g"`
-}
+const paillierWireVersion = 1
 
-type privateKeyWire struct {
-	PublicKey publicKeyWire `json:"public_key"`
-	Lambda    string        `json:"lambda"`
-	Mu        string        `json:"mu"`
-	P         string        `json:"p"`
-	Q         string        `json:"q"`
-}
+const (
+	publicKeyWireType  = "paillier.public-key"
+	privateKeyWireType = "paillier.private-key"
+)
+
+const (
+	publicKeyFieldN uint16 = iota + 1
+	publicKeyFieldG
+)
+
+const (
+	privateKeyFieldN uint16 = iota + 1
+	privateKeyFieldG
+	privateKeyFieldLambda
+	privateKeyFieldMu
+	privateKeyFieldP
+	privateKeyFieldQ
+)
 
 // GenerateKey creates a Paillier key using the g=n+1 variant.
 func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
@@ -124,28 +132,79 @@ func (pk PublicKey) ValidateBits(minBits int) error {
 	return nil
 }
 
-// MarshalBinary returns deterministic public-key JSON used inside transcripts.
+// Validate checks both public Paillier parameters and private CRT material.
+func (sk PrivateKey) Validate() error {
+	if err := sk.PublicKey.Validate(); err != nil {
+		return err
+	}
+	for name, value := range map[string]*big.Int{
+		"lambda": sk.Lambda,
+		"mu":     sk.Mu,
+		"p":      sk.P,
+		"q":      sk.Q,
+	} {
+		if value == nil || value.Sign() <= 0 {
+			return fmt.Errorf("invalid %s", name)
+		}
+	}
+	if sk.P.Cmp(sk.Q) == 0 {
+		return errors.New("paillier factors must differ")
+	}
+	if new(big.Int).Mul(sk.P, sk.Q).Cmp(sk.N) != 0 {
+		return errors.New("paillier factors do not multiply to modulus")
+	}
+	if !sk.P.ProbablyPrime(64) || !sk.Q.ProbablyPrime(64) {
+		return errors.New("paillier factors must be prime")
+	}
+	wantLambda := lcm(new(big.Int).Sub(sk.P, big.NewInt(1)), new(big.Int).Sub(sk.Q, big.NewInt(1)))
+	if sk.Lambda.Cmp(wantLambda) != 0 {
+		return errors.New("invalid paillier lambda")
+	}
+	u := new(big.Int).Exp(sk.G, sk.Lambda, sk.NSquared)
+	lu := L(u, sk.N)
+	wantMu := new(big.Int).ModInverse(lu, sk.N)
+	if wantMu == nil || sk.Mu.Cmp(wantMu) != 0 {
+		return errors.New("invalid paillier mu")
+	}
+	return nil
+}
+
+// MarshalBinary returns a deterministic TLV public-key record.
 func (pk PublicKey) MarshalBinary() ([]byte, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(publicKeyWire{
-		N: pk.N.Text(16),
-		G: pk.G.Text(16),
+	n, err := encodePositiveInt(pk.N)
+	if err != nil {
+		return nil, err
+	}
+	g, err := encodePositiveInt(pk.G)
+	if err != nil {
+		return nil, err
+	}
+	return wire.Marshal(paillierWireVersion, publicKeyWireType, []wire.Field{
+		{Tag: publicKeyFieldN, Value: n},
+		{Tag: publicKeyFieldG, Value: g},
 	})
 }
 
 // UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
-	var w publicKeyWire
-	if err := json.Unmarshal(in, &w); err != nil {
+	version, fields, err := wire.Unmarshal(in, publicKeyWireType)
+	if err != nil {
 		return nil, err
 	}
-	n, err := parseHex(w.N)
+	if version != paillierWireVersion {
+		return nil, fmt.Errorf("unexpected Paillier public-key version %d", version)
+	}
+	if err := requireExactKeyTags(fields, publicKeyFieldN, publicKeyFieldG); err != nil {
+		return nil, err
+	}
+	n, err := decodePositiveIntField(fields, publicKeyFieldN)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := parseHex(w.G)
+	g, err := decodePositiveIntField(fields, publicKeyFieldG)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
@@ -157,60 +216,81 @@ func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
 	}
-	canonical, err := pk.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(in, canonical) {
-		return nil, errors.New("non-canonical public key encoding")
-	}
 	return pk, nil
 }
 
-// MarshalBinary returns deterministic private-key JSON for local key shares.
+// MarshalBinary returns a deterministic TLV private-key record.
 func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
 	}
-	return json.Marshal(privateKeyWire{
-		PublicKey: publicKeyWire{
-			N: sk.N.Text(16),
-			G: sk.G.Text(16),
-		},
-		Lambda: sk.Lambda.Text(16),
-		Mu:     sk.Mu.Text(16),
-		P:      sk.P.Text(16),
-		Q:      sk.Q.Text(16),
+	n, err := encodePositiveInt(sk.N)
+	if err != nil {
+		return nil, err
+	}
+	g, err := encodePositiveInt(sk.G)
+	if err != nil {
+		return nil, err
+	}
+	lambda, err := encodePositiveInt(sk.Lambda)
+	if err != nil {
+		return nil, err
+	}
+	mu, err := encodePositiveInt(sk.Mu)
+	if err != nil {
+		return nil, err
+	}
+	p, err := encodePositiveInt(sk.P)
+	if err != nil {
+		return nil, err
+	}
+	q, err := encodePositiveInt(sk.Q)
+	if err != nil {
+		return nil, err
+	}
+	return wire.Marshal(paillierWireVersion, privateKeyWireType, []wire.Field{
+		{Tag: privateKeyFieldN, Value: n},
+		{Tag: privateKeyFieldG, Value: g},
+		{Tag: privateKeyFieldLambda, Value: lambda},
+		{Tag: privateKeyFieldMu, Value: mu},
+		{Tag: privateKeyFieldP, Value: p},
+		{Tag: privateKeyFieldQ, Value: q},
 	})
 }
 
 // UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
 func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
-	var w privateKeyWire
-	if err := json.Unmarshal(in, &w); err != nil {
+	version, fields, err := wire.Unmarshal(in, privateKeyWireType)
+	if err != nil {
 		return nil, err
 	}
-	n, err := parseHex(w.PublicKey.N)
+	if version != paillierWireVersion {
+		return nil, fmt.Errorf("unexpected Paillier private-key version %d", version)
+	}
+	if err := requireExactKeyTags(fields, privateKeyFieldN, privateKeyFieldG, privateKeyFieldLambda, privateKeyFieldMu, privateKeyFieldP, privateKeyFieldQ); err != nil {
+		return nil, err
+	}
+	n, err := decodePositiveIntField(fields, privateKeyFieldN)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := parseHex(w.PublicKey.G)
+	g, err := decodePositiveIntField(fields, privateKeyFieldG)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
-	lambda, err := parseHex(w.Lambda)
+	lambda, err := decodePositiveIntField(fields, privateKeyFieldLambda)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lambda: %w", err)
 	}
-	mu, err := parseHex(w.Mu)
+	mu, err := decodePositiveIntField(fields, privateKeyFieldMu)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mu: %w", err)
 	}
-	p, err := parseHex(w.P)
+	p, err := decodePositiveIntField(fields, privateKeyFieldP)
 	if err != nil {
 		return nil, fmt.Errorf("invalid p: %w", err)
 	}
-	q, err := parseHex(w.Q)
+	q, err := decodePositiveIntField(fields, privateKeyFieldQ)
 	if err != nil {
 		return nil, fmt.Errorf("invalid q: %w", err)
 	}
@@ -227,13 +307,6 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	}
 	if err := sk.Validate(); err != nil {
 		return nil, err
-	}
-	canonical, err := sk.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	if !bytes.Equal(in, canonical) {
-		return nil, errors.New("non-canonical private key encoding")
 	}
 	return sk, nil
 }
@@ -389,14 +462,37 @@ func mod(x, m *big.Int) *big.Int {
 	return out
 }
 
-func parseHex(s string) (*big.Int, error) {
-	if s == "" {
+func requireExactKeyTags(fields []wire.Field, tags ...uint16) error {
+	if len(fields) != len(tags) {
+		return fmt.Errorf("got %d fields, want %d", len(fields), len(tags))
+	}
+	for i, tag := range tags {
+		if fields[i].Tag != tag {
+			return fmt.Errorf("unexpected field tag %d at index %d", fields[i].Tag, i)
+		}
+	}
+	return nil
+}
+
+func encodePositiveInt(x *big.Int) ([]byte, error) {
+	if x == nil || x.Sign() <= 0 {
+		return nil, errors.New("integer must be positive")
+	}
+	return x.Bytes(), nil
+}
+
+func decodePositiveIntField(fields []wire.Field, tag uint16) (*big.Int, error) {
+	raw, err := wire.Require(fields, tag)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) == 0 {
 		return nil, errors.New("empty integer")
 	}
-	x, ok := new(big.Int).SetString(s, 16)
-	if !ok {
-		return nil, errors.New("invalid hex integer")
+	if raw[0] == 0 {
+		return nil, errors.New("non-minimal integer encoding")
 	}
+	x := new(big.Int).SetBytes(raw)
 	if x.Sign() <= 0 {
 		return nil, errors.New("integer must be positive")
 	}
