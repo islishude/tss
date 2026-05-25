@@ -2,6 +2,7 @@ package paillier
 
 import (
 	"bytes"
+	"encoding/json"
 	"fmt"
 	"math/big"
 	"testing"
@@ -91,6 +92,36 @@ func TestMarshalRoundTrip(t *testing.T) {
 	}
 	if priv.N.Cmp(sk.N) != 0 || priv.Lambda.Cmp(sk.Lambda) != 0 {
 		t.Fatal("private key mismatch after round trip")
+	}
+}
+
+func TestPrivateKeyJSONAndDestroy(t *testing.T) {
+	restore := SetMinimumModulusBitsForTesting(512)
+	defer restore()
+	sk, err := GenerateKey(nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := json.Marshal(sk); err == nil {
+		t.Fatal("pointer private key JSON encoded")
+	}
+	if _, err := json.Marshal(*sk); err == nil {
+		t.Fatal("value private key JSON encoded")
+	}
+	n := new(big.Int).Set(sk.N)
+	sk.Destroy()
+	for name, value := range map[string]*big.Int{
+		"lambda": sk.Lambda,
+		"mu":     sk.Mu,
+		"p":      sk.P,
+		"q":      sk.Q,
+	} {
+		if value == nil || value.Sign() != 0 {
+			t.Fatalf("%s was not cleared", name)
+		}
+	}
+	if sk.N.Cmp(n) != 0 {
+		t.Fatal("public modulus changed")
 	}
 }
 

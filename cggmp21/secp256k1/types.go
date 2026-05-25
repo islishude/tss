@@ -46,13 +46,13 @@ type PaillierPublicShare struct {
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 type KeyShare struct {
-	Version              uint16                `json:"version"`
-	Party                tss.PartyID           `json:"party"`
-	Threshold            int                   `json:"threshold"`
-	Parties              []tss.PartyID         `json:"parties"`
-	PublicKey            []byte                `json:"public_key"`
-	ChainCode            []byte                `json:"chain_code,omitempty"`
-	Secret               []byte                `json:"secret"`
+	Version              uint16        `json:"version"`
+	Party                tss.PartyID   `json:"party"`
+	Threshold            int           `json:"threshold"`
+	Parties              []tss.PartyID `json:"parties"`
+	PublicKey            []byte        `json:"public_key"`
+	ChainCode            []byte        `json:"chain_code,omitempty"`
+	Secret               []byte
 	GroupCommitments     [][]byte              `json:"group_commitments"`
 	VerificationShares   []VerificationShare   `json:"verification_shares"`
 	PaillierPublicKey    []byte                `json:"paillier_public_key,omitempty"`
@@ -110,6 +110,11 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 // MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
+}
+
+// MarshalJSON rejects default JSON encoding of secret-bearing key shares.
+func (k KeyShare) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("cggmp21 secp256k1 key share contains secret material; use MarshalBinary")
 }
 
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record.
@@ -243,6 +248,7 @@ func (k *KeyShare) Destroy() {
 	if k == nil {
 		return
 	}
+	clear(k.ChainCode)
 	clear(k.Secret)
 	clear(k.PaillierPrivateKey)
 }

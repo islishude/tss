@@ -31,6 +31,22 @@ type PrivateKey struct {
 	Q      *big.Int
 }
 
+// MarshalJSON rejects default JSON encoding of Paillier private keys.
+func (sk PrivateKey) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("paillier private key contains secret material; use MarshalBinary")
+}
+
+// Destroy clears Paillier private exponents and factors in place.
+func (sk *PrivateKey) Destroy() {
+	if sk == nil {
+		return
+	}
+	clearBigInt(sk.Lambda)
+	clearBigInt(sk.Mu)
+	clearBigInt(sk.P)
+	clearBigInt(sk.Q)
+}
+
 const paillierWireVersion = 1
 
 const (
@@ -167,6 +183,14 @@ func (sk PrivateKey) Validate() error {
 		return errors.New("invalid paillier mu")
 	}
 	return nil
+}
+
+func clearBigInt(x *big.Int) {
+	if x == nil {
+		return
+	}
+	clear(x.Bits())
+	x.SetInt64(0)
 }
 
 // MarshalBinary returns a deterministic TLV public-key record.

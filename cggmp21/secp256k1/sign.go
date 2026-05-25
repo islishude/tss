@@ -30,6 +30,22 @@ type Presign struct {
 	SecurityNotice string        `json:"security_notice"`
 }
 
+// MarshalJSON rejects default JSON encoding of secret-bearing presign records.
+func (p Presign) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("cggmp21 secp256k1 presign contains secret material; use MarshalBinary")
+}
+
+// Destroy marks the presign consumed and clears its local secret shares.
+func (p *Presign) Destroy() {
+	if p == nil {
+		return
+	}
+	p.Consumed = true
+	clear(p.KShare)
+	clear(p.ChiShare)
+	clear(p.Delta)
+}
+
 // SignOptions controls online signature aggregation behavior.
 type SignOptions struct {
 	LowS          bool

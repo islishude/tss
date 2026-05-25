@@ -112,7 +112,9 @@ New exported Go identifiers require doc comments. Protocol equations, transcript
 ## Security Notes
 
 - Do not log secret scalar, nonce, Paillier private-key, or key-share bytes.
-- Always destroy no-longer-needed key shares with `Destroy()` when practical.
+- Always destroy no-longer-needed key shares, presigns, and sessions with
+  `Destroy()` when practical. Go memory zeroization is best-effort; see
+  `docs/security.md` for limits.
 - Treat `ConfidentialRequired` envelopes as secret-bearing messages.
 - Treat `Blame.Evidence` as public diagnostic material: it should contain hashes and public inputs only.
 - Keep signer sets sorted before interpolation; helper APIs do this where needed.

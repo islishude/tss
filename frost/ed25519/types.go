@@ -27,12 +27,12 @@ type VerificationShare struct {
 
 // KeyShare is one local FROST Ed25519 signing share.
 type KeyShare struct {
-	Version            uint16              `json:"version"`
-	Party              tss.PartyID         `json:"party"`
-	Threshold          int                 `json:"threshold"`
-	Parties            []tss.PartyID       `json:"parties"`
-	PublicKey          []byte              `json:"public_key"`
-	Secret             []byte              `json:"secret"`
+	Version            uint16        `json:"version"`
+	Party              tss.PartyID   `json:"party"`
+	Threshold          int           `json:"threshold"`
+	Parties            []tss.PartyID `json:"parties"`
+	PublicKey          []byte        `json:"public_key"`
+	Secret             []byte
 	GroupCommitments   [][]byte            `json:"group_commitments"`
 	VerificationShares []VerificationShare `json:"verification_shares"`
 }
@@ -61,6 +61,11 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 // MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
+}
+
+// MarshalJSON rejects default JSON encoding of secret-bearing key shares.
+func (k KeyShare) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("frost ed25519 key share contains secret material; use MarshalBinary")
 }
 
 // UnmarshalKeyShare decodes a canonical FROST key-share record.

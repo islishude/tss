@@ -80,41 +80,6 @@ review.
 - `go test -race ./...` and `golangci-lint run` pass.
 - The experimental warning remains until independent review is complete.
 
-## P0: Harden Secret-Material Lifecycle and Misuse Resistance
-
-### Goal
-
-Reduce the risk of leaking key shares, nonces, Paillier private keys, or presign
-material through APIs, memory lifetime, logs, formatted errors, tests, or
-default encoders.
-
-### Detailed Process
-
-1. Review every exported struct that contains secret-bearing bytes, including
-   key shares, presigns, Paillier private keys, nonce state, and session state.
-2. Move long-lived secret fields behind opaque types or unexported fields where
-   the public API can remain practical.
-3. Prevent secret-bearing structs from being accidentally JSON-marshaled by
-   default. Prefer explicit `MarshalBinary` methods with clear security docs.
-4. Add `Destroy` or close-style methods for keygen, presign, and signing
-   sessions that clear local scalar, nonce, and Paillier private-key bytes.
-5. Clear temporary byte slices when they hold secret material and no longer need
-   to survive. Document where Go `big.Int` or compiler behavior limits reliable
-   zeroization.
-6. Review all errors, test failures, examples, and docs for accidental secret
-   formatting.
-7. Add tests proving `Destroy` clears stored byte slices and does not corrupt
-   public metadata needed for diagnostics.
-
-### Acceptance Criteria
-
-- `rg "json:\\\".*secret|fmt\\..*Secret|%x.*Secret"` has no unsafe hits.
-- Secret-bearing types do not expose default JSON representations.
-- Destroy tests cover key shares, presigns, and session-local secret material.
-- Docs clearly state what the library can and cannot guarantee about memory
-  zeroization in Go.
-- `go test -race ./...` and `golangci-lint run` pass.
-
 ## P1: Align FROST Ed25519 with RFC 9591
 
 ### Goal
