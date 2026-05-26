@@ -213,7 +213,7 @@ func (k *KeyShare) Validate() error {
 	if err != nil {
 		return fmt.Errorf("invalid paillier proof: %w", err)
 	}
-	if !zkpai.VerifyModulus(k.KeygenTranscriptHash, pk, uint32(k.Party), modProof) {
+	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.Party), modProof) {
 		return errors.New("invalid local paillier proof")
 	}
 	for i, item := range k.PaillierPublicKeys {

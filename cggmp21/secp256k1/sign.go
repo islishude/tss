@@ -175,7 +175,8 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, err
 	}
 	// Round 1 starts MtA by publishing Enc_i(k_i) with scalar/range proofs.
-	startMsg, err := mta.Start(nil, mtaStartDomain(sessionID, signers, key.Party), kShare, &paillierKey.PublicKey)
+	startDomain := mtaStartDomain(key, sessionID, signers, key.Party, key.PaillierPublicKey)
+	startMsg, err := mta.Start(nil, startDomain, kShare, &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -395,7 +396,7 @@ func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload
 		return errors.New("round1 Paillier public key does not match keygen")
 	}
 	start := mta.StartMessage{Ciphertext: p.EncK, EncProof: p.EncKProof, RangeProof: p.EncKRangeProof}
-	if !mta.VerifyStart(mtaStartDomain(s.sessionID, s.signers, from), start, expectedPK) {
+	if !mta.VerifyStart(mtaStartDomain(s.key, s.sessionID, s.signers, from, p.PaillierPublicKey), start, expectedPK) {
 		return errors.New("invalid encrypted nonce proof")
 	}
 	return nil
@@ -415,14 +416,31 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncProof: s.round1[peer].EncKProof, RangeProof: s.round1[peer].EncKRangeProof}
+		startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, peer, s.round1[peer].PaillierPublicKey)
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
-		deltaResp, betaDelta, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "delta"), start, s.gamma, s.gammaComm, peerPK)
+		deltaResp, betaDelta, err := mta.Respond(
+			nil,
+			startDomain,
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey),
+			start,
+			s.gamma,
+			s.gammaComm,
+			peerPK,
+		)
 		if err != nil {
 			return nil, err
 		}
 		// The sigma MtA instance creates additive shares of k_i*x_j, where x_j
 		// is already adjusted by the signer-set Lagrange coefficient.
-		sigmaResp, betaSigma, err := mta.Respond(nil, mtaStartDomain(s.sessionID, s.signers, peer), mtaResponseDomain(s.sessionID, s.signers, peer, s.key.Party, "sigma"), start, s.xBar, s.xBarComm, peerPK)
+		sigmaResp, betaSigma, err := mta.Respond(
+			nil,
+			startDomain,
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey),
+			start,
+			s.xBar,
+			s.xBarComm,
+			peerPK,
+		)
 		if err != nil {
 			return nil, err
 		}
@@ -444,7 +462,15 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	}
 	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncProof: s.round1[s.key.Party].EncKProof, RangeProof: s.round1[s.key.Party].EncKRangeProof}
 	gammaCommit := s.round1[from].Gamma
-	alphaDelta, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "delta"), start, p.Delta, gammaCommit, s.paillier)
+	startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, s.key.Party, s.key.PaillierPublicKey)
+	alphaDelta, err := mta.Finish(
+		startDomain,
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "delta", s.key.PaillierPublicKey),
+		start,
+		p.Delta,
+		gammaCommit,
+		s.paillier,
+	)
 	if err != nil {
 		return err
 	}
@@ -452,7 +478,14 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if err != nil {
 		return err
 	}
-	alphaSigma, err := mta.Finish(mtaStartDomain(s.sessionID, s.signers, s.key.Party), mtaResponseDomain(s.sessionID, s.signers, s.key.Party, from, "sigma"), start, p.Sigma, xBarCommit, s.paillier)
+	alphaSigma, err := mta.Finish(
+		startDomain,
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "sigma", s.key.PaillierPublicKey),
+		start,
+		p.Sigma,
+		xBarCommit,
+		s.paillier,
+	)
 	if err != nil {
 		return err
 	}
@@ -955,28 +988,6 @@ func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
 		seen[id] = struct{}{}
 	}
 	return nil
-}
-
-func mtaStartDomain(sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID) []byte {
-	return domainBytes("mta-start", sessionID, signers, owner, 0, "")
-}
-
-func mtaResponseDomain(sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, kind string) []byte {
-	return domainBytes("mta-response", sessionID, signers, initiator, responder, kind)
-}
-
-func domainBytes(label string, sessionID tss.SessionID, signers []tss.PartyID, a, b tss.PartyID, kind string) []byte {
-	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1"))
-	writeHashPart(h, []byte(label))
-	writeHashPart(h, sessionID[:])
-	for _, id := range signers {
-		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-	}
-	writeHashPart(h, []byte{byte(a >> 24), byte(a >> 16), byte(a >> 8), byte(a)})
-	writeHashPart(h, []byte{byte(b >> 24), byte(b >> 16), byte(b >> 8), byte(b)})
-	writeHashPart(h, []byte(kind))
-	return h.Sum(nil)
 }
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {

@@ -77,7 +77,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.SessionID[:], &paillierKey.PublicKey, uint32(config.Self))
+	modProof, err := zkpai.ProveModulus(keygenModulusDomain(config, config.Self, paillierPubBytes), &paillierKey.PublicKey, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -206,7 +206,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, e
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
-		if !zkpai.VerifyModulus(s.cfg.SessionID[:], pk, uint32(env.From), proof) {
+		if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -341,7 +341,15 @@ func (s *KeygenSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
-	localPaillierProof, err := zkpai.ProveModulus(transcriptHash, &s.paillier.PublicKey, uint32(s.cfg.Self))
+	localProofShare := &KeyShare{
+		Party:                s.cfg.Self,
+		Threshold:            s.cfg.Threshold,
+		Parties:              s.cfg.Parties,
+		PublicKey:            groupCommitments[0],
+		PaillierPublicKey:    localPaillierPub,
+		KeygenTranscriptHash: transcriptHash,
+	}
+	localPaillierProof, err := zkpai.ProveModulus(keySharePaillierProofDomain(localProofShare), &s.paillier.PublicKey, uint32(s.cfg.Self))
 	if err != nil {
 		return err
 	}

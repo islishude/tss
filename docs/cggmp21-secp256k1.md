@@ -12,7 +12,11 @@ non-minimal integer encodings.
 Each party generates a Shamir polynomial and broadcasts secp256k1 commitments. Private Shamir shares are sent point-to-point in confidential envelopes. Receivers verify shares against commitments before deriving the local aggregated share.
 
 Each party also generates Paillier material and a modulus proof. The proof is
-encoded as canonical binary TLV and bound to the keygen transcript. When
+encoded as canonical binary TLV and bound to the keygen session domain:
+protocol name, library version, session id, threshold, ordered participant set,
+sender, proof kind, and Paillier public key. The persisted local key-share
+Paillier proof is additionally bound to the group public key and keygen
+transcript hash. When
 `KeygenOptions.EnableHD` is set, parties contribute 32-byte chain-code shares
 that are XOR-aggregated into the key share. The group public key is the sum of
 degree-zero commitments. Local Paillier keys and secp256k1 Schnorr share
@@ -40,8 +44,10 @@ Round 2 includes a hash of the complete round 1 broadcast view. A mismatch abort
 
 Round 2 MtA response proofs are also canonical binary payloads. They bind the
 response ciphertext to the encrypted input scalar, the responder scalar
-commitment, and the beta-share commitment under a domain separated by session
-id, signer set, initiator, responder, and MtA kind.
+commitment, and the beta-share commitment under a domain separated by protocol
+name, library version, session id, threshold, participant set, signer set,
+initiator, responder, MtA kind, group public key, keygen transcript hash, and
+the initiator Paillier public key.
 
 After all `delta_i` values are broadcast:
 
