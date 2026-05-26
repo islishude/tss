@@ -335,11 +335,12 @@ func (e Envelope) ValidateBasic(protocol string, session SessionID, parties []Pa
 	if e.SessionID != session {
 		return errors.New("session mismatch")
 	}
-	if len(e.TranscriptHash) > 0 {
-		want := e.DomainSeparatedHash()
-		if string(want) != string(e.TranscriptHash) {
-			return errors.New("transcript hash mismatch")
-		}
+	if len(e.TranscriptHash) != sha256.Size {
+		return errors.New("missing or invalid envelope transcript hash")
+	}
+	want := e.DomainSeparatedHash()
+	if !slices.Equal(want, e.TranscriptHash) {
+		return errors.New("transcript hash mismatch")
 	}
 	if len(parties) > 0 && !ContainsParty(parties, e.From) {
 		return fmt.Errorf("sender %d is not a participant", e.From)

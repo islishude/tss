@@ -82,6 +82,12 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		_, err := kg1.HandleKeygenMessage(mutated)
 		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
+	t.Run("missing transcript", func(t *testing.T) {
+		mutated := commit
+		mutated.TranscriptHash = nil
+		_, err := kg1.HandleKeygenMessage(mutated)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	})
 	t.Run("duplicate commitment", func(t *testing.T) {
 		kg, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 		if err != nil {
@@ -214,6 +220,67 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 	}
 }
 
+func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
+	t.Run("completed signing rejects duplicate and wrong-recipient messages", func(t *testing.T) {
+		h := newHarness(t, 1, 1)
+		presigns := secpPresign(t, h.shares, []tss.PartyID{1})
+		digest := sha256.Sum256([]byte("completed session"))
+		signID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, out, err := StartSignDigest(h.shares[1], presigns[1], signID, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := session.Signature(); !ok {
+			t.Fatal("signing did not complete")
+		}
+		duplicate := out[0]
+		if _, err = session.HandleSignMessage(duplicate); err == nil {
+			t.Fatal("completed session accepted duplicate message")
+		}
+		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
+
+		wrongRecipient := out[0]
+		wrongRecipient.To = 2
+		wrongRecipient = wrongRecipient.WithTranscriptHash()
+		if _, err = session.HandleSignMessage(wrongRecipient); err == nil {
+			t.Fatal("completed session accepted wrong-recipient message")
+		}
+		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
+	})
+
+	t.Run("attributable presign abort is terminal", func(t *testing.T) {
+		h := newHarness(t, 2, 3)
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		mutated, err := mutatePresignRound1Payload(out2[0].Payload, func(p *presignRound1Payload) {
+			p.Gamma = []byte{0x02}
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		bad := out2[0]
+		bad.Payload = mutated
+		bad = bad.WithTranscriptHash()
+		_, err = s1.HandlePresignMessage(bad)
+		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
+		_, err = s1.HandlePresignMessage(out2[0])
+		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeAborted))
+	})
+}
+
 func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
@@ -311,16 +378,16 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, _, err := StartSignDigest(h.shares[1], presigns[1], signID, digest[:])
-	if err != nil {
-		t.Fatal(err)
-	}
 	_, out2, err := StartSignDigest(h.shares[2], presigns[2], signID, digest[:])
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("transcript mismatch", func(t *testing.T) {
+		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
 		payload, err := unmarshalSignPartialPayload(out2[0].Payload)
 		if err != nil {
 			t.Fatal(err)
@@ -333,7 +400,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		env := out2[0]
 		env.Payload = mutated
 		env = env.WithTranscriptHash()
-		_, err = s1.HandleSignMessage(env)
+		_, err = session.HandleSignMessage(env)
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("malformed scalar", func(t *testing.T) {
@@ -352,10 +419,14 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("wrong round", func(t *testing.T) {
+		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
 		env := out2[0]
 		env.Round = 2
 		env = env.WithTranscriptHash()
-		_, err := s1.HandleSignMessage(env)
+		_, err = session.HandleSignMessage(env)
 		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
@@ -367,7 +438,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = session.HandleSignMessage(out2[0])
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
 	})
 }
 
@@ -400,6 +471,13 @@ func assertProtocolErrorCode(t testing.TB, err error, code string) *tss.Protocol
 		t.Fatalf("expected code %s, got %s: %v", code, protocolErr.Code, err)
 	}
 	return protocolErr
+}
+
+func assertNoBlame(t testing.TB, protocolErr *tss.ProtocolError) {
+	t.Helper()
+	if protocolErr.Blame != nil {
+		t.Fatalf("%s unexpectedly carried blame: %#v", protocolErr.Code, protocolErr.Blame)
+	}
 }
 
 func clonePresign(in *Presign) *Presign {

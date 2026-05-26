@@ -78,6 +78,7 @@ type PresignSession struct {
 	round2Sent bool
 	round3Sent bool
 	completed  bool
+	aborted    bool
 	presign    *Presign
 }
 
@@ -91,6 +92,7 @@ type SignSession struct {
 	publicKey []byte
 	partials  map[tss.PartyID]*big.Int
 	completed bool
+	aborted   bool
 	signature *Signature
 }
 
@@ -226,10 +228,21 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
-func (s *PresignSession) HandlePresignMessage(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil presign session")
 	}
+	if s.completed {
+		return nil, completedSessionError(env.Round, env.From)
+	}
+	if s.aborted {
+		return nil, abortedSessionError(env.Round, env.From)
+	}
+	defer func() {
+		if shouldAbortSession(err) {
+			s.aborted = true
+		}
+	}()
 	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
@@ -722,10 +735,21 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
-func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
+	if s.completed {
+		return nil, completedSessionError(env.Round, env.From)
+	}
+	if s.aborted {
+		return nil, abortedSessionError(env.Round, env.From)
+	}
+	defer func() {
+		if shouldAbortSession(err) {
+			s.aborted = true
+		}
+	}()
 	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

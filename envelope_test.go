@@ -28,6 +28,11 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err != nil {
 		t.Fatal(err)
 	}
+	decoded.TranscriptHash = nil
+	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
+		t.Fatal("expected missing transcript hash rejection")
+	}
+	decoded.TranscriptHash = env.TranscriptHash
 	decoded.Payload[0] ^= 1
 	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected transcript mismatch")

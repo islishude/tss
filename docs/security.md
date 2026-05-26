@@ -21,6 +21,29 @@ Callers must provide:
 
 Never log secret scalar, nonce, Paillier private-key, key-share, or presign bytes. Blame evidence is designed to contain public hashes and public context only.
 
+## Production Integration Checklist
+
+Before passing an inbound envelope to any state machine, the caller must verify
+that the authenticated transport identity for the peer exactly matches
+`Envelope.From`. The library checks that `Envelope.From` is a participant or
+signer where applicable, but it cannot know whether the transport authenticated
+the same party id.
+
+Every inbound envelope must include the transcript hash produced by
+`Envelope.WithTranscriptHash`. `ValidateBasic` rejects missing or mismatched
+transcript hashes before payload decoding, so callers should recompute the hash
+after any relay, storage, or framing layer changes an envelope.
+
+Session ids must be fresh, unpredictable, and scoped to one protocol run. A
+completed or attributable-aborted session rejects later messages without
+mutating local state; callers should stop routing messages to such sessions and
+surface the original protocol error and blame evidence.
+
+The repository intentionally leaves these integration pieces to callers:
+network transport, peer authentication, storage encryption, secure deletion of
+persisted records, retries, consensus over session creation, KMS/HSM policy,
+and operational alerting.
+
 ## Secret-Material Lifecycle
 
 Secret-bearing records reject default JSON marshaling. Persist `KeyShare` and

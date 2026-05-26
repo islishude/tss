@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	stded25519 "crypto/ed25519"
+	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -129,6 +130,110 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 	if !delivered {
 		t.Fatal("mutated partial was not delivered")
 	}
+}
+
+func TestFROSTSessionStateIsMonotonic(t *testing.T) {
+	t.Run("completed keygen rejects messages", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		keygen, out, err := StartKeygen(tss.ThresholdConfig{
+			Threshold: 1,
+			Parties:   []tss.PartyID{1},
+			Self:      1,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, ok := keygen.KeyShare(); !ok {
+			t.Fatal("keygen did not complete")
+		}
+		env := out[0]
+		env.To = 2
+		env = env.WithTranscriptHash()
+		_, err = keygen.HandleKeygenMessage(env)
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
+	})
+
+	t.Run("missing transcript rejected", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		shares := frostKeygen(t, 2, 2)
+		sign, _, err := StartSign(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("msg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartSign(shares[2], sessionID, []tss.PartyID{1, 2}, []byte("msg"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		env := out2[0]
+		env.TranscriptHash = nil
+		_, err = sign.HandleSignMessage(env)
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
+	})
+
+	t.Run("attributable abort is terminal", func(t *testing.T) {
+		shares := frostKeygen(t, 2, 2)
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions := map[tss.PartyID]*SignSession{}
+		round1 := make([]tss.Envelope, 0, 2)
+		for _, id := range []tss.PartyID{1, 2} {
+			session, out, err := StartSign(shares[id], sessionID, []tss.PartyID{1, 2}, []byte("msg"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessions[id] = session
+			round1 = append(round1, out[0])
+		}
+		round2, err := sessions[2].HandleSignMessage(round1[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := sessions[1].HandleSignMessage(round1[1]); err != nil {
+			t.Fatal(err)
+		}
+		payload, err := unmarshalSignPartialPayload(round2[0].Payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		payload.Z[0] ^= 1
+		mutated, err := marshalSignPartialPayload(payload)
+		if err != nil {
+			t.Fatal(err)
+		}
+		bad := round2[0]
+		bad.Payload = mutated
+		bad = bad.WithTranscriptHash()
+		_, err = sessions[1].HandleSignMessage(bad)
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+		_, err = sessions[1].HandleSignMessage(round2[0])
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
+	})
+}
+
+func assertFROSTProtocolCode(t testing.TB, err error, code string) *tss.ProtocolError {
+	t.Helper()
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) {
+		t.Fatalf("expected ProtocolError %s, got %T: %v", code, err, err)
+	}
+	if protocolErr.Code != code {
+		t.Fatalf("expected code %s, got %s: %v", code, protocolErr.Code, err)
+	}
+	if code == tss.ErrCodeCompleted || code == tss.ErrCodeAborted || code == tss.ErrCodeDuplicate {
+		if protocolErr.Blame != nil {
+			t.Fatalf("%s error unexpectedly carried blame: %#v", code, protocolErr.Blame)
+		}
+	}
+	return protocolErr
 }
 
 func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {

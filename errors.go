@@ -17,6 +17,10 @@ const (
 	ErrCodeNotReady = "not_ready"
 	// ErrCodeConsumed marks one-use material that has already been consumed.
 	ErrCodeConsumed = "consumed"
+	// ErrCodeCompleted marks a protocol session that has already completed.
+	ErrCodeCompleted = "completed"
+	// ErrCodeAborted marks a protocol session that previously hit an attributable abort.
+	ErrCodeAborted = "aborted"
 	// ErrCodeNotImplemented marks intentionally unsupported protocol features.
 	ErrCodeNotImplemented = "not_implemented"
 )

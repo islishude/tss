@@ -24,6 +24,7 @@ type SignSession struct {
 	e             *big.Int
 	partialSent   bool
 	completed     bool
+	aborted       bool
 	signature     []byte
 	commitMessage tss.Envelope
 }
@@ -104,10 +105,21 @@ func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, me
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
-func (s *SignSession) HandleSignMessage(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
+	if s.completed {
+		return nil, completedSessionError(env.Round, env.From)
+	}
+	if s.aborted {
+		return nil, abortedSessionError(env.Round, env.From)
+	}
+	defer func() {
+		if shouldAbortSession(err) {
+			s.aborted = true
+		}
+	}()
 	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

@@ -142,38 +142,6 @@ boundary or allowing presign misuse.
 - Public examples cover the supported lifecycle.
 - `go test -race ./...` and `golangci-lint run` pass.
 
-## P1: Tighten API, State Machines, and Transport-Neutral Integration Contract
-
-### Goal
-
-Make misuse harder for integrators while keeping the library transport-neutral.
-
-### Detailed Process
-
-1. Require inbound envelopes to carry transcript hashes. Do not treat missing
-   transcript hash as acceptable in production protocol sessions.
-2. Document that authenticated sender identity must come from the external
-   transport and must match `Envelope.From` before the state machine handles a
-   message.
-3. Normalize protocol errors so wrong session, wrong round, wrong sender, wrong
-   recipient, wrong payload type, duplicate message, malformed payload, and
-   verification failure are distinguishable and stable.
-4. Confirm every state transition is monotonic: completed, consumed, or aborted
-   sessions must not accept additional messages that alter state.
-5. Add tests for session state after completion, duplicate after completion,
-   wrong recipient after completion, and retrying after attributable abort.
-6. Keep networking, storage encryption, retries, peer authentication, and KMS
-   integration outside this repository. Document the exact caller contract.
-
-### Acceptance Criteria
-
-- Wrong session, round, sender, recipient, payload type, transcript, malformed
-  scalar, malformed point, duplicate, and replay cases fail closed.
-- Duplicate/replay failures do not create blame evidence.
-- Attributable verification failures do create deterministic public evidence.
-- `docs/security.md` contains a production integration checklist.
-- `go test -race ./...` and `golangci-lint run` pass.
-
 ## P1: Expand Tests, Fuzzing, Race Checks, Lint, and Audit Gates
 
 ### Goal

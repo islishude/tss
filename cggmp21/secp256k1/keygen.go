@@ -32,6 +32,7 @@ type KeygenSession struct {
 	paillier     *pai.PrivateKey
 	paillierPubs map[tss.PartyID]PaillierPublicShare
 	completed    bool
+	aborted      bool
 	keyShare     *KeyShare
 }
 
@@ -139,10 +140,21 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
-func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
+	if s.completed {
+		return nil, completedSessionError(env.Round, env.From)
+	}
+	if s.aborted {
+		return nil, abortedSessionError(env.Round, env.From)
+	}
+	defer func() {
+		if shouldAbortSession(err) {
+			s.aborted = true
+		}
+	}()
 	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
