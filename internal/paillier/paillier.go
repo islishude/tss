@@ -76,14 +76,22 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	if bits < 512 {
 		return nil, errors.New("paillier modulus must be at least 512 bits")
 	}
+	four := big.NewInt(4)
+	three := big.NewInt(3)
 	for {
 		p, err := rand.Prime(reader, bits/2)
 		if err != nil {
 			return nil, err
 		}
+		if new(big.Int).Mod(p, four).Cmp(three) != 0 {
+			continue
+		}
 		q, err := rand.Prime(reader, bits-bits/2)
 		if err != nil {
 			return nil, err
+		}
+		if new(big.Int).Mod(q, four).Cmp(three) != 0 {
+			continue
 		}
 		if p.Cmp(q) == 0 {
 			continue

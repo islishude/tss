@@ -15,6 +15,8 @@ import (
 // Version is the library wire/protocol version used by current messages.
 const Version = 1
 
+const envelopeHashLabel = "github.com/islishude/tss/envelope/v1"
+
 const envelopeWireType = "tss.envelope"
 
 const (
@@ -302,7 +304,7 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	h := sha256.New()
 	// The protocol/version/session/round tuple keeps transcripts from one
 	// algorithm or session from being replayed into another.
-	h.Write([]byte("github.com/islishude/tss/envelope/v1"))
+	h.Write([]byte(envelopeHashLabel))
 	h.Write([]byte{0})
 	h.Write([]byte(e.Protocol))
 	h.Write([]byte{0, byte(e.Version >> 8), byte(e.Version), e.Round})

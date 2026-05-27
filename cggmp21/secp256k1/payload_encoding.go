@@ -7,7 +7,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
-	
+
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -16,12 +16,14 @@ import (
 )
 
 const (
-	keygenCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.keygen.commitments"
-	keygenSharePayloadWireType       = "cggmp21.secp256k1.payload.keygen.share"
-	presignRound1PayloadWireType     = "cggmp21.secp256k1.payload.presign.round1"
-	presignRound2PayloadWireType     = "cggmp21.secp256k1.payload.presign.round2"
-	presignRound3PayloadWireType     = "cggmp21.secp256k1.payload.presign.round3"
-	signPartialPayloadWireType       = "cggmp21.secp256k1.payload.sign.partial"
+	keygenCommitmentsPayloadWireType  = "cggmp21.secp256k1.payload.keygen.commitments"
+	keygenSharePayloadWireType        = "cggmp21.secp256k1.payload.keygen.share"
+	presignRound1PayloadWireType      = "cggmp21.secp256k1.payload.presign.round1"
+	presignRound2PayloadWireType      = "cggmp21.secp256k1.payload.presign.round2"
+	presignRound3PayloadWireType      = "cggmp21.secp256k1.payload.presign.round3"
+	signPartialPayloadWireType        = "cggmp21.secp256k1.payload.sign.partial"
+	reshareCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.reshare.commitments"
+	reshareSharePayloadWireType       = "cggmp21.secp256k1.payload.reshare.share"
 )
 
 const (
@@ -331,4 +333,59 @@ func validatePositiveIntegerBytes(in []byte) error {
 		return errors.New("integer must be positive")
 	}
 	return nil
+}
+
+const reshareCommitmentsPayloadFieldCommitments uint16 = 1
+
+const reshareSharePayloadFieldShare uint16 = 1
+
+func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
+	return wire.Marshal(tss.Version, reshareCommitmentsPayloadWireType, []wire.Field{
+		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+	})
+}
+
+func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, error) {
+	version, fields, err := wire.Unmarshal(in, reshareCommitmentsPayloadWireType)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	if version != tss.Version {
+		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments); err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	return reshareCommitmentsPayload{Commitments: commitments}, nil
+}
+
+func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
+	if _, err := secp.ParseScalar(p.Share); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(tss.Version, reshareSharePayloadWireType, []wire.Field{
+		{Tag: reshareSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
+	})
+}
+
+func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
+	version, fields, err := wire.Unmarshal(in, reshareSharePayloadWireType)
+	if err != nil {
+		return reshareSharePayload{}, err
+	}
+	if version != tss.Version {
+		return reshareSharePayload{}, fmt.Errorf("unexpected reshare share payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldShare); err != nil {
+		return reshareSharePayload{}, err
+	}
+	share := wire.MustField(fields, reshareSharePayloadFieldShare)
+	if _, err := secp.ParseScalar(share); err != nil {
+		return reshareSharePayload{}, err
+	}
+	return reshareSharePayload{Share: share}, nil
 }

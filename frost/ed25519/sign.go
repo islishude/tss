@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	stded25519 "crypto/ed25519"
 	"errors"
 	"fmt"
@@ -14,19 +15,20 @@ import (
 
 // SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
-	key           *KeyShare
-	sessionID     tss.SessionID
-	message       []byte
-	signers       []tss.PartyID
-	commitments   map[tss.PartyID]nonceCommitment
-	partials      map[tss.PartyID]*big.Int
-	d             *big.Int
-	e             *big.Int
-	partialSent   bool
-	completed     bool
-	aborted       bool
-	signature     []byte
-	commitMessage tss.Envelope
+	key            *KeyShare
+	sessionID      tss.SessionID
+	message        []byte
+	signers        []tss.PartyID
+	commitments    map[tss.PartyID]nonceCommitment
+	partials       map[tss.PartyID]*big.Int
+	d              *big.Int
+	e              *big.Int
+	partialSent    bool
+	completed      bool
+	aborted        bool
+	signature      []byte
+	commitMessage  tss.Envelope
+	partialDomains map[tss.PartyID][]byte
 }
 
 type nonceCommitment struct {
@@ -159,6 +161,10 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		s.partials[env.From] = edcurve.ScalarToBig(scalar)
+		if s.partialDomains == nil {
+			s.partialDomains = make(map[tss.PartyID][]byte)
+		}
+		s.partialDomains[env.From] = signPartialDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, env.From, s.key.PublicKey)
 		return nil, s.tryAggregate()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
@@ -265,6 +271,10 @@ func (s *SignSession) tryAggregate() error {
 }
 
 func (s *SignSession) verifyPartial(id tss.PartyID, z, rho, challenge *big.Int) error {
+	domain := signPartialDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, id, s.key.PublicKey)
+	if stored, ok := s.partialDomains[id]; ok && !bytes.Equal(stored, domain) {
+		return errors.New("partial signature domain mismatch")
+	}
 	commitment := s.commitments[id]
 	D, err := edcurve.PointFromBytes(commitment.D)
 	if err != nil {
@@ -318,7 +328,7 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*big.Int, e
 		if !ok {
 			return nil, nil, fmt.Errorf("missing commitment for %d", id)
 		}
-		rho := bindingFactor(s.key.PublicKey, s.message, s.signers, s.commitments, id)
+		rho := s.bindingFactor(id)
 		rhos[id] = rho
 		D, err := edcurve.PointFromBytes(commitment.D)
 		if err != nil {
@@ -342,16 +352,18 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*big.Int, e
 	return R, rhos, nil
 }
 
-func bindingFactor(publicKey, message []byte, signers []tss.PartyID, commitments map[tss.PartyID]nonceCommitment, id tss.PartyID) *big.Int {
+func (s *SignSession) bindingFactor(id tss.PartyID) *big.Int {
+	domain := signingBindingFactorDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, s.key.PublicKey)
 	parts := [][]byte{
-		[]byte("FROST-ED25519-SHA512-v1/binding"),
-		publicKey,
-		message,
+		[]byte(rfc9591ContextString + "rho"),
+		domain,
+		s.key.PublicKey,
+		s.message,
 	}
-	for _, signer := range signers {
+	for _, signer := range s.signers {
 		// Ordered signer ids and commitments make rho deterministic across parties.
 		parts = append(parts, []byte{byte(signer >> 24), byte(signer >> 16), byte(signer >> 8), byte(signer)})
-		parts = append(parts, commitments[signer].D, commitments[signer].E)
+		parts = append(parts, s.commitments[signer].D, s.commitments[signer].E)
 	}
 	parts = append(parts, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 	_, rho := edcurve.HashToScalar(parts...)

@@ -7,7 +7,19 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const proofDomainVersion = "cggmp21-secp256k1-proof-domain-v2"
+const (
+	proofDomainVersion = "cggmp21-secp256k1-proof-domain-v1"
+
+	// Domain labels identify the protocol phase for domain separation.
+	domainLabelKeygenModulus      = "keygen.modulus"
+	domainLabelKeySharePaillier   = "keyshare.paillier-modulus"
+	domainLabelPresignMTAStart    = "presign.mta-start"
+	domainLabelPresignMTAResponse = "presign.mta-response"
+
+	// Domain kinds identify the cryptographic object bound into a proof.
+	domainKindPaillierModulus = "paillier-modulus"
+	domainKindEncryptedK      = "encrypted-k"
+)
 
 type proofDomainContext struct {
 	label                string
@@ -25,12 +37,12 @@ type proofDomainContext struct {
 
 func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:             "keygen.modulus",
+		label:             domainLabelKeygenModulus,
 		sessionID:         config.SessionID,
 		threshold:         config.Threshold,
 		parties:           config.Parties,
 		sender:            sender,
-		kind:              "paillier-modulus",
+		kind:              domainKindPaillierModulus,
 		paillierPublicKey: paillierPublicKey,
 	})
 }
@@ -40,11 +52,11 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 		return nil
 	}
 	return proofDomain(proofDomainContext{
-		label:                "keyshare.paillier-modulus",
+		label:                domainLabelKeySharePaillier,
 		threshold:            key.Threshold,
 		parties:              key.Parties,
 		sender:               key.Party,
-		kind:                 "paillier-modulus",
+		kind:                 domainKindPaillierModulus,
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    key.PaillierPublicKey,
@@ -53,13 +65,13 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 
 func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID, paillierPublicKey []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:                "presign.mta-start",
+		label:                domainLabelPresignMTAStart,
 		sessionID:            sessionID,
 		threshold:            key.Threshold,
 		parties:              key.Parties,
 		signers:              signers,
 		sender:               owner,
-		kind:                 "encrypted-k",
+		kind:                 domainKindEncryptedK,
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    paillierPublicKey,
@@ -68,7 +80,7 @@ func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 
 func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, kind string, initiatorPaillierPublicKey []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:                "presign.mta-response",
+		label:                domainLabelPresignMTAResponse,
 		sessionID:            sessionID,
 		threshold:            key.Threshold,
 		parties:              key.Parties,
@@ -84,30 +96,19 @@ func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.Par
 
 func proofDomain(ctx proofDomainContext) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte(proofDomainVersion))
-	writeHashPart(h, []byte(protocol))
-	writeHashPart(h, wire.Uint32(uint32(tss.Version)))
-	writeHashPart(h, []byte(ctx.label))
-	writeHashPart(h, ctx.sessionID[:])
-	writeHashPart(h, wire.Uint32(uint32(ctx.threshold)))
-	writePartySet(h, ctx.parties)
-	writePartySet(h, ctx.signers)
-	writePartyID(h, ctx.sender)
-	writePartyID(h, ctx.receiver)
-	writeHashPart(h, []byte(ctx.kind))
-	writeHashPart(h, ctx.publicKey)
-	writeHashPart(h, ctx.keygenTranscriptHash)
-	writeHashPart(h, ctx.paillierPublicKey)
+	wire.WriteHashPart(h, []byte(proofDomainVersion))
+	wire.WriteHashPart(h, []byte(protocol))
+	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
+	wire.WriteHashPart(h, []byte(ctx.label))
+	wire.WriteHashPart(h, ctx.sessionID[:])
+	wire.WriteHashPart(h, wire.Uint32(uint32(ctx.threshold)))
+	wire.WritePartySet(h, ctx.parties)
+	wire.WritePartySet(h, ctx.signers)
+	wire.WritePartyID(h, ctx.sender)
+	wire.WritePartyID(h, ctx.receiver)
+	wire.WriteHashPart(h, []byte(ctx.kind))
+	wire.WriteHashPart(h, ctx.publicKey)
+	wire.WriteHashPart(h, ctx.keygenTranscriptHash)
+	wire.WriteHashPart(h, ctx.paillierPublicKey)
 	return h.Sum(nil)
-}
-
-func writePartySet(h interface{ Write([]byte) (int, error) }, parties []tss.PartyID) {
-	writeHashPart(h, wire.Uint32(uint32(len(parties))))
-	for _, id := range parties {
-		writePartyID(h, id)
-	}
-}
-
-func writePartyID(h interface{ Write([]byte) (int, error) }, id tss.PartyID) {
-	writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 }

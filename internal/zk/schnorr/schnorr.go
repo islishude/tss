@@ -10,6 +10,8 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+const schnorrChallengeLabel = "github.com/islishude/tss/internal/zk/schnorr/v1"
+
 const proofVersion = 1
 
 const proofWireType = "zk.schnorr.proof"
@@ -123,16 +125,11 @@ func (p *Proof) Validate() error {
 
 func challenge(domain, public, commitment []byte) *big.Int {
 	h := sha256.New()
-	writePart(h, []byte("github.com/islishude/tss/internal/zk/schnorr/v1"))
-	writePart(h, domain)
-	writePart(h, public)
-	writePart(h, commitment)
+	wire.WriteHashPart(h, []byte(schnorrChallengeLabel))
+	wire.WriteHashPart(h, domain)
+	wire.WriteHashPart(h, public)
+	wire.WriteHashPart(h, commitment)
 	out := new(big.Int).SetBytes(h.Sum(nil))
 	out.Mod(out, secp.Order())
 	return out
-}
-
-func writePart(h interface{ Write([]byte) (int, error) }, part []byte) {
-	_, _ = h.Write([]byte{byte(len(part) >> 24), byte(len(part) >> 16), byte(len(part) >> 8), byte(len(part))})
-	_, _ = h.Write(part)
 }

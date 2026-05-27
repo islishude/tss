@@ -7,7 +7,6 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
-	
 )
 
 type protocolHarness struct {

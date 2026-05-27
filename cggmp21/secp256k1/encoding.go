@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	
+
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
 )

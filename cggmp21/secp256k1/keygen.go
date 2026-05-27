@@ -12,8 +12,14 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
+	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
+)
+
+const (
+	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
+	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
 )
 
 // KeygenOptions controls non-default CGGMP21 keygen parameters.
@@ -78,7 +84,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(keygenModulusDomain(config, config.Self, paillierPubBytes), &paillierKey.PublicKey, uint32(config.Self))
+	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes), paillierKey, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -189,7 +195,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				[]tss.PartyID{env.From},
 				err,
 				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("cggmp21-secp256k1-keygen-commitments-v1", p.Commitments)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 			)
 		}
 		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
@@ -285,7 +291,7 @@ func (s *KeygenSession) tryComplete() error {
 						tss.EvidenceKindKeygenShare,
 						"invalid DKG share",
 						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash("cggmp21-secp256k1-keygen-commitments-v1", s.commits[dealer])),
+						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
 				Err: err,
@@ -361,7 +367,7 @@ func (s *KeygenSession) tryComplete() error {
 		PaillierPublicKey:    localPaillierPub,
 		KeygenTranscriptHash: transcriptHash,
 	}
-	localPaillierProof, err := zkpai.ProveModulus(keySharePaillierProofDomain(localProofShare), &s.paillier.PublicKey, uint32(s.cfg.Self))
+	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, uint32(s.cfg.Self))
 	if err != nil {
 		return err
 	}
@@ -406,20 +412,20 @@ func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
 
 func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-keygen-transcript-v1"))
-	writeHashPart(h, s.cfg.SessionID[:])
+	wire.WriteHashPart(h, []byte(keygenTranscriptHashLabel))
+	wire.WriteHashPart(h, s.cfg.SessionID[:])
 	for _, id := range s.cfg.Parties {
-		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		for _, commitment := range s.commits[id] {
-			writeHashPart(h, commitment)
+			wire.WriteHashPart(h, commitment)
 		}
 		item := s.paillierPubs[id]
-		writeHashPart(h, item.PublicKey)
-		writeHashPart(h, item.Proof)
-		writeHashPart(h, s.chainCodes[id])
+		wire.WriteHashPart(h, item.PublicKey)
+		wire.WriteHashPart(h, item.Proof)
+		wire.WriteHashPart(h, s.chainCodes[id])
 	}
 	for _, commitment := range groupCommitments {
-		writeHashPart(h, commitment)
+		wire.WriteHashPart(h, commitment)
 	}
 	return h.Sum(nil)
 }
@@ -457,11 +463,6 @@ func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, b
 		}
 	}
 	return nil, false
-}
-
-func writeHashPart(h interface{ Write([]byte) (int, error) }, part []byte) {
-	_, _ = h.Write([]byte{byte(len(part) >> 24), byte(len(part) >> 16), byte(len(part) >> 8), byte(len(part))})
-	_, _ = h.Write(part)
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {

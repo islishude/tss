@@ -32,7 +32,7 @@ func FuzzEncScalarProofUnmarshal(f *testing.F) {
 }
 
 func FuzzEncRangeProofUnmarshal(f *testing.F) {
-	f.Add(mustMarshalProof(f, seedEncRangeProof()))
+	f.Add(mustMarshalProof(f, seedEncRangeProof(f)))
 	f.Add([]byte(`{"version":1}`))
 	f.Add([]byte("TSS1"))
 	f.Fuzz(func(t *testing.T, data []byte) {

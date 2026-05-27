@@ -9,7 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
-	
+
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"

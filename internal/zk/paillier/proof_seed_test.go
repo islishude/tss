@@ -19,7 +19,9 @@ func seedModulusProof() *ModulusProof {
 		NBits:            2048,
 		SmallFactorCheck: proofSeedHash(1),
 		TranscriptHash:   proofSeedHash(2),
-		Digest:           proofSeedHash(3),
+		Commitment:       []byte{3},
+		Challenge:        []byte{4},
+		Response:         []byte{5},
 	}
 }
 
@@ -36,13 +38,17 @@ func seedEncScalarProof(tb proofFataler) *EncScalarProof {
 	}
 }
 
-func seedEncRangeProof() *EncRangeProof {
+func seedEncRangeProof(tb proofFataler) *EncRangeProof {
+	tb.Helper()
 	proof := &EncRangeProof{
-		Version:        proofVersion,
-		Bound:          secp.Order().Bytes(),
-		Challenge:      []byte{7},
-		Response:       []byte{8},
-		TranscriptHash: proofSeedHash(9),
+		Version:         proofVersion,
+		Bound:           secp.Order().Bytes(),
+		Commitment:      []byte{6},
+		PointCommitment: seedPoint(tb, 7),
+		Challenge:       []byte{8},
+		Response:        []byte{9},
+		Randomness:      []byte{10},
+		TranscriptHash:  proofSeedHash(11),
 	}
 	proof.Digest = encRangeDigest(proof)
 	return proof

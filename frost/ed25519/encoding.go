@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	
+
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -19,6 +19,7 @@ const (
 	keyShareFieldSecret
 	keyShareFieldGroupCommitments
 	keyShareFieldVerificationShares
+	keyShareFieldKeygenTranscriptHash
 )
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
@@ -33,6 +34,7 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(k.Secret)},
 		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
+		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
 	})
 }
 
@@ -44,7 +46,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -71,14 +73,15 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		return nil, err
 	}
 	k := &KeyShare{
-		Version:            tss.Version,
-		Party:              tss.PartyID(party),
-		Threshold:          int(threshold),
-		Parties:            parties,
-		PublicKey:          wire.MustField(fields, keyShareFieldPublicKey),
-		Secret:             wire.MustField(fields, keyShareFieldSecret),
-		GroupCommitments:   groupCommitments,
-		VerificationShares: verificationShares,
+		Version:              tss.Version,
+		Party:                tss.PartyID(party),
+		Threshold:            int(threshold),
+		Parties:              parties,
+		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
+		Secret:               wire.MustField(fields, keyShareFieldSecret),
+		GroupCommitments:     groupCommitments,
+		VerificationShares:   verificationShares,
+		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err

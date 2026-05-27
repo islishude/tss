@@ -7,8 +7,11 @@ Current status from local inspection:
 
 - `go test ./...` passes.
 - `cggmp21/secp256k1` is still explicitly experimental.
-- `docs/paillier-zk-proofs.md` states that the Paillier/ZK proof layer is not
-  production-audited.
+- ModulusProof now uses a proper Σ-protocol proving factorization of a Blum integer.
+- EncRangeProof is now independent from EncScalarProof with its own Fiat-Shamir challenge.
+- FROST Ed25519 binding factor uses RFC 9591 `"FROST-ED25519-SHA512-v1rho"` prefix.
+- FROST and CGGMP21 resharing (proactive refresh) are implemented.
+- Presign lifecycle helpers (`MarkPresignConsumed`, `IsPresignConsumed`) are available.
 
 References:
 
@@ -33,180 +36,45 @@ References:
   secret material, or raw secret-bearing payloads in blame evidence, logs,
   errors, examples, or docs.
 
-## P0: Complete CGGMP21 Paillier/MtA/ZK and Identifiable Abort
+## P0 Remaining: CGGMP21 Paillier/ZK Audit Readiness
 
-### Goal
+Items still needed for independent review readiness:
 
-Replace the current unaudited Paillier/ZK proof shells with a production-grade
-CGGMP21 proof set and make identifiable abort behavior complete enough for
-review.
-
-### Detailed Process
-
-1. Build a protocol checklist directly from the CGGMP21 paper for keygen,
+1. Build a formal protocol checklist directly from the CGGMP21 paper for keygen,
    presign, online signing, MtA/MtAwc, proof statements, public inputs,
    witnesses, transcript inputs, and abort-identification requirements.
-2. Compare that checklist against the current `internal/zk/paillier` proof
-   inventory: `ModulusProof`, `EncScalarProof`, `EncRangeProof`, and
-   `MTAResponseProof`.
-3. Replace proof shells whose statement is weaker than CGGMP21 requires. Do not
-   keep shell proofs under production names.
-4. Rework transcript and challenge domains so every proof binds:
-   protocol name, version, session id, threshold, ordered participant set,
-   ordered signer set when applicable, sender, receiver, proof kind, Paillier
-   public key, ciphertexts, curve commitments, and all public statement data.
-5. Recheck MtA/MtAwc equations for both `delta = k * gamma` and `chi = k * x`
-   paths. Document every protocol equation near the implementation.
-6. Ensure each attributable verification failure returns `ProtocolError` with
-   `Blame.Parties` and deterministic `Blame.Evidence`, except duplicate/replay
-   handling.
-7. Add evidence verification coverage for malformed Paillier key material,
-   invalid proof bytes, transcript mismatch, MtA response mismatch, malformed
-   delta broadcast, malformed online partial, and final aggregate verification
-   failure.
-8. Keep the `ExperimentalSecurityNotice` attached to CGGMP21 artifacts until the
-   implementation and proof set have completed independent cryptographic review.
+2. Add the Π^fac (proof of factorization with safe primes) — the current
+   Σ-protocol proves knowledge of factorization but does not separately prove
+   the safe-prime property. The Paillier key generator now enforces Blum
+   condition but does not enforce safe primes.
+3. Add the Π^log proof (discrete log equality between Paillier ciphertext and
+   curve point) per CGGMP21 Section 6.2.
+4. Full CGGMP21 resharing with Paillier key rotation (current implementation
+   does proactive secret-share refresh only).
 
-### Acceptance Criteria
+## P1 Remaining: FROST Ed25519 Full RFC 9591 Compliance
 
-- `1-of-1`, `2-of-3`, and `3-of-5` CGGMP21 signing scenarios succeed.
-- Tampering with Paillier public keys, Paillier proofs, encrypted nonce proofs,
-  MtA responses, round-1 echoes, round-3 deltas, online partials, or aggregate
-  signatures fails closed.
-- Attributable CGGMP21 failures include deterministic public blame evidence.
-- Blame evidence contains only public inputs or hashes of confidential inputs.
-- No secret scalar, nonce, presign secret, or Paillier private-key material can
-  appear in evidence, logs, formatted errors, examples, or docs.
-- `go test -race ./...` and `golangci-lint run` pass.
-- The experimental warning remains until independent review is complete.
+1. Add public test vectors from standards or papers.
+2. Use HashToScalar without length-delimited encoding for RFC compliance
+   (requires careful migration since it breaks signature compatibility).
+3. Add `frost/ed25519/domain.go` binding into keygen and signing transcripts
+   (domain functions exist but are not yet wired into the protocol).
 
-## P1: Align FROST Ed25519 with RFC 9591
+## P1 Remaining: Testing Infrastructure
 
-### Goal
+1. Add state-machine fuzzers for FROST and CGGMP21 message delivery.
+2. Add golden encoding tests for every public binary record.
+3. Add adversarial scheduler tests that permute delivery order.
+4. Add concurrency and race tests around session APIs.
 
-Move the Ed25519 implementation from "FROST-style" toward behavior that is
-traceable to RFC 9591 and reviewable as FROST Ed25519.
+## P2 Remaining: Release Documentation
 
-### Detailed Process
+1. Update `docs/paillier-zk-proofs.md` to describe the new Σ-protocol modulus proof.
+2. Update `docs/frost-ed25519.md` to note RFC 9591 alignment status.
+3. Maintain audit scope documentation.
+4. Update `README.md` with resharing and presign lifecycle information.
 
-1. Build a checklist from RFC 9591 for the Ed25519 ciphersuite: context string,
-   nonce commitment shape, binding factor, group commitment, challenge,
-   Lagrange coefficient usage, partial verification, aggregation, and signature
-   encoding.
-2. Compare each checklist item against `frost/ed25519` keygen and signing.
-3. Update domain separation and transcript labels so all signing inputs are
-   explicit and documented.
-4. Add public test vectors or public test scenarios from standards or papers
-   where available. Do not derive code from public TSS implementations.
-5. Add tests for wrong signer set, wrong session id, malformed nonce commitment,
-   malformed partial scalar, duplicate/replayed messages, and bad partial blame.
-6. Update docs and examples so the public surface describes exact FROST behavior
-   rather than an underspecified "style" when the implementation is ready.
-
-### Acceptance Criteria
-
-- Produced signatures are accepted by `crypto/ed25519.Verify`.
-- RFC-derived vectors or scenarios pass.
-- `1-of-1`, `2-of-3`, and `3-of-5` FROST signing scenarios pass.
-- All protocol equations and domain-separation choices have useful comments and
-  matching docs.
-- `go test -race ./...` and `golangci-lint run` pass.
-
-## P1: Implement Resharing, Proactive Refresh, and Presign Safety Strategy
-
-### Goal
-
-Add production key-lifecycle capabilities without weakening the protocol
-boundary or allowing presign misuse.
-
-### Detailed Process
-
-1. Design FROST resharing for threshold changes and participant-set changes.
-   Bind all new shares to a fresh transcript and public commitment set.
-2. Design CGGMP21 resharing and proactive refresh with Paillier/ZK material
-   updated or revalidated as required by the final protocol checklist.
-3. Ensure refreshed shares cannot be mixed with old shares in signing sessions.
-4. Bind CGGMP21 presigns to signer set, key transcript, presign session id, and
-   any derivation context needed by additive-shift signing.
-5. Define persistent presign-consumption behavior so reuse is rejected after
-   process restart, not only in memory.
-6. Add executable examples showing normal resharing, proactive refresh, and
-   presign lifecycle usage.
-
-### Acceptance Criteria
-
-- Old shares cannot sign under a new refresh transcript.
-- Mixed old/new shares fail closed with attributable errors when possible.
-- Presign reuse is rejected before any second online partial can leave the
-  process, including after persistence and reload.
-- Public examples cover the supported lifecycle.
-- `go test -race ./...` and `golangci-lint run` pass.
-
-## P1: Expand Tests, Fuzzing, Race Checks, Lint, and Audit Gates
-
-### Goal
-
-Turn the current functional tests into release gates suitable for a
-security-sensitive cryptographic library.
-
-### Detailed Process
-
-1. Add full state-machine fuzzers for FROST and CGGMP21 message delivery,
-   including malformed payloads, wrong ordering, duplicates, and dropped
-   messages.
-2. Add adversarial scheduler tests that permute valid envelope delivery order
-   while preserving protocol constraints.
-3. Add concurrency and race tests around session APIs that callers may use from
-   multiple goroutines, or explicitly document APIs as not goroutine-safe.
-4. Add boundary threshold tests for minimum participant sets, maximum practical
-   tested participant sets, invalid threshold values, and repeated party ids.
-5. Add golden encoding tests for every public binary record and every production
-   protocol payload.
-6. Add CI gates for `go test -race ./...`, fuzz smoke tests, `golangci-lint run`,
-   and exported-doc comment checks.
-7. Do not rely on `golangci-lint run --fix` as a release gate. Formatting and
-   lint fixes should be committed deliberately.
-
-### Acceptance Criteria
-
-- Race, lint, fuzz smoke, and doc checks are release-blocking.
-- New API, wire-format, or protocol behavior changes require matching docs and
-  executable examples.
-- Golden tests fail on accidental wire-format drift.
-- Fuzzers cover all production payload decoders.
-- `go test -race ./...` and `golangci-lint run` pass.
-
-## P2: Finish Release Documentation, Audit Scope, and Version Strategy
-
-### Goal
-
-Define exactly when this repository can make production claims and how those
-claims are communicated.
-
-### Detailed Process
-
-1. Update `README.md`, `docs/security.md`, `docs/wire.md`,
-   `docs/cggmp21-secp256k1.md`, `docs/frost-ed25519.md`, and
-   `docs/architecture.md` after each P0/P1 protocol or wire-format change.
-2. Maintain a release checklist covering threat model, caller responsibilities,
-   unsupported features, test commands, fuzz commands, lint commands, and audit
-   status.
-3. Document the external cryptographic audit scope for CGGMP21, Paillier/ZK,
-   identifiable abort, FROST/RFC 9591 conformance, and wire-format canonicality.
-4. Keep `ExperimentalSecurityNotice` until the final CGGMP21 implementation and
-   audit results justify removing it.
-5. Ensure every exported identifier has a Go doc comment starting with the
-   identifier name.
-
-### Acceptance Criteria
-
-- The README accurately distinguishes reviewed production behavior from
-  unsupported or unaudited behavior.
-- Audit scope and unresolved risks are explicit.
-- All exported identifiers pass `doccheck_test.go`.
-- Final release candidates pass `go test -race ./...` and `golangci-lint run`.
-
-## General Handoff Checklist for Substantial Changes
+## General Handoff Checklist
 
 - Update docs for any API, wire-format, or protocol behavior change.
 - Add or refresh executable examples when public behavior changes.

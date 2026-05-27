@@ -205,15 +205,17 @@ func (s *KeygenSession) tryComplete() error {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
+	keygenTranscriptHash := keygenDomain(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, s.cfg.Self, groupCommitments[0])
 	s.keyShare = &KeyShare{
-		Version:            tss.Version,
-		Party:              s.cfg.Self,
-		Threshold:          s.cfg.Threshold,
-		Parties:            append([]tss.PartyID(nil), s.cfg.Parties...),
-		PublicKey:          append([]byte(nil), groupCommitments[0]...),
-		Secret:             secretBytes,
-		GroupCommitments:   groupCommitments,
-		VerificationShares: verificationShares,
+		Version:              tss.Version,
+		Party:                s.cfg.Self,
+		Threshold:            s.cfg.Threshold,
+		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
+		PublicKey:            append([]byte(nil), groupCommitments[0]...),
+		Secret:               secretBytes,
+		GroupCommitments:     groupCommitments,
+		VerificationShares:   verificationShares,
+		KeygenTranscriptHash: keygenTranscriptHash,
 	}
 	s.completed = true
 	return s.keyShare.Validate()

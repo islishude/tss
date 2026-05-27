@@ -12,6 +12,14 @@ import (
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
+	"github.com/islishude/tss/internal/wire"
+)
+
+const (
+	presignTranscriptHashLabel = "cggmp21-secp256k1-presign-transcript-v1"
+	presignRound1EchoLabel     = "cggmp21-secp256k1-presign-round1-echo-v1"
+	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
+	aggregateSignEvidenceLabel = "cggmp21-secp256k1-aggregate-sign-evidence-v1"
 )
 
 // Presign contains one local offline signing record and must be consumed once.
@@ -611,36 +619,36 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 
 func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-presign-transcript-v1"))
-	writeHashPart(h, s.sessionID[:])
+	wire.WriteHashPart(h, []byte(presignTranscriptHashLabel))
+	wire.WriteHashPart(h, s.sessionID[:])
 	for _, id := range s.signers {
 		// Binding every signer id, nonce commitment, encrypted nonce proof, and
 		// delta share prevents replaying presign material across signer sets.
-		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-		writeHashPart(h, s.round1[id].Gamma)
-		writeHashPart(h, s.round1[id].EncK)
-		writeHashPart(h, s.round1[id].EncKProof)
-		writeHashPart(h, s.round1[id].EncKRangeProof)
-		writeHashPart(h, scalarBytes(s.deltas[id]))
+		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		wire.WriteHashPart(h, s.round1[id].Gamma)
+		wire.WriteHashPart(h, s.round1[id].EncK)
+		wire.WriteHashPart(h, s.round1[id].EncKProof)
+		wire.WriteHashPart(h, s.round1[id].EncKRangeProof)
+		wire.WriteHashPart(h, scalarBytes(s.deltas[id]))
 	}
-	writeHashPart(h, R)
-	writeHashPart(h, scalarBytes(littleR))
-	writeHashPart(h, scalarBytes(delta))
+	wire.WriteHashPart(h, R)
+	wire.WriteHashPart(h, scalarBytes(littleR))
+	wire.WriteHashPart(h, scalarBytes(delta))
 	return h.Sum(nil)
 }
 
 func (s *PresignSession) round1Echo() []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-presign-round1-echo-v1"))
-	writeHashPart(h, s.sessionID[:])
+	wire.WriteHashPart(h, []byte(presignRound1EchoLabel))
+	wire.WriteHashPart(h, s.sessionID[:])
 	for _, id := range s.signers {
 		p := s.round1[id]
-		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-		writeHashPart(h, p.Gamma)
-		writeHashPart(h, p.EncK)
-		writeHashPart(h, p.EncKProof)
-		writeHashPart(h, p.EncKRangeProof)
-		writeHashPart(h, p.PaillierPublicKey)
+		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		wire.WriteHashPart(h, p.Gamma)
+		wire.WriteHashPart(h, p.EncK)
+		wire.WriteHashPart(h, p.EncKProof)
+		wire.WriteHashPart(h, p.EncKRangeProof)
+		wire.WriteHashPart(h, p.PaillierPublicKey)
 	}
 	return h.Sum(nil)
 }
@@ -1016,20 +1024,20 @@ func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-mta-response-evidence-v1"))
-	writeHashPart(h, []byte(label))
-	writeHashPart(h, response.Ciphertext)
-	writeHashPart(h, response.Proof)
+	wire.WriteHashPart(h, []byte(mtaResponseEvidenceLabel))
+	wire.WriteHashPart(h, []byte(label))
+	wire.WriteHashPart(h, response.Ciphertext)
+	wire.WriteHashPart(h, response.Proof)
 	return h.Sum(nil)
 }
 
 func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-aggregate-sign-evidence-v1"))
-	writeHashPart(h, digest)
-	writeHashPart(h, r)
-	writeHashPart(h, sValue)
-	writeHashPart(h, transcript)
+	wire.WriteHashPart(h, []byte(aggregateSignEvidenceLabel))
+	wire.WriteHashPart(h, digest)
+	wire.WriteHashPart(h, r)
+	wire.WriteHashPart(h, sValue)
+	wire.WriteHashPart(h, transcript)
 	return h.Sum(nil)
 }
 

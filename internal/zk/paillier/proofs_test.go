@@ -47,7 +47,7 @@ func TestModulusProofTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := ProveModulus([]byte("domain"), &sk.PublicKey, 1)
+	proof, err := ProveModulus(nil, []byte("domain"), sk, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -57,7 +57,7 @@ func TestModulusProofTamper(t *testing.T) {
 	if VerifyModulus([]byte("other"), &sk.PublicKey, 1, proof) {
 		t.Fatal("modulus proof verified under wrong domain")
 	}
-	proof.Digest[0] ^= 1
+	proof.Response[0] ^= 1
 	if VerifyModulus([]byte("domain"), &sk.PublicKey, 1, proof) {
 		t.Fatal("tampered modulus proof verified")
 	}
@@ -72,7 +72,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	}
 	domain := []byte("canonical proof domain")
 
-	modProof, err := ProveModulus(domain, &sk.PublicKey, 1)
+	modProof, err := ProveModulus(nil, domain, sk, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestProofDomainSeparation(t *testing.T) {
 	domain := []byte("proof domain")
 	otherDomain := []byte("other proof domain")
 
-	modProof, err := ProveModulus(domain, &sk.PublicKey, 7)
+	modProof, err := ProveModulus(nil, domain, sk, 7)
 	if err != nil {
 		t.Fatal(err)
 	}

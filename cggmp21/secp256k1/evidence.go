@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const (
@@ -25,6 +26,11 @@ const (
 	evidenceFieldSHash                   = "s_hash"
 	evidenceFieldDeltaResponseHash       = "delta_response_hash"
 	evidenceFieldSigmaResponseHash       = "sigma_response_hash"
+)
+
+const (
+	partySetHashLabel             = "cggmp21-secp256k1-party-set-v1"
+	paillierPublicSharesHashLabel = "cggmp21-secp256k1-paillier-public-shares-v1"
 )
 
 // EvidenceContext is the public context used to verify CGGMP21 blame evidence.
@@ -156,34 +162,34 @@ func hashBytes(value []byte) []byte {
 
 func partySetHash(parties []tss.PartyID) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-party-set-v1"))
+	wire.WriteHashPart(h, []byte(partySetHashLabel))
 	sorted := tss.SortParties(parties)
 	for _, id := range sorted {
-		writeHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 	}
 	return h.Sum(nil)
 }
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte("cggmp21-secp256k1-paillier-public-shares-v1"))
+	wire.WriteHashPart(h, []byte(paillierPublicSharesHashLabel))
 	sorted := clonePaillierPublicShares(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return int(a.Party) - int(b.Party)
 	})
 	for _, share := range sorted {
-		writeHashPart(h, []byte{byte(share.Party >> 24), byte(share.Party >> 16), byte(share.Party >> 8), byte(share.Party)})
-		writeHashPart(h, share.PublicKey)
-		writeHashPart(h, share.Proof)
+		wire.WriteHashPart(h, []byte{byte(share.Party >> 24), byte(share.Party >> 16), byte(share.Party >> 8), byte(share.Party)})
+		wire.WriteHashPart(h, share.PublicKey)
+		wire.WriteHashPart(h, share.Proof)
 	}
 	return h.Sum(nil)
 }
 
 func byteSlicesHash(label string, values [][]byte) []byte {
 	h := sha256.New()
-	writeHashPart(h, []byte(label))
+	wire.WriteHashPart(h, []byte(label))
 	for _, value := range values {
-		writeHashPart(h, value)
+		wire.WriteHashPart(h, value)
 	}
 	return h.Sum(nil)
 }

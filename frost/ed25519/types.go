@@ -8,7 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
-	
+
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
@@ -29,14 +29,15 @@ type VerificationShare struct {
 
 // KeyShare is one local FROST Ed25519 signing share.
 type KeyShare struct {
-	Version            uint16        `json:"version"`
-	Party              tss.PartyID   `json:"party"`
-	Threshold          int           `json:"threshold"`
-	Parties            []tss.PartyID `json:"parties"`
-	PublicKey          []byte        `json:"public_key"`
-	Secret             []byte
-	GroupCommitments   [][]byte            `json:"group_commitments"`
-	VerificationShares []VerificationShare `json:"verification_shares"`
+	Version              uint16        `json:"version"`
+	Party                tss.PartyID   `json:"party"`
+	Threshold            int           `json:"threshold"`
+	Parties              []tss.PartyID `json:"parties"`
+	PublicKey            []byte        `json:"public_key"`
+	Secret               []byte
+	GroupCommitments     [][]byte            `json:"group_commitments"`
+	VerificationShares   []VerificationShare `json:"verification_shares"`
+	KeygenTranscriptHash []byte              `json:"keygen_transcript_hash,omitempty"`
 }
 
 // Algorithm returns the common algorithm identifier.
@@ -94,6 +95,9 @@ func (k *KeyShare) Validate() error {
 	}
 	if _, err := edcurve.PointFromBytes(k.PublicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
+	}
+	if len(k.KeygenTranscriptHash) == 0 {
+		return errors.New("key share has no keygen transcript hash")
 	}
 	if _, err := edcurve.ScalarFromCanonical(k.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
