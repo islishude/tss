@@ -1,9 +1,8 @@
-package codec
+package wire
 
 import (
+	"errors"
 	"fmt"
-
-	"github.com/islishude/tss/internal/wire"
 )
 
 // PartyBytes is a party-scoped byte string record.
@@ -17,6 +16,66 @@ type PartyBytePair[T uint32Value] struct {
 	Party  T
 	First  []byte
 	Second []byte
+}
+
+// EncodeUint32List encodes a list of uint32-compatible values.
+func EncodeUint32List[T uint32Value](items []T) []byte {
+	out := Uint32(uint32(len(items)))
+	for _, item := range items {
+		out = append(out, Uint32(uint32(item))...)
+	}
+	return out
+}
+
+// DecodeUint32List decodes a list produced by EncodeUint32List.
+func DecodeUint32List[T uint32Value](raw []byte) ([]T, error) {
+	count, offset, err := ReadUint32(raw, 0)
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(raw)-offset) != uint64(count)*4 {
+		return nil, errors.New("invalid party id list length")
+	}
+	out := make([]T, 0, count)
+	for i := 0; i < int(count); i++ {
+		value, next, err := ReadUint32(raw, offset)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		out = append(out, T(value))
+	}
+	return out, nil
+}
+
+// EncodeBytesList encodes a list of byte strings with uint32 lengths.
+func EncodeBytesList(items [][]byte) []byte {
+	out := Uint32(uint32(len(items)))
+	for _, item := range items {
+		out = AppendBytes(out, item)
+	}
+	return out
+}
+
+// DecodeBytesList decodes a list produced by EncodeBytesList.
+func DecodeBytesList(raw []byte) ([][]byte, error) {
+	count, offset, err := ReadUint32(raw, 0)
+	if err != nil {
+		return nil, err
+	}
+	out := make([][]byte, 0, count)
+	for i := 0; i < int(count); i++ {
+		item, next, err := ReadBytes(raw, offset)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		out = append(out, item)
+	}
+	if offset != len(raw) {
+		return nil, errors.New("trailing bytes list data")
+	}
+	return out, nil
 }
 
 // EncodePartyBytes encodes party-scoped byte string records.
@@ -53,15 +112,6 @@ func DecodePartyBytes[T uint32Value](raw []byte, name string) ([]PartyBytes[T], 
 		return nil, fmt.Errorf("trailing %s bytes", name)
 	}
 	return out, nil
-}
-
-// PartyBytesField decodes party-scoped byte string records from a wire field.
-func PartyBytesField[T uint32Value](fields []wire.Field, tag uint16, name string) ([]PartyBytes[T], error) {
-	raw, err := wire.Require(fields, tag)
-	if err != nil {
-		return nil, err
-	}
-	return DecodePartyBytes[T](raw, name)
 }
 
 // EncodePartyBytePairs encodes party-scoped pairs of byte string records.
@@ -104,13 +154,4 @@ func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePa
 		return nil, fmt.Errorf("trailing %s bytes", name)
 	}
 	return out, nil
-}
-
-// PartyBytePairsField decodes party-scoped byte string pairs from a wire field.
-func PartyBytePairsField[T uint32Value](fields []wire.Field, tag uint16, name string) ([]PartyBytePair[T], error) {
-	raw, err := wire.Require(fields, tag)
-	if err != nil {
-		return nil, err
-	}
-	return DecodePartyBytePairs[T](raw, name)
 }

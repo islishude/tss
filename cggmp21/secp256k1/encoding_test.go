@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -88,7 +88,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 		{name: "paillier public key", tag: keyShareFieldPaillierPublicKey, value: []byte{}},
 		{name: "paillier private key", tag: keyShareFieldPaillierPrivateKey, value: []byte{}},
 		{name: "paillier proof", tag: keyShareFieldPaillierProof, value: []byte{}},
-		{name: "paillier public key set", tag: keyShareFieldPaillierPublicKeys, value: codec.Uint32(0)},
+		{name: "paillier public key set", tag: keyShareFieldPaillierPublicKeys, value: wire.Uint32(0)},
 		{name: "share proof", tag: keyShareFieldShareProof, value: []byte{}},
 		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
 	} {

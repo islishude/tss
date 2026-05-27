@@ -1,4 +1,4 @@
-package codec
+package wire
 
 import (
 	"bytes"
@@ -32,22 +32,28 @@ func TestReadAppendBytes(t *testing.T) {
 	}
 }
 
-func TestBytesList(t *testing.T) {
-	items := [][]byte{{1}, {}, {2, 3}}
-	raw := EncodeBytesList(items)
-	got, err := DecodeBytesList(raw)
+func TestReadUint16(t *testing.T) {
+	got, offset, err := ReadUint16([]byte{2, 1, 2}, 1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != len(items) {
-		t.Fatalf("got %d items", len(got))
+	if got != 0x0102 || offset != 3 {
+		t.Fatalf("ReadUint16 got %x at %d", got, offset)
 	}
-	for i := range items {
-		if !bytes.Equal(got[i], items[i]) {
-			t.Fatalf("item %d got %x", i, got[i])
-		}
+	if _, _, err := ReadUint16([]byte{2, 1, 2}, 2); err == nil {
+		t.Fatal("ReadUint16 accepted truncated input")
 	}
-	if _, err := DecodeBytesList(append(raw, 0)); err == nil {
-		t.Fatal("DecodeBytesList accepted trailing bytes")
+}
+
+func TestReadUint32(t *testing.T) {
+	got, offset, err := ReadUint32([]byte{9, 1, 2, 3, 4}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got != 0x01020304 || offset != 5 {
+		t.Fatalf("ReadUint32 got %x at %d", got, offset)
+	}
+	if _, _, err := ReadUint32([]byte{1, 2, 3}, 0); err == nil {
+		t.Fatal("ReadUint32 accepted truncated input")
 	}
 }

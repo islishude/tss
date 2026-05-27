@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"crypto/rand"
 	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 
+	
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/wire"
@@ -194,16 +194,16 @@ func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
 	if err := requireExactProofTags(fields, modulusProofFieldNBits, modulusProofFieldSmallFactorCheck, modulusProofFieldTranscriptHash, modulusProofFieldDigest); err != nil {
 		return nil, err
 	}
-	nBits, err := decodeUint32ProofField(fields, modulusProofFieldNBits)
+	nBits, err := wire.Uint32Field(fields, modulusProofFieldNBits)
 	if err != nil {
 		return nil, err
 	}
 	p := &ModulusProof{
 		Version:          proofVersion,
 		NBits:            int(nBits),
-		SmallFactorCheck: mustProofField(fields, modulusProofFieldSmallFactorCheck),
-		TranscriptHash:   mustProofField(fields, modulusProofFieldTranscriptHash),
-		Digest:           mustProofField(fields, modulusProofFieldDigest),
+		SmallFactorCheck: wire.MustField(fields, modulusProofFieldSmallFactorCheck),
+		TranscriptHash:   wire.MustField(fields, modulusProofFieldTranscriptHash),
+		Digest:           wire.MustField(fields, modulusProofFieldDigest),
 	}
 	if err := validateModulusProof(p); err != nil {
 		return nil, err
@@ -225,12 +225,12 @@ func UnmarshalEncScalarProof(in []byte) (*EncScalarProof, error) {
 	}
 	p := &EncScalarProof{
 		Version:          proofVersion,
-		ScalarCommitment: mustProofField(fields, encScalarProofFieldScalarCommitment),
-		CipherCommitment: mustProofField(fields, encScalarProofFieldCipherCommitment),
-		PointCommitment:  mustProofField(fields, encScalarProofFieldPointCommitment),
-		Response:         mustProofField(fields, encScalarProofFieldResponse),
-		Randomness:       mustProofField(fields, encScalarProofFieldRandomness),
-		TranscriptHash:   mustProofField(fields, encScalarProofFieldTranscriptHash),
+		ScalarCommitment: wire.MustField(fields, encScalarProofFieldScalarCommitment),
+		CipherCommitment: wire.MustField(fields, encScalarProofFieldCipherCommitment),
+		PointCommitment:  wire.MustField(fields, encScalarProofFieldPointCommitment),
+		Response:         wire.MustField(fields, encScalarProofFieldResponse),
+		Randomness:       wire.MustField(fields, encScalarProofFieldRandomness),
+		TranscriptHash:   wire.MustField(fields, encScalarProofFieldTranscriptHash),
 	}
 	if err := validateEncScalarProof(p); err != nil {
 		return nil, err
@@ -252,11 +252,11 @@ func UnmarshalEncRangeProof(in []byte) (*EncRangeProof, error) {
 	}
 	p := &EncRangeProof{
 		Version:        proofVersion,
-		Bound:          mustProofField(fields, encRangeProofFieldBound),
-		Challenge:      mustProofField(fields, encRangeProofFieldChallenge),
-		Response:       mustProofField(fields, encRangeProofFieldResponse),
-		TranscriptHash: mustProofField(fields, encRangeProofFieldTranscriptHash),
-		Digest:         mustProofField(fields, encRangeProofFieldDigest),
+		Bound:          wire.MustField(fields, encRangeProofFieldBound),
+		Challenge:      wire.MustField(fields, encRangeProofFieldChallenge),
+		Response:       wire.MustField(fields, encRangeProofFieldResponse),
+		TranscriptHash: wire.MustField(fields, encRangeProofFieldTranscriptHash),
+		Digest:         wire.MustField(fields, encRangeProofFieldDigest),
 	}
 	if err := validateEncRangeProof(p); err != nil {
 		return nil, err
@@ -278,14 +278,14 @@ func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 	}
 	p := &MTAResponseProof{
 		Version:          proofVersion,
-		TranscriptHash:   mustProofField(fields, mtaResponseProofFieldTranscriptHash),
-		BetaCommitment:   mustProofField(fields, mtaResponseProofFieldBetaCommitment),
-		CipherCommitment: mustProofField(fields, mtaResponseProofFieldCipherCommitment),
-		BCommitment:      mustProofField(fields, mtaResponseProofFieldBCommitment),
-		BetaNonce:        mustProofField(fields, mtaResponseProofFieldBetaNonce),
-		BResponse:        mustProofField(fields, mtaResponseProofFieldBResponse),
-		BetaResponse:     mustProofField(fields, mtaResponseProofFieldBetaResponse),
-		Randomness:       mustProofField(fields, mtaResponseProofFieldRandomness),
+		TranscriptHash:   wire.MustField(fields, mtaResponseProofFieldTranscriptHash),
+		BetaCommitment:   wire.MustField(fields, mtaResponseProofFieldBetaCommitment),
+		CipherCommitment: wire.MustField(fields, mtaResponseProofFieldCipherCommitment),
+		BCommitment:      wire.MustField(fields, mtaResponseProofFieldBCommitment),
+		BetaNonce:        wire.MustField(fields, mtaResponseProofFieldBetaNonce),
+		BResponse:        wire.MustField(fields, mtaResponseProofFieldBResponse),
+		BetaResponse:     wire.MustField(fields, mtaResponseProofFieldBetaResponse),
+		Randomness:       wire.MustField(fields, mtaResponseProofFieldRandomness),
 	}
 	if err := validateMTAResponseProof(p); err != nil {
 		return nil, err
@@ -565,10 +565,10 @@ func marshalModulusProof(p *ModulusProof) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(proofVersion, modulusProofWireType, []wire.Field{
-		{Tag: modulusProofFieldNBits, Value: encodeUint32Proof(uint32(p.NBits))},
-		{Tag: modulusProofFieldSmallFactorCheck, Value: bytesOrEmpty(p.SmallFactorCheck)},
-		{Tag: modulusProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
-		{Tag: modulusProofFieldDigest, Value: bytesOrEmpty(p.Digest)},
+		{Tag: modulusProofFieldNBits, Value: wire.Uint32(uint32(p.NBits))},
+		{Tag: modulusProofFieldSmallFactorCheck, Value: wire.NonNilBytes(p.SmallFactorCheck)},
+		{Tag: modulusProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: modulusProofFieldDigest, Value: wire.NonNilBytes(p.Digest)},
 	})
 }
 
@@ -577,12 +577,12 @@ func marshalEncScalarProof(p *EncScalarProof) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(proofVersion, encScalarProofWireType, []wire.Field{
-		{Tag: encScalarProofFieldScalarCommitment, Value: bytesOrEmpty(p.ScalarCommitment)},
-		{Tag: encScalarProofFieldCipherCommitment, Value: bytesOrEmpty(p.CipherCommitment)},
-		{Tag: encScalarProofFieldPointCommitment, Value: bytesOrEmpty(p.PointCommitment)},
-		{Tag: encScalarProofFieldResponse, Value: bytesOrEmpty(p.Response)},
-		{Tag: encScalarProofFieldRandomness, Value: bytesOrEmpty(p.Randomness)},
-		{Tag: encScalarProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
+		{Tag: encScalarProofFieldScalarCommitment, Value: wire.NonNilBytes(p.ScalarCommitment)},
+		{Tag: encScalarProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
+		{Tag: encScalarProofFieldPointCommitment, Value: wire.NonNilBytes(p.PointCommitment)},
+		{Tag: encScalarProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
+		{Tag: encScalarProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
+		{Tag: encScalarProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
 	})
 }
 
@@ -591,11 +591,11 @@ func marshalEncRangeProof(p *EncRangeProof) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(proofVersion, encRangeProofWireType, []wire.Field{
-		{Tag: encRangeProofFieldBound, Value: bytesOrEmpty(p.Bound)},
-		{Tag: encRangeProofFieldChallenge, Value: bytesOrEmpty(p.Challenge)},
-		{Tag: encRangeProofFieldResponse, Value: bytesOrEmpty(p.Response)},
-		{Tag: encRangeProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
-		{Tag: encRangeProofFieldDigest, Value: bytesOrEmpty(p.Digest)},
+		{Tag: encRangeProofFieldBound, Value: wire.NonNilBytes(p.Bound)},
+		{Tag: encRangeProofFieldChallenge, Value: wire.NonNilBytes(p.Challenge)},
+		{Tag: encRangeProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
+		{Tag: encRangeProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: encRangeProofFieldDigest, Value: wire.NonNilBytes(p.Digest)},
 	})
 }
 
@@ -604,14 +604,14 @@ func marshalMTAResponseProof(p *MTAResponseProof) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(proofVersion, mtaResponseProofWireType, []wire.Field{
-		{Tag: mtaResponseProofFieldTranscriptHash, Value: bytesOrEmpty(p.TranscriptHash)},
-		{Tag: mtaResponseProofFieldBetaCommitment, Value: bytesOrEmpty(p.BetaCommitment)},
-		{Tag: mtaResponseProofFieldCipherCommitment, Value: bytesOrEmpty(p.CipherCommitment)},
-		{Tag: mtaResponseProofFieldBCommitment, Value: bytesOrEmpty(p.BCommitment)},
-		{Tag: mtaResponseProofFieldBetaNonce, Value: bytesOrEmpty(p.BetaNonce)},
-		{Tag: mtaResponseProofFieldBResponse, Value: bytesOrEmpty(p.BResponse)},
-		{Tag: mtaResponseProofFieldBetaResponse, Value: bytesOrEmpty(p.BetaResponse)},
-		{Tag: mtaResponseProofFieldRandomness, Value: bytesOrEmpty(p.Randomness)},
+		{Tag: mtaResponseProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: mtaResponseProofFieldBetaCommitment, Value: wire.NonNilBytes(p.BetaCommitment)},
+		{Tag: mtaResponseProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
+		{Tag: mtaResponseProofFieldBCommitment, Value: wire.NonNilBytes(p.BCommitment)},
+		{Tag: mtaResponseProofFieldBetaNonce, Value: wire.NonNilBytes(p.BetaNonce)},
+		{Tag: mtaResponseProofFieldBResponse, Value: wire.NonNilBytes(p.BResponse)},
+		{Tag: mtaResponseProofFieldBetaResponse, Value: wire.NonNilBytes(p.BetaResponse)},
+		{Tag: mtaResponseProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
 	})
 }
 
@@ -745,35 +745,6 @@ func requireExactProofTags(fields []wire.Field, tags ...uint16) error {
 		}
 	}
 	return nil
-}
-
-func mustProofField(fields []wire.Field, tag uint16) []byte {
-	value, _ := wire.Require(fields, tag)
-	return value
-}
-
-func decodeUint32ProofField(fields []wire.Field, tag uint16) (uint32, error) {
-	value, err := wire.Require(fields, tag)
-	if err != nil {
-		return 0, err
-	}
-	if len(value) != 4 {
-		return 0, fmt.Errorf("invalid uint32 proof field %d", tag)
-	}
-	return binary.BigEndian.Uint32(value), nil
-}
-
-func encodeUint32Proof(v uint32) []byte {
-	var out [4]byte
-	binary.BigEndian.PutUint32(out[:], v)
-	return out[:]
-}
-
-func bytesOrEmpty(in []byte) []byte {
-	if in == nil {
-		return []byte{}
-	}
-	return in
 }
 
 func encScalarTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

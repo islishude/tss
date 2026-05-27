@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const proofDomainVersion = "cggmp21-secp256k1-proof-domain-v2"
@@ -86,10 +86,10 @@ func proofDomain(ctx proofDomainContext) []byte {
 	h := sha256.New()
 	writeHashPart(h, []byte(proofDomainVersion))
 	writeHashPart(h, []byte(protocol))
-	writeHashPart(h, codec.Uint32(uint32(tss.Version)))
+	writeHashPart(h, wire.Uint32(uint32(tss.Version)))
 	writeHashPart(h, []byte(ctx.label))
 	writeHashPart(h, ctx.sessionID[:])
-	writeHashPart(h, codec.Uint32(uint32(ctx.threshold)))
+	writeHashPart(h, wire.Uint32(uint32(ctx.threshold)))
 	writePartySet(h, ctx.parties)
 	writePartySet(h, ctx.signers)
 	writePartyID(h, ctx.sender)
@@ -102,7 +102,7 @@ func proofDomain(ctx proofDomainContext) []byte {
 }
 
 func writePartySet(h interface{ Write([]byte) (int, error) }, parties []tss.PartyID) {
-	writeHashPart(h, codec.Uint32(uint32(len(parties))))
+	writeHashPart(h, wire.Uint32(uint32(len(parties))))
 	for _, id := range parties {
 		writePartyID(h, id)
 	}

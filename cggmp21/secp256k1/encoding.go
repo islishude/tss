@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -52,20 +52,20 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, keyShareWireType, []wire.Field{
-		{Tag: keyShareFieldParty, Value: codec.Uint32(uint32(k.Party))},
-		{Tag: keyShareFieldThreshold, Value: codec.Uint32(uint32(k.Threshold))},
-		{Tag: keyShareFieldParties, Value: codec.EncodeUint32List(k.Parties)},
-		{Tag: keyShareFieldPublicKey, Value: codec.NonNilBytes(k.PublicKey)},
-		{Tag: keyShareFieldChainCode, Value: codec.NonNilBytes(k.ChainCode)},
-		{Tag: keyShareFieldSecret, Value: codec.NonNilBytes(k.Secret)},
-		{Tag: keyShareFieldGroupCommitments, Value: codec.EncodeBytesList(k.GroupCommitments)},
+		{Tag: keyShareFieldParty, Value: wire.Uint32(uint32(k.Party))},
+		{Tag: keyShareFieldThreshold, Value: wire.Uint32(uint32(k.Threshold))},
+		{Tag: keyShareFieldParties, Value: wire.EncodeUint32List(k.Parties)},
+		{Tag: keyShareFieldPublicKey, Value: wire.NonNilBytes(k.PublicKey)},
+		{Tag: keyShareFieldChainCode, Value: wire.NonNilBytes(k.ChainCode)},
+		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(k.Secret)},
+		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
-		{Tag: keyShareFieldPaillierPublicKey, Value: codec.NonNilBytes(k.PaillierPublicKey)},
-		{Tag: keyShareFieldPaillierPrivateKey, Value: codec.NonNilBytes(k.PaillierPrivateKey)},
-		{Tag: keyShareFieldPaillierProof, Value: codec.NonNilBytes(k.PaillierProof)},
+		{Tag: keyShareFieldPaillierPublicKey, Value: wire.NonNilBytes(k.PaillierPublicKey)},
+		{Tag: keyShareFieldPaillierPrivateKey, Value: wire.NonNilBytes(k.PaillierPrivateKey)},
+		{Tag: keyShareFieldPaillierProof, Value: wire.NonNilBytes(k.PaillierProof)},
 		{Tag: keyShareFieldPaillierPublicKeys, Value: encodePaillierPublicShares(k.PaillierPublicKeys)},
-		{Tag: keyShareFieldShareProof, Value: codec.NonNilBytes(k.ShareProof)},
-		{Tag: keyShareFieldKeygenTranscriptHash, Value: codec.NonNilBytes(k.KeygenTranscriptHash)},
+		{Tag: keyShareFieldShareProof, Value: wire.NonNilBytes(k.ShareProof)},
+		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
 		{Tag: keyShareFieldSecurityNotice, Value: []byte(k.SecurityNotice)},
 	})
 }
@@ -78,25 +78,25 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldSecurityNotice); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldSecurityNotice); err != nil {
 		return nil, err
 	}
-	party, err := codec.Uint32Field(fields, keyShareFieldParty)
+	party, err := wire.Uint32Field(fields, keyShareFieldParty)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := codec.Uint32Field(fields, keyShareFieldThreshold)
+	threshold, err := wire.Uint32Field(fields, keyShareFieldThreshold)
 	if err != nil {
 		return nil, err
 	}
-	if uint64(threshold) > uint64(codec.MaxInt) {
+	if uint64(threshold) > uint64(wire.MaxInt) {
 		return nil, errors.New("threshold too large")
 	}
-	parties, err := codec.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)
+	parties, err := wire.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments, err := codec.BytesListField(fields, keyShareFieldGroupCommitments)
+	groupCommitments, err := wire.BytesListField(fields, keyShareFieldGroupCommitments)
 	if err != nil {
 		return nil, err
 	}
@@ -113,18 +113,18 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		Party:                tss.PartyID(party),
 		Threshold:            int(threshold),
 		Parties:              parties,
-		PublicKey:            codec.MustField(fields, keyShareFieldPublicKey),
-		ChainCode:            codec.MustField(fields, keyShareFieldChainCode),
-		Secret:               codec.MustField(fields, keyShareFieldSecret),
+		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
+		ChainCode:            wire.MustField(fields, keyShareFieldChainCode),
+		Secret:               wire.MustField(fields, keyShareFieldSecret),
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
-		PaillierPublicKey:    codec.MustField(fields, keyShareFieldPaillierPublicKey),
-		PaillierPrivateKey:   codec.MustField(fields, keyShareFieldPaillierPrivateKey),
-		PaillierProof:        codec.MustField(fields, keyShareFieldPaillierProof),
+		PaillierPublicKey:    wire.MustField(fields, keyShareFieldPaillierPublicKey),
+		PaillierPrivateKey:   wire.MustField(fields, keyShareFieldPaillierPrivateKey),
+		PaillierProof:        wire.MustField(fields, keyShareFieldPaillierProof),
 		PaillierPublicKeys:   paillierPublicKeys,
-		ShareProof:           codec.MustField(fields, keyShareFieldShareProof),
-		KeygenTranscriptHash: codec.MustField(fields, keyShareFieldKeygenTranscriptHash),
-		SecurityNotice:       string(codec.MustField(fields, keyShareFieldSecurityNotice)),
+		ShareProof:           wire.MustField(fields, keyShareFieldShareProof),
+		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		SecurityNotice:       string(wire.MustField(fields, keyShareFieldSecurityNotice)),
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err
@@ -138,16 +138,16 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, presignWireType, []wire.Field{
-		{Tag: presignFieldParty, Value: codec.Uint32(uint32(p.Party))},
-		{Tag: presignFieldThreshold, Value: codec.Uint32(uint32(p.Threshold))},
-		{Tag: presignFieldSigners, Value: codec.EncodeUint32List(p.Signers)},
-		{Tag: presignFieldR, Value: codec.NonNilBytes(p.R)},
-		{Tag: presignFieldLittleR, Value: codec.NonNilBytes(p.LittleR)},
-		{Tag: presignFieldKShare, Value: codec.NonNilBytes(p.KShare)},
-		{Tag: presignFieldChiShare, Value: codec.NonNilBytes(p.ChiShare)},
-		{Tag: presignFieldDelta, Value: codec.NonNilBytes(p.Delta)},
-		{Tag: presignFieldTranscriptHash, Value: codec.NonNilBytes(p.TranscriptHash)},
-		{Tag: presignFieldConsumed, Value: codec.Bool(p.Consumed)},
+		{Tag: presignFieldParty, Value: wire.Uint32(uint32(p.Party))},
+		{Tag: presignFieldThreshold, Value: wire.Uint32(uint32(p.Threshold))},
+		{Tag: presignFieldSigners, Value: wire.EncodeUint32List(p.Signers)},
+		{Tag: presignFieldR, Value: wire.NonNilBytes(p.R)},
+		{Tag: presignFieldLittleR, Value: wire.NonNilBytes(p.LittleR)},
+		{Tag: presignFieldKShare, Value: wire.NonNilBytes(p.KShare)},
+		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(p.ChiShare)},
+		{Tag: presignFieldDelta, Value: wire.NonNilBytes(p.Delta)},
+		{Tag: presignFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: presignFieldConsumed, Value: wire.Bool(p.Consumed)},
 		{Tag: presignFieldSecurityNotice, Value: []byte(p.SecurityNotice)},
 	})
 }
@@ -161,25 +161,25 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected presign wire version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldConsumed, presignFieldSecurityNotice); err != nil {
+	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldConsumed, presignFieldSecurityNotice); err != nil {
 		return nil, err
 	}
-	party, err := codec.Uint32Field(fields, presignFieldParty)
+	party, err := wire.Uint32Field(fields, presignFieldParty)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := codec.Uint32Field(fields, presignFieldThreshold)
+	threshold, err := wire.Uint32Field(fields, presignFieldThreshold)
 	if err != nil {
 		return nil, err
 	}
-	if uint64(threshold) > uint64(codec.MaxInt) {
+	if uint64(threshold) > uint64(wire.MaxInt) {
 		return nil, errors.New("threshold too large")
 	}
-	signers, err := codec.Uint32ListField[tss.PartyID](fields, presignFieldSigners)
+	signers, err := wire.Uint32ListField[tss.PartyID](fields, presignFieldSigners)
 	if err != nil {
 		return nil, err
 	}
-	consumed, err := codec.BoolField(fields, presignFieldConsumed)
+	consumed, err := wire.BoolField(fields, presignFieldConsumed)
 	if err != nil {
 		return nil, err
 	}
@@ -188,14 +188,14 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 		Party:          tss.PartyID(party),
 		Threshold:      int(threshold),
 		Signers:        signers,
-		R:              codec.MustField(fields, presignFieldR),
-		LittleR:        codec.MustField(fields, presignFieldLittleR),
-		KShare:         codec.MustField(fields, presignFieldKShare),
-		ChiShare:       codec.MustField(fields, presignFieldChiShare),
-		Delta:          codec.MustField(fields, presignFieldDelta),
-		TranscriptHash: codec.MustField(fields, presignFieldTranscriptHash),
+		R:              wire.MustField(fields, presignFieldR),
+		LittleR:        wire.MustField(fields, presignFieldLittleR),
+		KShare:         wire.MustField(fields, presignFieldKShare),
+		ChiShare:       wire.MustField(fields, presignFieldChiShare),
+		Delta:          wire.MustField(fields, presignFieldDelta),
+		TranscriptHash: wire.MustField(fields, presignFieldTranscriptHash),
 		Consumed:       consumed,
-		SecurityNotice: string(codec.MustField(fields, presignFieldSecurityNotice)),
+		SecurityNotice: string(wire.MustField(fields, presignFieldSecurityNotice)),
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -214,7 +214,7 @@ func (p *Presign) Validate() error {
 	if p.Threshold <= 0 || p.Threshold > len(p.Signers) {
 		return errors.New("invalid presign threshold")
 	}
-	if err := codec.ValidateStrictSortedIDs(p.Signers); err != nil {
+	if err := wire.ValidateStrictSortedIDs(p.Signers); err != nil {
 		return err
 	}
 	if !tss.ContainsParty(p.Signers, p.Party) {
@@ -242,15 +242,15 @@ func (p *Presign) Validate() error {
 }
 
 func encodeVerificationShares(shares []VerificationShare) []byte {
-	records := make([]codec.PartyBytes[tss.PartyID], len(shares))
+	records := make([]wire.PartyBytes[tss.PartyID], len(shares))
 	for i, share := range shares {
-		records[i] = codec.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
+		records[i] = wire.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
 	}
-	return codec.EncodePartyBytes(records)
+	return wire.EncodePartyBytes(records)
 }
 
 func decodeVerificationSharesField(fields []wire.Field, tag uint16) ([]VerificationShare, error) {
-	records, err := codec.PartyBytesField[tss.PartyID](fields, tag, "verification share")
+	records, err := wire.PartyBytesField[tss.PartyID](fields, tag, "verification share")
 	if err != nil {
 		return nil, err
 	}
@@ -262,19 +262,19 @@ func decodeVerificationSharesField(fields []wire.Field, tag uint16) ([]Verificat
 }
 
 func encodePaillierPublicShares(shares []PaillierPublicShare) []byte {
-	records := make([]codec.PartyBytePair[tss.PartyID], len(shares))
+	records := make([]wire.PartyBytePair[tss.PartyID], len(shares))
 	for i, share := range shares {
-		records[i] = codec.PartyBytePair[tss.PartyID]{
+		records[i] = wire.PartyBytePair[tss.PartyID]{
 			Party:  share.Party,
 			First:  share.PublicKey,
 			Second: share.Proof,
 		}
 	}
-	return codec.EncodePartyBytePairs(records)
+	return wire.EncodePartyBytePairs(records)
 }
 
 func decodePaillierPublicSharesField(fields []wire.Field, tag uint16) ([]PaillierPublicShare, error) {
-	records, err := codec.PartyBytePairsField[tss.PartyID](fields, tag, "Paillier public share")
+	records, err := wire.PartyBytePairsField[tss.PartyID](fields, tag, "Paillier public share")
 	if err != nil {
 		return nil, err
 	}

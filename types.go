@@ -9,7 +9,6 @@ import (
 	"io"
 	"slices"
 
-	"github.com/islishude/tss/internal/codec"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -187,15 +186,15 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	}
 	return wire.Marshal(Version, envelopeWireType, []wire.Field{
 		{Tag: envelopeFieldProtocol, Value: []byte(e.Protocol)},
-		{Tag: envelopeFieldVersion, Value: codec.Uint16(e.Version)},
+		{Tag: envelopeFieldVersion, Value: wire.Uint16(e.Version)},
 		{Tag: envelopeFieldSessionID, Value: e.SessionID[:]},
 		{Tag: envelopeFieldRound, Value: []byte{e.Round}},
-		{Tag: envelopeFieldFrom, Value: codec.Uint32(uint32(e.From))},
-		{Tag: envelopeFieldTo, Value: codec.Uint32(uint32(e.To))},
+		{Tag: envelopeFieldFrom, Value: wire.Uint32(uint32(e.From))},
+		{Tag: envelopeFieldTo, Value: wire.Uint32(uint32(e.To))},
 		{Tag: envelopeFieldPayloadType, Value: []byte(e.PayloadType)},
-		{Tag: envelopeFieldPayload, Value: codec.NonNilBytes(e.Payload)},
-		{Tag: envelopeFieldTranscriptHash, Value: codec.NonNilBytes(e.TranscriptHash)},
-		{Tag: envelopeFieldConfidentialRequired, Value: codec.Bool(e.ConfidentialRequired)},
+		{Tag: envelopeFieldPayload, Value: wire.NonNilBytes(e.Payload)},
+		{Tag: envelopeFieldTranscriptHash, Value: wire.NonNilBytes(e.TranscriptHash)},
+		{Tag: envelopeFieldConfidentialRequired, Value: wire.Bool(e.ConfidentialRequired)},
 	})
 }
 
@@ -216,7 +215,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	envVersion, err := codec.DecodeUint16(versionBytes)
+	envVersion, err := wire.DecodeUint16(versionBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope version field: %w", err)
 	}
@@ -242,7 +241,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	from, err := codec.DecodeUint32(fromBytes)
+	from, err := wire.DecodeUint32(fromBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope sender: %w", err)
 	}
@@ -250,7 +249,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	to, err := codec.DecodeUint32(toBytes)
+	to, err := wire.DecodeUint32(toBytes)
 	if err != nil {
 		return fmt.Errorf("invalid envelope recipient: %w", err)
 	}
@@ -273,7 +272,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	confidential, err := codec.DecodeBool(confidentialBytes)
+	confidential, err := wire.DecodeBool(confidentialBytes)
 	if err != nil {
 		return err
 	}
@@ -308,8 +307,8 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	h.Write([]byte(e.Protocol))
 	h.Write([]byte{0, byte(e.Version >> 8), byte(e.Version), e.Round})
 	h.Write(e.SessionID[:])
-	codec.WriteUint32(h, uint32(e.From))
-	codec.WriteUint32(h, uint32(e.To))
+	h.Write(wire.Uint32(uint32(e.From)))
+	h.Write(wire.Uint32(uint32(e.To)))
 	h.Write([]byte(e.PayloadType))
 	h.Write([]byte{0})
 	h.Write(e.Payload)

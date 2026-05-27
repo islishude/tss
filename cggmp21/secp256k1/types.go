@@ -8,7 +8,8 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	"github.com/islishude/tss/internal/wire"
+	
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -134,7 +135,7 @@ func (k *KeyShare) Validate() error {
 	if k.Threshold <= 0 || k.Threshold > len(k.Parties) {
 		return errors.New("invalid threshold")
 	}
-	if err := codec.ValidateStrictSortedIDs(k.Parties); err != nil {
+	if err := wire.ValidateStrictSortedIDs(k.Parties); err != nil {
 		return err
 	}
 	if !tss.ContainsParty(k.Parties, k.Party) {

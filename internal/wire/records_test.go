@@ -1,9 +1,45 @@
-package codec
+package wire
 
 import (
 	"bytes"
+	"slices"
 	"testing"
 )
+
+func TestUint32List(t *testing.T) {
+	input := []testID{3, 7, 11}
+	raw := EncodeUint32List(input)
+	got, err := DecodeUint32List[testID](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(got, input) {
+		t.Fatalf("DecodeUint32List got %v", got)
+	}
+	if _, err := DecodeUint32List[testID]([]byte{0, 0, 0, 1, 0}); err == nil {
+		t.Fatal("DecodeUint32List accepted invalid length")
+	}
+}
+
+func TestBytesList(t *testing.T) {
+	items := [][]byte{{1}, {}, {2, 3}}
+	raw := EncodeBytesList(items)
+	got, err := DecodeBytesList(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(items) {
+		t.Fatalf("got %d items", len(got))
+	}
+	for i := range items {
+		if !bytes.Equal(got[i], items[i]) {
+			t.Fatalf("item %d got %x", i, got[i])
+		}
+	}
+	if _, err := DecodeBytesList(append(raw, 0)); err == nil {
+		t.Fatal("DecodeBytesList accepted trailing bytes")
+	}
+}
 
 func TestPartyBytes(t *testing.T) {
 	input := []PartyBytes[testID]{

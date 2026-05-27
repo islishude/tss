@@ -1,4 +1,4 @@
-package codec
+package wire
 
 import (
 	"bytes"
@@ -44,23 +44,5 @@ func TestBoolPrimitive(t *testing.T) {
 	}
 	if _, err := DecodeBool([]byte{}); err == nil {
 		t.Fatal("DecodeBool accepted empty input")
-	}
-}
-
-func TestReadAndWriteUint32(t *testing.T) {
-	var out bytes.Buffer
-	WriteUint32(&out, 0x01020304)
-	if !bytes.Equal(out.Bytes(), []byte{1, 2, 3, 4}) {
-		t.Fatalf("WriteUint32 wrote %x", out.Bytes())
-	}
-	got, offset, err := ReadUint32([]byte{9, 1, 2, 3, 4}, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got != 0x01020304 || offset != 5 {
-		t.Fatalf("ReadUint32 got %x at %d", got, offset)
-	}
-	if _, _, err := ReadUint32([]byte{1, 2, 3}, 0); err == nil {
-		t.Fatal("ReadUint32 accepted truncated input")
 	}
 }

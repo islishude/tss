@@ -2,7 +2,6 @@ package wire
 
 import (
 	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -50,13 +49,13 @@ func Marshal(version uint16, typeID string, fields []Field) ([]byte, error) {
 	}
 	out := make([]byte, 0, size)
 	out = append(out, magic...)
-	out = appendUint16(out, uint16(len(typeID)))
+	out = AppendUint16(out, uint16(len(typeID)))
 	out = append(out, typeID...)
-	out = appendUint16(out, version)
-	out = appendUint16(out, uint16(len(fields)))
+	out = AppendUint16(out, version)
+	out = AppendUint16(out, uint16(len(fields)))
 	for _, field := range fields {
-		out = appendUint16(out, field.Tag)
-		out = appendUint32(out, uint32(len(field.Value)))
+		out = AppendUint16(out, field.Tag)
+		out = AppendUint32(out, uint32(len(field.Value)))
 		out = append(out, field.Value...)
 	}
 	return out, nil
@@ -74,7 +73,7 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 		return 0, nil, errors.New("invalid wire magic")
 	}
 	offset := len(magic)
-	typeLen, offset, err := readUint16(in, offset)
+	typeLen, offset, err := ReadUint16(in, offset)
 	if err != nil {
 		return 0, nil, err
 	}
@@ -92,18 +91,18 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 		return 0, nil, fmt.Errorf("unexpected wire type id %q", typeID)
 	}
 	offset += int(typeLen)
-	version, offset, err := readUint16(in, offset)
+	version, offset, err := ReadUint16(in, offset)
 	if err != nil {
 		return 0, nil, err
 	}
-	fieldCount, offset, err := readUint16(in, offset)
+	fieldCount, offset, err := ReadUint16(in, offset)
 	if err != nil {
 		return 0, nil, err
 	}
 	fields := make([]Field, 0, fieldCount)
 	var last uint16
 	for i := 0; i < int(fieldCount); i++ {
-		tag, next, err := readUint16(in, offset)
+		tag, next, err := ReadUint16(in, offset)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -111,7 +110,7 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 			return 0, nil, errors.New("wire fields must be strictly increasing")
 		}
 		offset = next
-		length, next, err := readUint32(in, offset)
+		length, next, err := ReadUint32(in, offset)
 		if err != nil {
 			return 0, nil, err
 		}
@@ -150,30 +149,4 @@ func Require(fields []Field, tag uint16) ([]byte, error) {
 		return nil, fmt.Errorf("missing wire field %d", tag)
 	}
 	return value, nil
-}
-
-func appendUint16(out []byte, v uint16) []byte {
-	var buf [2]byte
-	binary.BigEndian.PutUint16(buf[:], v)
-	return append(out, buf[:]...)
-}
-
-func appendUint32(out []byte, v uint32) []byte {
-	var buf [4]byte
-	binary.BigEndian.PutUint32(buf[:], v)
-	return append(out, buf[:]...)
-}
-
-func readUint16(in []byte, offset int) (uint16, int, error) {
-	if len(in)-offset < 2 {
-		return 0, offset, errors.New("truncated uint16")
-	}
-	return binary.BigEndian.Uint16(in[offset : offset+2]), offset + 2, nil
-}
-
-func readUint32(in []byte, offset int) (uint32, int, error) {
-	if len(in)-offset < 4 {
-		return 0, offset, errors.New("truncated uint32")
-	}
-	return binary.BigEndian.Uint32(in[offset : offset+4]), offset + 4, nil
 }

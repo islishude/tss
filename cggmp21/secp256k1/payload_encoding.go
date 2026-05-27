@@ -7,7 +7,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -68,10 +68,10 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 		return nil, errors.New("chain code must be 32 bytes")
 	}
 	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
-		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: codec.EncodeBytesList(p.Commitments)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: codec.NonNilBytes(p.PaillierPublicKey)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: codec.NonNilBytes(p.PaillierProof)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: codec.NonNilBytes(p.ChainCode)},
+		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
+		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
+		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
 	})
 }
 
@@ -83,10 +83,10 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if version != tss.Version {
 		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode); err != nil {
+	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	commitments, err := codec.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
+	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
@@ -95,9 +95,9 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	}
 	p := keygenCommitmentsPayload{
 		Commitments:       commitments,
-		PaillierPublicKey: codec.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
-		PaillierProof:     codec.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
-		ChainCode:         codec.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
+		PaillierPublicKey: wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
+		PaillierProof:     wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
+		ChainCode:         wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return keygenCommitmentsPayload{}, err
@@ -116,7 +116,7 @@ func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, keygenSharePayloadWireType, []wire.Field{
-		{Tag: keygenSharePayloadFieldShare, Value: codec.NonNilBytes(p.Share)},
+		{Tag: keygenSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
 	})
 }
 
@@ -128,10 +128,10 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 	if version != tss.Version {
 		return keygenSharePayload{}, fmt.Errorf("unexpected keygen share payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
+	if err := wire.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := codec.MustField(fields, keygenSharePayloadFieldShare)
+	share := wire.MustField(fields, keygenSharePayloadFieldShare)
 	if _, err := secp.ParseScalar(share); err != nil {
 		return keygenSharePayload{}, err
 	}
@@ -155,11 +155,11 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, presignRound1PayloadWireType, []wire.Field{
-		{Tag: presignRound1PayloadFieldGamma, Value: codec.NonNilBytes(p.Gamma)},
-		{Tag: presignRound1PayloadFieldEncK, Value: codec.NonNilBytes(p.EncK)},
-		{Tag: presignRound1PayloadFieldEncKProof, Value: codec.NonNilBytes(p.EncKProof)},
-		{Tag: presignRound1PayloadFieldEncKRangeProof, Value: codec.NonNilBytes(p.EncKRangeProof)},
-		{Tag: presignRound1PayloadFieldPaillierPublicKey, Value: codec.NonNilBytes(p.PaillierPublicKey)},
+		{Tag: presignRound1PayloadFieldGamma, Value: wire.NonNilBytes(p.Gamma)},
+		{Tag: presignRound1PayloadFieldEncK, Value: wire.NonNilBytes(p.EncK)},
+		{Tag: presignRound1PayloadFieldEncKProof, Value: wire.NonNilBytes(p.EncKProof)},
+		{Tag: presignRound1PayloadFieldEncKRangeProof, Value: wire.NonNilBytes(p.EncKRangeProof)},
+		{Tag: presignRound1PayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 	})
 }
 
@@ -171,15 +171,15 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if version != tss.Version {
 		return presignRound1Payload{}, fmt.Errorf("unexpected presign round1 payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldEncKProof, presignRound1PayloadFieldEncKRangeProof, presignRound1PayloadFieldPaillierPublicKey); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldEncKProof, presignRound1PayloadFieldEncKRangeProof, presignRound1PayloadFieldPaillierPublicKey); err != nil {
 		return presignRound1Payload{}, err
 	}
 	p := presignRound1Payload{
-		Gamma:             codec.MustField(fields, presignRound1PayloadFieldGamma),
-		EncK:              codec.MustField(fields, presignRound1PayloadFieldEncK),
-		EncKProof:         codec.MustField(fields, presignRound1PayloadFieldEncKProof),
-		EncKRangeProof:    codec.MustField(fields, presignRound1PayloadFieldEncKRangeProof),
-		PaillierPublicKey: codec.MustField(fields, presignRound1PayloadFieldPaillierPublicKey),
+		Gamma:             wire.MustField(fields, presignRound1PayloadFieldGamma),
+		EncK:              wire.MustField(fields, presignRound1PayloadFieldEncK),
+		EncKProof:         wire.MustField(fields, presignRound1PayloadFieldEncKProof),
+		EncKRangeProof:    wire.MustField(fields, presignRound1PayloadFieldEncKRangeProof),
+		PaillierPublicKey: wire.MustField(fields, presignRound1PayloadFieldPaillierPublicKey),
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return presignRound1Payload{}, err
@@ -214,7 +214,7 @@ func marshalPresignRound2Payload(p presignRound2Payload) ([]byte, error) {
 	return wire.Marshal(tss.Version, presignRound2PayloadWireType, []wire.Field{
 		{Tag: presignRound2PayloadFieldDelta, Value: delta},
 		{Tag: presignRound2PayloadFieldSigma, Value: sigma},
-		{Tag: presignRound2PayloadFieldRound1Echo, Value: codec.NonNilBytes(p.Round1Echo)},
+		{Tag: presignRound2PayloadFieldRound1Echo, Value: wire.NonNilBytes(p.Round1Echo)},
 	})
 }
 
@@ -226,18 +226,18 @@ func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
 	if version != tss.Version {
 		return presignRound2Payload{}, fmt.Errorf("unexpected presign round2 payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, presignRound2PayloadFieldDelta, presignRound2PayloadFieldSigma, presignRound2PayloadFieldRound1Echo); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound2PayloadFieldDelta, presignRound2PayloadFieldSigma, presignRound2PayloadFieldRound1Echo); err != nil {
 		return presignRound2Payload{}, err
 	}
-	delta, err := mta.UnmarshalResponseMessage(codec.MustField(fields, presignRound2PayloadFieldDelta))
+	delta, err := mta.UnmarshalResponseMessage(wire.MustField(fields, presignRound2PayloadFieldDelta))
 	if err != nil {
 		return presignRound2Payload{}, err
 	}
-	sigma, err := mta.UnmarshalResponseMessage(codec.MustField(fields, presignRound2PayloadFieldSigma))
+	sigma, err := mta.UnmarshalResponseMessage(wire.MustField(fields, presignRound2PayloadFieldSigma))
 	if err != nil {
 		return presignRound2Payload{}, err
 	}
-	echo := codec.MustField(fields, presignRound2PayloadFieldRound1Echo)
+	echo := wire.MustField(fields, presignRound2PayloadFieldRound1Echo)
 	if len(echo) != sha256.Size {
 		return presignRound2Payload{}, errors.New("round1 echo must be 32 bytes")
 	}
@@ -249,7 +249,7 @@ func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, presignRound3PayloadWireType, []wire.Field{
-		{Tag: presignRound3PayloadFieldDelta, Value: codec.NonNilBytes(p.Delta)},
+		{Tag: presignRound3PayloadFieldDelta, Value: wire.NonNilBytes(p.Delta)},
 	})
 }
 
@@ -261,10 +261,10 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 	if version != tss.Version {
 		return presignRound3Payload{}, fmt.Errorf("unexpected presign round3 payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, presignRound3PayloadFieldDelta); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound3PayloadFieldDelta); err != nil {
 		return presignRound3Payload{}, err
 	}
-	delta := codec.MustField(fields, presignRound3PayloadFieldDelta)
+	delta := wire.MustField(fields, presignRound3PayloadFieldDelta)
 	if _, err := secp.ParseScalar(delta); err != nil {
 		return presignRound3Payload{}, err
 	}
@@ -279,8 +279,8 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 		return nil, errors.New("presign transcript must be 32 bytes")
 	}
 	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
-		{Tag: signPartialPayloadFieldS, Value: codec.NonNilBytes(p.S)},
-		{Tag: signPartialPayloadFieldPresignTranscript, Value: codec.NonNilBytes(p.PresignTranscript)},
+		{Tag: signPartialPayloadFieldS, Value: wire.NonNilBytes(p.S)},
+		{Tag: signPartialPayloadFieldPresignTranscript, Value: wire.NonNilBytes(p.PresignTranscript)},
 	})
 }
 
@@ -292,12 +292,12 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if version != tss.Version {
 		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript); err != nil {
+	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript); err != nil {
 		return signPartialPayload{}, err
 	}
 	p := signPartialPayload{
-		S:                 codec.MustField(fields, signPartialPayloadFieldS),
-		PresignTranscript: codec.MustField(fields, signPartialPayloadFieldPresignTranscript),
+		S:                 wire.MustField(fields, signPartialPayloadFieldS),
+		PresignTranscript: wire.MustField(fields, signPartialPayloadFieldPresignTranscript),
 	}
 	if _, err := secp.ParseScalar(p.S); err != nil {
 		return signPartialPayload{}, err

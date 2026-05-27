@@ -1,14 +1,14 @@
-package codec
+package wire
 
 import (
 	"bytes"
 	"testing"
-
-	"github.com/islishude/tss/internal/wire"
 )
 
+type testID uint32
+
 func TestWireFieldHelpers(t *testing.T) {
-	fields := []wire.Field{
+	fields := []Field{
 		{Tag: 1, Value: Uint32(7)},
 		{Tag: 2, Value: Bool(true)},
 		{Tag: 3, Value: EncodeUint32List([]testID{1, 2})},
@@ -43,14 +43,14 @@ func TestWireFieldHelpers(t *testing.T) {
 }
 
 func TestWireFieldHelperErrors(t *testing.T) {
-	fields := []wire.Field{{Tag: 1, Value: Uint32(7)}}
+	fields := []Field{{Tag: 1, Value: Uint32(7)}}
 	if err := RequireExactTags(fields, 2); err == nil {
 		t.Fatal("RequireExactTags accepted wrong tag")
 	}
-	if _, err := Uint32Field([]wire.Field{{Tag: 1, Value: append(Uint32(7), 0)}}, 1); err == nil {
+	if _, err := Uint32Field([]Field{{Tag: 1, Value: append(Uint32(7), 0)}}, 1); err == nil {
 		t.Fatal("Uint32Field accepted trailing bytes")
 	}
-	if _, err := BoolField([]wire.Field{{Tag: 1, Value: []byte{2}}}, 1); err == nil {
+	if _, err := BoolField([]Field{{Tag: 1, Value: []byte{2}}}, 1); err == nil {
 		t.Fatal("BoolField accepted non-canonical bool")
 	}
 }

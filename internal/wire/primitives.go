@@ -1,9 +1,8 @@
-package codec
+package wire
 
 import (
 	"encoding/binary"
 	"errors"
-	"io"
 )
 
 type uint32Value interface {
@@ -64,17 +63,4 @@ func DecodeBool(in []byte) (bool, error) {
 	default:
 		return false, errors.New("bool must be 0 or 1")
 	}
-}
-
-// WriteUint32 writes v as big-endian uint32 and ignores hash.Writer errors.
-func WriteUint32(w io.Writer, v uint32) {
-	_, _ = w.Write(Uint32(v))
-}
-
-// ReadUint32 reads a big-endian uint32 at offset and returns the next offset.
-func ReadUint32(in []byte, offset int) (uint32, int, error) {
-	if len(in)-offset < 4 {
-		return 0, offset, errors.New("truncated uint32")
-	}
-	return binary.BigEndian.Uint32(in[offset : offset+4]), offset + 4, nil
 }

@@ -5,7 +5,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/codec"
+	
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -26,12 +26,12 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, keyShareWireType, []wire.Field{
-		{Tag: keyShareFieldParty, Value: codec.Uint32(uint32(k.Party))},
-		{Tag: keyShareFieldThreshold, Value: codec.Uint32(uint32(k.Threshold))},
-		{Tag: keyShareFieldParties, Value: codec.EncodeUint32List(k.Parties)},
-		{Tag: keyShareFieldPublicKey, Value: codec.NonNilBytes(k.PublicKey)},
-		{Tag: keyShareFieldSecret, Value: codec.NonNilBytes(k.Secret)},
-		{Tag: keyShareFieldGroupCommitments, Value: codec.EncodeBytesList(k.GroupCommitments)},
+		{Tag: keyShareFieldParty, Value: wire.Uint32(uint32(k.Party))},
+		{Tag: keyShareFieldThreshold, Value: wire.Uint32(uint32(k.Threshold))},
+		{Tag: keyShareFieldParties, Value: wire.EncodeUint32List(k.Parties)},
+		{Tag: keyShareFieldPublicKey, Value: wire.NonNilBytes(k.PublicKey)},
+		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(k.Secret)},
+		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
 	})
 }
@@ -44,25 +44,25 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := codec.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares); err != nil {
 		return nil, err
 	}
-	party, err := codec.Uint32Field(fields, keyShareFieldParty)
+	party, err := wire.Uint32Field(fields, keyShareFieldParty)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := codec.Uint32Field(fields, keyShareFieldThreshold)
+	threshold, err := wire.Uint32Field(fields, keyShareFieldThreshold)
 	if err != nil {
 		return nil, err
 	}
-	if uint64(threshold) > uint64(codec.MaxInt) {
+	if uint64(threshold) > uint64(wire.MaxInt) {
 		return nil, errors.New("threshold too large")
 	}
-	parties, err := codec.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)
+	parties, err := wire.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments, err := codec.BytesListField(fields, keyShareFieldGroupCommitments)
+	groupCommitments, err := wire.BytesListField(fields, keyShareFieldGroupCommitments)
 	if err != nil {
 		return nil, err
 	}
@@ -75,8 +75,8 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		Party:              tss.PartyID(party),
 		Threshold:          int(threshold),
 		Parties:            parties,
-		PublicKey:          codec.MustField(fields, keyShareFieldPublicKey),
-		Secret:             codec.MustField(fields, keyShareFieldSecret),
+		PublicKey:          wire.MustField(fields, keyShareFieldPublicKey),
+		Secret:             wire.MustField(fields, keyShareFieldSecret),
 		GroupCommitments:   groupCommitments,
 		VerificationShares: verificationShares,
 	}
@@ -87,15 +87,15 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 }
 
 func encodeVerificationShares(shares []VerificationShare) []byte {
-	records := make([]codec.PartyBytes[tss.PartyID], len(shares))
+	records := make([]wire.PartyBytes[tss.PartyID], len(shares))
 	for i, share := range shares {
-		records[i] = codec.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
+		records[i] = wire.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
 	}
-	return codec.EncodePartyBytes(records)
+	return wire.EncodePartyBytes(records)
 }
 
 func decodeVerificationSharesField(fields []wire.Field, tag uint16) ([]VerificationShare, error) {
-	records, err := codec.PartyBytesField[tss.PartyID](fields, tag, "verification share")
+	records, err := wire.PartyBytesField[tss.PartyID](fields, tag, "verification share")
 	if err != nil {
 		return nil, err
 	}
