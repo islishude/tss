@@ -6,7 +6,7 @@ This module is a transport-neutral threshold-signature library. The public API i
 - `github.com/islishude/tss/frost/ed25519`: dealerless FROST-style Ed25519 DKG and two-round signing.
 - `github.com/islishude/tss/cggmp21/secp256k1`: experimental CGGMP21-style secp256k1 threshold ECDSA keygen, presign, online signing, and evidence verification.
 - `internal/wire`: strict TLV encoding used by binary envelope, key-share, and presign records.
-- `internal/curve`, `internal/shamir`, `internal/paillier`, `internal/mta`, and `internal/zk`: protocol-local cryptographic helpers. Curve scalar and field wrappers use committed fiat-crypto generated arithmetic under `internal/fiat`.
+- `internal/curve`, `internal/shamir`, `internal/paillier`, `internal/paillier/paillierct`, `internal/secret`, `internal/mta`, and `internal/zk`: protocol-local cryptographic helpers. `paillierct` wraps constant-time `c^λ mod n²` via `filippo.io/bigmod`. `secret.Scalar` is a fixed-length secret type that rejects JSON and variable-length encoding. Curve scalar and field wrappers use committed fiat-crypto generated arithmetic under `internal/fiat`.
 
 ## Transport Model
 

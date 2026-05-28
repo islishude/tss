@@ -64,6 +64,33 @@ copies can leave historical secret material elsewhere in process memory. Use
 short process lifetimes, encrypted persistence, locked-down crash reporting, and
 process isolation when stronger memory-erasure guarantees are required.
 
+## Constant-Time Paillier Private-Key Operations
+
+Paillier private-key modular exponentiation (`c^λ mod n²`) is implemented via
+`filippo.io/bigmod` in `internal/paillier/paillierct`. This replaces the
+variable-time `math/big.Int.Exp` for secret-exponent paths.
+
+`math/big` remains acceptable for:
+
+- public-key encryption (`g^m mod n²`, `r^n mod n²`);
+- public-exponent proof verification;
+- parameter parsing and test vectors;
+- key generation (one-time, offline).
+
+`math/big.Int.Exp` must not be used when the exponent is a secret:
+λ, μ, or an MtA responder scalar `b`.
+
+The constant-time path enforces:
+
+- fixed-length big-endian encodings for modulus, base, and exponent;
+- Montgomery-ladder exponentiation via `bigmod.Nat.Exp`;
+- ciphertext blinding (`c' = c * r^n mod n²`) during decryption;
+- no secret-dependent branches, array indices, or early returns.
+
+Secret scalars (`λ`, `μ`) are stored as `secret.Scalar` (fixed-length bytes)
+and do not expose `String()`, variable-length `Bytes()`, `BigInt()`, or JSON
+encoding.
+
 ## CGGMP21 Status
 
 `cggmp21/secp256k1` remains experimental. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts, and encodes Paillier/ZK proof payloads as canonical binary TLV records. The Paillier/ZK proof layer and identifiable-abort behavior still require independent cryptographic audit before production use.

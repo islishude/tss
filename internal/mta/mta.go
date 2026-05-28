@@ -9,6 +9,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -198,7 +199,25 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 	if err != nil {
 		return nil, nil, err
 	}
-	response := new(big.Int).Exp(encA, b, pkA.NSquared)
+
+	// encA^b mod N² via constant-time modular exponentiation.
+	// Ciphertext blinding is NOT applied here because the ZK proof
+	// (ProveMTAResponse) verifies the exact relationship
+	// response = encA^b * encBeta mod N²; a blinded base would
+	// change the ciphertext and break the proof. The constant-time
+	// bigmod.Exp provides the primary side-channel protection for
+	// the secret scalar b.
+	nLen := (pkA.N.BitLen() + 7) / 8
+	nSquaredLen := 2 * nLen
+	nSquaredBytes := paillierct.FixedEncode(pkA.NSquared, nSquaredLen)
+	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
+	bBytes := scalarFixedBytes(b)
+
+	encRespBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, bBytes)
+	if err != nil {
+		return nil, nil, err
+	}
+	response := new(big.Int).SetBytes(encRespBytes)
 	response.Mul(response, encBeta)
 	response.Mod(response, pkA.NSquared)
 	proof, err := zkpai.ProveMTAResponse(reader, responseDomain, pkA, encA, response, bCommitment, b, beta, betaRandomness)
@@ -279,4 +298,16 @@ func validatePositiveIntegerBytes(in []byte) error {
 		return errors.New("integer must be positive")
 	}
 	return nil
+}
+
+// scalarFixedBytes encodes a secp256k1 scalar as fixed-length 32-byte big-endian.
+func scalarFixedBytes(x *big.Int) []byte {
+	const scalarByteLen = 32
+	b := x.Bytes()
+	if len(b) >= scalarByteLen {
+		return b[len(b)-scalarByteLen:]
+	}
+	out := make([]byte, scalarByteLen)
+	copy(out[scalarByteLen-len(b):], b)
+	return out
 }

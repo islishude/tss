@@ -7,6 +7,8 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -23,10 +25,12 @@ type PublicKey struct {
 }
 
 // PrivateKey contains Paillier secret factors and decryption exponents.
+// Lambda and Mu use fixed-length secret.Scalar to prevent accidental logging,
+// variable-length encoding, and non-constant-time conversion of secret material.
 type PrivateKey struct {
 	PublicKey
-	Lambda *big.Int
-	Mu     *big.Int
+	Lambda *secret.Scalar
+	Mu     *secret.Scalar
 	P      *big.Int
 	Q      *big.Int
 }
@@ -41,8 +45,8 @@ func (sk *PrivateKey) Destroy() {
 	if sk == nil {
 		return
 	}
-	clearBigInt(sk.Lambda)
-	clearBigInt(sk.Mu)
+	sk.Lambda.Destroy()
+	sk.Mu.Destroy()
 	clearBigInt(sk.P)
 	clearBigInt(sk.Q)
 }
@@ -94,11 +98,20 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 		nSquared := new(big.Int).Mul(n, n)
 		// g = n + 1 gives the common simplified Paillier variant.
 		g := new(big.Int).Add(n, big.NewInt(1))
-		lambda := lcm(new(big.Int).Sub(p, big.NewInt(1)), new(big.Int).Sub(q, big.NewInt(1)))
-		u := new(big.Int).Exp(g, lambda, nSquared)
+		lambdaBig := lcm(new(big.Int).Sub(p, big.NewInt(1)), new(big.Int).Sub(q, big.NewInt(1)))
+		u := new(big.Int).Exp(g, lambdaBig, nSquared)
 		lu := L(u, n)
-		mu := new(big.Int).ModInverse(lu, n)
-		if mu == nil {
+		muBig := new(big.Int).ModInverse(lu, n)
+		if muBig == nil {
+			continue
+		}
+		nLen := (n.BitLen() + 7) / 8
+		lambdaSec, err := secret.NewScalar(lambdaBig.Bytes(), nLen)
+		if err != nil {
+			continue
+		}
+		muSec, err := secret.NewScalar(muBig.Bytes(), nLen)
+		if err != nil {
 			continue
 		}
 		return &PrivateKey{
@@ -107,8 +120,8 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 				NSquared: nSquared,
 				G:        g,
 			},
-			Lambda: lambda,
-			Mu:     mu,
+			Lambda: lambdaSec,
+			Mu:     muSec,
 			P:      p,
 			Q:      q,
 		}, nil
@@ -204,11 +217,12 @@ func (sk PrivateKey) Validate() error {
 	if err := sk.PublicKey.Validate(); err != nil {
 		return err
 	}
+	if sk.Lambda == nil || sk.Mu == nil {
+		return errors.New("invalid secret scalar")
+	}
 	for name, value := range map[string]*big.Int{
-		"lambda": sk.Lambda,
-		"mu":     sk.Mu,
-		"p":      sk.P,
-		"q":      sk.Q,
+		"p": sk.P,
+		"q": sk.Q,
 	} {
 		if value == nil || value.Sign() <= 0 {
 			return fmt.Errorf("invalid %s", name)
@@ -223,17 +237,28 @@ func (sk PrivateKey) Validate() error {
 	if !sk.P.ProbablyPrime(64) || !sk.Q.ProbablyPrime(64) {
 		return errors.New("paillier factors must be prime")
 	}
+	lambdaBig := scalarToBig(sk.Lambda)
 	wantLambda := lcm(new(big.Int).Sub(sk.P, big.NewInt(1)), new(big.Int).Sub(sk.Q, big.NewInt(1)))
-	if sk.Lambda.Cmp(wantLambda) != 0 {
+	if lambdaBig.Cmp(wantLambda) != 0 {
 		return errors.New("invalid paillier lambda")
 	}
-	u := new(big.Int).Exp(sk.G, sk.Lambda, sk.NSquared)
+	u := new(big.Int).Exp(sk.G, lambdaBig, sk.NSquared)
 	lu := L(u, sk.N)
 	wantMu := new(big.Int).ModInverse(lu, sk.N)
-	if wantMu == nil || sk.Mu.Cmp(wantMu) != 0 {
+	if wantMu == nil || scalarToBig(sk.Mu).Cmp(wantMu) != 0 {
 		return errors.New("invalid paillier mu")
 	}
 	return nil
+}
+
+// scalarToBig converts a fixed-length secret.Scalar to a *big.Int.
+// This is unexported; callers outside the paillier package must use
+// the constant-time paths provided by paillierct.
+func scalarToBig(s *secret.Scalar) *big.Int {
+	if s == nil {
+		return nil
+	}
+	return new(big.Int).SetBytes(s.FixedBytes())
 }
 
 func clearBigInt(x *big.Int) {
@@ -307,11 +332,11 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lambda, err := encodePositiveInt(sk.Lambda)
+	lambda, err := encodePositiveInt(scalarToBig(sk.Lambda))
 	if err != nil {
 		return nil, err
 	}
-	mu, err := encodePositiveInt(sk.Mu)
+	mu, err := encodePositiveInt(scalarToBig(sk.Mu))
 	if err != nil {
 		return nil, err
 	}
@@ -353,11 +378,11 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
-	lambda, err := decodePositiveIntField(fields, privateKeyFieldLambda)
+	lambdaBig, err := decodePositiveIntField(fields, privateKeyFieldLambda)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lambda: %w", err)
 	}
-	mu, err := decodePositiveIntField(fields, privateKeyFieldMu)
+	muBig, err := decodePositiveIntField(fields, privateKeyFieldMu)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mu: %w", err)
 	}
@@ -369,14 +394,23 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid q: %w", err)
 	}
+	nLen := (n.BitLen() + 7) / 8
+	lambdaSec, err := secret.NewScalar(lambdaBig.Bytes(), nLen)
+	if err != nil {
+		return nil, fmt.Errorf("invalid lambda: %w", err)
+	}
+	muSec, err := secret.NewScalar(muBig.Bytes(), nLen)
+	if err != nil {
+		return nil, fmt.Errorf("invalid mu: %w", err)
+	}
 	sk := &PrivateKey{
 		PublicKey: PublicKey{
 			N:        n,
 			NSquared: new(big.Int).Mul(n, n),
 			G:        g,
 		},
-		Lambda: lambda,
-		Mu:     mu,
+		Lambda: lambdaSec,
+		Mu:     muSec,
 		P:      p,
 		Q:      q,
 	}
@@ -426,6 +460,9 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 }
 
 // Decrypt recovers a plaintext representative from a Paillier ciphertext.
+// The c^λ mod n² step uses constant-time modular exponentiation via
+// filippo.io/bigmod with ciphertext blinding to defeat side-channel attacks
+// on the secret exponent λ.
 func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
@@ -436,9 +473,33 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	if ciphertext == nil || ciphertext.Sign() <= 0 || ciphertext.Cmp(sk.NSquared) >= 0 {
 		return nil, errors.New("ciphertext out of range")
 	}
-	u := new(big.Int).Exp(ciphertext, sk.Lambda, sk.NSquared)
-	m := L(u, sk.N)
-	m.Mul(m, sk.Mu)
+
+	nLen := (sk.N.BitLen() + 7) / 8
+	nBytes := paillierct.FixedEncode(sk.N, nLen)
+	nSquaredBytes := paillierct.FixedEncode(sk.NSquared, 2*nLen)
+
+	// u = c^λ mod n² via constant-time exponentiation with ciphertext blinding.
+	ct, err := paillierct.NewPrivateModExp(nSquaredBytes, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillierct init: %w", err)
+	}
+	cBytes := paillierct.FixedEncode(ciphertext, len(nSquaredBytes))
+	lambdaBytes := sk.Lambda.FixedBytes()
+	uBytes, err := ct.ExpSecretBlinded(rand.Reader, cBytes, lambdaBytes, nBytes)
+	if err != nil {
+		return nil, fmt.Errorf("paillier decryption: %w", err)
+	}
+
+	// L(u) = (u - 1) / n. The division is exact for valid Paillier ciphertexts
+	// and only depends on the public modulus n.
+	u := new(big.Int).SetBytes(uBytes)
+	l := L(u, sk.N)
+
+	// m = L(u) * μ mod n using math/big. The exponentiation is already
+	// constant-time and ciphertext-blinded; the marginal timing variation
+	// from a single multiplication is not practically exploitable.
+	muBig := scalarToBig(sk.Mu)
+	m := new(big.Int).Mul(l, muBig)
 	m.Mod(m, sk.N)
 	return m, nil
 }

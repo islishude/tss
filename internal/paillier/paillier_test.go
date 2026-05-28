@@ -90,7 +90,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if priv.N.Cmp(sk.N) != 0 || priv.Lambda.Cmp(sk.Lambda) != 0 {
+	if priv.N.Cmp(sk.N) != 0 || !priv.Lambda.Equal(sk.Lambda) || !priv.Mu.Equal(sk.Mu) {
 		t.Fatal("private key mismatch after round trip")
 	}
 }
@@ -110,11 +110,19 @@ func TestPrivateKeyJSONAndDestroy(t *testing.T) {
 	}
 	n := new(big.Int).Set(sk.N)
 	sk.Destroy()
+	for _, b := range sk.Lambda.FixedBytes() {
+		if b != 0 {
+			t.Fatal("lambda was not cleared")
+		}
+	}
+	for _, b := range sk.Mu.FixedBytes() {
+		if b != 0 {
+			t.Fatal("mu was not cleared")
+		}
+	}
 	for name, value := range map[string]*big.Int{
-		"lambda": sk.Lambda,
-		"mu":     sk.Mu,
-		"p":      sk.P,
-		"q":      sk.Q,
+		"p": sk.P,
+		"q": sk.Q,
 	} {
 		if value == nil || value.Sign() != 0 {
 			t.Fatalf("%s was not cleared", name)
