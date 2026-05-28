@@ -224,11 +224,17 @@ func (k *KeyShare) Validate() error {
 		if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
 			return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
 		}
-		if _, err := pai.UnmarshalPublicKey(item.PublicKey); err != nil {
+		peerPK, err := pai.UnmarshalPublicKey(item.PublicKey)
+		if err != nil {
 			return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
 		}
-		if _, err := zkpai.UnmarshalModulusProof(item.Proof); err != nil {
+		peerProof, err := zkpai.UnmarshalModulusProof(item.Proof)
+		if err != nil {
 			return fmt.Errorf("invalid paillier proof for party %d: %w", item.Party, err)
+		}
+		// Verify the modulus proof is internally consistent with the public key.
+		if peerProof.NBits != peerPK.N.BitLen() {
+			return fmt.Errorf("paillier proof bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerProof.NBits, peerPK.N.BitLen())
 		}
 	}
 	shareProof, err := schnorr.UnmarshalProof(k.ShareProof)

@@ -1,6 +1,8 @@
 package secp256k1
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -8,11 +10,14 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/shamir"
+	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
 const (
-	payloadReshareCommitments = "cggmp21.secp256k1.reshare.commitments"
-	payloadReshareShare       = "cggmp21.secp256k1.reshare.share"
+	payloadReshareCommitments  = "cggmp21.secp256k1.reshare.commitments"
+	payloadReshareShare        = "cggmp21.secp256k1.reshare.share"
+	reshareTranscriptHashLabel = "cggmp21-secp256k1-reshare-transcript-v1"
 )
 
 // ReshareSession refreshes CGGMP21 key shares while preserving the group
@@ -225,6 +230,22 @@ func (s *ReshareSession) tryComplete() error {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
+	transcriptHash := s.reshareTranscriptHash(newCommitments)
+	localVerificationShare, ok := verificationShareFor(verificationShares, s.oldKey.Party)
+	if !ok {
+		return errors.New("missing local verification share")
+	}
+	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, newSecret)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(proofPublic, localVerificationShare) {
+		return errors.New("local share proof public key mismatch")
+	}
+	shareProofBytes, err := shareProof.MarshalBinary()
+	if err != nil {
+		return err
+	}
 	s.newShare = &KeyShare{
 		Version:              tss.Version,
 		Party:                s.oldKey.Party,
@@ -238,12 +259,23 @@ func (s *ReshareSession) tryComplete() error {
 		PaillierPrivateKey:   append([]byte(nil), s.oldKey.PaillierPrivateKey...),
 		PaillierProof:        append([]byte(nil), s.oldKey.PaillierProof...),
 		PaillierPublicKeys:   append([]PaillierPublicShare(nil), s.oldKey.PaillierPublicKeys...),
-		ShareProof:           append([]byte(nil), s.oldKey.ShareProof...),
-		KeygenTranscriptHash: append([]byte(nil), s.oldKey.KeygenTranscriptHash...),
+		ShareProof:           shareProofBytes,
+		KeygenTranscriptHash: transcriptHash,
 		SecurityNotice:       ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	return s.newShare.Validate()
+}
+
+func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(reshareTranscriptHashLabel))
+	wire.WriteHashPart(h, s.cfg.SessionID[:])
+	wire.WriteHashPart(h, s.oldKey.KeygenTranscriptHash)
+	for _, commitment := range newCommitments {
+		wire.WriteHashPart(h, commitment)
+	}
+	return h.Sum(nil)
 }
 
 func validateReshareCommitments(commitments [][]byte, threshold int) error {

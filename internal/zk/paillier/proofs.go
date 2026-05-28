@@ -479,7 +479,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 	if err != nil {
 		return nil, nil, err
 	}
-	rangeTranscript := encRangeTranscript(domain, pk, ciphertext, scalarCommitment, rangeCipherCommitment, rangePointCommitment)
+	rangeTranscript := encRangeTranscript(domain, pk, ciphertext, scalarCommitment, secp.Order().Bytes(), rangeCipherCommitment, rangePointCommitment)
 	eRange := challenge([]byte(encRangeChallengeLabel), rangeTranscript)
 	zRange := new(big.Int).Mul(eRange, scalar)
 	zRange.Add(zRange, beta)
@@ -531,7 +531,7 @@ func VerifyEncRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scala
 		return false
 	}
 
-	rangeTranscript := encRangeTranscript(domain, pk, ciphertext, scalarCommitment, cipherCommitment, proof.PointCommitment)
+	rangeTranscript := encRangeTranscript(domain, pk, ciphertext, scalarCommitment, proof.Bound, cipherCommitment, proof.PointCommitment)
 	if !bytes.Equal(rangeTranscript, proof.TranscriptHash) {
 		return false
 	}
@@ -544,6 +544,16 @@ func VerifyEncRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scala
 	z := new(big.Int).SetBytes(proof.Response)
 	u := new(big.Int).SetBytes(proof.Randomness)
 	if z.Sign() <= 0 || u.Sign() <= 0 {
+		return false
+	}
+
+	// Response range check: if scalar < bound, then z = e*scalar + alpha
+	// satisfies z < bound^2 + bound. A value outside this range indicates
+	// the encrypted scalar exceeds the bound.
+	bound := new(big.Int).SetBytes(proof.Bound)
+	maxZ := new(big.Int).Mul(bound, bound)
+	maxZ.Add(maxZ, bound)
+	if z.Cmp(maxZ) >= 0 {
 		return false
 	}
 
@@ -963,9 +973,9 @@ func encScalarTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, 
 	return hashParts([]byte(encScalarTranscriptLabel), domain, pkBytes, intBytes(ciphertext), scalarCommitment, intBytes(cipherCommitment), pointCommitment)
 }
 
-func encRangeTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {
+func encRangeTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment, bound []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {
 	pkBytes, _ := pk.MarshalBinary()
-	return hashParts([]byte(encRangeTranscriptLabel), domain, pkBytes, intBytes(ciphertext), scalarCommitment, intBytes(cipherCommitment), pointCommitment)
+	return hashParts([]byte(encRangeTranscriptLabel), domain, pkBytes, intBytes(ciphertext), scalarCommitment, bound, intBytes(cipherCommitment), pointCommitment)
 }
 
 func mtaTranscript(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) []byte {
