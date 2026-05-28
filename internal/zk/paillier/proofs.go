@@ -21,6 +21,7 @@ const (
 	encScalarProofWireType   = "zk.paillier.enc-scalar-proof"
 	encRangeProofWireType    = "zk.paillier.enc-range-proof"
 	mtaResponseProofWireType = "zk.paillier.mta-response-proof"
+	logProofWireType         = "zk.paillier.log-proof"
 )
 
 const (
@@ -64,6 +65,15 @@ const (
 )
 
 const (
+	logProofFieldPoint uint16 = iota + 1
+	logProofFieldCipherCommitment
+	logProofFieldPointCommitment
+	logProofFieldResponse
+	logProofFieldRandomness
+	logProofFieldTranscriptHash
+)
+
+const (
 	modulusTranscriptLabel   = "paillier-modulus-transcript-v1"
 	modulusChallengeLabel    = "paillier-modulus-challenge-v1"
 	modulusSigmaCommitLabel  = "paillier-modulus-sigma-commitment-v1"
@@ -74,6 +84,8 @@ const (
 	encRangeDigestLabel      = "paillier-enc-range-proof-v1"
 	mtaTranscriptLabel       = "paillier-mta-response-transcript-v1"
 	mtaChallengeLabel        = "paillier-mta-response-challenge-v1"
+	logTranscriptLabel       = "paillier-log-transcript-v1"
+	logChallengeLabel        = "paillier-log-challenge-v1"
 )
 
 // ModulusProof proves that a Paillier modulus N = p·q is a Blum integer
@@ -126,6 +138,20 @@ type MTAResponseProof struct {
 	BResponse        []byte `json:"b_response"`
 	BetaResponse     []byte `json:"beta_response"`
 	Randomness       []byte `json:"randomness"`
+}
+
+// LogProof (Π^log) proves that a Paillier ciphertext c = Enc(a) and a secp256k1
+// curve point A = a·G share the same discrete logarithm a. Per CGGMP21
+// Section 6.2, this is used during key refresh to prove that a new Paillier
+// ciphertext encrypts the same scalar as an existing verification share.
+type LogProof struct {
+	Version          uint16 `json:"version"`
+	Point            []byte `json:"point"`
+	CipherCommitment []byte `json:"cipher_commitment"`
+	PointCommitment  []byte `json:"point_commitment"`
+	Response         []byte `json:"response"`
+	Randomness       []byte `json:"randomness"`
+	TranscriptHash   []byte `json:"transcript_hash"`
 }
 
 // ProveModulus creates a Fiat-Shamir Σ-protocol proof that the prover knows
@@ -221,6 +247,14 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 	if pk.N.ProbablyPrime(64) || pk.N.Bit(0) == 0 {
 		return false
 	}
+	// Safe-prime structural checks: for safe primes p = 2p'+1, q = 2q'+1,
+	// N ≡ 1 (mod 4) and neither factor is 3.
+	if new(big.Int).Mod(pk.N, big.NewInt(4)).Cmp(big.NewInt(1)) != 0 {
+		return false
+	}
+	if new(big.Int).Mod(pk.N, big.NewInt(3)).Sign() == 0 {
+		return false
+	}
 	if !bytes.Equal(proof.SmallFactorCheck, smallFactorDigest(pk.N)) {
 		return false
 	}
@@ -286,6 +320,10 @@ func Marshal(v any) ([]byte, error) {
 		return marshalMTAResponseProof(p)
 	case MTAResponseProof:
 		return marshalMTAResponseProof(&p)
+	case *LogProof:
+		return marshalLogProof(p)
+	case LogProof:
+		return marshalLogProof(&p)
 	default:
 		return nil, fmt.Errorf("unsupported Paillier proof type %T", v)
 	}
@@ -402,6 +440,33 @@ func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 		Randomness:       wire.MustField(fields, mtaResponseProofFieldRandomness),
 	}
 	if err := validateMTAResponseProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+// UnmarshalLogProof decodes and validates a Π^log proof.
+func UnmarshalLogProof(in []byte) (*LogProof, error) {
+	version, fields, err := wire.Unmarshal(in, logProofWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected log proof version %d", version)
+	}
+	if err := requireExactProofTags(fields, logProofFieldPoint, logProofFieldCipherCommitment, logProofFieldPointCommitment, logProofFieldResponse, logProofFieldRandomness, logProofFieldTranscriptHash); err != nil {
+		return nil, err
+	}
+	p := &LogProof{
+		Version:          proofVersion,
+		Point:            wire.MustField(fields, logProofFieldPoint),
+		CipherCommitment: wire.MustField(fields, logProofFieldCipherCommitment),
+		PointCommitment:  wire.MustField(fields, logProofFieldPointCommitment),
+		Response:         wire.MustField(fields, logProofFieldResponse),
+		Randomness:       wire.MustField(fields, logProofFieldRandomness),
+		TranscriptHash:   wire.MustField(fields, logProofFieldTranscriptHash),
+	}
+	if err := validateLogProof(p); err != nil {
 		return nil, err
 	}
 	return p, nil
@@ -758,6 +823,104 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	return secp.Equal(leftBeta, rightBeta)
 }
 
+// ProveLog creates a Π^log proof that ciphertext c = Enc(a, r) and curve point
+// A = a·G share the same discrete logarithm a. The proof encodes the point A
+// directly rather than requiring a separate scalar commitment, matching the
+// CGGMP21 Section 6.2 Π^log structure.
+func ProveLog(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int, pointBytes []byte) (*LogProof, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
+	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+		return nil, err
+	}
+	if scalar == nil || scalar.Sign() <= 0 || scalar.Cmp(secp.Order()) >= 0 {
+		return nil, errors.New("scalar out of range")
+	}
+	if _, err := secp.PointFromBytes(pointBytes); err != nil {
+		return nil, fmt.Errorf("invalid point: %w", err)
+	}
+	alpha, err := randomScalar(reader)
+	if err != nil {
+		return nil, err
+	}
+	rho, err := randomCoprime(reader, pk.N)
+	if err != nil {
+		return nil, err
+	}
+	cipherCommitment, err := pk.EncryptWithRandomness(alpha, rho)
+	if err != nil {
+		return nil, err
+	}
+	pointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(alpha)))
+	if err != nil {
+		return nil, err
+	}
+	transcript := logTranscript(domain, pk, ciphertext, pointBytes, cipherCommitment, pointCommitment)
+	e := challenge([]byte(logChallengeLabel), transcript)
+	z := new(big.Int).Mul(e, scalar)
+	z.Add(z, alpha)
+	u := new(big.Int).Exp(randomness, e, pk.N)
+	u.Mul(u, rho)
+	u.Mod(u, pk.N)
+	return &LogProof{
+		Version:          proofVersion,
+		Point:            pointBytes,
+		CipherCommitment: intBytes(cipherCommitment),
+		PointCommitment:  pointCommitment,
+		Response:         intBytes(z),
+		Randomness:       intBytes(u),
+		TranscriptHash:   transcript,
+	}, nil
+}
+
+// VerifyLog checks a Π^log proof that ciphertext c and curve point A share the
+// same discrete logarithm. Returns true iff both the Paillier and curve
+// verification equations hold.
+func VerifyLog(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *LogProof) bool {
+	if validateLogProof(proof) != nil || pk == nil || pk.ValidateCiphertext(ciphertext) != nil {
+		return false
+	}
+	point, err := secp.PointFromBytes(proof.Point)
+	if err != nil {
+		return false
+	}
+	cipherCommitment := new(big.Int).SetBytes(proof.CipherCommitment)
+	if pk.ValidateCiphertext(cipherCommitment) != nil {
+		return false
+	}
+	pointCommitment, err := secp.PointFromBytes(proof.PointCommitment)
+	if err != nil {
+		return false
+	}
+	transcript := logTranscript(domain, pk, ciphertext, proof.Point, cipherCommitment, proof.PointCommitment)
+	if !bytes.Equal(transcript, proof.TranscriptHash) {
+		return false
+	}
+	z := new(big.Int).SetBytes(proof.Response)
+	u := new(big.Int).SetBytes(proof.Randomness)
+	if z.Sign() <= 0 || u.Sign() <= 0 {
+		return false
+	}
+	e := challenge([]byte(logChallengeLabel), transcript)
+	encZ, err := pk.EncryptWithRandomness(z, u)
+	if err != nil {
+		return false
+	}
+	rightCipher := new(big.Int).Exp(ciphertext, e, pk.NSquared)
+	rightCipher.Mul(rightCipher, cipherCommitment)
+	rightCipher.Mod(rightCipher, pk.NSquared)
+	if encZ.Cmp(rightCipher) != 0 {
+		return false
+	}
+	leftPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
+	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(point, secp.ScalarFromBigInt(e)))
+	return secp.Equal(leftPoint, rightPoint)
+}
+
 func marshalModulusProof(p *ModulusProof) ([]byte, error) {
 	if err := validateModulusProof(p); err != nil {
 		return nil, err
@@ -815,6 +978,20 @@ func marshalMTAResponseProof(p *MTAResponseProof) ([]byte, error) {
 		{Tag: mtaResponseProofFieldBResponse, Value: wire.NonNilBytes(p.BResponse)},
 		{Tag: mtaResponseProofFieldBetaResponse, Value: wire.NonNilBytes(p.BetaResponse)},
 		{Tag: mtaResponseProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
+	})
+}
+
+func marshalLogProof(p *LogProof) ([]byte, error) {
+	if err := validateLogProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, logProofWireType, []wire.Field{
+		{Tag: logProofFieldPoint, Value: wire.NonNilBytes(p.Point)},
+		{Tag: logProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
+		{Tag: logProofFieldPointCommitment, Value: wire.NonNilBytes(p.PointCommitment)},
+		{Tag: logProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
+		{Tag: logProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
+		{Tag: logProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
 	})
 }
 
@@ -939,6 +1116,34 @@ func validateMTAResponseProof(p *MTAResponseProof) error {
 	return nil
 }
 
+func validateLogProof(p *LogProof) error {
+	if p == nil {
+		return errors.New("nil log proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected log proof version %d", p.Version)
+	}
+	if len(p.Point) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
+		return errors.New("incomplete log proof")
+	}
+	if err := validateCurvePointBytes("point", p.Point); err != nil {
+		return err
+	}
+	if err := validateCurvePointBytes("point commitment", p.PointCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("cipher commitment", p.CipherCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("randomness", p.Randomness); err != nil {
+		return err
+	}
+	return nil
+}
+
 func validateCurvePointBytes(name string, in []byte) error {
 	if _, err := secp.PointFromBytes(in); err != nil {
 		return fmt.Errorf("invalid %s: %w", name, err)
@@ -981,6 +1186,11 @@ func encRangeTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, s
 func mtaTranscript(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) []byte {
 	pkBytes, _ := pk.MarshalBinary()
 	return hashParts([]byte(mtaTranscriptLabel), domain, pkBytes, intBytes(encA), intBytes(response), bCommitment, betaCommitment, intBytes(cipherCommitment), bNonce, betaNonce)
+}
+
+func logTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, pointBytes []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {
+	pkBytes, _ := pk.MarshalBinary()
+	return hashParts([]byte(logTranscriptLabel), domain, pkBytes, intBytes(ciphertext), pointBytes, intBytes(cipherCommitment), pointCommitment)
 }
 
 func encRangeDigest(proof *EncRangeProof) []byte {

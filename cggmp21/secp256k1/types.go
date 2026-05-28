@@ -33,6 +33,17 @@ const ExperimentalSecurityNotice = "experimental CGGMP21-style threshold ECDSA p
 // DefaultPaillierBits is the production default Paillier modulus size.
 const DefaultPaillierBits = 2048
 
+// defaultPaillierBits is the active default, overridable in tests.
+var defaultPaillierBits = DefaultPaillierBits
+
+// SetDefaultPaillierBitsForTesting overrides the default Paillier modulus size
+// and returns a function that restores the previous value.
+func SetDefaultPaillierBitsForTesting(bits int) func() {
+	old := defaultPaillierBits
+	defaultPaillierBits = bits
+	return func() { defaultPaillierBits = old }
+}
+
 // VerificationShare is one participant public ECDSA verification share.
 type VerificationShare struct {
 	Party     tss.PartyID `json:"party"`

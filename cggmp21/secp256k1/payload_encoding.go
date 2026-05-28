@@ -336,12 +336,16 @@ func validatePositiveIntegerBytes(in []byte) error {
 }
 
 const reshareCommitmentsPayloadFieldCommitments uint16 = 1
+const reshareCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
+const reshareCommitmentsPayloadFieldPaillierProof uint16 = 3
 
 const reshareSharePayloadFieldShare uint16 = 1
 
 func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
 	return wire.Marshal(tss.Version, reshareCommitmentsPayloadWireType, []wire.Field{
 		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+		{Tag: reshareCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
+		{Tag: reshareCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
 	})
 }
 
@@ -353,14 +357,22 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if version != tss.Version {
 		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments); err != nil {
+	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof); err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
 	if err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	return reshareCommitmentsPayload{Commitments: commitments}, nil
+	publicKey, err := wire.Require(fields, reshareCommitmentsPayloadFieldPaillierPublicKey)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	proof, err := wire.Require(fields, reshareCommitmentsPayloadFieldPaillierProof)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof}, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {

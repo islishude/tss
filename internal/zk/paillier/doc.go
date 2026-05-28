@@ -13,6 +13,8 @@
 //   - EncRangeProof independently proves that a Paillier ciphertext encrypts
 //     a scalar less than the secp256k1 order, using its own Fiat-Shamir
 //     challenge and transcript distinct from EncScalarProof.
+//   - LogProof (Π^log) proves that a Paillier ciphertext and a secp256k1 curve
+//     point share the same discrete logarithm, per CGGMP21 Section 6.2.
 //   - MTAResponseProof binds an MtA response ciphertext to the encrypted input
 //     scalar, the responder scalar commitment, and the beta share commitment.
 //

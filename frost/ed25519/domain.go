@@ -83,6 +83,7 @@ func signPartialDomain(sessionID tss.SessionID, threshold int, parties, signers 
 
 func frostProofDomain(ctx frostDomainContext) []byte {
 	h := sha256.New()
+	wire.WriteHashPart(h, []byte(rfc9591ContextString))
 	wire.WriteHashPart(h, []byte(frostDomainVersion))
 	wire.WriteHashPart(h, []byte(protocol))
 	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))

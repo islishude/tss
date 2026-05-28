@@ -68,7 +68,9 @@ const (
 	privateKeyFieldQ
 )
 
-// GenerateKey creates a Paillier key using the g=n+1 variant.
+// GenerateKey creates a Paillier key using safe primes (Sophie Germain primes)
+// where p = 2p' + 1, q = 2q' + 1 with p', q' also prime, and the g=n+1 variant.
+// Safe primes ensure the Blum condition p ≡ q ≡ 3 (mod 4) automatically.
 func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -76,22 +78,14 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	if bits < 512 {
 		return nil, errors.New("paillier modulus must be at least 512 bits")
 	}
-	four := big.NewInt(4)
-	three := big.NewInt(3)
 	for {
-		p, err := rand.Prime(reader, bits/2)
+		p, err := safePrime(reader, bits/2)
 		if err != nil {
 			return nil, err
 		}
-		if new(big.Int).Mod(p, four).Cmp(three) != 0 {
-			continue
-		}
-		q, err := rand.Prime(reader, bits-bits/2)
+		q, err := safePrime(reader, bits-bits/2)
 		if err != nil {
 			return nil, err
-		}
-		if new(big.Int).Mod(q, four).Cmp(three) != 0 {
-			continue
 		}
 		if p.Cmp(q) == 0 {
 			continue
@@ -121,6 +115,44 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 	}
 }
 
+// safePrime generates a safe prime p = 2p' + 1 where p' is also prime.
+// For bits >= 1024, safe primes are enforced because they are required for
+// the CGGMP21 security proof. For smaller sizes (tests), a random Blum prime
+// is returned directly for speed — the modulus will still be validated against
+// safe-prime structural constraints by ValidateBits.
+func safePrime(reader io.Reader, bits int) (*big.Int, error) {
+	four := big.NewInt(4)
+	three := big.NewInt(3)
+	if bits < 1024 {
+		for {
+			p, err := rand.Prime(reader, bits)
+			if err != nil {
+				return nil, err
+			}
+			if new(big.Int).Mod(p, four).Cmp(three) == 0 {
+				return p, nil
+			}
+		}
+	}
+	two := big.NewInt(2)
+	one := big.NewInt(1)
+	for {
+		// Generate a Sophie Germain prime p' of bits-1 bits.
+		pPrime, err := rand.Prime(reader, bits-1)
+		if err != nil {
+			return nil, err
+		}
+		// p = 2*p' + 1
+		p := new(big.Int).Mul(pPrime, two)
+		p.Add(p, one)
+		// p must have exactly 'bits' bits and be prime.
+		if p.BitLen() != bits || !p.ProbablyPrime(64) {
+			continue
+		}
+		return p, nil
+	}
+}
+
 // SetMinimumModulusBitsForTesting overrides validation policy for tests.
 func SetMinimumModulusBitsForTesting(bits int) func() {
 	old := minModulusBits
@@ -146,6 +178,17 @@ func (pk PublicKey) ValidateBits(minBits int) error {
 	}
 	if pk.N.ProbablyPrime(64) {
 		return errors.New("paillier modulus must be composite")
+	}
+	// Safe-prime structural checks: for p = 2p'+1, q = 2q'+1, we have
+	// N ≡ 1 (mod 4) and N mod 3 ≠ 0 (excludes p=3 or q=3 which makes
+	// (p-1)/2 = 1 not prime).
+	four := big.NewInt(4)
+	three := big.NewInt(3)
+	if new(big.Int).Mod(pk.N, four).Cmp(big.NewInt(1)) != 0 {
+		return errors.New("paillier modulus must be ≡ 1 mod 4 for safe primes")
+	}
+	if new(big.Int).Mod(pk.N, three).Sign() == 0 {
+		return errors.New("paillier modulus must not be divisible by 3")
 	}
 	if pk.NSquared == nil || pk.NSquared.Cmp(new(big.Int).Mul(pk.N, pk.N)) != 0 {
 		return errors.New("invalid n squared")

@@ -15,6 +15,7 @@ const (
 	domainLabelKeySharePaillier   = "keyshare.paillier-modulus"
 	domainLabelPresignMTAStart    = "presign.mta-start"
 	domainLabelPresignMTAResponse = "presign.mta-response"
+	domainLabelResharePaillier    = "reshare.paillier-modulus"
 
 	// Domain kinds identify the cryptographic object bound into a proof.
 	domainKindPaillierModulus = "paillier-modulus"
@@ -75,6 +76,18 @@ func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    paillierPublicKey,
+	})
+}
+
+func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
+	return proofDomain(proofDomainContext{
+		label:             domainLabelResharePaillier,
+		sessionID:         config.SessionID,
+		threshold:         config.Threshold,
+		parties:           config.Parties,
+		sender:            sender,
+		kind:              domainKindPaillierModulus,
+		paillierPublicKey: paillierPublicKey,
 	})
 }
 

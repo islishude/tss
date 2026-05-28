@@ -9,8 +9,10 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
@@ -20,12 +22,10 @@ const (
 	reshareTranscriptHashLabel = "cggmp21-secp256k1-reshare-transcript-v1"
 )
 
-// ReshareSession refreshes CGGMP21 key shares while preserving the group
-// public key. Each existing participant generates a polynomial with zero
-// constant term, so the aggregated secret remains unchanged.
-//
-// Full CGGMP21 resharing (with Paillier key rotation) is not yet implemented.
-// This session provides proactive secret-share refresh.
+// ReshareSession refreshes CGGMP21 key shares and rotates Paillier keys while
+// preserving the group public key. Each existing participant generates a
+// polynomial with zero constant term (to refresh the secret share) and a new
+// Paillier keypair (to rotate encryption material).
 type ReshareSession struct {
 	oldKey     *KeyShare
 	cfg        tss.ThresholdConfig
@@ -36,17 +36,23 @@ type ReshareSession struct {
 	aborted    bool
 	newShare   *KeyShare
 	ownPoly    []*big.Int
+
+	newPaillier     *pai.PrivateKey
+	newPaillierPubs map[tss.PartyID]PaillierPublicShare
+	newPaillierPriv []byte
 }
 
 type reshareCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments"`
+	Commitments       [][]byte `json:"commitments"`
+	PaillierPublicKey []byte   `json:"paillier_public_key"`
+	PaillierProof     []byte   `json:"paillier_proof"`
 }
 
 type reshareSharePayload struct {
 	Share []byte `json:"share"`
 }
 
-// StartReshare starts proactive CGGMP21 key-share refresh.
+// StartReshare starts CGGMP21 key-share refresh with Paillier key rotation.
 // newParties defines the target participant set.
 func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID) (*ReshareSession, []tss.Envelope, error) {
 	if err := oldKey.requireMPCMaterial(); err != nil {
@@ -60,6 +66,27 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		return nil, nil, errors.New("local party must be in the new participant set")
 	}
 	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
+	// Generate a new Paillier keypair for key rotation.
+	newPaillierKey, err := pai.GenerateKey(config.Reader(), defaultPaillierBits)
+	if err != nil {
+		return nil, nil, err
+	}
+	newPaillierPubBytes, err := newPaillierKey.PublicKey.MarshalBinary()
+	if err != nil {
+		return nil, nil, err
+	}
+	newPaillierPriv, err := newPaillierKey.MarshalBinary()
+	if err != nil {
+		return nil, nil, err
+	}
+	modProof, err := zkpai.ProveModulus(config.Reader(), resharePaillierDomain(config, config.Self, newPaillierPubBytes), newPaillierKey, uint32(config.Self))
+	if err != nil {
+		return nil, nil, err
+	}
+	modProofBytes, err := zkpai.Marshal(modProof)
+	if err != nil {
+		return nil, nil, err
+	}
 	poly, err := shamir.RandomPolynomial(config.Reader(), secp.Order(), config.Threshold, big.NewInt(0))
 	if err != nil {
 		return nil, nil, err
@@ -73,14 +100,23 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		commitments[i] = enc
 	}
 	s := &ReshareSession{
-		oldKey:     oldKey,
-		cfg:        config,
-		newParties: newParties,
-		commits:    map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:     map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
-		ownPoly:    poly,
+		oldKey:          oldKey,
+		cfg:             config,
+		newParties:      newParties,
+		commits:         map[tss.PartyID][][]byte{oldKey.Party: commitments},
+		shares:          map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
+		ownPoly:         poly,
+		newPaillier:     newPaillierKey,
+		newPaillierPriv: newPaillierPriv,
+		newPaillierPubs: map[tss.PartyID]PaillierPublicShare{
+			oldKey.Party: {Party: oldKey.Party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
+		},
 	}
-	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
+	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{
+		Commitments:       commitments,
+		PaillierPublicKey: newPaillierPubBytes,
+		PaillierProof:     modProofBytes,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -139,7 +175,19 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err := validateReshareCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
+		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if !zkpai.VerifyModulus(resharePaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("invalid reshare Paillier modulus proof"))
+		}
 		s.commits[env.From] = p.Commitments
+		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 	case payloadReshareShare:
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
@@ -171,7 +219,7 @@ func (s *ReshareSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) {
+	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -255,10 +303,10 @@ func (s *ReshareSession) tryComplete() error {
 		Secret:               scalarBytes(newSecret),
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,
-		PaillierPublicKey:    append([]byte(nil), s.oldKey.PaillierPublicKey...),
-		PaillierPrivateKey:   append([]byte(nil), s.oldKey.PaillierPrivateKey...),
-		PaillierProof:        append([]byte(nil), s.oldKey.PaillierProof...),
-		PaillierPublicKeys:   append([]PaillierPublicShare(nil), s.oldKey.PaillierPublicKeys...),
+		PaillierPublicKey:    append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
+		PaillierPrivateKey:   append([]byte(nil), s.newPaillierPriv...),
+		PaillierProof:        append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].Proof...),
+		PaillierPublicKeys:   s.sortedNewPaillierPublicKeys(),
 		ShareProof:           shareProofBytes,
 		KeygenTranscriptHash: transcriptHash,
 		SecurityNotice:       ExperimentalSecurityNotice,
@@ -288,4 +336,17 @@ func validateReshareCommitments(commitments [][]byte, threshold int) error {
 		}
 	}
 	return nil
+}
+
+func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {
+	out := make([]PaillierPublicShare, 0, len(s.oldKey.Parties))
+	for _, id := range s.oldKey.Parties {
+		item := s.newPaillierPubs[id]
+		out = append(out, PaillierPublicShare{
+			Party:     item.Party,
+			PublicKey: append([]byte(nil), item.PublicKey...),
+			Proof:     append([]byte(nil), item.Proof...),
+		})
+	}
+	return out
 }

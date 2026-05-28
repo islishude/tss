@@ -67,7 +67,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	config.Parties = parties
 	paillierBits := opts.PaillierBits
 	if paillierBits == 0 {
-		paillierBits = DefaultPaillierBits
+		paillierBits = defaultPaillierBits
 	}
 	var chainCode []byte
 	if opts.EnableHD {

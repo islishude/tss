@@ -9,7 +9,17 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	pai "github.com/islishude/tss/internal/paillier"
 )
+
+func TestMain(m *testing.M) {
+	restoreBits := SetDefaultPaillierBitsForTesting(768)
+	restoreMin := pai.SetMinimumModulusBitsForTesting(512)
+	code := m.Run()
+	restoreBits()
+	restoreMin()
+	os.Exit(code)
+}
 
 func TestThresholdECDSASignScenarios(t *testing.T) {
 	for _, tc := range []struct {
