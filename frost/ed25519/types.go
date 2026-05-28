@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"slices"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
 
@@ -34,6 +35,7 @@ type KeyShare struct {
 	Threshold            int           `json:"threshold"`
 	Parties              []tss.PartyID `json:"parties"`
 	PublicKey            []byte        `json:"public_key"`
+	ChainCode            []byte        `json:"chain_code,omitempty"`
 	Secret               []byte
 	GroupCommitments     [][]byte            `json:"group_commitments"`
 	VerificationShares   []VerificationShare `json:"verification_shares"`
@@ -96,6 +98,9 @@ func (k *KeyShare) Validate() error {
 	if _, err := edcurve.PointFromBytes(k.PublicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
 	}
+	if len(k.ChainCode) != 0 && len(k.ChainCode) != 32 {
+		return errors.New("chain code must be empty or 32 bytes")
+	}
 	if len(k.KeygenTranscriptHash) == 0 {
 		return errors.New("key share has no keygen transcript hash")
 	}
@@ -143,6 +148,7 @@ func (k *KeyShare) Destroy() {
 	if k == nil {
 		return
 	}
+	clear(k.ChainCode)
 	clear(k.Secret)
 }
 
@@ -169,4 +175,36 @@ func scalarBytes(x *big.Int) ([]byte, error) {
 		return nil, err
 	}
 	return s.Bytes(), nil
+}
+
+// KeygenOptions controls optional DKG behavior.
+type KeygenOptions struct {
+	// EnableHD generates a random 32-byte chain code during keygen for BIP32 derivation.
+	EnableHD bool
+}
+
+// SignOptions controls optional signing behavior.
+type SignOptions struct {
+	// AdditiveShift is the cumulative HD tweak applied as an additive scalar shift.
+	// Each signer adds lambda_i * c * AdditiveShift to their partial, and the
+	// group public key is effectively A' = A + AdditiveShift * B.
+	AdditiveShift []byte
+}
+
+// DerivePublicKey returns the child Ed25519 public key produced by adding
+// the additive scalar shift times the base point to publicKey.
+func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
+	base, err := edcurve.PointFromBytes(publicKey)
+	if err != nil {
+		return nil, err
+	}
+	if len(additiveShift) == 0 {
+		return base.Bytes(), nil
+	}
+	shift, err := edcurve.ScalarFromCanonical(additiveShift)
+	if err != nil {
+		return nil, fmt.Errorf("invalid additive shift: %w", err)
+	}
+	shifted := edcurve.AddPoints(base, fed.NewIdentityPoint().ScalarBaseMult(shift))
+	return shifted.Bytes(), nil
 }

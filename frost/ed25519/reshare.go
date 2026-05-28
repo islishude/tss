@@ -235,6 +235,7 @@ func (s *ReshareSession) tryComplete() error {
 		Threshold:            s.cfg.Threshold,
 		Parties:              append([]tss.PartyID(nil), s.newParties...),
 		PublicKey:            append([]byte(nil), newCommitments[0]...),
+		ChainCode:            append([]byte(nil), s.oldKey.ChainCode...),
 		Secret:               newSecretBytes,
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,

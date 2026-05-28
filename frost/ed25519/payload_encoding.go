@@ -18,7 +18,10 @@ const (
 	reshareSharePayloadWireType       = "frost.ed25519.payload.reshare.share"
 )
 
-const keygenCommitmentsPayloadFieldCommitments uint16 = 1
+const (
+	keygenCommitmentsPayloadFieldCommitments uint16 = 1
+	keygenCommitmentsPayloadFieldChainCode   uint16 = 2
+)
 
 const keygenSharePayloadFieldShare uint16 = 1
 
@@ -35,8 +38,12 @@ const (
 )
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
+	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
+		return nil, fmt.Errorf("chain code must be empty or 32 bytes, got %d", len(p.ChainCode))
+	}
 	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
 		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
 	})
 }
 
@@ -48,14 +55,18 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if version != tss.Version {
 		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments); err != nil {
+	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldChainCode); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	return keygenCommitmentsPayload{Commitments: commitments}, nil
+	chainCode := wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode)
+	if len(chainCode) != 0 && len(chainCode) != 32 {
+		return keygenCommitmentsPayload{}, fmt.Errorf("chain code must be empty or 32 bytes, got %d", len(chainCode))
+	}
+	return keygenCommitmentsPayload{Commitments: commitments, ChainCode: chainCode}, nil
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {

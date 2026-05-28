@@ -20,6 +20,7 @@ const (
 	keyShareFieldGroupCommitments
 	keyShareFieldVerificationShares
 	keyShareFieldKeygenTranscriptHash
+	keyShareFieldChainCode
 )
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
@@ -35,6 +36,7 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
+		{Tag: keyShareFieldChainCode, Value: wire.NonNilBytes(k.ChainCode)},
 	})
 }
 
@@ -46,7 +48,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash, keyShareFieldChainCode); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -78,6 +80,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		Threshold:            int(threshold),
 		Parties:              parties,
 		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
+		ChainCode:            wire.MustField(fields, keyShareFieldChainCode),
 		Secret:               wire.MustField(fields, keyShareFieldSecret),
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,

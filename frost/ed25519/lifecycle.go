@@ -14,6 +14,10 @@ func (s *KeygenSession) Destroy() {
 	clearBigIntMap(s.shares)
 	clearBigInts(s.ownPoly)
 	clearEnvelopePayloads(s.ownMessages)
+	for _, cc := range s.chainCodes {
+		clear(cc)
+	}
+	s.chainCodes = nil
 	s.ownPoly = nil
 	s.ownMessages = nil
 	if s.keyShare != nil {
@@ -28,10 +32,12 @@ func (s *SignSession) Destroy() {
 	}
 	clearBigInt(s.d)
 	clearBigInt(s.e)
+	clearBigInt(s.deltaScalar)
 	clearBigIntMap(s.partials)
 	clear(s.message)
 	s.d = nil
 	s.e = nil
+	s.deltaScalar = nil
 	s.message = nil
 }
 
