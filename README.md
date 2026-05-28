@@ -5,6 +5,11 @@ Go threshold-signature building blocks for:
 - `frost/ed25519`: dealerless FROST-style threshold Ed25519.
 - `cggmp21/secp256k1`: CGGMP21-shaped secp256k1 threshold ECDSA API.
 
+References:
+
+- [RFC 9591: The Flexible Round-Optimized Schnorr Threshold Protocol](https://www.rfc-editor.org/rfc/rfc9591)
+- [IACR ePrint 2021/060: CGGMP21](https://eprint.iacr.org/2021/060)
+
 ## Status
 
 This repository is an early library implementation, not a production audited TSS stack.
@@ -17,18 +22,18 @@ Both packages support resharing: FROST Ed25519 uses zero-coefficient polynomial 
 
 ## Packages
 
-| Package                                      | Purpose                                                                                 |
-| -------------------------------------------- | --------------------------------------------------------------------------------------- |
-| `github.com/islishude/tss`                   | Shared types: parties, sessions, envelopes, errors, key-share and signature interfaces. |
-| `github.com/islishude/tss/frost/ed25519`     | FROST-style Ed25519 DKG and signing.                                                    |
-| `github.com/islishude/tss/cggmp21/secp256k1` | Experimental secp256k1 threshold ECDSA API with CGGMP21 package shape.                  |
-| `internal/shamir`                            | Shamir sharing and interpolation helpers.                                               |
-| `internal/curve/*`                           | Curve helpers with fiat-crypto backed scalar/field wrappers.                            |
-| `internal/mta`                               | Paillier MtA product-share protocol helpers.                                            |
+| Package                                      | Purpose                                                                                                                        |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `github.com/islishude/tss`                   | Shared types: parties, sessions, envelopes, errors, key-share and signature interfaces.                                        |
+| `github.com/islishude/tss/frost/ed25519`     | FROST-style Ed25519 DKG and signing.                                                                                           |
+| `github.com/islishude/tss/cggmp21/secp256k1` | Experimental secp256k1 threshold ECDSA API with CGGMP21 package shape.                                                         |
+| `internal/shamir`                            | Shamir sharing and interpolation helpers.                                                                                      |
+| `internal/curve/*`                           | Curve helpers with fiat-crypto backed scalar/field wrappers.                                                                   |
+| `internal/mta`                               | Paillier MtA product-share protocol helpers.                                                                                   |
 | `internal/paillier`                          | Paillier primitives used by the CGGMP21-style signing path. Constant-time `c^λ mod n²` via `paillierct` (`filippo.io/bigmod`). |
-| `internal/wire`                              | Strict TLV encoding used by binary envelopes and key-share records.                     |
-| `internal/zk/paillier`                       | Paillier encryption, range, modulus, and MtA response proofs.                           |
-| `internal/zk/schnorr`                        | secp256k1 Schnorr proof-of-knowledge primitive.                                         |
+| `internal/wire`                              | Strict TLV encoding used by binary envelopes and key-share records.                                                            |
+| `internal/zk/paillier`                       | Paillier encryption, range, modulus, and MtA response proofs.                                                                  |
+| `internal/zk/schnorr`                        | secp256k1 Schnorr proof-of-knowledge primitive.                                                                                |
 
 ## Transport Model
 

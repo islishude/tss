@@ -7,6 +7,7 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 - Do not read, copy, port, or derive code from public TSS implementations in Go or any other language.
 - It is acceptable to use papers, RFCs, standards, and public test vectors or test scenarios.
 - Keep the protocol boundary honest: CGGMP21 applies to ECDSA/secp256k1; Ed25519 uses FROST-style EdDSA.
+- Do not preserve prior-format fallback paths while moving toward the production target. Existing conversion code for retired wire shapes must be removed rather than supported.
 - Do not remove the experimental warning from `cggmp21/secp256k1` until the full Paillier MtA/ZK CGGMP21 signing path exists and has been reviewed.
 - Never use `math/big.Int.Exp` when the exponent is a secret (`λ`, `μ`, `b` in MtA). All secret-exponent modular exponentiation must go through `internal/paillier/paillierct` (`filippo.io/bigmod`).
 - Secret scalars must use `secret.Scalar` (fixed-length bytes). Never expose them via `String()`, variable-length `Bytes()`, `BigInt()`, or JSON.
@@ -14,11 +15,13 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 ## Useful Commands
 
 ```sh
+# Test
 go test -race ./...
+# Lint and format golang files
 golangci-lint run --fix
+# Format markdown files
+npx -y prettier --write '*.md' 'docs'
 ```
-
-Run both test commands before handing off substantial changes.
 
 ## Architecture Map
 
