@@ -44,6 +44,10 @@ network transport, peer authentication, storage encryption, secure deletion of
 persisted records, retries, consensus over session creation, KMS/HSM policy,
 and operational alerting.
 
+See [docs/deployment.md](deployment.md) for a complete deployment guide covering
+key lifecycle, transport integration, persistence encryption, backup, and
+monitoring.
+
 ## Secret-Material Lifecycle
 
 Secret-bearing records reject default JSON marshaling. Persist `KeyShare` and
@@ -101,8 +105,8 @@ Caller responsibilities (not provided by this library):
 
 - network transport with peer authentication and encryption;
 - storage encryption for key shares and presign records;
-- proactive refresh scheduling (single-refresh API available via `StartRefresh`);
-- SLIP10 path derivation for Ed25519.
+- proactive refresh scheduling (`RefreshScheduler` provides periodic key rotation with configurable interval and transport interface);
+- SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1).
 
 ## One-Time Presigns
 

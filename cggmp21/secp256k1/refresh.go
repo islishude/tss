@@ -28,6 +28,7 @@ const (
 type RefreshSession struct {
 	oldKey                     *KeyShare
 	cfg                        tss.ThresholdConfig
+	log                        tss.Logger
 	commits                    map[tss.PartyID][][]byte
 	shares                     map[tss.PartyID]*big.Int
 	completed                  bool
@@ -102,6 +103,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 	s := &RefreshSession{
 		oldKey:                    oldKey,
 		cfg:                       config,
+		log:                       config.Logger(),
 		commits:                   map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:                    map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
 		ownPoly:                   poly,
@@ -390,6 +392,10 @@ func (s *RefreshSession) tryComplete() error {
 		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
+	s.log.Info(s.cfg.Ctx(), "refresh complete",
+		"party_id", s.oldKey.Party,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+	)
 	return s.newShare.Validate()
 }
 

@@ -203,5 +203,5 @@ Evidence NEVER contains: private shares, nonces (k_i, gamma_i), Paillier private
 | Add Π^Enc (full encryption proof)                      | P0       | Currently covered by Π^Eq + EncRangeProof combination; need equivalence proof          |
 | Independent cryptographic review of all proofs         | P0       | Required before removing experimental warning                                          |
 | Identifiable abort completeness review                 | P0       | All public-input evidence fields implemented; review against full CGGMP21 abort matrix |
-| BIP32 / SLIP10 path derivation                         | P2       | Not in v1 scope                                                                        |
-| Proactive refresh (periodic, without group-key change) | P2       | Resharing infrastructure exists; proactive scheduling not implemented                  |
+| BIP32 / SLIP10 path derivation                         | P2       | BIP32 implemented for secp256k1; SLIP10 not in v1 scope                                |
+| Proactive refresh (periodic, without group-key change) | P2       | RefreshScheduler with configurable interval and transport interface implemented        |

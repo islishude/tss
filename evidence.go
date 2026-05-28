@@ -29,6 +29,12 @@ const (
 	EvidenceKindSignPartial EvidenceKind = "sign_partial"
 	// EvidenceKindAggregateSign marks a final aggregate signature verification failure.
 	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
+	// EvidenceKindFrostKeygenShare marks an invalid FROST DKG share.
+	EvidenceKindFrostKeygenShare EvidenceKind = "frost_keygen_share"
+	// EvidenceKindFrostPartialSignature marks an invalid FROST partial signature.
+	EvidenceKindFrostPartialSignature EvidenceKind = "frost_partial_signature"
+	// EvidenceKindFrostAggregateSignature marks a failed FROST aggregate Ed25519 signature.
+	EvidenceKindFrostAggregateSignature EvidenceKind = "frost_aggregate_signature"
 )
 
 // EvidenceField carries one public input or public-input hash for blame evidence.

@@ -15,6 +15,7 @@ import (
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
 	cfg         tss.ThresholdConfig
+	log         tss.Logger
 	commits     map[tss.PartyID][][]byte
 	shares      map[tss.PartyID]*big.Int
 	chainCodes  map[tss.PartyID][]byte
@@ -68,6 +69,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	}
 	s := &KeygenSession{
 		cfg:     config,
+		log:     config.Logger(),
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
 		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, edcurve.Order())},
 		chainCodes: map[tss.PartyID][]byte{
@@ -185,11 +187,15 @@ func (s *KeygenSession) tryComplete() error {
 	for dealer, share := range s.shares {
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
 		if err := edcurve.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
+			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
+				"party_id", s.cfg.Self,
+				"dealer", dealer,
+			)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid DKG share", Parties: []tss.PartyID{dealer}},
+				Blame: frostKeygenBlame(s.cfg, dealer, s.commits[dealer]),
 				Err:   err,
 			}
 		}
@@ -245,6 +251,10 @@ func (s *KeygenSession) tryComplete() error {
 		KeygenTranscriptHash: keygenTranscriptHash,
 	}
 	s.completed = true
+	s.log.Info(s.cfg.Ctx(), "keygen complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+	)
 	return s.keyShare.Validate()
 }
 

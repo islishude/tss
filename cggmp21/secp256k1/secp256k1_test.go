@@ -830,3 +830,94 @@ func TestBIP32RejectsEmptyPath(t *testing.T) {
 		t.Fatal("expected error for empty path")
 	}
 }
+
+func TestThresholdECDSA_PresignRoundTrip(t *testing.T) {
+	shares := secpKeygen(t, 1, 1)
+	presigns := secpPresign(t, shares, []tss.PartyID{1})
+	presign := presigns[1]
+	raw, err := presign.MarshalBinary()
+	if err != nil {
+		t.Fatalf("Presign MarshalBinary: %v", err)
+	}
+	restored, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatalf("UnmarshalPresign: %v", err)
+	}
+	if restored.Consumed {
+		t.Fatal("fresh presign after round-trip is consumed")
+	}
+	digest := sha256.Sum256([]byte("round-trip test"))
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signSession, _, err := StartSignDigest(shares[1], restored, sessionID, digest[:])
+	if err != nil {
+		t.Fatalf("StartSignDigest with round-tripped presign: %v", err)
+	}
+	sig, ok := signSession.Signature()
+	if !ok {
+		t.Fatal("expected sign session to produce a signature")
+	}
+	if !VerifyDigest(shares[1].PublicKey, digest[:], sig) {
+		t.Fatal("ECDSA signature from round-tripped presign did not verify")
+	}
+}
+
+func TestThresholdECDSA_PresignConsumedRoundTrip(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presign := presigns[1]
+	digest := sha256.Sum256([]byte("consumed round-trip"))
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Consume the presign.
+	_, _, err = StartSignDigest(shares[1], presign, sessionID, digest[:])
+	if err != nil {
+		t.Fatalf("StartSignDigest: %v", err)
+	}
+	// Serialize and deserialize the consumed presign.
+	raw, err := presign.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary on consumed presign: %v", err)
+	}
+	restored, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatalf("UnmarshalPresign consumed: %v", err)
+	}
+	if !IsPresignConsumed(restored) {
+		t.Fatal("consumed state was not preserved through round-trip")
+	}
+	// Attempting to sign with the consumed restored presign must fail.
+	sessionID2, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = StartSignDigest(shares[1], restored, sessionID2, digest[:])
+	_ = assertProtocolErrorCode(t, err, tss.ErrCodeConsumed)
+}
+
+func TestThresholdECDSA_PresignRejectReuse(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presign := presigns[1]
+	digest := sha256.Sum256([]byte("reuse test"))
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// First sign succeeds.
+	_, _, err = StartSignDigest(shares[1], presign, sessionID, digest[:])
+	if err != nil {
+		t.Fatalf("first StartSignDigest: %v", err)
+	}
+	// Reusing the same presign must fail with ErrCodeConsumed.
+	sessionID2, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = StartSignDigest(shares[1], presign, sessionID2, digest[:])
+	_ = assertProtocolErrorCode(t, err, tss.ErrCodeConsumed)
+}

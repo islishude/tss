@@ -32,6 +32,7 @@ type KeygenOptions struct {
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
 	cfg             tss.ThresholdConfig
+	log             tss.Logger
 	commits         map[tss.PartyID][][]byte
 	shares          map[tss.PartyID]*big.Int
 	chainCodes      map[tss.PartyID][]byte
@@ -117,6 +118,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	}
 	s := &KeygenSession{
 		cfg:     config,
+		log:     config.Logger(),
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
 		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
 		chainCodes: map[tss.PartyID][]byte{
@@ -237,6 +239,10 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 			)
 		}
 		if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
+			s.log.Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
+				"party_id", s.cfg.Self,
+				"from", env.From,
+			)
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -261,6 +267,10 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 			)
 		}
 		if !zkpai.VerifyPrimality(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), pp) {
+			s.log.Warn(s.cfg.Ctx(), "invalid Paillier primality proof",
+				"party_id", s.cfg.Self,
+				"from", env.From,
+			)
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -315,6 +325,10 @@ func (s *KeygenSession) tryComplete() error {
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), secp.ScalarFromBigInt(share)); err != nil {
+			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
+				"party_id", s.cfg.Self,
+				"dealer", dealer,
+			)
 			evidenceEnv := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
@@ -437,6 +451,12 @@ func (s *KeygenSession) tryComplete() error {
 		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
+	pubKeyHash := sha256.Sum256(groupCommitments[0])
+	s.log.Info(s.cfg.Ctx(), "keygen complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
+	)
 	return s.keyShare.Validate()
 }
 

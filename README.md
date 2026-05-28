@@ -16,7 +16,7 @@ This repository is an early library implementation, not a production audited TSS
 
 The Ed25519 package implements a usable FROST-style flow: dealerless DKG, two-round signing, partial signature verification, and aggregation into signatures accepted by `crypto/ed25519.Verify`.
 
-The secp256k1 package exposes a CGGMP21-style API and signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing, round-1 echo checks, optional additive-shift signing, BIP32 HD derivation, key refresh, and resharing. The ZK proof layer has been prepared for independent cryptographic review; see `docs/audit-guide.md`.
+The secp256k1 package exposes a CGGMP21-style API and signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing, round-1 echo checks, optional additive-shift signing, BIP32 HD derivation, key refresh, and resharing. Structured blame evidence with public-input hashes supports identifiable abort. The ZK proof layer has been prepared for independent cryptographic review; see `docs/audit-guide.md`.
 
 Both packages support resharing: FROST Ed25519 uses zero-coefficient polynomial refresh to preserve the group secret, while CGGMP21 secp256k1 includes full Paillier key rotation with Π^log (discrete log equality) and modulus proofs. CGGMP21 presigns include one-use lifecycle helpers (`MarkPresignConsumed`, `IsPresignConsumed`) to prevent nonce reuse. Paillier private-key operations use constant-time `c^λ mod n²` via `filippo.io/bigmod` in `internal/paillier/paillierct`.
 
@@ -81,6 +81,10 @@ The secp256k1 package follows the same session-state pattern:
 `Presign.Consumed` is set before any online signing envelope is emitted to catch nonce reuse. The online signing message contains only a partial `s_i`, not the local private-key share or local nonce share.
 
 For additive-shift signing, pass `secp256k1.SignOptions{LowS: true, AdditiveShift: shift}` to `StartSignDigestWithOptions` and verify against `secp256k1.DerivePublicKey(publicKey, shift)`.
+
+## Production Deployment
+
+See [docs/deployment.md](docs/deployment.md) for a complete guide covering key lifecycle, transport integration, persistence encryption, backup and disaster recovery, monitoring, and a pre-deployment security checklist.
 
 ## Development
 

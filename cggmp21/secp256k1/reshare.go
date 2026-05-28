@@ -29,6 +29,7 @@ const (
 type ReshareSession struct {
 	oldKey     *KeyShare
 	cfg        tss.ThresholdConfig
+	log        tss.Logger
 	newParties []tss.PartyID
 	commits    map[tss.PartyID][][]byte
 	shares     map[tss.PartyID]*big.Int
@@ -113,6 +114,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	s := &ReshareSession{
 		oldKey:                    oldKey,
 		cfg:                       config,
+		log:                       config.Logger(),
 		newParties:                newParties,
 		commits:                   map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:                    map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
@@ -375,6 +377,10 @@ func (s *ReshareSession) tryComplete() error {
 		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
+	s.log.Info(s.cfg.Ctx(), "reshare complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+	)
 	return s.newShare.Validate()
 }
 

@@ -358,10 +358,7 @@ func ProvePrimality(reader io.Reader, domain []byte, sk *pai.PrivateKey, party u
 	p, q := sk.P, sk.Q
 	N := sk.N
 
-	factorBits := p.BitLen()
-	if q.BitLen() > factorBits {
-		factorBits = q.BitLen()
-	}
+	factorBits := max(q.BitLen(), p.BitLen())
 
 	r, err := randomCoprime(reader, N)
 	if err != nil {

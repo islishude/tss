@@ -114,6 +114,7 @@ type ThresholdConfig struct {
 	Rand         io.Reader       `json:"-"`
 	Context      context.Context `json:"-"`
 	RoundTimeout time.Duration   `json:"-"`
+	Log          Logger          `json:"-"`
 }
 
 // Ctx returns the configuration context or context.Background when unset.

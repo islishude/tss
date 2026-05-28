@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -65,6 +66,7 @@ type PresignSession struct {
 	key       *KeyShare
 	sessionID tss.SessionID
 	config    tss.ThresholdConfig
+	log       tss.Logger
 	signers   []tss.PartyID
 	paillier  *pai.PrivateKey
 
@@ -95,6 +97,7 @@ type SignSession struct {
 	key       *KeyShare
 	presign   *Presign
 	sessionID tss.SessionID
+	log       tss.Logger
 	digest    []byte
 	lowS      bool
 	publicKey []byte
@@ -204,6 +207,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		key:        key,
 		sessionID:  sessionID,
 		config:     config,
+		log:        config.Logger(),
 		signers:    signers,
 		paillier:   paillierKey,
 		kShare:     kShare.BigInt(),
@@ -597,6 +601,10 @@ func (s *PresignSession) tryComplete() error {
 	s.presign.Delta = scalarBytes(delta)
 	s.presign.TranscriptHash = s.presignTranscriptHash(R, littleR, delta)
 	s.completed = true
+	s.log.Info(s.config.Ctx(), "presign complete",
+		"party_id", s.key.Party,
+		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
+	)
 	return nil
 }
 
@@ -728,6 +736,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		key:       key,
 		presign:   presign,
 		sessionID: sessionID,
+		log:       tss.NopLogger(),
 		digest:    append([]byte(nil), digest32...),
 		lowS:      opts.LowS,
 		publicKey: verifyKey,
@@ -887,6 +896,10 @@ func (s *SignSession) tryComplete() error {
 	}
 	s.signature = &Signature{R: secp.ScalarBytes(r), S: secp.ScalarBytes(secp.ScalarFromBigInt(sigS))}
 	s.completed = true
+	s.log.Info(context.Background(), "signing complete",
+		"party_id", s.key.Party,
+		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
+	)
 	return nil
 }
 

@@ -1,0 +1,258 @@
+# Production Deployment Guide
+
+This guide covers the end-to-end lifecycle of a TSS deployment using this library, from initial key generation through online signing and key rotation.
+
+## Key Lifecycle
+
+### 1. Key Generation
+
+Each participant generates its share independently through the DKG protocol. See the package docs for `frost/ed25519` and `cggmp21/secp256k1` for per-protocol details.
+
+```go
+import (
+    "github.com/islishude/tss"
+    "github.com/islishude/tss/cggmp21/secp256k1"
+)
+
+config := tss.ThresholdConfig{
+    Threshold: 2,
+    Parties:   []tss.PartyID{1, 2, 3},
+    Self:      1,
+    SessionID: sessionID,
+}
+session, envelopes, err := secp256k1.StartKeygen(config)
+// Route envelopes to other parties via authenticated transport.
+```
+
+After all parties exchange messages, each obtains a `KeyShare`:
+
+```go
+share, ok := session.KeyShare()
+if !ok {
+    // DKG not yet complete — wait for more messages.
+}
+```
+
+### 2. Persistence
+
+Serialise the key share to TLV bytes and encrypt before storage:
+
+```go
+raw, _ := share.MarshalBinary()
+encrypted, _ := tss.EncryptKeyShare(raw, passphrase)
+// Store `encrypted` in durable storage (database, file, secrets manager).
+```
+
+For CGGMP21, presign records must also be persisted:
+
+```go
+raw, _ := presign.MarshalBinary()
+encrypted, _ := tss.EncryptPresign(raw, passphrase)
+```
+
+The `tss.EncryptKeyShare` and `tss.EncryptPresign` helpers use AES-256-GCM with HKDF key derivation from a passphrase. These are **reference implementations**. Production deployments should prefer a KMS or HSM.
+
+### 3. Loading
+
+On process restart, load and decrypt the key share:
+
+```go
+raw, _ := tss.DecryptKeyShare(encrypted, passphrase)
+share, err := secp256k1.UnmarshalKeyShare(raw)
+```
+
+For CGGMP21 presign records, check the consumed flag before use:
+
+```go
+raw, _ := tss.DecryptPresign(encrypted, passphrase)
+presign, _ := secp256k1.UnmarshalPresign(raw)
+if secp256k1.IsPresignConsumed(presign) {
+    // Discard; do not reuse.
+}
+```
+
+### 4. Signing
+
+**FROST Ed25519:**
+
+```go
+signSession, out, err := ed25519.StartSign(share, sessionID, signers, message)
+// Route out (round 1 commitments) to other signers.
+// Handle round 1 responses; obtain round 2 partials.
+sig, ok := signSession.Signature()
+ed25519.Verify(publicKey, message, sig) // true
+```
+
+**CGGMP21 secp256k1:**
+
+```go
+// Offline presign (can be done in advance):
+presignSession, out, err := secp256k1.StartPresign(keyShare, sessionID, signers)
+// Route messages. Obtain Presign record.
+presign, _ := presignSession.Presign()
+// Persist presign immediately.
+encrypted, _ := tss.EncryptPresign(presign.MarshalBinary(), passphrase)
+
+// Online signing (fast, one round):
+signSession, out, _ := secp256k1.StartSignDigest(presign, digest)
+// Route the single partial-signature round.
+sig, ok := signSession.Signature()
+secp256k1.VerifyDigest(publicKey, digest, sig) // true
+```
+
+After signing, mark the presign consumed:
+
+```go
+consumed, _ := secp256k1.MarkPresignConsumed(presign)
+encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
+// Persist updated record so restart won't reuse.
+```
+
+### 5. Destruction
+
+Call `Destroy()` on sessions and key shares when they are no longer needed. Go zeroisation is best-effort; use short-lived processes for stronger guarantees.
+
+```go
+share.Destroy()
+presign.Destroy()
+session.Destroy()
+signSession.Destroy()
+```
+
+## Transport Integration
+
+### Envelope Serialisation
+
+Envelopes are the only message type exchanged between parties. They have a deterministic binary encoding:
+
+```go
+env := tss.Envelope{...}.WithTranscriptHash()
+raw, err := env.MarshalBinary()
+// Transmit `raw` bytes.
+
+// On the receiving side:
+var received tss.Envelope
+err := received.UnmarshalBinary(data)
+```
+
+### Recommended Transport Patterns
+
+**Message delivery guarantees:**
+
+- Broadcast messages (`To == 0`) must reach all participants.
+- Point-to-point messages (`To != 0`, `ConfidentialRequired=true`) must be delivered with confidentiality.
+- Within a round, messages can be delivered in any order.
+- Across rounds, messages must be processed sequentially — round N must complete before round N+1.
+
+**Transport options:**
+
+| Transport                 | Notes                                                 |
+| ------------------------- | ----------------------------------------------------- |
+| gRPC bidirectional stream | Strong typing, TLS, built-in auth interceptors        |
+| WebSocket + JSON framing  | Encode envelope bytes as base64 or hex                |
+| NATS                      | Subject-based routing maps naturally to broadcast/p2p |
+
+### Message Routing Pattern
+
+```go
+func routeMessages(session Session, transport Transport) error {
+    for {
+        env := transport.Recv()
+        out, err := session.HandleMessage(env)
+        if err != nil {
+            var pe *tss.ProtocolError
+            if errors.As(err, &pe) && pe.Blame != nil {
+                logBlame(pe.Blame)
+            }
+            // Abort session or continue based on error code.
+        }
+        for _, e := range out {
+            transport.Send(e)
+        }
+        if session.IsCompleted() {
+            return nil
+        }
+    }
+}
+```
+
+## Persistence Encryption
+
+### Recommended Pattern (AES-256-GCM)
+
+```go
+func encrypt(plaintext, key []byte) ([]byte, error) {
+    block, _ := aes.NewCipher(key)
+    gcm, _ := cipher.NewGCM(block)
+    nonce := make([]byte, gcm.NonceSize())
+    io.ReadFull(rand.Reader, nonce)
+    return gcm.Seal(nonce, nonce, plaintext, nil), nil
+}
+```
+
+### Key Management
+
+- **Key derivation:** Derive encryption keys from a master secret using HKDF-SHA256 with per-record salt.
+- **Nonce management:** Use random 12-byte nonces. Never reuse a nonce with the same key.
+- **Key rotation:** Rotate encryption keys when rotating TSS key shares (proactive refresh).
+
+The `tss.EncryptKeyShare` and `tss.EncryptPresign` helpers implement this pattern as a reference.
+
+## Backup and Disaster Recovery
+
+### Backup Strategy
+
+- Back up each encrypted key share to geographically separated durable storage.
+- Consider a **Shamir backup** of the encryption passphrase with a higher threshold than the signing threshold (e.g., 5-of-7 backup recovery for a 3-of-5 signing scheme).
+- Back up CGGMP21 presign records alongside key shares.
+
+### Recovery Flow
+
+1. Restore encrypted key share from backup.
+2. Decrypt with the recovery passphrase.
+3. Load into a new session.
+4. Verify against known group public key.
+5. If presigns exist, check consumed flags — discard consumed presigns.
+
+## Monitoring and Alerting
+
+### Key Metrics
+
+| Metric                                | Alert Threshold                               | Severity |
+| ------------------------------------- | --------------------------------------------- | -------- |
+| Paillier proof verification failures  | > 0 in any session                            | Warning  |
+| Blame evidence events                 | Any occurrence                                | Warning  |
+| Signature failures (aggregate verify) | > 0 in any session                            | Error    |
+| Session timeouts                      | Session unfinished after 2x expected duration | Warning  |
+| Presign reuse attempts                | Any occurrence                                | Critical |
+
+### Log-Based Monitoring
+
+Enable the `Logger` interface on `ThresholdConfig` to capture structured logs. Protocol completion/failure events include `party_id` and `session_id` for cross-party correlation.
+
+```go
+config := tss.ThresholdConfig{
+    // ...
+    Log: tss.NewSLogger(slog.Default()),
+}
+```
+
+## Security Startup Checklist
+
+Before first production deployment, verify:
+
+1. **Transport authentication:** Every `Envelope.From` matches the authenticated transport identity.
+2. **Session ID freshness:** New session IDs are generated for every protocol run using `tss.NewSessionID`.
+3. **Storage encryption:** Key shares and presign records are encrypted at rest using AES-256-GCM or a KMS.
+4. **Secret material logging:** Verify no log output contains `secret.Scalar`, Paillier private keys, nonce values, or share values.
+5. **Presign lifecycle:** Presign consumed flags are persisted and checked on restart.
+6. **Blame evidence handling:** Protocol errors with `Blame != nil` are surfaced to operators.
+7. **Process isolation:** Key-share processes run with minimal privileges, no core dumps, locked-down crash reporting.
+8. **Network segmentation:** Signing processes are isolated from public-facing services.
+
+## Version Upgrades
+
+- Wire format version is encoded in every `Envelope.Version` and key-share record.
+- Decoders reject unknown versions. Multi-version deployments must coordinate upgrades.
+- Binary TLV encoding uses canonical tags. The decoder rejects unknown tags and trailing bytes.
+- Before upgrading, verify that all participants are running the same library version.

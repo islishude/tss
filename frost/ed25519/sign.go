@@ -17,6 +17,7 @@ import (
 type SignSession struct {
 	key            *KeyShare
 	sessionID      tss.SessionID
+	log            tss.Logger
 	message        []byte
 	signers        []tss.PartyID
 	commitments    map[tss.PartyID]nonceCommitment
@@ -109,6 +110,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	s := &SignSession{
 		key:           key,
 		sessionID:     sessionID,
+		log:           tss.NopLogger(),
 		message:       append([]byte(nil), message...),
 		signers:       signers,
 		commitments:   map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
@@ -280,7 +282,7 @@ func (s *SignSession) tryAggregate() error {
 				Code:  tss.ErrCodeVerification,
 				Round: 2,
 				Party: id,
-				Blame: &tss.Blame{Reason: "invalid FROST partial signature", Parties: []tss.PartyID{id}},
+				Blame: frostSignBlame(s.sessionID, s.signers, id, s.verifyKey),
 				Err:   err,
 			}
 		}
@@ -293,7 +295,12 @@ func (s *SignSession) tryAggregate() error {
 	}
 	sig := append(append([]byte(nil), RBytes...), zBytes...)
 	if !stded25519.Verify(stded25519.PublicKey(s.verifyKey), s.message, sig) {
-		return errors.New("aggregated Ed25519 signature failed verification")
+		return &tss.ProtocolError{
+			Code:  tss.ErrCodeVerification,
+			Round: 2,
+			Blame: frostAggregateBlame(s.sessionID, s.signers, s.verifyKey, s.message, sig),
+			Err:   errors.New("aggregated Ed25519 signature failed verification"),
+		}
 	}
 	s.signature = sig
 	s.completed = true
