@@ -4,16 +4,16 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 
 ## Proof Inventory
 
-| Proof | Paper § | Wire Type | Code Location |
-|-------|---------|-----------|---------------|
-| Π^fac (ModulusProof) | 3.1 | `zk.paillier.modulus-proof` | `internal/zk/paillier/proofs.go` `ProveModulus` / `VerifyModulus` |
-| Π^prm (PrimalityProof) | 3.1 | `zk.paillier.primality-proof` | `internal/zk/paillier/proofs.go` `ProvePrimality` / `VerifyPrimality` |
-| Π^Eq (EncScalarProof) | 4.1 | `zk.paillier.enc-scalar-proof` | `internal/zk/paillier/proofs.go` `ProveEncScalarAndRange` / `VerifyEncScalar` |
-| EncRangeProof | 4.1 | `zk.paillier.enc-range-proof` | `internal/zk/paillier/proofs.go` `ProveEncScalarAndRange` / `VerifyEncRange` |
-| Π^Enc (EncryptionProof) | 4.1 | `zk.paillier.encryption-proof` | `internal/zk/paillier/proofs.go` `ProveEncryption` / `VerifyEncryption` |
-| Π^mta (MTAResponseProof) | 4.2 | `zk.paillier.mta-response-proof` | `internal/zk/paillier/proofs.go` `ProveMTAResponse` / `VerifyMTAResponse` |
-| Π^log (LogProof) | 6.2 | `zk.paillier.log-proof` | `internal/zk/paillier/proofs.go` `ProveLog` / `VerifyLog` |
-| SchnorrProof | 3.1 | `zk.schnorr.proof` | `internal/zk/schnorr/schnorr.go` |
+| Proof                    | Paper § | Wire Type                        | Code Location                                                                 |
+| ------------------------ | ------- | -------------------------------- | ----------------------------------------------------------------------------- |
+| Π^fac (ModulusProof)     | 3.1     | `zk.paillier.modulus-proof`      | `internal/zk/paillier/proofs.go` `ProveModulus` / `VerifyModulus`             |
+| Π^prm (PrimalityProof)   | 3.1     | `zk.paillier.primality-proof`    | `internal/zk/paillier/proofs.go` `ProvePrimality` / `VerifyPrimality`         |
+| Π^Eq (EncScalarProof)    | 4.1     | `zk.paillier.enc-scalar-proof`   | `internal/zk/paillier/proofs.go` `ProveEncScalarAndRange` / `VerifyEncScalar` |
+| EncRangeProof            | 4.1     | `zk.paillier.enc-range-proof`    | `internal/zk/paillier/proofs.go` `ProveEncScalarAndRange` / `VerifyEncRange`  |
+| Π^Enc (EncryptionProof)  | 4.1     | `zk.paillier.encryption-proof`   | `internal/zk/paillier/proofs.go` `ProveEncryption` / `VerifyEncryption`       |
+| Π^mta (MTAResponseProof) | 4.2     | `zk.paillier.mta-response-proof` | `internal/zk/paillier/proofs.go` `ProveMTAResponse` / `VerifyMTAResponse`     |
+| Π^log (LogProof)         | 6.2     | `zk.paillier.log-proof`          | `internal/zk/paillier/proofs.go` `ProveLog` / `VerifyLog`                     |
+| SchnorrProof             | 3.1     | `zk.schnorr.proof`               | `internal/zk/schnorr/schnorr.go`                                              |
 
 ---
 
@@ -24,8 +24,9 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Witness:** Paillier prime factors p, q.
 
 **Protocol (Σ-protocol):**
+
 1. Prover computes non-trivial sqrt of 1: s = CRT(1 mod p, -1 mod q), then s² ≡ 1 (mod N).
-2. Prover samples random r ← Z*_N, commits A = r² mod N.
+2. Prover samples random r ← Z\*\_N, commits A = r² mod N.
 3. Challenge e = challengeBits(SHA-256(modulusChallengeLabel || domain || party || PK_bytes || A), 128).
 4. Response z = r · s^e mod N.
 5. Verifier checks z² ≡ A (mod N).
@@ -37,6 +38,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Fiat-Shamir hash ordering:** `hashParts` with 4-byte length prefix per part.
 
 **Verifier checks:**
+
 - N is odd composite, N ≢ 0 mod 3, N ≡ 1 mod 4
 - Small factor digest matches (primes 3–47)
 - Transcript hash matches
@@ -53,6 +55,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Witness:** Paillier prime factors p, q.
 
 **Protocol (extends Π^fac):**
+
 1. Prover computes non-trivial sqrt of 1 via CRT (same as Π^fac).
 2. Prover commits A = r² mod N for random r.
 3. Factor bit-length bound: max(BitLen(p), BitLen(q)) is bound into transcript.
@@ -73,6 +76,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Witness:** Scalar m, randomness r.
 
 **Protocol:**
+
 1. Prover samples random α, ρ. Commits A_c = Enc(α, ρ), B = α·G, and publishes V = m·G.
 2. Challenge e = SHA-256(encScalarChallengeLabel || transcript) mod q.
 3. Response z = e·m + α, u = r^e · ρ mod N.
@@ -89,6 +93,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Witness:** Scalar m, randomness r.
 
 **Protocol:**
+
 1. Prover samples α, ρ. Commits A_c = Enc(α, ρ), B = α·G.
 2. Challenge e = SHA-256(encRangeChallengeLabel || transcript) mod q.
 3. Response z = e·m + α, u = r^e · ρ mod N.
@@ -113,6 +118,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Challenge:** SHA-256(encryptionChallengeLabel || transcript) mod q.
 
 **Verifier checks:**
+
 - Enc(z, u) = A_c · c^e (mod N²)
 - z·G = B + e·V
 - z < q² + q (range bound)
@@ -126,6 +132,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 **Witness:** Scalar b, beta share, beta randomness β.
 
 **Protocol:**
+
 1. Prover commits: beta_comm = beta·G, b_nonce = μ·G, beta_nonce = ν·G, cipher_comm = Enc(a)^μ · Enc(ν, ρ).
 2. Challenge e = SHA-256(mtaChallengeLabel || transcript) mod q.
 3. Responses: z_b = e·b + μ, z_beta = e·beta + ν, u = β^e · ρ mod N.
@@ -159,17 +166,17 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 
 All domain separation labels follow the format `<protocol>-<phase>-v1` and are included as the first hash block in every transcript:
 
-| Protocol phase | Domain label |
-|---------------|-------------|
-| Keygen commitments | `cggmp21-secp256k1-keygen-commitments-v1` |
-| Keygen transcript | `cggmp21-secp256k1-keygen-transcript-v1` |
-| Presign transcript | `cggmp21-secp256k1-presign-transcript-v1` |
-| Presign round-1 echo | `cggmp21-secp256k1-presign-round1-echo-v1` |
-| MtA response evidence | `cggmp21-secp256k1-mta-response-evidence-v1` |
+| Protocol phase          | Domain label                                   |
+| ----------------------- | ---------------------------------------------- |
+| Keygen commitments      | `cggmp21-secp256k1-keygen-commitments-v1`      |
+| Keygen transcript       | `cggmp21-secp256k1-keygen-transcript-v1`       |
+| Presign transcript      | `cggmp21-secp256k1-presign-transcript-v1`      |
+| Presign round-1 echo    | `cggmp21-secp256k1-presign-round1-echo-v1`     |
+| MtA response evidence   | `cggmp21-secp256k1-mta-response-evidence-v1`   |
 | Aggregate sign evidence | `cggmp21-secp256k1-aggregate-sign-evidence-v1` |
-| Reshare transcript | `cggmp21-secp256k1-reshare-transcript-v1` |
-| Refresh transcript | `cggmp21-secp256k1-refresh-transcript-v1` |
-| Outer proof domain | `cggmp21-secp256k1-proof-domain-v1` |
+| Reshare transcript      | `cggmp21-secp256k1-reshare-transcript-v1`      |
+| Refresh transcript      | `cggmp21-secp256k1-refresh-transcript-v1`      |
+| Outer proof domain      | `cggmp21-secp256k1-proof-domain-v1`            |
 
 ---
 
