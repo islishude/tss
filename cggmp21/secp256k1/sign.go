@@ -180,13 +180,13 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	if err != nil {
 		return nil, nil, err
 	}
-	xBarComm, err := secp.PointBytes(secp.ScalarMult(localVerificationPoint, lambda))
+	xBarComm, err := secp.PointBytes(secp.ScalarMult(localVerificationPoint, secp.ScalarFromBigInt(lambda)))
 	if err != nil {
 		return nil, nil, err
 	}
 	// Round 1 starts MtA by publishing Enc_i(k_i) with scalar/range proofs.
 	startDomain := mtaStartDomain(key, sessionID, signers, key.Party, key.PaillierPublicKey)
-	startMsg, err := mta.Start(nil, startDomain, kShare, &paillierKey.PublicKey)
+	startMsg, err := mta.Start(nil, startDomain, kShare.BigInt(), &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -208,8 +208,8 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		config:     config,
 		signers:    signers,
 		paillier:   paillierKey,
-		kShare:     kShare,
-		gamma:      gamma,
+		kShare:     kShare.BigInt(),
+		gamma:      gamma.BigInt(),
 		xBar:       xBar,
 		gammaComm:  gammaComm,
 		xBarComm:   xBarComm,
@@ -357,7 +357,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 				s.presignRound3EvidenceFields(p)...,
 			)
 		}
-		s.deltas[env.From] = delta
+		s.deltas[env.From] = delta.BigInt()
 		return nil, s.tryComplete()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
@@ -580,12 +580,12 @@ func (s *PresignSession) tryComplete() error {
 		return errors.New("non-invertible presign delta")
 	}
 	gamma := secp.AddPoints(gammaPoints...)
-	RPoint := secp.ScalarMult(gamma, deltaInv)
+	RPoint := secp.ScalarMult(gamma, secp.ScalarFromBigInt(deltaInv))
 	R, err := secp.PointBytes(RPoint)
 	if err != nil {
 		return err
 	}
-	littleR := new(big.Int).Mod(RPoint.X, order)
+	littleR := new(big.Int).Mod(RPoint.X.BigInt(), order)
 	if littleR.Sign() == 0 {
 		return errors.New("zero ECDSA r")
 	}
@@ -614,7 +614,7 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return secp.PointBytes(secp.ScalarMult(point, lambda))
+	return secp.PointBytes(secp.ScalarMult(point, secp.ScalarFromBigInt(lambda)))
 }
 
 func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
@@ -693,9 +693,9 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		}
 		// CGGMP21 HD signing applies the additive public-key shift by adding
 		// k_i*shift to each local chi share, so aggregation adds k*shift once.
-		shiftTerm := new(big.Int).Mul(kShare, shift)
-		chiShare.Add(chiShare, shiftTerm)
-		chiShare.Mod(chiShare, secp.Order())
+		shiftTerm := new(big.Int).Mul(kShare.BigInt(), shift.BigInt())
+		chiShare = secp.ScalarAdd(chiShare, secp.ScalarFromBigInt(shiftTerm))
+		// modulus already handled by Scalar type
 	}
 	verifyKey := append([]byte(nil), key.PublicKey...)
 	if len(opts.AdditiveShift) > 0 {
@@ -710,8 +710,8 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	}
 	z := new(big.Int).SetBytes(digest32)
 	// Online ECDSA partial: s_i = m*k_i + r*chi_i mod q.
-	partial := new(big.Int).Mul(z, kShare)
-	rs := new(big.Int).Mul(littleR, chiShare)
+	partial := new(big.Int).Mul(z, kShare.BigInt())
+	rs := new(big.Int).Mul(littleR.BigInt(), chiShare.BigInt())
 	partial.Add(partial, rs)
 	partial.Mod(partial, secp.Order())
 	payload, err := marshalSignPartialPayload(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
@@ -809,7 +809,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			s.signPartialEvidenceFields(p)...,
 		)
 	}
-	s.partials[env.From] = partial
+	s.partials[env.From] = partial.BigInt()
 	return nil, s.tryComplete()
 }
 
@@ -835,8 +835,8 @@ func (s *SignSession) aggregateEvidenceFields(r, sigS *big.Int) []tss.EvidenceFi
 	return append(fields,
 		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
-		hashEvidenceField(evidenceFieldRHash, scalarBytes(r)),
-		hashEvidenceField(evidenceFieldSHash, scalarBytes(sigS)),
+		hashEvidenceField(evidenceFieldRHash, secp.ScalarBytes(secp.ScalarFromBigInt(r))),
+		hashEvidenceField(evidenceFieldSHash, secp.ScalarBytes(secp.ScalarFromBigInt(sigS))),
 	)
 }
 
@@ -852,8 +852,8 @@ func (s *SignSession) tryComplete() error {
 	if sigS.Sign() == 0 {
 		return errors.New("zero ECDSA s")
 	}
-	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.N), 1)) > 0 {
-		sigS.Sub(secp.N, sigS)
+	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.Order()), 1)) > 0 {
+		sigS.Sub(secp.Order(), sigS)
 	}
 	r, err := secp.ParseScalar(s.presign.LittleR)
 	if err != nil {
@@ -863,14 +863,14 @@ func (s *SignSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
-	if !secp.VerifyECDSA(public, s.digest, r, sigS) {
+	if !secp.VerifyECDSA(public, s.digest, r, secp.ScalarFromBigInt(sigS)) {
 		env := tss.Envelope{
 			Protocol:    protocol,
 			Version:     tss.Version,
 			SessionID:   s.sessionID,
 			Round:       1,
 			PayloadType: payloadSignPartial,
-			Payload:     aggregateEvidencePayload(s.digest, scalarBytes(r), scalarBytes(sigS), s.presign.TranscriptHash),
+			Payload:     aggregateEvidencePayload(s.digest, secp.ScalarBytes(r), secp.ScalarBytes(secp.ScalarFromBigInt(sigS)), s.presign.TranscriptHash),
 		}.WithTranscriptHash()
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
@@ -882,13 +882,13 @@ func (s *SignSession) tryComplete() error {
 					env,
 					tss.EvidenceKindAggregateSign,
 					"aggregated ECDSA signature failed verification",
-					s.aggregateEvidenceFields(r, sigS)...,
+					s.aggregateEvidenceFields(r.BigInt(), sigS)...,
 				),
 			},
 			Err: errors.New("ECDSA signature failed verification"),
 		}
 	}
-	s.signature = &Signature{R: scalarBytes(r), S: scalarBytes(sigS)}
+	s.signature = &Signature{R: secp.ScalarBytes(r), S: secp.ScalarBytes(secp.ScalarFromBigInt(sigS))}
 	s.completed = true
 	return nil
 }

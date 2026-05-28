@@ -98,7 +98,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		point := secp.ScalarBaseMult(coeff)
+		point := secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff))
 		enc, err := secp.PointBytes(point)
 		if err != nil {
 			return nil, nil, err
@@ -253,7 +253,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.shares[env.From] = share
+		s.shares[env.From] = share.BigInt()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -277,7 +277,7 @@ func (s *KeygenSession) tryComplete() error {
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
+		if err := secp.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), secp.ScalarFromBigInt(share)); err != nil {
 			evidenceEnv := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,

@@ -18,7 +18,7 @@ func TestMTAProductShares(t *testing.T) {
 	}
 	a := big.NewInt(13)
 	b := big.NewInt(37)
-	bCommit, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +121,7 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	}
 	a := big.NewInt(13)
 	b := big.NewInt(37)
-	bCommit, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		tb.Fatal(err)
 	}

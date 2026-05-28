@@ -104,7 +104,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 
 	b := big.NewInt(17)
 	beta := big.NewInt(19)
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +155,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -235,7 +235,7 @@ func TestProofDomainSeparation(t *testing.T) {
 
 	b := big.NewInt(17)
 	beta := big.NewInt(19)
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -380,7 +380,7 @@ func TestProofRejectsMalformedCurvePoints(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		t.Fatal(err)
 	}

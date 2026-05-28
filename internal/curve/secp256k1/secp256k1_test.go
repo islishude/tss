@@ -38,11 +38,11 @@ func TestECDSASignVerify(t *testing.T) {
 }
 
 func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
-	a := ScalarFromBig(big.NewInt(7))
-	b := ScalarFromBig(big.NewInt(11))
-	got := ScalarMul(ScalarAdd(a, b), b).Big()
+	a := ScalarFromBigInt(big.NewInt(7))
+	b := ScalarFromBigInt(big.NewInt(11))
+	got := ScalarMul(ScalarAdd(a, b), b).BigInt()
 	want := new(big.Int).Mul(big.NewInt(18), big.NewInt(11))
-	want.Mod(want, N)
+	want.Mod(want, Order())
 	if got.Cmp(want) != 0 {
 		t.Fatalf("fiat scalar arithmetic mismatch: got %s want %s", got, want)
 	}
@@ -50,17 +50,19 @@ func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ScalarMul(b, inv).Big().Cmp(big.NewInt(1)) != 0 {
+	if ScalarMul(b, inv).BigInt().Cmp(big.NewInt(1)) != 0 {
 		t.Fatal("fiat scalar inversion failed")
 	}
 }
 
 func TestFiatFieldArithmeticMatchesBigInt(t *testing.T) {
-	a := FieldElementFromBig(big.NewInt(7))
-	b := FieldElementFromBig(big.NewInt(11))
-	got := FieldSquare(FieldAdd(a, b)).Big()
+	a := FieldElementFromBigInt(big.NewInt(7))
+	b := FieldElementFromBigInt(big.NewInt(11))
+	got := FieldSquare(FieldAdd(a, b)).BigInt()
 	want := new(big.Int).Mul(big.NewInt(18), big.NewInt(18))
-	want.Mod(want, P)
+	// P = secp256k1 field prime
+	p := new(big.Int).SetBytes([]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0xFF, 0xFC, 0x2F})
+	want.Mod(want, p)
 	if got.Cmp(want) != 0 {
 		t.Fatalf("fiat field arithmetic mismatch: got %s want %s", got, want)
 	}

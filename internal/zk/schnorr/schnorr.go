@@ -32,11 +32,12 @@ func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	if secret == nil || secret.Sign() == 0 {
 		return nil, nil, errors.New("secret must be non-zero")
 	}
+	sec := secp.ScalarFromBigInt(secret)
 	nonce, err := secp.RandomScalar(nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	public, err := secp.PointBytes(secp.ScalarBaseMult(secret))
+	public, err := secp.PointBytes(secp.ScalarBaseMult(sec))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -46,9 +47,8 @@ func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	}
 	challenge := challenge(domain, public, commitment)
 	// Fiat-Shamir Schnorr response: s = k + e*x mod q.
-	response := new(big.Int).Mul(challenge, secret)
-	response.Add(response, nonce)
-	response.Mod(response, secp.Order())
+	challengeScalar := secp.ScalarFromBigInt(challenge)
+	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), nonce)
 	return &Proof{Commitment: commitment, Response: secp.ScalarBytes(response)}, public, nil
 }
 
@@ -72,7 +72,7 @@ func Verify(domain, public []byte, proof *Proof) bool {
 	challenge := challenge(domain, public, proof.Commitment)
 	left := secp.ScalarBaseMult(response)
 	// Verification checks [s]G = R + [e]X.
-	right := secp.Add(commitmentPoint, secp.ScalarMult(publicPoint, challenge))
+	right := secp.Add(commitmentPoint, secp.ScalarMult(publicPoint, secp.ScalarFromBigInt(challenge)))
 	return secp.Equal(left, right)
 }
 

@@ -12,7 +12,7 @@ func TestProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, public, err := Prove([]byte("test"), secret)
+	proof, public, err := Prove([]byte("test"), secret.BigInt())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func FuzzProofUnmarshal(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	proof, _, err := Prove([]byte("test"), secret)
+	proof, _, err := Prove([]byte("test"), secret.BigInt())
 	if err != nil {
 		f.Fatal(err)
 	}

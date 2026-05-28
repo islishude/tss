@@ -423,7 +423,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 	if scalar == nil || scalar.Sign() <= 0 || scalar.Cmp(secp.Order()) >= 0 {
 		return nil, nil, errors.New("scalar out of range")
 	}
-	scalarCommitment, err := secp.PointBytes(secp.ScalarBaseMult(scalar))
+	scalarCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -441,7 +441,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 	if err != nil {
 		return nil, nil, err
 	}
-	pointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(alpha))
+	pointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(alpha)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -475,7 +475,7 @@ func ProveEncScalarAndRange(reader io.Reader, domain []byte, pk *pai.PublicKey, 
 	if err != nil {
 		return nil, nil, err
 	}
-	rangePointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(beta))
+	rangePointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(beta)))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -560,8 +560,8 @@ func VerifyEncRange(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scala
 	}
 
 	// Curve check: z*G == pointCommitment + e * scalarPoint.
-	leftPoint := secp.ScalarBaseMult(z)
-	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(scalarPoint, e))
+	leftPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
+	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(scalarPoint, secp.ScalarFromBigInt(e)))
 	return secp.Equal(leftPoint, rightPoint)
 }
 
@@ -602,8 +602,8 @@ func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proo
 	if encZ.Cmp(rightCipher) != 0 {
 		return false
 	}
-	leftPoint := secp.ScalarBaseMult(z)
-	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(scalarCommitment, e))
+	leftPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
+	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(scalarCommitment, secp.ScalarFromBigInt(e)))
 	return secp.Equal(leftPoint, rightPoint)
 }
 
@@ -628,14 +628,14 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 		return nil, errors.New("nil beta")
 	}
 	betaMod := mod(beta, secp.Order())
-	expectedBCommit, err := secp.PointBytes(secp.ScalarBaseMult(b))
+	expectedBCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
 	if err != nil {
 		return nil, err
 	}
 	if !bytes.Equal(bCommitment, expectedBCommit) {
 		return nil, errors.New("b commitment mismatch")
 	}
-	betaCommitment, err := secp.PointBytes(secp.ScalarBaseMult(betaMod))
+	betaCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(betaMod)))
 	if err != nil {
 		return nil, err
 	}
@@ -658,11 +658,11 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	cipherCommitment := new(big.Int).Exp(encA, mu, pk.NSquared)
 	cipherCommitment.Mul(cipherCommitment, encNu)
 	cipherCommitment.Mod(cipherCommitment, pk.NSquared)
-	bNonce, err := secp.PointBytes(secp.ScalarBaseMult(mu))
+	bNonce, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(mu)))
 	if err != nil {
 		return nil, err
 	}
-	betaNonce, err := secp.PointBytes(secp.ScalarBaseMult(nu))
+	betaNonce, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(nu)))
 	if err != nil {
 		return nil, err
 	}
@@ -738,13 +738,13 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	if leftCipher.Cmp(rightCipher) != 0 {
 		return false
 	}
-	leftB := secp.ScalarBaseMult(zB)
-	rightB := secp.Add(bNonce, secp.ScalarMult(bCommitment, e))
+	leftB := secp.ScalarBaseMult(secp.ScalarFromBigInt(zB))
+	rightB := secp.Add(bNonce, secp.ScalarMult(bCommitment, secp.ScalarFromBigInt(e)))
 	if !secp.Equal(leftB, rightB) {
 		return false
 	}
-	leftBeta := secp.ScalarBaseMult(zBeta)
-	rightBeta := secp.Add(betaNonce, secp.ScalarMult(betaCommitment, e))
+	leftBeta := secp.ScalarBaseMult(secp.ScalarFromBigInt(zBeta))
+	rightBeta := secp.Add(betaNonce, secp.ScalarMult(betaCommitment, secp.ScalarFromBigInt(e)))
 	return secp.Equal(leftBeta, rightBeta)
 }
 

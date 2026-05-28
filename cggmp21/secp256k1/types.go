@@ -256,11 +256,15 @@ func (k *KeyShare) Destroy() {
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
-	return secp.ParseScalar(k.Secret)
+	s, err := secp.ParseScalar(k.Secret)
+	if err != nil {
+		return nil, err
+	}
+	return s.BigInt(), nil
 }
 
 func scalarBytes(x *big.Int) []byte {
-	return secp.ScalarBytes(x)
+	return secp.ScalarBytes(secp.ScalarFromBigInt(x))
 }
 
 func (k *KeyShare) requireMPCMaterial() error {

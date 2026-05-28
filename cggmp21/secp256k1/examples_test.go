@@ -15,15 +15,15 @@ func ExampleVerifyDigest() {
 	secret := big.NewInt(1)
 	nonce := big.NewInt(2)
 
-	r, s, err := secp.SignECDSAWithNonce(digest[:], secret, nonce, true)
+	r, s, err := secp.SignECDSAWithNonce(digest[:], secp.ScalarFromBigInt(secret), secp.ScalarFromBigInt(nonce), true)
 	if err != nil {
 		panic(err)
 	}
-	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secret))
+	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(secret)))
 	if err != nil {
 		panic(err)
 	}
-	signature := &Signature{R: scalarBytes(r), S: scalarBytes(s)}
+	signature := &Signature{R: secp.ScalarBytes(r), S: secp.ScalarBytes(s)}
 
 	fmt.Println(VerifyDigest(publicKey, digest[:], signature))
 	// Output:

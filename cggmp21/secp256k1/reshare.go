@@ -61,7 +61,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		enc, err := secp.PointBytes(secp.ScalarBaseMult(coeff))
+		enc, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff)))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -147,7 +147,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.shares[env.From] = share
+		s.shares[env.From] = share.BigInt()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -171,7 +171,7 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), share); err != nil {
+		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), secp.ScalarFromBigInt(share)); err != nil {
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,

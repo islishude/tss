@@ -75,7 +75,7 @@ func proofSeedHash(b byte) []byte {
 
 func seedPoint(tb proofFataler, scalar int64) []byte {
 	tb.Helper()
-	out, err := secp.PointBytes(secp.ScalarBaseMult(big.NewInt(scalar)))
+	out, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(scalar))))
 	if err != nil {
 		tb.Fatal(err)
 	}

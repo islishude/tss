@@ -240,12 +240,12 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	tb.Helper()
 	one := big.NewInt(1)
-	RPoint := secp.ScalarBaseMult(one)
+	RPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 	R, err := secp.PointBytes(RPoint)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	littleR := new(big.Int).Mod(RPoint.X, secp.Order())
+	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	return &Presign{
 		Version:        tss.Version,
