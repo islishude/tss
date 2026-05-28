@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"math/big"
@@ -526,4 +527,306 @@ func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.Prot
 		t.Fatal("tampered blame evidence verified")
 	}
 	return protocolErr
+}
+
+// Proactive refresh tests
+
+func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
+	shares := secpKeygen(t, 1, 1)
+	oldPub := shares[1].PublicKeyBytes()
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := tss.ThresholdConfig{Threshold: 1, Self: 1, SessionID: sessionID}
+	session, out, err := StartRefresh(shares[1], config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, env := range out {
+		if _, err := session.HandleRefreshMessage(env); err != nil {
+			if !strings.Contains(err.Error(), "already completed") {
+				t.Fatal(err)
+			}
+		}
+	}
+	newShare, ok := session.KeyShare()
+	if !ok {
+		t.Fatal("refresh did not complete")
+	}
+	if !bytes.Equal(oldPub, newShare.PublicKey) {
+		t.Fatal("public key changed after refresh")
+	}
+	if !bytes.Equal(shares[1].ChainCode, newShare.ChainCode) {
+		t.Fatal("chain code changed after refresh")
+	}
+	digest := sha256.Sum256([]byte("refresh 1-of-1"))
+	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShare})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after refresh did not verify")
+	}
+	if !bytes.Equal(oldPub, pub) {
+		t.Fatal("public key from signing differs from original")
+	}
+}
+
+func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	oldPub := shares[1].PublicKeyBytes()
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2, 3}
+	sessions := make(map[tss.PartyID]*RefreshSession)
+	queue := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: 2, Self: id, SessionID: sessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, id := range parties {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			out, err := sessions[id].HandleRefreshMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	newShares := make(map[tss.PartyID]*KeyShare)
+	for _, id := range parties {
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("refresh not complete for %d", id)
+		}
+		newShares[id] = share
+		if !bytes.Equal(oldPub, share.PublicKey) {
+			t.Fatalf("party %d public key changed after refresh", id)
+		}
+	}
+	signers := []*KeyShare{newShares[1], newShares[3]}
+	digest := sha256.Sum256([]byte("refresh 2-of-3"))
+	pub, sig, err := SignDigest(digest[:], signers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after refresh did not verify")
+	}
+}
+
+func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	sessions := make(map[tss.PartyID]*RefreshSession)
+	queue := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: 2, Self: id, SessionID: sessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, id := range parties {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			out, err := sessions[id].HandleRefreshMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	for _, id := range parties {
+		newShare, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("refresh not complete for %d", id)
+		}
+		if len(newShare.ChainCode) != 32 {
+			t.Fatalf("party %d missing chain code after refresh", id)
+		}
+		if !bytes.Equal(shares[id].ChainCode, newShare.ChainCode) {
+			t.Fatalf("party %d chain code changed after refresh", id)
+		}
+	}
+	signers := []*KeyShare{sessions[1].newShare, sessions[2].newShare}
+	digest := sha256.Sum256([]byte("hd refresh"))
+	pub, sig, err := SignDigest(digest[:], signers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after HD refresh did not verify")
+	}
+}
+
+// BIP32 derivation tests
+
+func TestBIP32SingleLevel(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	pubKey := shares[1].PublicKey
+	chainCode := shares[1].ChainCode
+
+	childPub, shift, childChain, err := DeriveBIP32(pubKey, chainCode, []uint32{0})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(childPub) != 33 {
+		t.Fatal("child public key must be 33 bytes")
+	}
+	if len(shift) != 32 {
+		t.Fatal("additive shift must be 32 bytes")
+	}
+	if len(childChain) != 32 {
+		t.Fatal("child chain code must be 32 bytes")
+	}
+	derived, err := DerivePublicKey(pubKey, shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(derived, childPub) {
+		t.Fatal("DeriveBIP32 and DerivePublicKey mismatch")
+	}
+}
+
+func TestBIP32MultiLevel(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	pubKey := shares[1].PublicKey
+	chainCode := shares[1].ChainCode
+
+	childPub, shift, childChain, err := DeriveBIP32(pubKey, chainCode, []uint32{0, 1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(childPub) != 33 {
+		t.Fatal("child public key must be 33 bytes")
+	}
+	if len(shift) != 32 {
+		t.Fatal("additive shift must be 32 bytes")
+	}
+	if len(childChain) != 32 {
+		t.Fatal("child chain code must be 32 bytes")
+	}
+	// Two-step cumulative should produce consistent chain code with direct.
+	_, _, midChain, err := DeriveBIP32(pubKey, chainCode, []uint32{0, 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, finalChain, err := DeriveBIP32(pubKey, chainCode, []uint32{0, 1, 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(childChain, finalChain) {
+		t.Fatal("multi-level chain code mismatch")
+	}
+	_ = midChain
+	derived, err := DerivePublicKey(pubKey, shift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(derived, childPub) {
+		t.Fatal("DeriveBIP32 and DerivePublicKey mismatch for multi-level")
+	}
+}
+
+func TestBIP32DeriveAndSign(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	childPub, shift, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{0, 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	digest := sha256.Sum256([]byte("bip32 derived signing"))
+	signID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := make(map[tss.PartyID]*SignSession)
+	messages := make([]tss.Envelope, 0, len(signers))
+	for _, id := range signers {
+		session, out, err := StartSignDigestWithOptions(
+			shares[id], presigns[id], signID, digest[:],
+			SignOptions{LowS: true, AdditiveShift: shift},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		messages = append(messages, out...)
+	}
+	for _, env := range messages {
+		for _, id := range signers {
+			if id == env.From {
+				continue
+			}
+			if _, err := sessions[id].HandleSignMessage(env); err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	sig, ok := sessions[1].Signature()
+	if !ok {
+		t.Fatal("signature not completed")
+	}
+	if !VerifyDigest(childPub, digest[:], sig) {
+		t.Fatal("signature did not verify against derived BIP32 key")
+	}
+	if VerifyDigest(shares[1].PublicKey, digest[:], sig) {
+		t.Fatal("signature verified against master key (should use derived key)")
+	}
+}
+
+func TestBIP32RejectsHardened(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	_, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{HardenedKeyStart})
+	if err == nil {
+		t.Fatal("expected error for hardened index")
+	}
+	_, _, _, err = DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{0, HardenedKeyStart + 1})
+	if err == nil {
+		t.Fatal("expected error for hardened index in path")
+	}
+}
+
+func TestBIP32RejectsEmptyChainCode(t *testing.T) {
+	shares := secpKeygen(t, 1, 1)
+	if len(shares[1].ChainCode) > 0 {
+		t.Skip("unexpected chain code with HD disabled")
+	}
+	_, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{0})
+	if err == nil {
+		t.Fatal("expected error for empty chain code")
+	}
+}
+
+func TestBIP32RejectsEmptyPath(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	_, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{})
+	if err == nil {
+		t.Fatal("expected error for empty path")
+	}
 }

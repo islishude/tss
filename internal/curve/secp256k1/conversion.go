@@ -58,17 +58,6 @@ func scalarFromUint64(v uint64) Scalar {
 	return out
 }
 
-func must32BE(hex string) [32]byte {
-	x, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		panic("invalid hex constant")
-	}
-	b := x.Bytes()
-	var out [32]byte
-	copy(out[32-len(b):], b)
-	return out
-}
-
 func reverseBytes(b []byte) []byte {
 	out := make([]byte, len(b))
 	for i := range len(b) {

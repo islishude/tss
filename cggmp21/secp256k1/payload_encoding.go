@@ -24,6 +24,8 @@ const (
 	signPartialPayloadWireType        = "cggmp21.secp256k1.payload.sign.partial"
 	reshareCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.reshare.commitments"
 	reshareSharePayloadWireType       = "cggmp21.secp256k1.payload.reshare.share"
+	refreshCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.refresh.commitments"
+	refreshSharePayloadWireType       = "cggmp21.secp256k1.payload.refresh.share"
 )
 
 const (
@@ -400,4 +402,81 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 		return reshareSharePayload{}, err
 	}
 	return reshareSharePayload{Share: share}, nil
+}
+
+const refreshCommitmentsPayloadFieldCommitments uint16 = 1
+const refreshCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
+const refreshCommitmentsPayloadFieldPaillierProof uint16 = 3
+
+const refreshSharePayloadFieldShare uint16 = 1
+
+type refreshCommitmentsPayload struct {
+	Commitments       [][]byte
+	PaillierPublicKey []byte
+	PaillierProof     []byte
+}
+
+type refreshSharePayload struct {
+	Share []byte
+}
+
+func marshalRefreshCommitmentsPayload(p refreshCommitmentsPayload) ([]byte, error) {
+	return wire.Marshal(tss.Version, refreshCommitmentsPayloadWireType, []wire.Field{
+		{Tag: refreshCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+		{Tag: refreshCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
+		{Tag: refreshCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
+	})
+}
+
+func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, error) {
+	version, fields, err := wire.Unmarshal(in, refreshCommitmentsPayloadWireType)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	if version != tss.Version {
+		return refreshCommitmentsPayload{}, fmt.Errorf("unexpected refresh commitments payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof); err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	commitments, err := wire.BytesListField(fields, refreshCommitmentsPayloadFieldCommitments)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	publicKey, err := wire.Require(fields, refreshCommitmentsPayloadFieldPaillierPublicKey)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	proof, err := wire.Require(fields, refreshCommitmentsPayloadFieldPaillierProof)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof}, nil
+}
+
+func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
+	if _, err := secp.ParseScalar(p.Share); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(tss.Version, refreshSharePayloadWireType, []wire.Field{
+		{Tag: refreshSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
+	})
+}
+
+func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
+	version, fields, err := wire.Unmarshal(in, refreshSharePayloadWireType)
+	if err != nil {
+		return refreshSharePayload{}, err
+	}
+	if version != tss.Version {
+		return refreshSharePayload{}, fmt.Errorf("unexpected refresh share payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, refreshSharePayloadFieldShare); err != nil {
+		return refreshSharePayload{}, err
+	}
+	share := wire.MustField(fields, refreshSharePayloadFieldShare)
+	if _, err := secp.ParseScalar(share); err != nil {
+		return refreshSharePayload{}, err
+	}
+	return refreshSharePayload{Share: share}, nil
 }

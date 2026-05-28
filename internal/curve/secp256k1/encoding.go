@@ -2,9 +2,6 @@ package secp256k1
 
 import "errors"
 
-// sqrtExp is (P+1)/4 in big-endian, used for square root in PointFromBytes.
-var sqrtExp = must32BE("3FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFBFFFFF0C")
-
 // PointBytes encodes p in canonical compressed SEC 1 form.
 func PointBytes(p *Point) ([]byte, error) {
 	if p == nil || p.Inf || !IsOnCurve(p) {
@@ -33,7 +30,7 @@ func PointFromBytes(in []byte) (*Point, error) {
 	y2 := FieldAdd(FieldMul(FieldSquare(x), x), fieldB)
 
 	// sqrt: y = y2^((P+1)/4) since P ≡ 3 mod 4
-	y := fieldExpVarTime(&y2, sqrtExp[:])
+	y := fieldSqrtAddchain(y2)
 	if !FieldSquare(y).Equal(y2) {
 		return nil, errors.New("point is not on curve")
 	}

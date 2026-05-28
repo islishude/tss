@@ -125,6 +125,13 @@ func ScalarMul(a, b Scalar) Scalar {
 	return out
 }
 
+// ScalarSquare returns a*a modulo the subgroup order.
+func ScalarSquare(a Scalar) Scalar {
+	var out Scalar
+	fiatscalar.Square(&out.mont, &a.mont)
+	return out
+}
+
 // ScalarNeg returns -a modulo the subgroup order.
 func ScalarNeg(a Scalar) Scalar {
 	var out Scalar
@@ -137,11 +144,8 @@ func ScalarInvert(a Scalar) (Scalar, error) {
 	if a.IsZero() {
 		return Scalar{}, errors.New("zero scalar is not invertible")
 	}
-	return scalarExpVarTime(&a, scalarInvertExp[:]), nil
+	return scalarInvAddchain(a), nil
 }
-
-// scalarInvertExp is N-2 in big-endian, used for Fermat inversion.
-var scalarInvertExp = must32BE("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD036413F")
 
 // FieldElementFromBytes parses a canonical 32-byte big-endian field element.
 func FieldElementFromBytes(in []byte) (FieldElement, error) {
@@ -272,11 +276,8 @@ func FieldInvert(a FieldElement) (FieldElement, error) {
 	if a.IsZero() {
 		return FieldElement{}, errors.New("zero field element is not invertible")
 	}
-	return fieldExpVarTime(&a, fieldInvertExp[:]), nil
+	return fieldInvAddchain(a), nil
 }
-
-// fieldInvertExp is P-2 in big-endian, used for Fermat inversion.
-var fieldInvertExp = must32BE("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2D")
 
 // Precomputed small field constants in Montgomery domain.
 var (
@@ -296,42 +297,6 @@ var (
 		FieldAdd(FieldOne(), FieldOne()),
 	)
 )
-
-// expBits iterates the bits of exp (big-endian byte slice) MSB to LSB,
-// skipping the leading 1, and calls square for each bit and mul when bit=1.
-func scalarExpVarTime(base *Scalar, exp []byte) Scalar {
-	var out Scalar
-	out = ScalarOne()
-	var sq Scalar
-	sq.Set(*base)
-	for byteIdx := len(exp) - 1; byteIdx >= 0; byteIdx-- {
-		b := exp[byteIdx]
-		for bit := range 8 {
-			if b&(1<<bit) != 0 {
-				out = ScalarMul(out, sq)
-			}
-			sq = ScalarMul(sq, sq)
-		}
-	}
-	return out
-}
-
-func fieldExpVarTime(base *FieldElement, exp []byte) FieldElement {
-	var out FieldElement
-	out = FieldOne()
-	var sq FieldElement
-	sq.Set(*base)
-	for byteIdx := len(exp) - 1; byteIdx >= 0; byteIdx-- {
-		b := exp[byteIdx]
-		for bit := range 8 {
-			if b&(1<<bit) != 0 {
-				out = FieldMul(out, sq)
-			}
-			sq = FieldSquare(sq)
-		}
-	}
-	return out
-}
 
 func isZero32(b []byte) bool {
 	for _, v := range b {

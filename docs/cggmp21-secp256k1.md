@@ -84,4 +84,8 @@ Malformed commitments, Paillier mismatches, invalid MtA responses, malformed onl
 
 ## Unsupported
 
-The package does not implement network transport, persistent storage encryption, proactive refresh, BIP32 path derivation, or production-audited proofs. Canonical proof encoding is a wire-safety improvement, not an external cryptographic audit. The experimental security notice remains part of generated artifacts. See [`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the current proof inventory and review blockers.
+The package does not implement network transport, persistent storage encryption, or production-audited proofs.
+
+Canonical proof encoding is a wire-safety improvement, not an external cryptographic audit.
+
+The experimental security notice remains part of generated artifacts. See [`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the current proof inventory and review blockers.

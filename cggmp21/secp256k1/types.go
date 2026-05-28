@@ -19,12 +19,14 @@ import (
 const protocol = "cggmp21-secp256k1"
 
 const (
-	payloadKeygenCommitments = "cggmp21.secp256k1.keygen.commitments"
-	payloadKeygenShare       = "cggmp21.secp256k1.keygen.share"
-	payloadPresignRound1     = "cggmp21.secp256k1.presign.round1"
-	payloadPresignRound2     = "cggmp21.secp256k1.presign.round2"
-	payloadPresignRound3     = "cggmp21.secp256k1.presign.round3"
-	payloadSignPartial       = "cggmp21.secp256k1.sign.partial"
+	payloadKeygenCommitments  = "cggmp21.secp256k1.keygen.commitments"
+	payloadKeygenShare        = "cggmp21.secp256k1.keygen.share"
+	payloadPresignRound1      = "cggmp21.secp256k1.presign.round1"
+	payloadPresignRound2      = "cggmp21.secp256k1.presign.round2"
+	payloadPresignRound3      = "cggmp21.secp256k1.presign.round3"
+	payloadSignPartial        = "cggmp21.secp256k1.sign.partial"
+	payloadRefreshCommitments = "cggmp21.secp256k1.refresh.commitments"
+	payloadRefreshShare       = "cggmp21.secp256k1.refresh.share"
 )
 
 // ExperimentalSecurityNotice is attached to CGGMP21 artifacts until external audit.

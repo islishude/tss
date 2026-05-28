@@ -16,11 +16,16 @@ func VerifyShare(commitments [][]byte, id uint32, share Scalar) error {
 }
 
 // EvalCommitments evaluates public polynomial commitments at participant id.
+// A nil commitment entry represents the point at infinity (a zero coefficient).
 func EvalCommitments(commitments [][]byte, id uint32) (*Point, error) {
 	x := scalarFromUint64(uint64(id))
 	pow := ScalarOne()
 	acc := NewInfinity()
 	for _, enc := range commitments {
+		if len(enc) == 0 {
+			pow = ScalarMul(pow, x)
+			continue
+		}
 		c, err := PointFromBytes(enc)
 		if err != nil {
 			return nil, err
