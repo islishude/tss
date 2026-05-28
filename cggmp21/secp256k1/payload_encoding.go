@@ -42,7 +42,6 @@ const (
 	presignRound1PayloadFieldGamma uint16 = iota + 1
 	presignRound1PayloadFieldEncK
 	presignRound1PayloadFieldEncKProof
-	presignRound1PayloadFieldEncKRangeProof
 	presignRound1PayloadFieldPaillierPublicKey
 )
 
@@ -155,10 +154,7 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return nil, err
 	}
-	if _, err := zkpai.UnmarshalEncScalarProof(p.EncKProof); err != nil {
-		return nil, err
-	}
-	if _, err := zkpai.UnmarshalEncRangeProof(p.EncKRangeProof); err != nil {
+	if _, err := zkpai.UnmarshalEncryptionProof(p.EncKProof); err != nil {
 		return nil, err
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
@@ -168,7 +164,6 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 		{Tag: presignRound1PayloadFieldGamma, Value: wire.NonNilBytes(p.Gamma)},
 		{Tag: presignRound1PayloadFieldEncK, Value: wire.NonNilBytes(p.EncK)},
 		{Tag: presignRound1PayloadFieldEncKProof, Value: wire.NonNilBytes(p.EncKProof)},
-		{Tag: presignRound1PayloadFieldEncKRangeProof, Value: wire.NonNilBytes(p.EncKRangeProof)},
 		{Tag: presignRound1PayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 	})
 }
@@ -181,14 +176,13 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if version != tss.Version {
 		return presignRound1Payload{}, fmt.Errorf("unexpected presign round1 payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldEncKProof, presignRound1PayloadFieldEncKRangeProof, presignRound1PayloadFieldPaillierPublicKey); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldEncKProof, presignRound1PayloadFieldPaillierPublicKey); err != nil {
 		return presignRound1Payload{}, err
 	}
 	p := presignRound1Payload{
 		Gamma:             wire.MustField(fields, presignRound1PayloadFieldGamma),
 		EncK:              wire.MustField(fields, presignRound1PayloadFieldEncK),
 		EncKProof:         wire.MustField(fields, presignRound1PayloadFieldEncKProof),
-		EncKRangeProof:    wire.MustField(fields, presignRound1PayloadFieldEncKRangeProof),
 		PaillierPublicKey: wire.MustField(fields, presignRound1PayloadFieldPaillierPublicKey),
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
@@ -197,10 +191,7 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return presignRound1Payload{}, err
 	}
-	if _, err := zkpai.UnmarshalEncScalarProof(p.EncKProof); err != nil {
-		return presignRound1Payload{}, err
-	}
-	if _, err := zkpai.UnmarshalEncRangeProof(p.EncKRangeProof); err != nil {
+	if _, err := zkpai.UnmarshalEncryptionProof(p.EncKProof); err != nil {
 		return presignRound1Payload{}, err
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
@@ -346,6 +337,7 @@ func validatePositiveIntegerBytes(in []byte) error {
 const reshareCommitmentsPayloadFieldCommitments uint16 = 1
 const reshareCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
 const reshareCommitmentsPayloadFieldPaillierProof uint16 = 3
+const reshareCommitmentsPayloadFieldPrimalityProof uint16 = 4
 
 const reshareSharePayloadFieldShare uint16 = 1
 
@@ -354,6 +346,7 @@ func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, erro
 		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: reshareCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: reshareCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
+		{Tag: reshareCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
 	})
 }
 
@@ -365,7 +358,7 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if version != tss.Version {
 		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof); err != nil {
+	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof, reshareCommitmentsPayloadFieldPrimalityProof); err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
@@ -380,7 +373,11 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof}, nil
+	primalityProof, err := wire.Require(fields, reshareCommitmentsPayloadFieldPrimalityProof)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, PrimalityProof: primalityProof}, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -413,6 +410,7 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 const refreshCommitmentsPayloadFieldCommitments uint16 = 1
 const refreshCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
 const refreshCommitmentsPayloadFieldPaillierProof uint16 = 3
+const refreshCommitmentsPayloadFieldPrimalityProof uint16 = 4
 
 const refreshSharePayloadFieldShare uint16 = 1
 
@@ -420,6 +418,7 @@ type refreshCommitmentsPayload struct {
 	Commitments       [][]byte
 	PaillierPublicKey []byte
 	PaillierProof     []byte
+	PrimalityProof    []byte
 }
 
 type refreshSharePayload struct {
@@ -431,6 +430,7 @@ func marshalRefreshCommitmentsPayload(p refreshCommitmentsPayload) ([]byte, erro
 		{Tag: refreshCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: refreshCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: refreshCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
+		{Tag: refreshCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
 	})
 }
 
@@ -442,7 +442,7 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 	if version != tss.Version {
 		return refreshCommitmentsPayload{}, fmt.Errorf("unexpected refresh commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof); err != nil {
+	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof, refreshCommitmentsPayloadFieldPrimalityProof); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, refreshCommitmentsPayloadFieldCommitments)
@@ -457,7 +457,11 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 	if err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof}, nil
+	primalityProof, err := wire.Require(fields, refreshCommitmentsPayloadFieldPrimalityProof)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, PrimalityProof: primalityProof}, nil
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {

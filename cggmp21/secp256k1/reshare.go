@@ -37,16 +37,18 @@ type ReshareSession struct {
 	newShare   *KeyShare
 	ownPoly    []*big.Int
 
-	newPaillier     *pai.PrivateKey
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare
-	newPaillierPriv []byte
-	newPaillierPrimalityProof []byte
+	newPaillier                *pai.PrivateKey
+	newPaillierPubs            map[tss.PartyID]PaillierPublicShare
+	newPaillierPriv            []byte
+	newPaillierPrimalityProof  []byte
+	newPaillierPrimalityProofs map[tss.PartyID][]byte
 }
 
 type reshareCommitmentsPayload struct {
 	Commitments       [][]byte `json:"commitments"`
 	PaillierPublicKey []byte   `json:"paillier_public_key"`
 	PaillierProof     []byte   `json:"paillier_proof"`
+	PrimalityProof    []byte   `json:"primality_proof"`
 }
 
 type reshareSharePayload struct {
@@ -109,15 +111,18 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		commitments[i] = enc
 	}
 	s := &ReshareSession{
-		oldKey:          oldKey,
-		cfg:             config,
-		newParties:      newParties,
-		commits:         map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:          map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
-		ownPoly:         poly,
-		newPaillier:     newPaillierKey,
-		newPaillierPriv: newPaillierPriv,
+		oldKey:                    oldKey,
+		cfg:                       config,
+		newParties:                newParties,
+		commits:                   map[tss.PartyID][][]byte{oldKey.Party: commitments},
+		shares:                    map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
+		ownPoly:                   poly,
+		newPaillier:               newPaillierKey,
+		newPaillierPriv:           newPaillierPriv,
 		newPaillierPrimalityProof: primalityProofBytes,
+		newPaillierPrimalityProofs: map[tss.PartyID][]byte{
+			oldKey.Party: primalityProofBytes,
+		},
 		newPaillierPubs: map[tss.PartyID]PaillierPublicShare{
 			oldKey.Party: {Party: oldKey.Party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
 		},
@@ -126,6 +131,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		Commitments:       commitments,
 		PaillierPublicKey: newPaillierPubBytes,
 		PaillierProof:     modProofBytes,
+		PrimalityProof:    primalityProofBytes,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -194,10 +200,55 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if !zkpai.VerifyModulus(resharePaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("invalid reshare Paillier modulus proof"))
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid reshare Paillier modulus proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid reshare Paillier modulus proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		if len(p.PrimalityProof) == 0 {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"empty reshare Paillier primality proof",
+				[]tss.PartyID{env.From},
+				errors.New("empty reshare Paillier primality proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		pp, err := zkpai.UnmarshalPrimalityProof(p.PrimalityProof)
+		if err != nil {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"malformed reshare Paillier primality proof",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		if !zkpai.VerifyPrimality(resharePaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), pp) {
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid reshare Paillier primality proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid reshare Paillier primality proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		s.commits[env.From] = p.Commitments
 		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
+		s.newPaillierPrimalityProofs[env.From] = p.PrimalityProof
 	case payloadReshareShare:
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
@@ -229,7 +280,7 @@ func (s *ReshareSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) {
+	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) || len(s.newPaillierPrimalityProofs) != len(s.oldKey.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -305,21 +356,23 @@ func (s *ReshareSession) tryComplete() error {
 		return err
 	}
 	s.newShare = &KeyShare{
-		Version:              tss.Version,
-		Party:                s.oldKey.Party,
-		Threshold:            s.cfg.Threshold,
-		Parties:              append([]tss.PartyID(nil), s.newParties...),
-		PublicKey:            append([]byte(nil), newCommitments[0]...),
-		Secret:               scalarBytes(newSecret),
-		GroupCommitments:     newCommitments,
-		VerificationShares:   verificationShares,
-		PaillierPublicKey:    append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
-		PaillierPrivateKey:   append([]byte(nil), s.newPaillierPriv...),
-		PaillierProof:        append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].Proof...),
-		PaillierPublicKeys:   s.sortedNewPaillierPublicKeys(),
-		ShareProof:           shareProofBytes,
-		KeygenTranscriptHash: transcriptHash,
-		SecurityNotice:       ExperimentalSecurityNotice,
+		Version:                 tss.Version,
+		Party:                   s.oldKey.Party,
+		Threshold:               s.cfg.Threshold,
+		Parties:                 append([]tss.PartyID(nil), s.newParties...),
+		PublicKey:               append([]byte(nil), newCommitments[0]...),
+		Secret:                  scalarBytes(newSecret),
+		GroupCommitments:        newCommitments,
+		VerificationShares:      verificationShares,
+		PaillierPublicKey:       append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
+		PaillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
+		PaillierProof:           append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].Proof...),
+		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
+		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
+		PaillierPublicKeys:      s.sortedNewPaillierPublicKeys(),
+		ShareProof:              shareProofBytes,
+		KeygenTranscriptHash:    transcriptHash,
+		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	return s.newShare.Validate()

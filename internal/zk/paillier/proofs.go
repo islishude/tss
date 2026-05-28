@@ -94,20 +94,20 @@ const (
 )
 
 const (
-	modulusTranscriptLabel   = "paillier-modulus-transcript-v1"
-	modulusChallengeLabel    = "paillier-modulus-challenge-v1"
-	modulusSigmaCommitLabel  = "paillier-modulus-sigma-commitment-v1"
-	encScalarTranscriptLabel = "paillier-enc-scalar-transcript-v1"
-	encScalarChallengeLabel  = "paillier-enc-scalar-challenge-v1"
-	encRangeTranscriptLabel  = "paillier-enc-range-transcript-v1"
-	encRangeChallengeLabel   = "paillier-enc-range-challenge-v1"
-	encRangeDigestLabel      = "paillier-enc-range-proof-v1"
-	mtaTranscriptLabel       = "paillier-mta-response-transcript-v1"
-	mtaChallengeLabel        = "paillier-mta-response-challenge-v1"
-	logTranscriptLabel       = "paillier-log-transcript-v1"
-	logChallengeLabel        = "paillier-log-challenge-v1"
-	primalityTranscriptLabel = "paillier-primality-transcript-v1"
-	primalityChallengeLabel  = "paillier-primality-challenge-v1"
+	modulusTranscriptLabel    = "paillier-modulus-transcript-v1"
+	modulusChallengeLabel     = "paillier-modulus-challenge-v1"
+	modulusSigmaCommitLabel   = "paillier-modulus-sigma-commitment-v1"
+	encScalarTranscriptLabel  = "paillier-enc-scalar-transcript-v1"
+	encScalarChallengeLabel   = "paillier-enc-scalar-challenge-v1"
+	encRangeTranscriptLabel   = "paillier-enc-range-transcript-v1"
+	encRangeChallengeLabel    = "paillier-enc-range-challenge-v1"
+	encRangeDigestLabel       = "paillier-enc-range-proof-v1"
+	mtaTranscriptLabel        = "paillier-mta-response-transcript-v1"
+	mtaChallengeLabel         = "paillier-mta-response-challenge-v1"
+	logTranscriptLabel        = "paillier-log-transcript-v1"
+	logChallengeLabel         = "paillier-log-challenge-v1"
+	primalityTranscriptLabel  = "paillier-primality-transcript-v1"
+	primalityChallengeLabel   = "paillier-primality-challenge-v1"
 	encryptionTranscriptLabel = "paillier-encryption-transcript-v1"
 	encryptionChallengeLabel  = "paillier-encryption-challenge-v1"
 )
@@ -730,6 +730,7 @@ func encryptionTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int,
 	pkBytes, _ := pk.MarshalBinary()
 	return hashParts([]byte(encryptionTranscriptLabel), domain, pkBytes, intBytes(ciphertext), scalarCommitment, bound, intBytes(cipherCommitment), pointCommitment)
 }
+
 // Marshal returns deterministic canonical binary proof payloads.
 func Marshal(v any) ([]byte, error) {
 	switch p := v.(type) {
@@ -1102,6 +1103,13 @@ func VerifyEncScalar(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proo
 	z := new(big.Int).SetBytes(proof.Response)
 	u := new(big.Int).SetBytes(proof.Randomness)
 	if z.Sign() <= 0 || u.Sign() <= 0 {
+		return false
+	}
+	// Response range check: if scalar < q, then z = e*scalar + alpha < q^2 + q.
+	bound := secp.Order()
+	maxZ := new(big.Int).Mul(bound, bound)
+	maxZ.Add(maxZ, bound)
+	if z.Cmp(maxZ) >= 0 {
 		return false
 	}
 	e := challenge([]byte(encScalarChallengeLabel), transcript)

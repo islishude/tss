@@ -104,7 +104,11 @@ func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, 
 		// g = n + 1 gives the common simplified Paillier variant.
 		g := new(big.Int).Add(n, big.NewInt(1))
 		lambdaBig := lcm(new(big.Int).Sub(p, big.NewInt(1)), new(big.Int).Sub(q, big.NewInt(1)))
-		u := new(big.Int).Exp(g, lambdaBig, nSquared)
+		// (n+1)^λ ≡ 1 + λ·n (mod n²) via the binomial theorem when g = n+1.
+		// This avoids math/big.Int.Exp with the secret exponent λ.
+		u := new(big.Int).Mul(lambdaBig, n)
+		u.Add(u, big.NewInt(1))
+		u.Mod(u, nSquared)
 		lu := L(u, n)
 		muBig := new(big.Int).ModInverse(lu, n)
 		if muBig == nil {

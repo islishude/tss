@@ -23,9 +23,9 @@ const (
 
 const (
 	startMessageFieldCiphertext uint16 = iota + 1
-	startMessageFieldEncProof
-	startMessageFieldRangeProof
-	startMessageFieldEncrProof
+	_                                  // 2: reserved (was EncProof)
+	_                                  // 3: reserved (was RangeProof)
+	startMessageFieldEncrProof         // 4
 )
 
 const (
@@ -36,8 +36,6 @@ const (
 // StartMessage carries an encrypted multiplicand and its public proofs.
 type StartMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
-	EncProof   []byte `json:"enc_proof"`
-	RangeProof []byte `json:"range_proof"`
 	EncrProof  []byte `json:"encr_proof,omitempty"`
 }
 
@@ -52,15 +50,10 @@ func (m StartMessage) MarshalBinary() ([]byte, error) {
 	if err := m.Validate(); err != nil {
 		return nil, err
 	}
-	fields := []wire.Field{
+	return wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
 		{Tag: startMessageFieldCiphertext, Value: m.Ciphertext},
-		{Tag: startMessageFieldEncProof, Value: m.EncProof},
-		{Tag: startMessageFieldRangeProof, Value: m.RangeProof},
-	}
-	if len(m.EncrProof) > 0 {
-		fields = append(fields, wire.Field{Tag: startMessageFieldEncrProof, Value: m.EncrProof})
-	}
-	return wire.Marshal(messageVersion, startMessageWireType, fields)
+		{Tag: startMessageFieldEncrProof, Value: m.EncrProof},
+	})
 }
 
 // UnmarshalStartMessage decodes an exact-field TLV MtA start message.
@@ -72,17 +65,12 @@ func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
 	if version != messageVersion {
 		return nil, fmt.Errorf("unexpected MtA start message version %d", version)
 	}
+	if err := requireExactMessageTags(fields, startMessageFieldCiphertext, startMessageFieldEncrProof); err != nil {
+		return nil, err
+	}
 	msg := &StartMessage{
 		Ciphertext: mustMessageField(fields, startMessageFieldCiphertext),
-		EncProof:   mustMessageField(fields, startMessageFieldEncProof),
-		RangeProof: mustMessageField(fields, startMessageFieldRangeProof),
-	}
-	// EncrProof is optional: decode if present, skip otherwise.
-	for _, f := range fields {
-		if f.Tag == startMessageFieldEncrProof {
-			msg.EncrProof = f.Value
-			break
-		}
+		EncrProof:  mustMessageField(fields, startMessageFieldEncrProof),
 	}
 	if err := msg.Validate(); err != nil {
 		return nil, err
@@ -95,16 +83,11 @@ func (m StartMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA start ciphertext: %w", err)
 	}
-	if _, err := zkpai.UnmarshalEncScalarProof(m.EncProof); err != nil {
-		return fmt.Errorf("invalid MtA encrypted scalar proof: %w", err)
+	if len(m.EncrProof) == 0 {
+		return errors.New("missing MtA encryption proof")
 	}
-	if _, err := zkpai.UnmarshalEncRangeProof(m.RangeProof); err != nil {
-		return fmt.Errorf("invalid MtA range proof: %w", err)
-	}
-	if len(m.EncrProof) > 0 {
-		if _, err := zkpai.UnmarshalEncryptionProof(m.EncrProof); err != nil {
-			return fmt.Errorf("invalid MtA unified encryption proof: %w", err)
-		}
+	if _, err := zkpai.UnmarshalEncryptionProof(m.EncrProof); err != nil {
+		return fmt.Errorf("invalid MtA encryption proof: %w", err)
 	}
 	return nil
 }
@@ -165,18 +148,6 @@ func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*Sta
 	if err != nil {
 		return nil, err
 	}
-	encProof, rangeProof, err := zkpai.ProveEncScalarAndRange(reader, domain, pk, c, a, r)
-	if err != nil {
-		return nil, err
-	}
-	encProofBytes, err := zkpai.Marshal(encProof)
-	if err != nil {
-		return nil, err
-	}
-	rangeProofBytes, err := zkpai.Marshal(rangeProof)
-	if err != nil {
-		return nil, err
-	}
 	encrProof, err := zkpai.ProveEncryption(reader, domain, pk, c, a, r)
 	if err != nil {
 		return nil, err
@@ -185,28 +156,17 @@ func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*Sta
 	if err != nil {
 		return nil, err
 	}
-	return &StartMessage{Ciphertext: c.Bytes(), EncProof: encProofBytes, RangeProof: rangeProofBytes, EncrProof: encrProofBytes}, nil
+	return &StartMessage{Ciphertext: c.Bytes(), EncrProof: encrProofBytes}, nil
 }
 
-// VerifyStart checks the encrypted scalar and range proofs from Start.
+// VerifyStart checks the unified encryption proof from Start.
 func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 	c := new(big.Int).SetBytes(msg.Ciphertext)
-	if len(msg.EncrProof) > 0 {
-		encrProof, err := zkpai.UnmarshalEncryptionProof(msg.EncrProof)
-		if err != nil {
-			return false
-		}
-		return zkpai.VerifyEncryption(domain, pk, c, encrProof)
-	}
-	encProof, err := zkpai.UnmarshalEncScalarProof(msg.EncProof)
+	encrProof, err := zkpai.UnmarshalEncryptionProof(msg.EncrProof)
 	if err != nil {
 		return false
 	}
-	rangeProof, err := zkpai.UnmarshalEncRangeProof(msg.RangeProof)
-	if err != nil {
-		return false
-	}
-	return zkpai.VerifyEncScalarAndRange(domain, pk, c, encProof, rangeProof)
+	return zkpai.VerifyEncryption(domain, pk, c, encrProof)
 }
 
 // Respond creates Enc(a*b+beta) and returns the local beta share as -beta.

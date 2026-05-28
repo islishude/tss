@@ -26,18 +26,19 @@ const (
 // participant generates a polynomial with zero constant term (to refresh the
 // secret share) and a new Paillier keypair (to rotate encryption material).
 type RefreshSession struct {
-	oldKey          *KeyShare
-	cfg             tss.ThresholdConfig
-	commits         map[tss.PartyID][][]byte
-	shares          map[tss.PartyID]*big.Int
-	completed       bool
-	aborted         bool
-	newShare        *KeyShare
-	ownPoly         []*big.Int
-	newPaillier     *pai.PrivateKey
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare
-	newPaillierPriv []byte
-	newPaillierPrimalityProof []byte
+	oldKey                     *KeyShare
+	cfg                        tss.ThresholdConfig
+	commits                    map[tss.PartyID][][]byte
+	shares                     map[tss.PartyID]*big.Int
+	completed                  bool
+	aborted                    bool
+	newShare                   *KeyShare
+	ownPoly                    []*big.Int
+	newPaillier                *pai.PrivateKey
+	newPaillierPubs            map[tss.PartyID]PaillierPublicShare
+	newPaillierPriv            []byte
+	newPaillierPrimalityProof  []byte
+	newPaillierPrimalityProofs map[tss.PartyID][]byte
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.
@@ -99,14 +100,17 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		commitments[i] = enc
 	}
 	s := &RefreshSession{
-		oldKey:          oldKey,
-		cfg:             config,
-		commits:         map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:          map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
-		ownPoly:         poly,
-		newPaillier:     newPaillierKey,
-		newPaillierPriv: newPaillierPriv,
+		oldKey:                    oldKey,
+		cfg:                       config,
+		commits:                   map[tss.PartyID][][]byte{oldKey.Party: commitments},
+		shares:                    map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
+		ownPoly:                   poly,
+		newPaillier:               newPaillierKey,
+		newPaillierPriv:           newPaillierPriv,
 		newPaillierPrimalityProof: primalityProofBytes,
+		newPaillierPrimalityProofs: map[tss.PartyID][]byte{
+			oldKey.Party: primalityProofBytes,
+		},
 		newPaillierPubs: map[tss.PartyID]PaillierPublicShare{
 			oldKey.Party: {Party: oldKey.Party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
 		},
@@ -115,6 +119,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		Commitments:       commitments,
 		PaillierPublicKey: newPaillierPubBytes,
 		PaillierProof:     modProofBytes,
+		PrimalityProof:    primalityProofBytes,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -183,10 +188,55 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if !zkpai.VerifyModulus(refreshPaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("invalid refresh Paillier modulus proof"))
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid refresh Paillier modulus proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid refresh Paillier modulus proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		if len(p.PrimalityProof) == 0 {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"empty refresh Paillier primality proof",
+				[]tss.PartyID{env.From},
+				errors.New("empty refresh Paillier primality proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		pp, err := zkpai.UnmarshalPrimalityProof(p.PrimalityProof)
+		if err != nil {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"malformed refresh Paillier primality proof",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		if !zkpai.VerifyPrimality(refreshPaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), pp) {
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid refresh Paillier primality proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid refresh Paillier primality proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		s.commits[env.From] = p.Commitments
 		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
+		s.newPaillierPrimalityProofs[env.From] = p.PrimalityProof
 	case payloadRefreshShare:
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
@@ -218,7 +268,7 @@ func (s *RefreshSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) {
+	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) || len(s.newPaillierPrimalityProofs) != len(s.oldKey.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -333,7 +383,7 @@ func (s *RefreshSession) tryComplete() error {
 		PaillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
 		PaillierProof:           paillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
-		PaillierPrimalityProofs: [][]byte{append([]byte(nil), s.newPaillierPrimalityProof...)},
+		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
 		PaillierPublicKeys:      s.sortedNewPaillierPublicKeys(),
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,

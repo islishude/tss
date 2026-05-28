@@ -355,9 +355,6 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
 		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncKProof, payload.EncKProof)
 	}
-	if !bytes.Equal(original.EncKRangeProof, payload.EncKRangeProof) {
-		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncKRangeProof, payload.EncKRangeProof)
-	}
 	if !bytes.Equal(original.PaillierPublicKey, payload.PaillierPublicKey) {
 		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
 	}

@@ -71,8 +71,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	startFrom2 := mta.StartMessage{
 		Ciphertext: round1From2.EncK,
-		EncProof:   round1From2.EncKProof,
-		RangeProof: round1From2.EncKRangeProof,
+		EncrProof:  round1From2.EncKProof,
 	}
 	pk2, err := shares[1].paillierPublicFor(2)
 	if err != nil {
@@ -106,8 +105,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	localStart := mta.StartMessage{
 		Ciphertext: s1.round1[s1.key.Party].EncK,
-		EncProof:   s1.round1[s1.key.Party].EncKProof,
-		RangeProof: s1.round1[s1.key.Party].EncKRangeProof,
+		EncrProof:  s1.round1[s1.key.Party].EncKProof,
 	}
 	startDomain := mtaStartDomain(s1.key, sessionID, signers, s1.key.Party, s1.key.PaillierPublicKey)
 	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey)

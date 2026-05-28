@@ -61,24 +61,24 @@ type PaillierPublicShare struct {
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 type KeyShare struct {
-	Version              uint16        `json:"version"`
-	Party                tss.PartyID   `json:"party"`
-	Threshold            int           `json:"threshold"`
-	Parties              []tss.PartyID `json:"parties"`
-	PublicKey            []byte        `json:"public_key"`
-	ChainCode            []byte        `json:"chain_code,omitempty"`
-	Secret               []byte
-	GroupCommitments     [][]byte              `json:"group_commitments"`
-	VerificationShares   []VerificationShare   `json:"verification_shares"`
-	PaillierPublicKey    []byte                `json:"paillier_public_key,omitempty"`
-	PaillierPrivateKey   []byte                `json:"paillier_private_key,omitempty"`
-	PaillierProof            []byte                `json:"paillier_proof,omitempty"`
-	PaillierPrimalityProof   []byte                `json:"paillier_primality_proof,omitempty"`
-	PaillierPrimalityProofs  [][]byte              `json:"paillier_primality_proofs,omitempty"`
-	PaillierPublicKeys       []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
-	ShareProof           []byte                `json:"share_proof,omitempty"`
-	KeygenTranscriptHash []byte                `json:"keygen_transcript_hash,omitempty"`
-	SecurityNotice       string                `json:"security_notice"`
+	Version                 uint16        `json:"version"`
+	Party                   tss.PartyID   `json:"party"`
+	Threshold               int           `json:"threshold"`
+	Parties                 []tss.PartyID `json:"parties"`
+	PublicKey               []byte        `json:"public_key"`
+	ChainCode               []byte        `json:"chain_code,omitempty"`
+	Secret                  []byte
+	GroupCommitments        [][]byte              `json:"group_commitments"`
+	VerificationShares      []VerificationShare   `json:"verification_shares"`
+	PaillierPublicKey       []byte                `json:"paillier_public_key,omitempty"`
+	PaillierPrivateKey      []byte                `json:"paillier_private_key,omitempty"`
+	PaillierProof           []byte                `json:"paillier_proof,omitempty"`
+	PaillierPrimalityProof  []byte                `json:"paillier_primality_proof,omitempty"`
+	PaillierPrimalityProofs [][]byte              `json:"paillier_primality_proofs,omitempty"`
+	PaillierPublicKeys      []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
+	ShareProof              []byte                `json:"share_proof,omitempty"`
+	KeygenTranscriptHash    []byte                `json:"keygen_transcript_hash,omitempty"`
+	SecurityNotice          string                `json:"security_notice"`
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -235,6 +235,9 @@ func (k *KeyShare) Validate() error {
 	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.Party), modProof) {
 		return errors.New("invalid local paillier proof")
 	}
+	if len(k.PaillierPrimalityProofs) != len(k.Parties) {
+		return errors.New("paillier primality proof count must equal party count")
+	}
 	for i, item := range k.PaillierPublicKeys {
 		if item.Party != k.Parties[i] {
 			return errors.New("paillier public keys must follow party order")
@@ -254,6 +257,16 @@ func (k *KeyShare) Validate() error {
 		if peerProof.NBits != peerPK.N.BitLen() {
 			return fmt.Errorf("paillier proof bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerProof.NBits, peerPK.N.BitLen())
 		}
+		if len(k.PaillierPrimalityProofs[i]) == 0 {
+			return fmt.Errorf("missing paillier primality proof for party %d", item.Party)
+		}
+		peerPrimalityProof, err := zkpai.UnmarshalPrimalityProof(k.PaillierPrimalityProofs[i])
+		if err != nil {
+			return fmt.Errorf("invalid paillier primality proof for party %d: %w", item.Party, err)
+		}
+		if peerPrimalityProof.FactorBitLen < peerPK.N.BitLen()/2-1 || peerPrimalityProof.FactorBitLen > peerPK.N.BitLen()/2+1 {
+			return fmt.Errorf("paillier primality proof factor bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerPrimalityProof.FactorBitLen, peerPK.N.BitLen())
+		}
 	}
 	shareProof, err := schnorr.UnmarshalProof(k.ShareProof)
 	if err != nil {
@@ -267,6 +280,15 @@ func (k *KeyShare) Validate() error {
 		return errors.New("invalid local share proof")
 	}
 	return nil
+}
+
+// sortedPaillierPrimalityProofs collects primality proofs in party order.
+func sortedPaillierPrimalityProofs(parties []tss.PartyID, proofs map[tss.PartyID][]byte) [][]byte {
+	out := make([][]byte, 0, len(parties))
+	for _, id := range parties {
+		out = append(out, append([]byte(nil), proofs[id]...))
+	}
+	return out
 }
 
 // Destroy zeros local secret scalar and Paillier private-key bytes in place.

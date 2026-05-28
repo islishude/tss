@@ -90,7 +90,6 @@ func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 		_, _ = pai.UnmarshalPublicKey(payload.PaillierPublicKey)
 		_ = sha256.Sum256(payload.EncK)
 		_ = sha256.Sum256(payload.EncKProof)
-		_ = sha256.Sum256(payload.EncKRangeProof)
 	})
 }
 

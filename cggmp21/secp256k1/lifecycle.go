@@ -82,7 +82,6 @@ func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
 		clear(payload.Gamma)
 		clear(payload.EncK)
 		clear(payload.EncKProof)
-		clear(payload.EncKRangeProof)
 		clear(payload.PaillierPublicKey)
 		delete(xs, id)
 	}
