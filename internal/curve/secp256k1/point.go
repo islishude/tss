@@ -22,9 +22,7 @@ func fieldElementFromHex(s string) FieldElement {
 	if !ok {
 		panic("invalid hex constant")
 	}
-	b := x.Bytes()
-	pad := make([]byte, 32)
-	copy(pad[32-len(b):], b)
+	pad := x.FillBytes(make([]byte, 32))
 	f, err := FieldElementFromBytes(pad)
 	if err != nil {
 		panic(fmt.Sprintf("invalid field element constant: %v", err))

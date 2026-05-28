@@ -214,9 +214,7 @@ func scalarFromHex(s string) Scalar {
 	if !ok {
 		panic("invalid hex constant")
 	}
-	b := x.Bytes()
-	pad := make([]byte, 32)
-	copy(pad[32-len(b):], b)
+	pad := x.FillBytes(make([]byte, 32))
 	out, err := ScalarFromBytes(pad)
 	if err != nil {
 		panic(fmt.Sprintf("invalid scalar constant %s: %v", s, err))

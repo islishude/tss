@@ -17,9 +17,7 @@ func scalarFromBig(x *big.Int) Scalar {
 	if reduced.Sign() < 0 {
 		reduced.Add(reduced, order)
 	}
-	rb := reduced.Bytes()
-	pad := make([]byte, 32)
-	copy(pad[32-len(rb):], rb)
+	pad := reduced.FillBytes(make([]byte, 32))
 	s, err := ScalarFromBytes(pad)
 	if err != nil {
 		return ScalarZero()
@@ -34,9 +32,7 @@ func FieldElementFromBigInt(x *big.Int) FieldElement {
 	if reduced.Sign() < 0 {
 		reduced.Add(reduced, modulus)
 	}
-	rb := reduced.Bytes()
-	pad := make([]byte, 32)
-	copy(pad[32-len(rb):], rb)
+	pad := reduced.FillBytes(make([]byte, 32))
 	f, _ := FieldElementFromBytes(pad)
 	return f
 }
