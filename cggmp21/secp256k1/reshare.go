@@ -40,6 +40,7 @@ type ReshareSession struct {
 	newPaillier     *pai.PrivateKey
 	newPaillierPubs map[tss.PartyID]PaillierPublicShare
 	newPaillierPriv []byte
+	newPaillierPrimalityProof []byte
 }
 
 type reshareCommitmentsPayload struct {
@@ -67,7 +68,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	}
 	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
 	// Generate a new Paillier keypair for key rotation.
-	newPaillierKey, err := pai.GenerateKey(config.Reader(), defaultPaillierBits)
+	newPaillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), defaultPaillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -84,6 +85,14 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		return nil, nil, err
 	}
 	modProofBytes, err := zkpai.Marshal(modProof)
+	if err != nil {
+		return nil, nil, err
+	}
+	primalityProof, err := zkpai.ProvePrimality(config.Reader(), resharePaillierDomain(config, config.Self, newPaillierPubBytes), newPaillierKey, uint32(config.Self))
+	if err != nil {
+		return nil, nil, err
+	}
+	primalityProofBytes, err := zkpai.Marshal(primalityProof)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,6 +117,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		ownPoly:         poly,
 		newPaillier:     newPaillierKey,
 		newPaillierPriv: newPaillierPriv,
+		newPaillierPrimalityProof: primalityProofBytes,
 		newPaillierPubs: map[tss.PartyID]PaillierPublicShare{
 			oldKey.Party: {Party: oldKey.Party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
 		},

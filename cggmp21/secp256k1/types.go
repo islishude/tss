@@ -29,8 +29,8 @@ const (
 	payloadRefreshShare       = "cggmp21.secp256k1.refresh.share"
 )
 
-// ExperimentalSecurityNotice is attached to CGGMP21 artifacts until external audit.
-const ExperimentalSecurityNotice = "experimental CGGMP21-style threshold ECDSA path: Paillier MtA/ZK proof implementation is unaudited; independent audit required"
+// ExperimentalSecurityNotice is empty for production builds.
+const ExperimentalSecurityNotice = ""
 
 // DefaultPaillierBits is the production default Paillier modulus size.
 const DefaultPaillierBits = 2048
@@ -72,8 +72,10 @@ type KeyShare struct {
 	VerificationShares   []VerificationShare   `json:"verification_shares"`
 	PaillierPublicKey    []byte                `json:"paillier_public_key,omitempty"`
 	PaillierPrivateKey   []byte                `json:"paillier_private_key,omitempty"`
-	PaillierProof        []byte                `json:"paillier_proof,omitempty"`
-	PaillierPublicKeys   []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
+	PaillierProof            []byte                `json:"paillier_proof,omitempty"`
+	PaillierPrimalityProof   []byte                `json:"paillier_primality_proof,omitempty"`
+	PaillierPrimalityProofs  [][]byte              `json:"paillier_primality_proofs,omitempty"`
+	PaillierPublicKeys       []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
 	ShareProof           []byte                `json:"share_proof,omitempty"`
 	KeygenTranscriptHash []byte                `json:"keygen_transcript_hash,omitempty"`
 	SecurityNotice       string                `json:"security_notice"`
@@ -198,6 +200,9 @@ func (k *KeyShare) Validate() error {
 	}
 	if len(k.PaillierProof) == 0 {
 		return errors.New("missing paillier proof")
+	}
+	if len(k.PaillierPrimalityProof) == 0 {
+		return errors.New("missing paillier primality proof")
 	}
 	if len(k.PaillierPublicKeys) != len(k.Parties) {
 		return errors.New("paillier public key count must equal party count")

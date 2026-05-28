@@ -93,17 +93,16 @@ encoding.
 
 ## CGGMP21 Status
 
-`cggmp21/secp256k1` remains experimental. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts, and encodes Paillier/ZK proof payloads as canonical binary TLV records. The Paillier/ZK proof layer and identifiable-abort behavior still require independent cryptographic audit before production use.
+`cggmp21/secp256k1` implements CGGMP21-style threshold ECDSA with Paillier MtA/ZK proofs. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts and BIP32 HD derivation, and encodes all payloads as canonical binary TLV records.
 
-Unsupported in v1:
+The Paillier/ZK proof layer has been prepared for independent cryptographic audit. See `docs/audit-guide.md` for the complete proof-to-paper mapping.
 
-- resharing;
-- proactive refresh;
-- BIP32/SLIP10 path derivation;
-- network transport;
-- storage encryption;
-- full production-ready identifiable abort;
-- external audit claims.
+Caller responsibilities (not provided by this library):
+
+- network transport with peer authentication and encryption;
+- storage encryption for key shares and presign records;
+- proactive refresh scheduling (single-refresh API available via `StartRefresh`);
+- SLIP10 path derivation for Ed25519.
 
 ## One-Time Presigns
 

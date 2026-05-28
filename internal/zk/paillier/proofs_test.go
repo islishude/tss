@@ -2,6 +2,7 @@ package paillier
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"testing"
 
@@ -13,7 +14,7 @@ import (
 func TestEncryptedScalarProofTamper(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +44,7 @@ func TestEncryptedScalarProofTamper(t *testing.T) {
 func TestModulusProofTamper(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 512)
+	sk, err := pai.GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -66,7 +67,7 @@ func TestModulusProofTamper(t *testing.T) {
 func TestProofMarshalCanonicalBinary(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +144,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 func TestMTAResponseProofFieldTamper(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -196,7 +197,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 func TestProofDomainSeparation(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -261,7 +262,7 @@ func TestProofDomainSeparation(t *testing.T) {
 func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -364,7 +365,7 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 func TestProofRejectsMalformedCurvePoints(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}

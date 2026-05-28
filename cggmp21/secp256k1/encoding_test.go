@@ -179,6 +179,7 @@ func FuzzCGGMP21KeygenCommitmentsPayloadUnmarshal(f *testing.F) {
 		Commitments:       shares[1].GroupCommitments,
 		PaillierPublicKey: shares[1].PaillierPublicKey,
 		PaillierProof:     shares[1].PaillierProof,
+		PrimalityProof:    shares[1].PaillierPrimalityProof,
 	}
 	raw, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {

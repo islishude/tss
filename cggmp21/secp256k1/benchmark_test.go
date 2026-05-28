@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -10,7 +11,7 @@ import (
 
 func BenchmarkPaillierKeygen2048(b *testing.B) {
 	for i := 0; i < b.N; i++ {
-		if _, err := pai.GenerateKey(nil, DefaultPaillierBits); err != nil {
+		if _, err := pai.GenerateKey(context.Background(), nil, DefaultPaillierBits); err != nil {
 			b.Fatal(err)
 		}
 	}

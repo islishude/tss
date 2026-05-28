@@ -22,6 +22,8 @@ const (
 	encRangeProofWireType    = "zk.paillier.enc-range-proof"
 	mtaResponseProofWireType = "zk.paillier.mta-response-proof"
 	logProofWireType         = "zk.paillier.log-proof"
+	primalityProofWireType   = "zk.paillier.primality-proof"
+	encryptionProofWireType  = "zk.paillier.encryption-proof"
 )
 
 const (
@@ -74,6 +76,24 @@ const (
 )
 
 const (
+	primalityProofFieldFactorBitLen uint16 = iota + 1
+	primalityProofFieldTranscriptHash
+	primalityProofFieldCommitment
+	primalityProofFieldChallenge
+	primalityProofFieldResponse
+)
+
+const (
+	encryptionProofFieldScalarCommitment uint16 = iota + 1
+	encryptionProofFieldCipherCommitment
+	encryptionProofFieldPointCommitment
+	encryptionProofFieldBound
+	encryptionProofFieldResponse
+	encryptionProofFieldRandomness
+	encryptionProofFieldTranscriptHash
+)
+
+const (
 	modulusTranscriptLabel   = "paillier-modulus-transcript-v1"
 	modulusChallengeLabel    = "paillier-modulus-challenge-v1"
 	modulusSigmaCommitLabel  = "paillier-modulus-sigma-commitment-v1"
@@ -86,6 +106,10 @@ const (
 	mtaChallengeLabel        = "paillier-mta-response-challenge-v1"
 	logTranscriptLabel       = "paillier-log-transcript-v1"
 	logChallengeLabel        = "paillier-log-challenge-v1"
+	primalityTranscriptLabel = "paillier-primality-transcript-v1"
+	primalityChallengeLabel  = "paillier-primality-challenge-v1"
+	encryptionTranscriptLabel = "paillier-encryption-transcript-v1"
+	encryptionChallengeLabel  = "paillier-encryption-challenge-v1"
 )
 
 // ModulusProof proves that a Paillier modulus N = p·q is a Blum integer
@@ -149,6 +173,35 @@ type LogProof struct {
 	Point            []byte `json:"point"`
 	CipherCommitment []byte `json:"cipher_commitment"`
 	PointCommitment  []byte `json:"point_commitment"`
+	Response         []byte `json:"response"`
+	Randomness       []byte `json:"randomness"`
+	TranscriptHash   []byte `json:"transcript_hash"`
+}
+
+// PrimalityProof (Π^prm) proves that a Paillier modulus N = p·q has two prime
+// factors of approximately equal size. It builds on Π^fac by additionally
+// binding the factor bit-length into the transcript, ensuring neither factor
+// is trivially small. Per CGGMP21 Section 3.1.
+type PrimalityProof struct {
+	Version        uint16 `json:"version"`
+	FactorBitLen   int    `json:"factor_bit_len"`
+	TranscriptHash []byte `json:"transcript_hash"`
+	Commitment     []byte `json:"commitment"`
+	Challenge      []byte `json:"challenge"`
+	Response       []byte `json:"response"`
+}
+
+// EncryptionProof (Π^Enc) is a unified Σ-protocol proving that a Paillier
+// ciphertext c = Enc(m, r) encrypts a scalar m < q (the secp256k1 order)
+// and that the public curve commitment A = m·G opens to the same scalar.
+// It combines Π^Eq (scalar knowledge) and the range constraint |m| < q
+// into a single Fiat-Shamir challenge. Per CGGMP21 Section 4.1.
+type EncryptionProof struct {
+	Version          uint16 `json:"version"`
+	ScalarCommitment []byte `json:"scalar_commitment"`
+	CipherCommitment []byte `json:"cipher_commitment"`
+	PointCommitment  []byte `json:"point_commitment"`
+	Bound            []byte `json:"bound"`
 	Response         []byte `json:"response"`
 	Randomness       []byte `json:"randomness"`
 	TranscriptHash   []byte `json:"transcript_hash"`
@@ -288,6 +341,194 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 	return z2.Cmp(a) == 0
 }
 
+// ProvePrimality creates a Π^prm proof that N = p·q has two prime factors of
+// approximately equal bit-length. The proof extends Π^fac by binding the factor
+// size into the transcript, which rules out trivially small or composite factors.
+// CGGMP21 §3.1 Π^prm.
+func ProvePrimality(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uint32) (*PrimalityProof, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if sk == nil {
+		return nil, errors.New("nil paillier private key")
+	}
+	if err := sk.Validate(); err != nil {
+		return nil, err
+	}
+	p, q := sk.P, sk.Q
+	N := sk.N
+
+	factorBits := p.BitLen()
+	if q.BitLen() > factorBits {
+		factorBits = q.BitLen()
+	}
+
+	r, err := randomCoprime(reader, N)
+	if err != nil {
+		return nil, err
+	}
+	a := new(big.Int).Exp(r, big.NewInt(2), N)
+
+	raw, err := sk.PublicKey.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	transcript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(factorBits)), intBytes(a))
+	challengeTranscript := hashParts([]byte(primalityChallengeLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(factorBits)), intBytes(a))
+	e := challengeBits(challengeTranscript, 128)
+
+	// Non-trivial sqrt of 1 via CRT (same as ProveModulus).
+	four := big.NewInt(4)
+	if new(big.Int).Mod(p, four).Int64() != 3 || new(big.Int).Mod(q, four).Int64() != 3 {
+		return nil, errors.New("factors do not satisfy Blum condition p ≡ q ≡ 3 mod 4")
+	}
+	invP := new(big.Int).ModInverse(p, q)
+	if invP == nil {
+		return nil, errors.New("CRT failed: p and q are not coprime")
+	}
+	k := new(big.Int).Mul(big.NewInt(2), invP)
+	k.Neg(k)
+	k.Mod(k, q)
+	s := new(big.Int).Mul(k, p)
+	s.Add(s, big.NewInt(1))
+	s.Mod(s, N)
+
+	z := new(big.Int).Exp(s, e, N)
+	z.Mul(z, r)
+	z.Mod(z, N)
+
+	return &PrimalityProof{
+		Version:        proofVersion,
+		FactorBitLen:   factorBits,
+		TranscriptHash: transcript,
+		Commitment:     intBytes(a),
+		Challenge:      e.Bytes(),
+		Response:       intBytes(z),
+	}, nil
+}
+
+// VerifyPrimality checks the Π^prm proof against a public key and domain.
+func VerifyPrimality(domain []byte, pk *pai.PublicKey, party uint32, proof *PrimalityProof) bool {
+	if validatePrimalityProof(proof) != nil || pk == nil {
+		return false
+	}
+	if err := pk.Validate(); err != nil {
+		return false
+	}
+	if proof.FactorBitLen <= 0 {
+		return false
+	}
+	nBits := pk.N.BitLen()
+	if proof.FactorBitLen < nBits/2-1 || proof.FactorBitLen > nBits/2+1 {
+		return false
+	}
+	if pk.N.ProbablyPrime(64) || pk.N.Bit(0) == 0 {
+		return false
+	}
+	if new(big.Int).Mod(pk.N, big.NewInt(4)).Cmp(big.NewInt(1)) != 0 {
+		return false
+	}
+	if new(big.Int).Mod(pk.N, big.NewInt(3)).Sign() == 0 {
+		return false
+	}
+	raw, err := pk.MarshalBinary()
+	if err != nil {
+		return false
+	}
+	expectedTranscript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(proof.FactorBitLen)), proof.Commitment)
+	if !bytes.Equal(expectedTranscript, proof.TranscriptHash) {
+		return false
+	}
+
+	a := new(big.Int).SetBytes(proof.Commitment)
+	e := new(big.Int).SetBytes(proof.Challenge)
+	z := new(big.Int).SetBytes(proof.Response)
+
+	expectedChallenge := challengeBits(hashParts([]byte(primalityChallengeLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(proof.FactorBitLen)), proof.Commitment), 128)
+	if e.Cmp(expectedChallenge) != 0 {
+		return false
+	}
+
+	if new(big.Int).GCD(nil, nil, a, pk.N).Cmp(big.NewInt(1)) != 0 {
+		return false
+	}
+	if new(big.Int).GCD(nil, nil, z, pk.N).Cmp(big.NewInt(1)) != 0 {
+		return false
+	}
+
+	z2 := new(big.Int).Exp(z, big.NewInt(2), pk.N)
+	return z2.Cmp(a) == 0
+}
+
+func validatePrimalityProof(p *PrimalityProof) error {
+	if p == nil {
+		return errors.New("nil primality proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected primality proof version %d", p.Version)
+	}
+	if p.FactorBitLen <= 0 {
+		return errors.New("invalid primality proof factor bit length")
+	}
+	if len(p.TranscriptHash) != sha256.Size {
+		return errors.New("invalid primality proof transcript hash")
+	}
+	if err := validatePositiveIntBytes("commitment", p.Commitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("challenge", p.Challenge); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+		return err
+	}
+	return nil
+}
+
+// MarshalPrimalityProof encodes the proof as a canonical TLV record.
+func MarshalPrimalityProof(p *PrimalityProof) ([]byte, error) {
+	if err := validatePrimalityProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, primalityProofWireType, []wire.Field{
+		{Tag: primalityProofFieldFactorBitLen, Value: wire.Uint32(uint32(p.FactorBitLen))},
+		{Tag: primalityProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: primalityProofFieldCommitment, Value: wire.NonNilBytes(p.Commitment)},
+		{Tag: primalityProofFieldChallenge, Value: wire.NonNilBytes(p.Challenge)},
+		{Tag: primalityProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
+	})
+}
+
+// UnmarshalPrimalityProof decodes and validates a primality proof.
+func UnmarshalPrimalityProof(in []byte) (*PrimalityProof, error) {
+	version, fields, err := wire.Unmarshal(in, primalityProofWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected primality proof version %d", version)
+	}
+	if err := requireExactProofTags(fields, primalityProofFieldFactorBitLen, primalityProofFieldTranscriptHash, primalityProofFieldCommitment, primalityProofFieldChallenge, primalityProofFieldResponse); err != nil {
+		return nil, err
+	}
+	bitLen, err := wire.Uint32Field(fields, primalityProofFieldFactorBitLen)
+	if err != nil {
+		return nil, err
+	}
+	p := &PrimalityProof{
+		Version:        proofVersion,
+		FactorBitLen:   int(bitLen),
+		TranscriptHash: wire.MustField(fields, primalityProofFieldTranscriptHash),
+		Commitment:     wire.MustField(fields, primalityProofFieldCommitment),
+		Challenge:      wire.MustField(fields, primalityProofFieldChallenge),
+		Response:       wire.MustField(fields, primalityProofFieldResponse),
+	}
+	if err := validatePrimalityProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
 // challengeBits derives a positive integer challenge from a transcript hash.
 func challengeBits(transcript []byte, bits int) *big.Int {
 	if bits > len(transcript)*8 {
@@ -301,6 +542,194 @@ func challengeBits(transcript []byte, bits int) *big.Int {
 	return out
 }
 
+// ProveEncryption creates a unified Π^Enc proof that a Paillier ciphertext
+// encrypts a scalar less than the secp256k1 order, and the public curve
+// commitment opens to the same scalar. Per CGGMP21 Section 4.1.
+func ProveEncryption(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int) (*EncryptionProof, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
+	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+		return nil, err
+	}
+	if scalar == nil || scalar.Sign() <= 0 || scalar.Cmp(secp.Order()) >= 0 {
+		return nil, errors.New("scalar out of range")
+	}
+	scalarCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
+	if err != nil {
+		return nil, err
+	}
+	alpha, err := randomScalar(reader)
+	if err != nil {
+		return nil, err
+	}
+	rho, err := randomCoprime(reader, pk.N)
+	if err != nil {
+		return nil, err
+	}
+	cipherCommitment, err := pk.EncryptWithRandomness(alpha, rho)
+	if err != nil {
+		return nil, err
+	}
+	pointCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(alpha)))
+	if err != nil {
+		return nil, err
+	}
+	bound := secp.Order().Bytes()
+	transcript := encryptionTranscript(domain, pk, ciphertext, scalarCommitment, bound, cipherCommitment, pointCommitment)
+	e := challenge([]byte(encryptionChallengeLabel), transcript)
+	z := new(big.Int).Mul(e, scalar)
+	z.Add(z, alpha)
+	u := new(big.Int).Exp(randomness, e, pk.N)
+	u.Mul(u, rho)
+	u.Mod(u, pk.N)
+	return &EncryptionProof{
+		Version:          proofVersion,
+		ScalarCommitment: scalarCommitment,
+		CipherCommitment: intBytes(cipherCommitment),
+		PointCommitment:  pointCommitment,
+		Bound:            bound,
+		Response:         intBytes(z),
+		Randomness:       intBytes(u),
+		TranscriptHash:   transcript,
+	}, nil
+}
+
+// VerifyEncryption checks the unified Π^Enc proof against a ciphertext and public key.
+func VerifyEncryption(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *EncryptionProof) bool {
+	if validateEncryptionProof(proof) != nil || pk == nil || pk.ValidateCiphertext(ciphertext) != nil {
+		return false
+	}
+	if new(big.Int).SetBytes(proof.Bound).Cmp(secp.Order()) != 0 {
+		return false
+	}
+	scalarCommitment, err := secp.PointFromBytes(proof.ScalarCommitment)
+	if err != nil {
+		return false
+	}
+	cipherCommitment := new(big.Int).SetBytes(proof.CipherCommitment)
+	if pk.ValidateCiphertext(cipherCommitment) != nil {
+		return false
+	}
+	pointCommitment, err := secp.PointFromBytes(proof.PointCommitment)
+	if err != nil {
+		return false
+	}
+	transcript := encryptionTranscript(domain, pk, ciphertext, proof.ScalarCommitment, proof.Bound, cipherCommitment, proof.PointCommitment)
+	if !bytes.Equal(transcript, proof.TranscriptHash) {
+		return false
+	}
+	z := new(big.Int).SetBytes(proof.Response)
+	u := new(big.Int).SetBytes(proof.Randomness)
+	if z.Sign() <= 0 || u.Sign() <= 0 {
+		return false
+	}
+	e := challenge([]byte(encryptionChallengeLabel), transcript)
+	// Range check: if scalar < bound, then z = e*scalar + alpha satisfies z < bound^2 + bound.
+	bound := new(big.Int).SetBytes(proof.Bound)
+	maxZ := new(big.Int).Mul(bound, bound)
+	maxZ.Add(maxZ, bound)
+	if z.Cmp(maxZ) >= 0 {
+		return false
+	}
+	// Paillier check: Enc(z, u) == cipherCommitment * ciphertext^e (mod N^2).
+	encZ, err := pk.EncryptWithRandomness(z, u)
+	if err != nil {
+		return false
+	}
+	rightCipher := new(big.Int).Exp(ciphertext, e, pk.NSquared)
+	rightCipher.Mul(rightCipher, cipherCommitment)
+	rightCipher.Mod(rightCipher, pk.NSquared)
+	if encZ.Cmp(rightCipher) != 0 {
+		return false
+	}
+	// Curve check: z*G == pointCommitment + e * scalarCommitment.
+	leftPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(z))
+	rightPoint := secp.Add(pointCommitment, secp.ScalarMult(scalarCommitment, secp.ScalarFromBigInt(e)))
+	return secp.Equal(leftPoint, rightPoint)
+}
+
+func validateEncryptionProof(p *EncryptionProof) error {
+	if p == nil {
+		return errors.New("nil encryption proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected encryption proof version %d", p.Version)
+	}
+	if len(p.ScalarCommitment) == 0 || len(p.CipherCommitment) == 0 || len(p.PointCommitment) == 0 || len(p.Bound) == 0 || len(p.Response) == 0 || len(p.Randomness) == 0 || len(p.TranscriptHash) != sha256.Size {
+		return errors.New("incomplete encryption proof")
+	}
+	if err := validateCurvePointBytes("scalar commitment", p.ScalarCommitment); err != nil {
+		return err
+	}
+	if err := validateCurvePointBytes("point commitment", p.PointCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("cipher commitment", p.CipherCommitment); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("bound", p.Bound); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+		return err
+	}
+	if err := validatePositiveIntBytes("randomness", p.Randomness); err != nil {
+		return err
+	}
+	return nil
+}
+
+func marshalEncryptionProof(p *EncryptionProof) ([]byte, error) {
+	if err := validateEncryptionProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, encryptionProofWireType, []wire.Field{
+		{Tag: encryptionProofFieldScalarCommitment, Value: wire.NonNilBytes(p.ScalarCommitment)},
+		{Tag: encryptionProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
+		{Tag: encryptionProofFieldPointCommitment, Value: wire.NonNilBytes(p.PointCommitment)},
+		{Tag: encryptionProofFieldBound, Value: wire.NonNilBytes(p.Bound)},
+		{Tag: encryptionProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
+		{Tag: encryptionProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
+		{Tag: encryptionProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+	})
+}
+
+// UnmarshalEncryptionProof decodes and validates an encryption proof.
+func UnmarshalEncryptionProof(in []byte) (*EncryptionProof, error) {
+	version, fields, err := wire.Unmarshal(in, encryptionProofWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected encryption proof version %d", version)
+	}
+	if err := requireExactProofTags(fields, encryptionProofFieldScalarCommitment, encryptionProofFieldCipherCommitment, encryptionProofFieldPointCommitment, encryptionProofFieldBound, encryptionProofFieldResponse, encryptionProofFieldRandomness, encryptionProofFieldTranscriptHash); err != nil {
+		return nil, err
+	}
+	p := &EncryptionProof{
+		Version:          proofVersion,
+		ScalarCommitment: wire.MustField(fields, encryptionProofFieldScalarCommitment),
+		CipherCommitment: wire.MustField(fields, encryptionProofFieldCipherCommitment),
+		PointCommitment:  wire.MustField(fields, encryptionProofFieldPointCommitment),
+		Bound:            wire.MustField(fields, encryptionProofFieldBound),
+		Response:         wire.MustField(fields, encryptionProofFieldResponse),
+		Randomness:       wire.MustField(fields, encryptionProofFieldRandomness),
+		TranscriptHash:   wire.MustField(fields, encryptionProofFieldTranscriptHash),
+	}
+	if err := validateEncryptionProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func encryptionTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment, bound []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {
+	pkBytes, _ := pk.MarshalBinary()
+	return hashParts([]byte(encryptionTranscriptLabel), domain, pkBytes, intBytes(ciphertext), scalarCommitment, bound, intBytes(cipherCommitment), pointCommitment)
+}
 // Marshal returns deterministic canonical binary proof payloads.
 func Marshal(v any) ([]byte, error) {
 	switch p := v.(type) {
@@ -322,6 +751,15 @@ func Marshal(v any) ([]byte, error) {
 		return marshalMTAResponseProof(&p)
 	case *LogProof:
 		return marshalLogProof(p)
+	case *PrimalityProof:
+		return MarshalPrimalityProof(p)
+	case *EncryptionProof:
+		return marshalEncryptionProof(p)
+	case EncryptionProof:
+		return marshalEncryptionProof(&p)
+
+	case PrimalityProof:
+		return MarshalPrimalityProof(&p)
 	case LogProof:
 		return marshalLogProof(&p)
 	default:

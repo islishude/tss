@@ -16,7 +16,7 @@ This repository is an early library implementation, not a production audited TSS
 
 The Ed25519 package implements a usable FROST-style flow: dealerless DKG, two-round signing, partial signature verification, and aggregation into signatures accepted by `crypto/ed25519.Verify`.
 
-The secp256k1 package exposes a CGGMP21-style API and now signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing, round-1 echo checks, optional additive-shift signing, and an unaudited proof implementation, so it remains explicitly experimental until independent cryptographic review is complete.
+The secp256k1 package exposes a CGGMP21-style API and signs without transmitting or reconstructing private key shares or nonce shares. Its signing path uses Paillier MtA/MtAwc-style product sharing, round-1 echo checks, optional additive-shift signing, BIP32 HD derivation, key refresh, and resharing. The ZK proof layer has been prepared for independent cryptographic review; see `docs/audit-guide.md`.
 
 Both packages support resharing: FROST Ed25519 uses zero-coefficient polynomial refresh to preserve the group secret, while CGGMP21 secp256k1 includes full Paillier key rotation with Π^log (discrete log equality) and modulus proofs. CGGMP21 presigns include one-use lifecycle helpers (`MarkPresignConsumed`, `IsPresignConsumed`) to prevent nonce reuse. Paillier private-key operations use constant-time `c^λ mod n²` via `filippo.io/bigmod` in `internal/paillier/paillierct`.
 

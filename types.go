@@ -1,6 +1,7 @@
 package tss
 
 import (
+	"context"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -8,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"slices"
+	"time"
 
 	"github.com/islishude/tss/internal/wire"
 )
@@ -105,11 +107,21 @@ func (id *SessionID) UnmarshalText(text []byte) error {
 
 // ThresholdConfig contains local participant configuration for a protocol run.
 type ThresholdConfig struct {
-	Threshold int
-	Parties   []PartyID
-	Self      PartyID
-	SessionID SessionID
-	Rand      io.Reader `json:"-"`
+	Threshold    int
+	Parties      []PartyID
+	Self         PartyID
+	SessionID    SessionID
+	Rand         io.Reader       `json:"-"`
+	Context      context.Context `json:"-"`
+	RoundTimeout time.Duration   `json:"-"`
+}
+
+// Ctx returns the configuration context or context.Background when unset.
+func (c ThresholdConfig) Ctx() context.Context {
+	if c.Context != nil {
+		return c.Context
+	}
+	return context.Background()
 }
 
 // Validate checks threshold, party-set, and local-party invariants.

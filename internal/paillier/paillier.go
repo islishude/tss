@@ -1,6 +1,7 @@
 package paillier
 
 import (
+	"context"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -75,7 +76,8 @@ const (
 // GenerateKey creates a Paillier key using safe primes (Sophie Germain primes)
 // where p = 2p' + 1, q = 2q' + 1 with p', q' also prime, and the g=n+1 variant.
 // Safe primes ensure the Blum condition p ≡ q ≡ 3 (mod 4) automatically.
-func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
+// The context is checked in each prime-search iteration to support cancellation.
+func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -83,6 +85,9 @@ func GenerateKey(reader io.Reader, bits int) (*PrivateKey, error) {
 		return nil, errors.New("paillier modulus must be at least 512 bits")
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		p, err := safePrime(reader, bits/2)
 		if err != nil {
 			return nil, err

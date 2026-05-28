@@ -2,6 +2,7 @@ package paillier
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"math/big"
@@ -13,7 +14,7 @@ import (
 func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +54,7 @@ func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 func TestMarshalRoundTrip(t *testing.T) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,7 +99,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 func TestPrivateKeyJSONAndDestroy(t *testing.T) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,7 +137,7 @@ func TestPrivateKeyJSONAndDestroy(t *testing.T) {
 func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -184,7 +185,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 func TestValidateCiphertextGroup(t *testing.T) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +203,7 @@ func TestValidateCiphertextGroup(t *testing.T) {
 func FuzzPublicKeyUnmarshal(f *testing.F) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -220,7 +221,7 @@ func FuzzPublicKeyUnmarshal(f *testing.F) {
 func FuzzPrivateKeyUnmarshal(f *testing.F) {
 	restore := SetMinimumModulusBitsForTesting(512)
 	defer restore()
-	sk, err := GenerateKey(nil, 512)
+	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)
 	}

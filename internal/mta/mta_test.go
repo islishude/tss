@@ -2,6 +2,7 @@ package mta
 
 import (
 	"bytes"
+	"context"
 	"math/big"
 	"testing"
 
@@ -12,7 +13,7 @@ import (
 func TestMTAProductShares(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -115,7 +116,7 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	tb.Helper()
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
-	sk, err := pai.GenerateKey(nil, 1024)
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		tb.Fatal(err)
 	}

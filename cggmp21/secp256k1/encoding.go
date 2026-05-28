@@ -27,6 +27,8 @@ const (
 	keyShareFieldPaillierPublicKey
 	keyShareFieldPaillierPrivateKey
 	keyShareFieldPaillierProof
+	keyShareFieldPaillierPrimalityProof
+	keyShareFieldPaillierPrimalityProofs
 	keyShareFieldPaillierPublicKeys
 	keyShareFieldShareProof
 	keyShareFieldKeygenTranscriptHash
@@ -63,6 +65,8 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldPaillierPublicKey, Value: wire.NonNilBytes(k.PaillierPublicKey)},
 		{Tag: keyShareFieldPaillierPrivateKey, Value: wire.NonNilBytes(k.PaillierPrivateKey)},
 		{Tag: keyShareFieldPaillierProof, Value: wire.NonNilBytes(k.PaillierProof)},
+		{Tag: keyShareFieldPaillierPrimalityProof, Value: wire.NonNilBytes(k.PaillierPrimalityProof)},
+		{Tag: keyShareFieldPaillierPrimalityProofs, Value: wire.EncodeBytesList(k.PaillierPrimalityProofs)},
 		{Tag: keyShareFieldPaillierPublicKeys, Value: encodePaillierPublicShares(k.PaillierPublicKeys)},
 		{Tag: keyShareFieldShareProof, Value: wire.NonNilBytes(k.ShareProof)},
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
@@ -78,7 +82,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldSecurityNotice); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPrimalityProof, keyShareFieldPaillierPrimalityProofs, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldSecurityNotice); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -108,23 +112,29 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
+	primalityProofs, err := wire.BytesListField(fields, keyShareFieldPaillierPrimalityProofs)
+	if err != nil {
+		return nil, err
+	}
 	k := &KeyShare{
-		Version:              tss.Version,
-		Party:                tss.PartyID(party),
-		Threshold:            int(threshold),
-		Parties:              parties,
-		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
-		ChainCode:            wire.MustField(fields, keyShareFieldChainCode),
-		Secret:               wire.MustField(fields, keyShareFieldSecret),
-		GroupCommitments:     groupCommitments,
-		VerificationShares:   verificationShares,
-		PaillierPublicKey:    wire.MustField(fields, keyShareFieldPaillierPublicKey),
-		PaillierPrivateKey:   wire.MustField(fields, keyShareFieldPaillierPrivateKey),
-		PaillierProof:        wire.MustField(fields, keyShareFieldPaillierProof),
-		PaillierPublicKeys:   paillierPublicKeys,
-		ShareProof:           wire.MustField(fields, keyShareFieldShareProof),
-		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
-		SecurityNotice:       string(wire.MustField(fields, keyShareFieldSecurityNotice)),
+		Version:                 tss.Version,
+		Party:                   tss.PartyID(party),
+		Threshold:               int(threshold),
+		Parties:                 parties,
+		PublicKey:               wire.MustField(fields, keyShareFieldPublicKey),
+		ChainCode:               wire.MustField(fields, keyShareFieldChainCode),
+		Secret:                  wire.MustField(fields, keyShareFieldSecret),
+		GroupCommitments:        groupCommitments,
+		VerificationShares:      verificationShares,
+		PaillierPublicKey:       wire.MustField(fields, keyShareFieldPaillierPublicKey),
+		PaillierPrivateKey:      wire.MustField(fields, keyShareFieldPaillierPrivateKey),
+		PaillierProof:           wire.MustField(fields, keyShareFieldPaillierProof),
+		PaillierPrimalityProof:  wire.MustField(fields, keyShareFieldPaillierPrimalityProof),
+		PaillierPrimalityProofs: primalityProofs,
+		PaillierPublicKeys:      paillierPublicKeys,
+		ShareProof:              wire.MustField(fields, keyShareFieldShareProof),
+		KeygenTranscriptHash:    wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		SecurityNotice:          string(wire.MustField(fields, keyShareFieldSecurityNotice)),
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err

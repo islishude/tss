@@ -31,15 +31,16 @@ type KeygenOptions struct {
 
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
-	cfg          tss.ThresholdConfig
-	commits      map[tss.PartyID][][]byte
-	shares       map[tss.PartyID]*big.Int
-	chainCodes   map[tss.PartyID][]byte
-	paillier     *pai.PrivateKey
-	paillierPubs map[tss.PartyID]PaillierPublicShare
-	completed    bool
-	aborted      bool
-	keyShare     *KeyShare
+	cfg             tss.ThresholdConfig
+	commits         map[tss.PartyID][][]byte
+	shares          map[tss.PartyID]*big.Int
+	chainCodes      map[tss.PartyID][]byte
+	paillier        *pai.PrivateKey
+	paillierPubs    map[tss.PartyID]PaillierPublicShare
+	primalityProofs map[tss.PartyID][]byte
+	completed       bool
+	aborted         bool
+	keyShare        *KeyShare
 }
 
 type keygenCommitmentsPayload struct {
@@ -47,6 +48,7 @@ type keygenCommitmentsPayload struct {
 	PaillierPublicKey []byte   `json:"paillier_public_key"`
 	PaillierProof     []byte   `json:"paillier_proof"`
 	ChainCode         []byte   `json:"chain_code,omitempty"`
+	PrimalityProof    []byte   `json:"primality_proof"`
 }
 
 type keygenSharePayload struct {
@@ -76,7 +78,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			return nil, nil, err
 		}
 	}
-	paillierKey, err := pai.GenerateKey(config.Reader(), paillierBits)
+	paillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), paillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -89,6 +91,14 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		return nil, nil, err
 	}
 	modProofBytes, err := zkpai.Marshal(modProof)
+	if err != nil {
+		return nil, nil, err
+	}
+	primalityProof, err := zkpai.ProvePrimality(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes), paillierKey, uint32(config.Self))
+	if err != nil {
+		return nil, nil, err
+	}
+	primalityProofBytes, err := zkpai.Marshal(primalityProof)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -116,6 +126,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
 		},
+		primalityProofs: map[tss.PartyID][]byte{config.Self: append([]byte(nil), primalityProofBytes...)},
 	}
 	out := make([]tss.Envelope, 0, len(parties))
 	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
@@ -123,6 +134,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		PaillierPublicKey: paillierPubBytes,
 		PaillierProof:     modProofBytes,
 		ChainCode:         chainCode,
+		PrimalityProof:    primalityProofBytes,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -235,12 +247,37 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
+		pp, err := zkpai.UnmarshalPrimalityProof(p.PrimalityProof)
+		if err != nil {
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"malformed Paillier primality proof",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
+		if !zkpai.VerifyPrimality(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), pp) {
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"invalid Paillier primality proof",
+				[]tss.PartyID{env.From},
+				errors.New("invalid Paillier primality proof"),
+				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
+		}
 		s.commits[env.From] = p.Commitments
 		if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("chain code must be 32 bytes"))
 		}
 		s.chainCodes[env.From] = append([]byte(nil), p.ChainCode...)
 		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
+		s.primalityProofs[env.From] = append([]byte(nil), p.PrimalityProof...)
 	case payloadKeygenShare:
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
@@ -272,7 +309,7 @@ func (s *KeygenSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) {
+	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) || len(s.primalityProofs) != len(s.cfg.Parties) {
 		return nil
 	}
 	order := secp.Order()
@@ -375,23 +412,29 @@ func (s *KeygenSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
+	primalityProofs := make([][]byte, len(s.cfg.Parties))
+	for i, id := range s.cfg.Parties {
+		primalityProofs[i] = append([]byte(nil), s.primalityProofs[id]...)
+	}
 	s.keyShare = &KeyShare{
-		Version:              tss.Version,
-		Party:                s.cfg.Self,
-		Threshold:            s.cfg.Threshold,
-		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
-		PublicKey:            append([]byte(nil), groupCommitments[0]...),
-		ChainCode:            chainCode,
-		Secret:               scalarBytes(secret),
-		GroupCommitments:     groupCommitments,
-		VerificationShares:   verificationShares,
-		PaillierPublicKey:    localPaillierPub,
-		PaillierPrivateKey:   localPaillierPriv,
-		PaillierProof:        localPaillierProofBytes,
-		PaillierPublicKeys:   s.sortedPaillierPublicKeys(),
-		ShareProof:           shareProofBytes,
-		KeygenTranscriptHash: transcriptHash,
-		SecurityNotice:       ExperimentalSecurityNotice,
+		Version:                 tss.Version,
+		Party:                   s.cfg.Self,
+		Threshold:               s.cfg.Threshold,
+		Parties:                 append([]tss.PartyID(nil), s.cfg.Parties...),
+		PublicKey:               append([]byte(nil), groupCommitments[0]...),
+		ChainCode:               chainCode,
+		Secret:                  scalarBytes(secret),
+		GroupCommitments:        groupCommitments,
+		VerificationShares:      verificationShares,
+		PaillierPublicKey:       localPaillierPub,
+		PaillierPrivateKey:      localPaillierPriv,
+		PaillierProof:           localPaillierProofBytes,
+		PaillierPrimalityProof:  append([]byte(nil), s.primalityProofs[s.cfg.Self]...),
+		PaillierPrimalityProofs: primalityProofs,
+		PaillierPublicKeys:      s.sortedPaillierPublicKeys(),
+		ShareProof:              shareProofBytes,
+		KeygenTranscriptHash:    transcriptHash,
+		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	return s.keyShare.Validate()

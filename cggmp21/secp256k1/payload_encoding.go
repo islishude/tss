@@ -33,6 +33,7 @@ const (
 	keygenCommitmentsPayloadFieldPaillierPublicKey
 	keygenCommitmentsPayloadFieldPaillierProof
 	keygenCommitmentsPayloadFieldChainCode
+	keygenCommitmentsPayloadFieldPrimalityProof
 )
 
 const keygenSharePayloadFieldShare uint16 = 1
@@ -68,6 +69,9 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
 		return nil, err
 	}
+	if _, err := zkpai.UnmarshalPrimalityProof(p.PrimalityProof); err != nil {
+		return nil, err
+	}
 	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
 		return nil, errors.New("chain code must be 32 bytes")
 	}
@@ -76,6 +80,7 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
 		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
+		{Tag: keygenCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
 	})
 }
 
@@ -87,7 +92,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if version != tss.Version {
 		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode); err != nil {
+	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode, keygenCommitmentsPayloadFieldPrimalityProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
@@ -102,6 +107,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 		PaillierPublicKey: wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
 		PaillierProof:     wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
 		ChainCode:         wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
+		PrimalityProof:    wire.MustField(fields, keygenCommitmentsPayloadFieldPrimalityProof),
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return keygenCommitmentsPayload{}, err
