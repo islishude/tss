@@ -137,7 +137,7 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 
 func secpLifecycleKeygen(t testing.TB, enableHD bool) (*KeygenSession, *KeyShare) {
 	t.Helper()
-	restore := pai.SetMinimumModulusBitsForTesting(512)
+	restore := pai.SetMinimumModulusBitsForTesting(minKeygenPaillierBits)
 	t.Cleanup(restore)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -148,7 +148,7 @@ func secpLifecycleKeygen(t testing.TB, enableHD bool) (*KeygenSession, *KeyShare
 		Parties:   []tss.PartyID{1},
 		Self:      1,
 		SessionID: sessionID,
-	}, KeygenOptions{PaillierBits: 512, EnableHD: enableHD})
+	}, KeygenOptions{PaillierBits: minKeygenPaillierBits, EnableHD: enableHD})
 	if err != nil {
 		t.Fatal(err)
 	}

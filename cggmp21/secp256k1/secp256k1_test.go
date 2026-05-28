@@ -630,7 +630,7 @@ func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 }
 
 func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{EnableHD: true})
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -686,7 +686,7 @@ func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
 // BIP32 derivation tests
 
 func TestBIP32SingleLevel(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true})
 	pubKey := shares[1].PublicKey
 	chainCode := shares[1].ChainCode
 
@@ -713,7 +713,7 @@ func TestBIP32SingleLevel(t *testing.T) {
 }
 
 func TestBIP32MultiLevel(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true})
 	pubKey := shares[1].PublicKey
 	chainCode := shares[1].ChainCode
 
@@ -753,7 +753,7 @@ func TestBIP32MultiLevel(t *testing.T) {
 }
 
 func TestBIP32DeriveAndSign(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
 	childPub, shift, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{0, 5})
 	if err != nil {
 		t.Fatal(err)
@@ -801,7 +801,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 }
 
 func TestBIP32RejectsHardened(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true})
 	_, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{HardenedKeyStart})
 	if err == nil {
 		t.Fatal("expected error for hardened index")
@@ -824,7 +824,7 @@ func TestBIP32RejectsEmptyChainCode(t *testing.T) {
 }
 
 func TestBIP32RejectsEmptyPath(t *testing.T) {
-	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true, PaillierBits: 512})
+	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true})
 	_, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{})
 	if err == nil {
 		t.Fatal("expected error for empty path")

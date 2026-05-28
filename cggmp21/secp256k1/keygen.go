@@ -61,6 +61,11 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
 
+// minKeygenPaillierBits is the minimum safe Paillier modulus size for CGGMP21.
+// A 512-bit modulus can wrap MtA plaintexts (k_i * b + beta up to ~2^513),
+// causing probabilistic (~10%) ECDSA signature verification failures.
+const minKeygenPaillierBits = 768
+
 // StartKeygenWithOptions starts keygen with explicit Paillier key-size options.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
 	if err := config.Validate(); err != nil {
@@ -71,6 +76,10 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	paillierBits := opts.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = defaultPaillierBits
+	}
+	if paillierBits < minKeygenPaillierBits {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self,
+			fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, minKeygenPaillierBits))
 	}
 	var chainCode []byte
 	if opts.EnableHD {
