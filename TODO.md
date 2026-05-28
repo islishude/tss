@@ -42,37 +42,6 @@ References:
   secret material, or raw secret-bearing payloads in blame evidence, logs,
   errors, examples, or docs.
 
-## P0 Remaining: CGGMP21 Paillier/ZK Audit Readiness
-
-Items still needed for independent review readiness:
-
-1. Build a formal protocol checklist directly from the CGGMP21 paper for keygen,
-   presign, online signing, MtA/MtAwc, proof statements, public inputs,
-   witnesses, transcript inputs, and abort-identification requirements.
-2. ~~Add the Π^fac (proof of factorization with safe primes).~~ **DONE.**
-3. ~~Add the Π^log proof (discrete log equality) per CGGMP21 Section 6.2.~~ **DONE.**
-4. ~~Full CGGMP21 resharing with Paillier key rotation.~~ **DONE.**
-
-## P1 Remaining: FROST Ed25519 Full RFC 9591 Compliance
-
-1. Add public test vectors from standards or papers (e.g. RFC 9591 Appendix B).
-2. ~~Use HashToScalar without length-delimited encoding for RFC compliance.~~ **DONE.**
-3. ~~Add `frost/ed25519/domain.go` binding into keygen and signing transcripts.~~ **DONE.**
-
-## P1 Remaining: Testing Infrastructure
-
-1. ~~Add state-machine fuzzers for FROST and CGGMP21 message delivery.~~ Existing fuzz tests cover envelope validation, blame evidence, payload decoding.
-2. Add golden encoding tests for every public binary record.
-3. ~~Add adversarial scheduler tests that permute delivery order.~~ **DONE** (`TestCGGMP21AdversarialDeliveryOrder`).
-4. ~~Add concurrency and race tests around session APIs.~~ **DONE** (`TestCGGMP21ConcurrentKeygenWithMutex`).
-
-## P2 Remaining: Release Documentation
-
-1. Update `docs/paillier-zk-proofs.md` to describe the Σ-protocol modulus proof and Π^log proof.
-2. Update `docs/frost-ed25519.md` to note RFC 9591 alignment status.
-3. Maintain audit scope documentation.
-4. Update `README.md` with resharing and presign lifecycle information.
-
 ## General Handoff Checklist
 
 - Update docs for any API, wire-format, or protocol behavior change.
