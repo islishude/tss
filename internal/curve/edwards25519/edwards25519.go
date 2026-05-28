@@ -159,11 +159,11 @@ func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 	return nil
 }
 
-// HashToScalar hashes length-delimited parts into a prime-order scalar.
+// HashToScalar hashes parts into a prime-order scalar via direct concatenation
+// without length-delimited encoding, per RFC 9591 Section 3.1.
 func HashToScalar(parts ...[]byte) (*fed.Scalar, *big.Int) {
 	h := sha512.New()
 	for _, p := range parts {
-		writeLen(h, len(p))
 		h.Write(p)
 	}
 	sum := h.Sum(nil)
@@ -197,8 +197,4 @@ func littleToBig(in []byte) *big.Int {
 		be[len(in)-1-i] = in[i]
 	}
 	return new(big.Int).SetBytes(be)
-}
-
-func writeLen(w io.Writer, n int) {
-	_, _ = w.Write([]byte{byte(n >> 24), byte(n >> 16), byte(n >> 8), byte(n)})
 }

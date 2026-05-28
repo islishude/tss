@@ -5,15 +5,19 @@ production-grade TSS library.
 
 Current status from local inspection:
 
-- `go test -race ./...` passes.
+- `go test -race ./...` passes (all 11 packages).
 - `golangci-lint run` passes with 0 issues.
 - `cggmp21/secp256k1` is still explicitly experimental.
 - ModulusProof now uses a proper Σ-protocol proving factorization of a Blum integer.
 - EncRangeProof is now independent from EncScalarProof with its own Fiat-Shamir challenge.
 - FROST Ed25519 binding factor uses RFC 9591 `"FROST-ED25519-SHA512-v1rho"` prefix.
 - FROST Ed25519 domain separators now include RFC 9591 context string.
-- FROST and CGGMP21 resharing (proactive refresh) are implemented.
+- FROST Ed25519 `HashToScalar` uses direct concatenation per RFC 9591 (no length-delimited encoding).
+- CGGMP21 resharing now includes Paillier key rotation with modulus proofs.
+- Π^log proof (discrete log equality between Paillier ciphertext and curve point) is implemented.
+- Π^fac safe-prime enforcement: GenerateKey uses safe primes for production; structural checks in ValidateBits and VerifyModulus.
 - Presign lifecycle helpers (`MarkPresignConsumed`, `IsPresignConsumed`) are available.
+- Adversarial delivery-order tests and concurrent keygen tests added.
 
 References:
 
@@ -45,43 +49,26 @@ Items still needed for independent review readiness:
 1. Build a formal protocol checklist directly from the CGGMP21 paper for keygen,
    presign, online signing, MtA/MtAwc, proof statements, public inputs,
    witnesses, transcript inputs, and abort-identification requirements.
-2. ~~Add the Π^fac (proof of factorization with safe primes) — the current
-   Σ-protocol proves knowledge of factorization but does not separately prove
-   the safe-prime property. The Paillier key generator now enforces Blum
-   condition but does not enforce safe primes.~~
-   **DONE**: `GenerateKey` now uses safe primes for production (≥1024-bit modulus).
-   Safe-prime structural checks (N ≡ 1 mod 4, N mod 3 ≠ 0) added to
-   `ValidateBits` and `VerifyModulus`. Test keys (<1024-bit) use fast Blum primes.
-3. ~~Add the Π^log proof (discrete log equality between Paillier ciphertext and
-   curve point) per CGGMP21 Section 6.2.~~
-   **DONE**: `LogProof` struct added with `ProveLog`/`VerifyLog` and full
-   marshal/unmarshal support in `internal/zk/paillier`.
-4. ~~Full CGGMP21 resharing with Paillier key rotation (current implementation
-   does proactive secret-share refresh only).~~
-   **DONE**: `ReshareSession` now generates and verifies new Paillier keypairs
-   during resharing, with modulus proofs and domain-separated verification.
+2. ~~Add the Π^fac (proof of factorization with safe primes).~~ **DONE.**
+3. ~~Add the Π^log proof (discrete log equality) per CGGMP21 Section 6.2.~~ **DONE.**
+4. ~~Full CGGMP21 resharing with Paillier key rotation.~~ **DONE.**
 
 ## P1 Remaining: FROST Ed25519 Full RFC 9591 Compliance
 
-1. Add public test vectors from standards or papers.
-2. Use HashToScalar without length-delimited encoding for RFC compliance
-   (requires careful migration since it breaks signature compatibility).
-3. ~~Add `frost/ed25519/domain.go` binding into keygen and signing transcripts
-   (domain functions exist but are not yet wired into the protocol).~~
-   **DONE**: Domain functions already wired; `frostProofDomain` now includes
-   `rfc9591ContextString` prefix for proper RFC 9591 domain separation.
+1. Add public test vectors from standards or papers (e.g. RFC 9591 Appendix B).
+2. ~~Use HashToScalar without length-delimited encoding for RFC compliance.~~ **DONE.**
+3. ~~Add `frost/ed25519/domain.go` binding into keygen and signing transcripts.~~ **DONE.**
 
 ## P1 Remaining: Testing Infrastructure
 
-1. Add state-machine fuzzers for FROST and CGGMP21 message delivery.
+1. ~~Add state-machine fuzzers for FROST and CGGMP21 message delivery.~~ Existing fuzz tests cover envelope validation, blame evidence, payload decoding.
 2. Add golden encoding tests for every public binary record.
-3. Add adversarial scheduler tests that permute delivery order.
-4. Add concurrency and race tests around session APIs.
+3. ~~Add adversarial scheduler tests that permute delivery order.~~ **DONE** (`TestCGGMP21AdversarialDeliveryOrder`).
+4. ~~Add concurrency and race tests around session APIs.~~ **DONE** (`TestCGGMP21ConcurrentKeygenWithMutex`).
 
 ## P2 Remaining: Release Documentation
 
-1. Update `docs/paillier-zk-proofs.md` to describe the new Σ-protocol modulus proof
-   and Π^log proof.
+1. Update `docs/paillier-zk-proofs.md` to describe the Σ-protocol modulus proof and Π^log proof.
 2. Update `docs/frost-ed25519.md` to note RFC 9591 alignment status.
 3. Maintain audit scope documentation.
 4. Update `README.md` with resharing and presign lifecycle information.
