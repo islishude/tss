@@ -81,3 +81,64 @@ func ExampleUnmarshalBlameEvidence() {
 	// Output:
 	// sign_partial 1
 }
+
+func ExampleEnvelope_roundtrip() {
+	sessionID, err := NewSessionID(nil)
+	if err != nil {
+		panic(err)
+	}
+
+	envelope := Envelope{
+		Protocol:    "example",
+		Version:     Version,
+		SessionID:   sessionID,
+		Round:       1,
+		From:        1,
+		PayloadType: "example.payload",
+		Payload:     []byte("roundtrip test"),
+	}.WithTranscriptHash()
+
+	encoded, err := envelope.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	var decoded Envelope
+	if err := decoded.UnmarshalBinary(encoded); err != nil {
+		panic(err)
+	}
+	if err := decoded.ValidateBasic("example", sessionID, []PartyID{1}); err != nil {
+		panic(err)
+	}
+
+	fmt.Println(string(decoded.Payload))
+	// Output:
+	// roundtrip test
+}
+
+func ExampleBlameEvidence_verify() {
+	sessionID, err := NewSessionID(nil)
+	if err != nil {
+		panic(err)
+	}
+
+	envelope := Envelope{
+		Protocol:    "example",
+		Version:     Version,
+		SessionID:   sessionID,
+		Round:       1,
+		From:        1,
+		PayloadType: "example.payload",
+		Payload:     []byte("bad data"),
+	}.WithTranscriptHash()
+
+	evidence, err := NewBlameEvidence(envelope, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
+		{Key: "public_hash", Value: []byte{1, 2, 3}},
+	})
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Println(evidence.Validate() == nil)
+	// Output:
+	// true
+}

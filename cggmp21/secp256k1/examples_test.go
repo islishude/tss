@@ -65,3 +65,76 @@ func ExampleVerifyBlameEvidence() {
 	// Output:
 	// true
 }
+
+func Example_full_lifecycle() {
+	// Use small Paillier keys for fast example execution.
+	reset := SetDefaultPaillierBitsForTesting(768)
+	defer reset()
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		panic(err)
+	}
+	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+		Threshold: 1,
+		Parties:   []tss.PartyID{1},
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		panic(err)
+	}
+	share, ok := keygen.KeyShare()
+	if !ok {
+		panic("keygen did not complete")
+	}
+
+	raw, err := share.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	loaded, err := UnmarshalKeyShare(raw)
+	if err != nil {
+		panic(err)
+	}
+
+	presignID, err := tss.NewSessionID(nil)
+	if err != nil {
+		panic(err)
+	}
+	ps, _, err := StartPresign(loaded, presignID, []tss.PartyID{1})
+	if err != nil {
+		panic(err)
+	}
+	presign, ok := ps.Presign()
+	if !ok {
+		panic("presign did not complete")
+	}
+
+	rawPresign, err := presign.MarshalBinary()
+	if err != nil {
+		panic(err)
+	}
+	loadedPresign, err := UnmarshalPresign(rawPresign)
+	if err != nil {
+		panic(err)
+	}
+
+	signID, err := tss.NewSessionID(nil)
+	if err != nil {
+		panic(err)
+	}
+	digest := sha256.Sum256([]byte("example full lifecycle"))
+	ss, _, err := StartSignDigest(loaded, loadedPresign, signID, digest[:])
+	if err != nil {
+		panic(err)
+	}
+	sig, ok := ss.Signature()
+	if !ok {
+		panic("signing did not complete")
+	}
+
+	fmt.Println(VerifyDigest(loaded.PublicKeyBytes(), digest[:], sig))
+	// Output:
+	// true
+}
