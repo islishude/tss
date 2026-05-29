@@ -236,6 +236,15 @@ func FuzzPrivateKeyUnmarshal(f *testing.F) {
 	})
 }
 
+func BenchmarkGenerateKey(b *testing.B) {
+	for b.Loop() {
+		_, err := GenerateKey(context.Background(), nil, 2048)
+		if err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) ([]byte, error) {
 	version, fields, err := wire.Unmarshal(raw, typeID)
 	if err != nil {

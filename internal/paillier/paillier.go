@@ -84,18 +84,42 @@ func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, 
 	if bits < 512 {
 		return nil, errors.New("paillier modulus must be at least 512 bits")
 	}
+
+	type primeResult struct {
+		prime *big.Int
+		err   error
+	}
+
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		p, err := safePrime(reader, bits/2)
-		if err != nil {
-			return nil, err
+
+		searchCtx, cancel := context.WithCancel(ctx)
+		defer cancel()
+
+		pCh := make(chan primeResult, 1)
+		qCh := make(chan primeResult, 1)
+
+		go func() {
+			p, err := safePrime(searchCtx, reader, bits/2)
+			pCh <- primeResult{prime: p, err: err}
+		}()
+		go func() {
+			q, err := safePrime(searchCtx, reader, bits-bits/2)
+			qCh <- primeResult{prime: q, err: err}
+		}()
+
+		pRes := <-pCh
+		if pRes.err != nil {
+			return nil, pRes.err
 		}
-		q, err := safePrime(reader, bits-bits/2)
-		if err != nil {
-			return nil, err
+		qRes := <-qCh
+		if qRes.err != nil {
+			return nil, qRes.err
 		}
+
+		p, q := pRes.prime, qRes.prime
 		if p.Cmp(q) == 0 {
 			continue
 		}
@@ -142,11 +166,14 @@ func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, 
 // the CGGMP21 security proof. For smaller sizes (tests), a random Blum prime
 // is returned directly for speed — the modulus will still be validated against
 // safe-prime structural constraints by ValidateBits.
-func safePrime(reader io.Reader, bits int) (*big.Int, error) {
+func safePrime(ctx context.Context, reader io.Reader, bits int) (*big.Int, error) {
 	four := big.NewInt(4)
 	three := big.NewInt(3)
 	if bits < 1024 {
 		for {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
 			p, err := rand.Prime(reader, bits)
 			if err != nil {
 				return nil, err
@@ -159,6 +186,9 @@ func safePrime(reader io.Reader, bits int) (*big.Int, error) {
 	two := big.NewInt(2)
 	one := big.NewInt(1)
 	for {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
 		// Generate a Sophie Germain prime p' of bits-1 bits.
 		pPrime, err := rand.Prime(reader, bits-1)
 		if err != nil {
