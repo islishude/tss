@@ -11,7 +11,7 @@
     ],
     "message": "46524f535420456432353531392074657374206d657373616765",
     "signers": [1],
-    "signature": ""
+    "signature": "71fcd1a99c8be234e1c7f77bd1b0d8e4f8fa9685d22f6e8856ccb5a37c1af3c724424f6e79f6fe86b6600b2bd584351e9302c5d0de426f7dc9230553b1e6d500"
   },
   {
     "description": "FROST Ed25519 2-of-3 keygen and signing",
@@ -27,6 +27,6 @@
     ],
     "message": "46524f535420322d6f662d332074657374206d657373616765",
     "signers": [1, 2],
-    "signature": ""
+    "signature": "9cafa78676b4738c096389c14fd086041dcae4171e1d82c5148e43b25d06710c9a4293d89c4768358de536640089676a31c154b88347a608afada2515ce46a0e"
   }
 ]
