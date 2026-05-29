@@ -8,7 +8,7 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 - It is acceptable to use papers, RFCs, standards, and public test vectors or test scenarios.
 - Keep the protocol boundary honest: CGGMP21 applies to ECDSA/secp256k1; Ed25519 uses FROST-style EdDSA.
 - Do not preserve prior-format fallback paths while moving toward the production target. Existing conversion code for retired wire shapes must be removed rather than supported.
-- Do not remove the experimental warning from `cggmp21/secp256k1` until the full Paillier MtA/ZK CGGMP21 signing path exists and has been reviewed.
+- Do not remove the experimental warning from `cggmp21/secp256k1` until an independent cryptographic review of the full Paillier MtA/ZK proof layer is complete.
 - Never use `math/big.Int.Exp` when the exponent is a secret (`λ`, `μ`, `b` in MtA). All secret-exponent modular exponentiation must go through `internal/paillier/paillierct` (`filippo.io/bigmod`).
 - Secret scalars must use `secret.Scalar` (fixed-length bytes). Never expose them via `String()`, variable-length `Bytes()`, `BigInt()`, or JSON.
 
@@ -25,18 +25,19 @@ npx -y prettier --write '*.md' 'docs'
 
 ## Architecture Map
 
-- Root package `tss`: transport-neutral session ids, envelopes, errors, blame evidence, common interfaces.
-- `frost/ed25519`: DKG, two-round signing, partial verification, Ed25519-compatible aggregation.
-- `cggmp21/secp256k1`: planned CGGMP21 API shape and experimental threshold ECDSA flow.
+- Root package `tss`: transport-neutral session ids, envelopes, errors, blame evidence, common interfaces, session-id generation, and reference storage-encryption helpers.
+- `frost/ed25519`: dealerless FROST-style Ed25519 DKG, two-round signing, partial verification, Ed25519-compatible aggregation, and resharing.
+- `cggmp21/secp256k1`: CGGMP21-style threshold ECDSA keygen, presign, online signing, resharing, proactive refresh, BIP32 HD derivation, RefreshScheduler, and evidence verification.
 - `internal/shamir`: Shamir sharing and interpolation over caller-provided prime-order fields.
 - `internal/curve/edwards25519`: Ed25519 scalar/point helpers and commitment verification.
 - `internal/curve/secp256k1`: SEC 2 curve constants, point operations, ECDSA helpers.
-- `internal/mta`: Paillier MtA product-share helpers for CGGMP21-style signing.
-- `internal/paillier`: Paillier public-key primitives (encrypt, homomorphic ops, key generation). Secret fields (`Lambda`, `Mu`) use `secret.Scalar`, not `*big.Int`.
-- `internal/paillier/paillierct`: constant-time `c^λ mod n²` via `filippo.io/bigmod` with ciphertext blinding; used by `Decrypt` and MtA `Respond` for secret-exponent paths.
+- `internal/fiat`: fiat-crypto generated constant-time arithmetic for secp256k1 scalar/field and ed25519 scalar.
+- `internal/mta`: Paillier MtA product-share helpers for CGGMP21-style signing (Start/Respond/Finish).
+- `internal/paillier`: Paillier public-key primitives (encrypt, decrypt, homomorphic ops, key generation). Secret fields (`Lambda`, `Mu`) use `secret.Scalar`, not `*big.Int`. Decrypt uses constant-time `c^λ mod n²` via `paillierct` with ciphertext blinding.
+- `internal/paillier/paillierct`: constant-time modular exponentiation via `filippo.io/bigmod`. Used by `Decrypt` (with ciphertext blinding) and MtA `Respond` (`c^b mod n²`, without blinding — the ZK proof verifies the exact ciphertext relationship).
 - `internal/secret`: fixed-length `Scalar` type; no `String()`, `BigInt()`, variable-length `Bytes()`, or JSON.
-- `internal/wire`: strict TLV encoding for binary envelopes, key shares, and presign records.
-- `internal/zk/paillier`: Paillier encryption, range, modulus, and MtA response proofs.
+- `internal/wire`: strict TLV encoding for binary envelopes, key shares, presign records, MtA messages, Paillier keys, and all proof payloads.
+- `internal/zk/paillier`: seven ZK proof types — Π^fac (modulus), Π^prm (primality), Π^Enc (unified encryption), Π^Eq (enc-scalar, legacy), EncRangeProof (legacy), Π^mta (MtA response), Π^log (discrete-log equality). Current protocol flows use Π^fac, Π^prm, Π^Enc, and Π^mta.
 - `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
 
 ## Coding Rules
@@ -65,4 +66,7 @@ When changing protocol behavior, add or update tests for:
 - duplicate/replayed messages;
 - malformed scalar/point payloads;
 - incorrect session id or signer set;
-- signature verification failure and blame attribution when applicable.
+- signature verification failure and blame attribution when applicable;
+- proof verification failures (wrong domain, wrong public key, malformed commitment/response);
+- presign consumption and nonce-reuse guards;
+- reshare and refresh flows preserving the group public key.

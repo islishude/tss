@@ -11,22 +11,22 @@ non-minimal integer encodings.
 
 Each party generates a Shamir polynomial and broadcasts secp256k1 commitments. Private Shamir shares are sent point-to-point in confidential envelopes. Receivers verify shares against commitments before deriving the local aggregated share.
 
-Each party also generates Paillier material and a modulus proof. The proof is
-encoded as canonical binary TLV and bound to the keygen session domain:
-protocol name, library version, session id, threshold, ordered participant set,
-sender, proof kind, and Paillier public key. The persisted local key-share
-Paillier proof is additionally bound to the group public key and keygen
-transcript hash. When
-`KeygenOptions.EnableHD` is set, parties contribute 32-byte chain-code shares
-that are XOR-aggregated into the key share. The group public key is the sum of
-degree-zero commitments. Local Paillier keys and secp256k1 Schnorr share
+Each party also generates Paillier material and two ZK proofs: a modulus proof
+(Π^fac) and a primality proof (Π^prm). Both are encoded as canonical binary TLV
+records and bound to the keygen session domain: protocol name, library version,
+session id, threshold, ordered participant set, sender, proof kind, and Paillier
+public key. The persisted local key-share modulus proof is additionally bound to
+the group public key and keygen transcript hash. When
+<code>KeygenOptions.EnableHD</code> is set, parties contribute 32-byte chain-code
+shares that are XOR-aggregated into the key share. The group public key is the
+sum of degree-zero commitments. Local Paillier keys and secp256k1 Schnorr share
 proofs are also persisted as canonical TLV records inside the key share.
 
 ## Presign
 
 Presign is the offline phase. Each signer samples local `k_i` and `gamma_i`,
-broadcasts `Gamma_i = gamma_i*G`, and publishes `Enc_i(k_i)` with canonical
-binary encrypted-scalar and range proof material.
+broadcasts `Gamma_i = gamma_i*G`, and publishes `Enc_i(k_i)` with a canonical
+binary unified encryption proof (Π^Enc).
 
 Pairwise MtA exchanges produce additive shares for:
 
