@@ -1,7 +1,7 @@
 # TSS Library Security Audit Report
 
 **Repository:** `github.com/islishude/tss`  
-**Audit Baseline:** `main` branch, `go 1.26.3`, `filippo.io/bigmod v0.1.0`, `filippo.io/edwards25519 v1.2.0`  
+**Audit Baseline:** `main` branch, `cbde4b03f709ba432efb0107129ce71133bffe68` git commit, `go 1.26.3`, `filippo.io/bigmod v0.1.0`, `filippo.io/edwards25519 v1.2.0`  
 **Date:** 2026-05-29  
 **Auditor:** Automated review per `docs/security.md` framework
 
@@ -37,14 +37,14 @@ Five audit packages:
 ### 2.1 FROST Ed25519 — PASS
 
 | Item                           | Status | Detail                                                                                               |
-| ------------------------------ | ------ | ---------------------------------------------------------------------------------------------------- | --- | ------------ |
+| ------------------------------ | ------ | ---------------------------------------------------------------------------------------------------- |
 | DKG polynomial sampling        | PASS   | `shamir.RandomPolynomial` uses `crypto/rand.Int` over Ed25519 scalar field                           |
 | Threshold/party validation     | PASS   | Rejects zero threshold, empty parties, threshold > parties, party 0, duplicates, self not in parties |
 | Private share delivery         | PASS   | `ConfidentialRequired = true` on share envelopes; receiver verifies against commitments              |
 | Hiding/binding nonce (round 1) | PASS   | Two nonces per signer (`d_i`, `e_i`), binding factor `rho` computed per RFC 9591 §4.2                |
 | Partial signature (round 2)    | PASS   | `z_i = d_i + rho_i*e_i + lambda_i*c*(x_i + delta)`                                                   |
 | Partial verification           | PASS   | `[z_i]B == D_i + [rho_i]E_i + [lambda_i*c]Y_i` per signer; domain-separated per session/signer       |
-| Aggregate verification         | PASS   | Uses `crypto/ed25519.Verify` on final 64-byte `R                                                     |     | S` signature |
+| Aggregate verification         | PASS   | Uses `crypto/ed25519.Verify` on final 64-byte R,S signature                                          |
 | HD additive shift              | PASS   | `lambda_i*c*delta` added to partial; group public key shifted as `A' = A + delta*B`                  |
 | Resharing                      | PASS   | Zero-constant-term polynomial refresh; group public key preserved                                    |
 | Duplicate/replay rejection     | PASS   | Duplicate commitment and partial messages rejected; wrong round/session rejected                     |
@@ -53,35 +53,35 @@ Five audit packages:
 
 ### 2.2 CGGMP21 secp256k1 — PASS
 
-| Item                             | Status            | Detail                                                                                                       |
-| -------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------ | --- | --------------------------------------------- |
-| Keygen: Shamir polynomial        | PASS              | `shamir.RandomPolynomial` over secp256k1 order, threshold-sized                                              |
-| Keygen: public commitments       | PASS              | `C_ik = a_ik*G` for each coefficient, verified by receivers                                                  |
-| Keygen: Paillier keypair         | PASS              | Safe primes (Sophie Germain) for bits ≥ 1024, Blum condition enforced, modulus ≥ 768 bits minimum            |
-| Keygen: Π^fac modulus proof      | PASS              | Fiat-Shamir Σ-protocol demonstrating knowledge of non-trivial sqrt of 1                                      |
-| Keygen: Π^prm primality proof    | PASS              | Extends Π^fac with factor bit-length binding; not a full GMR certificate (documented)                        |
-| Keygen: Schnorr share proof      | PASS              | Proves knowledge of secret corresponding to verification share, bound to keygen transcript                   |
-| Keygen: private share delivery   | PASS              | `ConfidentialRequired = true` on share envelopes                                                             |
-| Keygen: transcript hash          | PASS              | Binds all commitments, Paillier keys, proofs, chain codes per party                                          |
-| Presign R1: nonce generation     | PASS              | `k_i`, `gamma_i` from `crypto/rand`, `Gamma_i = gamma_i*G`, `Enc_i(k_i)` with Π^Enc proof                    |
-| Presign R1: Paillier key binding | PASS              | Round-1 Paillier public key must match keygen-committed value                                                |
-| Presign R2: delta MtA            | PASS              | `encA^b mod n^2` via **constant-time** `paillierct.ExpCT`; β from `crypto/rand`; Π^mta proof                 |
-| Presign R2: sigma MtA            | PASS              | Same constant-time path; uses Lagrange-adjusted `xBar` for signer-set-specific share                         |
-| Presign R2: echo hash            | PASS              | Round-1 echo binds all round-1 payloads and Paillier keys per signer; verified in round 2                    |
-| Presign R3: delta broadcast      | PASS              | `delta_i = k_i*gamma_i + sum_j(alpha_ij + beta_ji)`, broadcast to all                                        |
-| Presign completion               | PASS              | `delta = sum delta_i mod q`, `R = delta^(-1) * Gamma`, `r = R.x mod q`; zero delta/r rejected                |
-| Online signing: partial          | PASS              | `s_i = m*k_i + r*chi_i mod q`; only partial `s_i` broadcast, not secret or nonce                             |
-| Online signing: aggregation      | PASS              | `s = sum s_i mod q`, ECDSA verification against group public key                                             |
-| Low-S normalization              | PASS              | `s = min(s, q-s)` when `LowS: true`                                                                          |
-| r==0 / s==0 rejection            | PASS              | Both paths rejected before signature emission                                                                |
-| Digest length enforcement        | PASS              | Must be exactly 32 bytes                                                                                     |
-| VerifyDigest                     | PASS              | Uses `secp.VerifyECDSA` with canonical point/scalar parsing                                                  |
-| Additive shift / BIP32           | PASS              | `chi_i += k_i*shift`, public key shifted via `DerivePublicKey`; BIP32 CKD: `I = HMAC-SHA512(c, ser_P(parent) |     | ser_32(i))`, `iL` as scalar, cumulative shift |
-| Refresh                          | PASS              | Zero-constant-term polynomial; group key invariant maintained                                                |
-| Resharing                        | PASS              | Paillier key rotation, new Π^fac/Π^prm proofs, Schnorr proof, old commitments aggregated into new            |
-| Identifiable abort               | PASS              | Blame evidence contains only public diagnostic material (payload hash, transcript hash, public input hashes) |
-| Presign consumed guard           | PASS              | Atomic `Consumed = true` before any outbound envelope emission                                               |
-| Crash/restart guard              | DEPENDS ON CALLER | Persist `Consumed` flag; discard presign if uncertain about partial emission                                 |
+| Item                             | Status            | Detail                                                                                                                                                      |
+| -------------------------------- | ----------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Keygen: Shamir polynomial        | PASS              | `shamir.RandomPolynomial` over secp256k1 order, threshold-sized                                                                                             |
+| Keygen: public commitments       | PASS              | `C_ik = a_ik*G` for each coefficient, verified by receivers                                                                                                 |
+| Keygen: Paillier keypair         | PASS              | Safe primes (Sophie Germain) for bits ≥ 1024, Blum condition enforced, modulus ≥ 768 bits minimum                                                           |
+| Keygen: Π^fac modulus proof      | PASS              | Fiat-Shamir Σ-protocol demonstrating knowledge of non-trivial sqrt of 1                                                                                     |
+| Keygen: Π^prm primality proof    | PASS              | Extends Π^fac with factor bit-length binding; not a full GMR certificate (documented)                                                                       |
+| Keygen: Schnorr share proof      | PASS              | Proves knowledge of secret corresponding to verification share, bound to keygen transcript                                                                  |
+| Keygen: private share delivery   | PASS              | `ConfidentialRequired = true` on share envelopes                                                                                                            |
+| Keygen: transcript hash          | PASS              | Binds all commitments, Paillier keys, proofs, chain codes per party                                                                                         |
+| Presign R1: nonce generation     | PASS              | `k_i`, `gamma_i` from `crypto/rand`, `Gamma_i = gamma_i*G`, `Enc_i(k_i)` with Π^Enc proof                                                                   |
+| Presign R1: Paillier key binding | PASS              | Round-1 Paillier public key must match keygen-committed value                                                                                               |
+| Presign R2: delta MtA            | PASS              | `encA^b mod n^2` via **constant-time** `paillierct.ExpCT`; β from `crypto/rand`; Π^mta proof                                                                |
+| Presign R2: sigma MtA            | PASS              | Same constant-time path; uses Lagrange-adjusted `xBar` for signer-set-specific share                                                                        |
+| Presign R2: echo hash            | PASS              | Round-1 echo binds all round-1 payloads and Paillier keys per signer; verified in round 2                                                                   |
+| Presign R3: delta broadcast      | PASS              | `delta_i = k_i*gamma_i + sum_j(alpha_ij + beta_ji)`, broadcast to all                                                                                       |
+| Presign completion               | PASS              | `delta = sum delta_i mod q`, `R = delta^(-1) * Gamma`, `r = R.x mod q`; zero delta/r rejected                                                               |
+| Online signing: partial          | PASS              | `s_i = m*k_i + r*chi_i mod q`; only partial `s_i` broadcast, not secret or nonce                                                                            |
+| Online signing: aggregation      | PASS              | `s = sum s_i mod q`, ECDSA verification against group public key                                                                                            |
+| Low-S normalization              | PASS              | `s = min(s, q-s)` when `LowS: true`                                                                                                                         |
+| r==0 / s==0 rejection            | PASS              | Both paths rejected before signature emission                                                                                                               |
+| Digest length enforcement        | PASS              | Must be exactly 32 bytes                                                                                                                                    |
+| VerifyDigest                     | PASS              | Uses `secp.VerifyECDSA` with canonical point/scalar parsing                                                                                                 |
+| Additive shift / BIP32           | PASS              | `chi_i += k_i*shift`, public key shifted via `DerivePublicKey`; BIP32 CKD: `I = HMAC-SHA512(c, ser_P(parent), ser_32(i))`, `iL` as scalar, cumulative shift |
+| Refresh                          | PASS              | Zero-constant-term polynomial; group key invariant maintained                                                                                               |
+| Resharing                        | PASS              | Paillier key rotation, new Π^fac/Π^prm proofs, Schnorr proof, old commitments aggregated into new                                                           |
+| Identifiable abort               | PASS              | Blame evidence contains only public diagnostic material (payload hash, transcript hash, public input hashes)                                                |
+| Presign consumed guard           | PASS              | Atomic `Consumed = true` before any outbound envelope emission                                                                                              |
+| Crash/restart guard              | DEPENDS ON CALLER | Persist `Consumed` flag; discard presign if uncertain about partial emission                                                                                |
 
 ---
 
