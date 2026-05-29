@@ -336,7 +336,6 @@ func (s *SignSession) verifyPartial(id tss.PartyID, z, rho, challenge *big.Int) 
 		}
 		deltaPoint := fed.NewIdentityPoint().ScalarBaseMult(deltaScalar)
 		Y = edcurve.AddPoints(Y, deltaPoint)
-		_ = Y // debug
 	}
 	lambda, err := shamir.LagrangeCoefficient(id, s.signers, edcurve.Order())
 	if err != nil {
