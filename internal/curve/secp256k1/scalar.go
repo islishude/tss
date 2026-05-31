@@ -19,23 +19,32 @@ func ScalarBaseMult(k Scalar) *Point {
 	return ScalarMult(G, k)
 }
 
-// ScalarMult returns k*p using a simple double-and-add routine.
+// ScalarMult returns k*p using a constant-time double-and-add routine.
+// Every iteration evaluates both Double and Add unconditionally and
+// selects the result via PointSelect so the scalar bits never appear
+// in control flow.
 func ScalarMult(p *Point, k Scalar) *Point {
-	if k.IsZero() || p == nil || p.Inf {
+	if k.IsZero() || p == nil || p.Inf != 0 {
 		return NewInfinity()
 	}
 	kB := k.Bytes()
-	acc := NewInfinity()
 	base := Clone(p)
+	acc := NewInfinity()
+
 	for byteIdx := range 32 {
 		b := kB[byteIdx]
 		for bit := 7; bit >= 0; bit-- {
-			acc = Double(acc)
-			if b&(1<<bit) != 0 {
-				acc = Add(acc, base)
-			}
+			nextDouble := Double(acc)
+			nextAdd := Add(nextDouble, base)
+			bitVal := uint64((b >> bit) & 1)
+			// bitVal==0: keep nextDouble.  bitVal==1: pick nextAdd.
+			acc = PointSelect(bitVal, nextDouble, nextAdd)
 		}
 	}
+	// Normalise the accumulator without branching: when Inf is set,
+	// zero X and Y so the caller sees a canonical point-at-infinity.
+	acc.X = FieldSelect(acc.Inf, acc.X, FieldZero())
+	acc.Y = FieldSelect(acc.Inf, acc.Y, FieldZero())
 	return acc
 }
 

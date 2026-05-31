@@ -22,7 +22,7 @@ func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s 
 			return Scalar{}, Scalar{}, err
 		}
 		rp := ScalarBaseMult(k)
-		if rp.Inf {
+		if rp.Inf != 0 {
 			continue
 		}
 		r = scalarFromBig(new(big.Int).Mod(rp.X.BigInt(), Order()))
@@ -60,7 +60,7 @@ func SignECDSAWithNonce(digest []byte, secret, nonce Scalar, lowS bool) (r, s Sc
 		z = scalarFromBig(new(big.Int).SetBytes(digest))
 	}
 	rp := ScalarBaseMult(nonce)
-	if rp.Inf {
+	if rp.Inf != 0 {
 		return Scalar{}, Scalar{}, errors.New("nonce produced infinity")
 	}
 	r = scalarFromBig(new(big.Int).Mod(rp.X.BigInt(), Order()))
@@ -86,7 +86,7 @@ func SignECDSAWithNonce(digest []byte, secret, nonce Scalar, lowS bool) (r, s Sc
 
 // VerifyECDSA verifies a secp256k1 ECDSA signature over a 32-byte digest.
 func VerifyECDSA(public *Point, digest []byte, r, s Scalar) bool {
-	if len(digest) != 32 || public == nil || public.Inf || !IsOnCurve(public) {
+	if len(digest) != 32 || public == nil || public.Inf != 0 || !IsOnCurve(public) {
 		return false
 	}
 	if r.IsZero() || s.IsZero() {
@@ -105,7 +105,7 @@ func VerifyECDSA(public *Point, digest []byte, r, s Scalar) bool {
 	p1 := ScalarBaseMult(u1)
 	p2 := ScalarMult(public, u2)
 	x := Add(p1, p2)
-	if x.Inf {
+	if x.Inf != 0 {
 		return false
 	}
 	v := scalarFromBig(new(big.Int).Mod(x.X.BigInt(), Order()))

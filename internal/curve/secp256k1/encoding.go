@@ -4,7 +4,7 @@ import "errors"
 
 // PointBytes encodes p in canonical compressed SEC 1 form.
 func PointBytes(p *Point) ([]byte, error) {
-	if p == nil || p.Inf || !IsOnCurve(p) {
+	if p == nil || p.Inf != 0 || !IsOnCurve(p) {
 		return nil, errors.New("invalid secp256k1 point")
 	}
 	out := make([]byte, 33)

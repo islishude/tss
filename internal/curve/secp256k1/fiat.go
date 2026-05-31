@@ -277,6 +277,41 @@ func FieldInvert(a FieldElement) (FieldElement, error) {
 	return fieldInvAddchain(a), nil
 }
 
+// FieldSelect returns a if bit is 0, b if bit is 1 (constant-time).
+// It uses a bitwise mask so there is no branch on bit.
+func FieldSelect(bit uint64, a, b FieldElement) FieldElement {
+	mask := -bit // 0xFFFF... if bit==1, 0 if bit==0
+	var out FieldElement
+	out.mont[0] = (mask & b.mont[0]) | (^mask & a.mont[0])
+	out.mont[1] = (mask & b.mont[1]) | (^mask & a.mont[1])
+	out.mont[2] = (mask & b.mont[2]) | (^mask & a.mont[2])
+	out.mont[3] = (mask & b.mont[3]) | (^mask & a.mont[3])
+	return out
+}
+
+// nonzeroTo01 returns 0 if x==0, 1 if x!=0 (constant-time).
+// For any non-zero uint64 x, (x | -x) has the MSB set.
+func nonzeroTo01(x uint64) uint64 {
+	return (x | (^x + 1)) >> 63
+}
+
+// fieldIsZero returns 1 if f is the zero field element, 0 otherwise (constant-time).
+// It uses fiatfield.Nonzero as the primitive and converts the result to 0/1.
+func fieldIsZero(f FieldElement) uint64 {
+	var nz uint64
+	fiatfield.Nonzero(&nz, (*[4]uint64)(&f.mont))
+	return nonzeroTo01(nz) ^ 1 // invert: 1 if zero, 0 if non-zero
+}
+
+// fieldEq returns 1 if a and b are the same field element, 0 otherwise (constant-time).
+func fieldEq(a, b FieldElement) uint64 {
+	or := (a.mont[0] ^ b.mont[0]) |
+		(a.mont[1] ^ b.mont[1]) |
+		(a.mont[2] ^ b.mont[2]) |
+		(a.mont[3] ^ b.mont[3])
+	return nonzeroTo01(or) ^ 1 // invert: 1 if equal (or==0), 0 otherwise
+}
+
 // Precomputed small field constants in Montgomery domain.
 var (
 	fieldTwo   = FieldAdd(FieldOne(), FieldOne())
