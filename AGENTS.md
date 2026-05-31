@@ -43,6 +43,7 @@ npx -y prettier --write '*.md' 'docs'
 ## Coding Rules
 
 - Keep files small and organized around one responsibility. Split code when a file starts mixing unrelated concerns or becomes difficult to scan.
+- Prefer shared utility packages over hand-rolled helpers to keep invariants centralized
 - Prefer small, protocol-local helpers over broad abstractions.
 - Keep message decoding fail-closed: wrong session, round, sender, recipient, duplicate message, malformed scalar/point, or transcript mismatch must error.
 - Preserve deterministic `MarshalBinary` / `UnmarshalBinary` behavior for key-share types.
