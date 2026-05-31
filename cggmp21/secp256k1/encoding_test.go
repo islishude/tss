@@ -104,6 +104,22 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 	}
 }
 
+func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+
+	badModulusProof := cloneKeyShare(shares[1])
+	badModulusProof.PaillierPublicKeys[0].Proof = append([]byte(nil), badModulusProof.PaillierPublicKeys[1].Proof...)
+	if err := badModulusProof.Validate(); err == nil {
+		t.Fatal("key share accepted swapped peer Paillier modulus proof")
+	}
+
+	badPrimalityProof := cloneKeyShare(shares[1])
+	badPrimalityProof.PaillierPrimalityProofs[0] = append([]byte(nil), badPrimalityProof.PaillierPrimalityProofs[1]...)
+	if err := badPrimalityProof.Validate(); err == nil {
+		t.Fatal("key share accepted swapped peer Paillier primality proof")
+	}
+}
+
 func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
@@ -259,7 +275,6 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		ChiShare:       scalarBytes(one),
 		Delta:          scalarBytes(one),
 		TranscriptHash: transcript[:],
-		SecurityNotice: ExperimentalSecurityNotice,
 	}
 }
 
@@ -280,11 +295,15 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.PaillierPublicKey = append([]byte(nil), in.PaillierPublicKey...)
 	out.PaillierPrivateKey = append([]byte(nil), in.PaillierPrivateKey...)
 	out.PaillierProof = append([]byte(nil), in.PaillierProof...)
+	out.PaillierPrimalityProof = append([]byte(nil), in.PaillierPrimalityProof...)
+	out.PaillierPrimalityProofs = cloneByteSlices(in.PaillierPrimalityProofs)
 	out.PaillierPublicKeys = append([]PaillierPublicShare(nil), in.PaillierPublicKeys...)
 	for i := range out.PaillierPublicKeys {
 		out.PaillierPublicKeys[i].PublicKey = append([]byte(nil), in.PaillierPublicKeys[i].PublicKey...)
 		out.PaillierPublicKeys[i].Proof = append([]byte(nil), in.PaillierPublicKeys[i].Proof...)
 	}
+	out.PaillierProofSessionID = in.PaillierProofSessionID
+	out.PaillierProofDomain = in.PaillierProofDomain
 	out.ShareProof = append([]byte(nil), in.ShareProof...)
 	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
 	return &out

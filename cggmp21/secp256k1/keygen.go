@@ -420,12 +420,14 @@ func (s *KeygenSession) tryComplete() error {
 		return err
 	}
 	localProofShare := &KeyShare{
-		Party:                s.cfg.Self,
-		Threshold:            s.cfg.Threshold,
-		Parties:              s.cfg.Parties,
-		PublicKey:            groupCommitments[0],
-		PaillierPublicKey:    localPaillierPub,
-		KeygenTranscriptHash: transcriptHash,
+		Party:                  s.cfg.Self,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.cfg.Parties,
+		PublicKey:              groupCommitments[0],
+		PaillierPublicKey:      localPaillierPub,
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelKeygenModulus,
 	}
 	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, uint32(s.cfg.Self))
 	if err != nil {
@@ -455,9 +457,10 @@ func (s *KeygenSession) tryComplete() error {
 		PaillierPrimalityProof:  append([]byte(nil), s.primalityProofs[s.cfg.Self]...),
 		PaillierPrimalityProofs: primalityProofs,
 		PaillierPublicKeys:      s.sortedPaillierPublicKeys(),
+		PaillierProofSessionID:  s.cfg.SessionID,
+		PaillierProofDomain:     domainLabelKeygenModulus,
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
-		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	pubKeyHash := sha256.Sum256(groupCommitments[0])

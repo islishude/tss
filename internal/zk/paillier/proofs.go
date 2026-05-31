@@ -11,6 +11,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -1173,7 +1174,19 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	if err != nil {
 		return nil, err
 	}
-	cipherCommitment := new(big.Int).Exp(encA, mu, pk.NSquared)
+	// encA^mu uses a proof nonce that is later masked into zB = e*b + mu.
+	// Keep this exponentiation constant-time so timing leakage of mu cannot
+	// recover the MtA responder scalar b from the public response.
+	nLen := (pk.N.BitLen() + 7) / 8
+	nSquaredLen := 2 * nLen
+	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, nSquaredLen)
+	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
+	muBytes := secp.ScalarBytes(secp.ScalarFromBigInt(mu))
+	encAMuBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, muBytes)
+	if err != nil {
+		return nil, err
+	}
+	cipherCommitment := new(big.Int).SetBytes(encAMuBytes)
 	cipherCommitment.Mul(cipherCommitment, encNu)
 	cipherCommitment.Mod(cipherCommitment, pk.NSquared)
 	bNonce, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(mu)))

@@ -248,6 +248,9 @@ func (pk PublicKey) ValidateBits(minBits int) error {
 	if pk.G == nil || pk.G.Sign() <= 0 || pk.G.Cmp(pk.NSquared) >= 0 {
 		return errors.New("invalid generator")
 	}
+	if pk.G.Cmp(new(big.Int).Add(pk.N, big.NewInt(1))) != 0 {
+		return errors.New("paillier generator must be n+1")
+	}
 	return nil
 }
 
@@ -281,9 +284,9 @@ func (sk PrivateKey) Validate() error {
 	if lambdaBig.Cmp(wantLambda) != 0 {
 		return errors.New("invalid paillier lambda")
 	}
-	u := new(big.Int).Exp(sk.G, lambdaBig, sk.NSquared)
-	lu := L(u, sk.N)
-	wantMu := new(big.Int).ModInverse(lu, sk.N)
+	// For the enforced g=n+1 variant, L(g^lambda mod n^2) = lambda mod n.
+	// This avoids variable-time modular exponentiation with secret lambda.
+	wantMu := new(big.Int).ModInverse(lambdaBig, sk.N)
 	if wantMu == nil || scalarToBig(sk.Mu).Cmp(wantMu) != 0 {
 		return errors.New("invalid paillier mu")
 	}
@@ -584,7 +587,10 @@ func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 	return out, nil
 }
 
-// MulPlaintext homomorphically multiplies an encrypted value by plaintext.
+// MulPlaintext homomorphically multiplies an encrypted value by public plaintext.
+// The plaintext argument must not contain secret scalar or nonce material; this
+// helper uses variable-time public exponentiation and is not a secret-exponent
+// protocol primitive.
 func (pk PublicKey) MulPlaintext(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err

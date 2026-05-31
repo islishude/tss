@@ -16,7 +16,9 @@ Each party also generates Paillier material and two ZK proofs: a modulus proof
 records and bound to the keygen session domain: protocol name, library version,
 session id, threshold, ordered participant set, sender, proof kind, and Paillier
 public key. The persisted local key-share modulus proof is additionally bound to
-the group public key and keygen transcript hash. When
+the group public key and keygen transcript hash. Persisted key shares also carry
+the public proof session/domain context needed to re-verify stored peer Paillier
+proofs on reload. When
 <code>KeygenOptions.EnableHD</code> is set, parties contribute 32-byte chain-code
 shares that are XOR-aggregated into the key share. The group public key is the
 sum of degree-zero commitments. Local Paillier keys and secp256k1 Schnorr share
@@ -88,4 +90,4 @@ The package does not implement network transport, persistent storage encryption,
 
 Canonical proof encoding is a wire-safety improvement, not an external cryptographic audit.
 
-The experimental security notice remains part of generated artifacts. See [`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the current proof inventory and review blockers.
+See [`paillier-zk-proofs.md`](paillier-zk-proofs.md) for the current proof inventory and review blockers.

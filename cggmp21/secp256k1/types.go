@@ -29,9 +29,6 @@ const (
 	payloadRefreshShare       = "cggmp21.secp256k1.refresh.share"
 )
 
-// ExperimentalSecurityNotice is empty for production builds.
-const ExperimentalSecurityNotice = ""
-
 // DefaultPaillierBits is the production default Paillier modulus size.
 const DefaultPaillierBits = 2048
 
@@ -76,9 +73,10 @@ type KeyShare struct {
 	PaillierPrimalityProof  []byte                `json:"paillier_primality_proof,omitempty"`
 	PaillierPrimalityProofs [][]byte              `json:"paillier_primality_proofs,omitempty"`
 	PaillierPublicKeys      []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
+	PaillierProofSessionID  tss.SessionID         `json:"paillier_proof_session_id"`
+	PaillierProofDomain     string                `json:"paillier_proof_domain"`
 	ShareProof              []byte                `json:"share_proof,omitempty"`
 	KeygenTranscriptHash    []byte                `json:"keygen_transcript_hash,omitempty"`
-	SecurityNotice          string                `json:"security_notice"`
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -207,6 +205,9 @@ func (k *KeyShare) Validate() error {
 	if len(k.PaillierPublicKeys) != len(k.Parties) {
 		return errors.New("paillier public key count must equal party count")
 	}
+	if k.PaillierProofDomain == "" {
+		return errors.New("missing paillier public proof domain")
+	}
 	if len(k.ShareProof) == 0 {
 		return errors.New("missing share proof")
 	}
@@ -257,6 +258,13 @@ func (k *KeyShare) Validate() error {
 		if peerProof.NBits != peerPK.N.BitLen() {
 			return fmt.Errorf("paillier proof bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerProof.NBits, peerPK.N.BitLen())
 		}
+		proofDomain, err := k.paillierPublicProofDomainFor(item.Party, item.PublicKey)
+		if err != nil {
+			return err
+		}
+		if !zkpai.VerifyModulus(proofDomain, peerPK, uint32(item.Party), peerProof) {
+			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
+		}
 		if len(k.PaillierPrimalityProofs[i]) == 0 {
 			return fmt.Errorf("missing paillier primality proof for party %d", item.Party)
 		}
@@ -266,6 +274,9 @@ func (k *KeyShare) Validate() error {
 		}
 		if peerPrimalityProof.FactorBitLen < peerPK.N.BitLen()/2-1 || peerPrimalityProof.FactorBitLen > peerPK.N.BitLen()/2+1 {
 			return fmt.Errorf("paillier primality proof factor bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerPrimalityProof.FactorBitLen, peerPK.N.BitLen())
+		}
+		if !zkpai.VerifyPrimality(proofDomain, peerPK, uint32(item.Party), peerPrimalityProof) {
+			return fmt.Errorf("invalid paillier primality proof for party %d", item.Party)
 		}
 	}
 	shareProof, err := schnorr.UnmarshalProof(k.ShareProof)
@@ -280,6 +291,25 @@ func (k *KeyShare) Validate() error {
 		return errors.New("invalid local share proof")
 	}
 	return nil
+}
+
+func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPublicKey []byte) ([]byte, error) {
+	config := tss.ThresholdConfig{
+		Threshold: k.Threshold,
+		Parties:   k.Parties,
+		Self:      party,
+		SessionID: k.PaillierProofSessionID,
+	}
+	switch k.PaillierProofDomain {
+	case domainLabelKeygenModulus:
+		return keygenModulusDomain(config, party, paillierPublicKey), nil
+	case domainLabelRefreshPaillier:
+		return refreshPaillierDomain(config, party, paillierPublicKey), nil
+	case domainLabelResharePaillier:
+		return resharePaillierDomain(config, party, paillierPublicKey), nil
+	default:
+		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.PaillierProofDomain)
+	}
 }
 
 // sortedPaillierPrimalityProofs collects primality proofs in party order.

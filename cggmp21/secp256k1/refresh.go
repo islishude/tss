@@ -356,12 +356,14 @@ func (s *RefreshSession) tryComplete() error {
 	}
 	// Construct a temporary share for domain-separated Paillier proof binding.
 	localProofShare := &KeyShare{
-		Party:                s.oldKey.Party,
-		Threshold:            s.cfg.Threshold,
-		Parties:              s.oldKey.Parties,
-		PublicKey:            newCommitments[0],
-		PaillierPublicKey:    s.newPaillierPubs[s.oldKey.Party].PublicKey,
-		KeygenTranscriptHash: transcriptHash,
+		Party:                  s.oldKey.Party,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.oldKey.Parties,
+		PublicKey:              newCommitments[0],
+		PaillierPublicKey:      s.newPaillierPubs[s.oldKey.Party].PublicKey,
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelRefreshPaillier,
 	}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.oldKey.Party))
 	if err != nil {
@@ -387,9 +389,10 @@ func (s *RefreshSession) tryComplete() error {
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
 		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
 		PaillierPublicKeys:      s.sortedNewPaillierPublicKeys(),
+		PaillierProofSessionID:  s.cfg.SessionID,
+		PaillierProofDomain:     domainLabelRefreshPaillier,
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
-		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	s.log.Info(s.cfg.Ctx(), "refresh complete",

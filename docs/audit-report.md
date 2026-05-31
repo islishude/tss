@@ -22,7 +22,7 @@ Five audit packages:
 ## 1. P0: Pre-Production Blockers
 
 - [x] **Audit baseline:** `go.mod` pinned to `go 1.26.3`, direct dependencies `filippo.io/bigmod v0.1.0` and `filippo.io/edwards25519 v1.2.0`, indirect `golang.org/x/sys v0.11.0`. `govulncheck` reports **0 vulnerabilities**.
-- [x] **Risk statement:** README and `ExperimentalSecurityNotice` field clearly state the library is not a production-audited TSS stack. CGGMP21 package requires independent cryptographic review of the Paillier MtA/ZK proof layer.
+- [x] **Risk statement:** README and CGGMP21 package docs clearly state the library is not a production-audited TSS stack. CGGMP21 package requires independent cryptographic review of the Paillier MtA/ZK proof layer.
 - [x] **CGGMP21 spec-to-code mapping:** `docs/cggmp21-protocol-checklist.md` maps keygen, presign, MtA, proof, and abort conditions to paper sections (ePrint 2021/060) and code locations. Each item is marked "DONE." Auditors should independently verify each mapping.
 - [x] **FROST RFC 9591 alignment:** Domain separation labels, context strings, binding factor computation, and partial verification equations structurally align with RFC 9591. A cryptographer should perform full formula-by-formula verification.
 - [x] **Envelope.From / transport binding:** `Envelope.ValidateBasic` checks `From` is in the participant set. Transport-layer authentication and identity binding is the caller's responsibility.

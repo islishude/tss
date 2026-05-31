@@ -36,7 +36,6 @@ type Presign struct {
 	Delta          []byte        `json:"delta"`
 	TranscriptHash []byte        `json:"transcript_hash"`
 	Consumed       bool          `json:"consumed"`
-	SecurityNotice string        `json:"security_notice"`
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -545,13 +544,12 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	s.round3Sent = true
 	s.presign = &Presign{
-		Version:        tss.Version,
-		Party:          s.key.Party,
-		Threshold:      s.key.Threshold,
-		Signers:        append([]tss.PartyID(nil), s.signers...),
-		KShare:         scalarBytes(s.kShare),
-		ChiShare:       scalarBytes(chiShare),
-		SecurityNotice: ExperimentalSecurityNotice,
+		Version:   tss.Version,
+		Party:     s.key.Party,
+		Threshold: s.key.Threshold,
+		Signers:   append([]tss.PartyID(nil), s.signers...),
+		KShare:    scalarBytes(s.kShare),
+		ChiShare:  scalarBytes(chiShare),
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, err

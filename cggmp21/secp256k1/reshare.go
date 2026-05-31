@@ -357,6 +357,24 @@ func (s *ReshareSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
+	localProofShare := &KeyShare{
+		Party:                  s.oldKey.Party,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.newParties,
+		PublicKey:              newCommitments[0],
+		PaillierPublicKey:      s.newPaillierPubs[s.oldKey.Party].PublicKey,
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelResharePaillier,
+	}
+	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.oldKey.Party))
+	if err != nil {
+		return err
+	}
+	paillierProofBytes, err := zkpai.Marshal(paillierProof)
+	if err != nil {
+		return err
+	}
 	s.newShare = &KeyShare{
 		Version:                 tss.Version,
 		Party:                   s.oldKey.Party,
@@ -368,13 +386,14 @@ func (s *ReshareSession) tryComplete() error {
 		VerificationShares:      verificationShares,
 		PaillierPublicKey:       append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
 		PaillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
-		PaillierProof:           append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].Proof...),
+		PaillierProof:           paillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
 		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
 		PaillierPublicKeys:      s.sortedNewPaillierPublicKeys(),
+		PaillierProofSessionID:  s.cfg.SessionID,
+		PaillierProofDomain:     domainLabelResharePaillier,
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
-		SecurityNotice:          ExperimentalSecurityNotice,
 	}
 	s.completed = true
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
