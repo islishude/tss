@@ -21,7 +21,11 @@ go test -race ./...
 golangci-lint run --fix
 # Format markdown files
 npx -y prettier --write '*.md' 'docs'
+# Make go files modern
+go fix ./...
 ```
+
+Run the commands after makeing substantial changes.
 
 ## Architecture Map
 
