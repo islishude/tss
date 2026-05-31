@@ -158,7 +158,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 	}
 
 	// Group law: (k+1)*G - k*G = G for random scalars.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		k, err := RandomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -172,7 +172,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 	}
 
 	// Doubling consistency: 2*(k*G) = (2k)*G.
-	for i := 0; i < 20; i++ {
+	for i := range 20 {
 		k, err := RandomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -183,7 +183,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 	}
 
 	// ScalarBaseMult matches ScalarMult(G, k).
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		k, err := RandomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -196,7 +196,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 	// ScalarMult with non-G base point: k*(2G) = (2k)*G.
 	// The homomorphic property verifies the generic double-and-add loop.
 	twoG := Add(G, G)
-	for i := 0; i < 15; i++ {
+	for i := range 15 {
 		k, err := RandomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
@@ -219,7 +219,7 @@ func TestScalarMultAllocCount(t *testing.T) {
 	// Verify that ScalarMult with different non-zero scalars allocates
 	// the same number of objects (heuristic constant-time check).
 	var first float64
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k, err := RandomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
