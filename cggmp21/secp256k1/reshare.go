@@ -17,9 +17,10 @@ import (
 )
 
 const (
-	payloadReshareCommitments  = "cggmp21.secp256k1.reshare.commitments"
-	payloadReshareShare        = "cggmp21.secp256k1.reshare.share"
-	reshareTranscriptHashLabel = "cggmp21-secp256k1-reshare-transcript-v1"
+	payloadReshareCommitments   = "cggmp21.secp256k1.reshare.commitments"
+	payloadReshareShare         = "cggmp21.secp256k1.reshare.share"
+	reshareCommitmentsHashLabel = "cggmp21-secp256k1-reshare-commitments-v1"
+	reshareTranscriptHashLabel  = "cggmp21-secp256k1-reshare-transcript-v1"
 )
 
 // ReshareSession refreshes CGGMP21 key shares and rotates Paillier keys while
@@ -105,6 +106,10 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
+		if coeff.Sign() == 0 {
+			commitments[i] = nil
+			continue
+		}
 		enc, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff)))
 		if err != nil {
 			return nil, nil, err
@@ -252,6 +257,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 		s.newPaillierPrimalityProofs[env.From] = p.PrimalityProof
 	case payloadReshareShare:
+		if err := requireDirectConfidential(env, s.oldKey.Party, payloadReshareShare); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
 		}
@@ -275,7 +283,7 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.newShare, true
+	return cloneKeyShareValue(s.newShare), true
 }
 
 func (s *ReshareSession) tryComplete() error {
@@ -288,12 +296,23 @@ func (s *ReshareSession) tryComplete() error {
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), secp.ScalarFromBigInt(share)); err != nil {
+			evidenceEnv := envelope(s.cfg, 1, dealer, s.oldKey.Party, payloadReshareShare, nil, true)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid reshare share", Parties: []tss.PartyID{dealer}},
-				Err:   err,
+				Blame: &tss.Blame{
+					Reason:  "invalid reshare share",
+					Parties: []tss.PartyID{dealer},
+					Evidence: marshalEvidence(
+						evidenceEnv,
+						tss.EvidenceKindReshareShare,
+						"invalid reshare share",
+						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(reshareCommitmentsHashLabel, s.commits[dealer])),
+					),
+				},
+				Err: err,
 			}
 		}
 	}
@@ -381,11 +400,11 @@ func (s *ReshareSession) tryComplete() error {
 		Threshold:               s.cfg.Threshold,
 		Parties:                 append([]tss.PartyID(nil), s.newParties...),
 		PublicKey:               append([]byte(nil), newCommitments[0]...),
-		Secret:                  scalarBytes(newSecret),
+		secret:                  scalarBytes(newSecret),
 		GroupCommitments:        newCommitments,
 		VerificationShares:      verificationShares,
 		PaillierPublicKey:       append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
-		PaillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
+		paillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
 		PaillierProof:           paillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
 		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
@@ -419,6 +438,9 @@ func validateReshareCommitments(commitments [][]byte, threshold int) error {
 		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
 	}
 	for _, commitment := range commitments {
+		if len(commitment) == 0 {
+			continue
+		}
 		if _, err := secp.PointFromBytes(commitment); err != nil {
 			return err
 		}

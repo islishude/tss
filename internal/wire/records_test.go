@@ -39,6 +39,9 @@ func TestBytesList(t *testing.T) {
 	if _, err := DecodeBytesList(append(raw, 0)); err == nil {
 		t.Fatal("DecodeBytesList accepted trailing bytes")
 	}
+	if _, err := DecodeBytesList(Uint32(1 << 30)); err == nil {
+		t.Fatal("DecodeBytesList accepted impossible count")
+	}
 }
 
 func TestPartyBytes(t *testing.T) {
@@ -62,6 +65,9 @@ func TestPartyBytes(t *testing.T) {
 	if _, err := DecodePartyBytes[testID](append(raw, 0), "verification share"); err == nil {
 		t.Fatal("DecodePartyBytes accepted trailing bytes")
 	}
+	if _, err := DecodePartyBytes[testID](Uint32(1<<30), "verification share"); err == nil {
+		t.Fatal("DecodePartyBytes accepted impossible count")
+	}
 }
 
 func TestPartyBytePairs(t *testing.T) {
@@ -84,5 +90,8 @@ func TestPartyBytePairs(t *testing.T) {
 	}
 	if _, err := DecodePartyBytePairs[testID](append(raw, 0), "Paillier public share"); err == nil {
 		t.Fatal("DecodePartyBytePairs accepted trailing bytes")
+	}
+	if _, err := DecodePartyBytePairs[testID](Uint32(1<<30), "Paillier public share"); err == nil {
+		t.Fatal("DecodePartyBytePairs accepted impossible count")
 	}
 }

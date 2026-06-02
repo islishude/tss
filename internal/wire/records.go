@@ -63,6 +63,9 @@ func DecodeBytesList(raw []byte) ([][]byte, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRecordCount(raw, offset, count, 4, "bytes list"); err != nil {
+		return nil, err
+	}
 	out := make([][]byte, 0, count)
 	for i := 0; i < int(count); i++ {
 		item, next, err := ReadBytes(raw, offset)
@@ -92,6 +95,9 @@ func EncodePartyBytes[T uint32Value](records []PartyBytes[T]) []byte {
 func DecodePartyBytes[T uint32Value](raw []byte, name string) ([]PartyBytes[T], error) {
 	count, offset, err := ReadUint32(raw, 0)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateRecordCount(raw, offset, count, 8, name); err != nil {
 		return nil, err
 	}
 	out := make([]PartyBytes[T], 0, count)
@@ -131,6 +137,9 @@ func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePa
 	if err != nil {
 		return nil, err
 	}
+	if err := validateRecordCount(raw, offset, count, 12, name); err != nil {
+		return nil, err
+	}
 	out := make([]PartyBytePair[T], 0, count)
 	for i := 0; i < int(count); i++ {
 		party, next, err := ReadUint32(raw, offset)
@@ -154,4 +163,20 @@ func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePa
 		return nil, fmt.Errorf("trailing %s bytes", name)
 	}
 	return out, nil
+}
+
+func validateRecordCount(raw []byte, offset int, count uint32, minRecordLen int, name string) error {
+	if offset > len(raw) {
+		return fmt.Errorf("invalid %s offset", name)
+	}
+	maxInt := uint64(^uint(0) >> 1)
+	if uint64(count) > maxInt {
+		return fmt.Errorf("%s count too large", name)
+	}
+	remaining := uint64(len(raw) - offset)
+	minBytes := uint64(count) * uint64(minRecordLen)
+	if remaining < minBytes {
+		return fmt.Errorf("invalid %s length", name)
+	}
+	return nil
 }

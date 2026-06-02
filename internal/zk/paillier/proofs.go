@@ -95,27 +95,37 @@ const (
 )
 
 const (
-	modulusTranscriptLabel    = "paillier-modulus-transcript-v1"
-	modulusChallengeLabel     = "paillier-modulus-challenge-v1"
-	modulusSigmaCommitLabel   = "paillier-modulus-sigma-commitment-v1"
-	encScalarTranscriptLabel  = "paillier-enc-scalar-transcript-v1"
-	encScalarChallengeLabel   = "paillier-enc-scalar-challenge-v1"
-	encRangeTranscriptLabel   = "paillier-enc-range-transcript-v1"
-	encRangeChallengeLabel    = "paillier-enc-range-challenge-v1"
-	encRangeDigestLabel       = "paillier-enc-range-proof-v1"
-	mtaTranscriptLabel        = "paillier-mta-response-transcript-v1"
-	mtaChallengeLabel         = "paillier-mta-response-challenge-v1"
-	logTranscriptLabel        = "paillier-log-transcript-v1"
-	logChallengeLabel         = "paillier-log-challenge-v1"
-	primalityTranscriptLabel  = "paillier-primality-transcript-v1"
-	primalityChallengeLabel   = "paillier-primality-challenge-v1"
-	encryptionTranscriptLabel = "paillier-encryption-transcript-v1"
-	encryptionChallengeLabel  = "paillier-encryption-challenge-v1"
+	modulusTranscriptLabel      = "paillier-modulus-transcript-v1"
+	modulusChallengeLabel       = "paillier-modulus-challenge-v1"
+	modulusRootChallengeLabel   = "paillier-modulus-root-challenge-v1"
+	modulusSigmaCommitLabel     = "paillier-modulus-sigma-commitment-v1"
+	encScalarTranscriptLabel    = "paillier-enc-scalar-transcript-v1"
+	encScalarChallengeLabel     = "paillier-enc-scalar-challenge-v1"
+	encRangeTranscriptLabel     = "paillier-enc-range-transcript-v1"
+	encRangeChallengeLabel      = "paillier-enc-range-challenge-v1"
+	encRangeDigestLabel         = "paillier-enc-range-proof-v1"
+	mtaTranscriptLabel          = "paillier-mta-response-transcript-v1"
+	mtaChallengeLabel           = "paillier-mta-response-challenge-v1"
+	logTranscriptLabel          = "paillier-log-transcript-v1"
+	logChallengeLabel           = "paillier-log-challenge-v1"
+	primalityTranscriptLabel    = "paillier-primality-transcript-v1"
+	primalityChallengeLabel     = "paillier-primality-challenge-v1"
+	primalityRootChallengeLabel = "paillier-primality-root-challenge-v1"
+	encryptionTranscriptLabel   = "paillier-encryption-transcript-v1"
+	encryptionChallengeLabel    = "paillier-encryption-challenge-v1"
 )
 
-// ModulusProof proves that a Paillier modulus N = p·q is a Blum integer
-// with p ≡ q ≡ 3 (mod 4) by demonstrating knowledge of a non-trivial square
-// root of 1 modulo N. The proof uses a Fiat-Shamir-transformed Σ-protocol.
+const (
+	rootProofRounds    = 128
+	rootProofSeedBytes = sha256.Size
+	rootProofPositive  = byte(0)
+	rootProofNegative  = byte(1)
+
+	mtaResponseScalarMaxBytes = 64
+)
+
+// ModulusProof proves knowledge of the Paillier factorization by opening
+// verifier-derived Jacobi +1 challenges as square roots of x or -x modulo N.
 type ModulusProof struct {
 	Version          uint16 `json:"version"`
 	NBits            int    `json:"n_bits"`
@@ -208,14 +218,14 @@ type EncryptionProof struct {
 	TranscriptHash   []byte `json:"transcript_hash"`
 }
 
-// ProveModulus creates a Fiat-Shamir Σ-protocol proof that the prover knows
-// the factorization of N into distinct primes p, q satisfying p ≡ q ≡ 3 (mod 4).
-// The proof demonstrates knowledge of a non-trivial square root of 1 modulo N,
-// which is equivalent to knowing the factorization.
+// ProveModulus creates a Fiat-Shamir proof that the prover can extract square
+// roots for verifier-derived Jacobi +1 challenges modulo N. For a Blum modulus,
+// exactly one of x or -x is a quadratic residue, so opening every challenge
+// demonstrates factorization knowledge without revealing the factors.
 //
 // Verifying that p, q are safe primes (p = 2p' + 1, q = 2q' + 1) is delegated
-// to the key-generation layer; the Σ-protocol focuses on proving that the
-// prover actually holds the factors.
+// to the key-generation layer; this proof focuses on proving that the prover
+// actually holds the factors.
 func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uint32) (*ModulusProof, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -226,68 +236,38 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 	if err := sk.Validate(); err != nil {
 		return nil, err
 	}
-	p, q := sk.P, sk.Q
-	N := sk.N
-
-	// Blum condition: each factor must be ≡ 3 mod 4.
-	four := big.NewInt(4)
-	if new(big.Int).Mod(p, four).Int64() != 3 {
-		return nil, errors.New("p does not satisfy the Blum condition p ≡ 3 (mod 4)")
-	}
-	if new(big.Int).Mod(q, four).Int64() != 3 {
-		return nil, errors.New("q does not satisfy the Blum condition q ≡ 3 (mod 4)")
-	}
-
-	// Compute a non-trivial square root of 1 via CRT:
-	// s ≡ 1 (mod p), s ≡ -1 (mod q)  ⇒  s^2 ≡ 1 (mod N).
-	// Solve x = 1 + k·p such that 1 + k·p ≡ -1 (mod q).
-	// Then k ≡ -2 · p^{-1} (mod q), and s = 1 + k·p mod N.
-	invP := new(big.Int).ModInverse(p, q)
-	if invP == nil {
-		return nil, errors.New("CRT failed: p and q are not coprime")
-	}
-	k := new(big.Int).Mul(big.NewInt(2), invP)
-	k.Neg(k)
-	k.Mod(k, q)
-	s := new(big.Int).Mul(k, p)
-	s.Add(s, big.NewInt(1))
-	s.Mod(s, N)
-	if s.Cmp(big.NewInt(1)) == 0 || s.Cmp(new(big.Int).Sub(N, big.NewInt(1))) == 0 {
-		return nil, errors.New("non-trivial square root of 1 not found")
-	}
-
-	r, err := randomCoprime(reader, N)
-	if err != nil {
+	if err := validateBlumFactors(sk.P, sk.Q); err != nil {
 		return nil, err
 	}
-	a := new(big.Int).Exp(r, big.NewInt(2), N) // Σ-protocol commitment
 	raw, err := sk.PublicKey.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-
-	challengeTranscript := hashParts([]byte(modulusChallengeLabel), domain, partyBytes(party), raw, intBytes(a))
-	e := challengeBits(challengeTranscript, 128)
-
-	// z = r · s^e mod N
-	z := new(big.Int).Exp(s, e, N)
-	z.Mul(z, r)
-	z.Mod(z, N)
-
-	transcript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw)
+	seed := make([]byte, rootProofSeedBytes)
+	if _, err := io.ReadFull(reader, seed); err != nil {
+		return nil, fmt.Errorf("modulus proof seed: %w", err)
+	}
+	transcript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw, seed)
+	challenge := hashParts([]byte(modulusChallengeLabel), transcript)
+	response, err := proveRootChallenges(sk, func(i int) (*big.Int, error) {
+		return deriveRootChallenge([]byte(modulusRootChallengeLabel), sk.N, domain, partyBytes(party), raw, seed, wire.Uint32(uint32(i)))
+	})
+	if err != nil {
+		return nil, err
+	}
 
 	return &ModulusProof{
 		Version:          proofVersion,
-		NBits:            N.BitLen(),
-		SmallFactorCheck: smallFactorDigest(N),
+		NBits:            sk.N.BitLen(),
+		SmallFactorCheck: smallFactorDigest(sk.N),
 		TranscriptHash:   transcript,
-		Commitment:       intBytes(a),
-		Challenge:        e.Bytes(),
-		Response:         intBytes(z),
+		Commitment:       seed,
+		Challenge:        challenge,
+		Response:         response,
 	}, nil
 }
 
-// VerifyModulus checks the Σ-protocol modulus proof against a public key and domain.
+// VerifyModulus checks the modulus root-opening proof against a public key and domain.
 func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *ModulusProof) bool {
 	if validateModulusProof(proof) != nil || pk == nil {
 		return false
@@ -316,36 +296,23 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 	if err != nil {
 		return false
 	}
-	expectedTranscript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw)
+	expectedTranscript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw, proof.Commitment)
 	if !bytes.Equal(expectedTranscript, proof.TranscriptHash) {
 		return false
 	}
-
-	a := new(big.Int).SetBytes(proof.Commitment)
-	e := new(big.Int).SetBytes(proof.Challenge)
-	z := new(big.Int).SetBytes(proof.Response)
-
-	expectedChallenge := challengeBits(hashParts([]byte(modulusChallengeLabel), domain, partyBytes(party), raw, proof.Commitment), 128)
-	if e.Cmp(expectedChallenge) != 0 {
+	expectedChallenge := hashParts([]byte(modulusChallengeLabel), expectedTranscript)
+	if !bytes.Equal(expectedChallenge, proof.Challenge) {
 		return false
 	}
-
-	if new(big.Int).GCD(nil, nil, a, pk.N).Cmp(big.NewInt(1)) != 0 {
-		return false
-	}
-	if new(big.Int).GCD(nil, nil, z, pk.N).Cmp(big.NewInt(1)) != 0 {
-		return false
-	}
-
-	// Verify z^2 ≡ a mod N (since s^2 ≡ 1, so (r·s^e)^2 = r^2·(s^2)^e = a·1^e = a).
-	z2 := new(big.Int).Exp(z, big.NewInt(2), pk.N)
-	return z2.Cmp(a) == 0
+	return verifyRootChallenges(pk.N, proof.Response, func(i int) (*big.Int, error) {
+		return deriveRootChallenge([]byte(modulusRootChallengeLabel), pk.N, domain, partyBytes(party), raw, proof.Commitment, wire.Uint32(uint32(i)))
+	})
 }
 
-// ProvePrimality creates a Π^prm proof that N = p·q has two prime factors of
-// approximately equal bit-length. The proof extends Π^fac by binding the factor
-// size into the transcript, which rules out trivially small or composite factors.
-// CGGMP21 §3.1 Π^prm.
+// ProvePrimality creates a proof that binds the claimed factor bit length to
+// the same root-opening proof used by ProveModulus. It rejects local keys whose
+// factors are not Blum primes and proves factorization knowledge for the bound
+// public key without revealing the factors.
 func ProvePrimality(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uint32) (*PrimalityProof, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -356,56 +323,40 @@ func ProvePrimality(reader io.Reader, domain []byte, sk *pai.PrivateKey, party u
 	if err := sk.Validate(); err != nil {
 		return nil, err
 	}
-	p, q := sk.P, sk.Q
-	N := sk.N
-
-	factorBits := max(q.BitLen(), p.BitLen())
-
-	r, err := randomCoprime(reader, N)
-	if err != nil {
+	if err := validateBlumFactors(sk.P, sk.Q); err != nil {
 		return nil, err
 	}
-	a := new(big.Int).Exp(r, big.NewInt(2), N)
+	factorBits := max(sk.Q.BitLen(), sk.P.BitLen())
 
 	raw, err := sk.PublicKey.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-	transcript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(factorBits)), intBytes(a))
-	challengeTranscript := hashParts([]byte(primalityChallengeLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(factorBits)), intBytes(a))
-	e := challengeBits(challengeTranscript, 128)
-
-	// Non-trivial sqrt of 1 via CRT (same as ProveModulus).
-	four := big.NewInt(4)
-	if new(big.Int).Mod(p, four).Int64() != 3 || new(big.Int).Mod(q, four).Int64() != 3 {
-		return nil, errors.New("factors do not satisfy Blum condition p ≡ q ≡ 3 mod 4")
+	seed := make([]byte, rootProofSeedBytes)
+	if _, err := io.ReadFull(reader, seed); err != nil {
+		return nil, fmt.Errorf("primality proof seed: %w", err)
 	}
-	invP := new(big.Int).ModInverse(p, q)
-	if invP == nil {
-		return nil, errors.New("CRT failed: p and q are not coprime")
+	factorBitsBytes := wire.Uint32(uint32(factorBits))
+	transcript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, factorBitsBytes, seed)
+	challenge := hashParts([]byte(primalityChallengeLabel), transcript)
+	response, err := proveRootChallenges(sk, func(i int) (*big.Int, error) {
+		return deriveRootChallenge([]byte(primalityRootChallengeLabel), sk.N, domain, partyBytes(party), raw, factorBitsBytes, seed, wire.Uint32(uint32(i)))
+	})
+	if err != nil {
+		return nil, err
 	}
-	k := new(big.Int).Mul(big.NewInt(2), invP)
-	k.Neg(k)
-	k.Mod(k, q)
-	s := new(big.Int).Mul(k, p)
-	s.Add(s, big.NewInt(1))
-	s.Mod(s, N)
-
-	z := new(big.Int).Exp(s, e, N)
-	z.Mul(z, r)
-	z.Mod(z, N)
 
 	return &PrimalityProof{
 		Version:        proofVersion,
 		FactorBitLen:   factorBits,
 		TranscriptHash: transcript,
-		Commitment:     intBytes(a),
-		Challenge:      e.Bytes(),
-		Response:       intBytes(z),
+		Commitment:     seed,
+		Challenge:      challenge,
+		Response:       response,
 	}, nil
 }
 
-// VerifyPrimality checks the Π^prm proof against a public key and domain.
+// VerifyPrimality checks the factor-bit-bound root-opening proof.
 func VerifyPrimality(domain []byte, pk *pai.PublicKey, party uint32, proof *PrimalityProof) bool {
 	if validatePrimalityProof(proof) != nil || pk == nil {
 		return false
@@ -433,29 +384,201 @@ func VerifyPrimality(domain []byte, pk *pai.PublicKey, party uint32, proof *Prim
 	if err != nil {
 		return false
 	}
-	expectedTranscript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(proof.FactorBitLen)), proof.Commitment)
+	factorBitsBytes := wire.Uint32(uint32(proof.FactorBitLen))
+	expectedTranscript := hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, factorBitsBytes, proof.Commitment)
 	if !bytes.Equal(expectedTranscript, proof.TranscriptHash) {
 		return false
 	}
-
-	a := new(big.Int).SetBytes(proof.Commitment)
-	e := new(big.Int).SetBytes(proof.Challenge)
-	z := new(big.Int).SetBytes(proof.Response)
-
-	expectedChallenge := challengeBits(hashParts([]byte(primalityChallengeLabel), domain, partyBytes(party), raw, wire.Uint32(uint32(proof.FactorBitLen)), proof.Commitment), 128)
-	if e.Cmp(expectedChallenge) != 0 {
+	expectedChallenge := hashParts([]byte(primalityChallengeLabel), expectedTranscript)
+	if !bytes.Equal(expectedChallenge, proof.Challenge) {
 		return false
 	}
+	return verifyRootChallenges(pk.N, proof.Response, func(i int) (*big.Int, error) {
+		return deriveRootChallenge([]byte(primalityRootChallengeLabel), pk.N, domain, partyBytes(party), raw, factorBitsBytes, proof.Commitment, wire.Uint32(uint32(i)))
+	})
+}
 
-	if new(big.Int).GCD(nil, nil, a, pk.N).Cmp(big.NewInt(1)) != 0 {
+func validateBlumFactors(p, q *big.Int) error {
+	if p == nil || q == nil || p.Sign() <= 0 || q.Sign() <= 0 {
+		return errors.New("invalid Paillier factors")
+	}
+	if p.Cmp(q) == 0 {
+		return errors.New("paillier factors must differ")
+	}
+	three := big.NewInt(3)
+	four := big.NewInt(4)
+	if new(big.Int).Mod(p, four).Cmp(three) != 0 || new(big.Int).Mod(q, four).Cmp(three) != 0 {
+		return errors.New("paillier factors must be Blum primes")
+	}
+	return nil
+}
+
+func proveRootChallenges(sk *pai.PrivateKey, challenge func(int) (*big.Int, error)) ([]byte, error) {
+	nLen := (sk.N.BitLen() + 7) / 8
+	items := make([][]byte, 0, rootProofRounds)
+	for i := range rootProofRounds {
+		x, err := challenge(i)
+		if err != nil {
+			return nil, err
+		}
+		sign, root, err := rootForChallenge(sk, x)
+		if err != nil {
+			return nil, fmt.Errorf("root proof round %d: %w", i, err)
+		}
+		item := make([]byte, 1+nLen)
+		item[0] = sign
+		copy(item[1:], paillierct.FixedEncode(root, nLen))
+		items = append(items, item)
+	}
+	return wire.EncodeBytesList(items), nil
+}
+
+func deriveRootChallenge(label []byte, n *big.Int, parts ...[]byte) (*big.Int, error) {
+	if n == nil || n.Sign() <= 0 || n.Bit(0) == 0 {
+		return nil, errors.New("invalid Paillier modulus")
+	}
+	nLen := (n.BitLen() + 7) / 8
+	one := big.NewInt(1)
+	for counter := uint32(0); ; counter++ {
+		candidateParts := make([][]byte, 0, len(parts)+3)
+		candidateParts = append(candidateParts, label)
+		candidateParts = append(candidateParts, parts...)
+		candidateParts = append(candidateParts, wire.Uint32(counter))
+		candidate := new(big.Int).SetBytes(expandHash(nLen, candidateParts...))
+		candidate.Mod(candidate, n)
+		if candidate.Sign() == 0 {
+			continue
+		}
+		if new(big.Int).GCD(nil, nil, candidate, n).Cmp(one) != 0 {
+			continue
+		}
+		if big.Jacobi(candidate, n) != 1 {
+			continue
+		}
+		return candidate, nil
+	}
+}
+
+func verifyRootChallenges(n *big.Int, response []byte, challenge func(int) (*big.Int, error)) bool {
+	if n == nil || n.Sign() <= 0 || n.Bit(0) == 0 {
 		return false
 	}
-	if new(big.Int).GCD(nil, nil, z, pk.N).Cmp(big.NewInt(1)) != 0 {
+	items, err := wire.DecodeBytesList(response)
+	if err != nil || len(items) != rootProofRounds {
 		return false
 	}
+	nLen := (n.BitLen() + 7) / 8
+	one := big.NewInt(1)
+	for i, item := range items {
+		if len(item) != 1+nLen {
+			return false
+		}
+		if item[0] != rootProofPositive && item[0] != rootProofNegative {
+			return false
+		}
+		root := new(big.Int).SetBytes(item[1:])
+		if root.Sign() <= 0 || root.Cmp(n) >= 0 {
+			return false
+		}
+		if new(big.Int).GCD(nil, nil, root, n).Cmp(one) != 0 {
+			return false
+		}
+		x, err := challenge(i)
+		if err != nil {
+			return false
+		}
+		target := new(big.Int).Set(x)
+		if item[0] == rootProofNegative {
+			target.Sub(n, target)
+		}
+		if !verifyRoot(root, target, n) {
+			return false
+		}
+	}
+	return true
+}
 
-	z2 := new(big.Int).Exp(z, big.NewInt(2), pk.N)
-	return z2.Cmp(a) == 0
+func rootForChallenge(sk *pai.PrivateKey, challenge *big.Int) (byte, *big.Int, error) {
+	root, err := sqrtCompositeBlum(sk, challenge)
+	if err == nil && verifyRoot(root, challenge, sk.N) {
+		return rootProofPositive, root, nil
+	}
+	negative := new(big.Int).Sub(sk.N, challenge)
+	root, err = sqrtCompositeBlum(sk, negative)
+	if err == nil && verifyRoot(root, negative, sk.N) {
+		return rootProofNegative, root, nil
+	}
+	return 0, nil, errors.New("challenge has no square root")
+}
+
+func sqrtCompositeBlum(sk *pai.PrivateKey, target *big.Int) (*big.Int, error) {
+	rootP, err := sqrtModBlumPrime(target, sk.P)
+	if err != nil {
+		return nil, err
+	}
+	rootQ, err := sqrtModBlumPrime(target, sk.Q)
+	if err != nil {
+		return nil, err
+	}
+	n := new(big.Int).Mul(sk.P, sk.Q)
+	return crtCombine(rootP, rootQ, sk.P, sk.Q, n)
+}
+
+func sqrtModBlumPrime(target, prime *big.Int) (*big.Int, error) {
+	if target == nil || prime == nil || prime.Sign() <= 0 {
+		return nil, errors.New("invalid square root input")
+	}
+	exp := new(big.Int).Add(prime, big.NewInt(1))
+	exp.Rsh(exp, 2)
+	pLen := (prime.BitLen() + 7) / 8
+	modulus := paillierct.FixedEncode(prime, pLen)
+	base := paillierct.FixedEncode(new(big.Int).Mod(target, prime), pLen)
+	expBytes := paillierct.FixedEncode(exp, pLen)
+	rootBytes, err := paillierct.ExpCT(modulus, base, expBytes)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Int).SetBytes(rootBytes), nil
+}
+
+func crtCombine(rootP, rootQ, p, q, n *big.Int) (*big.Int, error) {
+	pInvQ := new(big.Int).ModInverse(p, q)
+	if pInvQ == nil {
+		return nil, errors.New("non-coprime Paillier factors")
+	}
+	delta := new(big.Int).Sub(rootQ, rootP)
+	delta.Mul(delta, pInvQ)
+	delta.Mod(delta, q)
+	out := new(big.Int).Mul(p, delta)
+	out.Add(out, rootP)
+	out.Mod(out, n)
+	return out, nil
+}
+
+func verifyRoot(root, target, n *big.Int) bool {
+	square := new(big.Int).Mul(root, root)
+	square.Mod(square, n)
+	expected := new(big.Int).Mod(target, n)
+	return square.Cmp(expected) == 0
+}
+
+func validateRootProofResponseShell(response []byte) error {
+	items, err := wire.DecodeBytesList(response)
+	if err != nil {
+		return fmt.Errorf("invalid root proof response: %w", err)
+	}
+	if len(items) != rootProofRounds {
+		return fmt.Errorf("invalid root proof round count %d", len(items))
+	}
+	for i, item := range items {
+		if len(item) < 2 {
+			return fmt.Errorf("invalid root proof response %d", i)
+		}
+		if item[0] != rootProofPositive && item[0] != rootProofNegative {
+			return fmt.Errorf("invalid root proof response sign %d", i)
+		}
+	}
+	return nil
 }
 
 func validatePrimalityProof(p *PrimalityProof) error {
@@ -471,13 +594,13 @@ func validatePrimalityProof(p *PrimalityProof) error {
 	if len(p.TranscriptHash) != sha256.Size {
 		return errors.New("invalid primality proof transcript hash")
 	}
-	if err := validatePositiveIntBytes("commitment", p.Commitment); err != nil {
-		return err
+	if len(p.Commitment) != rootProofSeedBytes {
+		return errors.New("invalid primality proof seed")
 	}
-	if err := validatePositiveIntBytes("challenge", p.Challenge); err != nil {
-		return err
+	if len(p.Challenge) != sha256.Size {
+		return errors.New("invalid primality proof challenge")
 	}
-	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+	if err := validateRootProofResponseShell(p.Response); err != nil {
 		return err
 	}
 	return nil
@@ -525,19 +648,6 @@ func UnmarshalPrimalityProof(in []byte) (*PrimalityProof, error) {
 		return nil, err
 	}
 	return p, nil
-}
-
-// challengeBits derives a positive integer challenge from a transcript hash.
-func challengeBits(transcript []byte, bits int) *big.Int {
-	if bits > len(transcript)*8 {
-		bits = len(transcript) * 8
-	}
-	out := new(big.Int).SetBytes(transcript)
-	out.Rsh(out, uint(len(transcript)*8-bits))
-	if out.Sign() == 0 {
-		out.SetInt64(1)
-	}
-	return out
 }
 
 // ProveEncryption creates a unified Π^Enc proof that a Paillier ciphertext
@@ -1224,6 +1334,9 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	if validateMTAResponseProof(proof) != nil || pk == nil || pk.ValidateCiphertext(encA) != nil || pk.ValidateCiphertext(response) != nil {
 		return false
 	}
+	if err := validateMTAResponseProofBounds(proof, pk); err != nil {
+		return false
+	}
 	bCommitment, err := secp.PointFromBytes(bCommitmentBytes)
 	if err != nil {
 		return false
@@ -1467,13 +1580,13 @@ func validateModulusProof(p *ModulusProof) error {
 	if len(p.TranscriptHash) != sha256.Size || len(p.SmallFactorCheck) != sha256.Size {
 		return errors.New("invalid modulus proof")
 	}
-	if err := validatePositiveIntBytes("commitment", p.Commitment); err != nil {
-		return err
+	if len(p.Commitment) != rootProofSeedBytes {
+		return errors.New("invalid modulus proof seed")
 	}
-	if err := validatePositiveIntBytes("challenge", p.Challenge); err != nil {
-		return err
+	if len(p.Challenge) != sha256.Size {
+		return errors.New("invalid modulus proof challenge")
 	}
-	if err := validatePositiveIntBytes("response", p.Response); err != nil {
+	if err := validateRootProofResponseShell(p.Response); err != nil {
 		return err
 	}
 	return nil
@@ -1560,14 +1673,41 @@ func validateMTAResponseProof(p *MTAResponseProof) error {
 	if err := validatePositiveIntBytes("cipher commitment", p.CipherCommitment); err != nil {
 		return err
 	}
+	if len(p.BResponse) > mtaResponseScalarMaxBytes {
+		return errors.New("MtA b response too large")
+	}
 	if err := validatePositiveIntBytes("b response", p.BResponse); err != nil {
 		return err
+	}
+	if len(p.BetaResponse) > mtaResponseScalarMaxBytes {
+		return errors.New("MtA beta response too large")
 	}
 	if err := validatePositiveIntBytes("beta response", p.BetaResponse); err != nil {
 		return err
 	}
 	if err := validatePositiveIntBytes("randomness", p.Randomness); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateMTAResponseProofBounds(p *MTAResponseProof, pk *pai.PublicKey) error {
+	if pk == nil || pk.N == nil {
+		return errors.New("nil Paillier public key")
+	}
+	nLen := (pk.N.BitLen() + 7) / 8
+	nSquaredLen := 2 * nLen
+	if len(p.CipherCommitment) > nSquaredLen {
+		return errors.New("MtA cipher commitment too large")
+	}
+	if len(p.Randomness) > nLen {
+		return errors.New("MtA randomness too large")
+	}
+	if len(p.BResponse) > mtaResponseScalarMaxBytes {
+		return errors.New("MtA b response too large")
+	}
+	if len(p.BetaResponse) > mtaResponseScalarMaxBytes {
+		return errors.New("MtA beta response too large")
 	}
 	return nil
 }
@@ -1681,6 +1821,20 @@ func hashParts(parts ...[]byte) []byte {
 		_, _ = h.Write(part)
 	}
 	return h.Sum(nil)
+}
+
+func expandHash(size int, parts ...[]byte) []byte {
+	if size <= 0 {
+		return nil
+	}
+	out := make([]byte, 0, size)
+	for counter := uint32(0); len(out) < size; counter++ {
+		blockParts := make([][]byte, 0, len(parts)+1)
+		blockParts = append(blockParts, parts...)
+		blockParts = append(blockParts, wire.Uint32(counter))
+		out = append(out, hashParts(blockParts...)...)
+	}
+	return out[:size]
 }
 
 func randomScalar(reader io.Reader) (*big.Int, error) {

@@ -298,6 +298,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 		s.primalityProofs[env.From] = append([]byte(nil), p.PrimalityProof...)
 	case payloadKeygenShare:
+		if err := requireDirectConfidential(env, s.cfg.Self, payloadKeygenShare); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 		}
@@ -321,7 +324,7 @@ func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.keyShare, true
+	return cloneKeyShareValue(s.keyShare), true
 }
 
 func (s *KeygenSession) tryComplete() error {
@@ -448,11 +451,11 @@ func (s *KeygenSession) tryComplete() error {
 		Parties:                 append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:               append([]byte(nil), groupCommitments[0]...),
 		ChainCode:               chainCode,
-		Secret:                  scalarBytes(secret),
+		secret:                  scalarBytes(secret),
 		GroupCommitments:        groupCommitments,
 		VerificationShares:      verificationShares,
 		PaillierPublicKey:       localPaillierPub,
-		PaillierPrivateKey:      localPaillierPriv,
+		paillierPrivateKey:      localPaillierPriv,
 		PaillierProof:           localPaillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.primalityProofs[s.cfg.Self]...),
 		PaillierPrimalityProofs: primalityProofs,

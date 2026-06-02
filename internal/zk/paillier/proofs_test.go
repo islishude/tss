@@ -64,6 +64,59 @@ func TestModulusProofTamper(t *testing.T) {
 	}
 }
 
+func TestRootProofRejectsSelfConsistentForgery(t *testing.T) {
+	restore := pai.SetMinimumModulusBitsForTesting(512)
+	defer restore()
+	sk, err := pai.GenerateKey(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := []byte("forged root proof")
+	party := uint32(1)
+	raw, err := sk.PublicKey.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	nLen := (sk.N.BitLen() + 7) / 8
+	root := make([]byte, 1+nLen)
+	root[0] = rootProofPositive
+	root[len(root)-1] = 1
+	items := make([][]byte, rootProofRounds)
+	for i := range items {
+		items[i] = append([]byte(nil), root...)
+	}
+	response := wire.EncodeBytesList(items)
+	seed := bytes.Repeat([]byte{0x42}, rootProofSeedBytes)
+	transcript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw, seed)
+	forgedModulus := &ModulusProof{
+		Version:          proofVersion,
+		NBits:            sk.N.BitLen(),
+		SmallFactorCheck: smallFactorDigest(sk.N),
+		TranscriptHash:   transcript,
+		Commitment:       seed,
+		Challenge:        hashParts([]byte(modulusChallengeLabel), transcript),
+		Response:         response,
+	}
+	if VerifyModulus(domain, &sk.PublicKey, party, forgedModulus) {
+		t.Fatal("self-consistent forged modulus proof verified")
+	}
+
+	factorBits := max(sk.P.BitLen(), sk.Q.BitLen())
+	factorBitsBytes := wire.Uint32(uint32(factorBits))
+	transcript = hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, factorBitsBytes, seed)
+	forgedPrimality := &PrimalityProof{
+		Version:        proofVersion,
+		FactorBitLen:   factorBits,
+		TranscriptHash: transcript,
+		Commitment:     seed,
+		Challenge:      hashParts([]byte(primalityChallengeLabel), transcript),
+		Response:       response,
+	}
+	if VerifyPrimality(domain, &sk.PublicKey, party, forgedPrimality) {
+		t.Fatal("self-consistent forged primality proof verified")
+	}
+}
+
 func TestProofMarshalCanonicalBinary(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
@@ -191,6 +244,52 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 				t.Fatal("tampered MtA response proof verified")
 			}
 		})
+	}
+}
+
+func TestMTAResponseProofRejectsOversizedResponses(t *testing.T) {
+	restore := pai.SetMinimumModulusBitsForTesting(1024)
+	defer restore()
+	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	domain := []byte("mta oversize")
+	a := big.NewInt(23)
+	b := big.NewInt(29)
+	beta := big.NewInt(31)
+	encA, _, err := sk.Encrypt(nil, a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := new(big.Int).Exp(encA, b, sk.NSquared)
+	response.Mul(response, encBeta)
+	response.Mod(response, sk.NSquared)
+	proof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
+	if err != nil {
+		t.Fatal(err)
+	}
+	oversizedScalar := cloneMTAResponseProof(proof)
+	oversizedScalar.BResponse = append([]byte{1}, make([]byte, mtaResponseScalarMaxBytes)...)
+	if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, oversizedScalar) {
+		t.Fatal("oversized MtA b response verified")
+	}
+	if _, err := Marshal(oversizedScalar); err == nil {
+		t.Fatal("oversized MtA b response marshaled")
+	}
+
+	oversizedRandomness := cloneMTAResponseProof(proof)
+	oversizedRandomness.Randomness = append([]byte{1}, make([]byte, (sk.N.BitLen()+7)/8)...)
+	if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, oversizedRandomness) {
+		t.Fatal("oversized MtA randomness verified")
 	}
 }
 

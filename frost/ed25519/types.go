@@ -36,7 +36,7 @@ type KeyShare struct {
 	Parties              []tss.PartyID `json:"parties"`
 	PublicKey            []byte        `json:"public_key"`
 	ChainCode            []byte        `json:"chain_code,omitempty"`
-	Secret               []byte
+	secret               []byte
 	GroupCommitments     [][]byte            `json:"group_commitments"`
 	VerificationShares   []VerificationShare `json:"verification_shares"`
 	KeygenTranscriptHash []byte              `json:"keygen_transcript_hash,omitempty"`
@@ -73,6 +73,40 @@ func (k KeyShare) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("frost ed25519 key share contains secret material; use MarshalBinary")
 }
 
+// String returns a redacted representation of the key share.
+func (k KeyShare) String() string {
+	return k.redactedString()
+}
+
+// GoString returns a redacted representation of the key share.
+func (k KeyShare) GoString() string {
+	return k.redactedString()
+}
+
+// Format writes a redacted representation of the key share.
+func (k *KeyShare) Format(state fmt.State, verb rune) {
+	if k == nil {
+		_, _ = fmt.Fprint(state, "<nil>")
+		return
+	}
+	_, _ = fmt.Fprint(state, k.redactedString())
+}
+
+func (k KeyShare) redactedString() string {
+	return fmt.Sprintf(
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenTranscriptHash:%x}",
+		k.Version,
+		k.Party,
+		k.Threshold,
+		k.Parties,
+		k.PublicKey,
+		len(k.ChainCode),
+		len(k.GroupCommitments),
+		len(k.VerificationShares),
+		k.KeygenTranscriptHash,
+	)
+}
+
 // UnmarshalKeyShare decodes a canonical FROST key-share record.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShare(in)
@@ -104,7 +138,7 @@ func (k *KeyShare) Validate() error {
 	if len(k.KeygenTranscriptHash) == 0 {
 		return errors.New("key share has no keygen transcript hash")
 	}
-	if _, err := edcurve.ScalarFromCanonical(k.Secret); err != nil {
+	if _, err := edcurve.ScalarFromCanonical(k.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if len(k.GroupCommitments) != k.Threshold {
@@ -149,11 +183,11 @@ func (k *KeyShare) Destroy() {
 		return
 	}
 	clear(k.ChainCode)
-	clear(k.Secret)
+	clear(k.secret)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
-	s, err := edcurve.ScalarFromCanonical(k.Secret)
+	s, err := edcurve.ScalarFromCanonical(k.secret)
 	if err != nil {
 		return nil, err
 	}
@@ -167,6 +201,43 @@ func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
 		}
 	}
 	return nil, false
+}
+
+func cloneKeyShareValue(k *KeyShare) *KeyShare {
+	if k == nil {
+		return nil
+	}
+	out := *k
+	out.Parties = slices.Clone(k.Parties)
+	out.PublicKey = slices.Clone(k.PublicKey)
+	out.ChainCode = slices.Clone(k.ChainCode)
+	out.secret = slices.Clone(k.secret)
+	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
+	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
+	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
+	return &out
+}
+
+func cloneKeyShareByteSlices(in [][]byte) [][]byte {
+	if in == nil {
+		return nil
+	}
+	out := make([][]byte, len(in))
+	for i, item := range in {
+		out[i] = slices.Clone(item)
+	}
+	return out
+}
+
+func cloneVerificationShares(in []VerificationShare) []VerificationShare {
+	if in == nil {
+		return nil
+	}
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].PublicKey = slices.Clone(out[i].PublicKey)
+	}
+	return out
 }
 
 func scalarBytes(x *big.Int) ([]byte, error) {
@@ -207,4 +278,14 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 	}
 	shifted := edcurve.AddPoints(base, fed.NewIdentityPoint().ScalarBaseMult(shift))
 	return shifted.Bytes(), nil
+}
+
+func requireDirectConfidential(env tss.Envelope, self tss.PartyID, payloadType string) error {
+	if env.To != self {
+		return fmt.Errorf("%s must be addressed to receiver", payloadType)
+	}
+	if !env.ConfidentialRequired {
+		return fmt.Errorf("%s must require confidential transport", payloadType)
+	}
+	return nil
 }

@@ -240,6 +240,10 @@ func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 		return expectEvidenceMessage(evidence, 1, payloadKeygenCommitments)
 	case tss.EvidenceKindKeygenShare:
 		return expectEvidenceMessage(evidence, 1, payloadKeygenShare)
+	case tss.EvidenceKindRefreshShare:
+		return expectEvidenceMessage(evidence, 1, payloadRefreshShare)
+	case tss.EvidenceKindReshareShare:
+		return expectEvidenceMessage(evidence, 1, payloadReshareShare)
 	case tss.EvidenceKindPresignRound1:
 		return expectEvidenceMessage(evidence, 1, payloadPresignRound1)
 	case tss.EvidenceKindPresignRound2:

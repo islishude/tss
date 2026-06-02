@@ -37,6 +37,11 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected transcript mismatch")
 	}
+	decoded = env
+	decoded.ConfidentialRequired = !decoded.ConfidentialRequired
+	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
+		t.Fatal("expected confidentiality flag transcript mismatch")
+	}
 }
 
 func TestEnvelopeUnmarshalRejectsNonCanonicalEncoding(t *testing.T) {

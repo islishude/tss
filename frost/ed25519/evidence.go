@@ -14,6 +14,7 @@ const (
 	frostEvidenceFieldSignerSetHash   = "signer_set_hash"
 	frostPartySetHashLabel            = "frost-ed25519-party-set-v1"
 	frostCommitmentsHashLabel         = "frost-ed25519-keygen-commitments-v1"
+	frostReshareCommitmentsHashLabel  = "frost-ed25519-reshare-commitments-v1"
 )
 
 func frostMarshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fields ...tss.EvidenceField) []byte {
@@ -40,6 +41,22 @@ func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitment
 			"invalid DKG share",
 			frostRawField(frostEvidenceFieldPartiesHash, frostPartySetHash(config.Parties)),
 			frostRawField(frostEvidenceFieldCommitmentsHash, frostByteSlicesHash(frostCommitmentsHashLabel, commitments)),
+		),
+	}
+}
+
+// frostReshareBlame builds Blame evidence for an invalid FROST reshare share.
+func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitments [][]byte) *tss.Blame {
+	evidenceEnv := envelope(config, 1, dealer, config.Self, payloadReshareShare, nil, true)
+	return &tss.Blame{
+		Reason:  "invalid reshare share",
+		Parties: []tss.PartyID{dealer},
+		Evidence: frostMarshalEvidence(
+			evidenceEnv,
+			tss.EvidenceKindFrostReshareShare,
+			"invalid reshare share",
+			frostRawField(frostEvidenceFieldPartiesHash, frostPartySetHash(config.Parties)),
+			frostRawField(frostEvidenceFieldCommitmentsHash, frostByteSlicesHash(frostReshareCommitmentsHashLabel, commitments)),
 		),
 	}
 }

@@ -286,14 +286,14 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
 	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.Secret = append([]byte(nil), in.Secret...)
+	out.secret = append([]byte(nil), in.secret...)
 	out.GroupCommitments = cloneByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
 	for i := range out.VerificationShares {
 		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
 	}
 	out.PaillierPublicKey = append([]byte(nil), in.PaillierPublicKey...)
-	out.PaillierPrivateKey = append([]byte(nil), in.PaillierPrivateKey...)
+	out.paillierPrivateKey = append([]byte(nil), in.paillierPrivateKey...)
 	out.PaillierProof = append([]byte(nil), in.PaillierProof...)
 	out.PaillierPrimalityProof = append([]byte(nil), in.PaillierPrimalityProof...)
 	out.PaillierPrimalityProofs = cloneByteSlices(in.PaillierPrimalityProofs)

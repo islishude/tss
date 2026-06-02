@@ -150,6 +150,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		}
 		s.chainCodes[env.From] = append([]byte(nil), p.ChainCode...)
 	case payloadKeygenShare:
+		if err := requireDirectConfidential(env, s.cfg.Self, payloadKeygenShare); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 		}
@@ -173,7 +176,7 @@ func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.keyShare, true
+	return cloneKeyShareValue(s.keyShare), true
 }
 
 func (s *KeygenSession) tryComplete() error {
@@ -245,7 +248,7 @@ func (s *KeygenSession) tryComplete() error {
 		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:            append([]byte(nil), groupCommitments[0]...),
 		ChainCode:            chainCode,
-		Secret:               secretBytes,
+		secret:               secretBytes,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: keygenTranscriptHash,

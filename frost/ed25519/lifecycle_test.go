@@ -3,6 +3,8 @@ package ed25519
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -19,11 +21,58 @@ func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
 	}
 	publicKey := append([]byte(nil), share.PublicKey...)
 	share.Destroy()
-	if !allZeroBytes(share.Secret) {
+	if !allZeroBytes(share.secret) {
 		t.Fatal("key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
 		t.Fatal("public key metadata changed")
+	}
+}
+
+func TestFROSTKeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+		Threshold: 1,
+		Parties:   []tss.PartyID{1},
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	share, ok := keygen.KeyShare()
+	if !ok {
+		t.Fatal("keygen did not complete")
+	}
+	formatted := fmt.Sprintf("%#v", share)
+	formattedValue := fmt.Sprintf("%#v", *share)
+	if !strings.Contains(formatted, "Secret:<redacted>") {
+		t.Fatalf("formatted key share did not mark secret field redacted: %s", formatted)
+	}
+	if !strings.Contains(formattedValue, "Secret:<redacted>") {
+		t.Fatalf("formatted key share value did not mark secret field redacted: %s", formattedValue)
+	}
+	if strings.Contains(formatted, string(share.secret)) {
+		t.Fatal("formatted key share exposed secret scalar bytes")
+	}
+	if strings.Contains(formattedValue, string(share.secret)) {
+		t.Fatal("formatted key share value exposed secret scalar bytes")
+	}
+	if keygen.keyShare == nil {
+		t.Fatal("missing session-retained key share")
+	}
+	internalPublic := append([]byte(nil), keygen.keyShare.PublicKey...)
+	internalSecret := append([]byte(nil), keygen.keyShare.secret...)
+	share.PublicKey[0] ^= 1
+	share.secret[0] ^= 1
+	if !bytes.Equal(keygen.keyShare.PublicKey, internalPublic) {
+		t.Fatal("mutating returned key share changed session public key")
+	}
+	if !bytes.Equal(keygen.keyShare.secret, internalSecret) {
+		t.Fatal("mutating returned key share changed session secret scalar")
 	}
 }
 
@@ -53,7 +102,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.ownPoly != nil {
 		t.Fatal("keygen polynomial was not released")
 	}
-	if !allZeroBytes(share.Secret) {
+	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret) {
 		t.Fatal("completed key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {

@@ -19,6 +19,10 @@ const (
 	EvidenceKindKeygenPaillier EvidenceKind = "keygen_paillier"
 	// EvidenceKindKeygenShare marks a DKG share that does not match commitments.
 	EvidenceKindKeygenShare EvidenceKind = "keygen_share"
+	// EvidenceKindRefreshShare marks a proactive refresh share that does not match commitments.
+	EvidenceKindRefreshShare EvidenceKind = "refresh_share"
+	// EvidenceKindReshareShare marks a CGGMP21 reshare share that does not match commitments.
+	EvidenceKindReshareShare EvidenceKind = "reshare_share"
 	// EvidenceKindPresignRound1 marks invalid presign nonce commitment material.
 	EvidenceKindPresignRound1 EvidenceKind = "presign_round1"
 	// EvidenceKindPresignRound2 marks invalid pairwise MtA response material.
@@ -31,6 +35,8 @@ const (
 	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
 	// EvidenceKindFrostKeygenShare marks an invalid FROST DKG share.
 	EvidenceKindFrostKeygenShare EvidenceKind = "frost_keygen_share"
+	// EvidenceKindFrostReshareShare marks an invalid FROST reshare share.
+	EvidenceKindFrostReshareShare EvidenceKind = "frost_reshare_share"
 	// EvidenceKindFrostPartialSignature marks an invalid FROST partial signature.
 	EvidenceKindFrostPartialSignature EvidenceKind = "frost_partial_signature"
 	// EvidenceKindFrostAggregateSignature marks a failed FROST aggregate Ed25519 signature.

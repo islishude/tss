@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 )
 
@@ -572,6 +573,80 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	if !bytes.Equal(oldPub, pub) {
 		t.Fatal("public key from signing differs from original")
 	}
+}
+
+func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
+	shares := secpKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	session, _, err := StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.HandleRefreshMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalRefreshSharePayload(out2[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badShare := new(big.Int).SetBytes(payload.Share)
+	badShare.Add(badShare, big.NewInt(1))
+	badShare.Mod(badShare, secp.Order())
+	if badShare.Sign() == 0 {
+		badShare.SetInt64(1)
+	}
+	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: scalarBytes(badShare)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[1] = out2[1].WithTranscriptHash()
+	_, err = session.HandleRefreshMessage(out2[1])
+	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
+}
+
+func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
+	shares := secpKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	session, _, err := StartReshare(shares[1], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID}, parties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartReshare(shares[2], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID}, parties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badShare := new(big.Int).SetBytes(payload.Share)
+	badShare.Add(badShare, big.NewInt(1))
+	badShare.Mod(badShare, secp.Order())
+	if badShare.Sign() == 0 {
+		badShare.SetInt64(1)
+	}
+	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: scalarBytes(badShare)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[1] = out2[1].WithTranscriptHash()
+	_, err = session.HandleReshareMessage(out2[1])
+	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
 func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {

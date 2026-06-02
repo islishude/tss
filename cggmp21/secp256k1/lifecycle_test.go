@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -20,10 +22,10 @@ func TestCGGMP21KeyShareJSONAndDestroy(t *testing.T) {
 	}
 	publicKey := append([]byte(nil), share.PublicKey...)
 	share.Destroy()
-	if !allZeroBytes(share.Secret) {
+	if !allZeroBytes(share.secret) {
 		t.Fatal("key share secret was not cleared")
 	}
-	if !allZeroBytes(share.PaillierPrivateKey) {
+	if !allZeroBytes(share.paillierPrivateKey) {
 		t.Fatal("Paillier private key bytes were not cleared")
 	}
 	if !allZeroBytes(share.ChainCode) {
@@ -31,6 +33,43 @@ func TestCGGMP21KeyShareJSONAndDestroy(t *testing.T) {
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
 		t.Fatal("public key metadata changed")
+	}
+}
+
+func TestCGGMP21KeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
+	keygen, share := secpLifecycleKeygen(t, false)
+	formatted := fmt.Sprintf("%#v", share)
+	formattedValue := fmt.Sprintf("%#v", *share)
+	if !strings.Contains(formatted, "Secret:<redacted>") || !strings.Contains(formatted, "PaillierPrivateKey:<redacted>") {
+		t.Fatalf("formatted key share did not mark secret fields redacted: %s", formatted)
+	}
+	if !strings.Contains(formattedValue, "Secret:<redacted>") || !strings.Contains(formattedValue, "PaillierPrivateKey:<redacted>") {
+		t.Fatalf("formatted key share value did not mark secret fields redacted: %s", formattedValue)
+	}
+	if strings.Contains(formatted, fmt.Sprint(string(share.secret))) {
+		t.Fatal("formatted key share exposed secret scalar bytes")
+	}
+	if strings.Contains(formattedValue, fmt.Sprint(string(share.secret))) {
+		t.Fatal("formatted key share value exposed secret scalar bytes")
+	}
+	if strings.Contains(formatted, fmt.Sprint(string(share.paillierPrivateKey))) {
+		t.Fatal("formatted key share exposed Paillier private-key bytes")
+	}
+	if strings.Contains(formattedValue, fmt.Sprint(string(share.paillierPrivateKey))) {
+		t.Fatal("formatted key share value exposed Paillier private-key bytes")
+	}
+	if keygen.keyShare == nil {
+		t.Fatal("missing session-retained key share")
+	}
+	internalPublic := append([]byte(nil), keygen.keyShare.PublicKey...)
+	internalSecret := append([]byte(nil), keygen.keyShare.secret...)
+	share.PublicKey[0] ^= 1
+	share.secret[0] ^= 1
+	if !bytes.Equal(keygen.keyShare.PublicKey, internalPublic) {
+		t.Fatal("mutating returned key share changed session public key")
+	}
+	if !bytes.Equal(keygen.keyShare.secret, internalSecret) {
+		t.Fatal("mutating returned key share changed session secret scalar")
 	}
 }
 
@@ -71,7 +110,7 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.paillier != nil {
 		t.Fatal("Paillier private key was not released")
 	}
-	if !allZeroBytes(share.Secret) || !allZeroBytes(share.PaillierPrivateKey) {
+	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret) || !allZeroBytes(keygen.keyShare.paillierPrivateKey) {
 		t.Fatal("completed key share secret material was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {

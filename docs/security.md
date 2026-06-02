@@ -54,6 +54,12 @@ Secret-bearing records reject default JSON marshaling. Persist `KeyShare` and
 CGGMP21 `Presign` values only through their explicit binary encoders, then store
 the resulting bytes under caller-managed encryption.
 
+Algorithm-specific `KeyShare` structs keep secret scalar and Paillier private-key
+bytes in unexported fields. Their string and Go-string formatting is redacted.
+Session `KeyShare()` accessors return caller-owned copies, so mutating a returned
+share does not mutate session-retained state. Callers must still destroy returned
+shares when they are no longer needed.
+
 Call `Destroy` on key shares, presigns, keygen sessions, presign sessions, and
 signing sessions once they are no longer needed. These methods clear local
 secret byte slices and scalar state such as Shamir shares, nonces, online

@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	refreshTranscriptHashLabel = "cggmp21-secp256k1-refresh-transcript-v1"
+	refreshCommitmentsHashLabel = "cggmp21-secp256k1-refresh-commitments-v1"
+	refreshTranscriptHashLabel  = "cggmp21-secp256k1-refresh-transcript-v1"
 )
 
 // RefreshSession refreshes CGGMP21 key shares and rotates Paillier keys while
@@ -240,6 +241,9 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 		s.newPaillierPrimalityProofs[env.From] = p.PrimalityProof
 	case payloadRefreshShare:
+		if err := requireDirectConfidential(env, s.oldKey.Party, payloadRefreshShare); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
 		}
@@ -263,7 +267,7 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.newShare, true
+	return cloneKeyShareValue(s.newShare), true
 }
 
 func (s *RefreshSession) tryComplete() error {
@@ -276,12 +280,23 @@ func (s *RefreshSession) tryComplete() error {
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), secp.ScalarFromBigInt(share)); err != nil {
+			evidenceEnv := envelope(s.cfg, 1, dealer, s.oldKey.Party, payloadRefreshShare, nil, true)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid refresh share", Parties: []tss.PartyID{dealer}},
-				Err:   err,
+				Blame: &tss.Blame{
+					Reason:  "invalid refresh share",
+					Parties: []tss.PartyID{dealer},
+					Evidence: marshalEvidence(
+						evidenceEnv,
+						tss.EvidenceKindRefreshShare,
+						"invalid refresh share",
+						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
+					),
+				},
+				Err: err,
 			}
 		}
 	}
@@ -380,11 +395,11 @@ func (s *RefreshSession) tryComplete() error {
 		Parties:                 append([]tss.PartyID(nil), s.oldKey.Parties...),
 		PublicKey:               append([]byte(nil), newCommitments[0]...),
 		ChainCode:               append([]byte(nil), s.oldKey.ChainCode...),
-		Secret:                  scalarBytes(newSecret),
+		secret:                  scalarBytes(newSecret),
 		GroupCommitments:        newCommitments,
 		VerificationShares:      verificationShares,
 		PaillierPublicKey:       append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
-		PaillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
+		paillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
 		PaillierProof:           paillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
 		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),

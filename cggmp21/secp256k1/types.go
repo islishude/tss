@@ -64,11 +64,11 @@ type KeyShare struct {
 	Parties                 []tss.PartyID `json:"parties"`
 	PublicKey               []byte        `json:"public_key"`
 	ChainCode               []byte        `json:"chain_code,omitempty"`
-	Secret                  []byte
-	GroupCommitments        [][]byte              `json:"group_commitments"`
-	VerificationShares      []VerificationShare   `json:"verification_shares"`
-	PaillierPublicKey       []byte                `json:"paillier_public_key,omitempty"`
-	PaillierPrivateKey      []byte                `json:"paillier_private_key,omitempty"`
+	secret                  []byte
+	GroupCommitments        [][]byte            `json:"group_commitments"`
+	VerificationShares      []VerificationShare `json:"verification_shares"`
+	PaillierPublicKey       []byte              `json:"paillier_public_key,omitempty"`
+	paillierPrivateKey      []byte
 	PaillierProof           []byte                `json:"paillier_proof,omitempty"`
 	PaillierPrimalityProof  []byte                `json:"paillier_primality_proof,omitempty"`
 	PaillierPrimalityProofs [][]byte              `json:"paillier_primality_proofs,omitempty"`
@@ -132,6 +132,48 @@ func (k KeyShare) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 key share contains secret material; use MarshalBinary")
 }
 
+// String returns a redacted representation of the key share.
+func (k KeyShare) String() string {
+	return k.redactedString()
+}
+
+// GoString returns a redacted representation of the key share.
+func (k KeyShare) GoString() string {
+	return k.redactedString()
+}
+
+// Format writes a redacted representation of the key share.
+func (k *KeyShare) Format(state fmt.State, verb rune) {
+	if k == nil {
+		_, _ = fmt.Fprint(state, "<nil>")
+		return
+	}
+	_, _ = fmt.Fprint(state, k.redactedString())
+}
+
+func (k KeyShare) redactedString() string {
+	return fmt.Sprintf(
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPrimalityProof:%d bytes PaillierPrimalityProofs:%d PaillierPublicKeys:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x}",
+		k.Version,
+		k.Party,
+		k.Threshold,
+		k.Parties,
+		k.PublicKey,
+		len(k.ChainCode),
+		len(k.GroupCommitments),
+		len(k.VerificationShares),
+		len(k.PaillierPublicKey),
+		len(k.PaillierProof),
+		len(k.PaillierPrimalityProof),
+		len(k.PaillierPrimalityProofs),
+		len(k.PaillierPublicKeys),
+		k.PaillierProofSessionID,
+		k.PaillierProofDomain,
+		len(k.ShareProof),
+		k.KeygenTranscriptHash,
+	)
+}
+
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShare(in)
@@ -160,7 +202,7 @@ func (k *KeyShare) Validate() error {
 	if len(k.ChainCode) != 0 && len(k.ChainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
 	}
-	if _, err := secp.ParseScalar(k.Secret); err != nil {
+	if _, err := secp.ParseScalar(k.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if len(k.GroupCommitments) != k.Threshold {
@@ -193,7 +235,7 @@ func (k *KeyShare) Validate() error {
 	if len(k.PaillierPublicKey) == 0 {
 		return errors.New("missing paillier public key")
 	}
-	if len(k.PaillierPrivateKey) == 0 {
+	if len(k.paillierPrivateKey) == 0 {
 		return errors.New("missing paillier private key")
 	}
 	if len(k.PaillierProof) == 0 {
@@ -218,7 +260,7 @@ func (k *KeyShare) Validate() error {
 	if err != nil {
 		return fmt.Errorf("invalid paillier public key: %w", err)
 	}
-	sk, err := pai.UnmarshalPrivateKey(k.PaillierPrivateKey)
+	sk, err := pai.UnmarshalPrivateKey(k.paillierPrivateKey)
 	if err != nil {
 		return fmt.Errorf("invalid paillier private key: %w", err)
 	}
@@ -327,12 +369,12 @@ func (k *KeyShare) Destroy() {
 		return
 	}
 	clear(k.ChainCode)
-	clear(k.Secret)
-	clear(k.PaillierPrivateKey)
+	clear(k.secret)
+	clear(k.paillierPrivateKey)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
-	s, err := secp.ParseScalar(k.Secret)
+	s, err := secp.ParseScalar(k.secret)
 	if err != nil {
 		return nil, err
 	}
@@ -360,7 +402,7 @@ func (k *KeyShare) paillierPublic() (*pai.PublicKey, error) {
 }
 
 func (k *KeyShare) paillierPrivate() (*pai.PrivateKey, error) {
-	return pai.UnmarshalPrivateKey(k.PaillierPrivateKey)
+	return pai.UnmarshalPrivateKey(k.paillierPrivateKey)
 }
 
 func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
@@ -384,6 +426,50 @@ func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
 	return nil, false
 }
 
+func cloneKeyShareValue(k *KeyShare) *KeyShare {
+	if k == nil {
+		return nil
+	}
+	out := *k
+	out.Parties = slices.Clone(k.Parties)
+	out.PublicKey = slices.Clone(k.PublicKey)
+	out.ChainCode = slices.Clone(k.ChainCode)
+	out.secret = slices.Clone(k.secret)
+	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
+	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
+	out.PaillierPublicKey = slices.Clone(k.PaillierPublicKey)
+	out.paillierPrivateKey = slices.Clone(k.paillierPrivateKey)
+	out.PaillierProof = slices.Clone(k.PaillierProof)
+	out.PaillierPrimalityProof = slices.Clone(k.PaillierPrimalityProof)
+	out.PaillierPrimalityProofs = cloneKeyShareByteSlices(k.PaillierPrimalityProofs)
+	out.PaillierPublicKeys = clonePaillierPublicShares(k.PaillierPublicKeys)
+	out.ShareProof = slices.Clone(k.ShareProof)
+	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
+	return &out
+}
+
+func cloneKeyShareByteSlices(in [][]byte) [][]byte {
+	if in == nil {
+		return nil
+	}
+	out := make([][]byte, len(in))
+	for i, item := range in {
+		out[i] = slices.Clone(item)
+	}
+	return out
+}
+
+func cloneVerificationShares(in []VerificationShare) []VerificationShare {
+	if in == nil {
+		return nil
+	}
+	out := slices.Clone(in)
+	for i := range out {
+		out[i].PublicKey = slices.Clone(out[i].PublicKey)
+	}
+	return out
+}
+
 func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType string, payload []byte, confidential bool) tss.Envelope {
 	return tss.Envelope{
 		Protocol:             protocol,
@@ -396,4 +482,14 @@ func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, pay
 		Payload:              payload,
 		ConfidentialRequired: confidential,
 	}.WithTranscriptHash()
+}
+
+func requireDirectConfidential(env tss.Envelope, self tss.PartyID, payloadType string) error {
+	if env.To != self {
+		return fmt.Errorf("%s must be addressed to receiver", payloadType)
+	}
+	if !env.ConfidentialRequired {
+		return fmt.Errorf("%s must require confidential transport", payloadType)
+	}
+	return nil
 }

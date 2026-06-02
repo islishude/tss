@@ -82,7 +82,10 @@ For HD-style additive shifts, callers pass the already-derived scalar shift in `
 
 ## Blame Evidence
 
-Malformed commitments, Paillier mismatches, invalid MtA responses, malformed online partials, and aggregate verification failure attach `ProtocolError.Blame` when the failure can be attributed. Evidence contains public hashes and public context only.
+Malformed commitments, Paillier mismatches, invalid keygen/refresh/reshare
+shares, invalid MtA responses, malformed online partials, and aggregate
+verification failure attach `ProtocolError.Blame` when the failure can be
+attributed. Evidence contains public hashes and public context only.
 
 ## Unsupported
 

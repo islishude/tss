@@ -82,6 +82,20 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		_, err := kg1.HandleKeygenMessage(mutated)
 		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
+	t.Run("broadcast secret share", func(t *testing.T) {
+		mutated := share
+		mutated.To = 0
+		mutated = mutated.WithTranscriptHash()
+		_, err := kg1.HandleKeygenMessage(mutated)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	})
+	t.Run("non-confidential secret share", func(t *testing.T) {
+		mutated := share
+		mutated.ConfidentialRequired = false
+		mutated = mutated.WithTranscriptHash()
+		_, err := kg1.HandleKeygenMessage(mutated)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	})
 	t.Run("missing transcript", func(t *testing.T) {
 		mutated := commit
 		mutated.TranscriptHash = nil

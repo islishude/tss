@@ -140,6 +140,9 @@ err := received.UnmarshalBinary(data)
 **Message delivery guarantees:**
 
 - Broadcast messages (`To == 0`) must reach all participants.
+- Secret-bearing point-to-point messages must have `To` set to the receiver and
+  `ConfidentialRequired=true`; protocol handlers reject broadcast or
+  non-confidential secret shares.
 - Point-to-point messages (`To != 0`, `ConfidentialRequired=true`) must be delivered with confidentiality.
 - Within a round, messages can be delivered in any order.
 - Across rounds, messages must be processed sequentially — round N must complete before round N+1.

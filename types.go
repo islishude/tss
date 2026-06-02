@@ -324,6 +324,7 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	h.Write(e.SessionID[:])
 	h.Write(wire.Uint32(uint32(e.From)))
 	h.Write(wire.Uint32(uint32(e.To)))
+	h.Write(wire.Bool(e.ConfidentialRequired))
 	h.Write([]byte(e.PayloadType))
 	h.Write([]byte{0})
 	h.Write(e.Payload)

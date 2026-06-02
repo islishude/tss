@@ -3,9 +3,11 @@ package ed25519
 import (
 	stded25519 "crypto/ed25519"
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
 func TestFROSTSignScenarios(t *testing.T) {
@@ -129,6 +131,89 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 	}
 	if !delivered {
 		t.Fatal("mutated partial was not delivered")
+	}
+}
+
+func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := out2[1]
+	t.Run("broadcast", func(t *testing.T) {
+		mutated := share
+		mutated.To = 0
+		mutated = mutated.WithTranscriptHash()
+		_, err := kg1.HandleKeygenMessage(mutated)
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
+	})
+	t.Run("non-confidential", func(t *testing.T) {
+		mutated := share
+		mutated.ConfidentialRequired = false
+		mutated = mutated.WithTranscriptHash()
+		_, err := kg1.HandleKeygenMessage(mutated)
+		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
+	})
+}
+
+func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	session, _, err := StartReshare(shares[1], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID}, parties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartReshare(shares[2], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID}, parties)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalar, err := edcurve.ScalarFromCanonical(payload.Share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badShare := edcurve.ScalarToBig(scalar)
+	badShare.Add(badShare, big.NewInt(1))
+	badShare.Mod(badShare, edcurve.Order())
+	badShareBytes, err := scalarBytes(badShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[1] = out2[1].WithTranscriptHash()
+	_, err = session.HandleReshareMessage(out2[1])
+	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
+		t.Fatal("invalid FROST reshare share did not carry evidence")
+	}
+	evidence, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if evidence.Kind != tss.EvidenceKindFrostReshareShare {
+		t.Fatalf("unexpected evidence kind %q", evidence.Kind)
 	}
 }
 

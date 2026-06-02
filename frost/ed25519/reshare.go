@@ -132,11 +132,14 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
+		if err := validateReshareCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		s.commits[env.From] = p.Commitments
 	case payloadReshareShare:
+		if err := requireDirectConfidential(env, s.oldKey.Party, payloadReshareShare); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
 		}
@@ -160,7 +163,7 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.newShare, true
+	return cloneKeyShareValue(s.newShare), true
 }
 
 func (s *ReshareSession) tryComplete() error {
@@ -178,7 +181,7 @@ func (s *ReshareSession) tryComplete() error {
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{Reason: "invalid reshare share", Parties: []tss.PartyID{dealer}},
+				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer]),
 				Err:   err,
 			}
 		}
@@ -238,7 +241,7 @@ func (s *ReshareSession) tryComplete() error {
 		Parties:              append([]tss.PartyID(nil), s.newParties...),
 		PublicKey:            append([]byte(nil), newCommitments[0]...),
 		ChainCode:            append([]byte(nil), s.oldKey.ChainCode...),
-		Secret:               newSecretBytes,
+		secret:               newSecretBytes,
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: reshareTranscriptHash,
@@ -249,4 +252,16 @@ func (s *ReshareSession) tryComplete() error {
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
 	return s.newShare.Validate()
+}
+
+func validateReshareCommitments(commitments [][]byte, threshold int) error {
+	if len(commitments) != threshold {
+		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
+	}
+	for _, commitment := range commitments {
+		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
+			return err
+		}
+	}
+	return nil
 }

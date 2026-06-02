@@ -6,6 +6,7 @@ import (
 	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire"
 )
 
 type proofFataler interface {
@@ -19,9 +20,9 @@ func seedModulusProof() *ModulusProof {
 		NBits:            2048,
 		SmallFactorCheck: proofSeedHash(1),
 		TranscriptHash:   proofSeedHash(2),
-		Commitment:       []byte{3},
-		Challenge:        []byte{4},
-		Response:         []byte{5},
+		Commitment:       proofSeedHash(3),
+		Challenge:        proofSeedHash(4),
+		Response:         seedRootProofResponse(),
 	}
 }
 
@@ -71,6 +72,14 @@ func seedMTAResponseProof(tb proofFataler) *MTAResponseProof {
 
 func proofSeedHash(b byte) []byte {
 	return bytes.Repeat([]byte{b}, sha256.Size)
+}
+
+func seedRootProofResponse() []byte {
+	items := make([][]byte, rootProofRounds)
+	for i := range items {
+		items[i] = []byte{rootProofPositive, byte(i + 1)}
+	}
+	return wire.EncodeBytesList(items)
 }
 
 func seedPoint(tb proofFataler, scalar int64) []byte {
