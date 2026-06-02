@@ -80,7 +80,7 @@ signSession, out, err := ed25519.StartSign(share, sessionID, signers, message)
 // Route out (round 1 commitments) to other signers.
 // Handle round 1 responses; obtain round 2 partials.
 sig, ok := signSession.Signature()
-ed25519.Verify(publicKey, message, sig) // true
+// Signature is a standard 64-byte Ed25519 value; verify with crypto/ed25519.
 ```
 
 **CGGMP21 secp256k1:**
@@ -94,7 +94,7 @@ presign, _ := presignSession.Presign()
 encrypted, _ := tss.EncryptPresign(presign.MarshalBinary(), passphrase)
 
 // Online signing (fast, one round):
-signSession, out, _ := secp256k1.StartSignDigest(presign, digest)
+signSession, out, _ := secp256k1.StartSignDigest(keyShare, presign, sessionID, digest)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
 secp256k1.VerifyDigest(publicKey, digest, sig) // true

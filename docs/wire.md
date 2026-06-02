@@ -49,6 +49,8 @@ These rules ensure one semantic record has one binary representation. This matte
 - `frost/ed25519` keygen share payload
 - `frost/ed25519` signing nonce commitment payload
 - `frost/ed25519` signing partial payload
+- `frost/ed25519` reshare commitments payload
+- `frost/ed25519` reshare share payload
 - `internal/mta.StartMessage`
 - `internal/mta.ResponseMessage`
 - `internal/paillier.PublicKey`

@@ -189,7 +189,7 @@ This is verified with `crypto/ed25519.Verify(PK, message, sig)`. A failed final 
 For tests and simple integrations, `Sign(message, shares)` runs the full two-round exchange in-process:
 
 ```go
-sig, err := ed25519.Sign(message, []*KeyShare{share1, share2})
+pub, sig, err := ed25519.Sign(message, []*KeyShare{share1, share2})
 ```
 
 ## Resharing
@@ -239,13 +239,13 @@ Only non-hardened indices (`i < 2^31`) are supported since hardened derivation r
 Pass the cumulative additive shift to `StartSignWithOptions`:
 
 ```go
-sig, err := ed25519.SignWithOptions(message, shares, SignOptions{AdditiveShift: additiveShift})
+childPub, sig, err := ed25519.SignWithOptions(message, shares, SignOptions{AdditiveShift: additiveShift})
 ```
 
 Each signer adds `λ_i·c·δ` to their partial. The resulting signature verifies against the child public key:
 
 ```go
-crypto.ed25519.Verify(childPub, message, sig) // true
+crypto/ed25519.Verify(childPub, message, sig) // true
 ```
 
 ## RFC 9591 Alignment

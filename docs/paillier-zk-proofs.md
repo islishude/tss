@@ -32,7 +32,7 @@ implementation.
 | Π^Eq (<code>EncScalarProof</code>)    | Legacy split form: a Paillier ciphertext and secp256k1 commitment open to the same scalar. No range bound.                                                                       | Scalar and Paillier randomness.                                                             | Outer proof domain, public key, ciphertext, scalar commitment, cipher commitment, point commitment.                                   | Ciphertext validity, point decoding, Fiat-Shamir challenge, Paillier relation, curve relation.                                                  | <code>zk.paillier.enc-scalar-proof</code>   | Legacy (not used in current protocol flows)           |
 | <code>EncRangeProof</code>            | Legacy split form: the encrypted scalar is less than the secp256k1 order. Uses an independent Fiat-Shamir challenge (not coupled to Π^Eq).                                       | Same scalar as Π^Eq.                                                                        | Bound <code>q</code>, challenge, response, encrypted-scalar transcript hash.                                                          | Transcript linkage, response linkage, order bound, digest, challenge, response size cap.                                                        | <code>zk.paillier.enc-range-proof</code>    | Legacy (not used in current protocol flows)           |
 | Π^mta (<code>MTAResponseProof</code>) | An MtA response encrypts the responder product share plus beta and matches public commitments.                                                                                   | Responder scalar <code>b</code>, beta share, beta randomness <code>β</code>.                | Outer proof domain, public key, input ciphertext, response ciphertext, scalar commitment, beta commitment, cipher commitment, nonces. | Ciphertext validity, point decoding, transcript hash, Fiat-Shamir challenge, Paillier relation, curve relations.                                | <code>zk.paillier.mta-response-proof</code> | Active (presign round 2 via <code>mta.Respond</code>) |
-| Π^log (<code>LogProof</code>)         | A Paillier ciphertext and secp256k1 curve point share the same discrete logarithm.                                                                                               | Scalar <code>a</code>, Paillier randomness <code>ρ</code>.                                  | Point, cipher commitment, point commitment, response, randomness, transcript hash.                                                    | Point decoding, transcript hash, Fiat-Shamir challenge, Paillier relation, curve relation.                                                      | <code>zk.paillier.log-proof</code>          | Implemented, not yet wired                            |
+| Π^log (<code>LogProof</code>)         | A Paillier ciphertext and secp256k1 curve point share the same discrete logarithm.                                                                                               | Scalar <code>a</code>, Paillier randomness <code>ρ</code>.                                  | Point, cipher commitment, point commitment, response, randomness, transcript hash.                                                    | Point decoding, transcript hash, Fiat-Shamir challenge, Paillier relation, curve relation.                                                      | <code>zk.paillier.log-proof</code>          | Active (keygen, reshare, refresh)                     |
 
 The <code>ProveModulus</code> function samples a verifier seed, derives 128 independent
 Jacobi +1 challenges from the transcript, and opens each challenge as a square
@@ -57,8 +57,9 @@ The current protocol flows use the unified <code>ProveEncryption</code> / <code>
 | Keygen          | Π^fac, Π^prm (per-party); Π^fac re-proved for stored KeyShare | <code>keygen.go</code>                                 |
 | Presign round 1 | Π^Enc (per-party, via <code>mta.Start</code>)                 | <code>sign.go</code>, <code>internal/mta/mta.go</code> |
 | Presign round 2 | Π^mta (pairwise, delta and sigma kinds)                       | <code>sign.go</code>, <code>internal/mta/mta.go</code> |
-| Reshare         | Π^fac, Π^prm (new Paillier key)                               | <code>reshare.go</code>                                |
-| Refresh         | Π^fac, Π^prm (new Paillier key)                               | <code>refresh.go</code>                                |
+| Reshare         | Π^fac, Π^prm (new Paillier key); Π^log (share-to-verification-share binding) | <code>reshare.go</code>                                |
+| Refresh         | Π^fac, Π^prm (new Paillier key); Π^log (share-to-verification-share binding) | <code>refresh.go</code>                                |
+| Keygen          | Π^fac, Π^prm (per-party); Π^log (final key-share binding)      | <code>keygen.go</code>                                 |
 
 ## Decoder Boundary
 
@@ -83,7 +84,6 @@ All Paillier private-key operations use <code>filippo.io/bigmod</code> via
 
 ## Blockers Before Production Use
 
-- Wire Π^log into the reshare flow (implemented, not yet called).
 - Review the outer proof-domain fields against the final CGGMP21 message schedule.
 - Confirm identifiable-abort evidence contains enough public context to blame
   malformed proof senders without leaking private shares, nonces, or Paillier

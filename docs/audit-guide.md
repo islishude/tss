@@ -144,7 +144,7 @@ This document maps every ZK proof to its CGGMP21 paper (ePrint 2021/060) specifi
 
 ## 7. Π^log — Discrete Log Equality Proof
 
-**Statement:** Ciphertext c = Enc(a, r) and curve point A = a·G share the same discrete log a. Used in CGGMP21 resharing (§6.2).
+**Statement:** Ciphertext c = Enc(a, r) and curve point A = a·G share the same discrete log a. Used in CGGMP21 keygen, resharing, and refresh (§6.2).
 
 **Witness:** Scalar a, randomness r.
 
@@ -175,7 +175,9 @@ All domain separation labels follow the format `<protocol>-<phase>-v1` and are i
 | MtA response evidence   | <code>cggmp21-secp256k1-mta-response-evidence-v1</code>   |
 | Aggregate sign evidence | <code>cggmp21-secp256k1-aggregate-sign-evidence-v1</code> |
 | Reshare transcript      | <code>cggmp21-secp256k1-reshare-transcript-v1</code>      |
+| Reshare commitments     | <code>cggmp21-secp256k1-reshare-commitments-v1</code>     |
 | Refresh transcript      | <code>cggmp21-secp256k1-refresh-transcript-v1</code>      |
+| Refresh commitments     | <code>cggmp21-secp256k1-refresh-commitments-v1</code>     |
 | Outer proof domain      | <code>cggmp21-secp256k1-proof-domain-v1</code>            |
 
 ---

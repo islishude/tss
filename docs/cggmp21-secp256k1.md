@@ -37,6 +37,9 @@ type KeyShare struct {
     PaillierProofDomain     string
     ShareProof              []byte        // Schnorr proof of discrete-log knowledge
     KeygenTranscriptHash    []byte
+    LogCiphertext           []byte        // Π^log ciphertext: Enc(x_i, ρ) under own Paillier key
+    LogProof                []byte        // Π^log proof of discrete-log equality
+    // logRandomness          []byte      // unexported: Paillier randomness for log ciphertext
 }
 ```
 
@@ -107,6 +110,8 @@ When all `n` parties' commitments and shares are received and verified:
 6. **Chain code** (HD): `chain = XOR_i chainCode_i`.
 
 7. **Paillier proof domain**: The persisted local Π^fac is re-proved against `(PK, keygen_transcript_hash)` for out-of-context detection.
+
+8. **Π^log proof**: Each party encrypts its aggregated secret share `x_j` under its own Paillier key and produces a Π^log proof binding the ciphertext to the party's verification share `V_j`. This allows re-verification on load to detect out-of-context or tampered share material.
 
 ### Domain Separation
 
@@ -247,7 +252,7 @@ Receivers verify shares, then:
 x'_j = x_j + Σ_i g_i(j)   mod q
 ```
 
-New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
+Each party then encrypts its new share under its new Paillier key and produces a Π^log proof binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
 
 ## Reshare
 
@@ -262,7 +267,7 @@ Each existing party:
 
 New participants only need to receive and verify — they don't need the old key share to participate.
 
-The Π^log proof (discrete-log equality) is implemented but not yet wired into the reshare flow. See [docs/paillier-zk-proofs.md](paillier-zk-proofs.md) for review blockers.
+The Π^log proof (discrete-log equality) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Π^log proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
 ## BIP32 HD Derivation
 
@@ -274,7 +279,8 @@ CGGMP21 evidence covers every attributable failure point:
 
 | Phase           | Evidence Kind         | When                                          |
 | --------------- | --------------------- | --------------------------------------------- |
-| Keygen          | `keygen_commitment`   | Invalid Paillier key or proof.                |
+| Keygen          | `keygen_commitment`   | Invalid keygen public commitment.              |
+| Keygen          | `keygen_paillier`     | Invalid Paillier key or modulus proof.         |
 | Keygen          | `keygen_share`        | DKG share fails commitment verification.      |
 | Presign round 1 | `presign_round1`      | Invalid nonce commitment or encryption proof. |
 | Presign round 2 | `presign_round2`      | Invalid MtA response or proof.                |
@@ -377,6 +383,5 @@ See [docs/security.md](security.md) for the full constant-time policy.
 ## Unsupported
 
 - Network transport, storage encryption, peer authentication (caller responsibilities).
-- Π^log proof not yet wired into reshare (implemented, pending integration).
 - Full CGGMP21 identifiable-abort security review (experimental warning active).
 - Production-audited ZK proofs (see [docs/audit-guide.md](audit-guide.md)).
