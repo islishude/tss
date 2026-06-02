@@ -997,7 +997,7 @@ func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool
 	if err := validatePresignContext(request.Context); err != nil {
 		return false
 	}
-	contextHash := presignContextHash(request.Context, nil)
+	contextHash := presignContextHash(request.Context)
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
 	return VerifyDigest(publicKey, digest, sig)
 }
@@ -1140,10 +1140,10 @@ func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, [
 		}
 		additiveShift = shift
 	}
-	return ctx, presignContextHash(ctx, additiveShift), additiveShift, nil
+	return ctx, presignContextHash(ctx), additiveShift, nil
 }
 
-func presignContextHash(ctx PresignContext, additiveShift []byte) []byte {
+func presignContextHash(ctx PresignContext) []byte {
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(presignContextHashLabel))
 	wire.WriteHashPart(h, []byte(protocol))

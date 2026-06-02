@@ -295,7 +295,7 @@ func (p *Presign) Validate() error {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
 	}
-	if !bytes.Equal(presignContextHash(p.Context, p.AdditiveShift), p.ContextHash) {
+	if !bytes.Equal(presignContextHash(p.Context), p.ContextHash) {
 		return errors.New("presign context hash mismatch")
 	}
 	return nil

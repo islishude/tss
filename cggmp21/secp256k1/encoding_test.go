@@ -373,7 +373,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	ctx := testPresignContext()
-	contextHash := presignContextHash(ctx, nil)
+	contextHash := presignContextHash(ctx)
 	return &Presign{
 		Version:        tss.Version,
 		Party:          1,
