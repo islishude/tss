@@ -29,13 +29,13 @@ make test-count
 # Run linter with auto-fix
 make lint-fix
 
-# Format markdown files
-make fmt-md
+# Format go and markdown files
+make format
 
 # Modernize Go code
 make fix
 
-# CI-ready check (build + vet + lint + fmt-md + tidy)
+# CI-ready check (build + vet + lint + format + tidy)
 make check
 
 # List all targets

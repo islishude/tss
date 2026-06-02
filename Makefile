@@ -42,12 +42,14 @@ lint-fix:
 
 # ---- Format ---------------------------------------------------------------
 
-.PHONY: fmt-md
-fmt-md:
+.PHONY: format
+format:
+	gofmt -w .
 	npx -y prettier --write '*.md' 'docs'
 
-.PHONY: fmt-md-check
-fmt-md-check:
+.PHONY: format-check
+format-check:
+	gofmt -l .
 	npx -y prettier --check '*.md' 'docs'
 
 # ---- Maintenance ----------------------------------------------------------
@@ -71,7 +73,7 @@ vet:
 # ---- Combined targets -----------------------------------------------------
 
 .PHONY: check
-check: build vet lint fmt-md-check tidy-check
+check: build vet lint format-check tidy-check
 
 .PHONY: tidy-check
 tidy-check:
@@ -93,11 +95,11 @@ help:
 	@echo "  test-coverage  run tests and produce coverage.{out,html}"
 	@echo "  lint           run golangci-lint"
 	@echo "  lint-fix       run golangci-lint with auto-fix"
-	@echo "  fmt-md         format markdown files with prettier"
-	@echo "  fmt-md-check   check markdown formatting (CI)"
+	@echo "  format         format go and markdown files with gofmt and prettier"
+	@echo "  format-check   check go and markdown formatting (CI)"
 	@echo "  fix            run go fix on all packages"
 	@echo "  tidy           run go mod tidy"
 	@echo "  verify         verify module integrity (go mod verify)"
 	@echo "  vet            run go vet"
-	@echo "  check          CI-ready check: build + vet + lint + fmt-md + tidy"
+	@echo "  check          CI-ready check: build + vet + lint + format + tidy"
 	@echo "  all            default: build + test + vet + lint"

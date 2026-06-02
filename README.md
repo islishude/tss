@@ -100,7 +100,7 @@ Full examples in [`examples_test.go`](frost/ed25519/examples_test.go) and [`exam
 make all          # build, test, vet, lint
 make test         # tests with race detector
 make test-count   # CI stress tests (10 iterations, 1h)
-make check        # CI-ready: build + vet + lint + fmt-md + tidy
+make check        # CI-ready: build + vet + lint + format + tidy
 make lint-fix     # linter with auto-fix
 make help         # list all targets
 ```

@@ -46,11 +46,11 @@ jobs:
       - name: Check go mod tidy
         run: make tidy-check
 
+      - name: Check Markdown formatting
+        run: make format-check
+
       - name: Run go fix diff
         run: go fix -diff ./...
-
-      - name: Check Markdown formatting
-        run: make fmt-md-check
 
   test:
     name: Test (${{ matrix.os }})
