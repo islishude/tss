@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"encoding/hex"
 	"math/big"
+	"math/rand"
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
@@ -88,18 +91,67 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 }
 
 func TestGoldenCGGMP21KeyShare(t *testing.T) {
-	// Note: The keygen flow uses Schnorr proofs which internally call
-	// crypto/rand.Reader. This test verifies marshal format stability using a
-	// golden file generated from a real keygen run. Run with UPDATE_GOLDEN=1
-	// after any intentional wire-format change.
 	golden := filepath.Join("testdata", "KeyShare.golden")
+
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		// Run a deterministic keygen to generate the golden file.
+		// Each party gets its own seeded RNG so the full protocol
+		// (Paillier keygen, Schnorr proofs) produces reproducible output.
+		rng := rand.New(rand.NewSource(700)) //nolint:gosec // deterministic for golden test
+		session, err := tss.NewSessionID(rng)
+		if err != nil {
+			t.Fatal(err)
+		}
+		parties := []tss.PartyID{1, 2, 3}
+		sessions := make(map[tss.PartyID]*KeygenSession, 3)
+		messages := make([]tss.Envelope, 0)
+		for _, id := range parties {
+			cfg := tss.ThresholdConfig{
+				Threshold: 2,
+				Parties:   parties,
+				Self:      id,
+				SessionID: session,
+				Rand:      rand.New(rand.NewSource(int64(id * 100))), //nolint:gosec // deterministic for golden test
+			}
+			kg, out, err := StartKeygen(cfg)
+			if err != nil {
+				t.Fatal(err)
+			}
+			sessions[id] = kg
+			messages = append(messages, out...)
+		}
+		for _, env := range messages {
+			for _, id := range parties {
+				if id == env.From {
+					continue
+				}
+				if env.To != 0 && env.To != id {
+					continue
+				}
+				if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
+					t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+				}
+			}
+		}
+		share, ok := sessions[1].KeyShare()
+		if !ok {
+			t.Fatal("keygen not complete")
+		}
+		raw, err := share.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
+
 	if _, err := os.Stat(golden); os.IsNotExist(err) {
 		t.Skipf("golden file %s does not exist; run with UPDATE_GOLDEN=1 to generate", golden)
 	}
-	// The golden file acts as a format regression check. Since keygen
-	// includes crypto/rand for Schnorr proofs, we cannot reproduce
-	// identical bytes deterministically. Instead, we verify that the
-	// golden file decodes, round-trips, and rejects trailing bytes.
+	// The golden file acts as a format regression check. It verifies that the
+	// stored bytes decode, round-trip, and reject trailing bytes.
 	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
 	if err != nil {
 		t.Fatal(err)
