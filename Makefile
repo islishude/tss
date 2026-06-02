@@ -23,7 +23,7 @@ test-race:
 
 .PHONY: test-count
 test-count:
-	go test -v -race -count=10 -cover -timeout 3h ./...
+	go test -v -count=10 -cover -timeout 3h ./...
 
 .PHONY: test-coverage
 test-coverage:

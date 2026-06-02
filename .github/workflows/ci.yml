@@ -55,7 +55,6 @@ jobs:
   test:
     name: Test (${{ matrix.os }})
     needs: check
-    continue-on-error: true
     strategy:
       fail-fast: false
       matrix:
@@ -71,4 +70,4 @@ jobs:
           go-version: stable
 
       - name: Run tests
-        run: make test-count
+        run: make test-race
