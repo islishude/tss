@@ -1,13 +1,12 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	pai "github.com/islishude/tss/internal/paillier"
 )
 
 func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
@@ -33,6 +32,13 @@ func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
 			return
 		}
 		_ = env.ValidateBasic(protocol, sessionID, []tss.PartyID{1, 2})
+		again, err := env.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, again) {
+			t.Fatal("envelope did not remarshal deterministically")
+		}
 	})
 }
 
@@ -69,6 +75,13 @@ func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 			Parties:   []tss.PartyID{1, 2},
 			Signers:   []tss.PartyID{1, 2},
 		})
+		again, err := decoded.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, again) {
+			t.Fatal("blame evidence did not remarshal deterministically")
+		}
 	})
 }
 
@@ -86,10 +99,7 @@ func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		_, _ = secp.PointFromBytes(payload.Gamma)
-		_, _ = pai.UnmarshalPublicKey(payload.PaillierPublicKey)
-		_ = sha256.Sum256(payload.EncK)
-		_ = sha256.Sum256(payload.EncKProof)
+		assertPayloadRemarshals(t, payload, marshalPresignRound1Payload, unmarshalPresignRound1Payload)
 	})
 }
 
@@ -108,8 +118,7 @@ func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		_, _ = secp.ParseScalar(payload.S)
-		_ = len(payload.PresignTranscript) == sha256.Size
+		assertPayloadRemarshals(t, payload, marshalSignPartialPayload, unmarshalSignPartialPayload)
 	})
 }
 

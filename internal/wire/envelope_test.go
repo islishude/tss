@@ -70,6 +70,16 @@ func FuzzWireUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte("not-wire"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _, _ = Unmarshal(data, "test.type")
+		version, fields, err := Unmarshal(data, "test.type")
+		if err != nil {
+			return
+		}
+		again, err := Marshal(version, "test.type", fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, again) {
+			t.Fatal("wire did not remarshal deterministically")
+		}
 	})
 }

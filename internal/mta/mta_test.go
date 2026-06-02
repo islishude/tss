@@ -95,7 +95,11 @@ func FuzzStartMessageUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"ciphertext":"AQ=="}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalStartMessage(data)
+		m, err := UnmarshalStartMessage(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, m, (*StartMessage).MarshalBinary, UnmarshalStartMessage)
 	})
 }
 
@@ -108,8 +112,31 @@ func FuzzResponseMessageUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"ciphertext":"AQ=="}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalResponseMessage(data)
+		m, err := UnmarshalResponseMessage(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, m, (*ResponseMessage).MarshalBinary, UnmarshalResponseMessage)
 	})
+}
+
+func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
+	t.Helper()
+	raw, err := marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := unmarshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatal("payload did not remarshal deterministically")
+	}
 }
 
 func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {

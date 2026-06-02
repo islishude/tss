@@ -1,6 +1,9 @@
 package tss
 
-import "testing"
+import (
+	"bytes"
+	"testing"
+)
 
 func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	session, err := NewSessionID(nil)
@@ -96,5 +99,12 @@ func FuzzEnvelopeUnmarshalBinary(f *testing.F) {
 			return
 		}
 		_ = decoded.ValidateBasic("test", session, []PartyID{1, 2})
+		again, err := decoded.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(data, again) {
+			t.Fatal("envelope did not remarshal deterministically")
+		}
 	})
 }

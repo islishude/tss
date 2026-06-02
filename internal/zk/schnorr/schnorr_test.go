@@ -74,6 +74,29 @@ func FuzzProofUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"commitment":"x"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalProof(data)
+		p, err := UnmarshalProof(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, (*Proof).MarshalBinary, UnmarshalProof)
 	})
+}
+
+func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
+	t.Helper()
+	raw, err := marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := unmarshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatal("payload did not remarshal deterministically")
+	}
 }

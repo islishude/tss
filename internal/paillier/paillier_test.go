@@ -214,7 +214,11 @@ func FuzzPublicKeyUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"n":"01","g":"02"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalPublicKey(data)
+		pk, err := UnmarshalPublicKey(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, pk, (*PublicKey).MarshalBinary, UnmarshalPublicKey)
 	})
 }
 
@@ -232,8 +236,31 @@ func FuzzPrivateKeyUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"public_key":{"n":"01","g":"02"}}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalPrivateKey(data)
+		sk, err := UnmarshalPrivateKey(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, sk, (*PrivateKey).MarshalBinary, UnmarshalPrivateKey)
 	})
+}
+
+func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
+	t.Helper()
+	raw, err := marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := unmarshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatal("payload did not remarshal deterministically")
+	}
 }
 
 func BenchmarkGenerateKey(b *testing.B) {

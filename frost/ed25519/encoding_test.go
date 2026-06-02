@@ -61,7 +61,11 @@ func FuzzFROSTKeyShareUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"version":1}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = UnmarshalKeyShare(data)
+		share, err := UnmarshalKeyShare(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
 	})
 }
 
@@ -75,7 +79,11 @@ func FuzzFROSTKeygenCommitmentsPayloadUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"commitments":[]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = unmarshalKeygenCommitmentsPayload(data)
+		p, err := unmarshalKeygenCommitmentsPayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
 	})
 }
 
@@ -87,7 +95,11 @@ func FuzzFROSTKeygenSharePayloadUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"share":"x"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = unmarshalKeygenSharePayload(data)
+		p, err := unmarshalKeygenSharePayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalKeygenSharePayload, unmarshalKeygenSharePayload)
 	})
 }
 
@@ -102,7 +114,11 @@ func FuzzFROSTNonceCommitmentPayloadUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"d":"x","e":"y"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = unmarshalNonceCommitmentPayload(data)
+		p, err := unmarshalNonceCommitmentPayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalNonceCommitmentPayload, unmarshalNonceCommitmentPayload)
 	})
 }
 
@@ -114,7 +130,45 @@ func FuzzFROSTSignPartialPayloadUnmarshal(f *testing.F) {
 	f.Add(raw)
 	f.Add([]byte(`{"z":"x"}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		_, _ = unmarshalSignPartialPayload(data)
+		p, err := unmarshalSignPartialPayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalSignPartialPayload, unmarshalSignPartialPayload)
+	})
+}
+
+func FuzzFROSTReshareCommitmentsPayloadUnmarshal(f *testing.F) {
+	raw, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{
+		Commitments: [][]byte{seedFROSTPoint(f)},
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"commitments":[]}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		p, err := unmarshalReshareCommitmentsPayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalReshareCommitmentsPayload, unmarshalReshareCommitmentsPayload)
+	})
+}
+
+func FuzzFROSTReshareSharePayloadUnmarshal(f *testing.F) {
+	raw, err := marshalReshareSharePayload(reshareSharePayload{Share: seedFROSTScalar(f)})
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"share":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		p, err := unmarshalReshareSharePayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalReshareSharePayload, unmarshalReshareSharePayload)
 	})
 }
 
@@ -199,4 +253,23 @@ func seedFROSTScalar(tb testing.TB) []byte {
 		tb.Fatal(err)
 	}
 	return out
+}
+
+func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
+	t.Helper()
+	raw, err := marshal(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := unmarshal(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	again, err := marshal(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, again) {
+		t.Fatal("payload did not remarshal deterministically")
+	}
 }
