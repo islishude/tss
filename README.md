@@ -120,14 +120,21 @@ See [docs/deployment.md](docs/deployment.md) for a complete guide covering key l
 
 ## Development
 
-Run:
+A `Makefile` provides common targets:
 
 ```sh
-golangci-lint run --fix
-go test -race ./...
+make all          # build, test, vet, lint (default)
+make test         # run tests with race detector
+make test-count   # CI-grade stress tests (10 iterations, 1h)
+make check        # CI-ready check: build + vet + lint + fmt-md + tidy
+make lint-fix     # run linter with auto-fix
+make fmt-md       # format markdown files
+make fix          # modernize Go code with go fix
+make test-coverage # tests with coverage.out and coverage.html
+make help         # list all targets
 ```
 
-The test suite covers:
+Run `make help` for all available targets. The test suite covers:
 
 - Shamir interpolation and duplicate-party rejection.
 - secp256k1 point encoding and ECDSA verification.
@@ -155,6 +162,8 @@ The design notes are kept under `docs/` and should be updated with protocol or w
 - `docs/paillier-zk-proofs.md`: Paillier ZK proof constructions and verification.
 - `docs/audit-guide.md`: cryptographic review guide for the ZK proof layer.
 - `docs/deployment.md`: production deployment guide covering key lifecycle, transport, backups, and monitoring.
+
+CI configuration lives in `.github/workflows/ci.yml` and runs lint, vet, format, and stress tests on every push and PR. A `Makefile` wraps all common development commands — run `make help` to see them.
 
 New exported Go identifiers require doc comments. Protocol equations, transcript/domain separation, and sensitive scalar or nonce handling also need explanatory comments. Examples in `examples_test.go` files exercise the public API and should be kept current with API changes.
 

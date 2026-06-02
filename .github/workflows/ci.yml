@@ -16,10 +16,48 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Fast checks that gate before running the heavier test matrix.
+  check:
+    name: Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Build
+        run: make build
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: latest
+
+      - name: Run vet
+        run: make vet
+
+      - name: Verify module integrity
+        run: make verify
+
+      - name: Check go mod tidy
+        run: make tidy-check
+
+      - name: Run go fix diff
+        run: go fix -diff ./...
+
+      - name: Check Markdown formatting
+        run: make fmt-md-check
+
   test:
-    name: Test
+    name: Test (${{ matrix.os }})
+    needs: check
     continue-on-error: true
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
@@ -30,57 +68,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Build
-        run: go build ./...
+          go-version: stable
 
       - name: Run tests
-        run: go test -v -race -count=10 -timeout 1h ./...
-
-  format:
-    name: Format
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Check Markdown
-        run: npx --yes prettier --check '*.md' 'docs'
-
-      - name: Tidy dependencies
-        run: go mod tidy -diff
-      - name: Run Go fix
-        run: go fix -diff ./...
-
-  lint:
-    name: Lint
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version-file: go.mod
-          cache-dependency-path: go.sum
-
-      - name: Verify module integrity
-        run: go mod verify
-
-      - name: Run vet
-        run: go vet ./...
-
-      # It also checks go format
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v9
-        with:
-          version: latest
+        run: make test-count

@@ -14,18 +14,35 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 
 ## Useful Commands
 
+Use `make` targets for common operations:
+
 ```sh
-# Test
-go test -race ./...
-# Lint and format golang files
-golangci-lint run --fix
+# Build, test, vet, lint (default)
+make all
+
+# Run tests with race detector
+make test
+
+# CI-grade stress tests (10 iterations, 1h timeout)
+make test-count
+
+# Run linter with auto-fix
+make lint-fix
+
 # Format markdown files
-npx -y prettier --write '*.md' 'docs'
-# Make go files modern
-go fix ./...
+make fmt-md
+
+# Modernize Go code
+make fix
+
+# CI-ready check (build + vet + lint + fmt-md + tidy)
+make check
+
+# List all targets
+make help
 ```
 
-Run the commands after makeing substantial changes.
+Run the commands after making substantial changes.
 
 ## Architecture Map
 
