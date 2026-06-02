@@ -16,8 +16,8 @@ const HardenedKeyStart = 1 << 31
 
 // DeriveBIP32 performs non-hardened BIP32 CKD (child key derivation) for
 // threshold ECDSA keys. It returns the child public key, the cumulative
-// additive shift (suitable for SignOptions.AdditiveShift), and the child
-// chain code. Only non-hardened indices (i < 2^31) are supported since
+// additive shift that StartPresignWithContext binds into the Presign, and the
+// child chain code. Only non-hardened indices (i < 2^31) are supported since
 // hardened derivation requires the private key which no single party has
 // in a threshold setting.
 //

@@ -49,14 +49,17 @@ kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
 // ... exchange kgOut messages, obtain KeyShare ...
 
 signers := []tss.PartyID{1, 2}
-presign, presignOut, _ := secp256k1.StartPresign(share, sessionID, signers)
+ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
+presign, presignOut, _ := secp256k1.StartPresignWithContext(share, sessionID, signers, ctx)
 // ... exchange presignOut messages ...
 pre, _ := presign.Presign()
 
-signSess, signOut, _ := secp256k1.StartSignDigest(share, pre, signID, digest)
+message := []byte("payload")
+request := secp256k1.SignRequest{Context: ctx, Message: message, LowS: true}
+signSess, signOut, _ := secp256k1.StartSign(share, pre, signID, request)
 // ... exchange signOut messages ...
 sig, _ := signSess.Signature()
-secp256k1.VerifyDigest(share.PublicKey, digest, sig) // true
+secp256k1.VerifySignature(share.PublicKey, request, sig) // true
 ```
 
 Full examples in [`examples_test.go`](frost/ed25519/examples_test.go) and [`examples_test.go`](cggmp21/secp256k1/examples_test.go).

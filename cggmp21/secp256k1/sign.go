@@ -19,24 +19,48 @@ import (
 
 const (
 	presignTranscriptHashLabel = "cggmp21-secp256k1-presign-transcript-v1"
+	presignContextHashLabel    = "cggmp21-secp256k1-presign-context-v1"
 	presignRound1EchoLabel     = "cggmp21-secp256k1-presign-round1-echo-v1"
+	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
 	aggregateSignEvidenceLabel = "cggmp21-secp256k1-aggregate-sign-evidence-v1"
 )
 
+// PresignContext binds a presignature to the key, chain, derivation path,
+// policy, and message domain where it may be consumed. An empty DerivationPath
+// is the canonical master-key path; non-empty paths are non-hardened BIP32.
+type PresignContext struct {
+	KeyID          string   `json:"key_id"`
+	ChainID        string   `json:"chain_id"`
+	DerivationPath []uint32 `json:"derivation_path"`
+	PolicyDomain   string   `json:"policy_domain"`
+	MessageDomain  string   `json:"message_domain"`
+}
+
+// SignRequest is the context-bound online signing request for a persisted
+// presignature. Message is hashed with the presign context before ECDSA.
+type SignRequest struct {
+	Context PresignContext `json:"context"`
+	Message []byte         `json:"message"`
+	LowS    bool           `json:"low_s"`
+}
+
 // Presign contains one local offline signing record and must be consumed once.
 type Presign struct {
-	Version        uint16        `json:"version"`
-	Party          tss.PartyID   `json:"party"`
-	Threshold      int           `json:"threshold"`
-	Signers        []tss.PartyID `json:"signers"`
-	R              []byte        `json:"r"`
-	LittleR        []byte        `json:"little_r"`
-	KShare         []byte        `json:"k_share"`
-	ChiShare       []byte        `json:"chi_share"`
-	Delta          []byte        `json:"delta"`
-	TranscriptHash []byte        `json:"transcript_hash"`
-	Consumed       bool          `json:"consumed"`
+	Version        uint16         `json:"version"`
+	Party          tss.PartyID    `json:"party"`
+	Threshold      int            `json:"threshold"`
+	Signers        []tss.PartyID  `json:"signers"`
+	R              []byte         `json:"r"`
+	LittleR        []byte         `json:"little_r"`
+	KShare         []byte         `json:"k_share"`
+	ChiShare       []byte         `json:"chi_share"`
+	Delta          []byte         `json:"delta"`
+	TranscriptHash []byte         `json:"transcript_hash"`
+	Context        PresignContext `json:"context"`
+	ContextHash    []byte         `json:"context_hash"`
+	AdditiveShift  []byte         `json:"additive_shift"`
+	Consumed       bool           `json:"consumed"`
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -53,22 +77,20 @@ func (p *Presign) Destroy() {
 	clear(p.KShare)
 	clear(p.ChiShare)
 	clear(p.Delta)
-}
-
-// SignOptions controls online signature aggregation behavior.
-type SignOptions struct {
-	LowS          bool
-	AdditiveShift []byte
+	clear(p.AdditiveShift)
 }
 
 // PresignSession tracks the CGGMP21-style offline presign exchange.
 type PresignSession struct {
-	key       *KeyShare
-	sessionID tss.SessionID
-	config    tss.ThresholdConfig
-	log       tss.Logger
-	signers   []tss.PartyID
-	paillier  *pai.PrivateKey
+	key           *KeyShare
+	sessionID     tss.SessionID
+	config        tss.ThresholdConfig
+	log           tss.Logger
+	signers       []tss.PartyID
+	context       PresignContext
+	contextHash   []byte
+	additiveShift []byte
+	paillier      *pai.PrivateKey
 
 	kShare    *big.Int
 	gamma     *big.Int
@@ -127,10 +149,12 @@ type presignRound3Payload struct {
 type signPartialPayload struct {
 	S                 []byte `json:"s"`
 	PresignTranscript []byte `json:"presign_transcript"`
+	PresignContext    []byte `json:"presign_context"`
 }
 
-// StartPresign starts the offline CGGMP21-style presign protocol for signers.
-func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID) (*PresignSession, []tss.Envelope, error) {
+// StartPresignWithContext starts the offline CGGMP-style presign protocol for
+// signers and binds the resulting presignature to ctx before nonce generation.
+func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (*PresignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -142,6 +166,10 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, errors.New("local party is not in signer set")
 	}
 	if err := validateSignerSet(key, signers); err != nil {
+		return nil, nil, err
+	}
+	ctx, contextHash, additiveShift, err := preparePresignContext(key, ctx)
+	if err != nil {
 		return nil, nil, err
 	}
 	paillierKey, err := key.paillierPrivate()
@@ -187,7 +215,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, err
 	}
 	// Round 1 starts MtA by publishing Enc_i(k_i) with scalar/range proofs.
-	startDomain := mtaStartDomain(key, sessionID, signers, key.Party, key.PaillierPublicKey)
+	startDomain := mtaStartDomain(key, sessionID, signers, key.Party, key.PaillierPublicKey, contextHash)
 	startMsg, err := mta.Start(nil, startDomain, kShare.BigInt(), &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
@@ -205,24 +233,27 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 	}
 	env := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
 	s := &PresignSession{
-		key:        key,
-		sessionID:  sessionID,
-		config:     config,
-		log:        config.Logger(),
-		signers:    signers,
-		paillier:   paillierKey,
-		kShare:     kShare.BigInt(),
-		gamma:      gamma.BigInt(),
-		xBar:       xBar,
-		gammaComm:  gammaComm,
-		xBarComm:   xBarComm,
-		round1:     map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
-		round2:     make(map[tss.PartyID]presignRound2Payload),
-		deltas:     make(map[tss.PartyID]*big.Int),
-		alphaDelta: make(map[tss.PartyID]*big.Int),
-		betaDelta:  make(map[tss.PartyID]*big.Int),
-		alphaSigma: make(map[tss.PartyID]*big.Int),
-		betaSigma:  make(map[tss.PartyID]*big.Int),
+		key:           key,
+		sessionID:     sessionID,
+		config:        config,
+		log:           config.Logger(),
+		signers:       signers,
+		context:       ctx,
+		contextHash:   contextHash,
+		additiveShift: additiveShift,
+		paillier:      paillierKey,
+		kShare:        kShare.BigInt(),
+		gamma:         gamma.BigInt(),
+		xBar:          xBar,
+		gammaComm:     gammaComm,
+		xBarComm:      xBarComm,
+		round1:        map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
+		round2:        make(map[tss.PartyID]presignRound2Payload),
+		deltas:        make(map[tss.PartyID]*big.Int),
+		alphaDelta:    make(map[tss.PartyID]*big.Int),
+		betaDelta:     make(map[tss.PartyID]*big.Int),
+		alphaSigma:    make(map[tss.PartyID]*big.Int),
+		betaSigma:     make(map[tss.PartyID]*big.Int),
 	}
 	out := []tss.Envelope{env}
 	round2, err := s.tryEmitRound2()
@@ -421,7 +452,7 @@ func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload
 		return errors.New("round1 Paillier public key does not match keygen")
 	}
 	start := mta.StartMessage{Ciphertext: p.EncK, EncrProof: p.EncKProof}
-	if !mta.VerifyStart(mtaStartDomain(s.key, s.sessionID, s.signers, from, p.PaillierPublicKey), start, expectedPK) {
+	if !mta.VerifyStart(mtaStartDomain(s.key, s.sessionID, s.signers, from, p.PaillierPublicKey, s.contextHash), start, expectedPK) {
 		return errors.New("invalid encrypted nonce proof")
 	}
 	return nil
@@ -441,12 +472,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncrProof: s.round1[peer].EncKProof}
-		startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, peer, s.round1[peer].PaillierPublicKey)
+		startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, peer, s.round1[peer].PaillierPublicKey, s.contextHash)
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
 			nil,
 			startDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey),
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			s.gamma,
 			s.gammaComm,
@@ -460,7 +491,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		sigmaResp, betaSigma, err := mta.Respond(
 			nil,
 			startDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey),
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			s.xBar,
 			s.xBarComm,
@@ -487,10 +518,10 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	}
 	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncrProof: s.round1[s.key.Party].EncKProof}
 	gammaCommit := s.round1[from].Gamma
-	startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, s.key.Party, s.key.PaillierPublicKey)
+	startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, s.key.Party, s.key.PaillierPublicKey, s.contextHash)
 	alphaDelta, err := mta.Finish(
 		startDomain,
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "delta", s.key.PaillierPublicKey),
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "delta", s.key.PaillierPublicKey, s.contextHash),
 		start,
 		p.Delta,
 		gammaCommit,
@@ -505,7 +536,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	}
 	alphaSigma, err := mta.Finish(
 		startDomain,
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "sigma", s.key.PaillierPublicKey),
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "sigma", s.key.PaillierPublicKey, s.contextHash),
 		start,
 		p.Sigma,
 		xBarCommit,
@@ -539,6 +570,15 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	deltaShare.Mod(deltaShare, order)
 	chiShare.Mod(chiShare, order)
+	if len(s.additiveShift) > 0 {
+		shift, err := secp.ParseScalar(s.additiveShift)
+		if err != nil {
+			return nil, err
+		}
+		shiftTerm := new(big.Int).Mul(s.kShare, shift.BigInt())
+		chiShare.Add(chiShare, shiftTerm)
+		chiShare.Mod(chiShare, order)
+	}
 	s.deltas[s.key.Party] = deltaShare
 	payload, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(deltaShare)})
 	if err != nil {
@@ -546,12 +586,15 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	s.round3Sent = true
 	s.presign = &Presign{
-		Version:   tss.Version,
-		Party:     s.key.Party,
-		Threshold: s.key.Threshold,
-		Signers:   append([]tss.PartyID(nil), s.signers...),
-		KShare:    scalarBytes(s.kShare),
-		ChiShare:  scalarBytes(chiShare),
+		Version:       tss.Version,
+		Party:         s.key.Party,
+		Threshold:     s.key.Threshold,
+		Signers:       append([]tss.PartyID(nil), s.signers...),
+		KShare:        scalarBytes(s.kShare),
+		ChiShare:      scalarBytes(chiShare),
+		Context:       s.context,
+		ContextHash:   append([]byte(nil), s.contextHash...),
+		AdditiveShift: append([]byte(nil), s.additiveShift...),
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, err
@@ -628,6 +671,8 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(presignTranscriptHashLabel))
 	wire.WriteHashPart(h, s.sessionID[:])
+	wire.WriteHashPart(h, s.contextHash)
+	wire.WriteHashPart(h, s.additiveShift)
 	for _, id := range s.signers {
 		// Binding every signer id, nonce commitment, encrypted nonce proof, and
 		// delta share prevents replaying presign material across signer sets.
@@ -647,6 +692,8 @@ func (s *PresignSession) round1Echo() []byte {
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(presignRound1EchoLabel))
 	wire.WriteHashPart(h, s.sessionID[:])
+	wire.WriteHashPart(h, s.contextHash)
+	wire.WriteHashPart(h, s.additiveShift)
 	for _, id := range s.signers {
 		p := s.round1[id]
 		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
@@ -658,16 +705,29 @@ func (s *PresignSession) round1Echo() []byte {
 	return h.Sum(nil)
 }
 
-// StartSignDigest starts online signing for a 32-byte digest using a presign.
-func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte) (*SignSession, []tss.Envelope, error) {
+// StartSign starts online signing using a context-bound presignature.
+func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest) (*SignSession, []tss.Envelope, error) {
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
 	}
-	return StartSignDigestWithOptions(key, presign, sessionID, digest32, SignOptions{LowS: true})
+	if presign == nil {
+		return nil, nil, errors.New("nil presign")
+	}
+	_, contextHash, additiveShift, err := preparePresignContext(key, request.Context)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !bytes.Equal(contextHash, presign.ContextHash) {
+		return nil, nil, errors.New("presign context mismatch")
+	}
+	if !bytes.Equal(additiveShift, presign.AdditiveShift) {
+		return nil, nil, errors.New("presign additive shift mismatch")
+	}
+	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
+	return startSignDigestBound(key, presign, sessionID, digest, contextHash, request.LowS)
 }
 
-// StartSignDigestWithOptions starts online signing with configurable options.
-func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, opts SignOptions) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -676,6 +736,9 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	}
 	if len(digest32) != 32 {
 		return nil, nil, errors.New("digest must be 32 bytes")
+	}
+	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.ContextHash) {
+		return nil, nil, errors.New("presign context mismatch")
 	}
 	if presign.Consumed {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
@@ -691,20 +754,9 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	if err != nil {
 		return nil, nil, err
 	}
-	if len(opts.AdditiveShift) > 0 {
-		shift, err := secp.ParseScalar(opts.AdditiveShift)
-		if err != nil {
-			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
-		}
-		// CGGMP21 HD signing applies the additive public-key shift by adding
-		// k_i*shift to each local chi share, so aggregation adds k*shift once.
-		shiftTerm := new(big.Int).Mul(kShare.BigInt(), shift.BigInt())
-		chiShare = secp.ScalarAdd(chiShare, secp.ScalarFromBigInt(shiftTerm))
-		// modulus already handled by Scalar type
-	}
 	verifyKey := append([]byte(nil), key.PublicKey...)
-	if len(opts.AdditiveShift) > 0 {
-		verifyKey, err = DerivePublicKey(key.PublicKey, opts.AdditiveShift)
+	if len(presign.AdditiveShift) > 0 {
+		verifyKey, err = DerivePublicKey(key.PublicKey, presign.AdditiveShift)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -719,7 +771,11 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 	rs := new(big.Int).Mul(littleR.BigInt(), chiShare.BigInt())
 	partial.Add(partial, rs)
 	partial.Mod(partial, secp.Order())
-	payload, err := marshalSignPartialPayload(signPartialPayload{S: scalarBytes(partial), PresignTranscript: append([]byte(nil), presign.TranscriptHash...)})
+	payload, err := marshalSignPartialPayload(signPartialPayload{
+		S:                 scalarBytes(partial),
+		PresignTranscript: append([]byte(nil), presign.TranscriptHash...),
+		PresignContext:    append([]byte(nil), contextHash...),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -738,7 +794,7 @@ func StartSignDigestWithOptions(key *KeyShare, presign *Presign, sessionID tss.S
 		sessionID: sessionID,
 		log:       tss.NopLogger(),
 		digest:    append([]byte(nil), digest32...),
-		lowS:      opts.LowS,
+		lowS:      lowS,
 		publicKey: verifyKey,
 		partials:  map[tss.PartyID]*big.Int{key.Party: partial},
 	}
@@ -803,6 +859,17 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			s.signPartialEvidenceFields(p)...,
 		)
 	}
+	if !bytes.Equal(p.PresignContext, s.presign.ContextHash) {
+		return nil, protocolErrorWithEvidence(
+			tss.ErrCodeInvalidMessage,
+			env,
+			tss.EvidenceKindSignPartial,
+			"presign context mismatch",
+			[]tss.PartyID{env.From},
+			errors.New("presign context mismatch"),
+			s.signPartialEvidenceFields(p)...,
+		)
+	}
 	partial, err := secp.ParseScalar(p.S)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
@@ -832,6 +899,8 @@ func (s *SignSession) signPartialEvidenceFields(p signPartialPayload) []tss.Evid
 	return append(fields,
 		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField("observed_presign_transcript_hash", p.PresignTranscript),
+		rawEvidenceField("presign_context_hash", s.presign.ContextHash),
+		hashEvidenceField("observed_presign_context_hash", p.PresignContext),
 		hashEvidenceField("sign_partial_hash", p.S),
 	)
 }
@@ -923,8 +992,32 @@ func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	return secp.VerifyECDSA(public, digest32, r, s)
 }
 
-// SignDigest runs an in-memory presign and signing exchange for convenience.
-func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error) {
+// VerifySignature verifies a context-bound secp256k1 ECDSA signature.
+func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool {
+	if err := validatePresignContext(request.Context); err != nil {
+		return false
+	}
+	contextHash := presignContextHash(request.Context, nil)
+	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
+	return VerifyDigest(publicKey, digest, sig)
+}
+
+// Sign runs an in-memory presign and signing exchange for a context-bound message.
+func Sign(message []byte, signers []*KeyShare, ctx PresignContext) ([]byte, *Signature, error) {
+	return signWithDigest(message, signers, ctx, false)
+}
+
+// SignDigestInteractive runs a full interactive signing exchange for a raw
+// digest after binding ctx before nonce generation. It does not return or
+// persist a reusable Presign.
+func SignDigestInteractive(digest32 []byte, signers []*KeyShare, ctx PresignContext) ([]byte, *Signature, error) {
+	if len(digest32) != sha256.Size {
+		return nil, nil, errors.New("digest must be 32 bytes")
+	}
+	return signWithDigest(digest32, signers, ctx, true)
+}
+
+func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDigest bool) ([]byte, *Signature, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
@@ -945,7 +1038,7 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 	presignSessions := make(map[tss.PartyID]*PresignSession, len(ids))
 	presignQueue := make([]tss.Envelope, 0)
 	for _, id := range ids {
-		session, out, err := StartPresign(shares[id], presignID, ids)
+		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -977,7 +1070,18 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 		if !ok {
 			return nil, nil, fmt.Errorf("presign not completed for %d", id)
 		}
-		session, out, err := StartSignDigest(shares[id], presign, signID, digest32)
+		var session *SignSession
+		var out []tss.Envelope
+		var err error
+		if rawDigest {
+			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true)
+		} else {
+			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
+				Context: ctx,
+				Message: input,
+				LowS:    true,
+			})
+		}
 		if err != nil {
 			return nil, nil, err
 		}
@@ -1000,6 +1104,69 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 		}
 	}
 	return nil, nil, errors.New("signature not completed")
+}
+
+func validatePresignContext(ctx PresignContext) error {
+	if ctx.KeyID == "" {
+		return errors.New("presign context key id is required")
+	}
+	if ctx.ChainID == "" {
+		return errors.New("presign context chain id is required")
+	}
+	if ctx.PolicyDomain == "" {
+		return errors.New("presign context policy domain is required")
+	}
+	if ctx.MessageDomain == "" {
+		return errors.New("presign context message domain is required")
+	}
+	for _, index := range ctx.DerivationPath {
+		if index >= HardenedKeyStart {
+			return fmt.Errorf("hardened derivation index %d is not supported", index)
+		}
+	}
+	return nil
+}
+
+func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, []byte, []byte, error) {
+	if err := validatePresignContext(ctx); err != nil {
+		return PresignContext{}, nil, nil, err
+	}
+	ctx.DerivationPath = append([]uint32(nil), ctx.DerivationPath...)
+	var additiveShift []byte
+	if len(ctx.DerivationPath) > 0 {
+		_, shift, _, err := DeriveBIP32(key.PublicKey, key.ChainCode, ctx.DerivationPath)
+		if err != nil {
+			return PresignContext{}, nil, nil, err
+		}
+		additiveShift = shift
+	}
+	return ctx, presignContextHash(ctx, additiveShift), additiveShift, nil
+}
+
+func presignContextHash(ctx PresignContext, additiveShift []byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(presignContextHashLabel))
+	wire.WriteHashPart(h, []byte(protocol))
+	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
+	wire.WriteHashPart(h, []byte("secp256k1"))
+	wire.WriteHashPart(h, []byte(ctx.KeyID))
+	wire.WriteHashPart(h, []byte(ctx.ChainID))
+	wire.WriteHashPart(h, wire.EncodeUint32List(ctx.DerivationPath))
+	wire.WriteHashPart(h, []byte(ctx.PolicyDomain))
+	wire.WriteHashPart(h, []byte(ctx.MessageDomain))
+	return h.Sum(nil)
+}
+
+func signMessageDigest(contextHash []byte, messageDomain string, message []byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(signMessageDigestLabel))
+	wire.WriteHashPart(h, []byte(protocol))
+	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
+	wire.WriteHashPart(h, []byte("secp256k1"))
+	wire.WriteHashPart(h, contextHash)
+	wire.WriteHashPart(h, []byte(messageDomain))
+	wire.WriteHashPart(h, message)
+	return h.Sum(nil)
 }
 
 func validatePresign(key *KeyShare, presign *Presign) error {

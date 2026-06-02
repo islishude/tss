@@ -6,7 +6,6 @@ import (
 	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
 )
 
 type proofFataler interface {
@@ -15,44 +14,51 @@ type proofFataler interface {
 }
 
 func seedModulusProof() *ModulusProof {
+	xs := make([][]byte, modulusProofRounds)
+	zs := make([][]byte, modulusProofRounds)
+	for i := range modulusProofRounds {
+		xs[i] = []byte{byte(i + 1)}
+		zs[i] = []byte{byte(i + 2)}
+	}
 	return &ModulusProof{
-		Version:          proofVersion,
-		NBits:            2048,
-		SmallFactorCheck: proofSeedHash(1),
-		TranscriptHash:   proofSeedHash(2),
-		Commitment:       proofSeedHash(3),
-		Challenge:        proofSeedHash(4),
-		Response:         seedRootProofResponse(),
+		Version:        proofVersion,
+		W:              []byte{1},
+		TranscriptHash: proofSeedHash(2),
+		X:              xs,
+		A:              make([]byte, modulusProofRounds),
+		B:              make([]byte, modulusProofRounds),
+		Z:              zs,
 	}
 }
 
-func seedEncScalarProof(tb proofFataler) *EncScalarProof {
+func seedRingPedersenProof() *RingPedersenProof {
+	commitments := make([][]byte, ringPedersenProofRounds)
+	responses := make([][]byte, ringPedersenProofRounds)
+	for i := range ringPedersenProofRounds {
+		commitments[i] = []byte{byte(i + 1)}
+		responses[i] = []byte{byte(i + 2)}
+	}
+	return &RingPedersenProof{
+		Version:        proofVersion,
+		TranscriptHash: proofSeedHash(3),
+		Commitments:    commitments,
+		Challenges:     make([]byte, ringPedersenProofRounds),
+		Responses:      responses,
+	}
+}
+
+func seedEncryptionProof(tb proofFataler) *EncryptionProof {
 	tb.Helper()
-	return &EncScalarProof{
+	return &EncryptionProof{
 		Version:          proofVersion,
 		ScalarCommitment: seedPoint(tb, 1),
 		CipherCommitment: []byte{2},
 		PointCommitment:  seedPoint(tb, 3),
+		Bound:            secp.Order().Bytes(),
 		Response:         []byte{4},
 		Randomness:       []byte{5},
 		TranscriptHash:   proofSeedHash(6),
 	}
-}
-
-func seedEncRangeProof(tb proofFataler) *EncRangeProof {
-	tb.Helper()
-	proof := &EncRangeProof{
-		Version:         proofVersion,
-		Bound:           secp.Order().Bytes(),
-		Commitment:      []byte{6},
-		PointCommitment: seedPoint(tb, 7),
-		Challenge:       []byte{8},
-		Response:        []byte{9},
-		Randomness:      []byte{10},
-		TranscriptHash:  proofSeedHash(11),
-	}
-	proof.Digest = encRangeDigest(proof)
-	return proof
 }
 
 func seedMTAResponseProof(tb proofFataler) *MTAResponseProof {
@@ -72,14 +78,6 @@ func seedMTAResponseProof(tb proofFataler) *MTAResponseProof {
 
 func proofSeedHash(b byte) []byte {
 	return bytes.Repeat([]byte{b}, sha256.Size)
-}
-
-func seedRootProofResponse() []byte {
-	items := make([][]byte, rootProofRounds)
-	for i := range items {
-		items[i] = []byte{rootProofPositive, byte(i + 1)}
-	}
-	return wire.EncodeBytesList(items)
 }
 
 func seedPoint(tb proofFataler, scalar int64) []byte {

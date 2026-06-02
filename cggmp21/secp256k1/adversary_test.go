@@ -506,6 +506,9 @@ func clonePresign(in *Presign) *Presign {
 	out.ChiShare = append([]byte(nil), in.ChiShare...)
 	out.Delta = append([]byte(nil), in.Delta...)
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
+	out.Context.DerivationPath = append([]uint32(nil), in.Context.DerivationPath...)
+	out.ContextHash = append([]byte(nil), in.ContextHash...)
+	out.AdditiveShift = append([]byte(nil), in.AdditiveShift...)
 	out.Consumed = false
 	return &out
 }

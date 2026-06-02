@@ -18,13 +18,13 @@ All protocol APIs return `tss.Envelope` values. The library does not open socket
 
 Keygen state machines produce algorithm-specific `KeyShare` records. `MarshalBinary` is deterministic and uses canonical TLV encoding for the share record. Secret material is not encrypted by this package; callers must encrypt persisted shares when needed and call `Destroy` when practical.
 
-CGGMP21 key shares include Paillier private material, proof data, and optional HD chain-code material needed by the signing path. Old CGGMP21 shares without Paillier/ZK fields can be decoded as records, but `StartPresign` rejects them and requires rerunning keygen. Old GG20 wire identifiers are rejected.
+CGGMP21 key shares include Paillier private material, Ring-Pedersen parameters/proofs, proof data, and optional HD chain-code material needed by the signing path. Old CGGMP21 shares without current Paillier/ZK fields are rejected and require rerunning keygen. Old GG20 wire identifiers are rejected.
 
 ## Signing Lifecycle
 
 FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature accepted by `crypto/ed25519.Verify`.
 
-CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `StartSignDigest` marks a presign consumed before producing any outbound online signing message. `StartSignDigestWithOptions` can apply a caller-provided additive public-key shift during online signing.
+CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `StartPresignWithContext` binds key id, chain id, derivation path, policy domain, and message domain before nonce generation. `StartSign` marks a presign consumed before producing any outbound online signing message.
 
 ## Public vs Internal
 

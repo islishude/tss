@@ -102,7 +102,8 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	ps, _, err := StartPresign(loaded, presignID, []tss.PartyID{1})
+	ctx := PresignContext{KeyID: "example-key", ChainID: "example-chain", PolicyDomain: "example-policy", MessageDomain: "example-message"}
+	ps, _, err := StartPresignWithContext(loaded, presignID, []tss.PartyID{1}, ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -124,8 +125,8 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	digest := sha256.Sum256([]byte("example full lifecycle"))
-	ss, _, err := StartSignDigest(loaded, loadedPresign, signID, digest[:])
+	request := SignRequest{Context: ctx, Message: []byte("example full lifecycle"), LowS: true}
+	ss, _, err := StartSign(loaded, loadedPresign, signID, request)
 	if err != nil {
 		panic(err)
 	}
@@ -134,7 +135,7 @@ func Example_full_lifecycle() {
 		panic("signing did not complete")
 	}
 
-	fmt.Println(VerifyDigest(loaded.PublicKeyBytes(), digest[:], sig))
+	fmt.Println(VerifySignature(loaded.PublicKeyBytes(), request, sig))
 	// Output:
 	// true
 }

@@ -56,30 +56,38 @@ type PaillierPublicShare struct {
 	Proof     []byte      `json:"proof"`
 }
 
+// RingPedersenPublicShare records a participant Ring-Pedersen parameters and proof.
+type RingPedersenPublicShare struct {
+	Party  tss.PartyID `json:"party"`
+	Params []byte      `json:"params"`
+	Proof  []byte      `json:"proof"`
+}
+
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 type KeyShare struct {
-	Version                 uint16        `json:"version"`
-	Party                   tss.PartyID   `json:"party"`
-	Threshold               int           `json:"threshold"`
-	Parties                 []tss.PartyID `json:"parties"`
-	PublicKey               []byte        `json:"public_key"`
-	ChainCode               []byte        `json:"chain_code,omitempty"`
-	secret                  []byte
-	GroupCommitments        [][]byte            `json:"group_commitments"`
-	VerificationShares      []VerificationShare `json:"verification_shares"`
-	PaillierPublicKey       []byte              `json:"paillier_public_key,omitempty"`
-	paillierPrivateKey      []byte
-	PaillierProof           []byte                `json:"paillier_proof,omitempty"`
-	PaillierPrimalityProof  []byte                `json:"paillier_primality_proof,omitempty"`
-	PaillierPrimalityProofs [][]byte              `json:"paillier_primality_proofs,omitempty"`
-	PaillierPublicKeys      []PaillierPublicShare `json:"paillier_public_keys,omitempty"`
-	PaillierProofSessionID  tss.SessionID         `json:"paillier_proof_session_id"`
-	PaillierProofDomain     string                `json:"paillier_proof_domain"`
-	ShareProof              []byte                `json:"share_proof,omitempty"`
-	KeygenTranscriptHash    []byte                `json:"keygen_transcript_hash,omitempty"`
-	LogCiphertext           []byte                `json:"log_ciphertext,omitempty"`
-	LogProof                []byte                `json:"log_proof,omitempty"`
-	logRandomness           []byte
+	Version                uint16        `json:"version"`
+	Party                  tss.PartyID   `json:"party"`
+	Threshold              int           `json:"threshold"`
+	Parties                []tss.PartyID `json:"parties"`
+	PublicKey              []byte        `json:"public_key"`
+	ChainCode              []byte        `json:"chain_code,omitempty"`
+	secret                 []byte
+	GroupCommitments       [][]byte            `json:"group_commitments"`
+	VerificationShares     []VerificationShare `json:"verification_shares"`
+	PaillierPublicKey      []byte              `json:"paillier_public_key,omitempty"`
+	paillierPrivateKey     []byte
+	PaillierProof          []byte                    `json:"paillier_proof,omitempty"`
+	PaillierPublicKeys     []PaillierPublicShare     `json:"paillier_public_keys,omitempty"`
+	RingPedersenParams     []byte                    `json:"ring_pedersen_params,omitempty"`
+	RingPedersenProof      []byte                    `json:"ring_pedersen_proof,omitempty"`
+	RingPedersenPublic     []RingPedersenPublicShare `json:"ring_pedersen_public,omitempty"`
+	PaillierProofSessionID tss.SessionID             `json:"paillier_proof_session_id"`
+	PaillierProofDomain    string                    `json:"paillier_proof_domain"`
+	ShareProof             []byte                    `json:"share_proof,omitempty"`
+	KeygenTranscriptHash   []byte                    `json:"keygen_transcript_hash,omitempty"`
+	LogCiphertext          []byte                    `json:"log_ciphertext,omitempty"`
+	LogProof               []byte                    `json:"log_proof,omitempty"`
+	logRandomness          []byte
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -156,7 +164,7 @@ func (k *KeyShare) Format(state fmt.State, verb rune) {
 
 func (k KeyShare) redactedString() string {
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPrimalityProof:%d bytes PaillierPrimalityProofs:%d PaillierPublicKeys:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes}",
 		k.Version,
 		k.Party,
 		k.Threshold,
@@ -167,9 +175,10 @@ func (k KeyShare) redactedString() string {
 		len(k.VerificationShares),
 		len(k.PaillierPublicKey),
 		len(k.PaillierProof),
-		len(k.PaillierPrimalityProof),
-		len(k.PaillierPrimalityProofs),
 		len(k.PaillierPublicKeys),
+		len(k.RingPedersenParams),
+		len(k.RingPedersenProof),
+		len(k.RingPedersenPublic),
 		k.PaillierProofSessionID,
 		k.PaillierProofDomain,
 		len(k.ShareProof),
@@ -246,11 +255,17 @@ func (k *KeyShare) Validate() error {
 	if len(k.PaillierProof) == 0 {
 		return errors.New("missing paillier proof")
 	}
-	if len(k.PaillierPrimalityProof) == 0 {
-		return errors.New("missing paillier primality proof")
+	if len(k.RingPedersenParams) == 0 {
+		return errors.New("missing Ring-Pedersen parameters")
+	}
+	if len(k.RingPedersenProof) == 0 {
+		return errors.New("missing Ring-Pedersen proof")
 	}
 	if len(k.PaillierPublicKeys) != len(k.Parties) {
 		return errors.New("paillier public key count must equal party count")
+	}
+	if len(k.RingPedersenPublic) != len(k.Parties) {
+		return errors.New("Ring-Pedersen public parameter count must equal party count")
 	}
 	if k.PaillierProofDomain == "" {
 		return errors.New("missing paillier public proof domain")
@@ -289,15 +304,40 @@ func (k *KeyShare) Validate() error {
 	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.Party), modProof) {
 		return errors.New("invalid local paillier proof")
 	}
-	if len(k.PaillierPrimalityProofs) != len(k.Parties) {
-		return errors.New("paillier primality proof count must equal party count")
+	localRPParams, err := zkpai.UnmarshalRingPedersenParams(k.RingPedersenParams)
+	if err != nil {
+		return fmt.Errorf("invalid local Ring-Pedersen parameters: %w", err)
+	}
+	if localRPParams.N.Cmp(pk.N) != 0 {
+		return errors.New("local Ring-Pedersen modulus does not match Paillier modulus")
+	}
+	localRPProof, err := zkpai.UnmarshalRingPedersenProof(k.RingPedersenProof)
+	if err != nil {
+		return fmt.Errorf("invalid local Ring-Pedersen proof: %w", err)
+	}
+	localRPDomain := keyShareRingPedersenProofDomain(k, k.Party, k.RingPedersenParams)
+	if localRPDomain == nil {
+		return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.PaillierProofDomain)
+	}
+	if !zkpai.VerifyRingPedersen(localRPDomain, localRPParams, uint32(k.Party), localRPProof) {
+		return errors.New("invalid local Ring-Pedersen proof")
 	}
 	for i, item := range k.PaillierPublicKeys {
 		if item.Party != k.Parties[i] {
 			return errors.New("paillier public keys must follow party order")
 		}
+		rp := k.RingPedersenPublic[i]
+		if rp.Party != k.Parties[i] {
+			return errors.New("Ring-Pedersen public parameters must follow party order")
+		}
+		if rp.Party != item.Party {
+			return fmt.Errorf("Ring-Pedersen public parameters do not match Paillier party %d", item.Party)
+		}
 		if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
 			return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
+		}
+		if len(rp.Params) == 0 || len(rp.Proof) == 0 {
+			return fmt.Errorf("incomplete Ring-Pedersen public parameters for party %d", rp.Party)
 		}
 		peerPK, err := pai.UnmarshalPublicKey(item.PublicKey)
 		if err != nil {
@@ -308,9 +348,6 @@ func (k *KeyShare) Validate() error {
 			return fmt.Errorf("invalid paillier proof for party %d: %w", item.Party, err)
 		}
 		// Verify the modulus proof is internally consistent with the public key.
-		if peerProof.NBits != peerPK.N.BitLen() {
-			return fmt.Errorf("paillier proof bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerProof.NBits, peerPK.N.BitLen())
-		}
 		proofDomain, err := k.paillierPublicProofDomainFor(item.Party, item.PublicKey)
 		if err != nil {
 			return err
@@ -318,18 +355,23 @@ func (k *KeyShare) Validate() error {
 		if !zkpai.VerifyModulus(proofDomain, peerPK, uint32(item.Party), peerProof) {
 			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
 		}
-		if len(k.PaillierPrimalityProofs[i]) == 0 {
-			return fmt.Errorf("missing paillier primality proof for party %d", item.Party)
-		}
-		peerPrimalityProof, err := zkpai.UnmarshalPrimalityProof(k.PaillierPrimalityProofs[i])
+		peerRPParams, err := zkpai.UnmarshalRingPedersenParams(rp.Params)
 		if err != nil {
-			return fmt.Errorf("invalid paillier primality proof for party %d: %w", item.Party, err)
+			return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", rp.Party, err)
 		}
-		if peerPrimalityProof.FactorBitLen < peerPK.N.BitLen()/2-1 || peerPrimalityProof.FactorBitLen > peerPK.N.BitLen()/2+1 {
-			return fmt.Errorf("paillier primality proof factor bit length mismatch for party %d: proof claims %d bits, key has %d bits", item.Party, peerPrimalityProof.FactorBitLen, peerPK.N.BitLen())
+		if peerRPParams.N.Cmp(peerPK.N) != 0 {
+			return fmt.Errorf("Ring-Pedersen modulus mismatch for party %d", rp.Party)
 		}
-		if !zkpai.VerifyPrimality(proofDomain, peerPK, uint32(item.Party), peerPrimalityProof) {
-			return fmt.Errorf("invalid paillier primality proof for party %d", item.Party)
+		peerRPProof, err := zkpai.UnmarshalRingPedersenProof(rp.Proof)
+		if err != nil {
+			return fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", rp.Party, err)
+		}
+		rpDomain := keyShareRingPedersenProofDomain(k, rp.Party, rp.Params)
+		if rpDomain == nil {
+			return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.PaillierProofDomain)
+		}
+		if !zkpai.VerifyRingPedersen(rpDomain, peerRPParams, uint32(rp.Party), peerRPProof) {
+			return fmt.Errorf("invalid Ring-Pedersen proof for party %d", rp.Party)
 		}
 	}
 	shareProof, err := schnorr.UnmarshalProof(k.ShareProof)
@@ -375,15 +417,6 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	default:
 		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.PaillierProofDomain)
 	}
-}
-
-// sortedPaillierPrimalityProofs collects primality proofs in party order.
-func sortedPaillierPrimalityProofs(parties []tss.PartyID, proofs map[tss.PartyID][]byte) [][]byte {
-	out := make([][]byte, 0, len(parties))
-	for _, id := range parties {
-		out = append(out, append([]byte(nil), proofs[id]...))
-	}
-	return out
 }
 
 // Destroy zeros local secret scalar and Paillier private-key bytes in place.
@@ -464,9 +497,10 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.PaillierPublicKey = slices.Clone(k.PaillierPublicKey)
 	out.paillierPrivateKey = slices.Clone(k.paillierPrivateKey)
 	out.PaillierProof = slices.Clone(k.PaillierProof)
-	out.PaillierPrimalityProof = slices.Clone(k.PaillierPrimalityProof)
-	out.PaillierPrimalityProofs = cloneKeyShareByteSlices(k.PaillierPrimalityProofs)
 	out.PaillierPublicKeys = clonePaillierPublicShares(k.PaillierPublicKeys)
+	out.RingPedersenParams = slices.Clone(k.RingPedersenParams)
+	out.RingPedersenProof = slices.Clone(k.RingPedersenProof)
+	out.RingPedersenPublic = cloneRingPedersenPublicShares(k.RingPedersenPublic)
 	out.ShareProof = slices.Clone(k.ShareProof)
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
 	out.LogCiphertext = slices.Clone(k.LogCiphertext)

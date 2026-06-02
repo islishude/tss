@@ -116,7 +116,7 @@ Caller responsibilities (not provided by this library):
 
 ## One-Time Presigns
 
-CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSignDigest` sets `Presign.Consumed` before constructing any outbound online signing envelope so reuse fails before a second partial signature leaves the process.
+CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` sets `Presign.Consumed` before constructing any outbound online signing envelope so reuse fails before a second partial signature leaves the process. Presigns are also bound to `PresignContext` fields: key id, chain id, derivation path, policy domain, and message domain.
 
 ## Blame Evidence
 

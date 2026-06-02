@@ -71,15 +71,17 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 }
 
 func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
 	signers := []tss.PartyID{1, 2}
-	presigns := secpPresign(t, shares, signers)
-	shift := scalarBytes(big.NewInt(17))
-	derived, err := DerivePublicKey(shares[1].PublicKey, shift)
+	path := []uint32{0, 17}
+	derived, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := sha256.Sum256([]byte("hd additive shift"))
+	ctx := testPresignContext()
+	ctx.DerivationPath = path
+	presigns := secpPresignWithContext(t, shares, signers, ctx)
+	request := SignRequest{Context: ctx, Message: []byte("hd additive shift"), LowS: true}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -87,7 +89,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	messages := make([]tss.Envelope, 0, len(signers))
 	for _, id := range signers {
-		session, out, err := StartSignDigestWithOptions(shares[id], presigns[id], signID, digest[:], SignOptions{LowS: true, AdditiveShift: shift})
+		session, out, err := StartSign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,10 +110,10 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	if !ok {
 		t.Fatal("signature not completed")
 	}
-	if !VerifyDigest(derived, digest[:], sig) {
+	if !VerifySignature(derived, request, sig) {
 		t.Fatal("shifted signature did not verify against derived key")
 	}
-	if VerifyDigest(shares[1].PublicKey, digest[:], sig) {
+	if VerifySignature(shares[1].PublicKey, request, sig) {
 		t.Fatal("shifted signature verified against unshifted key")
 	}
 }
@@ -439,6 +441,10 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 }
 
 func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID) map[tss.PartyID]*Presign {
+	return secpPresignWithContext(t, shares, signers, testPresignContext())
+}
+
+func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID, ctx PresignContext) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -447,7 +453,7 @@ func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.P
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := StartPresign(shares[id], sessionID, signers)
+		session, out, err := StartPresignWithContext(shares[id], sessionID, signers, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -829,13 +835,16 @@ func TestBIP32MultiLevel(t *testing.T) {
 
 func TestBIP32DeriveAndSign(t *testing.T) {
 	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
-	childPub, shift, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, []uint32{0, 5})
+	path := []uint32{0, 5}
+	childPub, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
 	signers := []tss.PartyID{1, 2}
-	presigns := secpPresign(t, shares, signers)
-	digest := sha256.Sum256([]byte("bip32 derived signing"))
+	ctx := testPresignContext()
+	ctx.DerivationPath = path
+	presigns := secpPresignWithContext(t, shares, signers, ctx)
+	request := SignRequest{Context: ctx, Message: []byte("bip32 derived signing"), LowS: true}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -843,10 +852,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	sessions := make(map[tss.PartyID]*SignSession)
 	messages := make([]tss.Envelope, 0, len(signers))
 	for _, id := range signers {
-		session, out, err := StartSignDigestWithOptions(
-			shares[id], presigns[id], signID, digest[:],
-			SignOptions{LowS: true, AdditiveShift: shift},
-		)
+		session, out, err := StartSign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -867,10 +873,10 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	if !ok {
 		t.Fatal("signature not completed")
 	}
-	if !VerifyDigest(childPub, digest[:], sig) {
+	if !VerifySignature(childPub, request, sig) {
 		t.Fatal("signature did not verify against derived BIP32 key")
 	}
-	if VerifyDigest(shares[1].PublicKey, digest[:], sig) {
+	if VerifySignature(shares[1].PublicKey, request, sig) {
 		t.Fatal("signature verified against master key (should use derived key)")
 	}
 }

@@ -107,6 +107,7 @@ func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 	seed, err := marshalSignPartialPayload(signPartialPayload{
 		S:                 scalarBytes(big.NewInt(1)),
 		PresignTranscript: make([]byte, sha256.Size),
+		PresignContext:    bytes.Repeat([]byte{1}, sha256.Size),
 	})
 	if err != nil {
 		f.Fatal(err)

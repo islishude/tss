@@ -8,122 +8,192 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/wire"
 )
 
-func TestEncryptedScalarProofTamper(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
+func TestEncryptionProofTamper(t *testing.T) {
+	sk := testPaillierKey(t, 1024)
+	domain := []byte("encryption proof")
 	scalar := big.NewInt(42)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encProof, rangeProof, err := ProveEncScalarAndRange(nil, []byte("domain"), &sk.PublicKey, ciphertext, scalar, randomness)
+	proof, err := ProveEncryption(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyEncScalarAndRange([]byte("domain"), &sk.PublicKey, ciphertext, encProof, rangeProof) {
-		t.Fatal("proof did not verify")
+	if !VerifyEncryption(domain, &sk.PublicKey, ciphertext, proof) {
+		t.Fatal("encryption proof did not verify")
 	}
-	encProof.Response[0] ^= 1
-	if VerifyEncScalarAndRange([]byte("domain"), &sk.PublicKey, ciphertext, encProof, rangeProof) {
-		t.Fatal("tampered enc proof verified")
+	if VerifyEncryption([]byte("other domain"), &sk.PublicKey, ciphertext, proof) {
+		t.Fatal("encryption proof verified under wrong domain")
 	}
-	encProof.Response[0] ^= 1
-	rangeProof.Digest[0] ^= 1
-	if VerifyEncScalarAndRange([]byte("domain"), &sk.PublicKey, ciphertext, encProof, rangeProof) {
-		t.Fatal("tampered range proof verified")
+	tampered := cloneEncryptionProof(proof)
+	tampered.Response[0] ^= 1
+	if VerifyEncryption(domain, &sk.PublicKey, ciphertext, tampered) {
+		t.Fatal("tampered encryption proof verified")
+	}
+	if VerifyEncryption(domain, &sk.PublicKey, sk.NSquared, proof) {
+		t.Fatal("invalid ciphertext outside Z*_{N^2} verified")
 	}
 }
 
-func TestModulusProofTamper(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(512)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 512)
+func TestModulusProofCGGMP24Checks(t *testing.T) {
+	sk := testPaillierKey(t, 512)
+	domain := []byte("modulus proof")
+	party := uint32(7)
+	proof, err := ProveModulus(nil, domain, sk, party)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := ProveModulus(nil, []byte("domain"), sk, 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyModulus([]byte("domain"), &sk.PublicKey, 1, proof) {
+	if !VerifyModulus(domain, &sk.PublicKey, party, proof) {
 		t.Fatal("modulus proof did not verify")
 	}
-	if VerifyModulus([]byte("other"), &sk.PublicKey, 1, proof) {
+	if VerifyModulus([]byte("other"), &sk.PublicKey, party, proof) {
 		t.Fatal("modulus proof verified under wrong domain")
 	}
-	proof.Response[0] ^= 1
-	if VerifyModulus([]byte("domain"), &sk.PublicKey, 1, proof) {
-		t.Fatal("tampered modulus proof verified")
+	if VerifyModulus(domain, &sk.PublicKey, party+1, proof) {
+		t.Fatal("modulus proof verified under wrong party")
 	}
+
+	nLen := modulusBytes(sk.N)
+	t.Run("jacobi w", func(t *testing.T) {
+		tampered := cloneModulusProof(proof)
+		tampered.W = fixedModNBytes(big.NewInt(1), nLen)
+		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+			t.Fatal("modulus proof with Jacobi(w,N) != -1 verified")
+		}
+	})
+	t.Run("round count", func(t *testing.T) {
+		tampered := cloneModulusProof(proof)
+		tampered.X = tampered.X[:modulusProofRounds-1]
+		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+			t.Fatal("modulus proof with wrong tuple count verified")
+		}
+		if _, err := Marshal(tampered); err == nil {
+			t.Fatal("modulus proof with wrong tuple count marshaled")
+		}
+	})
+	t.Run("prover y field", func(t *testing.T) {
+		raw := mustWireProof(t, modulusProofWireType, []wire.Field{
+			{Tag: modulusProofFieldW, Value: proof.W},
+			{Tag: modulusProofFieldTranscriptHash, Value: proof.TranscriptHash},
+			{Tag: modulusProofFieldX, Value: wire.EncodeBytesList(proof.X)},
+			{Tag: modulusProofFieldA, Value: proof.A},
+			{Tag: modulusProofFieldB, Value: proof.B},
+			{Tag: modulusProofFieldZ, Value: wire.EncodeBytesList(proof.Z)},
+			{Tag: 99, Value: wire.EncodeBytesList(proof.Z)},
+		})
+		if _, err := UnmarshalModulusProof(raw); err == nil {
+			t.Fatal("modulus proof accepted prover-supplied extra field")
+		}
+	})
+	t.Run("w x z units", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*ModulusProof)
+		}{
+			{name: "w zero", mutate: func(p *ModulusProof) { p.W = make([]byte, nLen) }},
+			{name: "x outside", mutate: func(p *ModulusProof) { p.X[0] = fixedModNBytes(sk.N, nLen) }},
+			{name: "z outside", mutate: func(p *ModulusProof) { p.Z[0] = fixedModNBytes(sk.N, nLen) }},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				tampered := cloneModulusProof(proof)
+				tc.mutate(tampered)
+				if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+					t.Fatal("modulus proof with invalid Z_N* element verified")
+				}
+			})
+		}
+	})
+	t.Run("equations", func(t *testing.T) {
+		tamperedZ := cloneModulusProof(proof)
+		tamperedZ.Z[0][len(tamperedZ.Z[0])-1] ^= 1
+		if VerifyModulus(domain, &sk.PublicKey, party, tamperedZ) {
+			t.Fatal("modulus proof with bad z^N equation verified")
+		}
+		tamperedX := cloneModulusProof(proof)
+		tamperedX.X[0][len(tamperedX.X[0])-1] ^= 1
+		if VerifyModulus(domain, &sk.PublicKey, party, tamperedX) {
+			t.Fatal("modulus proof with bad x^4 equation verified")
+		}
+	})
 }
 
-func TestRootProofRejectsSelfConsistentForgery(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(512)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 512)
+func TestRingPedersenProofChecks(t *testing.T) {
+	sk := testPaillierKey(t, 512)
+	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
-	domain := []byte("forged root proof")
-	party := uint32(1)
-	raw, err := sk.PublicKey.MarshalBinary()
+	paramsBytes, err := MarshalRingPedersenParams(params)
 	if err != nil {
 		t.Fatal(err)
 	}
-	nLen := (sk.N.BitLen() + 7) / 8
-	root := make([]byte, 1+nLen)
-	root[0] = rootProofPositive
-	root[len(root)-1] = 1
-	items := make([][]byte, rootProofRounds)
-	for i := range items {
-		items[i] = append([]byte(nil), root...)
+	domain := []byte("ring pedersen")
+	party := uint32(3)
+	proof, err := ProveRingPedersen(nil, domain, sk, params, lambda, party)
+	if err != nil {
+		t.Fatal(err)
 	}
-	response := wire.EncodeBytesList(items)
-	seed := bytes.Repeat([]byte{0x42}, rootProofSeedBytes)
-	transcript := hashParts([]byte(modulusTranscriptLabel), domain, partyBytes(party), raw, seed)
-	forgedModulus := &ModulusProof{
-		Version:          proofVersion,
-		NBits:            sk.N.BitLen(),
-		SmallFactorCheck: smallFactorDigest(sk.N),
-		TranscriptHash:   transcript,
-		Commitment:       seed,
-		Challenge:        hashParts([]byte(modulusChallengeLabel), transcript),
-		Response:         response,
+	if !VerifyRingPedersen(domain, params, party, proof) {
+		t.Fatal("Ring-Pedersen proof did not verify")
 	}
-	if VerifyModulus(domain, &sk.PublicKey, party, forgedModulus) {
-		t.Fatal("self-consistent forged modulus proof verified")
+	if VerifyRingPedersen([]byte("other"), params, party, proof) {
+		t.Fatal("Ring-Pedersen proof verified under wrong domain")
+	}
+	if VerifyRingPedersen(domain, params, party+1, proof) {
+		t.Fatal("Ring-Pedersen proof verified under wrong party")
+	}
+	decodedParams, err := UnmarshalRingPedersenParams(paramsBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if decodedParams.N.Cmp(params.N) != 0 || decodedParams.S.Cmp(params.S) != 0 || decodedParams.T.Cmp(params.T) != 0 {
+		t.Fatal("Ring-Pedersen parameters did not round-trip")
 	}
 
-	factorBits := max(sk.P.BitLen(), sk.Q.BitLen())
-	factorBitsBytes := wire.Uint32(uint32(factorBits))
-	transcript = hashParts([]byte(primalityTranscriptLabel), domain, partyBytes(party), raw, factorBitsBytes, seed)
-	forgedPrimality := &PrimalityProof{
-		Version:        proofVersion,
-		FactorBitLen:   factorBits,
-		TranscriptHash: transcript,
-		Commitment:     seed,
-		Challenge:      hashParts([]byte(primalityChallengeLabel), transcript),
-		Response:       response,
-	}
-	if VerifyPrimality(domain, &sk.PublicKey, party, forgedPrimality) {
-		t.Fatal("self-consistent forged primality proof verified")
-	}
+	nLen := modulusBytes(params.N)
+	t.Run("invalid params", func(t *testing.T) {
+		bad := &RingPedersenParams{N: params.N, S: big.NewInt(1), T: params.T}
+		if ValidateRingPedersenParams(bad) == nil {
+			t.Fatal("degenerate Ring-Pedersen parameters validated")
+		}
+		if VerifyRingPedersen(domain, bad, party, proof) {
+			t.Fatal("Ring-Pedersen proof verified against invalid parameters")
+		}
+	})
+	t.Run("out of range response", func(t *testing.T) {
+		tampered := cloneRingPedersenProof(proof)
+		tampered.Responses[0] = fixedModNBytes(params.N, nLen)
+		if VerifyRingPedersen(domain, params, party, tampered) {
+			t.Fatal("Ring-Pedersen proof with out-of-range response verified")
+		}
+	})
+	t.Run("tamper", func(t *testing.T) {
+		for _, tc := range []struct {
+			name   string
+			mutate func(*RingPedersenProof)
+		}{
+			{name: "commitment", mutate: func(p *RingPedersenProof) { p.Commitments[0][len(p.Commitments[0])-1] ^= 1 }},
+			{name: "challenge", mutate: func(p *RingPedersenProof) { p.Challenges[0] ^= 1 }},
+			{name: "response", mutate: func(p *RingPedersenProof) { p.Responses[0][len(p.Responses[0])-1] ^= 1 }},
+		} {
+			t.Run(tc.name, func(t *testing.T) {
+				tampered := cloneRingPedersenProof(proof)
+				tc.mutate(tampered)
+				if VerifyRingPedersen(domain, params, party, tampered) {
+					t.Fatal("tampered Ring-Pedersen proof verified")
+				}
+			})
+		}
+	})
 }
 
 func TestProofMarshalCanonicalBinary(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sk := testPaillierKey(t, 1024)
 	domain := []byte("canonical proof domain")
 
 	modProof, err := ProveModulus(nil, domain, sk, 1)
@@ -134,14 +204,25 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if _, err := UnmarshalModulusProof([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON modulus proof fallback was accepted")
 	}
-	if _, err := UnmarshalEncScalarProof([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON encrypted scalar proof fallback was accepted")
+
+	params, lambda, err := GenerateRingPedersenParams(nil, sk)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := UnmarshalEncRangeProof([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON encrypted range proof fallback was accepted")
+	paramsBytes, err := MarshalRingPedersenParams(params)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, err := UnmarshalMTAResponseProof([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON MtA response proof fallback was accepted")
+	if _, err := UnmarshalRingPedersenParams(paramsBytes); err != nil {
+		t.Fatal(err)
+	}
+	rpProof, err := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertRingPedersenProofRoundTrip(t, rpProof)
+	if _, err := UnmarshalRingPedersenProof([]byte(`{"version":1}`)); err == nil {
+		t.Fatal("JSON Ring-Pedersen proof fallback was accepted")
 	}
 
 	scalar := big.NewInt(42)
@@ -149,12 +230,14 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encProof, rangeProof, err := ProveEncScalarAndRange(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
+	encProof, err := ProveEncryption(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertEncScalarProofRoundTrip(t, encProof)
-	assertEncRangeProofRoundTrip(t, rangeProof)
+	assertEncryptionProofRoundTrip(t, encProof)
+	if _, err := UnmarshalEncryptionProof([]byte(`{"version":1}`)); err == nil {
+		t.Fatal("JSON encryption proof fallback was accepted")
+	}
 
 	b := big.NewInt(17)
 	beta := big.NewInt(19)
@@ -162,13 +245,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(ciphertext, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
+	response, betaRandomness := mtaResponseForTest(t, sk, ciphertext, b, beta)
 	mtaProof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, ciphertext, response, bCommitment, b, beta, betaRandomness)
 	if err != nil {
 		t.Fatal(err)
@@ -177,30 +254,18 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if !VerifyMTAResponse(domain, &sk.PublicKey, ciphertext, response, bCommitment, mtaProof) {
 		t.Fatal("MtA response proof did not verify")
 	}
-
-	encProofBytes, err := Marshal(encProof)
-	if err != nil {
+	if _, err := UnmarshalMTAResponseProof([]byte(`{"version":1}`)); err == nil {
+		t.Fatal("JSON MtA response proof fallback was accepted")
+	}
+	if mtaBytes, err := Marshal(mtaProof); err != nil {
 		t.Fatal(err)
-	}
-	if _, err := UnmarshalEncRangeProof(encProofBytes); err == nil {
-		t.Fatal("encrypted scalar proof decoded as range proof")
-	}
-	rangeProofBytes, err := Marshal(rangeProof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := UnmarshalMTAResponseProof(rangeProofBytes); err == nil {
-		t.Fatal("range proof decoded as MtA response proof")
+	} else if _, err := UnmarshalEncryptionProof(mtaBytes); err == nil {
+		t.Fatal("MtA response proof decoded as encryption proof")
 	}
 }
 
 func TestMTAResponseProofFieldTamper(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
+	sk := testPaillierKey(t, 1024)
 	domain := []byte("mta tamper")
 	a := big.NewInt(23)
 	b := big.NewInt(29)
@@ -213,13 +278,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(encA, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
+	response, betaRandomness := mtaResponseForTest(t, sk, encA, b, beta)
 	proof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
 	if err != nil {
 		t.Fatal(err)
@@ -247,125 +306,9 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 	}
 }
 
-func TestMTAResponseProofRejectsOversizedResponses(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	domain := []byte("mta oversize")
-	a := big.NewInt(23)
-	b := big.NewInt(29)
-	beta := big.NewInt(31)
-	encA, _, err := sk.Encrypt(nil, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(encA, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
-	proof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	oversizedScalar := cloneMTAResponseProof(proof)
-	oversizedScalar.BResponse = append([]byte{1}, make([]byte, mtaResponseScalarMaxBytes)...)
-	if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, oversizedScalar) {
-		t.Fatal("oversized MtA b response verified")
-	}
-	if _, err := Marshal(oversizedScalar); err == nil {
-		t.Fatal("oversized MtA b response marshaled")
-	}
-
-	oversizedRandomness := cloneMTAResponseProof(proof)
-	oversizedRandomness.Randomness = append([]byte{1}, make([]byte, (sk.N.BitLen()+7)/8)...)
-	if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, oversizedRandomness) {
-		t.Fatal("oversized MtA randomness verified")
-	}
-}
-
-func TestProofDomainSeparation(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	domain := []byte("proof domain")
-	otherDomain := []byte("other proof domain")
-
-	modProof, err := ProveModulus(nil, domain, sk, 7)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyModulus(domain, &sk.PublicKey, 7, modProof) {
-		t.Fatal("modulus proof did not verify")
-	}
-	if VerifyModulus(otherDomain, &sk.PublicKey, 7, modProof) {
-		t.Fatal("modulus proof verified under wrong domain")
-	}
-	if VerifyModulus(domain, &sk.PublicKey, 8, modProof) {
-		t.Fatal("modulus proof verified under wrong party")
-	}
-
-	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encProof, rangeProof, err := ProveEncScalarAndRange(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyEncScalarAndRange(domain, &sk.PublicKey, ciphertext, encProof, rangeProof) {
-		t.Fatal("encrypted scalar proof did not verify")
-	}
-	if VerifyEncScalarAndRange(otherDomain, &sk.PublicKey, ciphertext, encProof, rangeProof) {
-		t.Fatal("encrypted scalar proof verified under wrong domain")
-	}
-
-	b := big.NewInt(17)
-	beta := big.NewInt(19)
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(ciphertext, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
-	mtaProof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, ciphertext, response, bCommitment, b, beta, betaRandomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyMTAResponse(domain, &sk.PublicKey, ciphertext, response, bCommitment, mtaProof) {
-		t.Fatal("MtA response proof did not verify")
-	}
-	if VerifyMTAResponse(otherDomain, &sk.PublicKey, ciphertext, response, bCommitment, mtaProof) {
-		t.Fatal("MtA response proof verified under wrong domain")
-	}
-}
-
-func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	domain := []byte("minimal integers")
+func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
+	sk := testPaillierKey(t, 1024)
+	domain := []byte("negative proof inputs")
 	a := big.NewInt(23)
 	b := big.NewInt(29)
 	beta := big.NewInt(31)
@@ -373,7 +316,7 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encProof, rangeProof, err := ProveEncScalarAndRange(nil, domain, &sk.PublicKey, encA, a, randomness)
+	encProof, err := ProveEncryption(nil, domain, &sk.PublicKey, encA, a, randomness)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -381,235 +324,65 @@ func TestProofRejectsNonMinimalIntegerEncodings(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(encA, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
+	response, betaRandomness := mtaResponseForTest(t, sk, encA, b, beta)
 	mtaProof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	t.Run("encrypted scalar", func(t *testing.T) {
-		tampered := *encProof
-		tampered.CipherCommitment = prependZero(tampered.CipherCommitment)
-		if VerifyEncScalar(domain, &sk.PublicKey, encA, &tampered) {
-			t.Fatal("non-minimal encrypted scalar proof verified")
-		}
-		if _, err := Marshal(&tampered); err == nil {
-			t.Fatal("non-minimal encrypted scalar proof marshaled")
-		}
-		raw := mustWireProof(t, encScalarProofWireType, []wire.Field{
-			{Tag: encScalarProofFieldScalarCommitment, Value: tampered.ScalarCommitment},
-			{Tag: encScalarProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: encScalarProofFieldPointCommitment, Value: tampered.PointCommitment},
-			{Tag: encScalarProofFieldResponse, Value: tampered.Response},
-			{Tag: encScalarProofFieldRandomness, Value: tampered.Randomness},
-			{Tag: encScalarProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-		})
-		if _, err := UnmarshalEncScalarProof(raw); err == nil {
-			t.Fatal("non-minimal encrypted scalar proof decoded")
-		}
-	})
-
-	t.Run("encrypted range", func(t *testing.T) {
-		tampered := *rangeProof
+	t.Run("non canonical scalar response", func(t *testing.T) {
+		tampered := cloneEncryptionProof(encProof)
 		tampered.Response = prependZero(tampered.Response)
-		if VerifyEncScalarAndRange(domain, &sk.PublicKey, encA, encProof, &tampered) {
-			t.Fatal("non-minimal range proof verified")
-		}
-		if _, err := Marshal(&tampered); err == nil {
-			t.Fatal("non-minimal range proof marshaled")
-		}
-		raw := mustWireProof(t, encRangeProofWireType, []wire.Field{
-			{Tag: encRangeProofFieldBound, Value: tampered.Bound},
-			{Tag: encRangeProofFieldChallenge, Value: tampered.Challenge},
-			{Tag: encRangeProofFieldResponse, Value: tampered.Response},
-			{Tag: encRangeProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-			{Tag: encRangeProofFieldDigest, Value: tampered.Digest},
-		})
-		if _, err := UnmarshalEncRangeProof(raw); err == nil {
-			t.Fatal("non-minimal range proof decoded")
-		}
-	})
-
-	t.Run("mta response", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
-		tampered.BResponse = prependZero(tampered.BResponse)
-		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
-			t.Fatal("non-minimal MtA response proof verified")
+		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
+			t.Fatal("non-canonical encryption response verified")
 		}
 		if _, err := Marshal(tampered); err == nil {
-			t.Fatal("non-minimal MtA response proof marshaled")
-		}
-		raw := mustWireProof(t, mtaResponseProofWireType, []wire.Field{
-			{Tag: mtaResponseProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-			{Tag: mtaResponseProofFieldBetaCommitment, Value: tampered.BetaCommitment},
-			{Tag: mtaResponseProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: mtaResponseProofFieldBCommitment, Value: tampered.BCommitment},
-			{Tag: mtaResponseProofFieldBetaNonce, Value: tampered.BetaNonce},
-			{Tag: mtaResponseProofFieldBResponse, Value: tampered.BResponse},
-			{Tag: mtaResponseProofFieldBetaResponse, Value: tampered.BetaResponse},
-			{Tag: mtaResponseProofFieldRandomness, Value: tampered.Randomness},
-		})
-		if _, err := UnmarshalMTAResponseProof(raw); err == nil {
-			t.Fatal("non-minimal MtA response proof decoded")
+			t.Fatal("non-canonical encryption response marshaled")
 		}
 	})
-}
-
-func TestProofRejectsMalformedCurvePoints(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	domain := []byte("malformed points")
-	a := big.NewInt(23)
-	b := big.NewInt(29)
-	beta := big.NewInt(31)
-	encA, randomness, err := sk.Encrypt(nil, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	encProof, _, err := ProveEncScalarAndRange(nil, domain, &sk.PublicKey, encA, a, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).Exp(encA, b, sk.NSquared)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
-	mtaProof, err := ProveMTAResponse(nil, domain, &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	malformedPoint := []byte{0x02}
-
-	t.Run("encrypted scalar commitment", func(t *testing.T) {
-		tampered := *encProof
-		tampered.ScalarCommitment = malformedPoint
-		if VerifyEncScalar(domain, &sk.PublicKey, encA, &tampered) {
+	t.Run("fixed width ciphertext", func(t *testing.T) {
+		tampered := cloneEncryptionProof(encProof)
+		tampered.CipherCommitment = prependZero(tampered.CipherCommitment)
+		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
+			t.Fatal("wrong-width encryption cipher commitment verified")
+		}
+	})
+	t.Run("malformed curve point", func(t *testing.T) {
+		tampered := cloneEncryptionProof(encProof)
+		tampered.ScalarCommitment = []byte{0x02}
+		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("malformed scalar commitment verified")
 		}
-		if _, err := Marshal(&tampered); err == nil {
+		if _, err := Marshal(tampered); err == nil {
 			t.Fatal("malformed scalar commitment marshaled")
 		}
-		raw := mustWireProof(t, encScalarProofWireType, []wire.Field{
-			{Tag: encScalarProofFieldScalarCommitment, Value: tampered.ScalarCommitment},
-			{Tag: encScalarProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: encScalarProofFieldPointCommitment, Value: tampered.PointCommitment},
-			{Tag: encScalarProofFieldResponse, Value: tampered.Response},
-			{Tag: encScalarProofFieldRandomness, Value: tampered.Randomness},
-			{Tag: encScalarProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-		})
-		if _, err := UnmarshalEncScalarProof(raw); err == nil {
-			t.Fatal("malformed scalar commitment decoded")
-		}
 	})
-
-	t.Run("encrypted scalar nonce", func(t *testing.T) {
-		tampered := *encProof
-		tampered.PointCommitment = malformedPoint
-		if VerifyEncScalar(domain, &sk.PublicKey, encA, &tampered) {
-			t.Fatal("malformed point commitment verified")
-		}
-		if _, err := Marshal(&tampered); err == nil {
-			t.Fatal("malformed point commitment marshaled")
-		}
-		raw := mustWireProof(t, encScalarProofWireType, []wire.Field{
-			{Tag: encScalarProofFieldScalarCommitment, Value: tampered.ScalarCommitment},
-			{Tag: encScalarProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: encScalarProofFieldPointCommitment, Value: tampered.PointCommitment},
-			{Tag: encScalarProofFieldResponse, Value: tampered.Response},
-			{Tag: encScalarProofFieldRandomness, Value: tampered.Randomness},
-			{Tag: encScalarProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-		})
-		if _, err := UnmarshalEncScalarProof(raw); err == nil {
-			t.Fatal("malformed point commitment decoded")
-		}
-	})
-
-	t.Run("mta beta commitment", func(t *testing.T) {
+	t.Run("mta oversized response", func(t *testing.T) {
 		tampered := cloneMTAResponseProof(mtaProof)
-		tampered.BetaCommitment = malformedPoint
+		tampered.BResponse = append([]byte{1}, make([]byte, mtaResponseScalarMaxBytes)...)
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
-			t.Fatal("malformed beta commitment verified")
+			t.Fatal("oversized MtA response verified")
 		}
 		if _, err := Marshal(tampered); err == nil {
-			t.Fatal("malformed beta commitment marshaled")
-		}
-		raw := mustWireProof(t, mtaResponseProofWireType, []wire.Field{
-			{Tag: mtaResponseProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-			{Tag: mtaResponseProofFieldBetaCommitment, Value: tampered.BetaCommitment},
-			{Tag: mtaResponseProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: mtaResponseProofFieldBCommitment, Value: tampered.BCommitment},
-			{Tag: mtaResponseProofFieldBetaNonce, Value: tampered.BetaNonce},
-			{Tag: mtaResponseProofFieldBResponse, Value: tampered.BResponse},
-			{Tag: mtaResponseProofFieldBetaResponse, Value: tampered.BetaResponse},
-			{Tag: mtaResponseProofFieldRandomness, Value: tampered.Randomness},
-		})
-		if _, err := UnmarshalMTAResponseProof(raw); err == nil {
-			t.Fatal("malformed beta commitment decoded")
+			t.Fatal("oversized MtA response marshaled")
 		}
 	})
-
-	t.Run("mta b nonce", func(t *testing.T) {
+	t.Run("mta malformed point", func(t *testing.T) {
 		tampered := cloneMTAResponseProof(mtaProof)
-		tampered.BCommitment = malformedPoint
+		tampered.BCommitment = []byte{0x02}
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
-			t.Fatal("malformed b nonce verified")
+			t.Fatal("malformed MtA point verified")
 		}
 		if _, err := Marshal(tampered); err == nil {
-			t.Fatal("malformed b nonce marshaled")
-		}
-		raw := mustWireProof(t, mtaResponseProofWireType, []wire.Field{
-			{Tag: mtaResponseProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-			{Tag: mtaResponseProofFieldBetaCommitment, Value: tampered.BetaCommitment},
-			{Tag: mtaResponseProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: mtaResponseProofFieldBCommitment, Value: tampered.BCommitment},
-			{Tag: mtaResponseProofFieldBetaNonce, Value: tampered.BetaNonce},
-			{Tag: mtaResponseProofFieldBResponse, Value: tampered.BResponse},
-			{Tag: mtaResponseProofFieldBetaResponse, Value: tampered.BetaResponse},
-			{Tag: mtaResponseProofFieldRandomness, Value: tampered.Randomness},
-		})
-		if _, err := UnmarshalMTAResponseProof(raw); err == nil {
-			t.Fatal("malformed b nonce decoded")
+			t.Fatal("malformed MtA point marshaled")
 		}
 	})
-
-	t.Run("mta beta nonce", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
-		tampered.BetaNonce = malformedPoint
-		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
-			t.Fatal("malformed beta nonce verified")
+	t.Run("mta invalid ciphertext", func(t *testing.T) {
+		if VerifyMTAResponse(domain, &sk.PublicKey, big.NewInt(0), response, bCommitment, mtaProof) {
+			t.Fatal("MtA proof verified with invalid input ciphertext")
 		}
-		if _, err := Marshal(tampered); err == nil {
-			t.Fatal("malformed beta nonce marshaled")
-		}
-		raw := mustWireProof(t, mtaResponseProofWireType, []wire.Field{
-			{Tag: mtaResponseProofFieldTranscriptHash, Value: tampered.TranscriptHash},
-			{Tag: mtaResponseProofFieldBetaCommitment, Value: tampered.BetaCommitment},
-			{Tag: mtaResponseProofFieldCipherCommitment, Value: tampered.CipherCommitment},
-			{Tag: mtaResponseProofFieldBCommitment, Value: tampered.BCommitment},
-			{Tag: mtaResponseProofFieldBetaNonce, Value: tampered.BetaNonce},
-			{Tag: mtaResponseProofFieldBResponse, Value: tampered.BResponse},
-			{Tag: mtaResponseProofFieldBetaResponse, Value: tampered.BetaResponse},
-			{Tag: mtaResponseProofFieldRandomness, Value: tampered.Randomness},
-		})
-		if _, err := UnmarshalMTAResponseProof(raw); err == nil {
-			t.Fatal("malformed beta nonce decoded")
+		if VerifyMTAResponse(domain, &sk.PublicKey, encA, sk.NSquared, bCommitment, mtaProof) {
+			t.Fatal("MtA proof verified with invalid response ciphertext")
 		}
 	})
 }
@@ -639,13 +412,13 @@ func assertModulusProofRoundTrip(t *testing.T, proof *ModulusProof) {
 	}
 }
 
-func assertEncScalarProofRoundTrip(t *testing.T, proof *EncScalarProof) {
+func assertRingPedersenProofRoundTrip(t *testing.T, proof *RingPedersenProof) {
 	t.Helper()
 	raw, err := Marshal(proof)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalEncScalarProof(raw)
+	decoded, err := UnmarshalRingPedersenProof(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -654,20 +427,20 @@ func assertEncScalarProofRoundTrip(t *testing.T, proof *EncScalarProof) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(raw, again) {
-		t.Fatal("encrypted scalar proof encoding is not deterministic")
+		t.Fatal("Ring-Pedersen proof encoding is not deterministic")
 	}
-	if _, err := UnmarshalEncScalarProof(append(raw, 0)); err == nil {
-		t.Fatal("encrypted scalar proof accepted trailing bytes")
+	if _, err := UnmarshalRingPedersenProof(append(raw, 0)); err == nil {
+		t.Fatal("Ring-Pedersen proof accepted trailing bytes")
 	}
 }
 
-func assertEncRangeProofRoundTrip(t *testing.T, proof *EncRangeProof) {
+func assertEncryptionProofRoundTrip(t *testing.T, proof *EncryptionProof) {
 	t.Helper()
 	raw, err := Marshal(proof)
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalEncRangeProof(raw)
+	decoded, err := UnmarshalEncryptionProof(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -676,10 +449,10 @@ func assertEncRangeProofRoundTrip(t *testing.T, proof *EncRangeProof) {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(raw, again) {
-		t.Fatal("encrypted range proof encoding is not deterministic")
+		t.Fatal("encryption proof encoding is not deterministic")
 	}
-	if _, err := UnmarshalEncRangeProof(append(raw, 0)); err == nil {
-		t.Fatal("encrypted range proof accepted trailing bytes")
+	if _, err := UnmarshalEncryptionProof(append(raw, 0)); err == nil {
+		t.Fatal("encryption proof accepted trailing bytes")
 	}
 }
 
@@ -705,6 +478,71 @@ func assertMTAResponseProofRoundTrip(t *testing.T, proof *MTAResponseProof) {
 	}
 }
 
+func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
+	t.Helper()
+	restore := pai.SetMinimumModulusBitsForTesting(bits)
+	t.Cleanup(restore)
+	sk, err := pai.GenerateKey(context.Background(), nil, bits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return sk
+}
+
+func mtaResponseForTest(t *testing.T, sk *pai.PrivateKey, encA, b, beta *big.Int) (*big.Int, *big.Int) {
+	t.Helper()
+	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
+	if err != nil {
+		t.Fatal(err)
+	}
+	nLen := modulusBytes(sk.N)
+	nSquaredLen := 2 * nLen
+	encPowBytes, err := paillierct.ExpCT(
+		paillierct.FixedEncode(sk.NSquared, nSquaredLen),
+		paillierct.FixedEncode(encA, nSquaredLen),
+		secp.ScalarBytes(secp.ScalarFromBigInt(b)),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := new(big.Int).SetBytes(encPowBytes)
+	response.Mul(response, encBeta)
+	response.Mod(response, sk.NSquared)
+	return response, betaRandomness
+}
+
+func cloneModulusProof(in *ModulusProof) *ModulusProof {
+	out := *in
+	out.W = append([]byte(nil), in.W...)
+	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
+	out.X = cloneByteSlices(in.X)
+	out.A = append([]byte(nil), in.A...)
+	out.B = append([]byte(nil), in.B...)
+	out.Z = cloneByteSlices(in.Z)
+	return &out
+}
+
+func cloneRingPedersenProof(in *RingPedersenProof) *RingPedersenProof {
+	out := *in
+	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
+	out.Commitments = cloneByteSlices(in.Commitments)
+	out.Challenges = append([]byte(nil), in.Challenges...)
+	out.Responses = cloneByteSlices(in.Responses)
+	return &out
+}
+
+func cloneEncryptionProof(in *EncryptionProof) *EncryptionProof {
+	out := *in
+	out.ScalarCommitment = append([]byte(nil), in.ScalarCommitment...)
+	out.CipherCommitment = append([]byte(nil), in.CipherCommitment...)
+	out.PointCommitment = append([]byte(nil), in.PointCommitment...)
+	out.Bound = append([]byte(nil), in.Bound...)
+	out.Response = append([]byte(nil), in.Response...)
+	out.Randomness = append([]byte(nil), in.Randomness...)
+	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
+	return &out
+}
+
 func cloneMTAResponseProof(in *MTAResponseProof) *MTAResponseProof {
 	out := *in
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
@@ -716,6 +554,17 @@ func cloneMTAResponseProof(in *MTAResponseProof) *MTAResponseProof {
 	out.BetaResponse = append([]byte(nil), in.BetaResponse...)
 	out.Randomness = append([]byte(nil), in.Randomness...)
 	return &out
+}
+
+func cloneByteSlices(in [][]byte) [][]byte {
+	if in == nil {
+		return nil
+	}
+	out := make([][]byte, len(in))
+	for i := range in {
+		out[i] = append([]byte(nil), in[i]...)
+	}
+	return out
 }
 
 func prependZero(in []byte) []byte {

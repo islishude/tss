@@ -88,6 +88,9 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 		{name: "paillier public key", tag: keyShareFieldPaillierPublicKey, value: []byte{}},
 		{name: "paillier private key", tag: keyShareFieldPaillierPrivateKey, value: []byte{}},
 		{name: "paillier proof", tag: keyShareFieldPaillierProof, value: []byte{}},
+		{name: "Ring-Pedersen parameters", tag: keyShareFieldRingPedersenParams, value: []byte{}},
+		{name: "Ring-Pedersen proof", tag: keyShareFieldRingPedersenProof, value: []byte{}},
+		{name: "Ring-Pedersen public parameters", tag: keyShareFieldRingPedersenPublic, value: wire.Uint32(0)},
 		{name: "paillier public key set", tag: keyShareFieldPaillierPublicKeys, value: wire.Uint32(0)},
 		{name: "share proof", tag: keyShareFieldShareProof, value: []byte{}},
 		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
@@ -113,10 +116,10 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 		t.Fatal("key share accepted swapped peer Paillier modulus proof")
 	}
 
-	badPrimalityProof := cloneKeyShare(shares[1])
-	badPrimalityProof.PaillierPrimalityProofs[0] = append([]byte(nil), badPrimalityProof.PaillierPrimalityProofs[1]...)
-	if err := badPrimalityProof.Validate(); err == nil {
-		t.Fatal("key share accepted swapped peer Paillier primality proof")
+	badRingPedersenProof := cloneKeyShare(shares[1])
+	badRingPedersenProof.RingPedersenPublic[0].Proof = append([]byte(nil), badRingPedersenProof.RingPedersenPublic[1].Proof...)
+	if err := badRingPedersenProof.Validate(); err == nil {
+		t.Fatal("key share accepted swapped peer Ring-Pedersen proof")
 	}
 }
 
@@ -200,10 +203,11 @@ func FuzzCGGMP21PresignUnmarshal(f *testing.F) {
 func FuzzCGGMP21KeygenCommitmentsPayloadUnmarshal(f *testing.F) {
 	shares := secpKeygen(f, 1, 1)
 	payload := keygenCommitmentsPayload{
-		Commitments:       shares[1].GroupCommitments,
-		PaillierPublicKey: shares[1].PaillierPublicKey,
-		PaillierProof:     shares[1].PaillierProof,
-		PrimalityProof:    shares[1].PaillierPrimalityProof,
+		Commitments:        shares[1].GroupCommitments,
+		PaillierPublicKey:  shares[1].PaillierPublicKey,
+		PaillierProof:      shares[1].PaillierProof,
+		RingPedersenParams: shares[1].RingPedersenParams,
+		RingPedersenProof:  shares[1].RingPedersenProof,
 	}
 	raw, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {
@@ -281,10 +285,11 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 func FuzzCGGMP21ReshareCommitmentsPayloadUnmarshal(f *testing.F) {
 	shares := secpKeygen(f, 1, 1)
 	payload := reshareCommitmentsPayload{
-		Commitments:       shares[1].GroupCommitments,
-		PaillierPublicKey: shares[1].PaillierPublicKey,
-		PaillierProof:     shares[1].PaillierProof,
-		PrimalityProof:    shares[1].PaillierPrimalityProof,
+		Commitments:        shares[1].GroupCommitments,
+		PaillierPublicKey:  shares[1].PaillierPublicKey,
+		PaillierProof:      shares[1].PaillierProof,
+		RingPedersenParams: shares[1].RingPedersenParams,
+		RingPedersenProof:  shares[1].RingPedersenProof,
 	}
 	raw, err := marshalReshareCommitmentsPayload(payload)
 	if err != nil {
@@ -320,10 +325,11 @@ func FuzzCGGMP21ReshareSharePayloadUnmarshal(f *testing.F) {
 func FuzzCGGMP21RefreshCommitmentsPayloadUnmarshal(f *testing.F) {
 	shares := secpKeygen(f, 1, 1)
 	payload := refreshCommitmentsPayload{
-		Commitments:       shares[1].GroupCommitments,
-		PaillierPublicKey: shares[1].PaillierPublicKey,
-		PaillierProof:     shares[1].PaillierProof,
-		PrimalityProof:    shares[1].PaillierPrimalityProof,
+		Commitments:        shares[1].GroupCommitments,
+		PaillierPublicKey:  shares[1].PaillierPublicKey,
+		PaillierProof:      shares[1].PaillierProof,
+		RingPedersenParams: shares[1].RingPedersenParams,
+		RingPedersenProof:  shares[1].RingPedersenProof,
 	}
 	raw, err := marshalRefreshCommitmentsPayload(payload)
 	if err != nil {
@@ -366,6 +372,8 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	}
 	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
 	transcript := sha256.Sum256([]byte("minimal presign"))
+	ctx := testPresignContext()
+	contextHash := presignContextHash(ctx, nil)
 	return &Presign{
 		Version:        tss.Version,
 		Party:          1,
@@ -377,6 +385,8 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		ChiShare:       scalarBytes(one),
 		Delta:          scalarBytes(one),
 		TranscriptHash: transcript[:],
+		Context:        ctx,
+		ContextHash:    contextHash,
 	}
 }
 
@@ -397,12 +407,17 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.PaillierPublicKey = append([]byte(nil), in.PaillierPublicKey...)
 	out.paillierPrivateKey = append([]byte(nil), in.paillierPrivateKey...)
 	out.PaillierProof = append([]byte(nil), in.PaillierProof...)
-	out.PaillierPrimalityProof = append([]byte(nil), in.PaillierPrimalityProof...)
-	out.PaillierPrimalityProofs = cloneByteSlices(in.PaillierPrimalityProofs)
 	out.PaillierPublicKeys = append([]PaillierPublicShare(nil), in.PaillierPublicKeys...)
 	for i := range out.PaillierPublicKeys {
 		out.PaillierPublicKeys[i].PublicKey = append([]byte(nil), in.PaillierPublicKeys[i].PublicKey...)
 		out.PaillierPublicKeys[i].Proof = append([]byte(nil), in.PaillierPublicKeys[i].Proof...)
+	}
+	out.RingPedersenParams = append([]byte(nil), in.RingPedersenParams...)
+	out.RingPedersenProof = append([]byte(nil), in.RingPedersenProof...)
+	out.RingPedersenPublic = append([]RingPedersenPublicShare(nil), in.RingPedersenPublic...)
+	for i := range out.RingPedersenPublic {
+		out.RingPedersenPublic[i].Params = append([]byte(nil), in.RingPedersenPublic[i].Params...)
+		out.RingPedersenPublic[i].Proof = append([]byte(nil), in.RingPedersenPublic[i].Proof...)
 	}
 	out.PaillierProofSessionID = in.PaillierProofSessionID
 	out.PaillierProofDomain = in.PaillierProofDomain

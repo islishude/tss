@@ -33,7 +33,8 @@ const (
 	keygenCommitmentsPayloadFieldPaillierPublicKey
 	keygenCommitmentsPayloadFieldPaillierProof
 	keygenCommitmentsPayloadFieldChainCode
-	keygenCommitmentsPayloadFieldPrimalityProof
+	keygenCommitmentsPayloadFieldRingPedersenParams
+	keygenCommitmentsPayloadFieldRingPedersenProof
 )
 
 const keygenSharePayloadFieldShare uint16 = 1
@@ -56,6 +57,7 @@ const presignRound3PayloadFieldDelta uint16 = 1
 const (
 	signPartialPayloadFieldS uint16 = iota + 1
 	signPartialPayloadFieldPresignTranscript
+	signPartialPayloadFieldPresignContext
 )
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
@@ -68,7 +70,10 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
 		return nil, err
 	}
-	if _, err := zkpai.UnmarshalPrimalityProof(p.PrimalityProof); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+		return nil, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return nil, err
 	}
 	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
@@ -79,7 +84,8 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
 		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
-		{Tag: keygenCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
+		{Tag: keygenCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
+		{Tag: keygenCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
 	})
 }
 
@@ -91,7 +97,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if version != tss.Version {
 		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode, keygenCommitmentsPayloadFieldPrimalityProof); err != nil {
+	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode, keygenCommitmentsPayloadFieldRingPedersenParams, keygenCommitmentsPayloadFieldRingPedersenProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
@@ -102,16 +108,23 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 		return keygenCommitmentsPayload{}, err
 	}
 	p := keygenCommitmentsPayload{
-		Commitments:       commitments,
-		PaillierPublicKey: wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
-		PaillierProof:     wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
-		ChainCode:         wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
-		PrimalityProof:    wire.MustField(fields, keygenCommitmentsPayloadFieldPrimalityProof),
+		Commitments:        commitments,
+		PaillierPublicKey:  wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
+		PaillierProof:      wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
+		ChainCode:          wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
+		RingPedersenParams: wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenParams),
+		RingPedersenProof:  wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenProof),
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+		return keygenCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+		return keygenCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
@@ -279,9 +292,13 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 	if len(p.PresignTranscript) != sha256.Size {
 		return nil, errors.New("presign transcript must be 32 bytes")
 	}
+	if len(p.PresignContext) != sha256.Size {
+		return nil, errors.New("presign context must be 32 bytes")
+	}
 	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
 		{Tag: signPartialPayloadFieldS, Value: wire.NonNilBytes(p.S)},
 		{Tag: signPartialPayloadFieldPresignTranscript, Value: wire.NonNilBytes(p.PresignTranscript)},
+		{Tag: signPartialPayloadFieldPresignContext, Value: wire.NonNilBytes(p.PresignContext)},
 	})
 }
 
@@ -293,18 +310,22 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if version != tss.Version {
 		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript); err != nil {
+	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript, signPartialPayloadFieldPresignContext); err != nil {
 		return signPartialPayload{}, err
 	}
 	p := signPartialPayload{
 		S:                 wire.MustField(fields, signPartialPayloadFieldS),
 		PresignTranscript: wire.MustField(fields, signPartialPayloadFieldPresignTranscript),
+		PresignContext:    wire.MustField(fields, signPartialPayloadFieldPresignContext),
 	}
 	if _, err := secp.ParseScalar(p.S); err != nil {
 		return signPartialPayload{}, err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
 		return signPartialPayload{}, errors.New("presign transcript must be 32 bytes")
+	}
+	if len(p.PresignContext) != sha256.Size {
+		return signPartialPayload{}, errors.New("presign context must be 32 bytes")
 	}
 	return p, nil
 }
@@ -337,7 +358,8 @@ func validatePositiveIntegerBytes(in []byte) error {
 const reshareCommitmentsPayloadFieldCommitments uint16 = 1
 const reshareCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
 const reshareCommitmentsPayloadFieldPaillierProof uint16 = 3
-const reshareCommitmentsPayloadFieldPrimalityProof uint16 = 4
+const reshareCommitmentsPayloadFieldRingPedersenParams uint16 = 4
+const reshareCommitmentsPayloadFieldRingPedersenProof uint16 = 5
 
 const reshareSharePayloadFieldShare uint16 = 1
 
@@ -346,7 +368,8 @@ func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, erro
 		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: reshareCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: reshareCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: reshareCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
+		{Tag: reshareCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
+		{Tag: reshareCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
 	})
 }
 
@@ -358,7 +381,7 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if version != tss.Version {
 		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof, reshareCommitmentsPayloadFieldPrimalityProof); err != nil {
+	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof, reshareCommitmentsPayloadFieldRingPedersenParams, reshareCommitmentsPayloadFieldRingPedersenProof); err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
@@ -373,11 +396,21 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	primalityProof, err := wire.Require(fields, reshareCommitmentsPayloadFieldPrimalityProof)
+	ringPedersenParams, err := wire.Require(fields, reshareCommitmentsPayloadFieldRingPedersenParams)
 	if err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, PrimalityProof: primalityProof}, nil
+	ringPedersenProof, err := wire.Require(fields, reshareCommitmentsPayloadFieldRingPedersenProof)
+	if err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
+		return reshareCommitmentsPayload{}, err
+	}
+	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -410,15 +443,17 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 const refreshCommitmentsPayloadFieldCommitments uint16 = 1
 const refreshCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
 const refreshCommitmentsPayloadFieldPaillierProof uint16 = 3
-const refreshCommitmentsPayloadFieldPrimalityProof uint16 = 4
+const refreshCommitmentsPayloadFieldRingPedersenParams uint16 = 4
+const refreshCommitmentsPayloadFieldRingPedersenProof uint16 = 5
 
 const refreshSharePayloadFieldShare uint16 = 1
 
 type refreshCommitmentsPayload struct {
-	Commitments       [][]byte
-	PaillierPublicKey []byte
-	PaillierProof     []byte
-	PrimalityProof    []byte
+	Commitments        [][]byte
+	PaillierPublicKey  []byte
+	PaillierProof      []byte
+	RingPedersenParams []byte
+	RingPedersenProof  []byte
 }
 
 type refreshSharePayload struct {
@@ -430,7 +465,8 @@ func marshalRefreshCommitmentsPayload(p refreshCommitmentsPayload) ([]byte, erro
 		{Tag: refreshCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: refreshCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: refreshCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: refreshCommitmentsPayloadFieldPrimalityProof, Value: wire.NonNilBytes(p.PrimalityProof)},
+		{Tag: refreshCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
+		{Tag: refreshCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
 	})
 }
 
@@ -442,7 +478,7 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 	if version != tss.Version {
 		return refreshCommitmentsPayload{}, fmt.Errorf("unexpected refresh commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof, refreshCommitmentsPayloadFieldPrimalityProof); err != nil {
+	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof, refreshCommitmentsPayloadFieldRingPedersenParams, refreshCommitmentsPayloadFieldRingPedersenProof); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
 	commitments, err := wire.BytesListField(fields, refreshCommitmentsPayloadFieldCommitments)
@@ -457,11 +493,21 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 	if err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	primalityProof, err := wire.Require(fields, refreshCommitmentsPayloadFieldPrimalityProof)
+	ringPedersenParams, err := wire.Require(fields, refreshCommitmentsPayloadFieldRingPedersenParams)
 	if err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, PrimalityProof: primalityProof}, nil
+	ringPedersenProof, err := wire.Require(fields, refreshCommitmentsPayloadFieldRingPedersenProof)
+	if err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
+		return refreshCommitmentsPayload{}, err
+	}
+	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {

@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"slices"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -77,16 +78,21 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mta.VerifyStart(mtaStartDomain(shares[1], sessionID, signers, 2, round1From2.PaillierPublicKey), startFrom2, pk2) {
+	if !mta.VerifyStart(mtaStartDomain(shares[1], sessionID, signers, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
 		t.Fatal("MtA start proof did not verify")
 	}
 	mutatedKey := cloneKeyShare(shares[1])
 	mutatedKey.KeygenTranscriptHash[0] ^= 1
-	if mta.VerifyStart(mtaStartDomain(mutatedKey, sessionID, signers, 2, round1From2.PaillierPublicKey), startFrom2, pk2) {
+	if mta.VerifyStart(mtaStartDomain(mutatedKey, sessionID, signers, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
-	if mta.VerifyStart(mtaStartDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, round1From2.PaillierPublicKey), startFrom2, pk2) {
+	if mta.VerifyStart(mtaStartDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
 		t.Fatal("MtA start proof verified under mutated signer set")
+	}
+	wrongContextHash := slices.Clone(s1.contextHash)
+	wrongContextHash[0] ^= 1
+	if mta.VerifyStart(mtaStartDomain(shares[1], sessionID, signers, 2, round1From2.PaillierPublicKey, wrongContextHash), startFrom2, pk2) {
+		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
 	if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
@@ -107,12 +113,12 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		Ciphertext: s1.round1[s1.key.Party].EncK,
 		EncrProof:  s1.round1[s1.key.Party].EncKProof,
 	}
-	startDomain := mtaStartDomain(s1.key, sessionID, signers, s1.key.Party, s1.key.PaillierPublicKey)
-	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey)
+	startDomain := mtaStartDomain(s1.key, sessionID, signers, s1.key.Party, s1.key.PaillierPublicKey, s1.contextHash)
+	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey, s1.contextHash)
 	if _, err := mta.Finish(startDomain, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier); err != nil {
 		t.Fatal(err)
 	}
-	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "sigma", s1.key.PaillierPublicKey)
+	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "sigma", s1.key.PaillierPublicKey, s1.contextHash)
 	if _, err := mta.Finish(startDomain, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}

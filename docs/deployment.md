@@ -87,17 +87,20 @@ sig, ok := signSession.Signature()
 
 ```go
 // Offline presign (can be done in advance):
-presignSession, out, err := secp256k1.StartPresign(keyShare, sessionID, signers)
+ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
+presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionID, signers, ctx)
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
 // Persist presign immediately.
 encrypted, _ := tss.EncryptPresign(presign.MarshalBinary(), passphrase)
 
 // Online signing (fast, one round):
-signSession, out, _ := secp256k1.StartSignDigest(keyShare, presign, sessionID, digest)
+message := []byte("payload")
+request := secp256k1.SignRequest{Context: ctx, Message: message, LowS: true}
+signSession, out, _ := secp256k1.StartSign(keyShare, presign, sessionID, request)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
-secp256k1.VerifyDigest(publicKey, digest, sig) // true
+secp256k1.VerifySignature(publicKey, request, sig) // true
 ```
 
 After signing, mark the presign consumed:

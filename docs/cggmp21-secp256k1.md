@@ -29,10 +29,11 @@ type KeyShare struct {
     VerificationShares      []VerificationShare
     PaillierPublicKey       []byte        // local Paillier public key (TLV-encoded)
     paillierPrivateKey      []byte        // unexported: local Paillier private key (λ, μ)
-    PaillierProof           []byte        // Π^fac modulus proof
-    PaillierPrimalityProof  []byte        // Π^prm primality proof
-    PaillierPrimalityProofs [][]byte      // all parties' primality proofs
+    PaillierProof           []byte        // Πmod modulus proof
     PaillierPublicKeys      []PaillierPublicShare
+    RingPedersenParams      []byte        // local (N,s,t)
+    RingPedersenProof       []byte        // Πprm Ring-Pedersen proof
+    RingPedersenPublic      []RingPedersenPublicShare
     PaillierProofSessionID  tss.SessionID
     PaillierProofDomain     string
     ShareProof              []byte        // Schnorr proof of discrete-log knowledge
@@ -47,7 +48,7 @@ The `secret` and `paillierPrivateKey` fields are unexported. `String()`, `GoStri
 
 ### MPC Material Requirement
 
-CGGMP21 key shares require full Paillier/ZK material for the signing path. `requireMPCMaterial()` rejects shares from old keygen flows that lack Paillier keys, modulus proofs, primality proofs, share proofs, or the keygen transcript hash.
+CGGMP21 key shares require full Paillier/ZK material for the signing path. `requireMPCMaterial()` rejects shares from old keygen flows that lack Paillier keys, Πmod proofs, Ring-Pedersen parameters/proofs, share proofs, or the keygen transcript hash.
 
 ## Keygen
 
@@ -57,9 +58,9 @@ Each party `i`:
 
 1. **Paillier key generation**: Generates a Paillier keypair `(N_i, λ_i, μ_i)` with safe primes `p ≡ q ≡ 3 mod 4`. Default modulus size is 2048 bits (minimum 768 bits for MtA correctness).
 
-2. **ZK proofs**: Produces two proofs bound to the keygen session domain:
-   - **Π^fac** — knowledge of `N_i = p·q` factorization (modulus proof).
-   - **Π^prm** — approximate equal bit-length of `p` and `q` (primality proof).
+2. **ZK proofs**: Produces proofs bound to the keygen session domain:
+   - **Πmod** — CGGMP24 Paillier-Blum modulus proof.
+   - **Πprm** — CGGMP24 Ring-Pedersen parameter proof for `(N_i,s_i,t_i)`.
 
 3. **Shamir polynomial**: Samples a random degree `t-1` polynomial:
 
@@ -212,9 +213,9 @@ s = Σ_i s_i  mod q
 
 Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the group public key before being returned. A failed verification returns `ProtocolError` with `EvidenceKindAggregateSign` blame.
 
-### HD Additive Shift
+### HD Derivation
 
-Pass `SignOptions{AdditiveShift: shift}` to `StartSignDigestWithOptions`. Each signer adds `k_i·δ` to their local `χ_i`, and the resulting signature verifies against `DerivePublicKey(PK, shift)`.
+Set `PresignContext.DerivationPath` before calling `StartPresignWithContext`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain.
 
 ## Presign Lifecycle
 
@@ -224,15 +225,15 @@ Presign records are strictly one-use:
 // Check before use:
 if IsPresignConsumed(presign) { /* discard */ }
 
-// StartSignDigest marks Consumed before emitting any outbound message:
-sess, out, err := StartSignDigest(share, presign, sessionID, digest)
+// StartSign marks Consumed before emitting any outbound message:
+sess, out, err := StartSign(share, presign, sessionID, request)
 
 // After signing, persist the consumed record:
 consumed, _ := MarkPresignConsumed(presign)
 encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
 ```
 
-`StartSignDigest` sets `Consumed = true` **before** constructing the outbound signature envelope, so reuse fails before any partial signature leaves the process.
+`StartSign` sets `Consumed = true` **before** constructing the outbound signature envelope, so reuse fails before any partial signature leaves the process.
 
 ## Refresh
 
@@ -271,7 +272,7 @@ The Π^log proof (discrete-log equality) is integrated into keygen, reshare, and
 
 ## BIP32 HD Derivation
 
-HD derivation is implemented via `DeriveBIP32` and `DerivePublicKey` (same API shape as the frost/ed25519 package). The additive shift is passed to `StartSignDigestWithOptions` and each signer applies `k_i·δ` locally.
+HD derivation is implemented via `DeriveBIP32` and `DerivePublicKey` (same API shape as the frost/ed25519 package). Set `PresignContext.DerivationPath` before presign generation; the derived additive shift is stored in the presign and cannot be changed during online signing.
 
 ## Blame Evidence
 
@@ -279,8 +280,8 @@ CGGMP21 evidence covers every attributable failure point:
 
 | Phase           | Evidence Kind         | When                                          |
 | --------------- | --------------------- | --------------------------------------------- |
-| Keygen          | `keygen_commitment`   | Invalid keygen public commitment.              |
-| Keygen          | `keygen_paillier`     | Invalid Paillier key or modulus proof.         |
+| Keygen          | `keygen_commitment`   | Invalid keygen public commitment.             |
+| Keygen          | `keygen_paillier`     | Invalid Paillier key or modulus proof.        |
 | Keygen          | `keygen_share`        | DKG share fails commitment verification.      |
 | Presign round 1 | `presign_round1`      | Invalid nonce commitment or encryption proof. |
 | Presign round 2 | `presign_round2`      | Invalid MtA response or proof.                |
@@ -321,7 +322,8 @@ share, ok := kg.KeyShare()
 ### Presign
 
 ```go
-ps, out, err := StartPresign(share, sessionID, signers)
+ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
+ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
 ```
@@ -329,12 +331,11 @@ presign, ok := ps.Presign()
 ### Online Signing
 
 ```go
-ss, out, err := StartSignDigest(share, presign, sessionID, digest)
-// or with options:
-ss, out, err := StartSignDigestWithOptions(share, presign, sessionID, digest, SignOptions{LowS: true, AdditiveShift: shift})
+request := SignRequest{Context: ctx, Message: message, LowS: true}
+ss, out, err := StartSign(share, presign, sessionID, request)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
-ok := VerifyDigest(publicKey, digest, sig)
+ok := VerifySignature(publicKey, request, sig)
 ```
 
 ### Refresh
@@ -365,7 +366,7 @@ ok := IsPresignConsumed(presign)
 ```go
 share, err := UnmarshalKeyShare(raw)
 presign, err := UnmarshalPresign(raw)
-pubKey, sig, err := SignDigest(digest, shares) // in-memory exchange
+pubKey, sig, err := Sign(message, shares, ctx) // in-memory exchange
 ```
 
 ## Constant-Time Guarantees

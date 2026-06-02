@@ -209,6 +209,21 @@ func clonePaillierPublicShares(in []PaillierPublicShare) []PaillierPublicShare {
 	return out
 }
 
+func cloneRingPedersenPublicShares(in []RingPedersenPublicShare) []RingPedersenPublicShare {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]RingPedersenPublicShare, len(in))
+	for i, share := range in {
+		out[i] = RingPedersenPublicShare{
+			Party:  share.Party,
+			Params: append([]byte(nil), share.Params...),
+			Proof:  append([]byte(nil), share.Proof...),
+		}
+	}
+	return out
+}
+
 func paillierPublicShareFor(shares []PaillierPublicShare, id tss.PartyID) (PaillierPublicShare, bool) {
 	for _, share := range shares {
 		if share.Party == id {

@@ -12,18 +12,22 @@ const (
 	proofDomainVersion = "cggmp21-secp256k1-proof-domain-v1"
 
 	// Domain labels identify the protocol phase for domain separation.
-	domainLabelKeygenModulus      = "keygen.modulus"
-	domainLabelKeySharePaillier   = "keyshare.paillier-modulus"
-	domainLabelPresignMTAStart    = "presign.mta-start"
-	domainLabelPresignMTAResponse = "presign.mta-response"
-	domainLabelResharePaillier    = "reshare.paillier-modulus"
-	domainLabelRefreshPaillier    = "refresh.paillier-modulus"
-	domainLabelKeyShareLogProof   = "keyshare.log-proof"
-	domainLabelReshareLogProof    = "reshare.log-proof"
-	domainLabelRefreshLogProof    = "refresh.log-proof"
+	domainLabelKeygenModulus       = "keygen.modulus"
+	domainLabelKeygenRingPedersen  = "keygen.ring-pedersen"
+	domainLabelKeySharePaillier    = "keyshare.paillier-modulus"
+	domainLabelPresignMTAStart     = "presign.mta-start"
+	domainLabelPresignMTAResponse  = "presign.mta-response"
+	domainLabelResharePaillier     = "reshare.paillier-modulus"
+	domainLabelReshareRingPedersen = "reshare.ring-pedersen"
+	domainLabelRefreshPaillier     = "refresh.paillier-modulus"
+	domainLabelRefreshRingPedersen = "refresh.ring-pedersen"
+	domainLabelKeyShareLogProof    = "keyshare.log-proof"
+	domainLabelReshareLogProof     = "reshare.log-proof"
+	domainLabelRefreshLogProof     = "refresh.log-proof"
 
 	// Domain kinds identify the cryptographic object bound into a proof.
 	domainKindPaillierModulus = "paillier-modulus"
+	domainKindRingPedersen    = "ring-pedersen"
 	domainKindEncryptedK      = "encrypted-k"
 	domainKindLogProof        = "log-proof"
 )
@@ -40,6 +44,8 @@ type proofDomainContext struct {
 	publicKey            []byte
 	keygenTranscriptHash []byte
 	paillierPublicKey    []byte
+	ringPedersenParams   []byte
+	presignContextHash   []byte
 }
 
 func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
@@ -51,6 +57,18 @@ func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillie
 		sender:            sender,
 		kind:              domainKindPaillierModulus,
 		paillierPublicKey: paillierPublicKey,
+	})
+}
+
+func keygenRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params []byte) []byte {
+	return proofDomain(proofDomainContext{
+		label:              domainLabelKeygenRingPedersen,
+		sessionID:          config.SessionID,
+		threshold:          config.Threshold,
+		parties:            config.Parties,
+		sender:             sender,
+		kind:               domainKindRingPedersen,
+		ringPedersenParams: params,
 	})
 }
 
@@ -70,7 +88,29 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 	})
 }
 
-func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID, paillierPublicKey []byte) []byte {
+func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []byte) []byte {
+	if key == nil {
+		return nil
+	}
+	config := tss.ThresholdConfig{
+		Threshold: key.Threshold,
+		Parties:   key.Parties,
+		Self:      party,
+		SessionID: key.PaillierProofSessionID,
+	}
+	switch key.PaillierProofDomain {
+	case domainLabelKeygenModulus:
+		return keygenRingPedersenDomain(config, party, params)
+	case domainLabelRefreshPaillier:
+		return refreshRingPedersenDomain(config, party, params)
+	case domainLabelResharePaillier:
+		return reshareRingPedersenDomain(config, party, params)
+	default:
+		return nil
+	}
+}
+
+func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID, paillierPublicKey, presignContextHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:                domainLabelPresignMTAStart,
 		sessionID:            sessionID,
@@ -82,6 +122,7 @@ func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    paillierPublicKey,
+		presignContextHash:   presignContextHash,
 	})
 }
 
@@ -97,6 +138,18 @@ func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paill
 	})
 }
 
+func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params []byte) []byte {
+	return proofDomain(proofDomainContext{
+		label:              domainLabelReshareRingPedersen,
+		sessionID:          config.SessionID,
+		threshold:          config.Threshold,
+		parties:            config.Parties,
+		sender:             sender,
+		kind:               domainKindRingPedersen,
+		ringPedersenParams: params,
+	})
+}
+
 func refreshPaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:             domainLabelRefreshPaillier,
@@ -109,7 +162,19 @@ func refreshPaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paill
 	})
 }
 
-func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, kind string, initiatorPaillierPublicKey []byte) []byte {
+func refreshRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params []byte) []byte {
+	return proofDomain(proofDomainContext{
+		label:              domainLabelRefreshRingPedersen,
+		sessionID:          config.SessionID,
+		threshold:          config.Threshold,
+		parties:            config.Parties,
+		sender:             sender,
+		kind:               domainKindRingPedersen,
+		ringPedersenParams: params,
+	})
+}
+
+func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, kind string, initiatorPaillierPublicKey, presignContextHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:                domainLabelPresignMTAResponse,
 		sessionID:            sessionID,
@@ -122,6 +187,7 @@ func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.Par
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    initiatorPaillierPublicKey,
+		presignContextHash:   presignContextHash,
 	})
 }
 
@@ -168,5 +234,7 @@ func proofDomain(ctx proofDomainContext) []byte {
 	wire.WriteHashPart(h, ctx.publicKey)
 	wire.WriteHashPart(h, ctx.keygenTranscriptHash)
 	wire.WriteHashPart(h, ctx.paillierPublicKey)
+	wire.WriteHashPart(h, ctx.ringPedersenParams)
+	wire.WriteHashPart(h, ctx.presignContextHash)
 	return h.Sum(nil)
 }

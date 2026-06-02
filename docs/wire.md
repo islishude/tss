@@ -19,8 +19,9 @@ field      = tag:uint16 || value_len:uint32 || value
 - Nil field values are rejected by the encoder.
 - Decoders reject trailing bytes.
 - Higher-level decoders require exact field sets for fixed records.
-- Proof integer fields use minimal positive big-endian encoding; leading-zero
-  aliases are rejected.
+- Proof scalar responses use canonical positive big-endian encoding; Paillier
+  statement and commitment integers use fixed-width encodings derived from `N`
+  or `N²`, with out-of-range values rejected before algebraic checks.
 - Proof secp256k1 point fields must pass the curve package's canonical point
   decoder before the proof is accepted.
 - Proof transcript and challenge labels are fixed constants in the proof
@@ -56,17 +57,16 @@ These rules ensure one semantic record has one binary representation. This matte
 - `internal/paillier.PublicKey`
 - `internal/paillier.PrivateKey`
 - `internal/zk/paillier.ModulusProof`
-- `internal/zk/paillier.PrimalityProof`
+- `internal/zk/paillier.RingPedersenParams`
+- `internal/zk/paillier.RingPedersenProof`
 - `internal/zk/paillier.EncryptionProof`
-- `internal/zk/paillier.EncScalarProof`
-- `internal/zk/paillier.EncRangeProof`
 - `internal/zk/paillier.MTAResponseProof`
 - `internal/zk/paillier.LogProof`
 - `internal/zk/schnorr.Proof`
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
-all seven Paillier ZK proof types (modulus, primality, encryption, enc-scalar,
-enc-range, MtA response, log), and Schnorr share proofs all use the same strict
+all active Paillier ZK proof types (modulus, Ring-Pedersen parameters/proof,
+encryption, MtA response, log), and Schnorr share proofs all use the same strict
 TLV encoding as other binary records. Keygen, presign, and signing payloads reject
 JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings

@@ -39,7 +39,11 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 }
 
 func TestGoldenSignPartialPayload(t *testing.T) {
-	payload := signPartialPayload{S: scalarBytes(big.NewInt(1)), PresignTranscript: bytes.Repeat([]byte{0xaa}, 32)}
+	payload := signPartialPayload{
+		S:                 scalarBytes(big.NewInt(1)),
+		PresignTranscript: bytes.Repeat([]byte{0xaa}, 32),
+		PresignContext:    bytes.Repeat([]byte{0xbb}, 32),
+	}
 	raw, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -178,6 +182,18 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 
 func TestGoldenCGGMP21Presign(t *testing.T) {
 	golden := filepath.Join("testdata", "Presign.golden")
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		shares := secpKeygen(t, 1, 1)
+		presigns := secpPresign(t, shares, []tss.PartyID{1})
+		raw, err := presigns[1].MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
+			t.Fatal(err)
+		}
+		return
+	}
 	if _, err := os.Stat(golden); os.IsNotExist(err) {
 		t.Skipf("golden file %s does not exist; run with UPDATE_GOLDEN=1 to generate", golden)
 	}

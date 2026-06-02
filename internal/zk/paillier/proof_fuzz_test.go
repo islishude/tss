@@ -18,29 +18,29 @@ func FuzzModulusProofUnmarshal(f *testing.F) {
 	})
 }
 
-func FuzzEncScalarProofUnmarshal(f *testing.F) {
-	f.Add(mustMarshalProof(f, seedEncScalarProof(f)))
+func FuzzRingPedersenProofUnmarshal(f *testing.F) {
+	f.Add(mustMarshalProof(f, seedRingPedersenProof()))
 	f.Add([]byte(`{"version":1}`))
 	f.Add([]byte("TSS1"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		proof, err := UnmarshalEncScalarProof(data)
+		proof, err := UnmarshalRingPedersenProof(data)
 		if err != nil {
 			return
 		}
-		assertProofRemarshals(t, proof, UnmarshalEncScalarProof)
+		assertProofRemarshals(t, proof, UnmarshalRingPedersenProof)
 	})
 }
 
-func FuzzEncRangeProofUnmarshal(f *testing.F) {
-	f.Add(mustMarshalProof(f, seedEncRangeProof(f)))
+func FuzzEncryptionProofUnmarshal(f *testing.F) {
+	f.Add(mustMarshalProof(f, seedEncryptionProof(f)))
 	f.Add([]byte(`{"version":1}`))
 	f.Add([]byte("TSS1"))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		proof, err := UnmarshalEncRangeProof(data)
+		proof, err := UnmarshalEncryptionProof(data)
 		if err != nil {
 			return
 		}
-		assertProofRemarshals(t, proof, UnmarshalEncRangeProof)
+		assertProofRemarshals(t, proof, UnmarshalEncryptionProof)
 	})
 }
 

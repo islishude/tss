@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -11,8 +12,9 @@ import (
 )
 
 const (
-	keyShareWireType = "cggmp21.secp256k1.keyshare"
-	presignWireType  = "cggmp21.secp256k1.presign"
+	keyShareWireType       = "cggmp21.secp256k1.keyshare"
+	presignWireType        = "cggmp21.secp256k1.presign"
+	presignContextWireType = "cggmp21.secp256k1.presign.context"
 )
 
 const (
@@ -27,8 +29,9 @@ const (
 	keyShareFieldPaillierPublicKey
 	keyShareFieldPaillierPrivateKey
 	keyShareFieldPaillierProof
-	keyShareFieldPaillierPrimalityProof
-	keyShareFieldPaillierPrimalityProofs
+	keyShareFieldRingPedersenParams
+	keyShareFieldRingPedersenProof
+	keyShareFieldRingPedersenPublic
 	keyShareFieldPaillierPublicKeys
 	keyShareFieldShareProof
 	keyShareFieldKeygenTranscriptHash
@@ -48,7 +51,18 @@ const (
 	presignFieldChiShare
 	presignFieldDelta
 	presignFieldTranscriptHash
+	presignFieldContext
+	presignFieldContextHash
+	presignFieldAdditiveShift
 	presignFieldConsumed
+)
+
+const (
+	presignContextFieldKeyID uint16 = iota + 1
+	presignContextFieldChainID
+	presignContextFieldDerivationPath
+	presignContextFieldPolicyDomain
+	presignContextFieldMessageDomain
 )
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
@@ -67,8 +81,9 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldPaillierPublicKey, Value: wire.NonNilBytes(k.PaillierPublicKey)},
 		{Tag: keyShareFieldPaillierPrivateKey, Value: wire.NonNilBytes(k.paillierPrivateKey)},
 		{Tag: keyShareFieldPaillierProof, Value: wire.NonNilBytes(k.PaillierProof)},
-		{Tag: keyShareFieldPaillierPrimalityProof, Value: wire.NonNilBytes(k.PaillierPrimalityProof)},
-		{Tag: keyShareFieldPaillierPrimalityProofs, Value: wire.EncodeBytesList(k.PaillierPrimalityProofs)},
+		{Tag: keyShareFieldRingPedersenParams, Value: wire.NonNilBytes(k.RingPedersenParams)},
+		{Tag: keyShareFieldRingPedersenProof, Value: wire.NonNilBytes(k.RingPedersenProof)},
+		{Tag: keyShareFieldRingPedersenPublic, Value: encodeRingPedersenPublicShares(k.RingPedersenPublic)},
 		{Tag: keyShareFieldPaillierPublicKeys, Value: encodePaillierPublicShares(k.PaillierPublicKeys)},
 		{Tag: keyShareFieldShareProof, Value: wire.NonNilBytes(k.ShareProof)},
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
@@ -87,7 +102,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPrimalityProof, keyShareFieldPaillierPrimalityProofs, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldPaillierProofSessionID, keyShareFieldPaillierProofDomain, keyShareFieldLogCiphertext, keyShareFieldLogProof); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldRingPedersenParams, keyShareFieldRingPedersenProof, keyShareFieldRingPedersenPublic, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldPaillierProofSessionID, keyShareFieldPaillierProofDomain, keyShareFieldLogCiphertext, keyShareFieldLogProof); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -117,7 +132,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	primalityProofs, err := wire.BytesListField(fields, keyShareFieldPaillierPrimalityProofs)
+	ringPedersenPublic, err := decodeRingPedersenPublicSharesField(fields, keyShareFieldRingPedersenPublic)
 	if err != nil {
 		return nil, err
 	}
@@ -126,27 +141,28 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		return nil, fmt.Errorf("invalid paillier proof session id: %w", err)
 	}
 	k := &KeyShare{
-		Version:                 tss.Version,
-		Party:                   tss.PartyID(party),
-		Threshold:               int(threshold),
-		Parties:                 parties,
-		PublicKey:               wire.MustField(fields, keyShareFieldPublicKey),
-		ChainCode:               wire.MustField(fields, keyShareFieldChainCode),
-		secret:                  wire.MustField(fields, keyShareFieldSecret),
-		GroupCommitments:        groupCommitments,
-		VerificationShares:      verificationShares,
-		PaillierPublicKey:       wire.MustField(fields, keyShareFieldPaillierPublicKey),
-		paillierPrivateKey:      wire.MustField(fields, keyShareFieldPaillierPrivateKey),
-		PaillierProof:           wire.MustField(fields, keyShareFieldPaillierProof),
-		PaillierPrimalityProof:  wire.MustField(fields, keyShareFieldPaillierPrimalityProof),
-		PaillierPrimalityProofs: primalityProofs,
-		PaillierPublicKeys:      paillierPublicKeys,
-		ShareProof:              wire.MustField(fields, keyShareFieldShareProof),
-		KeygenTranscriptHash:    wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
-		PaillierProofSessionID:  paillierProofSessionID,
-		PaillierProofDomain:     string(wire.MustField(fields, keyShareFieldPaillierProofDomain)),
-		LogCiphertext:           wire.MustField(fields, keyShareFieldLogCiphertext),
-		LogProof:                wire.MustField(fields, keyShareFieldLogProof),
+		Version:                tss.Version,
+		Party:                  tss.PartyID(party),
+		Threshold:              int(threshold),
+		Parties:                parties,
+		PublicKey:              wire.MustField(fields, keyShareFieldPublicKey),
+		ChainCode:              wire.MustField(fields, keyShareFieldChainCode),
+		secret:                 wire.MustField(fields, keyShareFieldSecret),
+		GroupCommitments:       groupCommitments,
+		VerificationShares:     verificationShares,
+		PaillierPublicKey:      wire.MustField(fields, keyShareFieldPaillierPublicKey),
+		paillierPrivateKey:     wire.MustField(fields, keyShareFieldPaillierPrivateKey),
+		PaillierProof:          wire.MustField(fields, keyShareFieldPaillierProof),
+		RingPedersenParams:     wire.MustField(fields, keyShareFieldRingPedersenParams),
+		RingPedersenProof:      wire.MustField(fields, keyShareFieldRingPedersenProof),
+		RingPedersenPublic:     ringPedersenPublic,
+		PaillierPublicKeys:     paillierPublicKeys,
+		ShareProof:             wire.MustField(fields, keyShareFieldShareProof),
+		KeygenTranscriptHash:   wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		PaillierProofSessionID: paillierProofSessionID,
+		PaillierProofDomain:    string(wire.MustField(fields, keyShareFieldPaillierProofDomain)),
+		LogCiphertext:          wire.MustField(fields, keyShareFieldLogCiphertext),
+		LogProof:               wire.MustField(fields, keyShareFieldLogProof),
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err
@@ -169,6 +185,9 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(p.ChiShare)},
 		{Tag: presignFieldDelta, Value: wire.NonNilBytes(p.Delta)},
 		{Tag: presignFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: presignFieldContext, Value: encodePresignContext(p.Context)},
+		{Tag: presignFieldContextHash, Value: wire.NonNilBytes(p.ContextHash)},
+		{Tag: presignFieldAdditiveShift, Value: wire.NonNilBytes(p.AdditiveShift)},
 		{Tag: presignFieldConsumed, Value: wire.Bool(p.Consumed)},
 	})
 }
@@ -182,7 +201,7 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected presign wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldConsumed); err != nil {
+	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, presignFieldParty)
@@ -204,6 +223,10 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 	if err != nil {
 		return nil, err
 	}
+	ctx, err := decodePresignContext(wire.MustField(fields, presignFieldContext))
+	if err != nil {
+		return nil, err
+	}
 	p := &Presign{
 		Version:        tss.Version,
 		Party:          tss.PartyID(party),
@@ -215,6 +238,9 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 		ChiShare:       wire.MustField(fields, presignFieldChiShare),
 		Delta:          wire.MustField(fields, presignFieldDelta),
 		TranscriptHash: wire.MustField(fields, presignFieldTranscriptHash),
+		Context:        ctx,
+		ContextHash:    wire.MustField(fields, presignFieldContextHash),
+		AdditiveShift:  wire.MustField(fields, presignFieldAdditiveShift),
 		Consumed:       consumed,
 	}
 	if err := p.Validate(); err != nil {
@@ -257,6 +283,20 @@ func (p *Presign) Validate() error {
 	}
 	if len(p.TranscriptHash) != 32 {
 		return errors.New("invalid presign transcript hash")
+	}
+	if err := validatePresignContext(p.Context); err != nil {
+		return err
+	}
+	if len(p.ContextHash) != 32 {
+		return errors.New("invalid presign context hash")
+	}
+	if len(p.AdditiveShift) > 0 {
+		if _, err := secp.ParseScalar(p.AdditiveShift); err != nil {
+			return fmt.Errorf("invalid additive shift: %w", err)
+		}
+	}
+	if !bytes.Equal(presignContextHash(p.Context, p.AdditiveShift), p.ContextHash) {
+		return errors.New("presign context hash mismatch")
 	}
 	return nil
 }
@@ -307,4 +347,74 @@ func decodePaillierPublicSharesField(fields []wire.Field, tag uint16) ([]Paillie
 		})
 	}
 	return out, nil
+}
+
+func encodeRingPedersenPublicShares(shares []RingPedersenPublicShare) []byte {
+	records := make([]wire.PartyBytePair[tss.PartyID], len(shares))
+	for i, share := range shares {
+		records[i] = wire.PartyBytePair[tss.PartyID]{
+			Party:  share.Party,
+			First:  share.Params,
+			Second: share.Proof,
+		}
+	}
+	return wire.EncodePartyBytePairs(records)
+}
+
+func decodeRingPedersenPublicSharesField(fields []wire.Field, tag uint16) ([]RingPedersenPublicShare, error) {
+	records, err := wire.PartyBytePairsField[tss.PartyID](fields, tag, "Ring-Pedersen public share")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]RingPedersenPublicShare, 0, len(records))
+	for _, record := range records {
+		out = append(out, RingPedersenPublicShare{
+			Party:  record.Party,
+			Params: record.First,
+			Proof:  record.Second,
+		})
+	}
+	return out, nil
+}
+
+func encodePresignContext(ctx PresignContext) []byte {
+	raw, err := wire.Marshal(tss.Version, presignContextWireType, []wire.Field{
+		{Tag: presignContextFieldKeyID, Value: []byte(ctx.KeyID)},
+		{Tag: presignContextFieldChainID, Value: []byte(ctx.ChainID)},
+		{Tag: presignContextFieldDerivationPath, Value: wire.EncodeUint32List(ctx.DerivationPath)},
+		{Tag: presignContextFieldPolicyDomain, Value: []byte(ctx.PolicyDomain)},
+		{Tag: presignContextFieldMessageDomain, Value: []byte(ctx.MessageDomain)},
+	})
+	if err != nil {
+		return nil
+	}
+	return raw
+}
+
+func decodePresignContext(in []byte) (PresignContext, error) {
+	version, fields, err := wire.Unmarshal(in, presignContextWireType)
+	if err != nil {
+		return PresignContext{}, err
+	}
+	if version != tss.Version {
+		return PresignContext{}, fmt.Errorf("unexpected presign context wire version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, presignContextFieldKeyID, presignContextFieldChainID, presignContextFieldDerivationPath, presignContextFieldPolicyDomain, presignContextFieldMessageDomain); err != nil {
+		return PresignContext{}, err
+	}
+	path, err := wire.Uint32ListField[uint32](fields, presignContextFieldDerivationPath)
+	if err != nil {
+		return PresignContext{}, err
+	}
+	ctx := PresignContext{
+		KeyID:          string(wire.MustField(fields, presignContextFieldKeyID)),
+		ChainID:        string(wire.MustField(fields, presignContextFieldChainID)),
+		DerivationPath: path,
+		PolicyDomain:   string(wire.MustField(fields, presignContextFieldPolicyDomain)),
+		MessageDomain:  string(wire.MustField(fields, presignContextFieldMessageDomain)),
+	}
+	if err := validatePresignContext(ctx); err != nil {
+		return PresignContext{}, err
+	}
+	return ctx, nil
 }
