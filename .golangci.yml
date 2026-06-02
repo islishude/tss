@@ -22,10 +22,6 @@ linters:
       excludes:
         - G115
 
-formatters:
-  enable:
-    - gofmt
-
 issues:
   max-issues-per-linter: 0
   max-same-issues: 0
