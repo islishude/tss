@@ -49,6 +49,14 @@ type EvidenceField struct {
 	Value []byte `json:"value"`
 }
 
+// Clone returns a deep copy of an evidence field.
+func (f EvidenceField) Clone() EvidenceField {
+	return EvidenceField{
+		Key:   f.Key,
+		Value: slices.Clone(f.Value),
+	}
+}
+
 // BlameEvidence is intentionally public-only. Confidential protocol messages
 // should be represented by hashes or other public inputs, not by plaintext.
 type BlameEvidence struct {
@@ -183,7 +191,7 @@ func cloneEvidenceFields(in []EvidenceField) []EvidenceField {
 	}
 	out := make([]EvidenceField, len(in))
 	for i, field := range in {
-		out[i] = EvidenceField{Key: field.Key, Value: slices.Clone(field.Value)}
+		out[i] = field.Clone()
 	}
 	return out
 }

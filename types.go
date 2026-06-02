@@ -74,9 +74,7 @@ func SessionIDFromBytes(in []byte) (SessionID, error) {
 
 // Bytes returns a copy of the session identifier bytes.
 func (id SessionID) Bytes() []byte {
-	out := make([]byte, len(id))
-	copy(out, id[:])
-	return out
+	return slices.Clone(id[:])
 }
 
 // String returns the hex encoding of the session identifier.
@@ -158,9 +156,7 @@ func (c ThresholdConfig) Validate() error {
 
 // SortedParties returns the configured party set in ascending order.
 func (c ThresholdConfig) SortedParties() []PartyID {
-	out := append([]PartyID(nil), c.Parties...)
-	slices.Sort(out)
-	return out
+	return SortParties(c.Parties)
 }
 
 // Reader returns the configured randomness source or crypto/rand.
@@ -395,7 +391,7 @@ func ContainsParty(parties []PartyID, id PartyID) bool {
 
 // SortParties returns a sorted copy of parties.
 func SortParties(parties []PartyID) []PartyID {
-	out := append([]PartyID(nil), parties...)
+	out := slices.Clone(parties)
 	slices.Sort(out)
 	return out
 }
