@@ -465,6 +465,23 @@ func (s *KeygenSession) tryComplete() error {
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
 	}
+	// Π^log: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i.
+	logCiphertext, logRandomness, err := s.paillier.Encrypt(s.cfg.Reader(), secret)
+	if err != nil {
+		return err
+	}
+	logDomain := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash)
+	logProof, err := zkpai.ProveLog(s.cfg.Reader(), logDomain, &s.paillier.PublicKey, logCiphertext, secret, logRandomness, localVerificationShare)
+	if err != nil {
+		return err
+	}
+	logProofBytes, err := zkpai.Marshal(logProof)
+	if err != nil {
+		return err
+	}
+	s.keyShare.LogCiphertext = logCiphertext.Bytes()
+	s.keyShare.LogProof = logProofBytes
+	s.keyShare.logRandomness = logRandomness.Bytes()
 	s.completed = true
 	pubKeyHash := sha256.Sum256(groupCommitments[0])
 	s.log.Info(s.cfg.Ctx(), "keygen complete",

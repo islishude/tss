@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -192,12 +193,13 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		return nil, nil, err
 	}
 	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
-	payload, err := marshalPresignRound1Payload(presignRound1Payload{
+	presignPayload := presignRound1Payload{
 		Gamma:             gammaComm,
 		EncK:              startMsg.Ciphertext,
 		EncKProof:         startMsg.EncrProof,
-		PaillierPublicKey: append([]byte(nil), key.PaillierPublicKey...),
-	})
+		PaillierPublicKey: slices.Clone(key.PaillierPublicKey),
+	}
+	payload, err := marshalPresignRound1Payload(presignPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -214,7 +216,7 @@ func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID)
 		xBar:       xBar,
 		gammaComm:  gammaComm,
 		xBarComm:   xBarComm,
-		round1:     map[tss.PartyID]presignRound1Payload{key.Party: mustRound1(payload)},
+		round1:     map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
 		round2:     make(map[tss.PartyID]presignRound2Payload),
 		deltas:     make(map[tss.PartyID]*big.Int),
 		alphaDelta: make(map[tss.PartyID]*big.Int),
@@ -1047,12 +1049,4 @@ func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
 	wire.WriteHashPart(h, sValue)
 	wire.WriteHashPart(h, transcript)
 	return h.Sum(nil)
-}
-
-func mustRound1(payload []byte) presignRound1Payload {
-	p, err := unmarshalPresignRound1Payload(payload)
-	if err != nil {
-		panic(err)
-	}
-	return p
 }

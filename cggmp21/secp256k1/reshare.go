@@ -407,13 +407,30 @@ func (s *ReshareSession) tryComplete() error {
 		paillierPrivateKey:      append([]byte(nil), s.newPaillierPriv...),
 		PaillierProof:           paillierProofBytes,
 		PaillierPrimalityProof:  append([]byte(nil), s.newPaillierPrimalityProof...),
-		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.oldKey.Parties, s.newPaillierPrimalityProofs),
+		PaillierPrimalityProofs: sortedPaillierPrimalityProofs(s.newParties, s.newPaillierPrimalityProofs),
 		PaillierPublicKeys:      s.sortedNewPaillierPublicKeys(),
 		PaillierProofSessionID:  s.cfg.SessionID,
 		PaillierProofDomain:     domainLabelResharePaillier,
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
 	}
+	// Π^log: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret.
+	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
+	if err != nil {
+		return err
+	}
+	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
+	logProof, err := zkpai.ProveLog(s.cfg.Reader(), logDomain, &s.newPaillier.PublicKey, logCiphertext, newSecret, logRandomness, localVerificationShare)
+	if err != nil {
+		return err
+	}
+	logProofBytes, err := zkpai.Marshal(logProof)
+	if err != nil {
+		return err
+	}
+	s.newShare.LogCiphertext = logCiphertext.Bytes()
+	s.newShare.LogProof = logProofBytes
+	s.newShare.logRandomness = logRandomness.Bytes()
 	s.completed = true
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
 		"party_id", s.cfg.Self,
@@ -449,8 +466,8 @@ func validateReshareCommitments(commitments [][]byte, threshold int) error {
 }
 
 func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {
-	out := make([]PaillierPublicShare, 0, len(s.oldKey.Parties))
-	for _, id := range s.oldKey.Parties {
+	out := make([]PaillierPublicShare, 0, len(s.newParties))
+	for _, id := range s.newParties {
 		item := s.newPaillierPubs[id]
 		out = append(out, PaillierPublicShare{
 			Party:     item.Party,

@@ -34,6 +34,8 @@ const (
 	keyShareFieldKeygenTranscriptHash
 	keyShareFieldPaillierProofSessionID
 	keyShareFieldPaillierProofDomain
+	keyShareFieldLogCiphertext
+	keyShareFieldLogProof
 )
 
 const (
@@ -72,6 +74,8 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
 		{Tag: keyShareFieldPaillierProofSessionID, Value: k.PaillierProofSessionID.Bytes()},
 		{Tag: keyShareFieldPaillierProofDomain, Value: []byte(k.PaillierProofDomain)},
+		{Tag: keyShareFieldLogCiphertext, Value: wire.NonNilBytes(k.LogCiphertext)},
+		{Tag: keyShareFieldLogProof, Value: wire.NonNilBytes(k.LogProof)},
 	})
 }
 
@@ -83,7 +87,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPrimalityProof, keyShareFieldPaillierPrimalityProofs, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldPaillierProofSessionID, keyShareFieldPaillierProofDomain); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldPaillierPrimalityProof, keyShareFieldPaillierPrimalityProofs, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldPaillierProofSessionID, keyShareFieldPaillierProofDomain, keyShareFieldLogCiphertext, keyShareFieldLogProof); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -141,6 +145,8 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 		KeygenTranscriptHash:    wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
 		PaillierProofSessionID:  paillierProofSessionID,
 		PaillierProofDomain:     string(wire.MustField(fields, keyShareFieldPaillierProofDomain)),
+		LogCiphertext:           wire.MustField(fields, keyShareFieldLogCiphertext),
+		LogProof:                wire.MustField(fields, keyShareFieldLogProof),
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err

@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 
 	"github.com/islishude/tss"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -17,10 +18,14 @@ const (
 	domainLabelPresignMTAResponse = "presign.mta-response"
 	domainLabelResharePaillier    = "reshare.paillier-modulus"
 	domainLabelRefreshPaillier    = "refresh.paillier-modulus"
+	domainLabelKeyShareLogProof   = "keyshare.log-proof"
+	domainLabelReshareLogProof    = "reshare.log-proof"
+	domainLabelRefreshLogProof    = "refresh.log-proof"
 
 	// Domain kinds identify the cryptographic object bound into a proof.
 	domainKindPaillierModulus = "paillier-modulus"
 	domainKindEncryptedK      = "encrypted-k"
+	domainKindLogProof        = "log-proof"
 )
 
 type proofDomainContext struct {
@@ -117,6 +122,33 @@ func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.Par
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    initiatorPaillierPublicKey,
+	})
+}
+
+func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcriptHash []byte) []byte {
+	if key == nil || pk == nil {
+		return nil
+	}
+	label := domainLabelKeyShareLogProof
+	switch key.PaillierProofDomain {
+	case domainLabelResharePaillier:
+		label = domainLabelReshareLogProof
+	case domainLabelRefreshPaillier:
+		label = domainLabelRefreshLogProof
+	}
+	// MarshalBinary cannot fail for a validated or freshly-generated PublicKey;
+	// callers must ensure pk passes pai.UnmarshalPublicKey or pai.GenerateKey first.
+	pkBytes, _ := pk.MarshalBinary()
+	return proofDomain(proofDomainContext{
+		label:                label,
+		sessionID:            key.PaillierProofSessionID,
+		threshold:            key.Threshold,
+		parties:              key.Parties,
+		sender:               key.Party,
+		kind:                 domainKindLogProof,
+		publicKey:            verificationShare, // verification share point binds this proof to the party's share
+		keygenTranscriptHash: transcriptHash,
+		paillierPublicKey:    pkBytes,
 	})
 }
 

@@ -409,6 +409,23 @@ func (s *RefreshSession) tryComplete() error {
 		ShareProof:              shareProofBytes,
 		KeygenTranscriptHash:    transcriptHash,
 	}
+	// Π^log: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret.
+	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
+	if err != nil {
+		return err
+	}
+	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
+	logProof, err := zkpai.ProveLog(s.cfg.Reader(), logDomain, &s.newPaillier.PublicKey, logCiphertext, newSecret, logRandomness, localVerificationShare)
+	if err != nil {
+		return err
+	}
+	logProofBytes, err := zkpai.Marshal(logProof)
+	if err != nil {
+		return err
+	}
+	s.newShare.LogCiphertext = logCiphertext.Bytes()
+	s.newShare.LogProof = logProofBytes
+	s.newShare.logRandomness = logRandomness.Bytes()
 	s.completed = true
 	s.log.Info(s.cfg.Ctx(), "refresh complete",
 		"party_id", s.oldKey.Party,

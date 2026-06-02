@@ -77,6 +77,9 @@ type KeyShare struct {
 	PaillierProofDomain     string                `json:"paillier_proof_domain"`
 	ShareProof              []byte                `json:"share_proof,omitempty"`
 	KeygenTranscriptHash    []byte                `json:"keygen_transcript_hash,omitempty"`
+	LogCiphertext           []byte                `json:"log_ciphertext,omitempty"`
+	LogProof                []byte                `json:"log_proof,omitempty"`
+	logRandomness           []byte
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -153,7 +156,7 @@ func (k *KeyShare) Format(state fmt.State, verb rune) {
 
 func (k KeyShare) redactedString() string {
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPrimalityProof:%d bytes PaillierPrimalityProofs:%d PaillierPublicKeys:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPrimalityProof:%d bytes PaillierPrimalityProofs:%d PaillierPublicKeys:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes}",
 		k.Version,
 		k.Party,
 		k.Threshold,
@@ -171,6 +174,8 @@ func (k KeyShare) redactedString() string {
 		k.PaillierProofDomain,
 		len(k.ShareProof),
 		k.KeygenTranscriptHash,
+		len(k.LogCiphertext),
+		len(k.LogProof),
 	)
 }
 
@@ -256,6 +261,12 @@ func (k *KeyShare) Validate() error {
 	if len(k.KeygenTranscriptHash) == 0 {
 		return errors.New("missing keygen transcript hash")
 	}
+	if len(k.LogCiphertext) == 0 {
+		return errors.New("missing log ciphertext")
+	}
+	if len(k.LogProof) == 0 {
+		return errors.New("missing log proof")
+	}
 	pk, err := pai.UnmarshalPublicKey(k.PaillierPublicKey)
 	if err != nil {
 		return fmt.Errorf("invalid paillier public key: %w", err)
@@ -332,6 +343,18 @@ func (k *KeyShare) Validate() error {
 	if !schnorr.Verify(k.KeygenTranscriptHash, verificationShare, shareProof) {
 		return errors.New("invalid local share proof")
 	}
+	logProof, err := zkpai.UnmarshalLogProof(k.LogProof)
+	if err != nil {
+		return fmt.Errorf("invalid log proof: %w", err)
+	}
+	ciphertext := new(big.Int).SetBytes(k.LogCiphertext)
+	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+		return fmt.Errorf("invalid log ciphertext: %w", err)
+	}
+	logDomain := logProofDomain(k, pk, verificationShare, k.KeygenTranscriptHash)
+	if !zkpai.VerifyLog(logDomain, pk, ciphertext, logProof) {
+		return errors.New("invalid log proof")
+	}
 	return nil
 }
 
@@ -371,6 +394,7 @@ func (k *KeyShare) Destroy() {
 	clear(k.ChainCode)
 	clear(k.secret)
 	clear(k.paillierPrivateKey)
+	clear(k.logRandomness)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
@@ -445,6 +469,9 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.PaillierPublicKeys = clonePaillierPublicShares(k.PaillierPublicKeys)
 	out.ShareProof = slices.Clone(k.ShareProof)
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
+	out.LogCiphertext = slices.Clone(k.LogCiphertext)
+	out.LogProof = slices.Clone(k.LogProof)
+	out.logRandomness = slices.Clone(k.logRandomness)
 	return &out
 }
 
@@ -463,9 +490,12 @@ func cloneVerificationShares(in []VerificationShare) []VerificationShare {
 	if in == nil {
 		return nil
 	}
-	out := slices.Clone(in)
+	out := make([]VerificationShare, len(in))
 	for i := range out {
-		out[i].PublicKey = slices.Clone(out[i].PublicKey)
+		out[i] = VerificationShare{
+			Party:     in[i].Party,
+			PublicKey: slices.Clone(in[i].PublicKey),
+		}
 	}
 	return out
 }
