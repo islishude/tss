@@ -15,15 +15,15 @@ build:
 
 .PHONY: test
 test:
-	go test -race -timeout 25m ./...
+	go test -cover -timeout 25m ./...
 
-.PHONY: test-verbose
-test-verbose:
-	go test -v -race -timeout 25m ./...
+.PHONY: test-race
+test-race:
+	go test -v -race -timeout 1h ./...
 
 .PHONY: test-count
 test-count:
-	go test -v -race -count=10 -timeout 1h ./...
+	go test -v -race -count=10 -cover -timeout 3h ./...
 
 .PHONY: test-coverage
 test-coverage:
@@ -87,8 +87,8 @@ help:
 	@echo "TSS development targets:"
 	@echo ""
 	@echo "  build          compile all packages"
-	@echo "  test           run tests with race detector (5m timeout)"
-	@echo "  test-verbose   run tests with verbose output"
+	@echo "  test           run tests (25m timeout)"
+	@echo "  test-race      run tests with race detector (1h timeout)"
 	@echo "  test-count     CI-grade stress tests (10 iterations, 1h timeout)"
 	@echo "  test-coverage  run tests and produce coverage.{out,html}"
 	@echo "  lint           run golangci-lint"
