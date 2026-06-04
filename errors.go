@@ -23,6 +23,16 @@ const (
 	ErrCodeAborted = "aborted"
 	// ErrCodeNotImplemented marks intentionally unsupported protocol features.
 	ErrCodeNotImplemented = "not_implemented"
+	// ErrCodeLimitExceeded marks a value that exceeds a configured hard cap.
+	ErrCodeLimitExceeded = "limit_exceeded"
+	// ErrCodeTooManyParties marks a party set that exceeds the configured maximum.
+	ErrCodeTooManyParties = "too_many_parties"
+	// ErrCodeTooManySigners marks a signer set that exceeds the configured maximum.
+	ErrCodeTooManySigners = "too_many_signers"
+	// ErrCodePayloadTooLarge marks a payload that exceeds its byte cap.
+	ErrCodePayloadTooLarge = "payload_too_large"
+	// ErrCodeProofTooLarge marks a proof input that exceeds its byte cap.
+	ErrCodeProofTooLarge = "proof_too_large"
 )
 
 // ProtocolError is the stable error shape returned by protocol state machines.

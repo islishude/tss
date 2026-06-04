@@ -1223,17 +1223,8 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
-	seen := make(map[tss.PartyID]struct{}, len(signers))
-	for _, id := range signers {
-		if !tss.ContainsParty(key.Parties, id) {
-			return fmt.Errorf("signer %d is not a participant", id)
-		}
-		if _, ok := seen[id]; ok {
-			return fmt.Errorf("duplicate signer %d", id)
-		}
-		seen[id] = struct{}{}
-	}
-	return nil
+	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)
+	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
 }
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {

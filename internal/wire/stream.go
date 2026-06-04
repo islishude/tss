@@ -3,6 +3,7 @@ package wire
 import (
 	"encoding/binary"
 	"errors"
+	"fmt"
 )
 
 // NonNilBytes returns an empty byte slice when in is nil.
@@ -31,9 +32,19 @@ func ReadUint32(in []byte, offset int) (uint32, int, error) {
 
 // ReadBytes reads a uint32 length-prefixed byte string at offset.
 func ReadBytes(in []byte, offset int) ([]byte, int, error) {
+	return ReadBytesWithLimit(in, offset, 0)
+}
+
+// ReadBytesWithLimit reads a uint32 length-prefixed byte string at offset.
+// When maxItemBytes > 0, it rejects lengths that exceed the cap before allocating.
+// When maxItemBytes <= 0, the check is skipped (callers should prefer a real cap).
+func ReadBytesWithLimit(in []byte, offset int, maxItemBytes int) ([]byte, int, error) {
 	length, offset, err := ReadUint32(in, offset)
 	if err != nil {
 		return nil, offset, err
+	}
+	if maxItemBytes > 0 && int(length) > maxItemBytes {
+		return nil, offset, fmt.Errorf("byte field too large: %d > %d", length, maxItemBytes)
 	}
 	if uint64(len(in)-offset) < uint64(length) {
 		return nil, offset, errors.New("truncated byte field")

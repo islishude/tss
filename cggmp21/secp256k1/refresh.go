@@ -51,7 +51,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		return nil, nil, err
 	}
 	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
-	if err := config.Validate(); err != nil {
+	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Generate a new Paillier keypair for key rotation.

@@ -58,6 +58,15 @@ func Uint32ListField[T uint32Value](fields []Field, tag uint16) ([]T, error) {
 	return DecodeUint32List[T](raw)
 }
 
+// Uint32ListFieldWithLimit decodes a uint32 list with an explicit item cap.
+func Uint32ListFieldWithLimit[T uint32Value](fields []Field, tag uint16, maxItems int) ([]T, error) {
+	raw, err := Require(fields, tag)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeUint32ListWithLimit[T](raw, maxItems)
+}
+
 // BytesListField decodes a byte-string list from a required wire field.
 func BytesListField(fields []Field, tag uint16) ([][]byte, error) {
 	raw, err := Require(fields, tag)
@@ -65,6 +74,15 @@ func BytesListField(fields []Field, tag uint16) ([][]byte, error) {
 		return nil, err
 	}
 	return DecodeBytesList(raw)
+}
+
+// BytesListFieldWithLimit decodes a byte-string list with explicit caps.
+func BytesListFieldWithLimit(fields []Field, tag uint16, maxItems int, maxItemBytes int) ([][]byte, error) {
+	raw, err := Require(fields, tag)
+	if err != nil {
+		return nil, err
+	}
+	return DecodeBytesListWithLimit(raw, maxItems, maxItemBytes)
 }
 
 // PartyBytesField decodes party-scoped byte string records from a wire field.
@@ -76,6 +94,15 @@ func PartyBytesField[T uint32Value](fields []Field, tag uint16, name string) ([]
 	return DecodePartyBytes[T](raw, name)
 }
 
+// PartyBytesFieldWithLimit decodes party-scoped byte string records with explicit caps.
+func PartyBytesFieldWithLimit[T uint32Value](fields []Field, tag uint16, maxItems int, maxItemBytes int, name string) ([]PartyBytes[T], error) {
+	raw, err := Require(fields, tag)
+	if err != nil {
+		return nil, err
+	}
+	return DecodePartyBytesWithLimit[T](raw, maxItems, maxItemBytes, name)
+}
+
 // PartyBytePairsField decodes party-scoped byte string pairs from a wire field.
 func PartyBytePairsField[T uint32Value](fields []Field, tag uint16, name string) ([]PartyBytePair[T], error) {
 	raw, err := Require(fields, tag)
@@ -83,4 +110,13 @@ func PartyBytePairsField[T uint32Value](fields []Field, tag uint16, name string)
 		return nil, err
 	}
 	return DecodePartyBytePairs[T](raw, name)
+}
+
+// PartyBytePairsFieldWithLimit decodes party-scoped byte string pairs with explicit caps.
+func PartyBytePairsFieldWithLimit[T uint32Value](fields []Field, tag uint16, maxItems int, maxItemBytes int, name string) ([]PartyBytePair[T], error) {
+	raw, err := Require(fields, tag)
+	if err != nil {
+		return nil, err
+	}
+	return DecodePartyBytePairsWithLimit[T](raw, maxItems, maxItemBytes, name)
 }

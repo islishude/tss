@@ -42,7 +42,7 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 
 // StartKeygenWithOptions starts dealerless DKG with optional HD chain code generation.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
-	if err := config.Validate(); err != nil {
+	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := config.SortedParties()

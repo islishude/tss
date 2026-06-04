@@ -61,13 +61,40 @@ func Marshal(version uint16, typeID string, fields []Field) ([]byte, error) {
 	return out, nil
 }
 
+// Limits defines per-message caps used during TLV decoding.
+type Limits struct {
+	MaxTotalBytes int // maximum input byte length
+	MaxFields     int // maximum TLV field count
+	MaxFieldBytes int // maximum per-field value size
+}
+
+// DefaultLimits returns conservative wire-level caps suitable as a fallback.
+func DefaultLimits() Limits {
+	return Limits{
+		MaxTotalBytes: 1 << 20, // 1 MiB
+		MaxFields:     256,
+		MaxFieldBytes: 1 << 20, // 1 MiB
+	}
+}
+
 // Unmarshal decodes a typed message and rejects trailing or non-canonical data.
+// It uses DefaultLimits to guard against oversized inputs.
 func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
+	return UnmarshalWithLimits(in, expectedTypeID, DefaultLimits())
+}
+
+// UnmarshalWithLimits decodes a typed TLV message enforcing per-message caps.
+// It checks the total input size, field count, and per-field value size before
+// allocating memory, preventing oversized messages from causing OOM.
+func UnmarshalWithLimits(in []byte, expectedTypeID string, limits Limits) (uint16, []Field, error) {
 	if expectedTypeID == "" {
 		return 0, nil, errors.New("empty expected wire type id")
 	}
 	if len(in) < len(magic)+2+2+2 {
 		return 0, nil, errors.New("wire input too short")
+	}
+	if len(in) > limits.MaxTotalBytes {
+		return 0, nil, fmt.Errorf("wire input too large: %d > %d", len(in), limits.MaxTotalBytes)
 	}
 	if !bytes.Equal(in[:len(magic)], magic) {
 		return 0, nil, errors.New("invalid wire magic")
@@ -99,6 +126,9 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 	if err != nil {
 		return 0, nil, err
 	}
+	if int(fieldCount) > limits.MaxFields {
+		return 0, nil, fmt.Errorf("too many wire fields: %d > %d", fieldCount, limits.MaxFields)
+	}
 	fields := make([]Field, 0, fieldCount)
 	var last uint16
 	for i := 0; i < int(fieldCount); i++ {
@@ -117,6 +147,9 @@ func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
 		offset = next
 		if uint64(len(in)-offset) < uint64(length) {
 			return 0, nil, fmt.Errorf("truncated wire field %d", tag)
+		}
+		if int(length) > limits.MaxFieldBytes {
+			return 0, nil, fmt.Errorf("wire field %d too large: %d > %d", tag, length, limits.MaxFieldBytes)
 		}
 		value := make([]byte, length)
 		copy(value, in[offset:offset+int(length)])

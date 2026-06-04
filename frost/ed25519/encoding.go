@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"errors"
 	"fmt"
 	"math"
 
@@ -41,8 +40,12 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 	})
 }
 
-func unmarshalKeyShare(in []byte) (*KeyShare, error) {
-	version, fields, err := wire.Unmarshal(in, keyShareWireType)
+func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error) {
+	version, fields, err := wire.UnmarshalWithLimits(in, keyShareWireType, wire.Limits{
+		MaxTotalBytes: limits.MaxSerializedKeyShareBytes,
+		MaxFields:     limits.MaxWireFields,
+		MaxFieldBytes: limits.MaxWireFieldBytes,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -60,18 +63,24 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	if uint64(threshold) > uint64(math.MaxInt) {
-		return nil, errors.New("threshold too large")
+	// Guard int conversion: on 32-bit platforms int is int32, so any uint32
+	// above MaxInt32 would overflow. The check is harmless (always false) on
+	// 64-bit where int is int64.
+	if threshold > math.MaxInt32 {
+		return nil, fmt.Errorf("threshold overflows platform int: %d", threshold)
 	}
-	parties, err := wire.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)
+	if int(threshold) > limits.MaxThreshold {
+		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.MaxThreshold)
+	}
+	parties, err := wire.Uint32ListFieldWithLimit[tss.PartyID](fields, keyShareFieldParties, limits.MaxParties)
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments, err := wire.BytesListField(fields, keyShareFieldGroupCommitments)
+	groupCommitments, err := wire.BytesListFieldWithLimit(fields, keyShareFieldGroupCommitments, limits.MaxThreshold, limits.MaxPointBytes)
 	if err != nil {
 		return nil, err
 	}
-	verificationShares, err := decodeVerificationSharesField(fields, keyShareFieldVerificationShares)
+	verificationShares, err := decodeVerificationSharesFieldWithLimit(fields, keyShareFieldVerificationShares, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -93,16 +102,8 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return k, nil
 }
 
-func encodeVerificationShares(shares []VerificationShare) []byte {
-	records := make([]wire.PartyBytes[tss.PartyID], len(shares))
-	for i, share := range shares {
-		records[i] = wire.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
-	}
-	return wire.EncodePartyBytes(records)
-}
-
-func decodeVerificationSharesField(fields []wire.Field, tag uint16) ([]VerificationShare, error) {
-	records, err := wire.PartyBytesField[tss.PartyID](fields, tag, "verification share")
+func decodeVerificationSharesFieldWithLimit(fields []wire.Field, tag uint16, limits tss.Limits) ([]VerificationShare, error) {
+	records, err := wire.PartyBytesFieldWithLimit[tss.PartyID](fields, tag, limits.MaxParties, limits.MaxPointBytes, "verification share")
 	if err != nil {
 		return nil, err
 	}
@@ -111,4 +112,12 @@ func decodeVerificationSharesField(fields []wire.Field, tag uint16) ([]Verificat
 		out = append(out, VerificationShare{Party: record.Party, PublicKey: record.Bytes})
 	}
 	return out, nil
+}
+
+func encodeVerificationShares(shares []VerificationShare) []byte {
+	records := make([]wire.PartyBytes[tss.PartyID], len(shares))
+	for i, share := range shares {
+		records[i] = wire.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
+	}
+	return wire.EncodePartyBytes(records)
 }

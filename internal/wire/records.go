@@ -3,7 +3,6 @@ package wire
 import (
 	"errors"
 	"fmt"
-	"math"
 )
 
 // PartyBytes is a party-scoped byte string record.
@@ -30,9 +29,21 @@ func EncodeUint32List[T uint32Value](items []T) []byte {
 
 // DecodeUint32List decodes a list produced by EncodeUint32List.
 func DecodeUint32List[T uint32Value](raw []byte) ([]T, error) {
+	return DecodeUint32ListWithLimit[T](raw, 0)
+}
+
+// DecodeUint32ListWithLimit decodes a uint32 list with an explicit item cap.
+// When maxItems <= 0 the check is skipped; callers should prefer a real cap.
+func DecodeUint32ListWithLimit[T uint32Value](raw []byte, maxItems int) ([]T, error) {
 	count, offset, err := ReadUint32(raw, 0)
 	if err != nil {
 		return nil, err
+	}
+	if int(count) > maxRecordCount {
+		return nil, fmt.Errorf("uint32 list count too large: %d > %d", count, maxRecordCount)
+	}
+	if maxItems > 0 && int(count) > maxItems {
+		return nil, fmt.Errorf("uint32 list count too large: %d > %d", count, maxItems)
 	}
 	if uint64(len(raw)-offset) != uint64(count)*4 {
 		return nil, errors.New("invalid party id list length")
@@ -60,16 +71,22 @@ func EncodeBytesList(items [][]byte) []byte {
 
 // DecodeBytesList decodes a list produced by EncodeBytesList.
 func DecodeBytesList(raw []byte) ([][]byte, error) {
+	return DecodeBytesListWithLimit(raw, 0, 0)
+}
+
+// DecodeBytesListWithLimit decodes a byte-string list with explicit caps.
+// When maxItems or maxItemBytes is <= 0 the respective check is skipped.
+func DecodeBytesListWithLimit(raw []byte, maxItems int, maxItemBytes int) ([][]byte, error) {
 	count, offset, err := ReadUint32(raw, 0)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRecordCount(raw, offset, count, 4, "bytes list"); err != nil {
+	if err := validateRecordCountWithLimit(raw, offset, count, 4, maxItems, "bytes list"); err != nil {
 		return nil, err
 	}
 	out := make([][]byte, 0, count)
 	for i := 0; i < int(count); i++ {
-		item, next, err := ReadBytes(raw, offset)
+		item, next, err := ReadBytesWithLimit(raw, offset, maxItemBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -94,11 +111,16 @@ func EncodePartyBytes[T uint32Value](records []PartyBytes[T]) []byte {
 
 // DecodePartyBytes decodes party-scoped byte string records.
 func DecodePartyBytes[T uint32Value](raw []byte, name string) ([]PartyBytes[T], error) {
+	return DecodePartyBytesWithLimit[T](raw, 0, 0, name)
+}
+
+// DecodePartyBytesWithLimit decodes party-scoped byte string records with explicit caps.
+func DecodePartyBytesWithLimit[T uint32Value](raw []byte, maxItems int, maxItemBytes int, name string) ([]PartyBytes[T], error) {
 	count, offset, err := ReadUint32(raw, 0)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRecordCount(raw, offset, count, 8, name); err != nil {
+	if err := validateRecordCountWithLimit(raw, offset, count, 8, maxItems, name); err != nil {
 		return nil, err
 	}
 	out := make([]PartyBytes[T], 0, count)
@@ -108,7 +130,7 @@ func DecodePartyBytes[T uint32Value](raw []byte, name string) ([]PartyBytes[T], 
 			return nil, err
 		}
 		offset = next
-		value, next, err := ReadBytes(raw, offset)
+		value, next, err := ReadBytesWithLimit(raw, offset, maxItemBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -134,11 +156,16 @@ func EncodePartyBytePairs[T uint32Value](records []PartyBytePair[T]) []byte {
 
 // DecodePartyBytePairs decodes party-scoped pairs of byte string records.
 func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePair[T], error) {
+	return DecodePartyBytePairsWithLimit[T](raw, 0, 0, name)
+}
+
+// DecodePartyBytePairsWithLimit decodes party-scoped pairs with explicit caps.
+func DecodePartyBytePairsWithLimit[T uint32Value](raw []byte, maxItems int, maxItemBytes int, name string) ([]PartyBytePair[T], error) {
 	count, offset, err := ReadUint32(raw, 0)
 	if err != nil {
 		return nil, err
 	}
-	if err := validateRecordCount(raw, offset, count, 12, name); err != nil {
+	if err := validateRecordCountWithLimit(raw, offset, count, 12, maxItems, name); err != nil {
 		return nil, err
 	}
 	out := make([]PartyBytePair[T], 0, count)
@@ -148,12 +175,12 @@ func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePa
 			return nil, err
 		}
 		offset = next
-		first, next, err := ReadBytes(raw, offset)
+		first, next, err := ReadBytesWithLimit(raw, offset, maxItemBytes)
 		if err != nil {
 			return nil, err
 		}
 		offset = next
-		second, next, err := ReadBytes(raw, offset)
+		second, next, err := ReadBytesWithLimit(raw, offset, maxItemBytes)
 		if err != nil {
 			return nil, err
 		}
@@ -166,12 +193,19 @@ func DecodePartyBytePairs[T uint32Value](raw []byte, name string) ([]PartyBytePa
 	return out, nil
 }
 
-func validateRecordCount(raw []byte, offset int, count uint32, minRecordLen int, name string) error {
+// maxRecordCount is the absolute maximum number of items in any repeated wire field.
+// It matches max(uint16) which is the wire format's field count ceiling.
+const maxRecordCount = 65535
+
+func validateRecordCountWithLimit(raw []byte, offset int, count uint32, minRecordLen int, maxItems int, name string) error {
 	if offset > len(raw) {
 		return fmt.Errorf("invalid %s offset", name)
 	}
-	if uint64(count) > math.MaxInt {
-		return fmt.Errorf("%s count too large", name)
+	if maxItems > 0 && int(count) > maxItems {
+		return fmt.Errorf("%s count too large: %d > %d", name, count, maxItems)
+	}
+	if int(count) > maxRecordCount {
+		return fmt.Errorf("%s count too large: %d > %d", name, count, maxRecordCount)
 	}
 	remaining := uint64(len(raw) - offset)
 	minBytes := uint64(count) * uint64(minRecordLen)

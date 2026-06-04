@@ -2,11 +2,14 @@ package ed25519
 
 import (
 	"bytes"
+	"fmt"
+	"math"
 	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/wire"
 )
 
 func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
@@ -49,6 +52,24 @@ func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	malformed.PublicKey = []byte{0x01}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
+	}
+}
+
+func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
+	shares := frostKeygen(t, 2, 3)
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Rewrite the threshold field to uint32 values that overflow int on 32-bit platforms.
+	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
+		mutated, err := rewriteFROSTWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := UnmarshalKeyShare(mutated); err == nil {
+			t.Fatalf("threshold %d accepted", overflow)
+		}
 	}
 }
 
@@ -253,6 +274,21 @@ func seedFROSTScalar(tb testing.TB) []byte {
 		tb.Fatal(err)
 	}
 	return out
+}
+
+func rewriteFROSTWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
+	version, fields, err := wire.Unmarshal(raw, wireType)
+	if err != nil {
+		return nil, err
+	}
+	for i := range fields {
+		if fields[i].Tag == tag {
+			fields[i].Value = make([]byte, len(value))
+			copy(fields[i].Value, value)
+			return wire.Marshal(version, wireType, fields)
+		}
+	}
+	return nil, fmt.Errorf("missing wire field %d", tag)
 }
 
 func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {

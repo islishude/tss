@@ -47,7 +47,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	if err := oldKey.Validate(); err != nil {
 		return nil, nil, err
 	}
-	if err := config.Validate(); err != nil {
+	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	newParties = tss.SortParties(newParties)

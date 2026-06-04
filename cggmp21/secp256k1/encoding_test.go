@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 
@@ -178,6 +179,40 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	}
 	if _, _, err := StartSignDigest(shares[1], unsorted, tss.SessionID{}, make([]byte, 32)); err == nil {
 		t.Fatal("unsorted signer set entered signing")
+	}
+}
+
+func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
+		mutated, err := rewriteKeyShareField(raw, keyShareFieldThreshold, wire.Uint32(overflow))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := UnmarshalKeyShare(mutated); err == nil {
+			t.Fatalf("key share threshold %d accepted", overflow)
+		}
+	}
+}
+
+func TestCGGMP21PresignRejectsOverflowThreshold(t *testing.T) {
+	presign := minimalCGGMP21Presign(t)
+	raw, err := presign.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
+		mutated, err := rewriteWireField(raw, presignWireType, presignFieldThreshold, wire.Uint32(overflow))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := UnmarshalPresign(mutated); err == nil {
+			t.Fatalf("presign threshold %d accepted", overflow)
+		}
 	}
 }
 

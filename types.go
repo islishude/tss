@@ -124,15 +124,38 @@ func (c ThresholdConfig) Ctx() context.Context {
 }
 
 // Validate checks threshold, party-set, and local-party invariants.
+// It uses DefaultLimits as a conservative fallback; callers that know the
+// algorithm should prefer ValidateWithLimits with algorithm-specific limits.
 func (c ThresholdConfig) Validate() error {
+	return c.ValidateWithLimits(DefaultLimits())
+}
+
+// ValidateWithLimits checks threshold, party-set, and local-party invariants
+// against the provided Limits. It enforces hard caps on party count and
+// threshold to prevent unbounded resource consumption.
+func (c ThresholdConfig) ValidateWithLimits(l Limits) error {
+	if err := l.Validate(); err != nil {
+		return fmt.Errorf("invalid limits: %w", err)
+	}
 	if c.Threshold <= 0 {
 		return errors.New("threshold must be positive")
 	}
 	if len(c.Parties) == 0 {
 		return errors.New("parties must not be empty")
 	}
+	if len(c.Parties) > l.MaxParties {
+		return fmt.Errorf("too many parties: %d > %d", len(c.Parties), l.MaxParties)
+	}
 	if c.Threshold > len(c.Parties) {
 		return errors.New("threshold exceeds party count")
+	}
+	if c.Threshold > l.MaxThreshold {
+		return fmt.Errorf("threshold too large: %d > %d", c.Threshold, l.MaxThreshold)
+	}
+	if c.Threshold < l.MinProductionThreshold {
+		if !l.AllowOneOfOne || c.Threshold != 1 || len(c.Parties) != 1 {
+			return fmt.Errorf("threshold %d is below production minimum %d", c.Threshold, l.MinProductionThreshold)
+		}
 	}
 	seen := make(map[PartyID]struct{}, len(c.Parties))
 	hasSelf := false
@@ -182,9 +205,14 @@ type Envelope struct {
 }
 
 // MarshalBinary encodes the envelope using strict canonical TLV wire format.
+// It rejects locally-constructed payloads that exceed size limits.
 func (e Envelope) MarshalBinary() ([]byte, error) {
+	limits := DefaultLimits()
 	if e.Protocol == "" {
 		return nil, errors.New("envelope protocol is empty")
+	}
+	if len(e.Protocol) > limits.MaxProtocolNameBytes {
+		return nil, fmt.Errorf("envelope protocol name too long: %d > %d", len(e.Protocol), limits.MaxProtocolNameBytes)
 	}
 	if e.Version != Version {
 		return nil, fmt.Errorf("unexpected envelope version %d", e.Version)
@@ -192,8 +220,14 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	if e.PayloadType == "" {
 		return nil, errors.New("envelope payload type is empty")
 	}
+	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
+		return nil, fmt.Errorf("envelope payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
+	}
 	if len(e.TranscriptHash) != 0 && len(e.TranscriptHash) != sha256.Size {
 		return nil, errors.New("invalid envelope transcript hash")
+	}
+	if len(e.Payload) > limits.MaxEnvelopePayloadBytes {
+		return nil, fmt.Errorf("envelope payload too large: %d > %d", len(e.Payload), limits.MaxEnvelopePayloadBytes)
 	}
 	return wire.Marshal(Version, envelopeWireType, []wire.Field{
 		{Tag: envelopeFieldProtocol, Value: []byte(e.Protocol)},
@@ -210,8 +244,22 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 }
 
 // UnmarshalBinary decodes a canonical TLV envelope and rejects JSON fallback.
+// It enforces total size, per-field size, and metadata length limits.
 func (e *Envelope) UnmarshalBinary(in []byte) error {
-	version, fields, err := wire.Unmarshal(in, envelopeWireType)
+	limits := DefaultLimits()
+
+	if len(in) == 0 {
+		return errors.New("empty envelope")
+	}
+	if len(in) > limits.MaxEnvelopeBytes {
+		return fmt.Errorf("envelope too large: %d > %d", len(in), limits.MaxEnvelopeBytes)
+	}
+
+	version, fields, err := wire.UnmarshalWithLimits(in, envelopeWireType, wire.Limits{
+		MaxTotalBytes: limits.MaxEnvelopeBytes,
+		MaxFields:     limits.MaxWireFields,
+		MaxFieldBytes: limits.MaxWireFieldBytes,
+	})
 	if err != nil {
 		return err
 	}
@@ -221,6 +269,12 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	protocol, err := wire.Require(fields, envelopeFieldProtocol)
 	if err != nil {
 		return err
+	}
+	if len(protocol) == 0 {
+		return errors.New("envelope protocol is empty")
+	}
+	if len(protocol) > limits.MaxProtocolNameBytes {
+		return fmt.Errorf("envelope protocol name too long: %d > %d", len(protocol), limits.MaxProtocolNameBytes)
 	}
 	versionBytes, err := wire.Require(fields, envelopeFieldVersion)
 	if err != nil {
@@ -268,9 +322,18 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
+	if len(payloadType) == 0 {
+		return errors.New("envelope payload type is empty")
+	}
+	if len(payloadType) > limits.MaxPayloadTypeBytes {
+		return fmt.Errorf("envelope payload type too long: %d > %d", len(payloadType), limits.MaxPayloadTypeBytes)
+	}
 	payload, err := wire.Require(fields, envelopeFieldPayload)
 	if err != nil {
 		return err
+	}
+	if len(payload) > limits.MaxEnvelopePayloadBytes {
+		return fmt.Errorf("envelope payload too large: %d > %d", len(payload), limits.MaxEnvelopePayloadBytes)
 	}
 	transcript, err := wire.Require(fields, envelopeFieldTranscriptHash)
 	if err != nil {
@@ -286,12 +349,6 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	confidential, err := wire.DecodeBool(confidentialBytes)
 	if err != nil {
 		return err
-	}
-	if len(protocol) == 0 {
-		return errors.New("envelope protocol is empty")
-	}
-	if len(payloadType) == 0 {
-		return errors.New("envelope payload type is empty")
 	}
 	*e = Envelope{
 		Protocol:             string(protocol),
@@ -394,4 +451,34 @@ func SortParties(parties []PartyID) []PartyID {
 	out := slices.Clone(parties)
 	slices.Sort(out)
 	return out
+}
+
+// ValidateSignerSet checks signers against a key's participant set and limits.
+// It verifies: non-empty, minimum size (threshold), maximum size, membership,
+// and no duplicates. For algorithms where AllowOversizedSignerSet is false,
+// signer count must exactly equal threshold.
+func ValidateSignerSet(keyParties []PartyID, threshold int, signers []PartyID, limits Limits) error {
+	if len(signers) == 0 {
+		return errors.New("signers must not be empty")
+	}
+	if len(signers) < threshold {
+		return fmt.Errorf("not enough signers: %d < threshold %d", len(signers), threshold)
+	}
+	if len(signers) > limits.MaxSigners {
+		return fmt.Errorf("too many signers: %d > %d", len(signers), limits.MaxSigners)
+	}
+	if !limits.AllowOversizedSignerSet && len(signers) != threshold {
+		return fmt.Errorf("signer count must equal threshold: got %d, want %d", len(signers), threshold)
+	}
+	seen := make(map[PartyID]struct{}, len(signers))
+	for _, id := range signers {
+		if !ContainsParty(keyParties, id) {
+			return fmt.Errorf("signer %d is not a participant", id)
+		}
+		if _, ok := seen[id]; ok {
+			return fmt.Errorf("duplicate signer %d", id)
+		}
+		seen[id] = struct{}{}
+	}
+	return nil
 }
