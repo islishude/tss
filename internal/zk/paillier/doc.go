@@ -6,16 +6,23 @@
 //
 //   - ModulusProof is CGGMP24 Πmod for a Paillier-Blum modulus.
 //   - RingPedersenProof is CGGMP24 Πprm for Ring-Pedersen parameters.
-//   - EncryptionProof proves that a Paillier ciphertext and a secp256k1 curve
-//     commitment open to the same scalar witness with a secp256k1-order bound.
-//   - LogProof (Π^log) proves that a Paillier ciphertext and a secp256k1 curve
-//     point share the same discrete logarithm, per CGGMP21 Section 6.2.
-//   - MTAResponseProof binds an MtA response ciphertext to the encrypted input
-//     scalar, the responder scalar commitment, and the beta share commitment.
+//   - EncProof (Πenc, ) proves that a Paillier ciphertext encrypts a
+//     plaintext in the range ±2^Ell, using Ring-Pedersen commitments and
+//     large integer masks for statistical zero-knowledge.
+//   - AffGProof (Πaff-g, ) proves that an MtA response was correctly
+//     computed: D = x ⊙ C ⊕ Enc_Nj(y; rho) with X = x·G and Y = Enc_Ni(y).
+//     Uses Ring-Pedersen commitments and binds both Paillier keys.
+//   - LogStarProof (Πlog*, ) proves that a Paillier ciphertext and a
+//     secp256k1 curve point share the same discrete logarithm in range,
+//     using Ring-Pedersen commitment to hide the integer witness.
 //
-// Paillier statement and commitment integers are encoded at fixed public-key
-// widths; scalar responses are canonical positive big-endian values. Curve
-// point fields must be accepted by the secp256k1 point decoder. Transcript and challenge
-// labels are fixed package constants so changes to proof domains are
-// explicit review points.
+// All  proofs use SecurityParams to configure statistical and computational
+// security parameters, a typed Transcript API for Fiat-Shamir challenge
+// derivation, signed integer encoding for witness responses, and strict
+// ciphertext/point membership checks before algebraic equation verification.
+//
+// Legacy proof types (EncryptionProof, MTAResponseProof, LogProof) are
+// version 1 and are rejected by the new proof verifiers. The MtA Start path
+// retains EncryptionProof v1 for the broadcast Round 1 flow where per-verifier
+// Ring-Pedersen commitments are impractical; the witness k_i is ephemeral.
 package paillier

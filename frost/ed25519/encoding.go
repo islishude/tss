@@ -3,6 +3,7 @@ package ed25519
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/islishude/tss"
 
@@ -59,7 +60,7 @@ func unmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	if uint64(threshold) > uint64(wire.MaxInt) {
+	if uint64(threshold) > uint64(math.MaxInt) {
 		return nil, errors.New("threshold too large")
 	}
 	parties, err := wire.Uint32ListField[tss.PartyID](fields, keyShareFieldParties)

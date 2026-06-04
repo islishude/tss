@@ -62,12 +62,27 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
 
-// minKeygenPaillierBits is the minimum safe Paillier modulus size for CGGMP21.
-// A 512-bit modulus can wrap MtA plaintexts (k_i * b + beta up to ~2^513),
-// causing probabilistic (~10%) ECDSA signature verification failures.
-const minKeygenPaillierBits = 768
+// minKeygenPaillierBits is the minimum Paillier modulus size accepted for keygen.
+// Production default is 3072 bits (~128-bit security matching secp256k1).
+// Tests that need smaller moduli must call SetMinKeygenPaillierBitsForTesting.
+var minKeygenPaillierBits = 3072
+
+// SetMinKeygenPaillierBitsForTesting overrides the minimum keygen Paillier size
+// and returns a function that restores the previous value. DO NOT use outside tests.
+func SetMinKeygenPaillierBitsForTesting(bits int) func() {
+	old := minKeygenPaillierBits
+	minKeygenPaillierBits = bits
+	return func() { minKeygenPaillierBits = old }
+}
 
 // StartKeygenWithOptions starts keygen with explicit Paillier key-size options.
+//
+// Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
+// to all parties. The caller MUST ensure that every recipient receives identical
+// broadcast payloads (equivocation-resistant transport). After keygen completes,
+// all parties SHOULD compare KeygenTranscriptHash out-of-band to detect
+// equivocation. A mismatch indicates a dishonest participant or compromised
+// transport and requires aborting the key material.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
 	if err := config.Validate(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
@@ -499,17 +514,37 @@ func (s *KeygenSession) tryComplete() error {
 		ShareProof:             shareProofBytes,
 		KeygenTranscriptHash:   transcriptHash,
 	}
-	// Π^log: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i.
+	// Π^log*: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i,
+	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.paillier.Encrypt(s.cfg.Reader(), secret)
 	if err != nil {
 		return err
 	}
+	localRP, err := zkpai.UnmarshalRingPedersenParams(localRingPedersen.Params)
+	if err != nil {
+		return fmt.Errorf("unmarshal local RP params: %w", err)
+	}
 	logDomain := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash)
-	logProof, err := zkpai.ProveLog(s.cfg.Reader(), logDomain, &s.paillier.PublicKey, logCiphertext, secret, logRandomness, localVerificationShare)
+	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
+	if err != nil {
+		return fmt.Errorf("invalid verification share: %w", err)
+	}
+	logStmt := zkpai.LogStarStatement{
+		PaillierN:   &s.paillier.PublicKey,
+		C:           logCiphertext,
+		X:           verificationPoint,
+		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))), // G
+		VerifierAux: *localRP,
+	}
+	logWitness := zkpai.LogStarWitness{
+		X:   new(big.Int).Set(secret),
+		Rho: new(big.Int).Set(logRandomness),
+	}
+	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return err
 	}
-	logProofBytes, err := zkpai.Marshal(logProof)
+	logProofBytes, err := logProof.MarshalBinary()
 	if err != nil {
 		return err
 	}

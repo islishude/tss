@@ -3,6 +3,7 @@ package paillier
 import (
 	"bytes"
 	"context"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -387,6 +388,144 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 	})
 }
 
+func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
+	sk := testPaillierKey(t, 1024)
+	params := SecurityParams{
+		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
+	}
+	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	k := big.NewInt(17)
+	ciphertextK, rhoK, err := sk.Encrypt(nil, k)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encStmt := EncStatement{
+		ProverPaillierN: &sk.PublicKey,
+		CiphertextK:     ciphertextK,
+		VerifierAux:     *aux,
+	}
+	encProof, err := ProveEnc(params, []byte("enc canonical"), encStmt, EncWitness{K: k, Rho: rhoK}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyEnc(params, []byte("enc canonical"), encStmt, encProof); err != nil {
+		t.Fatal(err)
+	}
+	encRaw, err := encProof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []uint16{encProofFieldS, encProofFieldA, encProofFieldC, encProofFieldZ2} {
+		t.Run(fmt.Sprintf("enc field %d", tag), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(encRaw, encProofWireType, tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UnmarshalEncProof(mutated); err == nil {
+				t.Fatal("EncProof accepted non-canonical positive integer")
+			}
+		})
+	}
+
+	x := big.NewInt(23)
+	y := big.NewInt(29)
+	encX, _, err := sk.Encrypt(nil, x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encYReceiver, rhoYReceiver, err := sk.Encrypt(nil, y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	xMulC, err := OMulCT(&sk.PublicKey, x, encX, signedPowerOfTwoBytes(params.Ell))
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseD, err := OAdd(&sk.PublicKey, xMulC, encYReceiver)
+	if err != nil {
+		t.Fatal(err)
+	}
+	encYProver, rhoYProver, err := sk.Encrypt(nil, y)
+	if err != nil {
+		t.Fatal(err)
+	}
+	affGStmt := AffGStatement{
+		ReceiverPaillierN: &sk.PublicKey,
+		ProverPaillierN:   &sk.PublicKey,
+		C:                 encX,
+		D:                 responseD,
+		Y:                 encYProver,
+		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		VerifierAux:       *aux,
+	}
+	affGProof, err := ProveAffG(params, []byte("affg canonical"), affGStmt, AffGWitness{
+		X: x, Y: y, Rho: rhoYReceiver, RhoY: rhoYProver,
+	}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyAffG(params, []byte("affg canonical"), affGStmt, affGProof); err != nil {
+		t.Fatal(err)
+	}
+	affGRaw, err := affGProof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []uint16{
+		affGProofFieldA, affGProofFieldBy, affGProofFieldE, affGProofFieldS,
+		affGProofFieldF, affGProofFieldT, affGProofFieldY, affGProofFieldW, affGProofFieldWY,
+	} {
+		t.Run(fmt.Sprintf("affg field %d", tag), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(affGRaw, affGProofWireType, tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UnmarshalAffGProof(mutated); err == nil {
+				t.Fatal("AffGProof accepted non-canonical positive integer")
+			}
+		})
+	}
+
+	logX := big.NewInt(31)
+	logC, logRho, err := sk.Encrypt(nil, logX)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logStmt := LogStarStatement{
+		PaillierN:   &sk.PublicKey,
+		C:           logC,
+		X:           secp.ScalarBaseMult(secp.ScalarFromBigInt(logX)),
+		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
+		VerifierAux: *aux,
+	}
+	logProof, err := ProveLogStar(params, []byte("logstar canonical"), logStmt, LogStarWitness{X: logX, Rho: logRho}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyLogStar(params, []byte("logstar canonical"), logStmt, logProof); err != nil {
+		t.Fatal(err)
+	}
+	logRaw, err := logProof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tag := range []uint16{logStarProofFieldS, logStarProofFieldA, logStarProofFieldD, logStarProofFieldZ2} {
+		t.Run(fmt.Sprintf("logstar field %d", tag), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(logRaw, logStarProofWireType, tag)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := UnmarshalLogStarProof(mutated); err == nil {
+				t.Fatal("LogStarProof accepted non-canonical positive integer")
+			}
+		})
+	}
+}
+
 func assertModulusProofRoundTrip(t *testing.T, proof *ModulusProof) {
 	t.Helper()
 	raw, err := Marshal(proof)
@@ -581,4 +720,21 @@ func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, error) {
+	version, fields, err := wire.Unmarshal(raw, typeID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range fields {
+		if fields[i].Tag == tag {
+			value := make([]byte, 0, len(fields[i].Value)+1)
+			value = append(value, 0)
+			value = append(value, fields[i].Value...)
+			fields[i].Value = value
+			return wire.Marshal(version, typeID, fields)
+		}
+	}
+	return nil, fmt.Errorf("missing wire field %d", tag)
 }

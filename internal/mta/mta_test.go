@@ -8,12 +8,22 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 func TestMTAProductShares(t *testing.T) {
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
+	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
+		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
+	})
+	defer restoreSP()
 	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Generate Ring-Pedersen params for the test.
+	rp, _, err := zkpai.GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,11 +39,11 @@ func TestMTAProductShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, betaShare, err := Respond(nil, startDomain, responseDomain, *start, b, bCommit, &sk.PublicKey)
+	response, betaShare, err := Respond(nil, startDomain, responseDomain, *start, b, bCommit, &sk.PublicKey, &sk.PublicKey, *rp)
 	if err != nil {
 		t.Fatal(err)
 	}
-	alphaShare, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk)
+	alphaShare, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk, &sk.PublicKey, *rp)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -80,7 +90,7 @@ func TestMTAProductShares(t *testing.T) {
 		t.Fatal("JSON MtA response decoded")
 	}
 	response.Proof[0] ^= 1
-	if _, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk); err == nil {
+	if _, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk, &sk.PublicKey, *rp); err == nil {
 		t.Fatal("tampered response proof verified")
 	}
 }
@@ -143,7 +153,15 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	tb.Helper()
 	restore := pai.SetMinimumModulusBitsForTesting(1024)
 	defer restore()
+	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
+		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
+	})
+	defer restoreSP()
 	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	rp, _, err := zkpai.GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -157,7 +175,7 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(nil, []byte("start"), []byte("response"), *start, b, bCommit, &sk.PublicKey)
+	response, _, err := Respond(nil, []byte("start"), []byte("response"), *start, b, bCommit, &sk.PublicKey, &sk.PublicKey, *rp)
 	if err != nil {
 		tb.Fatal(err)
 	}

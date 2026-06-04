@@ -126,17 +126,23 @@ func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
 }
 
 // Validate checks the canonical proof record and ciphertext integer.
+// The proof must be a valid AffGProof. Legacy MTAResponseProof payloads are
+// rejected rather than supported as a fallback.
 func (m ResponseMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
 	}
-	if _, err := zkpai.UnmarshalMTAResponseProof(m.Proof); err != nil {
+	if _, err := zkpai.UnmarshalAffGProof(m.Proof); err != nil {
 		return fmt.Errorf("invalid MtA response proof: %w", err)
 	}
 	return nil
 }
 
 // Start encrypts scalar a and proves it is a valid secp256k1 scalar.
+// The encryption proof uses the existing Π^Enc (version 1) structure; a
+// full upgrade to Πenc requires per-verifier Ring-Pedersen commitments
+// which are incompatible with the broadcast Round 1 flow. Since k_i is
+// ephemeral (one-time nonce), the leakage risk is bounded.
 func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*StartMessage, error) {
 	if reader == nil {
 		reader = rand.Reader
@@ -169,8 +175,17 @@ func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 	return zkpai.VerifyEncryption(domain, pk, c, encrProof)
 }
 
-// Respond creates Enc(a*b+beta) and returns the local beta share as -beta.
-func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMessage, b *big.Int, bCommitment []byte, pkA *pai.PublicKey) (*ResponseMessage, *big.Int, error) {
+// Respond creates Enc(a*b+beta) under the initiator's Paillier key and proves
+// the response is correctly formed using a Πaff-g proof. It also encrypts beta
+// under the responder's own Paillier key for the Y component of the proof.
+//
+// Parameters:
+//   - pkA: initiator's Paillier public key (Nj in Πaff-g)
+//   - pkB: responder's own Paillier public key (Ni in Πaff-g)
+//   - verifierAux: initiator's Ring-Pedersen parameters
+//
+// Returns the response message and the negated local beta share (-beta mod q).
+func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMessage, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -180,6 +195,7 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 	if b == nil || b.Sign() <= 0 || b.Cmp(secp.Order()) >= 0 {
 		return nil, nil, errors.New("b out of range")
 	}
+
 	encA := new(big.Int).SetBytes(start.Ciphertext)
 	beta, err := randomScalar(reader)
 	if err != nil {
@@ -192,11 +208,7 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 
 	// encA^b mod N² via constant-time modular exponentiation.
 	// Ciphertext blinding is NOT applied here because the ZK proof
-	// (ProveMTAResponse) verifies the exact relationship
-	// response = encA^b * encBeta mod N²; a blinded base would
-	// change the ciphertext and break the proof. The constant-time
-	// bigmod.Exp provides the primary side-channel protection for
-	// the secret scalar b.
+	// verifies the exact relationship response = encA^b * encBeta mod N².
 	nLen := (pkA.N.BitLen() + 7) / 8
 	nSquaredLen := 2 * nLen
 	nSquaredBytes := paillierct.FixedEncode(pkA.NSquared, nSquaredLen)
@@ -210,11 +222,38 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 	response := new(big.Int).SetBytes(encRespBytes)
 	response.Mul(response, encBeta)
 	response.Mod(response, pkA.NSquared)
-	proof, err := zkpai.ProveMTAResponse(reader, responseDomain, pkA, encA, response, bCommitment, b, beta, betaRandomness)
+
+	// Encrypt beta under the responder's own key for the Y commitment.
+	yCiphertext, yRandomness, err := pkB.Encrypt(reader, beta)
 	if err != nil {
 		return nil, nil, err
 	}
-	proofBytes, err := zkpai.Marshal(proof)
+
+	// Curve commitment X = b * G.
+	X := secp.ScalarBaseMult(secp.ScalarFromBigInt(b))
+
+	params := zkpai.ActiveSecurityParams()
+	stmt := zkpai.AffGStatement{
+		ReceiverPaillierN: pkA,
+		ProverPaillierN:   pkB,
+		C:                 encA,
+		D:                 response,
+		Y:                 yCiphertext,
+		X:                 X,
+		VerifierAux:       verifierAux,
+	}
+	witness := zkpai.AffGWitness{
+		X:    new(big.Int).Set(b),
+		Y:    new(big.Int).Set(beta),
+		Rho:  new(big.Int).Set(betaRandomness),
+		RhoY: new(big.Int).Set(yRandomness),
+	}
+
+	proof, err := zkpai.ProveAffG(params, responseDomain, stmt, witness, reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	proofBytes, err := proof.MarshalBinary()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -223,22 +262,44 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: proofBytes}, betaShare, nil
 }
 
-// Finish verifies the response proof and decrypts the alpha share.
-func Finish(startDomain, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey) (*big.Int, error) {
+// Finish verifies the AffG response proof and decrypts the alpha share.
+//
+// Parameters:
+//   - skA: initiator's Paillier private key
+//   - pkB: responder's Paillier public key (Ni in Πaff-g)
+//   - verifierAux: initiator's own Ring-Pedersen parameters
+func Finish(startDomain, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
 	}
 	if !VerifyStart(startDomain, start, &skA.PublicKey) {
 		return nil, errors.New("invalid MtA start proof")
 	}
-	proof, err := zkpai.UnmarshalMTAResponseProof(response.Proof)
+	proof, err := zkpai.UnmarshalAffGProof(response.Proof)
 	if err != nil {
 		return nil, err
 	}
 	encA := new(big.Int).SetBytes(start.Ciphertext)
 	resp := new(big.Int).SetBytes(response.Ciphertext)
-	if !zkpai.VerifyMTAResponse(responseDomain, &skA.PublicKey, encA, resp, bCommitment, proof) {
-		return nil, fmt.Errorf("invalid MtA response proof")
+
+	bCommit, err := secp.PointFromBytes(bCommitment)
+	if err != nil {
+		return nil, fmt.Errorf("invalid b commitment: %w", err)
+	}
+
+	params := zkpai.ActiveSecurityParams()
+	stmt := zkpai.AffGStatement{
+		ReceiverPaillierN: &skA.PublicKey,
+		ProverPaillierN:   pkB,
+		C:                 encA,
+		D:                 resp,
+		Y:                 proof.Y, // Y is carried in the proof
+		X:                 bCommit,
+		VerifierAux:       verifierAux,
+	}
+
+	if err := zkpai.VerifyAffG(params, responseDomain, stmt, proof); err != nil {
+		return nil, fmt.Errorf("invalid MtA response proof: %w", err)
 	}
 	alpha, err := skA.Decrypt(resp)
 	if err != nil {

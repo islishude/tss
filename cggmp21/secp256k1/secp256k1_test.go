@@ -12,14 +12,23 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 func TestMain(m *testing.M) {
 	restoreBits := SetDefaultPaillierBitsForTesting(768)
 	restoreMin := pai.SetMinimumModulusBitsForTesting(512)
+	restoreKeygenMin := SetMinKeygenPaillierBitsForTesting(768)
+	restoreSign := SetPresignSignDisabledForTesting(false)
+	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
+		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 512,
+	})
 	code := m.Run()
 	restoreBits()
 	restoreMin()
+	restoreKeygenMin()
+	restoreSign()
+	restoreSP()
 	os.Exit(code)
 }
 
@@ -390,6 +399,52 @@ func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
 	}
 }
 
+// secpKeygenWithoutConfirmation runs keygen without the confirmation exchange.
+// Only use in tests that verify the confirmation step itself.
+func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	session, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := make([]tss.PartyID, n)
+	for i := range parties {
+		parties[i] = tss.PartyID(i + 1)
+	}
+	sessions := make(map[tss.PartyID]*KeygenSession, n)
+	messages := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		kg, out, err := StartKeygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = kg
+		messages = append(messages, out...)
+	}
+	for _, env := range messages {
+		for _, id := range parties {
+			if id == env.From {
+				continue
+			}
+			if env.To != 0 && env.To != id {
+				continue
+			}
+			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
+				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+		}
+	}
+	out := make(map[tss.PartyID]*KeyShare, n)
+	for _, id := range parties {
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("keygen not complete for %d", id)
+		}
+		out[id] = share
+	}
+	return out
+}
+
 func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	session, err := tss.NewSessionID(nil)
@@ -436,6 +491,20 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 			t.Fatal("group public key mismatch")
 		}
 		out[id] = share
+	}
+	// Exchange and verify keygen confirmations.
+	confirmations := make([]*KeygenConfirmation, n)
+	for i, id := range parties {
+		c, err := out[id].KeygenConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmations[i] = c
+	}
+	for _, id := range parties {
+		if err := VerifyKeygenConfirmations(out[id], confirmations); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return out
 }
@@ -561,6 +630,14 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	newShare, ok := session.KeyShare()
 	if !ok {
 		t.Fatal("refresh did not complete")
+	}
+	// Confirm the new share (self-confirm for 1-of-1).
+	conf, err := newShare.KeygenConfirmation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyKeygenConfirmations(newShare, []*KeygenConfirmation{conf}); err != nil {
+		t.Fatal(err)
 	}
 	if !bytes.Equal(oldPub, newShare.PublicKey) {
 		t.Fatal("public key changed after refresh")
@@ -699,6 +776,20 @@ func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 			t.Fatalf("party %d public key changed after refresh", id)
 		}
 	}
+	// Exchange and verify keygen confirmations for refreshed shares.
+	refreshConfirmations := make([]*KeygenConfirmation, len(parties))
+	for i, id := range parties {
+		c, err := newShares[id].KeygenConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		refreshConfirmations[i] = c
+	}
+	for _, id := range parties {
+		if err := VerifyKeygenConfirmations(newShares[id], refreshConfirmations); err != nil {
+			t.Fatal(err)
+		}
+	}
 	signers := []*KeyShare{newShares[1], newShares[3]}
 	digest := sha256.Sum256([]byte("refresh 2-of-3"))
 	pub, sig, err := SignDigest(digest[:], signers)
@@ -751,6 +842,20 @@ func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
 		}
 		if !bytes.Equal(shares[id].ChainCode, newShare.ChainCode) {
 			t.Fatalf("party %d chain code changed after refresh", id)
+		}
+	}
+	// Confirm refreshed shares.
+	hdRefreshConfirmations := make([]*KeygenConfirmation, len(parties))
+	for i, id := range parties {
+		c, err := sessions[id].newShare.KeygenConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		hdRefreshConfirmations[i] = c
+	}
+	for _, id := range parties {
+		if err := VerifyKeygenConfirmations(sessions[id].newShare, hdRefreshConfirmations); err != nil {
+			t.Fatal(err)
 		}
 	}
 	signers := []*KeyShare{sessions[1].newShare, sessions[2].newShare}

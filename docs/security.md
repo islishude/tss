@@ -14,6 +14,10 @@ Callers must provide:
 
 - authenticated peer identity for every envelope;
 - encryption for envelopes with `ConfidentialRequired`;
+- **equivocation-resistant broadcast** for CGGMP21 keygen round 1: every
+  participant must receive identical commitment, Paillier, and
+  Ring-Pedersen payloads. After keygen completes, compare
+  `KeygenTranscriptHash` across parties to detect equivocation;
 - replay protection and session-id freshness;
 - durable storage encryption for key shares and presigns;
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
@@ -105,14 +109,41 @@ encoding.
 
 `cggmp21/secp256k1` implements CGGMP21-style threshold ECDSA with Paillier MtA/ZK proofs. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts and BIP32 HD derivation, and encodes all payloads as canonical binary TLV records.
 
-The Paillier/ZK proof layer has been prepared for independent cryptographic audit. See `docs/audit-guide.md` for the complete proof-to-paper mapping.
+The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible constructions:
+
+- **Πenc**: Paillier encryption in range with Ring-Pedersen commitments, large integer masks sampled from ±2^(Ell+Epsilon), and strict ciphertext membership and response range checks.
+- **Πaff-g**: Paillier affine operation with group commitment in range, replacing the legacy MTAResponseProof. Uses Ring-Pedersen commitments and binds the prover's Paillier key, the verifier's auxiliary parameters, and all statement fields into the Fiat-Shamir challenge.
+- **Πlog\***: Group element vs Paillier encryption in range, replacing the legacy LogProof. Uses Ring-Pedersen commitment to hide the integer witness and binds the Paillier ciphertext, curve points, and base point into the challenge.
+
+All three proofs use the canonical typed transcript API; the Fiat-Shamir challenge is never reduced modulo the secp256k1 order for Paillier-integer proofs.
+
+Presign and signing entry points are gated behind `PresignSignDisabled` (enabled by default) pending independent cryptographic review of the Paillier MtA/ZK proof layer. See `docs/audit-guide.md` for the complete proof-to-paper mapping.
+
+## Keygen Broadcast Consistency
+
+The keygen protocol assumes authenticated transport and a non-equivocating broadcast view. After keygen completes, each party produces a `KeygenConfirmation` message binding the session ID, sender, threshold, party set, public key, keygen transcript hash, and commitments hash.
+
+Applications must exchange and verify keygen confirmations before using the resulting key shares for presign or signing:
+
+```go
+conf, _ := share.KeygenConfirmation()
+// ... exchange confirmations with all parties via authenticated transport ...
+err := VerifyKeygenConfirmations(share, receivedConfirmations)
+```
+
+A CGGMP21/secp256k1 key share is not valid for signing until `VerifyKeygenConfirmations` succeeds for the full keygen party set. The `KeygenConfirmed` flag is set to `true` on success and checked by `requireMPCMaterial` before any presign or sign operation.
+
+## Paillier Ciphertext Membership
+
+All Paillier public operations (`Decrypt`, `AddCiphertexts`, `AddPlaintext`, `MulPlaintext`) validate ciphertext membership in `Z*_{n²}` before acting on inputs. Unchecked variants (`AddCiphertextsUnchecked`, `AddPlaintextUnchecked`, `MulPlaintextUnchecked`) skip the expensive gcd check but still enforce basic range and nil guards. Callers must ensure ciphertexts passed to unchecked helpers have been validated through upstream proof checks.
 
 Caller responsibilities (not provided by this library):
 
 - network transport with peer authentication and encryption;
 - storage encryption for key shares and presign records;
 - proactive refresh scheduling (`RefreshScheduler` provides periodic key rotation with configurable interval and transport interface);
-- SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1).
+- SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1);
+- keygen confirmation exchange after keygen and refresh before any presign/sign operation.
 
 ## One-Time Presigns
 

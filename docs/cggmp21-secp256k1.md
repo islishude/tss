@@ -38,8 +38,9 @@ type KeyShare struct {
     PaillierProofDomain     string
     ShareProof              []byte        // Schnorr proof of discrete-log knowledge
     KeygenTranscriptHash    []byte
-    LogCiphertext           []byte        // Π^log ciphertext: Enc(x_i, ρ) under own Paillier key
-    LogProof                []byte        // Π^log proof of discrete-log equality
+    LogCiphertext           []byte        // Πlog* ciphertext (LogStarProof): Enc(x_i, ρ) under own Paillier key
+    LogProof                []byte        // Πlog* proof (LogStarProof) of discrete-log equality with Ring-Pedersen commitment
+    KeygenConfirmed         bool          // set true by VerifyKeygenConfirmations
     // logRandomness          []byte      // unexported: Paillier randomness for log ciphertext
 }
 ```
@@ -48,7 +49,7 @@ The `secret` and `paillierPrivateKey` fields are unexported. `String()`, `GoStri
 
 ### MPC Material Requirement
 
-CGGMP21 key shares require full Paillier/ZK material for the signing path. `requireMPCMaterial()` rejects shares from old keygen flows that lack Paillier keys, Πmod proofs, Ring-Pedersen parameters/proofs, share proofs, or the keygen transcript hash.
+CGGMP21 key shares require full Paillier/ZK material for the signing path. `requireMPCMaterial()` validates the share, checks the `KeygenConfirmed` flag (set by `VerifyKeygenConfirmations` after keygen confirmation exchange), and verifies that every party's Paillier public key is deserializable. Unconfirmed shares are rejected.
 
 ## Keygen
 
@@ -112,7 +113,7 @@ When all `n` parties' commitments and shares are received and verified:
 
 7. **Paillier proof domain**: The persisted local Π^fac is re-proved against `(PK, keygen_transcript_hash)` for out-of-context detection.
 
-8. **Π^log proof**: Each party encrypts its aggregated secret share `x_j` under its own Paillier key and produces a Π^log proof binding the ciphertext to the party's verification share `V_j`. This allows re-verification on load to detect out-of-context or tampered share material.
+8. **Πlog\* proof**: Each party encrypts its aggregated secret share `x_j` under its own Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share `V_j`, using the party's own Ring-Pedersen parameters for the commitment. This allows re-verification on load to detect out-of-context or tampered share material.
 
 ### Domain Separation
 
@@ -139,7 +140,7 @@ and broadcasts:
 
 - `Γ_i = γ_i · G` (gamma commitment)
 - `Enc_i(k_i)` — Paillier encryption of `k_i` under party `i`'s public key
-- Π^Enc proof — unified encryption proof that the ciphertext and `Γ_i` commitment are consistent
+- Encryption proof — unified encryption proof (v1 EncryptionProof) that the ciphertext and `Γ_i` commitment are consistent. The broadcast Round 1 retains the v1 proof because per-verifier Ring-Pedersen commitments are impractical for broadcast; the witness `k_i` is ephemeral.
 
 Internally, each signer computes the Lagrange-adjusted secret:
 
@@ -160,13 +161,13 @@ For every ordered pair of distinct signers `(i, j)`, two MtA exchanges run in pa
 **Delta MtA** (produces additive shares of `k·γ`):
 
 - Initiator `i` sends `Enc_i(k_i)` to responder `j`.
-- Responder `j` computes response `Enc_i(γ_j·k_i + β_{i→j})` with Π^mta proof.
+- Responder `j` computes response `Enc_i(γ_j·k_i + β_{i→j})` with Πaff-g proof (AffGProof).
 - Result: `α_{i→j}` (initiator's share) and `β_{i→j}` (responder's share) such that `α_{i→j} + β_{i→j} = k_i·γ_j mod q`.
 
 **Sigma MtA** (produces additive shares of `k·x`):
 
 - Initiator `i` sends `Enc_i(k_i)` to responder `j`.
-- Responder `j` computes response `Enc_i(x̄_j·k_i + β̂_{i→j})` with Π^mta proof.
+- Responder `j` computes response `Enc_i(x̄_j·k_i + β̂_{i→j})` with Πaff-g proof (AffGProof).
 - Result: `α̂_{i→j}` and `β̂_{i→j}` such that `α̂_{i→j} + β̂_{i→j} = k_i·x̄_j mod q`.
 
 The MtA domain binds `(protocol, version, session, threshold, all_parties, signers, initiator, responder, mta_kind, group_pk, keygen_transcript, initiator_paillier_pk)`.
@@ -253,7 +254,7 @@ Receivers verify shares, then:
 x'_j = x_j + Σ_i g_i(j)   mod q
 ```
 
-Each party then encrypts its new share under its new Paillier key and produces a Π^log proof binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
+Each party then encrypts its new share under its new Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
 
 ## Reshare
 
@@ -268,7 +269,7 @@ Each existing party:
 
 New participants only need to receive and verify — they don't need the old key share to participate.
 
-The Π^log proof (discrete-log equality) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Π^log proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
+The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commitment) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Πlog\* proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
 ## BIP32 HD Derivation
 
@@ -295,18 +296,18 @@ Evidence records are deterministic JSON binding protocol context, payload hash, 
 
 ## Payload Types
 
-| Payload Type                            | Direction      | Confidential | Content                                        |
-| --------------------------------------- | -------------- | ------------ | ---------------------------------------------- |
-| `cggmp21.secp256k1.keygen.commitments`  | broadcast      | no           | Polynomial commitments + Paillier key + proofs |
-| `cggmp21.secp256k1.keygen.share`        | point-to-point | yes          | Scalar share for one recipient                 |
-| `cggmp21.secp256k1.presign.round1`      | broadcast      | no           | `(Γ_i, Enc_i(k_i), Π^Enc, PaillierPK)`         |
-| `cggmp21.secp256k1.presign.round2`      | point-to-point | yes          | MtA response ciphertexts + Π^mta proofs        |
-| `cggmp21.secp256k1.presign.round3`      | broadcast      | no           | `δ_i` scalar share                             |
-| `cggmp21.secp256k1.sign.partial`        | broadcast      | no           | `s_i` partial + presign transcript hash        |
-| `cggmp21.secp256k1.refresh.commitments` | broadcast      | no           | Refresh polynomial commitments + new Paillier  |
-| `cggmp21.secp256k1.refresh.share`       | point-to-point | yes          | Refresh scalar share                           |
-| `cggmp21.secp256k1.reshare.commitments` | broadcast      | no           | Reshare commitments + new Paillier             |
-| `cggmp21.secp256k1.reshare.share`       | point-to-point | yes          | Reshare scalar share                           |
+| Payload Type                            | Direction      | Confidential | Content                                              |
+| --------------------------------------- | -------------- | ------------ | ---------------------------------------------------- |
+| `cggmp21.secp256k1.keygen.commitments`  | broadcast      | no           | Polynomial commitments + Paillier key + proofs       |
+| `cggmp21.secp256k1.keygen.share`        | point-to-point | yes          | Scalar share for one recipient                       |
+| `cggmp21.secp256k1.presign.round1`      | broadcast      | no           | `(Γ_i, Enc_i(k_i), EncryptionProof v1, PaillierPK)`  |
+| `cggmp21.secp256k1.presign.round2`      | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof) |
+| `cggmp21.secp256k1.presign.round3`      | broadcast      | no           | `δ_i` scalar share                                   |
+| `cggmp21.secp256k1.sign.partial`        | broadcast      | no           | `s_i` partial + presign transcript hash              |
+| `cggmp21.secp256k1.refresh.commitments` | broadcast      | no           | Refresh polynomial commitments + new Paillier        |
+| `cggmp21.secp256k1.refresh.share`       | point-to-point | yes          | Refresh scalar share                                 |
+| `cggmp21.secp256k1.reshare.commitments` | broadcast      | no           | Reshare commitments + new Paillier                   |
+| `cggmp21.secp256k1.reshare.share`       | point-to-point | yes          | Reshare scalar share                                 |
 
 ## API Reference
 

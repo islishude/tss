@@ -115,11 +115,21 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	startDomain := mtaStartDomain(s1.key, sessionID, signers, s1.key.Party, s1.key.PaillierPublicKey, s1.contextHash)
 	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey, s1.contextHash)
-	if _, err := mta.Finish(startDomain, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier); err != nil {
+
+	responderPK, err := s1.key.paillierPublicFor(2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	selfRP, err := s1.key.ringPedersenPublicFor(s1.key.Party)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := mta.Finish(startDomain, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
 	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "sigma", s1.key.PaillierPublicKey, s1.contextHash)
-	if _, err := mta.Finish(startDomain, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier); err == nil {
+	if _, err := mta.Finish(startDomain, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}
 }
@@ -161,6 +171,19 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 			t.Fatalf("keygen not complete for %d", id)
 		}
 		out[id] = share
+	}
+	confirmations := make([]*KeygenConfirmation, n)
+	for i, id := range parties {
+		c, err := out[id].KeygenConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmations[i] = c
+	}
+	for _, id := range parties {
+		if err := VerifyKeygenConfirmations(out[id], confirmations); err != nil {
+			t.Fatal(err)
+		}
 	}
 	return out
 }

@@ -3,6 +3,7 @@ package wire
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // PartyBytes is a party-scoped byte string record.
@@ -169,8 +170,7 @@ func validateRecordCount(raw []byte, offset int, count uint32, minRecordLen int,
 	if offset > len(raw) {
 		return fmt.Errorf("invalid %s offset", name)
 	}
-	maxInt := uint64(^uint(0) >> 1)
-	if uint64(count) > maxInt {
+	if uint64(count) > math.MaxInt {
 		return fmt.Errorf("%s count too large", name)
 	}
 	remaining := uint64(len(raw) - offset)

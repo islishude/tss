@@ -9,9 +9,6 @@ type uint32Value interface {
 	~uint32
 }
 
-// MaxInt is the largest value representable by int on this platform.
-const MaxInt = int(^uint(0) >> 1)
-
 // Uint16 encodes v as big-endian uint16.
 func Uint16(v uint16) []byte {
 	var out [2]byte

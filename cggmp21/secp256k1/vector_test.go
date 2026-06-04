@@ -2,8 +2,10 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -27,6 +29,80 @@ type cggmp21TestVector struct {
 type cggmpSigVector struct {
 	R string `json:"r"`
 	S string `json:"s"`
+}
+
+func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
+	t.Helper()
+
+	run := func(threshold, n int, signerIDs []tss.PartyID) cggmp21TestVector {
+		shares := secpKeygen(t, threshold, n)
+
+		parties := make([]int, n)
+		keygenShares := make([]string, n)
+		pubKey := ""
+		for i := range n {
+			parties[i] = i + 1
+			raw, err := shares[tss.PartyID(i+1)].MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+			keygenShares[i] = hex.EncodeToString(raw)
+			pubKey = hex.EncodeToString(shares[tss.PartyID(i+1)].PublicKey)
+		}
+
+		presignMap := secpPresign(t, shares, signerIDs)
+		presigns := make([]string, len(signerIDs))
+		for j, pid := range signerIDs {
+			raw, err := presignMap[pid].MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+			presigns[j] = hex.EncodeToString(raw)
+		}
+
+		digest := sha256.Sum256(fmt.Appendf(nil, "test message %d-of-%d", threshold, n))
+		signerShares := make([]*KeyShare, len(signerIDs))
+		for j, pid := range signerIDs {
+			signerShares[j] = shares[pid]
+		}
+		_, sig, err := SignDigest(digest[:], signerShares)
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		return cggmp21TestVector{
+			Description:    fmt.Sprintf("CGGMP21 secp256k1 %d-of-%d keygen", threshold, n),
+			Threshold:      threshold,
+			N:              n,
+			Parties:        parties,
+			GroupPublicKey: pubKey,
+			KeygenShares:   keygenShares,
+			Presigns:       presigns,
+			Digest:         hex.EncodeToString(digest[:]),
+			Signature:      &cggmpSigVector{R: hex.EncodeToString(sig.R), S: hex.EncodeToString(sig.S)},
+		}
+	}
+
+	return []cggmp21TestVector{
+		run(1, 1, []tss.PartyID{1}),
+		run(2, 3, []tss.PartyID{1, 2}),
+	}
+}
+
+func TestGenerateCGGMP21Vectors(t *testing.T) {
+	if os.Getenv("GENERATE_VECTORS") != "1" {
+		t.Skip("set GENERATE_VECTORS=1 to regenerate cross-implementation vectors")
+	}
+	vectorPath := filepath.Join("testdata", "cggmp21_secp256k1_vectors.json")
+	vectors := generateCGGMP21Vectors(t)
+	data, err := json.MarshalIndent(vectors, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(vectorPath, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("wrote %d vectors to %s", len(vectors), vectorPath)
 }
 
 func TestCGGMP21CrossImplementationVectors(t *testing.T) {

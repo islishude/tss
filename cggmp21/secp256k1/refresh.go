@@ -428,17 +428,37 @@ func (s *RefreshSession) tryComplete() error {
 		ShareProof:             shareProofBytes,
 		KeygenTranscriptHash:   transcriptHash,
 	}
-	// Π^log: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret.
+	// Π^log*: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret,
+	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
 	if err != nil {
 		return err
 	}
+	localRP, err := zkpai.UnmarshalRingPedersenParams(s.newRingPedersen[s.oldKey.Party].Params)
+	if err != nil {
+		return fmt.Errorf("unmarshal local RP params: %w", err)
+	}
 	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
-	logProof, err := zkpai.ProveLog(s.cfg.Reader(), logDomain, &s.newPaillier.PublicKey, logCiphertext, newSecret, logRandomness, localVerificationShare)
+	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
+	if err != nil {
+		return fmt.Errorf("invalid verification share: %w", err)
+	}
+	logStmt := zkpai.LogStarStatement{
+		PaillierN:   &s.newPaillier.PublicKey,
+		C:           logCiphertext,
+		X:           verificationPoint,
+		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
+		VerifierAux: *localRP,
+	}
+	logWitness := zkpai.LogStarWitness{
+		X:   new(big.Int).Set(newSecret),
+		Rho: new(big.Int).Set(logRandomness),
+	}
+	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return err
 	}
-	logProofBytes, err := zkpai.Marshal(logProof)
+	logProofBytes, err := logProof.MarshalBinary()
 	if err != nil {
 		return err
 	}

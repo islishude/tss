@@ -59,9 +59,11 @@ These rules ensure one semantic record has one binary representation. This matte
 - `internal/zk/paillier.ModulusProof`
 - `internal/zk/paillier.RingPedersenParams`
 - `internal/zk/paillier.RingPedersenProof`
-- `internal/zk/paillier.EncryptionProof`
-- `internal/zk/paillier.MTAResponseProof`
-- `internal/zk/paillier.LogProof`
+- `internal/zk/paillier.EncryptionProof` (v1, MtA Start broadcast)
+- `internal/zk/paillier.EncProof` (Πenc)
+- `internal/zk/paillier.AffGProof` (Πaff-g)
+- `internal/zk/paillier.LogStarProof` (Πlog\*)
+- `internal/zk/paillier.KeygenConfirmation`
 - `internal/zk/schnorr.Proof`
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,

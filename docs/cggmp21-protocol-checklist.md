@@ -6,15 +6,15 @@ Ring-Pedersen Πprm semantics.
 
 ## Keygen, Refresh, Reshare
 
-| Requirement                                                                        | Code Location                                                             | Status |
-| ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ------ |
-| Generate Paillier safe-prime modulus `N=pq` with `p≡q≡3 mod 4`                     | `internal/paillier`, `keygen.go`, `refresh.go`, `reshare.go`              | DONE   |
-| Prove and verify CGGMP24 Πmod with `w` and exactly 128 verifier-derived rounds     | `internal/zk/paillier/proofs.go`                                          | DONE   |
-| Generate, store, and verify Ring-Pedersen `(N,s,t)` parameters and Πprm            | `internal/zk/paillier/proofs.go`, `keygen.go`, `refresh.go`, `reshare.go` | DONE   |
-| Reject mismatched Ring-Pedersen modulus vs Paillier public key                     | `types.go`, protocol receive handlers                                     | DONE   |
-| Bind keygen/refresh/reshare transcripts to Paillier keys and Ring-Pedersen records | `keygen.go`, `refresh.go`, `reshare.go`                                   | DONE   |
-| Prove share-to-verification-share discrete-log equality with Πlog                  | `keygen.go`, `refresh.go`, `reshare.go`                                   | DONE   |
-| Store only canonical TLV key-share records with no legacy proof fallback           | `encoding.go`, `payload_encoding.go`                                      | DONE   |
+| Requirement                                                                        | Code Location                                                              | Status |
+| ---------------------------------------------------------------------------------- | -------------------------------------------------------------------------- | ------ |
+| Generate Paillier safe-prime modulus `N=pq` with `p≡q≡3 mod 4`                     | `internal/paillier`, `keygen.go`, `refresh.go`, `reshare.go`               | DONE   |
+| Prove and verify CGGMP24 Πmod with `w` and exactly 128 verifier-derived rounds     | `internal/zk/paillier/proofs.go`                                           | DONE   |
+| Generate, store, and verify Ring-Pedersen `(N,s,t)` parameters and Πprm            | `internal/zk/paillier/proofs.go`, `keygen.go`, `refresh.go`, `reshare.go`  | DONE   |
+| Reject mismatched Ring-Pedersen modulus vs Paillier public key                     | `types.go`, protocol receive handlers                                      | DONE   |
+| Bind keygen/refresh/reshare transcripts to Paillier keys and Ring-Pedersen records | `keygen.go`, `refresh.go`, `reshare.go`                                    | DONE   |
+| Prove share-to-verification-share discrete-log equality with Πlog\*                | `keygen.go`, `refresh.go`, `reshare.go`, `internal/zk/paillier/logstar.go` | DONE   |
+| Store only canonical TLV key-share records with no legacy proof fallback           | `encoding.go`, `payload_encoding.go`                                       | DONE   |
 
 ## Proof Verifier Policy
 

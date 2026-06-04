@@ -17,6 +17,17 @@ import (
 
 const proofVersion = 1
 
+// Security parameters for statistical zero-knowledge in Fiat-Shamir proofs.
+// l (securityParameter) matches the secp256k1 order bit length.
+// ε (statSecurityParam) provides the statistical hiding margin so that
+// the mask α ∈ [0, 2^{l+ε}) makes witness recovery from z = α + e·x
+// computationally infeasible (~2^ε candidates).
+const (
+	securityParameter = 256                                   // l, secp256k1 order ≈ 2^256
+	statSecurityParam = 128                                   // ε, statistical security parameter
+	maskBits          = securityParameter + statSecurityParam // 384
+)
+
 const (
 	modulusProofWireType       = "zk.paillier.modulus-proof"
 	mtaResponseProofWireType   = "zk.paillier.mta-response-proof"
@@ -85,18 +96,18 @@ const (
 	ringPedersenProofTag       = "prm"
 	ringPedersenChallengeLabel = "cggmp24-paillier-prm-challenge-v1"
 	mtaProofTag                = "mta"
-	mtaChallengeLabel          = "paillier-mta-response-challenge-v2"
+	mtaChallengeLabel          = "paillier-mta-response-challenge-v1"
 	logProofTag                = "log"
-	logChallengeLabel          = "paillier-log-challenge-v2"
+	logChallengeLabel          = "paillier-log-challenge-v1"
 	encryptionProofTag         = "enc"
-	encryptionChallengeLabel   = "paillier-encryption-challenge-v2"
+	encryptionChallengeLabel   = "paillier-encryption-challenge-v1"
 )
 
 const (
 	modulusProofRounds      = 128
 	ringPedersenProofRounds = 128
 
-	mtaResponseScalarMaxBytes = 64
+	mtaResponseScalarMaxBytes = 128
 )
 
 // ModulusProof is CGGMP24 Πmod for a Paillier-Blum modulus. It proves
@@ -575,9 +586,17 @@ func UnmarshalRingPedersenProof(in []byte) (*RingPedersenProof, error) {
 // ProveEncryption creates a unified Π^Enc proof that a Paillier ciphertext
 // encrypts a scalar less than the secp256k1 order, and the public curve
 // commitment opens to the same scalar. Per CGGMP21 Section 4.1.
+//
+// Statistical zero-knowledge: α is sampled from [0, 2^{l+ε}) with l=256, ε=128,
+// providing ~128 bits of statistical hiding against witness recovery from the
+// response z = α + e·m. The challenge e is derived from the full 256-bit hash
+// output without modular reduction.
 func ProveEncryption(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int) (*EncryptionProof, error) {
 	if reader == nil {
 		reader = rand.Reader
+	}
+	if pk == nil {
+		return nil, errors.New("nil Paillier public key")
 	}
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -592,7 +611,7 @@ func ProveEncryption(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphert
 	if err != nil {
 		return nil, err
 	}
-	alpha, err := randomScalar(reader)
+	alpha, err := randomLargeMask(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -661,11 +680,8 @@ func VerifyEncryption(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, pro
 		return false
 	}
 	e := challenge([]byte(encryptionChallengeLabel), transcript)
-	// Range check: if scalar < bound, then z = e*scalar + alpha satisfies z < bound^2 + bound.
-	bound := new(big.Int).SetBytes(proof.Bound)
-	maxZ := new(big.Int).Mul(bound, bound)
-	maxZ.Add(maxZ, bound)
-	if z.Cmp(maxZ) >= 0 {
+	// Statistical ZK: z = α + e·m with α ∈ [0, 2^{l+ε}) must satisfy z < 2^{l+ε} + e·q.
+	if z.Cmp(zkRangeBound(e)) >= 0 {
 		return false
 	}
 	// Paillier check: Enc(z, u) == cipherCommitment * ciphertext^e (mod N^2).
@@ -888,9 +904,17 @@ func UnmarshalLogProof(in []byte) (*LogProof, error) {
 }
 
 // ProveMTAResponse proves response encrypts a*b+beta for committed b.
+//
+// Statistical zero-knowledge: μ and ν are sampled from [0, 2^{l+ε}) with
+// l=256, ε=128, and the challenge e is the full 256-bit hash output. This
+// provides ~128 bits of statistical hiding for both b (via zB = e·b + μ)
+// and beta (via zBeta = e·beta + ν).
 func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment []byte, b, beta, betaRandomness *big.Int) (*MTAResponseProof, error) {
 	if reader == nil {
 		reader = rand.Reader
+	}
+	if pk == nil {
+		return nil, errors.New("nil Paillier public key")
 	}
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -919,11 +943,11 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	if err != nil {
 		return nil, err
 	}
-	mu, err := randomScalar(reader)
+	mu, err := randomLargeMask(reader)
 	if err != nil {
 		return nil, err
 	}
-	nu, err := randomScalar(reader)
+	nu, err := randomLargeMask(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -942,8 +966,8 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	nSquaredLen := 2 * nLen
 	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, nSquaredLen)
 	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
-	muBytes := secp.ScalarFromBigInt(mu).Bytes()
-	encAMuBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, muBytes)
+	muFixed := paillierct.FixedEncode(mu, nSquaredLen)
+	encAMuBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, muFixed)
 	if err != nil {
 		return nil, err
 	}
@@ -1023,6 +1047,12 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 	}
 	e := challenge([]byte(mtaChallengeLabel), transcript)
 
+	maxResponse := zkRangeBound(e)
+	// Statistical ZK: zB = e·b + μ and zBeta = e·beta + ν each satisfy the same bound.
+	if zB.Cmp(maxResponse) >= 0 || zBeta.Cmp(maxResponse) >= 0 {
+		return false
+	}
+
 	encZBeta, err := pk.EncryptWithRandomness(zBeta, u)
 	if err != nil {
 		return false
@@ -1050,9 +1080,16 @@ func VerifyMTAResponse(domain []byte, pk *pai.PublicKey, encA, response *big.Int
 // A = a·G share the same discrete logarithm a. The proof encodes the point A
 // directly rather than requiring a separate scalar commitment, matching the
 // CGGMP21 Section 6.2 Π^log structure.
+//
+// Statistical zero-knowledge: α is sampled from [0, 2^{l+ε}) with l=256, ε=128,
+// and the challenge e is the full 256-bit hash output, providing ~128 bits of
+// statistical hiding for the scalar a.
 func ProveLog(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, scalar, randomness *big.Int, pointBytes []byte) (*LogProof, error) {
 	if reader == nil {
 		reader = rand.Reader
+	}
+	if pk == nil {
+		return nil, errors.New("nil Paillier public key")
 	}
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -1066,7 +1103,7 @@ func ProveLog(reader io.Reader, domain []byte, pk *pai.PublicKey, ciphertext, sc
 	if _, err := secp.PointFromBytes(pointBytes); err != nil {
 		return nil, fmt.Errorf("invalid point: %w", err)
 	}
-	alpha, err := randomScalar(reader)
+	alpha, err := randomLargeMask(reader)
 	if err != nil {
 		return nil, err
 	}
@@ -1132,6 +1169,10 @@ func VerifyLog(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, proof *Log
 		return false
 	}
 	e := challenge([]byte(logChallengeLabel), transcript)
+	// Statistical ZK: z = α + e·a with α ∈ [0, 2^{l+ε}) must satisfy z < 2^{l+ε} + e·q.
+	if z.Cmp(zkRangeBound(e)) >= 0 {
+		return false
+	}
 	encZ, err := pk.EncryptWithRandomness(z, u)
 	if err != nil {
 		return false
@@ -1392,13 +1433,12 @@ func proofTranscript(tag string, domain []byte, statementParts, commitmentParts 
 	)
 }
 
+// challenge returns the full 256-bit SHA-256 hash output as a Fiat-Shamir
+// challenge without modular reduction. Used by EncryptionProof, MTAResponseProof,
+// and LogProof where a ~256-bit challenge combined with a large mask α ∈ [0,2^384)
+// provides statistical zero-knowledge (~2^128 candidate witnesses).
 func challenge(parts ...[]byte) *big.Int {
-	out := new(big.Int).SetBytes(hashParts(parts...))
-	out.Mod(out, secp.Order())
-	if out.Sign() == 0 {
-		out.SetInt64(1)
-	}
-	return out
+	return new(big.Int).SetBytes(hashParts(parts...))
 }
 
 func ringPedersenChallenge(transcript []byte, round int) byte {
@@ -1593,16 +1633,12 @@ func expandHash(size int, parts ...[]byte) []byte {
 	return out[:size]
 }
 
-func randomScalar(reader io.Reader) (*big.Int, error) {
-	for {
-		x, err := rand.Int(reader, secp.Order())
-		if err != nil {
-			return nil, err
-		}
-		if x.Sign() != 0 {
-			return x, nil
-		}
-	}
+// randomLargeMask returns a uniform mask in [0, 2^{l+ε}) for statistical
+// zero-knowledge. With l=256 and ε=128, the mask range (~2^384) provides
+// ~128 bits of statistical hiding against witness recovery from
+// z = α + e·x.
+func randomLargeMask(reader io.Reader) (*big.Int, error) {
+	return rand.Int(reader, twoToThe(maskBits))
 }
 
 func randomCoprime(reader io.Reader, n *big.Int) (*big.Int, error) {
@@ -1626,6 +1662,20 @@ func intBytes(x *big.Int) []byte {
 		return nil
 	}
 	return x.Bytes()
+}
+
+// twoToThe returns 2^n as a *big.Int.
+func twoToThe(n int) *big.Int {
+	return new(big.Int).Lsh(big.NewInt(1), uint(n))
+}
+
+// zkRangeBound returns the maximum allowed Fiat-Shamir response for the
+// statistical ZK range: 2^{l+ε} + e·q. With l=256, ε=128, and e ∈ [0,2^256),
+// z = α + e·m must satisfy z < 2^{l+ε} + e·q.
+func zkRangeBound(e *big.Int) *big.Int {
+	maxZ := twoToThe(maskBits)
+	maxZ.Add(maxZ, new(big.Int).Mul(e, secp.Order()))
+	return maxZ
 }
 
 func partyBytes(party uint32) []byte {

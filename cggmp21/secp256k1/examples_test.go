@@ -91,6 +91,15 @@ func Example_full_lifecycle() {
 		panic("keygen did not complete")
 	}
 
+	// Confirm keygen transcript (self-confirm for 1-of-1).
+	confirmation, err := share.KeygenConfirmation()
+	if err != nil {
+		panic(err)
+	}
+	if err := VerifyKeygenConfirmations(share, []*KeygenConfirmation{confirmation}); err != nil {
+		panic(err)
+	}
+
 	raw, err := share.MarshalBinary()
 	if err != nil {
 		panic(err)

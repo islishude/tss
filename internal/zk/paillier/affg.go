@@ -1,0 +1,665 @@
+package paillier
+
+import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"io"
+	"math/big"
+
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/wire"
+)
+
+const affGProofVersion = 1
+
+const affGProofWireType = "zk.paillier.aff-g-proof"
+
+const (
+	affGProofFieldVersion uint16 = iota + 1
+	affGProofFieldA
+	affGProofFieldBx
+	affGProofFieldBy
+	affGProofFieldE
+	affGProofFieldS
+	affGProofFieldF
+	affGProofFieldT
+	affGProofFieldY
+	affGProofFieldZ1
+	affGProofFieldZ2
+	affGProofFieldZ3
+	affGProofFieldZ4
+	affGProofFieldW
+	affGProofFieldWY
+	affGProofFieldTranscriptHash
+)
+
+// AffGStatement is the public input for a Πaff-g proof: the MtA ciphertexts,
+// the curve commitment, the Paillier keys of both parties, and the verifier's
+// Ring-Pedersen auxiliary parameters.
+type AffGStatement struct {
+	// ReceiverPaillierN is the initiator's Paillier modulus (Nj).
+	ReceiverPaillierN *pai.PublicKey
+	// ProverPaillierN is the responder's Paillier modulus (Ni).
+	ProverPaillierN *pai.PublicKey
+
+	C *big.Int    // encA under Nj (the start ciphertext)
+	D *big.Int    // D = x ⊙ C ⊕ Enc_Nj(y; rho) (the MtA response)
+	Y *big.Int    // Y = Enc_Ni(y; rhoY) (responder encrypts y under own key)
+	X *secp.Point // X = x * G (responder's curve commitment)
+
+	VerifierAux RingPedersenParams // initiator's RP params (Nhat_j = Nj)
+}
+
+// AffGWitness is the secret witness for a Πaff-g proof.
+type AffGWitness struct {
+	X    *big.Int // affine multiplier (scalar for curve point X)
+	Y    *big.Int // affine additive term
+	Rho  *big.Int // randomness for Enc_Nj(y; rho) inside D
+	RhoY *big.Int // randomness for Y = Enc_Ni(y; rhoY)
+}
+
+// AffGProof is a CGGMP-compatible Πaff-g proof that an MtA response was
+// computed correctly: D = x ⊙ C ⊕ Enc_Nj(y; rho) with X = x*G and Y = Enc_Ni(y).
+// Y is included in the proof so the verifier can check equation 3 without
+// separately receiving the responder's encryption of y.
+type AffGProof struct {
+	Version uint16
+
+	A  *big.Int    // (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
+	Bx *secp.Point // alpha * G
+	By *big.Int    // Enc_Ni(beta; rY)
+	E  *big.Int    // RP: s_j^alpha * t_j^gamma mod Nhat_j
+	S  *big.Int    // RP: s_j^x * t_j^m mod Nhat_j
+	F  *big.Int    // RP: s_j^beta * t_j^delta mod Nhat_j
+	T  *big.Int    // RP: s_j^y * t_j^mu mod Nhat_j
+
+	Y *big.Int // Enc_Ni(y; rhoY) — public, carried in proof for verifier
+
+	Z1 *big.Int // alpha + e*x
+	Z2 *big.Int // beta + e*y
+	Z3 *big.Int // gamma + e*m
+	Z4 *big.Int // delta + e*mu
+	W  *big.Int // r * rho^e mod Nj
+	WY *big.Int // rY * rhoY^e mod Ni
+
+	TranscriptHash []byte
+}
+
+// ProveAffG creates a Πaff-g proof for the MtA response.
+func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
+	if rng == nil {
+		rng = rand.Reader
+	}
+	if err := params.Validate(); err != nil {
+		return nil, err
+	}
+	if err := validateAffGStatement(params, stmt, w); err != nil {
+		return nil, err
+	}
+
+	Ni := stmt.ProverPaillierN
+	Nj := stmt.ReceiverPaillierN
+	Nhat := stmt.VerifierAux.N // Nhat_j = Nj
+
+	// Sample masks.
+	alpha, err := SampleSignedPowerOfTwo(rng, params.EncRange()) // ±2^(Ell+Epsilon)
+	if err != nil {
+		return nil, err
+	}
+	beta, err := SampleSignedPowerOfTwo(rng, params.AffGRange()) // ±2^(EllPrime+Epsilon)
+	if err != nil {
+		return nil, err
+	}
+	r, err := SampleZNStar(rng, Nj.N)
+	if err != nil {
+		return nil, err
+	}
+	rY, err := SampleZNStar(rng, Ni.N)
+	if err != nil {
+		return nil, err
+	}
+	gamma, err := SampleMultRange(rng, params.EncRange(), Nhat) // ±(2^(Ell+Epsilon) * Nhat)
+	if err != nil {
+		return nil, err
+	}
+	delta, err := SampleMultRange(rng, params.AffGRange(), Nhat) // ±(2^(EllPrime+Epsilon) * Nhat)
+	if err != nil {
+		return nil, err
+	}
+	mask, err := SampleMultRange(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
+	if err != nil {
+		return nil, err
+	}
+	mu, err := SampleMultRange(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
+	if err != nil {
+		return nil, err
+	}
+
+	// A = (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
+	alphaMulC, err := OMulCT(Nj, alpha, stmt.C, signedPowerOfTwoBytes(params.EncRange()))
+	if err != nil {
+		return nil, err
+	}
+	encBeta, err := EncRandom(Nj, beta, r)
+	if err != nil {
+		return nil, err
+	}
+	A, err := OAdd(Nj, alphaMulC, encBeta)
+	if err != nil {
+		return nil, err
+	}
+
+	// Bx = alpha * G
+	Bx := secp.ScalarBaseMult(secp.ScalarFromBigInt(alpha))
+
+	// By = Enc_Ni(beta; rY)
+	By, err := EncRandom(Ni, beta, rY)
+	if err != nil {
+		return nil, err
+	}
+
+	// RP commitments.
+	encMaskCommitLen := max(signedPowerOfTwoBytes(params.EncRange()), multRangeBytes(Nhat, params.EncRange()))
+	E, err := RPCommitCT(stmt.VerifierAux, alpha, gamma, encMaskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	secretCommitLen := max(signedPowerOfTwoBytes(params.Ell), multRangeBytes(Nhat, params.Ell))
+	S, err := RPCommitCT(stmt.VerifierAux, w.X, mask, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	affineCommitLen := max(signedPowerOfTwoBytes(params.AffGRange()), multRangeBytes(Nhat, params.AffGRange()))
+	F, err := RPCommitCT(stmt.VerifierAux, beta, delta, affineCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	yCommitLen := max(signedPowerOfTwoBytes(params.EllPrime), multRangeBytes(Nhat, params.Ell))
+	T, err := RPCommitCT(stmt.VerifierAux, w.Y, mu, yCommitLen)
+	if err != nil {
+		return nil, err
+	}
+
+	// Transcript and challenge.
+	transcript := buildAffGTranscript(params, state, stmt, stmt.Y, A, Bx, By, E, S, F, T)
+	e, err := transcript.ChallengeSigned(params.ChallengeBits)
+	if err != nil {
+		return nil, err
+	}
+
+	// Responses.
+	z1 := new(big.Int).Mul(e, w.X)
+	z1.Add(z1, alpha)
+
+	z2 := new(big.Int).Mul(e, w.Y)
+	z2.Add(z2, beta)
+
+	z3 := new(big.Int).Mul(e, mask)
+	z3.Add(z3, gamma)
+
+	z4 := new(big.Int).Mul(e, mu)
+	z4.Add(z4, delta)
+
+	// w = r * rho^e mod Nj
+	rhoExp := new(big.Int).Exp(w.Rho, e, Nj.N)
+	wVal := new(big.Int).Mul(r, rhoExp)
+	wVal.Mod(wVal, Nj.N)
+
+	// wY = rY * rhoY^e mod Ni
+	rhoYExp := new(big.Int).Exp(w.RhoY, e, Ni.N)
+	wY := new(big.Int).Mul(rY, rhoYExp)
+	wY.Mod(wY, Ni.N)
+
+	return &AffGProof{
+		Version:        affGProofVersion,
+		A:              new(big.Int).Set(A),
+		Bx:             Bx,
+		By:             new(big.Int).Set(By),
+		E:              new(big.Int).Set(E),
+		S:              new(big.Int).Set(S),
+		F:              new(big.Int).Set(F),
+		T:              new(big.Int).Set(T),
+		Y:              new(big.Int).Set(stmt.Y),
+		Z1:             new(big.Int).Set(z1),
+		Z2:             new(big.Int).Set(z2),
+		Z3:             new(big.Int).Set(z3),
+		Z4:             new(big.Int).Set(z4),
+		W:              new(big.Int).Set(wVal),
+		WY:             new(big.Int).Set(wY),
+		TranscriptHash: transcript.Sum(),
+	}, nil
+}
+
+// VerifyAffG checks a Πaff-g proof. Returns nil on success or an error.
+func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *AffGProof) error {
+	if err := params.Validate(); err != nil {
+		return err
+	}
+	if proof == nil {
+		return errors.New("nil AffGProof")
+	}
+	if proof.Version != affGProofVersion {
+		return fmt.Errorf("unsupported AffGProof version %d", proof.Version)
+	}
+
+	Ni := stmt.ProverPaillierN
+	Nj := stmt.ReceiverPaillierN
+	Nhat := stmt.VerifierAux.N
+
+	// Structural checks.
+	if err := params.CheckPaillierModulus(Ni); err != nil {
+		return err
+	}
+	if err := params.CheckPaillierModulus(Nj); err != nil {
+		return err
+	}
+	if _, err := RequireZN2Star(stmt.C, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: C not in Z*_Nj^2: %w", err)
+	}
+	if _, err := RequireZN2Star(stmt.D, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: D not in Z*_Nj^2: %w", err)
+	}
+	if _, err := RequireZN2Star(proof.Y, Ni.N); err != nil {
+		return fmt.Errorf("AffGProof: Y not in Z*_Ni^2: %w", err)
+	}
+	if stmt.X == nil {
+		return errors.New("AffGProof: nil X point")
+	}
+	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+		return fmt.Errorf("AffGProof: invalid verifier aux: %w", err)
+	}
+
+	// Validate proof fields.
+	if _, err := RequireZN2Star(proof.A, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: A not in Z*_Nj^2: %w", err)
+	}
+	if proof.Bx == nil {
+		return errors.New("AffGProof: nil Bx")
+	}
+	if _, err := RequireZN2Star(proof.By, Ni.N); err != nil {
+		return fmt.Errorf("AffGProof: By not in Z*_Ni^2: %w", err)
+	}
+	if _, err := RequireZNStar(proof.E, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: E not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.S, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: S not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.F, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: F not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.T, Nhat); err != nil {
+		return fmt.Errorf("AffGProof: T not in Z*_Nhat: %w", err)
+	}
+	if _, err := RequireZNStar(proof.W, Nj.N); err != nil {
+		return fmt.Errorf("AffGProof: w not in Z*_Nj: %w", err)
+	}
+	if _, err := RequireZNStar(proof.WY, Ni.N); err != nil {
+		return fmt.Errorf("AffGProof: wY not in Z*_Ni: %w", err)
+	}
+
+	// Range checks BEFORE algebraic equations.
+	// +1 accounts for the addition of mask and challenge*secret term.
+	if !InSignedPowerOfTwo(proof.Z1, params.EncRange()+1) {
+		return fmt.Errorf("AffGProof: z1 out of range ±2^%d", params.EncRange()+1)
+	}
+	if !InSignedPowerOfTwo(proof.Z2, params.AffGRange()+1) {
+		return fmt.Errorf("AffGProof: z2 out of range ±2^%d", params.AffGRange()+1)
+	}
+	// z3 ∈ ±(Nhat * 2^(EncRange + 1))
+	if !inMultRange(proof.Z3, Nhat, params.EncRange()+1) {
+		return errors.New("AffGProof: z3 out of range")
+	}
+	// z4 ∈ ±(Nhat * 2^(AffGRange + 1))
+	if !inMultRange(proof.Z4, Nhat, params.AffGRange()+1) {
+		return errors.New("AffGProof: z4 out of range")
+	}
+
+	// Recompute challenge.
+	transcript := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
+	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
+		return errors.New("AffGProof: transcript hash mismatch")
+	}
+	e, err := transcript.ChallengeSigned(params.ChallengeBits)
+	if err != nil {
+		return err
+	}
+
+	// Equation 1: A ⊕ (e ⊙ D) == (z1 ⊙ C) ⊕ Enc_Nj(z2; w)
+	eMulD, err := OMul(Nj, e, stmt.D)
+	if err != nil {
+		return fmt.Errorf("AffGProof: e ⊙ D: %w", err)
+	}
+	left1, err := OAdd(Nj, proof.A, eMulD)
+	if err != nil {
+		return fmt.Errorf("AffGProof: A ⊕ (e ⊙ D): %w", err)
+	}
+	z1MulC, err := OMul(Nj, proof.Z1, stmt.C)
+	if err != nil {
+		return fmt.Errorf("AffGProof: z1 ⊙ C: %w", err)
+	}
+	encZ2, err := EncRandom(Nj, proof.Z2, proof.W)
+	if err != nil {
+		return fmt.Errorf("AffGProof: Enc(z2; w): %w", err)
+	}
+	right1, err := OAdd(Nj, z1MulC, encZ2)
+	if err != nil {
+		return fmt.Errorf("AffGProof: (z1 ⊙ C) ⊕ Enc(z2): %w", err)
+	}
+	if left1.Cmp(right1) != 0 {
+		return errors.New("AffGProof: equation 1 failed")
+	}
+
+	// Equation 2: z1 * G == Bx + e * X
+	left2 := secp.ScalarBaseMult(secp.ScalarFromBigInt(proof.Z1))
+	right2 := secp.Add(proof.Bx, secp.ScalarMult(stmt.X, secp.ScalarFromBigInt(e)))
+	if !secp.Equal(left2, right2) {
+		return errors.New("AffGProof: equation 2 failed")
+	}
+
+	// Equation 3: By ⊕ (e ⊙ Y) == Enc_Ni(z2; wY)
+	eMulY, err := OMul(Ni, e, proof.Y)
+	if err != nil {
+		return fmt.Errorf("AffGProof: e ⊙ Y: %w", err)
+	}
+	left3, err := OAdd(Ni, proof.By, eMulY)
+	if err != nil {
+		return fmt.Errorf("AffGProof: By ⊕ (e ⊙ Y): %w", err)
+	}
+	encZ2Ni, err := EncRandom(Ni, proof.Z2, proof.WY)
+	if err != nil {
+		return fmt.Errorf("AffGProof: Enc_Ni(z2; wY): %w", err)
+	}
+	if left3.Cmp(encZ2Ni) != 0 {
+		return errors.New("AffGProof: equation 3 failed")
+	}
+
+	// Equation 4: s_j^z1 * t_j^z3 == E * S^e mod Nhat
+	left4, err := RPCommit(stmt.VerifierAux, proof.Z1, proof.Z3)
+	if err != nil {
+		return fmt.Errorf("AffGProof: RP(z1,z3): %w", err)
+	}
+	se, err := ExpSignedMod(proof.S, e, Nhat)
+	if err != nil {
+		return fmt.Errorf("AffGProof: S^e: %w", err)
+	}
+	right4 := new(big.Int).Mul(proof.E, se)
+	right4.Mod(right4, Nhat)
+	if left4.Cmp(right4) != 0 {
+		return errors.New("AffGProof: equation 4 failed")
+	}
+
+	// Equation 5: s_j^z2 * t_j^z4 == F * T^e mod Nhat
+	left5, err := RPCommit(stmt.VerifierAux, proof.Z2, proof.Z4)
+	if err != nil {
+		return fmt.Errorf("AffGProof: RP(z2,z4): %w", err)
+	}
+	te, err := ExpSignedMod(proof.T, e, Nhat)
+	if err != nil {
+		return fmt.Errorf("AffGProof: T^e: %w", err)
+	}
+	right5 := new(big.Int).Mul(proof.F, te)
+	right5.Mod(right5, Nhat)
+	if left5.Cmp(right5) != 0 {
+		return errors.New("AffGProof: equation 5 failed")
+	}
+
+	return nil
+}
+
+// MarshalBinary encodes the AffGProof in canonical TLV format.
+func (p *AffGProof) MarshalBinary() ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil AffGProof")
+	}
+	bxBytes, err := secp.PointBytes(p.Bx)
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: Bx: %w", err)
+	}
+	return wire.Marshal(affGProofVersion, affGProofWireType, []wire.Field{
+		{Tag: affGProofFieldVersion, Value: wire.Uint16(p.Version)},
+		{Tag: affGProofFieldA, Value: p.A.Bytes()},
+		{Tag: affGProofFieldBx, Value: bxBytes},
+		{Tag: affGProofFieldBy, Value: p.By.Bytes()},
+		{Tag: affGProofFieldE, Value: p.E.Bytes()},
+		{Tag: affGProofFieldS, Value: p.S.Bytes()},
+		{Tag: affGProofFieldF, Value: p.F.Bytes()},
+		{Tag: affGProofFieldT, Value: p.T.Bytes()},
+		{Tag: affGProofFieldY, Value: p.Y.Bytes()},
+		{Tag: affGProofFieldZ1, Value: EncodeSigned(p.Z1)},
+		{Tag: affGProofFieldZ2, Value: EncodeSigned(p.Z2)},
+		{Tag: affGProofFieldZ3, Value: EncodeSigned(p.Z3)},
+		{Tag: affGProofFieldZ4, Value: EncodeSigned(p.Z4)},
+		{Tag: affGProofFieldW, Value: p.W.Bytes()},
+		{Tag: affGProofFieldWY, Value: p.WY.Bytes()},
+		{Tag: affGProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+	})
+}
+
+// UnmarshalAffGProof decodes a canonical TLV AffGProof.
+func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
+	version, fields, err := wire.Unmarshal(in, affGProofWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != affGProofVersion {
+		return nil, fmt.Errorf("unexpected AffGProof wire version %d", version)
+	}
+	if err := wire.RequireExactTags(fields,
+		affGProofFieldVersion, affGProofFieldA, affGProofFieldBx, affGProofFieldBy,
+		affGProofFieldE, affGProofFieldS, affGProofFieldF, affGProofFieldT,
+		affGProofFieldY,
+		affGProofFieldZ1, affGProofFieldZ2, affGProofFieldZ3, affGProofFieldZ4,
+		affGProofFieldW, affGProofFieldWY, affGProofFieldTranscriptHash,
+	); err != nil {
+		return nil, err
+	}
+
+	versionBytes := wire.MustField(fields, affGProofFieldVersion)
+	pVersion, err := wire.DecodeUint16(versionBytes)
+	if err != nil {
+		return nil, err
+	}
+	if pVersion != affGProofVersion {
+		return nil, fmt.Errorf("unsupported AffGProof version %d", pVersion)
+	}
+
+	a, err := DecodePositive(wire.MustField(fields, affGProofFieldA))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid A: %w", err)
+	}
+	Bx, err := secp.PointFromBytes(wire.MustField(fields, affGProofFieldBx))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid Bx: %w", err)
+	}
+	by, err := DecodePositive(wire.MustField(fields, affGProofFieldBy))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid By: %w", err)
+	}
+	eVal, err := DecodePositive(wire.MustField(fields, affGProofFieldE))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid E: %w", err)
+	}
+	sVal, err := DecodePositive(wire.MustField(fields, affGProofFieldS))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid S: %w", err)
+	}
+	fVal, err := DecodePositive(wire.MustField(fields, affGProofFieldF))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid F: %w", err)
+	}
+	tVal, err := DecodePositive(wire.MustField(fields, affGProofFieldT))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid T: %w", err)
+	}
+	y, err := DecodePositive(wire.MustField(fields, affGProofFieldY))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid Y: %w", err)
+	}
+
+	z1, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ1))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid z1: %w", err)
+	}
+	z2, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ2))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid z2: %w", err)
+	}
+	z3, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ3))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid z3: %w", err)
+	}
+	z4, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ4))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid z4: %w", err)
+	}
+	wVal, err := DecodePositive(wire.MustField(fields, affGProofFieldW))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid W: %w", err)
+	}
+	wy, err := DecodePositive(wire.MustField(fields, affGProofFieldWY))
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof: invalid WY: %w", err)
+	}
+
+	return &AffGProof{
+		Version:        pVersion,
+		A:              a,
+		Bx:             Bx,
+		By:             by,
+		E:              eVal,
+		S:              sVal,
+		F:              fVal,
+		T:              tVal,
+		Y:              y,
+		Z1:             z1,
+		Z2:             z2,
+		Z3:             z3,
+		Z4:             z4,
+		W:              wVal,
+		WY:             wy,
+		TranscriptHash: wire.MustField(fields, affGProofFieldTranscriptHash),
+	}, nil
+}
+
+func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitness) error {
+	if stmt.ReceiverPaillierN == nil || stmt.ProverPaillierN == nil {
+		return errors.New("nil Paillier key")
+	}
+	if err := stmt.ReceiverPaillierN.Validate(); err != nil {
+		return fmt.Errorf("invalid receiver Paillier key: %w", err)
+	}
+	if err := stmt.ProverPaillierN.Validate(); err != nil {
+		return fmt.Errorf("invalid prover Paillier key: %w", err)
+	}
+	if err := params.CheckPaillierModulus(stmt.ReceiverPaillierN); err != nil {
+		return err
+	}
+	if err := params.CheckPaillierModulus(stmt.ProverPaillierN); err != nil {
+		return err
+	}
+	if stmt.C == nil || stmt.D == nil || stmt.Y == nil || stmt.X == nil {
+		return errors.New("nil statement field")
+	}
+	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.C); err != nil {
+		return fmt.Errorf("invalid C: %w", err)
+	}
+	if err := stmt.ReceiverPaillierN.ValidateCiphertext(stmt.D); err != nil {
+		return fmt.Errorf("invalid D: %w", err)
+	}
+	if err := stmt.ProverPaillierN.ValidateCiphertext(stmt.Y); err != nil {
+		return fmt.Errorf("invalid Y: %w", err)
+	}
+	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+		return fmt.Errorf("invalid verifier aux: %w", err)
+	}
+
+	if w.X == nil || w.Y == nil || w.Rho == nil || w.RhoY == nil {
+		return errors.New("nil witness field")
+	}
+	if !InSignedPowerOfTwo(w.X, params.Ell) {
+		return errors.New("witness x out of range")
+	}
+	if !InSignedPowerOfTwo(w.Y, params.EllPrime) {
+		return errors.New("witness y out of range")
+	}
+	if !IsZNStar(w.Rho, stmt.ReceiverPaillierN.N) {
+		return errors.New("witness rho not in Z*_Nj")
+	}
+	if !IsZNStar(w.RhoY, stmt.ProverPaillierN.N) {
+		return errors.New("witness rhoY not in Z*_Ni")
+	}
+
+	// Verify D == (x ⊙ C) ⊕ Enc_Nj(y; rho).
+	xMulC, err := OMulCT(stmt.ReceiverPaillierN, w.X, stmt.C, signedPowerOfTwoBytes(params.Ell))
+	if err != nil {
+		return fmt.Errorf("cannot verify D: %w", err)
+	}
+	encY, err := EncRandom(stmt.ReceiverPaillierN, w.Y, w.Rho)
+	if err != nil {
+		return fmt.Errorf("cannot verify D: %w", err)
+	}
+	expectedD, err := OAdd(stmt.ReceiverPaillierN, xMulC, encY)
+	if err != nil {
+		return fmt.Errorf("cannot verify D: %w", err)
+	}
+	if expectedD.Cmp(stmt.D) != 0 {
+		return errors.New("witness does not open D")
+	}
+
+	// Verify Y == Enc_Ni(y; rhoY).
+	expectedY, err := EncRandom(stmt.ProverPaillierN, w.Y, w.RhoY)
+	if err != nil {
+		return fmt.Errorf("cannot verify Y: %w", err)
+	}
+	if expectedY.Cmp(stmt.Y) != 0 {
+		return errors.New("witness does not open Y")
+	}
+
+	// Verify X == x * G.
+	expectedX := secp.ScalarBaseMult(secp.ScalarFromBigInt(w.X))
+	if !secp.Equal(stmt.X, expectedX) {
+		return errors.New("witness x does not open X")
+	}
+
+	return nil
+}
+
+func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, yVal *big.Int, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int) *Transcript {
+	t := NewTranscript("cggmp-paillier-zk")
+	t.AppendBytes("curve", []byte("secp256k1"))
+	t.AppendBytes("proof", []byte("aff-g"))
+	t.AppendUint16("version", 1)
+	t.AppendUint32("ell", uint32(params.Ell))
+	t.AppendUint32("ell_prime", uint32(params.EllPrime))
+	t.AppendUint32("epsilon", uint32(params.Epsilon))
+	t.AppendUint32("challenge_bits", uint32(params.ChallengeBits))
+	t.AppendBytes("state", state)
+
+	// Statement.
+	t.AppendBigInt("receiver_N", stmt.ReceiverPaillierN.N)
+	t.AppendBigInt("prover_N", stmt.ProverPaillierN.N)
+	nhatLen := modulusBytes(stmt.VerifierAux.N)
+	t.AppendBytes("verifier_N", fixedModNBytes(stmt.VerifierAux.N, nhatLen))
+	t.AppendBytes("verifier_S", fixedModNBytes(stmt.VerifierAux.S, nhatLen))
+	t.AppendBytes("verifier_T", fixedModNBytes(stmt.VerifierAux.T, nhatLen))
+	t.AppendBigInt("C", stmt.C)
+	t.AppendBigInt("D", stmt.D)
+	t.AppendBigInt("Y", yVal)
+	t.AppendPoint("X", stmt.X)
+
+	// Commitments.
+	t.AppendBigInt("A", A)
+	t.AppendPoint("Bx", Bx)
+	t.AppendBigInt("By", By)
+	t.AppendBigInt("E", E)
+	t.AppendBigInt("S", S)
+	t.AppendBigInt("F", F)
+	t.AppendBigInt("T", T)
+
+	return t
+}

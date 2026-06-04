@@ -14,7 +14,8 @@ import (
 )
 
 // DefaultMinModulusBits is the minimum modulus size accepted outside tests.
-const DefaultMinModulusBits = 2048
+// 3072 bits provides ~128-bit classical security matching secp256k1 (NIST SP 800-57).
+const DefaultMinModulusBits = 3072
 
 var minModulusBits = DefaultMinModulusBits
 
@@ -502,9 +503,11 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 }
 
 // Decrypt recovers a plaintext representative from a Paillier ciphertext.
-// The c^λ mod n² step uses constant-time modular exponentiation via
-// filippo.io/bigmod with ciphertext blinding to defeat side-channel attacks
-// on the secret exponent λ.
+// The ciphertext must be a member of Z*_{n^2} — callers that have not already
+// validated the ciphertext through a proof or explicit check should use
+// ValidateCiphertext first. The c^λ mod n² step uses constant-time modular
+// exponentiation via filippo.io/bigmod with ciphertext blinding to defeat
+// side-channel attacks on the secret exponent λ.
 func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
@@ -512,8 +515,8 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	if sk.Lambda == nil || sk.Mu == nil {
 		return nil, errors.New("invalid private key")
 	}
-	if ciphertext == nil || ciphertext.Sign() <= 0 || ciphertext.Cmp(sk.NSquared) >= 0 {
-		return nil, errors.New("ciphertext out of range")
+	if err := sk.ValidateCiphertext(ciphertext); err != nil {
+		return nil, fmt.Errorf("invalid ciphertext for decryption: %w", err)
 	}
 
 	nLen := (sk.N.BitLen() + 7) / 8
@@ -561,6 +564,8 @@ func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
 }
 
 // AddCiphertexts homomorphically adds two encrypted plaintexts.
+// Both inputs must be in Z*_{n^2}; use AddCiphertextsUnchecked when
+// membership has already been verified upstream.
 func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -568,18 +573,57 @@ func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
 	if a == nil || b == nil {
 		return nil, errors.New("nil ciphertext")
 	}
+	if err := pk.ValidateCiphertext(a); err != nil {
+		return nil, err
+	}
+	if err := pk.ValidateCiphertext(b); err != nil {
+		return nil, err
+	}
+	return pk.AddCiphertextsUnchecked(a, b)
+}
+
+// AddCiphertextsUnchecked homomorphically adds two encrypted plaintexts
+// without validating ciphertext membership in Z*_{n^2}. Callers must ensure
+// both inputs have been validated through upstream proof checks. Basic
+// range checks are still enforced to catch nil, zero, and out-of-range values.
+func (pk PublicKey) AddCiphertextsUnchecked(a, b *big.Int) (*big.Int, error) {
+	if a == nil || b == nil {
+		return nil, errors.New("nil ciphertext")
+	}
+	if a.Sign() <= 0 || a.Cmp(pk.NSquared) >= 0 || b.Sign() <= 0 || b.Cmp(pk.NSquared) >= 0 {
+		return nil, errors.New("ciphertext out of range")
+	}
 	out := new(big.Int).Mul(a, b)
 	out.Mod(out, pk.NSquared)
 	return out, nil
 }
 
 // AddPlaintext homomorphically adds plaintext to an encrypted value.
+// The ciphertext must be in Z*_{n^2}; use AddPlaintextUnchecked when
+// membership has already been verified upstream.
 func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
 	}
 	if ciphertext == nil || plaintext == nil {
 		return nil, errors.New("nil input")
+	}
+	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+		return nil, err
+	}
+	return pk.AddPlaintextUnchecked(ciphertext, plaintext)
+}
+
+// AddPlaintextUnchecked homomorphically adds plaintext to an encrypted value
+// without validating ciphertext membership in Z*_{n^2}. Callers must ensure
+// the ciphertext has been validated through upstream proof checks. Basic
+// range checks are still enforced to catch nil, zero, and out-of-range values.
+func (pk PublicKey) AddPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.Int, error) {
+	if ciphertext == nil || plaintext == nil {
+		return nil, errors.New("nil input")
+	}
+	if ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
+		return nil, errors.New("ciphertext out of range")
 	}
 	gm := new(big.Int).Exp(pk.G, mod(plaintext, pk.N), pk.NSquared)
 	out := new(big.Int).Mul(ciphertext, gm)
@@ -590,13 +634,31 @@ func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 // MulPlaintext homomorphically multiplies an encrypted value by public plaintext.
 // The plaintext argument must not contain secret scalar or nonce material; this
 // helper uses variable-time public exponentiation and is not a secret-exponent
-// protocol primitive.
+// protocol primitive. The ciphertext must be in Z*_{n^2}; use
+// MulPlaintextUnchecked when membership has already been verified upstream.
 func (pk PublicKey) MulPlaintext(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
 	}
 	if ciphertext == nil || plaintext == nil {
 		return nil, errors.New("nil input")
+	}
+	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+		return nil, err
+	}
+	return pk.MulPlaintextUnchecked(ciphertext, plaintext)
+}
+
+// MulPlaintextUnchecked homomorphically multiplies an encrypted value by public
+// plaintext without validating ciphertext membership in Z*_{n^2}. Callers must
+// ensure the ciphertext has been validated through upstream proof checks. Basic
+// range checks are still enforced to catch nil, zero, and out-of-range values.
+func (pk PublicKey) MulPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.Int, error) {
+	if ciphertext == nil || plaintext == nil {
+		return nil, errors.New("nil input")
+	}
+	if ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
+		return nil, errors.New("ciphertext out of range")
 	}
 	out := new(big.Int).Exp(ciphertext, mod(plaintext, pk.N), pk.NSquared)
 	return out, nil

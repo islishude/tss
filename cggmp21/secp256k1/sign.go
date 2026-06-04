@@ -155,6 +155,9 @@ type signPartialPayload struct {
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
 // signers and binds the resulting presignature to ctx before nonce generation.
 func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (*PresignSession, []tss.Envelope, error) {
+	if presignSignDisabled {
+		return nil, nil, errors.New("cggmp21/secp256k1 presign is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
+	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -471,6 +474,14 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
+		selfPK, err := s.key.paillierPublic()
+		if err != nil {
+			return nil, err
+		}
+		peerRP, err := s.key.ringPedersenPublicFor(peer)
+		if err != nil {
+			return nil, err
+		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncrProof: s.round1[peer].EncKProof}
 		startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, peer, s.round1[peer].PaillierPublicKey, s.contextHash)
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
@@ -482,6 +493,8 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			s.gamma,
 			s.gammaComm,
 			peerPK,
+			selfPK,
+			peerRP,
 		)
 		if err != nil {
 			return nil, err
@@ -496,6 +509,8 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			s.xBar,
 			s.xBarComm,
 			peerPK,
+			selfPK,
+			peerRP,
 		)
 		if err != nil {
 			return nil, err
@@ -518,6 +533,18 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	}
 	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncrProof: s.round1[s.key.Party].EncKProof}
 	gammaCommit := s.round1[from].Gamma
+
+	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
+	responderPK, err := s.key.paillierPublicFor(from)
+	if err != nil {
+		return err
+	}
+	// Initiator's own Ring-Pedersen params (the verifier's auxiliary input).
+	selfRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	if err != nil {
+		return err
+	}
+
 	startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, s.key.Party, s.key.PaillierPublicKey, s.contextHash)
 	alphaDelta, err := mta.Finish(
 		startDomain,
@@ -526,6 +553,8 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		p.Delta,
 		gammaCommit,
 		s.paillier,
+		responderPK,
+		selfRP,
 	)
 	if err != nil {
 		return err
@@ -541,6 +570,8 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		p.Sigma,
 		xBarCommit,
 		s.paillier,
+		responderPK,
+		selfRP,
 	)
 	if err != nil {
 		return err
@@ -707,6 +738,9 @@ func (s *PresignSession) round1Echo() []byte {
 
 // StartSign starts online signing using a context-bound presignature.
 func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest) (*SignSession, []tss.Envelope, error) {
+	if presignSignDisabled {
+		return nil, nil, errors.New("cggmp21/secp256k1 signing is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
+	}
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -728,6 +762,9 @@ func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request
 }
 
 func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
+	if presignSignDisabled {
+		return nil, nil, errors.New("cggmp21/secp256k1 signing is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
+	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}

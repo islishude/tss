@@ -83,18 +83,18 @@ Full examples in [`examples_test.go`](frost/ed25519/examples_test.go) and [`exam
 
 ## Internal Packages
 
-| Package                        | Purpose                                                           |
-| ------------------------------ | ----------------------------------------------------------------- |
-| `internal/shamir`              | Shamir sharing and interpolation over prime-order fields.         |
-| `internal/secret`              | Fixed-length `Scalar`; no `String()`, `BigInt()`, or JSON.        |
-| `internal/curve/*`             | Curve helpers backed by fiat-crypto field arithmetic.             |
-| `internal/fiat`                | fiat-crypto generated arithmetic for Ed25519/secp256k1 fields.    |
-| `internal/mta`                 | Paillier MtA product-share protocol (Start/Respond/Finish).       |
-| `internal/paillier`            | Paillier primitives; constant-time `c^λ mod n²` via `paillierct`. |
-| `internal/paillier/paillierct` | Constant-time `c^λ mod n²` via `filippo.io/bigmod`.               |
-| `internal/wire`                | Strict TLV encoding for all binary records.                       |
-| `internal/zk/paillier`         | Seven ZK proof types for Paillier operations.                     |
-| `internal/zk/schnorr`          | secp256k1 Schnorr proof-of-knowledge.                             |
+| Package                        | Purpose                                                                        |
+| ------------------------------ | ------------------------------------------------------------------------------ |
+| `internal/shamir`              | Shamir sharing and interpolation over prime-order fields.                      |
+| `internal/secret`              | Fixed-length `Scalar`; no `String()`, `BigInt()`, or JSON.                     |
+| `internal/curve/*`             | Curve helpers backed by fiat-crypto field arithmetic.                          |
+| `internal/fiat`                | fiat-crypto generated arithmetic for Ed25519/secp256k1 fields.                 |
+| `internal/mta`                 | Paillier MtA product-share protocol (Start/Respond/Finish) with Πaff-g proofs. |
+| `internal/paillier`            | Paillier primitives; constant-time `c^λ mod n²` via `paillierct`.              |
+| `internal/paillier/paillierct` | Constant-time `c^λ mod n²` via `filippo.io/bigmod`.                            |
+| `internal/wire`                | Strict TLV encoding for all binary records.                                    |
+| `internal/zk/paillier`         | ZK proofs: Πmod, Πprm, Πenc, Πaff-g, Πlog\*.                                   |
+| `internal/zk/schnorr`          | secp256k1 Schnorr proof-of-knowledge.                                          |
 
 ## Development
 

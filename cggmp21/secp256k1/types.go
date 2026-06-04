@@ -30,10 +30,25 @@ const (
 )
 
 // DefaultPaillierBits is the production default Paillier modulus size.
-const DefaultPaillierBits = 2048
+// 3072 bits provides ~128-bit classical security matching secp256k1.
+const DefaultPaillierBits = 3072
 
 // defaultPaillierBits is the active default, overridable in tests.
 var defaultPaillierBits = DefaultPaillierBits
+
+// presignSignDisabled gates presign and signing entry points.
+// The gate is enabled by default because the ZK proof layer is new
+// and has not yet received independent cryptographic review.
+// Tests may call SetPresignSignDisabledForTesting to re-enable.
+var presignSignDisabled = true
+
+// SetPresignSignDisabledForTesting overrides the presign/sign gate and returns
+// a function that restores the previous value. DO NOT use outside tests.
+func SetPresignSignDisabledForTesting(disabled bool) func() {
+	old := presignSignDisabled
+	presignSignDisabled = disabled
+	return func() { presignSignDisabled = old }
+}
 
 // SetDefaultPaillierBitsForTesting overrides the default Paillier modulus size
 // and returns a function that restores the previous value.
@@ -88,6 +103,7 @@ type KeyShare struct {
 	LogCiphertext          []byte                    `json:"log_ciphertext,omitempty"`
 	LogProof               []byte                    `json:"log_proof,omitempty"`
 	logRandomness          []byte
+	KeygenConfirmed        bool `json:"keygen_confirmed"`
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -385,7 +401,7 @@ func (k *KeyShare) Validate() error {
 	if !schnorr.Verify(k.KeygenTranscriptHash, verificationShare, shareProof) {
 		return errors.New("invalid local share proof")
 	}
-	logProof, err := zkpai.UnmarshalLogProof(k.LogProof)
+	logProof, err := zkpai.UnmarshalLogStarProof(k.LogProof)
 	if err != nil {
 		return fmt.Errorf("invalid log proof: %w", err)
 	}
@@ -393,9 +409,25 @@ func (k *KeyShare) Validate() error {
 	if err := pk.ValidateCiphertext(ciphertext); err != nil {
 		return fmt.Errorf("invalid log ciphertext: %w", err)
 	}
+	// Use the prover's own Ring-Pedersen params to verify the log proof.
+	rp, err := k.ringPedersenPublicFor(k.Party)
+	if err != nil {
+		return fmt.Errorf("missing RP params for log proof: %w", err)
+	}
+	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return fmt.Errorf("invalid verification share: %w", err)
+	}
 	logDomain := logProofDomain(k, pk, verificationShare, k.KeygenTranscriptHash)
-	if !zkpai.VerifyLog(logDomain, pk, ciphertext, logProof) {
-		return errors.New("invalid log proof")
+	logStmt := zkpai.LogStarStatement{
+		PaillierN:   pk,
+		C:           ciphertext,
+		X:           verificationPoint,
+		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
+		VerifierAux: rp,
+	}
+	if err := zkpai.VerifyLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logProof); err != nil {
+		return fmt.Errorf("invalid log proof: %w", err)
 	}
 	return nil
 }
@@ -446,6 +478,9 @@ func (k *KeyShare) requireMPCMaterial() error {
 	if err := k.Validate(); err != nil {
 		return err
 	}
+	if !k.KeygenConfirmed {
+		return errors.New("key share has not been confirmed: call VerifyKeygenConfirmations before presign/sign")
+	}
 	for _, id := range k.Parties {
 		if _, err := k.paillierPublicFor(id); err != nil {
 			return err
@@ -472,6 +507,27 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
 		}
 	}
 	return nil, fmt.Errorf("missing Paillier public key for party %d", id)
+}
+
+// ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
+func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID) (zkpai.RingPedersenParams, error) {
+	if id == k.Party {
+		params, err := zkpai.UnmarshalRingPedersenParams(k.RingPedersenParams)
+		if err != nil {
+			return zkpai.RingPedersenParams{}, err
+		}
+		return *params, nil
+	}
+	for _, item := range k.RingPedersenPublic {
+		if item.Party == id {
+			params, err := zkpai.UnmarshalRingPedersenParams(item.Params)
+			if err != nil {
+				return zkpai.RingPedersenParams{}, err
+			}
+			return *params, nil
+		}
+	}
+	return zkpai.RingPedersenParams{}, fmt.Errorf("missing Ring-Pedersen params for party %d", id)
 }
 
 func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
