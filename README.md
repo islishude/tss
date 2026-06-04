@@ -20,6 +20,8 @@ References: [RFC 9591 (FROST)](https://www.rfc-editor.org/rfc/rfc9591), [CGGMP21
 ### Ed25519 (FROST)
 
 ```go
+import "crypto/ed25519";
+
 // DKG
 sessionID, _ := tss.NewSessionID(nil)
 parties := []tss.PartyID{1, 2, 3}
@@ -37,7 +39,7 @@ share, _ := sessions[1].KeyShare()
 
 // Sign
 sig, _ := ed25519.Sign(message, map[tss.PartyID]*ed25519.KeyShare{1: share, 2: share2})
-crypto.ed25519.Verify(share.PublicKey, message, sig) // true
+ed25519.Verify(share.PublicKey, message, sig) // true
 ```
 
 ### secp256k1 (CGGMP21)
