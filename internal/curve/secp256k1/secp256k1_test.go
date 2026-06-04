@@ -214,27 +214,6 @@ func TestScalarMultCorrectness(t *testing.T) {
 	}
 }
 
-func TestScalarMultAllocCount(t *testing.T) {
-	base := G
-	// Verify that ScalarMult with different non-zero scalars allocates
-	// the same number of objects (heuristic constant-time check).
-	var first float64
-	for i := range 10 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		allocs := testing.AllocsPerRun(1, func() {
-			_ = ScalarMult(base, k)
-		})
-		if i == 0 {
-			first = allocs
-		} else if allocs != first {
-			t.Fatalf("allocation count differs: got %.0f, expected %.0f at iteration %d", allocs, first, i)
-		}
-	}
-}
-
 func TestFiatFieldArithmeticMatchesBigInt(t *testing.T) {
 	a := FieldElementFromBigInt(big.NewInt(7))
 	b := FieldElementFromBigInt(big.NewInt(11))

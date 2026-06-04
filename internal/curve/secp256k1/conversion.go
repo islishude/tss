@@ -27,7 +27,7 @@ func scalarFromBig(x *big.Int) Scalar {
 
 // FieldElementFromBigInt converts a *big.Int to FieldElement, reducing mod P.
 func FieldElementFromBigInt(x *big.Int) FieldElement {
-	modulus := new(big.Int).SetBytes(reverseBytes(fieldModulusLE[:]))
+	modulus := new(big.Int).SetBytes(fieldModulus[:])
 	reduced := new(big.Int).Mod(x, modulus)
 	if reduced.Sign() < 0 {
 		reduced.Add(reduced, modulus)
@@ -51,13 +51,5 @@ func scalarFromUint64(v uint64) Scalar {
 	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &le)
 	var out Scalar
 	fiatscalar.ToMontgomery(&out.mont, &nonMont)
-	return out
-}
-
-func reverseBytes(b []byte) []byte {
-	out := make([]byte, len(b))
-	for i := range len(b) {
-		out[i] = b[len(b)-1-i]
-	}
 	return out
 }

@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"math/big"
 
 	fiatfield "github.com/islishude/tss/internal/fiat/secp256k1field"
@@ -20,40 +19,39 @@ type FieldElement struct {
 	mont fiatfield.MontgomeryDomainFieldElement
 }
 
-// Precomputed modulus bytes in little-endian for canonical validation.
+// Precomputed modulus bytes in big-endian order (MSB at index 0) for canonical validation.
 var (
-	scalarModulusLE = mustModulusLE("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
-	fieldModulusLE  = mustModulusLE("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")
+	scalarModulus = [32]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B, 0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41}
+	fieldModulus  = [32]byte{0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE, 0xFF, 0xFF, 0xFC, 0x2F}
 )
 
-func mustModulusLE(hex string) [32]byte {
-	x, ok := new(big.Int).SetString(hex, 16)
-	if !ok {
-		panic("invalid hex constant")
-	}
-	b := x.Bytes()
-	var out [32]byte
-	for i := range b {
-		out[31-i] = b[len(b)-1-i]
-	}
-	return out
-}
+// Precomputed small field constants in Montgomery domain.
+// Derived as k * R mod P where R = 2^256:
+//
+//	fieldTwo   = Mont(2) = 0x00000000000000000000000000000000000000000000000000000002000007a2
+//	fieldThree = Mont(3) = 0x0000000000000000000000000000000000000000000000000000000300000b73
+//	fieldB     = Mont(7) = 0x0000000000000000000000000000000000000000000000000000000700001ab7
+var (
+	fieldTwo   = FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0x2000007a2, 0x0, 0x0, 0x0}}
+	fieldThree = FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0x300000b73, 0x0, 0x0, 0x0}}
+	fieldB     = FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0x700001ab7, 0x0, 0x0, 0x0}}
+)
 
 // ScalarFromBytes parses a canonical 32-byte big-endian non-zero scalar.
 func ScalarFromBytes(in []byte) (Scalar, error) {
 	if len(in) != 32 {
 		return Scalar{}, errors.New("secp256k1 scalar must be 32 bytes")
 	}
-	if isZero32(in) {
+	var be = [32]byte(in)
+	if be == [32]byte{} {
 		return Scalar{}, errors.New("secp256k1 scalar is zero")
 	}
-	var le [32]uint8
-	reverse32To(&le, in)
-	if !lt32LE(le, scalarModulusLE) {
+	if !lt32BE(be, scalarModulus) {
 		return Scalar{}, errors.New("secp256k1 scalar out of range")
 	}
+	reverse32(&be) // convert to little-endian for fiat-crypto
 	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
-	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &le)
+	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &be)
 	var out Scalar
 	fiatscalar.ToMontgomery(&out.mont, &nonMont)
 	return out, nil
@@ -63,11 +61,10 @@ func ScalarFromBytes(in []byte) (Scalar, error) {
 func (s Scalar) Bytes() []byte {
 	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
 	fiatscalar.FromMontgomery(&nonMont, &s.mont)
-	var raw [32]uint8
+	var raw [32]byte
 	fiatscalar.ToBytes(&raw, (*[4]uint64)(&nonMont))
-	out := make([]byte, 32)
-	reverse32To((*[32]uint8)(out), raw[:])
-	return out
+	reverse32(&raw)
+	return raw[:]
 }
 
 // IsZero reports whether s is zero.
@@ -152,13 +149,13 @@ func FieldElementFromBytes(in []byte) (FieldElement, error) {
 	if len(in) != 32 {
 		return FieldElement{}, errors.New("secp256k1 field element must be 32 bytes")
 	}
-	var le [32]uint8
-	reverse32To(&le, in)
-	if !lt32LE(le, fieldModulusLE) {
+	be := [32]byte(in)
+	if !lt32BE(be, fieldModulus) {
 		return FieldElement{}, errors.New("secp256k1 field element out of range")
 	}
+	reverse32(&be) // convert to little-endian for fiat-crypto
 	var nonMont fiatfield.NonMontgomeryDomainFieldElement
-	fiatfield.FromBytes((*[4]uint64)(&nonMont), &le)
+	fiatfield.FromBytes((*[4]uint64)(&nonMont), &be)
 	var out FieldElement
 	fiatfield.ToMontgomery(&out.mont, &nonMont)
 	return out, nil
@@ -168,11 +165,10 @@ func FieldElementFromBytes(in []byte) (FieldElement, error) {
 func (f FieldElement) Bytes() []byte {
 	var nonMont fiatfield.NonMontgomeryDomainFieldElement
 	fiatfield.FromMontgomery(&nonMont, &f.mont)
-	var raw [32]uint8
+	var raw [32]byte
 	fiatfield.ToBytes(&raw, (*[4]uint64)(&nonMont))
-	out := make([]byte, 32)
-	reverse32To((*[32]uint8)(out), raw[:])
-	return out
+	reverse32(&raw)
+	return raw[:]
 }
 
 // IsZero reports whether f is zero.
@@ -197,29 +193,11 @@ func (f FieldElement) BigInt() *big.Int {
 	return new(big.Int).SetBytes(f.Bytes())
 }
 
-// lowSOrder returns N/2 as a Scalar for low-S checks.
-// Precomputed at init time.
-var halfOrderVar Scalar
-
-func init() {
-	halfOrderVar = scalarFromHex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0")
-}
-
+// halfOrder returns N/2 as a Scalar for low-S checks.
+// N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+// The returned value is N/2 in Montgomery domain.
 func halfOrder() Scalar {
-	return halfOrderVar
-}
-
-func scalarFromHex(s string) Scalar {
-	x, ok := new(big.Int).SetString(s, 16)
-	if !ok {
-		panic("invalid hex constant")
-	}
-	pad := x.FillBytes(make([]byte, 32))
-	out, err := ScalarFromBytes(pad)
-	if err != nil {
-		panic(fmt.Sprintf("invalid scalar constant %s: %v", s, err))
-	}
-	return out
+	return Scalar{mont: fiatscalar.MontgomeryDomainFieldElement{0xbfd25e8cd0364141, 0xbaaedce6af48a03b, 0xfffffffffffffffe, 0x7fffffffffffffff}}
 }
 
 // FieldZero returns the zero field element.
@@ -312,40 +290,12 @@ func fieldEq(a, b FieldElement) uint64 {
 	return nonzeroTo01(or) ^ 1 // invert: 1 if equal (or==0), 0 otherwise
 }
 
-// Precomputed small field constants in Montgomery domain.
-var (
-	fieldTwo   = FieldAdd(FieldOne(), FieldOne())
-	fieldThree = FieldAdd(fieldTwo, FieldOne())
-	fieldB     = FieldAdd(
-		FieldAdd(
-			FieldAdd(
-				FieldAdd(
-					FieldAdd(FieldOne(), FieldOne()),
-					FieldOne(),
-				),
-				FieldOne(),
-			),
-			FieldOne(),
-		),
-		FieldAdd(FieldOne(), FieldOne()),
-	)
-)
-
-func isZero32(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
-}
-
-func reverse32To(dst *[32]uint8, src []byte) {
-	for i := range 32 {
-		dst[i] = src[31-i]
+func reverse32(b *[32]byte) {
+	for i, j := 0, 31; i < j; i, j = i+1, j-1 {
+		b[i], b[j] = b[j], b[i]
 	}
 }
 
-func lt32LE(a, b [32]uint8) bool {
+func lt32BE(a, b [32]byte) bool {
 	return bytes.Compare(a[:], b[:]) < 0
 }
