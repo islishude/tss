@@ -37,6 +37,11 @@ var (
 	fieldB     = FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0x700001ab7, 0x0, 0x0, 0x0}}
 )
 
+// halfOrder is N/2 as a precomputed Scalar for low-S checks.
+// N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
+// The value is N/2 in Montgomery domain.
+var halfOrder = Scalar{mont: fiatscalar.MontgomeryDomainFieldElement{0xbfd25e8cd0364141, 0xbaaedce6af48a03b, 0xfffffffffffffffe, 0x7fffffffffffffff}}
+
 // ScalarFromBytes parses a canonical 32-byte big-endian non-zero scalar.
 func ScalarFromBytes(in []byte) (Scalar, error) {
 	if len(in) != 32 {
@@ -193,13 +198,6 @@ func (f FieldElement) BigInt() *big.Int {
 	return new(big.Int).SetBytes(f.Bytes())
 }
 
-// halfOrder returns N/2 as a Scalar for low-S checks.
-// N = 0xFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141
-// The returned value is N/2 in Montgomery domain.
-func halfOrder() Scalar {
-	return Scalar{mont: fiatscalar.MontgomeryDomainFieldElement{0xbfd25e8cd0364141, 0xbaaedce6af48a03b, 0xfffffffffffffffe, 0x7fffffffffffffff}}
-}
-
 // FieldZero returns the zero field element.
 func FieldZero() FieldElement {
 	return FieldElement{}
@@ -298,4 +296,37 @@ func reverse32(b *[32]byte) {
 
 func lt32BE(a, b [32]byte) bool {
 	return bytes.Compare(a[:], b[:]) < 0
+}
+
+// sub32BE performs a 256-bit subtraction a = a - b in-place.
+// It assumes a >= b. The result is a - b (no modular wrap).
+func sub32BE(a *[32]byte, b [32]byte) {
+	var borrow uint16
+	for i := 31; i >= 0; i-- {
+		diff := uint16(a[i]) - uint16(b[i]) - borrow
+		// borrow is 1 if diff underflowed past 0xFF, otherwise 0.
+		if diff > 0xFF {
+			borrow = 1
+		} else {
+			borrow = 0
+		}
+		a[i] = byte(diff)
+	}
+}
+
+// scalarLessOrEqual returns true if a <= b as unsigned 256-bit integers.
+// Both a and b must be reduced scalars in [0, n). The comparison converts
+// from Montgomery to non-Montgomery form and compares the integer limbs
+// without allocating or going through byte reversal.
+func scalarLessOrEqual(a, b Scalar) bool {
+	var aNonMont, bNonMont fiatscalar.NonMontgomeryDomainFieldElement
+	fiatscalar.FromMontgomery(&aNonMont, &a.mont)
+	fiatscalar.FromMontgomery(&bNonMont, &b.mont)
+	// Compare limbs from most significant to least significant (big-endian order).
+	for i := 3; i >= 0; i-- {
+		if aNonMont[i] != bNonMont[i] {
+			return aNonMont[i] < bNonMont[i]
+		}
+	}
+	return true // equal
 }

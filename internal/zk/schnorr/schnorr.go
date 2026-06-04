@@ -49,7 +49,7 @@ func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	// Fiat-Shamir Schnorr response: s = k + e*x mod q.
 	challengeScalar := secp.ScalarFromBigInt(challenge)
 	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), nonce)
-	return &Proof{Commitment: commitment, Response: secp.ScalarBytes(response)}, public, nil
+	return &Proof{Commitment: commitment, Response: response.Bytes()}, public, nil
 }
 
 // Verify checks a Fiat-Shamir Schnorr proof against public key bytes.
@@ -65,7 +65,7 @@ func Verify(domain, public []byte, proof *Proof) bool {
 	if err != nil {
 		return false
 	}
-	response, err := secp.ParseScalar(proof.Response)
+	response, err := secp.ScalarFromBytes(proof.Response)
 	if err != nil {
 		return false
 	}
@@ -117,7 +117,7 @@ func (p *Proof) Validate() error {
 	if _, err := secp.PointFromBytes(p.Commitment); err != nil {
 		return fmt.Errorf("invalid Schnorr commitment: %w", err)
 	}
-	if _, err := secp.ParseScalar(p.Response); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Response); err != nil {
 		return fmt.Errorf("invalid Schnorr response: %w", err)
 	}
 	return nil

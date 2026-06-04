@@ -1,8 +1,7 @@
 package secp256k1
 
 import (
-	"fmt"
-	"math/big"
+	fiatfield "github.com/islishude/tss/internal/fiat/secp256k1field"
 )
 
 // Point is an affine secp256k1 point backed by fiat-crypto field elements.
@@ -11,23 +10,11 @@ type Point struct {
 	Inf  uint64 // 0 = finite point, 1 = point at infinity
 }
 
-// G is the SEC 2 base point.
+// G is the SEC 2 base point (generator) for secp256k1.
+// Coordinates are precomputed in Montgomery domain.
 var G = &Point{
-	X: fieldElementFromHex("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"),
-	Y: fieldElementFromHex("483ADA7726A3C4655DA4FBFC0E1108A8FD17B448A68554199C47D08FFB10D4B8"),
-}
-
-func fieldElementFromHex(s string) FieldElement {
-	x, ok := new(big.Int).SetString(s, 16)
-	if !ok {
-		panic("invalid hex constant")
-	}
-	pad := x.FillBytes(make([]byte, 32))
-	f, err := FieldElementFromBytes(pad)
-	if err != nil {
-		panic(fmt.Sprintf("invalid field element constant: %v", err))
-	}
-	return f
+	X: FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0xd7362e5a487e2097, 0x231e295329bc66db, 0x979f48c033fd129c, 0x9981e643e9089f48}},
+	Y: FieldElement{mont: fiatfield.MontgomeryDomainFieldElement{0xb15ea6d2d3dbabe2, 0x8dfc5d5d1f1dc64d, 0x70b6b59aac19c136, 0xcf3f851fd4a582d6}},
 }
 
 // NewInfinity returns the point at infinity.

@@ -37,6 +37,30 @@ func FieldElementFromBigInt(x *big.Int) FieldElement {
 	return f
 }
 
+// scalarFromFieldElement converts a field element X-coordinate to a Scalar
+// by reducing it modulo the group order n. For secp256k1, p - n < n, so at most
+// one subtraction of n is needed — no big.Int required.
+func scalarFromFieldElement(x FieldElement) Scalar {
+	b := x.Bytes() // 32-byte big-endian, non-Montgomery
+	var be [32]byte
+	copy(be[:], b)
+	if !lt32BE(be, scalarModulus) {
+		// X >= n, reduce by subtracting n once (p - n < n guarantees one subtraction suffices).
+		sub32BE(&be, scalarModulus)
+	}
+	return mustScalarFromBytes(be)
+}
+
+// mustScalarFromBytes parses a 32-byte big-endian value as a Scalar,
+// returning ScalarZero() if the value cannot be represented (e.g. zero).
+func mustScalarFromBytes(be [32]byte) Scalar {
+	s, err := ScalarFromBytes(be[:])
+	if err != nil {
+		return ScalarZero()
+	}
+	return s
+}
+
 func scalarFromUint64(v uint64) Scalar {
 	var le [32]uint8
 	le[0] = uint8(v)

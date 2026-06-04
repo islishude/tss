@@ -942,7 +942,7 @@ func ProveMTAResponse(reader io.Reader, domain []byte, pk *pai.PublicKey, encA, 
 	nSquaredLen := 2 * nLen
 	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, nSquaredLen)
 	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
-	muBytes := secp.ScalarBytes(secp.ScalarFromBigInt(mu))
+	muBytes := secp.ScalarFromBigInt(mu).Bytes()
 	encAMuBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, muBytes)
 	if err != nil {
 		return nil, err

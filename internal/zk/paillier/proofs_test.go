@@ -500,7 +500,7 @@ func mtaResponseForTest(t *testing.T, sk *pai.PrivateKey, encA, b, beta *big.Int
 	encPowBytes, err := paillierct.ExpCT(
 		paillierct.FixedEncode(sk.NSquared, nSquaredLen),
 		paillierct.FixedEncode(encA, nSquaredLen),
-		secp.ScalarBytes(secp.ScalarFromBigInt(b)),
+		secp.ScalarFromBigInt(b).Bytes(),
 	)
 	if err != nil {
 		t.Fatal(err)

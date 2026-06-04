@@ -379,7 +379,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 				fields...,
 			)
 		}
-		delta, err := secp.ParseScalar(p.Delta)
+		delta, err := secp.ScalarFromBytes(p.Delta)
 		if err != nil {
 			return nil, protocolErrorWithEvidence(
 				tss.ErrCodeInvalidMessage,
@@ -571,7 +571,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	deltaShare.Mod(deltaShare, order)
 	chiShare.Mod(chiShare, order)
 	if len(s.additiveShift) > 0 {
-		shift, err := secp.ParseScalar(s.additiveShift)
+		shift, err := secp.ScalarFromBytes(s.additiveShift)
 		if err != nil {
 			return nil, err
 		}
@@ -746,11 +746,11 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	// Mark the presign consumed before constructing the outbound sign envelope
 	// so accidental reuse fails before any new partial signature can leave.
 	presign.Consumed = true
-	kShare, err := secp.ParseScalar(presign.KShare)
+	kShare, err := secp.ScalarFromBytes(presign.KShare)
 	if err != nil {
 		return nil, nil, err
 	}
-	chiShare, err := secp.ParseScalar(presign.ChiShare)
+	chiShare, err := secp.ScalarFromBytes(presign.ChiShare)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -761,7 +761,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 			return nil, nil, err
 		}
 	}
-	littleR, err := secp.ParseScalar(presign.LittleR)
+	littleR, err := secp.ScalarFromBytes(presign.LittleR)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -870,7 +870,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			s.signPartialEvidenceFields(p)...,
 		)
 	}
-	partial, err := secp.ParseScalar(p.S)
+	partial, err := secp.ScalarFromBytes(p.S)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -910,8 +910,8 @@ func (s *SignSession) aggregateEvidenceFields(r, sigS *big.Int) []tss.EvidenceFi
 	return append(fields,
 		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
-		hashEvidenceField(evidenceFieldRHash, secp.ScalarBytes(secp.ScalarFromBigInt(r))),
-		hashEvidenceField(evidenceFieldSHash, secp.ScalarBytes(secp.ScalarFromBigInt(sigS))),
+		hashEvidenceField(evidenceFieldRHash, secp.ScalarFromBigInt(r).Bytes()),
+		hashEvidenceField(evidenceFieldSHash, secp.ScalarFromBigInt(sigS).Bytes()),
 	)
 }
 
@@ -930,7 +930,7 @@ func (s *SignSession) tryComplete() error {
 	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.Order()), 1)) > 0 {
 		sigS.Sub(secp.Order(), sigS)
 	}
-	r, err := secp.ParseScalar(s.presign.LittleR)
+	r, err := secp.ScalarFromBytes(s.presign.LittleR)
 	if err != nil {
 		return err
 	}
@@ -945,7 +945,7 @@ func (s *SignSession) tryComplete() error {
 			SessionID:   s.sessionID,
 			Round:       1,
 			PayloadType: payloadSignPartial,
-			Payload:     aggregateEvidencePayload(s.digest, secp.ScalarBytes(r), secp.ScalarBytes(secp.ScalarFromBigInt(sigS)), s.presign.TranscriptHash),
+			Payload:     aggregateEvidencePayload(s.digest, r.Bytes(), secp.ScalarFromBigInt(sigS).Bytes(), s.presign.TranscriptHash),
 		}.WithTranscriptHash()
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
@@ -963,7 +963,7 @@ func (s *SignSession) tryComplete() error {
 			Err: errors.New("ECDSA signature failed verification"),
 		}
 	}
-	s.signature = &Signature{R: secp.ScalarBytes(r), S: secp.ScalarBytes(secp.ScalarFromBigInt(sigS))}
+	s.signature = &Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes()}
 	s.completed = true
 	s.log.Info(context.Background(), "signing complete",
 		"party_id", s.key.Party,
@@ -981,11 +981,11 @@ func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	if sig == nil {
 		return false
 	}
-	r, err := secp.ParseScalar(sig.R)
+	r, err := secp.ScalarFromBytes(sig.R)
 	if err != nil {
 		return false
 	}
-	s, err := secp.ParseScalar(sig.S)
+	s, err := secp.ScalarFromBytes(sig.S)
 	if err != nil {
 		return false
 	}

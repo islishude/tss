@@ -134,7 +134,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
-	if _, err := secp.ParseScalar(p.Share); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, keygenSharePayloadWireType, []wire.Field{
@@ -154,7 +154,7 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 		return keygenSharePayload{}, err
 	}
 	share := wire.MustField(fields, keygenSharePayloadFieldShare)
-	if _, err := secp.ParseScalar(share); err != nil {
+	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return keygenSharePayload{}, err
 	}
 	return keygenSharePayload{Share: share}, nil
@@ -259,7 +259,7 @@ func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
 }
 
 func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
-	if _, err := secp.ParseScalar(p.Delta); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, presignRound3PayloadWireType, []wire.Field{
@@ -279,14 +279,14 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 		return presignRound3Payload{}, err
 	}
 	delta := wire.MustField(fields, presignRound3PayloadFieldDelta)
-	if _, err := secp.ParseScalar(delta); err != nil {
+	if _, err := secp.ScalarFromBytes(delta); err != nil {
 		return presignRound3Payload{}, err
 	}
 	return presignRound3Payload{Delta: delta}, nil
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
-	if _, err := secp.ParseScalar(p.S); err != nil {
+	if _, err := secp.ScalarFromBytes(p.S); err != nil {
 		return nil, err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
@@ -318,7 +318,7 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 		PresignTranscript: wire.MustField(fields, signPartialPayloadFieldPresignTranscript),
 		PresignContext:    wire.MustField(fields, signPartialPayloadFieldPresignContext),
 	}
-	if _, err := secp.ParseScalar(p.S); err != nil {
+	if _, err := secp.ScalarFromBytes(p.S); err != nil {
 		return signPartialPayload{}, err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
@@ -414,7 +414,7 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
-	if _, err := secp.ParseScalar(p.Share); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, reshareSharePayloadWireType, []wire.Field{
@@ -434,7 +434,7 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 		return reshareSharePayload{}, err
 	}
 	share := wire.MustField(fields, reshareSharePayloadFieldShare)
-	if _, err := secp.ParseScalar(share); err != nil {
+	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return reshareSharePayload{}, err
 	}
 	return reshareSharePayload{Share: share}, nil
@@ -511,7 +511,7 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
-	if _, err := secp.ParseScalar(p.Share); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, refreshSharePayloadWireType, []wire.Field{
@@ -531,7 +531,7 @@ func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
 		return refreshSharePayload{}, err
 	}
 	share := wire.MustField(fields, refreshSharePayloadFieldShare)
-	if _, err := secp.ParseScalar(share); err != nil {
+	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return refreshSharePayload{}, err
 	}
 	return refreshSharePayload{Share: share}, nil

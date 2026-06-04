@@ -269,16 +269,16 @@ func (p *Presign) Validate() error {
 	if _, err := secp.PointFromBytes(p.R); err != nil {
 		return fmt.Errorf("invalid presign R: %w", err)
 	}
-	if _, err := secp.ParseScalar(p.LittleR); err != nil {
+	if _, err := secp.ScalarFromBytes(p.LittleR); err != nil {
 		return fmt.Errorf("invalid little r: %w", err)
 	}
-	if _, err := secp.ParseScalar(p.KShare); err != nil {
+	if _, err := secp.ScalarFromBytes(p.KShare); err != nil {
 		return fmt.Errorf("invalid k share: %w", err)
 	}
-	if _, err := secp.ParseScalar(p.ChiShare); err != nil {
+	if _, err := secp.ScalarFromBytes(p.ChiShare); err != nil {
 		return fmt.Errorf("invalid chi share: %w", err)
 	}
-	if _, err := secp.ParseScalar(p.Delta); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
 		return fmt.Errorf("invalid delta: %w", err)
 	}
 	if len(p.TranscriptHash) != 32 {
@@ -291,7 +291,7 @@ func (p *Presign) Validate() error {
 		return errors.New("invalid presign context hash")
 	}
 	if len(p.AdditiveShift) > 0 {
-		if _, err := secp.ParseScalar(p.AdditiveShift); err != nil {
+		if _, err := secp.ScalarFromBytes(p.AdditiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
 	}

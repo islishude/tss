@@ -56,7 +56,7 @@ func DeriveBIP32(publicKey, chainCode []byte, path []uint32) (childPublicKey, ad
 		mac.Write(parentPub)
 		mac.Write(idxBytes[:])
 		I := mac.Sum(nil)
-		iL, err := secp.ParseScalar(I[:32])
+		iL, err := secp.ScalarFromBytes(I[:32])
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("invalid BIP32 derivation at index %d: %w", idx, err)
 		}
@@ -64,12 +64,12 @@ func DeriveBIP32(publicKey, chainCode []byte, path []uint32) (childPublicKey, ad
 			return nil, nil, nil, fmt.Errorf("BIP32 derivation produced zero scalar at index %d", idx)
 		}
 		cumShift = secp.ScalarAdd(cumShift, iL)
-		childPub, err := DerivePublicKey(publicKey, secp.ScalarBytes(cumShift))
+		childPub, err := DerivePublicKey(publicKey, cumShift.Bytes())
 		if err != nil {
 			return nil, nil, nil, fmt.Errorf("child public key derivation at index %d: %w", idx, err)
 		}
 		parentPub = childPub
 		parentChain = I[32:]
 	}
-	return parentPub, secp.ScalarBytes(cumShift), parentChain, nil
+	return parentPub, cumShift.Bytes(), parentChain, nil
 }

@@ -126,7 +126,7 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 	if len(additiveShift) == 0 {
 		return secp.PointBytes(base)
 	}
-	shift, err := secp.ParseScalar(additiveShift)
+	shift, err := secp.ScalarFromBytes(additiveShift)
 	if err != nil {
 		return nil, fmt.Errorf("invalid additive shift: %w", err)
 	}
@@ -216,7 +216,7 @@ func (k *KeyShare) Validate() error {
 	if len(k.ChainCode) != 0 && len(k.ChainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
 	}
-	if _, err := secp.ParseScalar(k.secret); err != nil {
+	if _, err := secp.ScalarFromBytes(k.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if len(k.GroupCommitments) != k.Threshold {
@@ -431,7 +431,7 @@ func (k *KeyShare) Destroy() {
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
-	s, err := secp.ParseScalar(k.secret)
+	s, err := secp.ScalarFromBytes(k.secret)
 	if err != nil {
 		return nil, err
 	}
@@ -439,7 +439,7 @@ func (k *KeyShare) secretBig() (*big.Int, error) {
 }
 
 func scalarBytes(x *big.Int) []byte {
-	return secp.ScalarBytes(secp.ScalarFromBigInt(x))
+	return secp.ScalarFromBigInt(x).Bytes()
 }
 
 func (k *KeyShare) requireMPCMaterial() error {

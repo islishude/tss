@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
 	"errors"
 	"io"
 	"math/big"
@@ -25,7 +24,7 @@ func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s 
 		if rp.Inf != 0 {
 			continue
 		}
-		r = scalarFromBig(new(big.Int).Mod(rp.X.BigInt(), Order()))
+		r = scalarFromFieldElement(rp.X)
 		if r.IsZero() {
 			continue
 		}
@@ -38,50 +37,12 @@ func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s 
 			continue
 		}
 		if lowS {
-			half := halfOrder()
-			if !scalarLessOrEqual(s, half) {
+			if !scalarLessOrEqual(s, halfOrder) {
 				s = ScalarNeg(s)
 			}
 		}
 		return r, s, nil
 	}
-}
-
-// SignECDSAWithNonce signs with caller-provided nonce material for tests only.
-func SignECDSAWithNonce(digest []byte, secret, nonce Scalar, lowS bool) (r, s Scalar, err error) {
-	if len(digest) != 32 {
-		return Scalar{}, Scalar{}, errors.New("ECDSA digest must be 32 bytes")
-	}
-	if secret.IsZero() || nonce.IsZero() {
-		return Scalar{}, Scalar{}, errors.New("secret and nonce must be non-zero")
-	}
-	z, err := ScalarFromBytes(digest)
-	if err != nil {
-		z = scalarFromBig(new(big.Int).SetBytes(digest))
-	}
-	rp := ScalarBaseMult(nonce)
-	if rp.Inf != 0 {
-		return Scalar{}, Scalar{}, errors.New("nonce produced infinity")
-	}
-	r = scalarFromBig(new(big.Int).Mod(rp.X.BigInt(), Order()))
-	if r.IsZero() {
-		return Scalar{}, Scalar{}, errors.New("nonce produced zero r")
-	}
-	kinv, err := ScalarInvert(nonce)
-	if err != nil {
-		return Scalar{}, Scalar{}, errors.New("nonce is not invertible")
-	}
-	s = ScalarMul(ScalarAdd(ScalarMul(r, secret), z), kinv)
-	if s.IsZero() {
-		return Scalar{}, Scalar{}, errors.New("zero s")
-	}
-	if lowS {
-		half := halfOrder()
-		if !scalarLessOrEqual(s, half) {
-			s = ScalarNeg(s)
-		}
-	}
-	return r, s, nil
 }
 
 // VerifyECDSA verifies a secp256k1 ECDSA signature over a 32-byte digest.
@@ -108,10 +69,6 @@ func VerifyECDSA(public *Point, digest []byte, r, s Scalar) bool {
 	if x.Inf != 0 {
 		return false
 	}
-	v := scalarFromBig(new(big.Int).Mod(x.X.BigInt(), Order()))
+	v := scalarFromFieldElement(x.X)
 	return v.Equal(r)
-}
-
-func scalarLessOrEqual(a, b Scalar) bool {
-	return bytes.Compare(a.Bytes(), b.Bytes()) <= 0
 }

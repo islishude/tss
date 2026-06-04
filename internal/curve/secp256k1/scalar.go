@@ -65,13 +65,3 @@ func RandomScalar(reader io.Reader) (Scalar, error) {
 		return s, nil
 	}
 }
-
-// ParseScalar parses a canonical 32-byte non-zero scalar.
-func ParseScalar(in []byte) (Scalar, error) {
-	return ScalarFromBytes(in)
-}
-
-// ScalarBytes returns x as a fixed-width 32-byte big-endian scalar.
-func ScalarBytes(x Scalar) []byte {
-	return x.Bytes()
-}

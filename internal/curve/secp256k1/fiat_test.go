@@ -45,8 +45,8 @@ func TestPrecomputedValues(t *testing.T) {
 	}
 
 	wantHalfOrder := scalarFromHex("7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0")
-	if got := halfOrder(); got != wantHalfOrder {
-		t.Errorf("halfOrder() = %v, want %v", got, wantHalfOrder)
+	if got := halfOrder; got != wantHalfOrder {
+		t.Errorf("halfOrder = %v, want %v", got, wantHalfOrder)
 	}
 
 	var (

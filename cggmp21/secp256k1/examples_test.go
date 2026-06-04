@@ -2,9 +2,9 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"fmt"
-	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -12,18 +12,20 @@ import (
 
 func ExampleVerifyDigest() {
 	digest := sha256.Sum256([]byte("hello secp256k1"))
-	secret := big.NewInt(1)
-	nonce := big.NewInt(2)
+	secret, err := secp.RandomScalar(rand.Reader)
+	if err != nil {
+		panic(err)
+	}
 
-	r, s, err := secp.SignECDSAWithNonce(digest[:], secp.ScalarFromBigInt(secret), secp.ScalarFromBigInt(nonce), true)
+	r, s, err := secp.SignECDSA(rand.Reader, digest[:], secret, true)
 	if err != nil {
 		panic(err)
 	}
-	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(secret)))
+	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secret))
 	if err != nil {
 		panic(err)
 	}
-	signature := &Signature{R: secp.ScalarBytes(r), S: secp.ScalarBytes(s)}
+	signature := &Signature{R: r.Bytes(), S: s.Bytes()}
 
 	fmt.Println(VerifyDigest(publicKey, digest[:], signature))
 	// Output:

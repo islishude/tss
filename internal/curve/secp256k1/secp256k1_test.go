@@ -214,6 +214,59 @@ func TestScalarMultCorrectness(t *testing.T) {
 	}
 }
 
+func TestScalarFromFieldElement(t *testing.T) {
+	// Compare scalarFromFieldElement against the old big.Int-based path
+	// for randomly generated field elements and edge cases.
+	oldPath := func(x FieldElement) Scalar {
+		return scalarFromBig(new(big.Int).Mod(x.BigInt(), Order()))
+	}
+
+	// Random test points from scalar multiplications.
+	for range 100 {
+		k, err := RandomScalar(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		p := ScalarBaseMult(k)
+		if p.Inf != 0 {
+			continue
+		}
+		got := scalarFromFieldElement(p.X)
+		want := oldPath(p.X)
+		if !got.Equal(want) {
+			t.Fatalf("mismatch for random point: got %x want %x", got.Bytes(), want.Bytes())
+		}
+	}
+
+	// Edge cases: field elements near the scalar modulus n.
+	for _, delta := range []int{-2, -1, 0} {
+		bigN := Order()
+		bigVal := new(big.Int).Add(bigN, big.NewInt(int64(delta)))
+		fe := FieldElementFromBigInt(bigVal)
+		got := scalarFromFieldElement(fe)
+		want := oldPath(fe)
+		if !got.Equal(want) {
+			t.Fatalf("mismatch at n+%d: got %x want %x", delta, got.Bytes(), want.Bytes())
+		}
+	}
+
+	// Edge case: field element equal to the field prime minus 1 (max field element).
+	bigP := new(big.Int).SetBytes(fieldModulus[:])
+	bigPm1 := new(big.Int).Sub(bigP, big.NewInt(1))
+	feMax := FieldElementFromBigInt(bigPm1)
+	got := scalarFromFieldElement(feMax)
+	want := oldPath(feMax)
+	if !got.Equal(want) {
+		t.Fatalf("mismatch at p-1: got %x want %x", got.Bytes(), want.Bytes())
+	}
+
+	// Zero field element should produce ScalarZero.
+	feZero := FieldZero()
+	if r := scalarFromFieldElement(feZero); !r.IsZero() {
+		t.Fatalf("expected zero scalar for zero field element, got %x", r.Bytes())
+	}
+}
+
 func TestFiatFieldArithmeticMatchesBigInt(t *testing.T) {
 	a := FieldElementFromBigInt(big.NewInt(7))
 	b := FieldElementFromBigInt(big.NewInt(11))

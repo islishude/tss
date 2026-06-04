@@ -40,7 +40,7 @@ func TestGoldenProof(t *testing.T) {
 	challengeScalar := secp.ScalarFromBigInt(challenge)
 	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), n)
 
-	p := &Proof{Commitment: commitment, Response: secp.ScalarBytes(response)}
+	p := &Proof{Commitment: commitment, Response: response.Bytes()}
 
 	// Round-trip: MarshalBinary → UnmarshalProof → MarshalBinary.
 	raw, err := p.MarshalBinary()
