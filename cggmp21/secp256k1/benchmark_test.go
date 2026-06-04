@@ -10,7 +10,7 @@ import (
 )
 
 func BenchmarkPaillierKeygen2048(b *testing.B) {
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		if _, err := pai.GenerateKey(context.Background(), nil, DefaultPaillierBits); err != nil {
 			b.Fatal(err)
 		}
@@ -20,8 +20,8 @@ func BenchmarkPaillierKeygen2048(b *testing.B) {
 func BenchmarkThresholdECDSAPresign2of3(b *testing.B) {
 	shares := secpKeygen(b, 2, 3)
 	signers := []tss.PartyID{1, 2}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		secpPresign(b, shares, signers)
 	}
 }
@@ -29,8 +29,8 @@ func BenchmarkThresholdECDSAPresign2of3(b *testing.B) {
 func BenchmarkThresholdECDSAPresign3of5(b *testing.B) {
 	shares := secpKeygen(b, 3, 5)
 	signers := []tss.PartyID{1, 3, 5}
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		secpPresign(b, shares, signers)
 	}
 }
@@ -39,8 +39,8 @@ func BenchmarkThresholdECDSAOnlineSign2of3(b *testing.B) {
 	shares := secpKeygen(b, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	digest := sha256.Sum256([]byte("benchmark"))
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	for b.Loop() {
 		b.StopTimer()
 		presigns := secpPresign(b, shares, signers)
 		sessionID, err := tss.NewSessionID(nil)
