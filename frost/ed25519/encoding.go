@@ -96,7 +96,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
 	}
-	if err := k.Validate(); err != nil {
+	if err := k.ValidateConsistency(); err != nil {
 		return nil, err
 	}
 	return k, nil

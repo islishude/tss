@@ -1,14 +1,14 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
+	"sync"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
-	"github.com/islishude/tss/internal/shamir"
 )
 
 const (
@@ -16,20 +16,27 @@ const (
 	payloadReshareShare       = "frost.ed25519.reshare.share"
 )
 
-// ReshareSession tracks FROST key resharing for threshold or participant-set changes.
-// The group public key is preserved because every participant generates a
-// polynomial with zero constant term.
+// ReshareSession tracks a FROST key resharing exchange.
+// The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
-	oldKey     *KeyShare
-	cfg        tss.ThresholdConfig
-	log        tss.Logger
-	newParties []tss.PartyID
-	commits    map[tss.PartyID][][]byte
-	shares     map[tss.PartyID]*big.Int
-	completed  bool
-	aborted    bool
-	newShare   *KeyShare
-	ownPoly    []*big.Int
+	mu           sync.Mutex
+	oldKey       *KeyShare     // nil for recipient-only participants
+	oldPublicKey []byte        // original group public key, required for preservation checks
+	oldParties   []tss.PartyID // sorted, the dealer set (old key holders)
+	newParties   []tss.PartyID // sorted, the target participant set
+	newThreshold int
+	isRecipient  bool        // true when this participant receives a new share
+	selfID       tss.PartyID // local party ID (for To checks)
+	refreshMode  bool        // true when using zero-constant-term refresh
+
+	cfg     tss.ThresholdConfig
+	log     tss.Logger
+	commits map[tss.PartyID][][]byte
+	shares  map[tss.PartyID]edcurve.Scalar
+
+	completed bool
+	aborted   bool
+	newShare  *KeyShare
 }
 
 type reshareCommitmentsPayload struct {
@@ -40,42 +47,72 @@ type reshareSharePayload struct {
 	Share []byte `json:"share"`
 }
 
-// StartReshare starts FROST resharing. The group public key is preserved.
-// newParties defines the target participant set; it may differ in size and
-// identity from the current participant set.
-func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID) (*ReshareSession, []tss.Envelope, error) {
-	if err := oldKey.Validate(); err != nil {
+// StartReshare starts a FROST key resharing as an old-party dealer.
+// Each dealer computes w_i = λ_i(old,0) * old_share_i and generates a random
+// polynomial with w_i as the constant term. The aggregated polynomial preserves
+// the group secret while supporting arbitrary membership and threshold changes.
+//
+// newParties defines the target participant set and newThreshold the target
+// threshold. Both may differ from the old key's parties and threshold.
+func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, []tss.Envelope, error) {
+	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
-	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)); err != nil {
+	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	if err := config.ValidateWithLimits(limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	newParties = tss.SortParties(newParties)
-	if !tss.ContainsParty(newParties, oldKey.Party) {
-		return nil, nil, errors.New("local party must be in the new participant set")
+	if newThreshold <= 0 || newThreshold > len(newParties) {
+		return nil, nil, errors.New("invalid new threshold for reshare")
 	}
-	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
-	// Zero-coefficient polynomial preserves the group secret.
-	poly, err := shamir.RandomPolynomial(config.Reader(), edcurve.Order(), config.Threshold, big.NewInt(0))
+	if newThreshold > limits.MaxThreshold {
+		return nil, nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.MaxThreshold)
+	}
+	if config.Self != oldKey.Party {
+		return nil, nil, errors.New("config.Self must match the old key's party ID")
+	}
+	oldParties := append([]tss.PartyID(nil), oldKey.Parties...)
+	// Fix config.Parties to the old party set so blame evidence is deterministic.
+	config.Parties = oldParties
+	isRecipient := tss.ContainsParty(newParties, oldKey.Party)
+
+	// Compute w_i = λ_i(old, 0) * s_i (mod L).
+	lambda, err := lagrangeCoefficientScalar(oldKey.Party, oldParties)
+	if err != nil {
+		return nil, nil, err
+	}
+	oldSecret, err := oldKey.secretScalar()
+	if err != nil {
+		return nil, nil, err
+	}
+	weighted := edcurve.ScalarMul(lambda, oldSecret)
+
+	// Generate polynomial g_i of degree newThreshold-1 with constant term w_i.
+	poly, err := randomScalarPolynomial(config.Reader(), newThreshold, &weighted)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		point, err := edcurve.ScalarBaseMultBig(coeff)
+		point, err := edcurve.ScalarBaseMult(coeff)
 		if err != nil {
 			return nil, nil, err
 		}
 		commitments[i] = point.Bytes()
 	}
 	s := &ReshareSession{
-		oldKey:     oldKey,
-		cfg:        config,
-		log:        config.Logger(),
-		newParties: newParties,
-		commits:    map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:     map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, edcurve.Order())},
-		ownPoly:    poly,
+		oldKey:       oldKey,
+		oldPublicKey: oldKey.PublicKeyBytes(),
+		oldParties:   oldParties,
+		newParties:   newParties,
+		newThreshold: newThreshold,
+		isRecipient:  isRecipient,
+		selfID:       oldKey.Party,
+		cfg:          config,
+		log:          config.Logger(),
+		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
+		shares:       map[tss.PartyID]edcurve.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
@@ -86,11 +123,118 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 		if id == oldKey.Party {
 			continue
 		}
-		share := shamir.Eval(poly, id, edcurve.Order())
-		shareBytes, err := scalarBytes(share)
+		share := evalScalarPolynomial(poly, id)
+		shareBytes := share.Bytes()
+		payload, err := marshalReshareSharePayload(reshareSharePayload{Share: shareBytes})
 		if err != nil {
 			return nil, nil, err
 		}
+		out = append(out, envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true))
+	}
+	if err := s.tryComplete(); err != nil {
+		return nil, nil, err
+	}
+	return s, out, nil
+}
+
+// StartReshareRecipient starts a FROST resharing session for a participant who
+// is in the new participant set but does not hold an old KeyShare. The
+// recipient receives shares from all old-party dealers and aggregates them
+// into a new KeyShare without generating a polynomial of its own.
+func StartReshareRecipient(oldPublicKey []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, error) {
+	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	if err := config.ValidateWithLimits(limits); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if _, err := edcurve.PointFromBytes(oldPublicKey); err != nil {
+		return nil, fmt.Errorf("invalid old public key: %w", err)
+	}
+	oldParties = tss.SortParties(oldParties)
+	newParties = tss.SortParties(newParties)
+	if newThreshold <= 0 || newThreshold > len(newParties) {
+		return nil, errors.New("invalid new threshold for reshare")
+	}
+	if newThreshold > limits.MaxThreshold {
+		return nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.MaxThreshold)
+	}
+	if !tss.ContainsParty(newParties, config.Self) {
+		return nil, errors.New("recipient must be in the new participant set")
+	}
+	if tss.ContainsParty(oldParties, config.Self) {
+		return nil, errors.New("recipient is in the old participant set; use StartReshare instead")
+	}
+	// Blame evidence for reshare share verification is scoped to old dealers.
+	config.Parties = oldParties
+	return &ReshareSession{
+		oldPublicKey: append([]byte(nil), oldPublicKey...),
+		oldParties:   oldParties,
+		newParties:   newParties,
+		newThreshold: newThreshold,
+		isRecipient:  true,
+		selfID:       config.Self,
+		cfg:          config,
+		log:          config.Logger(),
+		commits:      make(map[tss.PartyID][][]byte),
+		shares:       make(map[tss.PartyID]edcurve.Scalar),
+	}, nil
+}
+
+// StartRefresh starts a FROST same-party proactive key refresh using the
+// simpler zero-constant-term polynomial approach. The participant set and
+// threshold are unchanged.
+func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession, []tss.Envelope, error) {
+	if err := oldKey.ValidateConsistency(); err != nil {
+		return nil, nil, err
+	}
+	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	if err := config.ValidateWithLimits(limits); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if !tss.ContainsParty(oldKey.Parties, config.Self) {
+		return nil, nil, errors.New("local party is not in the participant set")
+	}
+	parties := append([]tss.PartyID(nil), oldKey.Parties...)
+	config.Parties = parties
+	config.Threshold = oldKey.Threshold
+	// Zero-coefficient polynomial preserves the group secret.
+	zero := edcurve.ScalarZero()
+	poly, err := randomScalarPolynomial(config.Reader(), oldKey.Threshold, &zero)
+	if err != nil {
+		return nil, nil, err
+	}
+	commitments := make([][]byte, len(poly))
+	for i, coeff := range poly {
+		point, err := edcurve.ScalarBaseMult(coeff)
+		if err != nil {
+			return nil, nil, err
+		}
+		commitments[i] = point.Bytes()
+	}
+	s := &ReshareSession{
+		oldKey:       oldKey,
+		oldPublicKey: oldKey.PublicKeyBytes(),
+		oldParties:   parties,
+		newParties:   parties,
+		newThreshold: oldKey.Threshold,
+		isRecipient:  true,
+		selfID:       oldKey.Party,
+		refreshMode:  true,
+		cfg:          config,
+		log:          config.Logger(),
+		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
+		shares:       map[tss.PartyID]edcurve.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+	}
+	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []tss.Envelope{envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)}
+	for _, id := range parties {
+		if id == oldKey.Party {
+			continue
+		}
+		share := evalScalarPolynomial(poly, id)
+		shareBytes := share.Bytes()
 		payload, err := marshalReshareSharePayload(reshareSharePayload{Share: shareBytes})
 		if err != nil {
 			return nil, nil, err
@@ -108,50 +252,58 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, errors.New("reshare session is already completed")
 	}
 	if s.aborted {
 		return nil, errors.New("reshare session is aborted")
 	}
-	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldKey.Parties); err != nil {
+	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldParties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
 	}
-	if env.To != 0 && env.To != s.oldKey.Party {
+	if env.To != 0 && env.To != s.selfID {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
 	switch env.PayloadType {
 	case payloadReshareCommitments:
-		if _, ok := s.commits[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare commitments"))
-		}
 		p, err := unmarshalReshareCommitmentsPayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := validateReshareCommitments(p.Commitments, s.cfg.Threshold); err != nil {
+		if err := validateReshareCommitments(p.Commitments, s.newThreshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+		if existing, ok := s.commits[env.From]; ok {
+			if equalByteSlices(existing, p.Commitments) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting reshare commitments"))
 		}
 		s.commits[env.From] = p.Commitments
 	case payloadReshareShare:
-		if err := requireDirectConfidential(env, s.oldKey.Party, payloadReshareShare); err != nil {
+		if err := requireDirectConfidential(env, s.selfID, payloadReshareShare); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if _, ok := s.shares[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
 		}
 		p, err := unmarshalReshareSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonical(p.Share)
+		scalar, err := edcurve.ScalarFromCanonicalFiat(p.Share)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.shares[env.From] = edcurve.ScalarToBig(scalar)
+		if existing, ok := s.shares[env.From]; ok {
+			if edcurve.ScalarEqual(existing, scalar) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting reshare share"))
+		}
+		s.shares[env.From] = scalar
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -160,7 +312,12 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 
 // KeyShare returns the reshared key share when resharing completes.
 func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed || s.newShare == nil {
 		return nil, false
 	}
 	return cloneKeyShareValue(s.newShare), true
@@ -170,13 +327,30 @@ func (s *ReshareSession) tryComplete() error {
 	if s.completed {
 		return nil
 	}
-	// Wait for all old participants (they are the dealers) to contribute.
-	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) {
+	// Dealer-only (not in new set): only need commitments from all old parties.
+	// Shares are sent to newParties, not to removed dealers, so we don't wait
+	// for shares here.
+	if !s.isRecipient {
+		if len(s.commits) != len(s.oldParties) {
+			return nil
+		}
+		newCommitments, err := s.aggregateCommitments()
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
+			return errors.New("reshared group public key does not match original")
+		}
+		s.completed = true
 		return nil
 	}
-	order := edcurve.Order()
+	// Recipient: wait for commitments and shares from all old parties.
+	if len(s.commits) != len(s.oldParties) || len(s.shares) != len(s.oldParties) {
+		return nil
+	}
+	// Verify each dealer's share against their commitments at the local party's ID.
 	for dealer, share := range s.shares {
-		if err := edcurve.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), share); err != nil {
+		if err := edcurve.VerifyScalarShare(s.commits[dealer], uint32(s.selfID), share); err != nil {
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
@@ -186,45 +360,42 @@ func (s *ReshareSession) tryComplete() error {
 			}
 		}
 	}
-	oldSecret, err := s.oldKey.secretBig()
+
+	newSecret := edcurve.ScalarZero()
+	publicKey := append([]byte(nil), s.oldPublicKey...)
+	if s.refreshMode {
+		// Refresh: new_secret = old_secret + Σ f_i(self) mod L.
+		// New commitments = old_commitments + Σ dealer_commitments.
+		oldSecret, err := s.oldKey.secretScalar()
+		if err != nil {
+			return err
+		}
+		newSecret = oldSecret
+		for _, dealer := range s.oldParties {
+			newSecret = edcurve.ScalarAdd(newSecret, s.shares[dealer])
+		}
+	} else {
+		// True reshare: new_secret = Σ g_i(self) mod L.
+		for _, dealer := range s.oldParties {
+			newSecret = edcurve.ScalarAdd(newSecret, s.shares[dealer])
+		}
+	}
+	newSecretBytes := newSecret.Bytes()
+
+	newCommitments, err := s.aggregateCommitments()
 	if err != nil {
 		return err
 	}
-	// new_secret = old_secret + sum_i f_i(self)  (mod order).
-	// Since each f_i(0) = 0, the aggregated polynomial preserves the group secret.
-	newSecret := new(big.Int).Set(oldSecret)
-	for _, dealer := range s.oldKey.Parties {
-		newSecret.Add(newSecret, s.shares[dealer])
-		newSecret.Mod(newSecret, order)
-	}
-	newSecretBytes, err := scalarBytes(newSecret)
-	if err != nil {
-		return err
-	}
-	// New group commitments: sum of all dealers' commitments per degree.
-	newCommitments := make([][]byte, s.cfg.Threshold)
-	for degree := 0; degree < s.cfg.Threshold; degree++ {
-		points := make([]*fed.Point, 0, len(s.oldKey.Parties))
-		for _, dealer := range s.oldKey.Parties {
-			p, err := edcurve.PointFromBytesAllowIdentity(s.commits[dealer][degree])
-			if err != nil {
-				return err
-			}
-			points = append(points, p)
-		}
-		// The old group commitments contribute the existing key share.
-		if degree < len(s.oldKey.GroupCommitments) {
-			oldCommitment, err := edcurve.PointFromBytesAllowIdentity(s.oldKey.GroupCommitments[degree])
-			if err != nil {
-				return err
-			}
-			points = append(points, oldCommitment)
-		}
-		newCommitments[degree] = edcurve.AddPoints(points...).Bytes()
-	}
+
+	// Verify group public key is preserved.
 	if _, err := edcurve.PointFromBytes(newCommitments[0]); err != nil {
 		return fmt.Errorf("invalid reshared group public key: %w", err)
 	}
+	if !bytes.Equal(newCommitments[0], publicKey) {
+		return errors.New("reshared group public key does not match original")
+	}
+	publicKey = append([]byte(nil), newCommitments[0]...)
+
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
 		pub, err := edcurve.EvalCommitments(newCommitments, uint32(id))
@@ -233,14 +404,18 @@ func (s *ReshareSession) tryComplete() error {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
-	reshareTranscriptHash := keygenDomain(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, s.oldKey.Party, newCommitments[0])
+	reshareTranscriptHash := keygenDomain(s.cfg.SessionID, s.newThreshold, s.newParties, s.selfID, publicKey)
+	chainCode := []byte(nil)
+	if s.oldKey != nil {
+		chainCode = append([]byte(nil), s.oldKey.ChainCode...)
+	}
 	s.newShare = &KeyShare{
 		Version:              tss.Version,
-		Party:                s.oldKey.Party,
-		Threshold:            s.cfg.Threshold,
+		Party:                s.selfID,
+		Threshold:            s.newThreshold,
 		Parties:              append([]tss.PartyID(nil), s.newParties...),
-		PublicKey:            append([]byte(nil), newCommitments[0]...),
-		ChainCode:            append([]byte(nil), s.oldKey.ChainCode...),
+		PublicKey:            append([]byte(nil), publicKey...),
+		ChainCode:            chainCode,
 		secret:               newSecretBytes,
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,
@@ -248,10 +423,36 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	s.completed = true
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
-		"party_id", s.oldKey.Party,
+		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.newShare.Validate()
+	return s.newShare.ValidateConsistency()
+}
+
+func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
+	newCommitments := make([][]byte, s.newThreshold)
+	for degree := 0; degree < s.newThreshold; degree++ {
+		points := make([]*fed.Point, 0, len(s.oldParties)+1)
+		for _, dealer := range s.oldParties {
+			p, err := edcurve.PointFromBytesAllowIdentity(s.commits[dealer][degree])
+			if err != nil {
+				return nil, err
+			}
+			points = append(points, p)
+		}
+		if s.refreshMode && degree < len(s.oldKey.GroupCommitments) {
+			oldCommitment, err := edcurve.PointFromBytesAllowIdentity(s.oldKey.GroupCommitments[degree])
+			if err != nil {
+				return nil, err
+			}
+			points = append(points, oldCommitment)
+		}
+		newCommitments[degree] = edcurve.AddPoints(points...).Bytes()
+	}
+	if _, err := edcurve.PointFromBytes(newCommitments[0]); err != nil {
+		return nil, fmt.Errorf("invalid reshared group public key: %w", err)
+	}
+	return newCommitments, nil
 }
 
 func validateReshareCommitments(commitments [][]byte, threshold int) error {

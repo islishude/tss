@@ -1,10 +1,12 @@
 package edwards25519
 
 import (
+	"crypto/rand"
 	"errors"
+	"io"
 	"math/big"
-	"slices"
 
+	fed "filippo.io/edwards25519"
 	fiatscalar "github.com/islishude/tss/internal/fiat/ed25519scalar"
 )
 
@@ -14,12 +16,13 @@ type Scalar struct {
 }
 
 // ScalarFromCanonicalFiat parses a canonical Ed25519 scalar into fiat form.
+// Zero is accepted because canonical scalar encodings are in [0, order).
 func ScalarFromCanonicalFiat(in []byte) (Scalar, error) {
 	if len(in) != 32 {
 		return Scalar{}, errors.New("edwards25519 scalar must be 32 bytes")
 	}
 	x := littleToBig(in)
-	if x.Sign() == 0 || x.Cmp(order) >= 0 {
+	if x.Cmp(order) >= 0 {
 		return Scalar{}, errors.New("edwards25519 scalar out of range")
 	}
 	return FiatScalarFromBig(x), nil
@@ -40,6 +43,19 @@ func FiatScalarFromBig(x *big.Int) Scalar {
 	return out
 }
 
+// FiatScalarFromUint64 returns x reduced modulo the Ed25519 subgroup order.
+func FiatScalarFromUint64(x uint64) Scalar {
+	var raw [32]uint8
+	for i := range 8 {
+		raw[i] = uint8(x >> (8 * i))
+	}
+	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
+	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &raw)
+	var out Scalar
+	fiatscalar.ToMontgomery(&out.mont, &nonMont)
+	return out
+}
+
 // Big returns s as a non-negative integer representative.
 func (s Scalar) Big() *big.Int {
 	return littleToBig(s.Bytes())
@@ -51,7 +67,7 @@ func (s Scalar) Bytes() []byte {
 	fiatscalar.FromMontgomery(&nonMont, &s.mont)
 	var raw [32]uint8
 	fiatscalar.ToBytes(&raw, (*[4]uint64)(&nonMont))
-	return slices.Clone(raw[:])
+	return raw[:]
 }
 
 // IsZero reports whether s is zero.
@@ -87,4 +103,90 @@ func ScalarNeg(a Scalar) Scalar {
 	var out Scalar
 	fiatscalar.Opp(&out.mont, &a.mont)
 	return out
+}
+
+// ScalarInv returns a^-1 modulo the Ed25519 subgroup order.
+func ScalarInv(a Scalar) (Scalar, error) {
+	if a.IsZero() {
+		return Scalar{}, errors.New("zero scalar has no inverse")
+	}
+	fedA, err := a.ToFed()
+	if err != nil {
+		return Scalar{}, err
+	}
+	return FiatScalarFromFed(fed.NewScalar().Invert(fedA)), nil
+}
+
+// ScalarZero returns the zero scalar.
+func ScalarZero() Scalar { return Scalar{} }
+
+// ScalarOne returns the scalar 1.
+func ScalarOne() Scalar {
+	var out Scalar
+	fiatscalar.SetOne(&out.mont)
+	return out
+}
+
+// ScalarEqual reports whether a and b represent the same field element.
+func ScalarEqual(a, b Scalar) bool {
+	return a.mont == b.mont
+}
+
+// FiatScalarFromFed converts a filippo.io/edwards25519 scalar into a fiat scalar
+// without an intermediate big.Int allocation.
+func FiatScalarFromFed(s *fed.Scalar) Scalar {
+	b := s.Bytes() // canonical 32-byte LE, already < order
+	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
+	fiatscalar.FromBytes((*[4]uint64)(&nonMont), (*[32]byte)(b))
+	var out Scalar
+	fiatscalar.ToMontgomery(&out.mont, &nonMont)
+	return out
+}
+
+// ToFed converts the fiat scalar to a filippo.io/edwards25519 scalar
+// without an intermediate allocation.
+func (s Scalar) ToFed() (*fed.Scalar, error) {
+	return fed.NewScalar().SetCanonicalBytes(s.Bytes())
+}
+
+// FiatRandomScalar returns a random non-zero fiat scalar.
+func FiatRandomScalar(reader io.Reader) (Scalar, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	for {
+		var candidate [32]byte
+		if _, err := io.ReadFull(reader, candidate[:]); err != nil {
+			return Scalar{}, err
+		}
+		candidate[0] &= 0x1f
+		if isZeroBE(candidate[:]) || !lessThanOrderBE(candidate[:]) {
+			continue
+		}
+		var le [32]byte
+		for i := range candidate {
+			le[i] = candidate[len(candidate)-1-i]
+		}
+		return ScalarFromCanonicalFiat(le[:])
+	}
+}
+
+func isZeroBE(in []byte) bool {
+	var acc byte
+	for _, b := range in {
+		acc |= b
+	}
+	return acc == 0
+}
+
+func lessThanOrderBE(in []byte) bool {
+	for i, b := range in {
+		if b < orderBE[i] {
+			return true
+		}
+		if b > orderBE[i] {
+			return false
+		}
+	}
+	return false
 }

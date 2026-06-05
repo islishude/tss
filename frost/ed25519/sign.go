@@ -5,33 +5,32 @@ import (
 	stded25519 "crypto/ed25519"
 	"errors"
 	"fmt"
-	"math/big"
+	"sync"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
-	"github.com/islishude/tss/internal/shamir"
 )
 
 // SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
-	key            *KeyShare
-	sessionID      tss.SessionID
-	log            tss.Logger
-	message        []byte
-	signers        []tss.PartyID
-	commitments    map[tss.PartyID]nonceCommitment
-	partials       map[tss.PartyID]*big.Int
-	d              *big.Int
-	e              *big.Int
-	deltaScalar    *big.Int
-	verifyKey      []byte
-	partialSent    bool
-	completed      bool
-	aborted        bool
-	signature      []byte
-	commitMessage  tss.Envelope
-	partialDomains map[tss.PartyID][]byte
+	mu            sync.Mutex
+	key           *KeyShare
+	sessionID     tss.SessionID
+	log           tss.Logger
+	message       []byte
+	signers       []tss.PartyID
+	commitments   map[tss.PartyID]nonceCommitment
+	partials      map[tss.PartyID]edcurve.Scalar
+	d             edcurve.Scalar
+	e             edcurve.Scalar
+	deltaScalar   edcurve.Scalar
+	verifyKey     []byte
+	partialSent   bool
+	completed     bool
+	aborted       bool
+	signature     []byte
+	commitMessage tss.Envelope
 }
 
 type nonceCommitment struct {
@@ -50,7 +49,7 @@ func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, me
 
 // StartSignWithOptions starts a FROST signing session with optional HD additive shift.
 func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions) (*SignSession, []tss.Envelope, error) {
-	if err := key.Validate(); err != nil {
+	if err := key.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
 	signers = tss.SortParties(signers)
@@ -64,13 +63,13 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		return nil, nil, err
 	}
 	verifyKey := key.PublicKeyBytes()
-	var deltaScalar *big.Int
+	var deltaScalar edcurve.Scalar
 	if len(opts.AdditiveShift) > 0 {
 		shift, err := edcurve.ScalarFromCanonical(opts.AdditiveShift)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
 		}
-		deltaScalar = edcurve.ScalarToBig(shift)
+		deltaScalar = edcurve.FiatScalarFromFed(shift)
 		verifyKey, err = DerivePublicKey(key.PublicKey, opts.AdditiveShift)
 		if err != nil {
 			return nil, nil, err
@@ -78,22 +77,24 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	}
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	_, d, err := edcurve.RandomScalar(nil)
+	d, err := edcurve.FiatRandomScalar(nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	_, e, err := edcurve.RandomScalar(nil)
+	e, err := edcurve.FiatRandomScalar(nil)
 	if err != nil {
 		return nil, nil, err
 	}
-	dPoint, err := edcurve.ScalarBaseMultBig(d)
+	dFed, err := d.ToFed()
 	if err != nil {
 		return nil, nil, err
 	}
-	ePoint, err := edcurve.ScalarBaseMultBig(e)
+	eFed, err := e.ToFed()
 	if err != nil {
 		return nil, nil, err
 	}
+	dPoint := fed.NewIdentityPoint().ScalarBaseMult(dFed)
+	ePoint := fed.NewIdentityPoint().ScalarBaseMult(eFed)
 	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes()})
 	if err != nil {
 		return nil, nil, err
@@ -114,7 +115,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		message:       append([]byte(nil), message...),
 		signers:       signers,
 		commitments:   map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
-		partials:      make(map[tss.PartyID]*big.Int),
+		partials:      make(map[tss.PartyID]edcurve.Scalar),
 		d:             d,
 		e:             e,
 		deltaScalar:   deltaScalar,
@@ -135,6 +136,8 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}
@@ -160,12 +163,15 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		if env.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("commitment must be round 1"))
 		}
-		if _, ok := s.commitments[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate nonce commitment"))
-		}
 		p, err := unmarshalNonceCommitmentPayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if existing, ok := s.commitments[env.From]; ok {
+			if bytes.Equal(existing.D, p.D) && bytes.Equal(existing.E, p.E) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting nonce commitment"))
 		}
 		s.commitments[env.From] = p
 		return s.tryEmitPartial()
@@ -173,22 +179,21 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		if env.Round != 2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("partial signature must be round 2"))
 		}
-		if _, ok := s.partials[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate partial signature"))
-		}
 		p, err := unmarshalSignPartialPayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonical(p.Z)
+		partial, err := edcurve.ScalarFromCanonicalFiat(p.Z)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.partials[env.From] = edcurve.ScalarToBig(scalar)
-		if s.partialDomains == nil {
-			s.partialDomains = make(map[tss.PartyID][]byte)
+		if existing, ok := s.partials[env.From]; ok {
+			if edcurve.ScalarEqual(existing, partial) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting partial signature"))
 		}
-		s.partialDomains[env.From] = signPartialDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, env.From, s.key.PublicKey)
+		s.partials[env.From] = partial
 		return nil, s.tryAggregate()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
@@ -197,10 +202,27 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 
 // Signature returns the completed RFC 8032 Ed25519 signature.
 func (s *SignSession) Signature() ([]byte, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed {
 		return nil, false
 	}
 	return append([]byte(nil), s.signature...), true
+}
+
+// VerifyKey returns the Ed25519 public key used for signature verification.
+// When HD additive shift is in use, this is the derived (shifted) child key;
+// otherwise it is the original group public key.
+func (s *SignSession) VerifyKey() []byte {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]byte(nil), s.verifyKey...)
 }
 
 func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
@@ -211,37 +233,31 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	_, c := edcurve.Ed25519Challenge(R.Bytes(), s.verifyKey, s.message)
+	c := edcurve.Ed25519ChallengeFiat(R.Bytes(), s.verifyKey, s.message)
 
-	lambda, err := shamir.LagrangeCoefficient(s.key.Party, s.signers, edcurve.Order())
+	lambda, err := lagrangeCoefficientScalar(s.key.Party, s.signers)
 	if err != nil {
 		return nil, err
 	}
-	secret, err := s.key.secretBig()
+	x, err := s.key.secretScalar()
 	if err != nil {
 		return nil, err
 	}
-	// z_i = d_i + rho_i*e_i + lambda_i*c*(x_i + delta). With an HD additive
-	// shift delta, the signing share is effectively x_i + delta, and the
-	// group public key is A + delta*B.
-	// z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
-	lambdaC := new(big.Int).Mul(lambda, c)
-	lambdaC.Mod(lambdaC, edcurve.Order())
-	z := new(big.Int).Mul(rhos[s.key.Party], s.e)
-	z.Add(z, s.d)
-	lcs := new(big.Int).Mul(lambdaC, secret)
-	z.Add(z, lcs)
-	if s.deltaScalar != nil {
-		shiftTerm := new(big.Int).Mul(lambdaC, s.deltaScalar)
-		shiftTerm.Mod(shiftTerm, edcurve.Order())
-		z.Add(z, shiftTerm)
+
+	// z_i = d_i + rho_i*e_i + lambda_i*c*(x_i + delta).
+	// With HD additive shift delta: z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
+	lambdaC := edcurve.ScalarMul(lambda, c)
+	rho := rhos[s.key.Party]
+	z := edcurve.ScalarMul(rho, s.e)
+	z = edcurve.ScalarAdd(z, s.d)
+	lcs := edcurve.ScalarMul(lambdaC, x)
+	z = edcurve.ScalarAdd(z, lcs)
+	if !s.deltaScalar.IsZero() {
+		shiftTerm := edcurve.ScalarMul(lambdaC, s.deltaScalar)
+		z = edcurve.ScalarAdd(z, shiftTerm)
 	}
-	z.Mod(z, edcurve.Order())
 	s.partials[s.key.Party] = z
-	zBytes, err := scalarBytes(z)
-	if err != nil {
-		return nil, err
-	}
+	zBytes := z.Bytes()
 	payload, err := marshalSignPartialPayload(signPartialPayload{Z: zBytes})
 	if err != nil {
 		return nil, err
@@ -271,9 +287,8 @@ func (s *SignSession) tryAggregate() error {
 		return err
 	}
 	RBytes := R.Bytes()
-	_, c := edcurve.Ed25519Challenge(RBytes, s.verifyKey, s.message)
-	order := edcurve.Order()
-	z := new(big.Int)
+	c := edcurve.Ed25519ChallengeFiat(RBytes, s.verifyKey, s.message)
+	z := edcurve.ScalarZero()
 	for _, id := range s.signers {
 		partial := s.partials[id]
 		// Verify each partial before aggregation so failures can be blamed on a signer.
@@ -286,13 +301,9 @@ func (s *SignSession) tryAggregate() error {
 				Err:   err,
 			}
 		}
-		z.Add(z, partial)
-		z.Mod(z, order)
+		z = edcurve.ScalarAdd(z, partial)
 	}
-	zBytes, err := scalarBytes(z)
-	if err != nil {
-		return err
-	}
+	zBytes := z.Bytes()
 	sig := append(append([]byte(nil), RBytes...), zBytes...)
 	if !stded25519.Verify(stded25519.PublicKey(s.verifyKey), s.message, sig) {
 		return &tss.ProtocolError{
@@ -307,11 +318,7 @@ func (s *SignSession) tryAggregate() error {
 	return nil
 }
 
-func (s *SignSession) verifyPartial(id tss.PartyID, z, rho, challenge *big.Int) error {
-	domain := signPartialDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, id, s.key.PublicKey)
-	if stored, ok := s.partialDomains[id]; ok && !bytes.Equal(stored, domain) {
-		return errors.New("partial signature domain mismatch")
-	}
+func (s *SignSession) verifyPartial(id tss.PartyID, z edcurve.Scalar, rho edcurve.Scalar, challenge edcurve.Scalar) error {
 	commitment := s.commitments[id]
 	D, err := edcurve.PointFromBytes(commitment.D)
 	if err != nil {
@@ -329,35 +336,37 @@ func (s *SignSession) verifyPartial(id tss.PartyID, z, rho, challenge *big.Int) 
 	if err != nil {
 		return err
 	}
-	if s.deltaScalar != nil {
-		deltaScalar, err := edcurve.ScalarFromBig(s.deltaScalar)
+	if !s.deltaScalar.IsZero() {
+		deltaFed, err := s.deltaScalar.ToFed()
 		if err != nil {
 			return err
 		}
-		deltaPoint := fed.NewIdentityPoint().ScalarBaseMult(deltaScalar)
+		deltaPoint := fed.NewIdentityPoint().ScalarBaseMult(deltaFed)
 		Y = edcurve.AddPoints(Y, deltaPoint)
 	}
-	lambda, err := shamir.LagrangeCoefficient(id, s.signers, edcurve.Order())
+	lambda, err := lagrangeCoefficientScalar(id, s.signers)
 	if err != nil {
 		return err
 	}
-	left, err := edcurve.ScalarBaseMultBig(z)
-	if err != nil {
-		return err
-	}
-	rhoScalar, err := edcurve.ScalarFromBig(rho)
-	if err != nil {
-		return err
-	}
-	rhoE := fed.NewIdentityPoint().ScalarMult(rhoScalar, E)
-	lc := new(big.Int).Mul(lambda, challenge)
-	lc.Mod(lc, edcurve.Order())
-	lcScalar, err := edcurve.ScalarFromBig(lc)
-	if err != nil {
-		return err
-	}
-	lcY := fed.NewIdentityPoint().ScalarMult(lcScalar, Y)
+
 	// Check [z_i]B = D_i + [rho_i]E_i + [lambda_i*c]Y_i.
+	zFed, err := z.ToFed()
+	if err != nil {
+		return err
+	}
+	left := fed.NewIdentityPoint().ScalarBaseMult(zFed)
+
+	rhoFed, err := rho.ToFed()
+	if err != nil {
+		return err
+	}
+	rhoE := fed.NewIdentityPoint().ScalarMult(rhoFed, E)
+	lc := edcurve.ScalarMul(lambda, challenge)
+	lcFed, err := lc.ToFed()
+	if err != nil {
+		return err
+	}
+	lcY := fed.NewIdentityPoint().ScalarMult(lcFed, Y)
 	right := edcurve.AddPoints(D, rhoE, lcY)
 	if left.Equal(right) != 1 {
 		return errors.New("partial verification equation failed")
@@ -365,8 +374,8 @@ func (s *SignSession) verifyPartial(id tss.PartyID, z, rho, challenge *big.Int) 
 	return nil
 }
 
-func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*big.Int, error) {
-	rhos := make(map[tss.PartyID]*big.Int, len(s.signers))
+func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]edcurve.Scalar, error) {
+	rhos := make(map[tss.PartyID]edcurve.Scalar, len(s.signers))
 	terms := make([]*fed.Point, 0, len(s.signers))
 	for _, id := range s.signers {
 		commitment, ok := s.commitments[id]
@@ -383,7 +392,7 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*big.Int, e
 		if err != nil {
 			return nil, nil, err
 		}
-		rhoScalar, err := edcurve.ScalarFromBig(rho)
+		rhoScalar, err := rho.ToFed()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -397,12 +406,14 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*big.Int, e
 	return R, rhos, nil
 }
 
-func (s *SignSession) bindingFactor(id tss.PartyID) *big.Int {
-	domain := signingBindingFactorDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, s.key.PublicKey)
+func (s *SignSession) bindingFactor(id tss.PartyID) edcurve.Scalar {
+	// Bind the actual verification key (shifted for HD, original otherwise)
+	// so that the binding factor commits to the key the verifier will use.
+	domain := signingBindingFactorDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, s.verifyKey)
 	parts := [][]byte{
 		[]byte(rfc9591ContextString + "rho"),
 		domain,
-		s.key.PublicKey,
+		s.verifyKey,
 		s.message,
 	}
 	for _, signer := range s.signers {
@@ -411,8 +422,7 @@ func (s *SignSession) bindingFactor(id tss.PartyID) *big.Int {
 		parts = append(parts, s.commitments[signer].D, s.commitments[signer].E)
 	}
 	parts = append(parts, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-	_, rho := edcurve.HashToScalar(parts...)
-	return rho
+	return edcurve.HashToFiatScalar(parts...)
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
@@ -433,7 +443,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	ids := make([]tss.PartyID, len(signers))
 	shares := make(map[tss.PartyID]*KeyShare, len(signers))
 	for i, share := range signers {
-		if err := share.Validate(); err != nil {
+		if err := share.ValidateConsistency(); err != nil {
 			return nil, nil, err
 		}
 		ids[i] = share.Party
@@ -483,10 +493,10 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			}
 		}
 	}
-	for _, id := range ids {
-		if sig, ok := sessions[id].Signature(); ok {
-			return signers[0].PublicKeyBytes(), sig, nil
-		}
+	sig, ok := sessions[ids[0]].Signature()
+	if !ok {
+		return nil, nil, errors.New("signature not completed")
 	}
-	return nil, nil, errors.New("signature not completed")
+	// Return the actual verification key — shifted when HD additive shift is in use.
+	return sessions[ids[0]].VerifyKey(), sig, nil
 }

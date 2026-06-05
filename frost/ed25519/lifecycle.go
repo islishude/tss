@@ -1,9 +1,8 @@
 package ed25519
 
 import (
-	"math/big"
-
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -11,8 +10,10 @@ func (s *KeygenSession) Destroy() {
 	if s == nil {
 		return
 	}
-	clearBigIntMap(s.shares)
-	clearBigInts(s.ownPoly)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clearScalarMap(s.shares)
+	clearScalars(s.ownPoly)
 	clearEnvelopePayloads(s.ownMessages)
 	for _, cc := range s.chainCodes {
 		clear(cc)
@@ -30,37 +31,45 @@ func (s *SignSession) Destroy() {
 	if s == nil {
 		return
 	}
-	clearBigInt(s.d)
-	clearBigInt(s.e)
-	clearBigInt(s.deltaScalar)
-	clearBigIntMap(s.partials)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Zero constant-time fiat scalars in place.
+	s.d = edcurve.ScalarZero()
+	s.e = edcurve.ScalarZero()
+	s.deltaScalar = edcurve.ScalarZero()
+	for id := range s.partials {
+		s.partials[id] = edcurve.ScalarZero()
+		delete(s.partials, id)
+	}
 	clear(s.message)
-	s.d = nil
-	s.e = nil
-	s.deltaScalar = nil
 	s.message = nil
 }
 
-func clearBigInts(xs []*big.Int) {
-	for i := range xs {
-		clearBigInt(xs[i])
-		xs[i] = nil
-	}
-}
-
-func clearBigIntMap(xs map[tss.PartyID]*big.Int) {
-	for id, x := range xs {
-		clearBigInt(x)
-		delete(xs, id)
-	}
-}
-
-func clearBigInt(x *big.Int) {
-	if x == nil {
+// Destroy clears local reshare material retained by the reshare session.
+func (s *ReshareSession) Destroy() {
+	if s == nil {
 		return
 	}
-	clear(x.Bits())
-	x.SetInt64(0)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	clearScalarMap(s.shares)
+	if s.newShare != nil {
+		s.newShare.Destroy()
+	}
+	s.newShare = nil
+}
+
+func clearScalars(xs []edcurve.Scalar) {
+	for i := range xs {
+		xs[i] = edcurve.ScalarZero()
+	}
+}
+
+func clearScalarMap(xs map[tss.PartyID]edcurve.Scalar) {
+	for id := range xs {
+		xs[id] = edcurve.ScalarZero()
+		delete(xs, id)
+	}
 }
 
 func clearEnvelopePayloads(envelopes []tss.Envelope) {

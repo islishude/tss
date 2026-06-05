@@ -1,6 +1,15 @@
+// Package ed25519 implements FROST Ed25519 threshold signatures.
+//
+// Session types (SignSession, KeygenSession, ReshareSession) serialize message
+// handling internally, so concurrent delivery cannot race state mutation.
+//
+// Duplicate messages with identical payloads are ignored and do not change
+// session state. Sending a different payload for the same round and sender pair
+// is rejected as equivocation with ErrCodeVerification.
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 
 	"github.com/islishude/tss"
@@ -23,4 +32,16 @@ func shouldAbortSession(err error) bool {
 		return false
 	}
 	return protocolErr.Code == tss.ErrCodeVerification || protocolErr.Blame != nil
+}
+
+func equalByteSlices(a, b [][]byte) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if !bytes.Equal(a[i], b[i]) {
+			return false
+		}
+	}
+	return true
 }

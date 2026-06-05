@@ -302,10 +302,18 @@ sig, ok := sess.Signature()
 ### Resharing
 
 ```go
-sess, out, err := StartReshare(oldShare, config, newParties)
+sess, out, err := StartReshare(oldShare, newParties, newThreshold, config)
+recipient, err := StartReshareRecipient(oldPublicKey, oldParties, newParties, newThreshold, config)
+refresh, out, err := StartRefresh(oldShare, config)
 out, err := sess.HandleReshareMessage(env)
 newShare, ok := sess.KeyShare()
 ```
+
+Old committee members call `StartReshare` and act as dealers. A participant
+that is only in the new committee calls `StartReshareRecipient` with the old
+group public key so the completed share can verify `oldPK == newPK`. Same-party
+proactive refresh uses `StartRefresh`, which preserves the participant set and
+threshold.
 
 ### BIP32 HD
 
@@ -317,8 +325,8 @@ shiftedPub, err := DerivePublicKey(pubKey, additiveShift)
 ### Convenience
 
 ```go
-sig, err := Sign(message, shares)
-sig, err := SignWithOptions(message, shares, opts)
+pub, sig, err := Sign(message, shares)
+pub, sig, err := SignWithOptions(message, shares, opts)
 share, err := UnmarshalKeyShare(raw)
 ```
 

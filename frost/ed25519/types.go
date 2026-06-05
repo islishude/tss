@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
@@ -184,6 +185,52 @@ func (k *KeyShare) Validate() error {
 	return nil
 }
 
+// ValidateConsistency checks that the key share's cryptographic invariants hold:
+// the public key matches the group commitments, each verification share is derived
+// from those commitments, and the local secret share is consistent with its
+// verification share. Call this after UnmarshalKeyShare or before using a key
+// share recovered from persistent storage.
+func (k *KeyShare) ValidateConsistency() error {
+	if err := k.Validate(); err != nil {
+		return err
+	}
+	// PublicKey must equal GroupCommitments evaluated at 0.
+	commit0, err := edcurve.EvalCommitments(k.GroupCommitments, 0)
+	if err != nil {
+		return fmt.Errorf("cannot evaluate group commitments at 0: %w", err)
+	}
+	if !bytes.Equal(commit0, k.PublicKey) {
+		return errors.New("group public key does not match first group commitment")
+	}
+	// Verification shares must equal commitments evaluated at each party's ID.
+	for _, vs := range k.VerificationShares {
+		expected, err := edcurve.EvalCommitments(k.GroupCommitments, uint32(vs.Party))
+		if err != nil {
+			return fmt.Errorf("cannot evaluate commitments for party %d: %w", vs.Party, err)
+		}
+		if !bytes.Equal(expected, vs.PublicKey) {
+			return fmt.Errorf("verification share for party %d does not match group commitments", vs.Party)
+		}
+	}
+	// Secret share * B must equal the local verification share.
+	secretScalar, err := k.secretScalar()
+	if err != nil {
+		return fmt.Errorf("cannot decode secret share: %w", err)
+	}
+	wantPub, ok := k.verificationShare(k.Party)
+	if !ok {
+		return errors.New("missing verification share for local party")
+	}
+	secretPub, err := edcurve.ScalarBaseMult(secretScalar)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(secretPub.Bytes(), wantPub) {
+		return errors.New("secret share inconsistent with verification share")
+	}
+	return nil
+}
+
 // Destroy zeros the local scalar share bytes in place.
 func (k *KeyShare) Destroy() {
 	if k == nil {
@@ -193,12 +240,8 @@ func (k *KeyShare) Destroy() {
 	clear(k.secret)
 }
 
-func (k *KeyShare) secretBig() (*big.Int, error) {
-	s, err := edcurve.ScalarFromCanonical(k.secret)
-	if err != nil {
-		return nil, err
-	}
-	return edcurve.ScalarToBig(s), nil
+func (k *KeyShare) secretScalar() (edcurve.Scalar, error) {
+	return edcurve.ScalarFromCanonicalFiat(k.secret)
 }
 
 func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {

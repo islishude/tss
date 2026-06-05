@@ -118,11 +118,11 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sign.d == nil || sign.e == nil || len(sign.partials) == 0 {
+	if sign.d.IsZero() || sign.e.IsZero() || len(sign.partials) == 0 {
 		t.Fatal("sign session did not retain expected local secret material")
 	}
 	sign.Destroy()
-	if sign.d != nil || sign.e != nil {
+	if !sign.d.IsZero() || !sign.e.IsZero() {
 		t.Fatal("signing nonces were not released")
 	}
 	if len(sign.partials) != 0 {

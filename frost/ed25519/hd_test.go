@@ -225,8 +225,8 @@ func TestHDSignSingleSigner(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(pub, share.PublicKey) {
-		t.Fatal("Sign returns original public key")
+	if !bytes.Equal(pub, childPub) {
+		t.Fatal("SignWithOptions with additive shift returns shifted public key")
 	}
 	if !stded25519.Verify(stded25519.PublicKey(childPub), msg, sig) {
 		t.Fatal("HD signature did not verify against derived public key")
@@ -254,8 +254,8 @@ func TestHDSign2Of3(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(pub, key1.PublicKey) {
-		t.Fatal("Sign returns original public key")
+	if !bytes.Equal(pub, childPub) {
+		t.Fatal("SignWithOptions with additive shift returns shifted public key")
 	}
 	if !stded25519.Verify(stded25519.PublicKey(childPub), msg, sig) {
 		t.Fatal("HD threshold signature did not verify against derived key")

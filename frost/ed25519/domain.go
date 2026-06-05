@@ -16,14 +16,12 @@ const frostDomainVersion = "frost-ed25519-domain-v1"
 const (
 	domainLabelKeygen            = "keygen"
 	domainLabelSignBindingFactor = "sign.binding-factor"
-	domainLabelSignPartial       = "sign.partial"
 )
 
 // Domain kinds identify the cryptographic object bound into a proof.
 const (
-	domainKindCommitment       = "commitment"
-	domainKindRho              = "rho"
-	domainKindPartialSignature = "partial-signature"
+	domainKindCommitment = "commitment"
+	domainKindRho        = "rho"
 )
 
 // frostDomainContext carries the protocol-level fields that are bound into
@@ -63,20 +61,6 @@ func signingBindingFactorDomain(sessionID tss.SessionID, threshold int, parties,
 		parties:   parties,
 		signers:   signers,
 		kind:      domainKindRho,
-		publicKey: publicKey,
-	})
-}
-
-// signPartialDomain returns the domain separator for partial signature verification.
-func signPartialDomain(sessionID tss.SessionID, threshold int, parties, signers []tss.PartyID, sender tss.PartyID, publicKey []byte) []byte {
-	return frostProofDomain(frostDomainContext{
-		label:     domainLabelSignPartial,
-		sessionID: sessionID,
-		threshold: threshold,
-		parties:   parties,
-		signers:   signers,
-		sender:    sender,
-		kind:      domainKindPartialSignature,
 		publicKey: publicKey,
 	})
 }

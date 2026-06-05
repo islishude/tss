@@ -73,3 +73,17 @@ func TestVerifyShare(t *testing.T) {
 		}
 	}
 }
+
+func TestPointFromBytesRejectsTorsionComponent(t *testing.T) {
+	lowOrder, err := fed.NewIdentityPoint().SetBytes(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixed := AddPoints(fed.NewGeneratorPoint(), lowOrder)
+	if _, err := PointFromBytes(mixed.Bytes()); err == nil {
+		t.Fatal("point with torsion component should be rejected")
+	}
+	if _, err := PointFromBytesAllowIdentity(mixed.Bytes()); err == nil {
+		t.Fatal("point with torsion component should be rejected even when identity is allowed")
+	}
+}

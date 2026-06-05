@@ -1,28 +1,29 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
+	"sync"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
-	"github.com/islishude/tss/internal/shamir"
 )
 
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
+	mu          sync.Mutex
 	cfg         tss.ThresholdConfig
 	log         tss.Logger
 	commits     map[tss.PartyID][][]byte
-	shares      map[tss.PartyID]*big.Int
+	shares      map[tss.PartyID]edcurve.Scalar
 	chainCodes  map[tss.PartyID][]byte
 	completed   bool
 	aborted     bool
 	keyShare    *KeyShare
-	ownPoly     []*big.Int
+	ownPoly     []edcurve.Scalar
 	ownMessages []tss.Envelope
 }
 
@@ -47,14 +48,14 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	}
 	parties := config.SortedParties()
 	config.Parties = parties
-	poly, err := shamir.RandomPolynomial(config.Reader(), edcurve.Order(), config.Threshold, nil)
+	poly, err := randomScalarPolynomial(config.Reader(), config.Threshold, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		// Each coefficient commitment lets receivers validate their private share.
-		point, err := edcurve.ScalarBaseMultBig(coeff)
+		point, err := edcurve.ScalarBaseMult(coeff)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -71,7 +72,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		cfg:     config,
 		log:     config.Logger(),
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, edcurve.Order())},
+		shares:  map[tss.PartyID]edcurve.Scalar{config.Self: evalScalarPolynomial(poly, config.Self)},
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
@@ -88,11 +89,8 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		if id == config.Self {
 			continue
 		}
-		share := shamir.Eval(poly, id, edcurve.Order())
-		shareBytes, err := scalarBytes(share)
-		if err != nil {
-			return nil, nil, err
-		}
+		share := evalScalarPolynomial(poly, id)
+		shareBytes := share.Bytes()
 		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: shareBytes})
 		if err != nil {
 			return nil, nil, err
@@ -112,6 +110,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}
@@ -134,15 +134,18 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	}
 	switch env.PayloadType {
 	case payloadKeygenCommitments:
-		if _, ok := s.commits[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
-		}
 		p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+		if existing, ok := s.commits[env.From]; ok {
+			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodes[env.From], p.ChainCode) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting commitments"))
 		}
 		s.commits[env.From] = p.Commitments
 		if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
@@ -153,18 +156,21 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		if err := requireDirectConfidential(env, s.cfg.Self, payloadKeygenShare); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if _, ok := s.shares[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
-		}
 		p, err := unmarshalKeygenSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonical(p.Share)
+		scalar, err := edcurve.ScalarFromCanonicalFiat(p.Share)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		s.shares[env.From] = edcurve.ScalarToBig(scalar)
+		if existing, ok := s.shares[env.From]; ok {
+			if edcurve.ScalarEqual(existing, scalar) {
+				return nil, nil
+			}
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting share"))
+		}
+		s.shares[env.From] = scalar
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -173,7 +179,12 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 
 // KeyShare returns the completed local key share when DKG has finished.
 func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed {
 		return nil, false
 	}
 	return cloneKeyShareValue(s.keyShare), true
@@ -186,10 +197,9 @@ func (s *KeygenSession) tryComplete() error {
 	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) {
 		return nil
 	}
-	order := edcurve.Order()
 	for dealer, share := range s.shares {
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		if err := edcurve.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
+		if err := edcurve.VerifyScalarShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
@@ -203,15 +213,11 @@ func (s *KeygenSession) tryComplete() error {
 			}
 		}
 	}
-	secret := new(big.Int)
+	secret := edcurve.ScalarZero()
 	for _, dealer := range s.cfg.Parties {
-		secret.Add(secret, s.shares[dealer])
-		secret.Mod(secret, order)
+		secret = edcurve.ScalarAdd(secret, s.shares[dealer])
 	}
-	secretBytes, err := scalarBytes(secret)
-	if err != nil {
-		return err
-	}
+	secretBytes := secret.Bytes()
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*fed.Point, 0, len(s.cfg.Parties))
@@ -258,7 +264,7 @@ func (s *KeygenSession) tryComplete() error {
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.keyShare.Validate()
+	return s.keyShare.ValidateConsistency()
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {
