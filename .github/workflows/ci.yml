@@ -11,10 +11,6 @@ on:
 permissions:
   contents: read
 
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   # Fast checks that gate before running the heavier test matrix.
   check:
@@ -95,7 +91,7 @@ jobs:
       - name: Run race detector on integration code
         run: go test -race -timeout 15m -tags=integration ./cggmp21/secp256k1/ ./internal/mta/ ./internal/zk/paillier/
 
-  # Tier 3 + Tier 4: Production security-parameter tests and stress.
+  # Tier 3: Production security-parameter tests.
   # Runs on main pushes and scheduled nightly runs only.
   test-slow:
     name: Test Slow / Stress
@@ -114,6 +110,22 @@ jobs:
 
       - name: Run Tier 3 slowcrypto tests
         run: make test-slowcrypto
+
+  # Tier 4: Production security-parameter stress.
+  test-stress:
+    name: Test Stress
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
 
       - name: Run Tier 4 stress tests
         run: make test-stress

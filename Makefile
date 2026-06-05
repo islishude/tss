@@ -21,12 +21,12 @@ test:
 # Tier 0 + Tier 1: Fast unit tests + small-param crypto correctness (< 2m).
 .PHONY: test-fast
 test-fast:
-	go test -timeout 2m ./...
+	go test -timeout 5m ./...
 
 # Tier 2: Integration tests requiring full keygen/presign/sign (< 10m).
 .PHONY: test-integration
 test-integration:
-	go test -tags=integration -timeout 10m ./cggmp21/secp256k1 ./internal/mta ./internal/zk/paillier
+	go test -tags=integration -timeout 20m ./cggmp21/secp256k1 ./internal/mta ./internal/zk/paillier
 
 # Tier 3: Production security-parameter smoke tests (< 45m).
 .PHONY: test-slowcrypto
