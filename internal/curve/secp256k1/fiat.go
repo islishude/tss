@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"math/big"
+	"slices"
 
 	fiatfield "github.com/islishude/tss/internal/fiat/secp256k1field"
 	fiatscalar "github.com/islishude/tss/internal/fiat/secp256k1scalar"
@@ -54,7 +55,7 @@ func ScalarFromBytes(in []byte) (Scalar, error) {
 	if !lt32BE(be, scalarModulus) {
 		return Scalar{}, errors.New("secp256k1 scalar out of range")
 	}
-	reverse32(&be) // convert to little-endian for fiat-crypto
+	slices.Reverse(be[:]) // convert to little-endian for fiat-crypto
 	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
 	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &be)
 	var out Scalar
@@ -68,7 +69,7 @@ func (s Scalar) Bytes() []byte {
 	fiatscalar.FromMontgomery(&nonMont, &s.mont)
 	var raw [32]byte
 	fiatscalar.ToBytes(&raw, (*[4]uint64)(&nonMont))
-	reverse32(&raw)
+	slices.Reverse(raw[:])
 	return raw[:]
 }
 
@@ -158,7 +159,7 @@ func FieldElementFromBytes(in []byte) (FieldElement, error) {
 	if !lt32BE(be, fieldModulus) {
 		return FieldElement{}, errors.New("secp256k1 field element out of range")
 	}
-	reverse32(&be) // convert to little-endian for fiat-crypto
+	slices.Reverse(be[:]) // convert to little-endian for fiat-crypto
 	var nonMont fiatfield.NonMontgomeryDomainFieldElement
 	fiatfield.FromBytes((*[4]uint64)(&nonMont), &be)
 	var out FieldElement
@@ -172,7 +173,7 @@ func (f FieldElement) Bytes() []byte {
 	fiatfield.FromMontgomery(&nonMont, &f.mont)
 	var raw [32]byte
 	fiatfield.ToBytes(&raw, (*[4]uint64)(&nonMont))
-	reverse32(&raw)
+	slices.Reverse(raw[:]) // convert to big-endian for output
 	return raw[:]
 }
 
@@ -286,12 +287,6 @@ func fieldEq(a, b FieldElement) uint64 {
 		(a.mont[2] ^ b.mont[2]) |
 		(a.mont[3] ^ b.mont[3])
 	return nonzeroTo01(or) ^ 1 // invert: 1 if equal (or==0), 0 otherwise
-}
-
-func reverse32(b *[32]byte) {
-	for i, j := 0, 31; i < j; i, j = i+1, j-1 {
-		b[i], b[j] = b[j], b[i]
-	}
 }
 
 func lt32BE(a, b [32]byte) bool {
