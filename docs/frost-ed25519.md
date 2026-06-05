@@ -97,13 +97,18 @@ Signing operates in two rounds. Only `threshold` or more signers from the origin
 
 ### Round 1: Nonce Commitments
 
-Each signer `i` samples two random nonces:
+Each signer `i` derives two hedged nonces with RFC 9591 `H3`:
 
 ```
-(d_i, e_i) ← Z_q
+d_i = H3(random32 || SerializeScalar(x_i))
+e_i = H3(random32 || SerializeScalar(x_i))
 ```
 
-and broadcasts their public commitments:
+`random32` comes from `SignOptions.NonceReader` or `crypto/rand.Reader`.
+The session stores the canonical nonce bytes only until the round-2 partial is
+constructed. After that point the nonce bytes are cleared and set to `nil`.
+
+The signer broadcasts the public commitments:
 
 ```
 D_i = d_i · B
@@ -117,12 +122,16 @@ These are sent as a `nonceCommitment` payload in a round-1 broadcast envelope.
 After collecting all signers' nonce commitments, each signer computes the binding factor `ρ_i` (per RFC 9591):
 
 ```
-ρ_i = H1("FROST-ED25519-SHA512-v1rho" || domain || PK || message || ordered_commitments || i)
+encoded = Σ SerializeScalar(i) || D_i || E_i   // sorted by participant id
+msg_hash = H4(message)
+commitment_hash = H5(encoded)
+ρ_i = H1(PK || msg_hash || commitment_hash || SerializeScalar(i))
 ```
 
-where `domain` binds `(session ID, threshold, all parties, signers, group public key)`, and `ordered_commitments` lists `(signer_id, D, E)` for each signer in ascending ID order.
-
-`H1` is implemented via `HashToScalar` which uses SHA-512 and truncates to the scalar field.
+`PK` is the actual verification key for the signature: the original group key
+for normal signing, or the shifted child key when HD additive signing is used.
+`H1`, `H4`, and `H5` use the RFC 9591 Ed25519 ciphersuite context string
+`"FROST-ED25519-SHA512-v1"` with the `"rho"`, `"msg"`, and `"com"` labels.
 
 ### Group Commitment
 
@@ -160,6 +169,11 @@ With an HD additive shift `δ`:
 z_i = d_i + ρ_i·e_i + λ_i·c·(x_i + δ)   mod q
 ```
 
+The signing session clears `d_i` and `e_i` immediately after the partial
+payload is constructed. Call `SignSession.Destroy()` when the session is no
+longer needed to clear message copies, partials, shifted verification keys, and
+remaining session-owned material on a best-effort basis.
+
 ### Aggregation and Verification
 
 Each signer verifies every received partial `z_j` before aggregation:
@@ -194,25 +208,34 @@ pub, sig, err := ed25519.Sign(message, []*KeyShare{share1, share2})
 
 ## Resharing
 
-Resharing updates the threshold or participant set while preserving the group public key. It uses a **zero-coefficient polynomial refresh**: each existing party samples a fresh polynomial with constant term zero.
+Resharing updates the threshold or participant set while preserving the group
+public key. True resharing requires all old parties to be online as dealers.
+`StartRefresh` is the same-party proactive-refresh variant.
 
 ### Protocol
 
-Each party `i` from the original participant set:
+For true resharing, each party `i` from the original participant set:
 
-1. Samples `g_i(x)` where `g_i(0) = 0` and `deg(g_i) = threshold_new - 1`.
-2. Broadcasts commitments `C'_{i,k} = g_{i,k}·B`.
-3. Sends private shares `g_i(j)` to each party `j` in the new participant set.
+1. Computes `w_i = λ_i(old, 0) · x_i`.
+2. Samples `g_i(x)` where `g_i(0) = w_i` and `deg(g_i) = threshold_new - 1`.
+3. Broadcasts commitments `C'_{i,k} = g_{i,k}·B`.
+4. Sends private shares `g_i(j)` to each party `j` in the new participant set.
 
 Each receiver `j` verifies each share against its dealer's commitments, then computes:
 
 ```
-x'_j = x_j + Σ_{i} g_i(j)   mod q
+x'_j = Σ_i g_i(j)   mod q
 ```
 
-Since `Σ_i g_i(0) = 0`, the group secret (and thus the group public key) is preserved.
+Since `Σ_i g_i(0)` reconstructs the old group secret, the group public key is
+preserved. `StartRefresh` instead uses zero-constant polynomials and adds the
+refresh shares to the existing local share.
 
-New group commitments are the sum of old group commitments plus all reshare commitments. The chain code is preserved from the original key share.
+New group commitments are the sum of all reshare commitments, plus the old
+commitments in refresh mode. The chain code is preserved from the original key
+metadata. A new recipient that does not hold an old `KeyShare` must receive the
+old 32-byte chain code out of band and pass it to `StartReshareRecipient`; use
+`nil` for non-HD keys.
 
 ## BIP32 HD Derivation
 
@@ -250,22 +273,22 @@ crypto/ed25519.Verify(childPub, message, sig) // true
 
 ## RFC 9591 Alignment
 
-| Feature              | Implementation                                              |
-| -------------------- | ----------------------------------------------------------- | --- | --- |
-| Context string       | `"FROST-ED25519-SHA512-v1"` per RFC 9591 §5.4.1             |
-| Ciphersuite          | Ed25519-SHA512 (standard Ed25519 challenge)                 |
-| Binding factor `H1`  | Prepends `"FROST-ED25519-SHA512-v1rho"` label, full domain  |
-| `HashToScalar`       | Direct concatenation (no length-delimited encoding)         |
-| Domain separation    | SHA-256 transcripts binding session, threshold, parties, PK |
-| Scalar encoding      | 32-byte little-endian, canonical (reduced mod q)            |
-| Point encoding       | 32-byte compressed Edwards y-coordinate                     |
-| Group commitment     | `R = Σ (D_j + ρ_j·E_j)` per RFC 9591                        |
-| Partial verification | Per-signer before aggregation with attributable blame       |
-| Signature format     | Standard 64-byte `R                                         |     | S`  |
+| Feature              | Implementation                                                         |
+| -------------------- | ---------------------------------------------------------------------- |
+| Context string       | `"FROST-ED25519-SHA512-v1"` per RFC 9591 §6.1                          |
+| Ciphersuite          | Ed25519-SHA512 with the standard Ed25519 challenge                     |
+| Nonce generation     | RFC 9591 `H3` over `random32` concatenated with `SerializeScalar(x_i)` |
+| Binding factor       | RFC 9591 `H1` over `PK`, `H4(msg)`, `H5(encoded commitments)`, and `i` |
+| Scalar encoding      | 32-byte little-endian canonical scalar encoding                        |
+| Point encoding       | 32-byte compressed Edwards y-coordinate                                |
+| Group commitment     | `R = Σ (D_j + ρ_j·E_j)` per RFC 9591                                   |
+| Partial verification | Per-signer before aggregation with attributable blame                  |
+| Signature format     | Standard 64-byte Ed25519 signature, `R` followed by `S`                |
 
 ### Differences from RFC 9591
 
-- Domain separation is more granular: session ID, threshold, full participant set, and group public key are bound into every transcript, providing stronger session isolation than the minimal RFC 9591 definition.
+- Key generation is dealerless DKG rather than the RFC Appendix C trusted dealer.
+- Wire envelopes are this library's transport-neutral TLV messages, not an RFC wire format.
 - `Signature()` returns a plain `[]byte` rather than a structured `(R, z)` tuple — the caller can split on the 32-byte boundary if needed.
 
 ## Payload Types
@@ -303,7 +326,7 @@ sig, ok := sess.Signature()
 
 ```go
 sess, out, err := StartReshare(oldShare, newParties, newThreshold, config)
-recipient, err := StartReshareRecipient(oldPublicKey, oldParties, newParties, newThreshold, config)
+recipient, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, config)
 refresh, out, err := StartRefresh(oldShare, config)
 out, err := sess.HandleReshareMessage(env)
 newShare, ok := sess.KeyShare()
@@ -311,9 +334,9 @@ newShare, ok := sess.KeyShare()
 
 Old committee members call `StartReshare` and act as dealers. A participant
 that is only in the new committee calls `StartReshareRecipient` with the old
-group public key so the completed share can verify `oldPK == newPK`. Same-party
-proactive refresh uses `StartRefresh`, which preserves the participant set and
-threshold.
+group public key and old chain code so the completed share can verify
+`oldPK == newPK` and preserve HD derivation metadata. Same-party proactive
+refresh uses `StartRefresh`, which preserves the participant set and threshold.
 
 ### BIP32 HD
 

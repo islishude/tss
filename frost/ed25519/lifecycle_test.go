@@ -7,7 +7,6 @@ import (
 	"strings"
 	"testing"
 
-	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 )
 
@@ -110,20 +109,33 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 		t.Fatal("keygen public metadata changed")
 	}
 
-	shares := frostKeygen(t, 1, 1)
+	shares := frostKeygen(t, 2, 2)
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	sign, _, err := StartSign(shares[1], signID, []tss.PartyID{1}, []byte("message"))
+	sign, _, err := StartSign(shares[1], signID, []tss.PartyID{1, 2}, []byte("message"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sign.d.Equal(fed.NewScalar()) == 1 || sign.e.Equal(fed.NewScalar()) == 1 || len(sign.partials) == 0 {
-		t.Fatal("sign session did not retain expected local secret material")
+	if len(sign.dNonce) == 0 || len(sign.eNonce) == 0 {
+		t.Fatal("sign session did not retain expected local nonce bytes before round 2")
+	}
+	_, out2, err := StartSign(shares[2], signID, []tss.PartyID{1, 2}, []byte("message"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sign.HandleSignMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+	if sign.dNonce != nil || sign.eNonce != nil {
+		t.Fatal("signing nonces were not released after partial generation")
+	}
+	if len(sign.partials) == 0 {
+		t.Fatal("sign session did not retain expected local partial material")
 	}
 	sign.Destroy()
-	if sign.d.Equal(fed.NewScalar()) != 1 || sign.e.Equal(fed.NewScalar()) != 1 {
+	if sign.dNonce != nil || sign.eNonce != nil {
 		t.Fatal("signing nonces were not released")
 	}
 	if len(sign.partials) != 0 {
@@ -132,7 +144,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if sign.message != nil {
 		t.Fatal("signed message copy was not released")
 	}
-	if len(sign.signers) != 1 || sign.signers[0] != 1 {
+	if len(sign.signers) != 2 || sign.signers[0] != 1 || sign.signers[1] != 2 {
 		t.Fatal("signer metadata changed")
 	}
 }

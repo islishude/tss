@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
 	"slices"
 
@@ -307,6 +308,10 @@ type SignOptions struct {
 	// Each signer adds lambda_i * c * AdditiveShift to their partial, and the
 	// group public key is effectively A' = A + AdditiveShift * B.
 	AdditiveShift []byte
+
+	// NonceReader supplies fresh randomness for FROST signing nonces. If nil,
+	// crypto/rand.Reader is used.
+	NonceReader io.Reader
 }
 
 // DerivePublicKey returns the child Ed25519 public key produced by adding

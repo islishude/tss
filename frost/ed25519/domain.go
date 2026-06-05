@@ -14,14 +14,12 @@ const frostDomainVersion = "frost-ed25519-domain-v1"
 
 // Domain labels identify the protocol phase for domain separation.
 const (
-	domainLabelKeygen            = "keygen"
-	domainLabelSignBindingFactor = "sign.binding-factor"
+	domainLabelKeygen = "keygen"
 )
 
 // Domain kinds identify the cryptographic object bound into a proof.
 const (
 	domainKindCommitment = "commitment"
-	domainKindRho        = "rho"
 )
 
 // frostDomainContext carries the protocol-level fields that are bound into
@@ -47,20 +45,6 @@ func keygenDomain(sessionID tss.SessionID, threshold int, parties []tss.PartyID,
 		parties:   parties,
 		sender:    sender,
 		kind:      domainKindCommitment,
-		publicKey: publicKey,
-	})
-}
-
-// signingBindingFactorDomain returns the domain separator bound into the FROST
-// binding factor computation, incorporating the signing session context.
-func signingBindingFactorDomain(sessionID tss.SessionID, threshold int, parties, signers []tss.PartyID, publicKey []byte) []byte {
-	return frostProofDomain(frostDomainContext{
-		label:     domainLabelSignBindingFactor,
-		sessionID: sessionID,
-		threshold: threshold,
-		parties:   parties,
-		signers:   signers,
-		kind:      domainKindRho,
 		publicKey: publicKey,
 	})
 }

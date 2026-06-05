@@ -532,7 +532,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			messages = append(messages, out...)
 		}
 		// Recipient-only: party 4 has no old KeyShare.
-		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
+		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -608,7 +608,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
+		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
 			Parties: newParties, Self: 4, SessionID: sessionID,
 		})
 		if err != nil {
@@ -650,7 +650,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
+		recipient, err := StartReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
 			Parties:   newParties,
 			Self:      4,

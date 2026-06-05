@@ -1,0 +1,215 @@
+package ed25519
+
+import (
+	"bytes"
+	stded25519 "crypto/ed25519"
+	"strings"
+	"testing"
+
+	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+)
+
+func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
+	oldShares := frostKeygenHD(t, 2, 3)
+	oldParties := []tss.PartyID{1, 2, 3}
+	newParties := []tss.PartyID{2, 3, 4}
+	newThreshold := 2
+	oldPublicKey := oldShares[1].PublicKeyBytes()
+	oldChainCode := append([]byte(nil), oldShares[1].ChainCode...)
+
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	reshareSessions := make(map[tss.PartyID]*ReshareSession, 4)
+	messages := make([]tss.Envelope, 0)
+	for _, id := range oldParties {
+		session, out, err := StartReshare(oldShares[id], newParties, newThreshold, tss.ThresholdConfig{
+			Threshold: newThreshold,
+			Parties:   oldParties,
+			Self:      id,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		reshareSessions[id] = session
+		messages = append(messages, out...)
+	}
+
+	recipient, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+		Threshold: newThreshold,
+		Parties:   oldParties,
+		Self:      4,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reshareSessions[4] = recipient
+
+	deliverReshareMessages(t, []tss.PartyID{1, 2, 3, 4}, messages, reshareSessions)
+	newShares := collectReshareShares(t, newParties, reshareSessions)
+
+	for _, id := range newParties {
+		if !bytes.Equal(newShares[id].ChainCode, oldChainCode) {
+			t.Fatalf("party %d chain code was not preserved", id)
+		}
+		if err := newShares[id].ValidateConsistency(); err != nil {
+			t.Fatalf("party %d invalid reshared key: %v", id, err)
+		}
+	}
+
+	path := []uint32{0, 1, 2}
+	childPub2, shift2, childChain2, err := DeriveBIP32(newShares[2].PublicKey, newShares[2].ChainCode, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	childPub4, shift4, childChain4, err := DeriveBIP32(newShares[4].PublicKey, newShares[4].ChainCode, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(childPub2, childPub4) || !bytes.Equal(shift2, shift4) || !bytes.Equal(childChain2, childChain4) {
+		t.Fatal("HD derivation diverged across reshared recipients")
+	}
+
+	message := []byte("HD reshare recipient signing")
+	pub, sig, err := SignWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{AdditiveShift: shift2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(pub, childPub2) {
+		t.Fatal("HD signing returned the wrong derived public key")
+	}
+	if !stded25519.Verify(stded25519.PublicKey(childPub2), message, sig) {
+		t.Fatal("HD reshared signature failed verification")
+	}
+}
+
+func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
+	oldShares := frostKeygen(t, 2, 3)
+	oldParties := []tss.PartyID{1, 2, 3}
+	newParties := []tss.PartyID{2, 3, 4}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   oldParties,
+		Self:      4,
+		SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("recipient with config.Parties=oldParties should succeed: %v", err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      4,
+		SessionID: sessionID,
+	}); err != nil {
+		t.Fatalf("recipient with config.Parties=newParties should succeed: %v", err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      5,
+		SessionID: sessionID,
+	}); err == nil || !strings.Contains(err.Error(), "recipient must be in the new participant set") {
+		t.Fatalf("expected self-not-in-newParties failure, got %v", err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      2,
+		SessionID: sessionID,
+	}); err == nil || !strings.Contains(err.Error(), "use StartReshare") {
+		t.Fatalf("expected old-party recipient failure, got %v", err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 1, 2}, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      4,
+		SessionID: sessionID,
+	}); err == nil || !strings.Contains(err.Error(), "invalid old participant set") {
+		t.Fatalf("expected duplicate old-party failure, got %v", err)
+	}
+
+	if _, err := StartReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{0, 1, 2}, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      4,
+		SessionID: sessionID,
+	}); err == nil || !strings.Contains(err.Error(), "invalid old participant set") {
+		t.Fatalf("expected zero old-party failure, got %v", err)
+	}
+}
+
+func TestReshareVerificationErrorAbortsSession(t *testing.T) {
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	session, _, err := StartReshare(shares[1], parties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   parties,
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartReshare(shares[2], parties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   parties,
+		Self:      2,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+
+	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	scalar, err := edcurve.ScalarFromCanonical(payload.Share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badShare := edcurve.ScalarOne().Add(edcurve.ScalarOne(), scalar)
+	badShareBytes := badShare.Bytes()
+	badPayload, err := marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes})
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad := out2[1]
+	bad.Payload = badPayload
+	bad = bad.WithTranscriptHash()
+
+	_, err = session.HandleReshareMessage(bad)
+	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	if !session.aborted {
+		t.Fatal("verification error did not abort reshare session")
+	}
+	if len(session.shares) != 0 {
+		t.Fatal("aborted reshare session retained share references")
+	}
+
+	_, err = session.HandleReshareMessage(out2[1])
+	if err == nil || !strings.Contains(err.Error(), "reshare session is aborted") {
+		t.Fatalf("expected terminal aborted error, got %v", err)
+	}
+}

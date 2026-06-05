@@ -9,6 +9,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const (
@@ -20,8 +21,9 @@ const (
 // The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
 	mu           sync.Mutex
-	oldKey       *KeyShare     // nil for recipient-only participants
-	oldPublicKey []byte        // original group public key, required for preservation checks
+	oldKey       *KeyShare // nil for recipient-only participants
+	oldPublicKey []byte    // original group public key, required for preservation checks
+	chainCode    []byte
 	oldParties   []tss.PartyID // sorted, the dealer set (old key holders)
 	newParties   []tss.PartyID // sorted, the target participant set
 	newThreshold int
@@ -101,6 +103,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.PublicKeyBytes(),
+		chainCode:    append([]byte(nil), oldKey.ChainCode...),
 		oldParties:   oldParties,
 		newParties:   newParties,
 		newThreshold: newThreshold,
@@ -134,20 +137,25 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	return s, out, nil
 }
 
-// StartReshareRecipient starts a FROST resharing session for a participant who
-// is in the new participant set but does not hold an old KeyShare. The
-// recipient receives shares from all old-party dealers and aggregates them
-// into a new KeyShare without generating a polynomial of its own.
-func StartReshareRecipient(oldPublicKey []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, error) {
+// StartReshareRecipient starts a resharing session for a new participant.
+// config.Self is the recipient ID. The function validates membership against
+// newParties and validates incoming dealer messages against oldParties.
+func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, error) {
 	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
-	if err := config.ValidateWithLimits(limits); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
-	}
 	if _, err := edcurve.PointFromBytes(oldPublicKey); err != nil {
 		return nil, fmt.Errorf("invalid old public key: %w", err)
 	}
+	if len(oldChainCode) != 0 && len(oldChainCode) != 32 {
+		return nil, errors.New("old chain code must be empty or 32 bytes")
+	}
 	oldParties = tss.SortParties(oldParties)
 	newParties = tss.SortParties(newParties)
+	if len(oldParties) > limits.MaxParties {
+		return nil, fmt.Errorf("too many old parties: %d > %d", len(oldParties), limits.MaxParties)
+	}
+	if err := wire.ValidateStrictSortedIDs(oldParties); err != nil {
+		return nil, fmt.Errorf("invalid old participant set: %w", err)
+	}
 	if newThreshold <= 0 || newThreshold > len(newParties) {
 		return nil, errors.New("invalid new threshold for reshare")
 	}
@@ -160,10 +168,18 @@ func StartReshareRecipient(oldPublicKey []byte, oldParties, newParties []tss.Par
 	if tss.ContainsParty(oldParties, config.Self) {
 		return nil, errors.New("recipient is in the old participant set; use StartReshare instead")
 	}
+	validationConfig := config
+	validationConfig.Parties = append([]tss.PartyID(nil), newParties...)
+	validationConfig.Threshold = newThreshold
+	if err := validationConfig.ValidateWithLimits(limits); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
 	config.Parties = oldParties
+	config.Threshold = len(oldParties)
 	return &ReshareSession{
 		oldPublicKey: append([]byte(nil), oldPublicKey...),
+		chainCode:    append([]byte(nil), oldChainCode...),
 		oldParties:   oldParties,
 		newParties:   newParties,
 		newThreshold: newThreshold,
@@ -207,6 +223,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.PublicKeyBytes(),
+		chainCode:    append([]byte(nil), oldKey.ChainCode...),
 		oldParties:   parties,
 		newParties:   parties,
 		newThreshold: oldKey.Threshold,
@@ -254,6 +271,12 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	if s.aborted {
 		return nil, errors.New("reshare session is aborted")
 	}
+	defer func() {
+		if shouldAbortSession(err) {
+			s.aborted = true
+			s.clearSensitive()
+		}
+	}()
 	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldParties); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
@@ -302,6 +325,13 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
 	return nil, s.tryComplete()
+}
+
+func (s *ReshareSession) clearSensitive() {
+	if s == nil {
+		return
+	}
+	clearScalarMap(s.shares)
 }
 
 // KeyShare returns the reshared key share when resharing completes.
@@ -399,10 +429,7 @@ func (s *ReshareSession) tryComplete() error {
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
 	reshareTranscriptHash := keygenDomain(s.cfg.SessionID, s.newThreshold, s.newParties, s.selfID, publicKey)
-	chainCode := []byte(nil)
-	if s.oldKey != nil {
-		chainCode = append([]byte(nil), s.oldKey.ChainCode...)
-	}
+	chainCode := append([]byte(nil), s.chainCode...)
 	s.newShare = &KeyShare{
 		Version:              tss.Version,
 		Party:                s.selfID,

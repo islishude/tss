@@ -24,6 +24,9 @@ Callers must provide:
 - operational monitoring for protocol errors and blame evidence.
 
 Never log secret scalar, nonce, Paillier private-key, key-share, or presign bytes. Blame evidence is designed to contain public hashes and public context only.
+FROST Ed25519 `ChainCode` values are not signing secrets, but HD key
+consistency depends on them; back them up and distribute them only with the
+same authorization checks used for key-share metadata.
 
 ## Production Integration Checklist
 
@@ -70,6 +73,20 @@ secret byte slices and scalar state such as Shamir shares, nonces, online
 partials, Paillier private factors, and CGGMP21 presign shares while leaving
 public metadata, such as party ids, public keys, signer sets, transcript hashes,
 and public signatures, available for diagnostics where practical.
+
+FROST Ed25519 signing nonces are derived from 32 bytes of fresh randomness and
+the local secret-share scalar encoding. A `SignSession` stores nonce bytes only
+until its round-2 partial payload is constructed; successful partial generation
+and attributable signing failures clear those bytes immediately. `Destroy`
+should still be called after completion or abort to clear message copies,
+partials, shifted verification keys, and any remaining session-owned material.
+
+FROST resharing share envelopes carry confidential scalar shares and have
+`ConfidentialRequired` set. Transports must authenticate the sender and encrypt
+these point-to-point messages. New HD reshare recipients must be provisioned
+with the old 32-byte chain code through an authorized metadata channel; the
+chain code is not a signing secret, but losing or substituting it changes child
+key derivation.
 
 Zeroization in Go is best-effort. The library clears owned byte slices and
 overwrites currently referenced `big.Int` words, but Go's garbage collector,

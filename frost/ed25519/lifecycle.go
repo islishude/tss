@@ -33,24 +33,17 @@ func (s *SignSession) Destroy() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Zero scalars in place.
-	if s.d != nil {
-		s.d.Set(fed.NewScalar())
-	}
-	if s.e != nil {
-		s.e.Set(fed.NewScalar())
-	}
+	s.clearNonceBytes()
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
 	}
-	for id := range s.partials {
-		if s.partials[id] != nil {
-			s.partials[id].Set(fed.NewScalar())
-		}
-		delete(s.partials, id)
-	}
+	clearScalarMap(s.partials)
 	clear(s.message)
 	s.message = nil
+	clear(s.verifyKey)
+	s.verifyKey = nil
+	clear(s.signature)
+	s.signature = nil
 }
 
 // Destroy clears local reshare material retained by the reshare session.

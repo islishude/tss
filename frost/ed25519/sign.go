@@ -22,8 +22,8 @@ type SignSession struct {
 	signers       []tss.PartyID
 	commitments   map[tss.PartyID]nonceCommitment
 	partials      map[tss.PartyID]*fed.Scalar
-	d             *fed.Scalar
-	e             *fed.Scalar
+	dNonce        []byte
+	eNonce        []byte
 	deltaScalar   *fed.Scalar
 	verifyKey     []byte
 	partialSent   bool
@@ -75,20 +75,41 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 			return nil, nil, err
 		}
 	}
+	x, err := key.secretScalar()
+	if err != nil {
+		return nil, nil, err
+	}
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	d, err := edcurve.RandomScalar(nil)
+	dBytes, err := signingNonceGenerate(x, opts.NonceReader)
 	if err != nil {
 		return nil, nil, err
 	}
-	e, err := edcurve.RandomScalar(nil)
+	eBytes, err := signingNonceGenerate(x, opts.NonceReader)
 	if err != nil {
+		clear(dBytes)
 		return nil, nil, err
 	}
+
+	d, err := edcurve.ScalarFromCanonical(dBytes)
+	if err != nil {
+		clear(dBytes)
+		clear(eBytes)
+		return nil, nil, err
+	}
+	e, err := edcurve.ScalarFromCanonical(eBytes)
+	if err != nil {
+		clear(dBytes)
+		clear(eBytes)
+		return nil, nil, err
+	}
+
 	dPoint := fed.NewIdentityPoint().ScalarBaseMult(d)
 	ePoint := fed.NewIdentityPoint().ScalarBaseMult(e)
 	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes()})
 	if err != nil {
+		clear(dBytes)
+		clear(eBytes)
 		return nil, nil, err
 	}
 	env := tss.Envelope{
@@ -108,8 +129,8 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		signers:       signers,
 		commitments:   map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
 		partials:      make(map[tss.PartyID]*fed.Scalar),
-		d:             d,
-		e:             e,
+		dNonce:        dBytes,
+		eNonce:        eBytes,
 		deltaScalar:   deltaScalar,
 		verifyKey:     verifyKey,
 		commitMessage: env,
@@ -117,6 +138,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
 	if err != nil {
+		s.clearNonceBytes()
 		return nil, nil, err
 	}
 	out = append(out, partial...)
@@ -139,6 +161,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	defer func() {
 		if shouldAbortSession(err) {
 			s.aborted = true
+			s.clearNonceBytes()
 		}
 	}()
 	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
@@ -217,22 +240,48 @@ func (s *SignSession) VerifyKey() []byte {
 	return append([]byte(nil), s.verifyKey...)
 }
 
+func (s *SignSession) clearNonceBytes() {
+	if s == nil {
+		return
+	}
+	clear(s.dNonce)
+	clear(s.eNonce)
+	s.dNonce = nil
+	s.eNonce = nil
+}
+
 func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if s.partialSent || len(s.commitments) != len(s.signers) {
 		return nil, nil
 	}
+	if len(s.dNonce) == 0 || len(s.eNonce) == 0 {
+		return nil, errors.New("signing nonce is unavailable")
+	}
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
+		s.clearNonceBytes()
+		return nil, err
+	}
+	d, err := edcurve.ScalarFromCanonical(s.dNonce)
+	if err != nil {
+		s.clearNonceBytes()
+		return nil, err
+	}
+	e, err := edcurve.ScalarFromCanonical(s.eNonce)
+	if err != nil {
+		s.clearNonceBytes()
 		return nil, err
 	}
 	c, _ := edcurve.Ed25519Challenge(R.Bytes(), s.verifyKey, s.message)
 
 	lambda, err := lagrangeCoefficientScalar(s.key.Party, s.signers)
 	if err != nil {
+		s.clearNonceBytes()
 		return nil, err
 	}
 	x, err := s.key.secretScalar()
 	if err != nil {
+		s.clearNonceBytes()
 		return nil, err
 	}
 
@@ -240,8 +289,8 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	// With HD additive shift delta: z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
 	lambdaC := fed.NewScalar().Multiply(lambda, c)
 	rho := rhos[s.key.Party]
-	z := fed.NewScalar().Multiply(rho, s.e)
-	z.Add(z, s.d)
+	z := fed.NewScalar().Multiply(rho, e)
+	z.Add(z, d)
 	lcs := fed.NewScalar().Multiply(lambdaC, x)
 	z.Add(z, lcs)
 	if s.deltaScalar != nil && s.deltaScalar.Equal(edcurve.ScalarZero()) != 1 {
@@ -252,6 +301,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	zBytes := z.Bytes()
 	payload, err := marshalSignPartialPayload(signPartialPayload{Z: zBytes})
 	if err != nil {
+		s.clearNonceBytes()
 		return nil, err
 	}
 	env := tss.Envelope{
@@ -264,6 +314,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		Payload:     payload,
 	}.WithTranscriptHash()
 	s.partialSent = true
+	s.clearNonceBytes()
 	if err := s.tryAggregate(); err != nil {
 		return nil, err
 	}
@@ -272,6 +323,9 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 
 func (s *SignSession) tryAggregate() error {
 	if s.completed || len(s.partials) != len(s.signers) {
+		return nil
+	}
+	if len(s.commitments) != len(s.signers) {
 		return nil
 	}
 	R, rhos, err := s.groupCommitment()
@@ -350,15 +404,19 @@ func (s *SignSession) verifyPartial(id tss.PartyID, z *fed.Scalar, rho *fed.Scal
 }
 
 func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar, error) {
-	rhos := make(map[tss.PartyID]*fed.Scalar, len(s.signers))
+	if len(s.commitments) != len(s.signers) {
+		return nil, nil, errors.New("waiting for complete nonce commitments")
+	}
+	rhos, err := s.bindingFactors()
+	if err != nil {
+		return nil, nil, err
+	}
 	terms := make([]*fed.Point, 0, len(s.signers))
 	for _, id := range s.signers {
 		commitment, ok := s.commitments[id]
 		if !ok {
 			return nil, nil, fmt.Errorf("missing commitment for %d", id)
 		}
-		rho := s.bindingFactor(id)
-		rhos[id] = rho
 		D, err := edcurve.PointFromBytes(commitment.D)
 		if err != nil {
 			return nil, nil, err
@@ -367,7 +425,7 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar
 		if err != nil {
 			return nil, nil, err
 		}
-		rhoE := fed.NewIdentityPoint().ScalarMult(rho, E)
+		rhoE := fed.NewIdentityPoint().ScalarMult(rhos[id], E)
 		terms = append(terms, edcurve.AddPoints(D, rhoE))
 	}
 	R := edcurve.AddPoints(terms...)
@@ -377,24 +435,36 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar
 	return R, rhos, nil
 }
 
-func (s *SignSession) bindingFactor(id tss.PartyID) *fed.Scalar {
+func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {
+	encodedCommitments, err := encodeGroupCommitmentList(s.signers, s.commitments)
+	if err != nil {
+		return nil, err
+	}
+
+	msgHash := rfc9591H4(s.message)
+	commitmentHash := rfc9591H5(encodedCommitments)
+
 	// Bind the actual verification key (shifted for HD, original otherwise)
-	// so that the binding factor commits to the key the verifier will use.
-	domain := signingBindingFactorDomain(s.sessionID, s.key.Threshold, s.key.Parties, s.signers, s.verifyKey)
-	parts := [][]byte{
-		[]byte(rfc9591ContextString + "rho"),
-		domain,
-		s.verifyKey,
-		s.message,
+	// so that every rho is tied to the key the verifier will use.
+	prefix := make([]byte, 0, len(s.verifyKey)+len(msgHash)+len(commitmentHash)+32)
+	prefix = append(prefix, s.verifyKey...)
+	prefix = append(prefix, msgHash...)
+	prefix = append(prefix, commitmentHash...)
+
+	out := make(map[tss.PartyID]*fed.Scalar, len(s.signers))
+	for _, id := range s.signers {
+		idEnc, err := partyIDScalarEncoding(id)
+		if err != nil {
+			return nil, err
+		}
+		input := append(append([]byte(nil), prefix...), idEnc...)
+		rho, err := rfc9591H1(input)
+		if err != nil {
+			return nil, err
+		}
+		out[id] = rho
 	}
-	for _, signer := range s.signers {
-		// Ordered signer ids and commitments make rho deterministic across parties.
-		parts = append(parts, []byte{byte(signer >> 24), byte(signer >> 16), byte(signer >> 8), byte(signer)})
-		parts = append(parts, s.commitments[signer].D, s.commitments[signer].E)
-	}
-	parts = append(parts, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-	rho, _ := edcurve.HashToScalar(parts...)
-	return rho
+	return out, nil
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
