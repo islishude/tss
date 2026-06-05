@@ -21,6 +21,7 @@ type deterministicReader struct {
 	rng *rand.Rand
 }
 
+// Read fills p from the deterministic pseudo-random source.
 func (r *deterministicReader) Read(p []byte) (int, error) {
 	// Fill with random bytes from the deterministic source.
 	for i := range p {

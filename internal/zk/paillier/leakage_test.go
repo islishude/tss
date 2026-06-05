@@ -13,6 +13,7 @@ import (
 // that satisfy both the range constraint and the curve equation must be
 // computationally infeasible to enumerate.
 func TestEncryptionProofLeakageResistance(t *testing.T) {
+	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test enc")
 	scalar := big.NewInt(123456789)
@@ -76,6 +77,7 @@ func TestEncryptionProofLeakageResistance(t *testing.T) {
 // TestMTAResponseProofLeakageResistance verifies that the MtA response proof
 // does not leak the responder scalar b through BResponse = e·b + μ.
 func TestMTAResponseProofLeakageResistance(t *testing.T) {
+	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test mta")
 	a := big.NewInt(42)
@@ -140,6 +142,7 @@ func TestMTAResponseProofLeakageResistance(t *testing.T) {
 // TestLogProofLeakageResistance verifies that the Π^log proof does not leak
 // the discrete logarithm through Response = e·a + α.
 func TestLogProofLeakageResistance(t *testing.T) {
+	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test log")
 	scalar := big.NewInt(99)
@@ -185,6 +188,7 @@ func TestLogProofLeakageResistance(t *testing.T) {
 
 // TestProofsUseV1Version verifies all proof types carry version 1.
 func TestProofsUseV1Version(t *testing.T) {
+	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("version check")
 
@@ -219,6 +223,13 @@ func TestProofsUseV1Version(t *testing.T) {
 	rpProof, _ := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
 	if rpProof.Version != 1 {
 		t.Fatalf("Ring-Pedersen proof version %d, want 1", rpProof.Version)
+	}
+}
+
+func skipProofLeakageInShort(t *testing.T) {
+	t.Helper()
+	if testing.Short() {
+		t.Skip("skipping 1024-bit Paillier proof leakage test in short mode")
 	}
 }
 
