@@ -45,6 +45,9 @@ ed25519.Verify(share.PublicKey, message, sig) // true
 ### secp256k1 (CGGMP21)
 
 ```go
+// presign and signing are experimental features
+secp256k1.SetAcceptExperimentalUsageForTesting(true)
+
 // DKG → Presign (offline) → Sign (online, one round)
 sessionID, _ := tss.NewSessionID(nil)
 kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
@@ -64,7 +67,7 @@ sig, _ := signSess.Signature()
 secp256k1.VerifySignature(share.PublicKey, request, sig) // true
 ```
 
-Full examples in [`examples_test.go`](frost/ed25519/examples_test.go) and [`examples_test.go`](cggmp21/secp256k1/examples_test.go).
+Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go) and [`cggmp21/secp256k1/examples_test.go`](cggmp21/secp256k1/examples_test.go).
 
 ## Documentation
 

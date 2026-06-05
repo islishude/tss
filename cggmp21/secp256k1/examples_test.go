@@ -69,10 +69,6 @@ func ExampleVerifyBlameEvidence() {
 }
 
 func Example_full_lifecycle() {
-	// Use small Paillier keys for fast example execution.
-	reset := SetDefaultPaillierBitsForTesting(768)
-	defer reset()
-
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		panic(err)
