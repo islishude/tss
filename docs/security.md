@@ -117,7 +117,7 @@ The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible construct
 
 All three proofs use the canonical typed transcript API; the Fiat-Shamir challenge is never reduced modulo the secp256k1 order for Paillier-integer proofs.
 
-Presign and signing entry points are gated behind `PresignSignDisabled` (enabled by default) pending independent cryptographic review of the Paillier MtA/ZK proof layer. See `docs/audit-guide.md` for the complete proof-to-paper mapping.
+Presign and signing entry points are gated behind `AcceptExperimentalUsage` (disabled by default) pending independent cryptographic review of the Paillier MtA/ZK proof layer. See `docs/audit-guide.md` for the complete proof-to-paper mapping.
 
 ## Keygen Broadcast Consistency
 

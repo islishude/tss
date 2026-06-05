@@ -19,7 +19,7 @@ func TestMain(m *testing.M) {
 	restoreBits := SetDefaultPaillierBitsForTesting(768)
 	restoreMin := pai.SetMinimumModulusBitsForTesting(512)
 	restoreKeygenMin := SetMinKeygenPaillierBitsForTesting(768)
-	restoreSign := SetPresignSignDisabledForTesting(false)
+	restoreSign := SetAcceptExperimentalUsageForTesting(true)
 	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 512,
 	})

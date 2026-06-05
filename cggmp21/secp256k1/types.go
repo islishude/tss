@@ -36,18 +36,18 @@ const DefaultPaillierBits = 3072
 // defaultPaillierBits is the active default, overridable in tests.
 var defaultPaillierBits = DefaultPaillierBits
 
-// presignSignDisabled gates presign and signing entry points.
-// The gate is enabled by default because the ZK proof layer is new
+// acceptExperimentalUsage gates presign and signing entry points.
+// The gate is disabled by default because the ZK proof layer is new
 // and has not yet received independent cryptographic review.
-// Tests may call SetPresignSignDisabledForTesting to re-enable.
-var presignSignDisabled = true
+// Tests may call SetAcceptExperimentalUsageForTesting to re-enable.
+var acceptExperimentalUsage = false
 
-// SetPresignSignDisabledForTesting overrides the presign/sign gate and returns
+// SetAcceptExperimentalUsageForTesting overrides the presign/sign gate and returns
 // a function that restores the previous value. DO NOT use outside tests.
-func SetPresignSignDisabledForTesting(disabled bool) func() {
-	old := presignSignDisabled
-	presignSignDisabled = disabled
-	return func() { presignSignDisabled = old }
+func SetAcceptExperimentalUsageForTesting(accept bool) func() {
+	old := acceptExperimentalUsage
+	acceptExperimentalUsage = accept
+	return func() { acceptExperimentalUsage = old }
 }
 
 // SetDefaultPaillierBitsForTesting overrides the default Paillier modulus size
