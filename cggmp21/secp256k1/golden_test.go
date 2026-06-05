@@ -1,3 +1,5 @@
+//go:build integration
+
 package secp256k1
 
 import (
@@ -221,20 +223,4 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	}
 }
 
-func checkGolden(t *testing.T, golden string, raw []byte) {
-	t.Helper()
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
-}
+// checkGolden is now defined in helpers_test.go

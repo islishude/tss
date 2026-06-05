@@ -1,3 +1,5 @@
+//go:build integration || vectorgen
+
 package secp256k1
 
 import (
@@ -494,21 +496,4 @@ func assertNoBlame(t testing.TB, protocolErr *tss.ProtocolError) {
 	}
 }
 
-func clonePresign(in *Presign) *Presign {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.Signers = append([]tss.PartyID(nil), in.Signers...)
-	out.R = append([]byte(nil), in.R...)
-	out.LittleR = append([]byte(nil), in.LittleR...)
-	out.KShare = append([]byte(nil), in.KShare...)
-	out.ChiShare = append([]byte(nil), in.ChiShare...)
-	out.Delta = append([]byte(nil), in.Delta...)
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.Context.DerivationPath = append([]uint32(nil), in.Context.DerivationPath...)
-	out.ContextHash = append([]byte(nil), in.ContextHash...)
-	out.AdditiveShift = append([]byte(nil), in.AdditiveShift...)
-	out.Consumed = false
-	return &out
-}
+// clonePresign is now defined in helpers_test.go

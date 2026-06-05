@@ -18,14 +18,32 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 Use `make` targets for common operations:
 
 ```sh
-# Build, test, vet, lint (default)
-make all
-
-# Run tests with race detector
+# Default: fast unit tests (Tier 0, < 30s)
 make test
 
-# CI-grade stress tests (10 iterations, 1h timeout)
-make test-count
+# Tier 0 + Tier 1: fast unit + small-param crypto (< 2m)
+make test-fast
+
+# Tier 2: integration tests with full keygen/presign/sign (< 10m)
+make test-integration
+
+# Tier 3: production security-parameter smoke tests (< 45m)
+make test-slowcrypto
+
+# Tier 4: stress tests with count=10 (3h)
+make test-stress
+
+# Race detector across all packages
+make test-race
+
+# PR-ready check: build + vet + lint + format + tidy + test-fast
+make ci
+
+# Full suite: ci + integration + slowcrypto + race + stress
+make nightly
+
+# Build, test-fast, vet, lint (default)
+make all
 
 # Run linter with auto-fix
 make lint-fix
@@ -36,14 +54,11 @@ make format
 # Modernize Go code
 make fix
 
-# CI-ready check (build + vet + lint + format + tidy)
-make check
-
 # List all targets
 make help
 ```
 
-Run the commands after making substantial changes.
+Run `make test` after each change for fast feedback. Use `make ci` before pushing a PR.
 
 ## Architecture Map
 
@@ -58,6 +73,7 @@ Run the commands after making substantial changes.
 - `internal/paillier`: Paillier public-key primitives (encrypt, decrypt, homomorphic ops, key generation). Secret fields (`Lambda`, `Mu`) use `secret.Scalar`, not `*big.Int`. Decrypt uses constant-time `c^λ mod n²` via `paillierct` with ciphertext blinding.
 - `internal/paillier/paillierct`: constant-time modular exponentiation via `filippo.io/bigmod`. Used by `Decrypt` (with ciphertext blinding) and MtA `Respond` (`c^b mod n²`, without blinding — the ZK proof verifies the exact ciphertext relationship).
 - `internal/secret`: fixed-length `Scalar` type; no `String()`, `BigInt()`, variable-length `Bytes()`, or JSON.
+- `internal/testutil`: shared test helpers — deterministic readers, session/party factories, wire mutation utilities, protocol-error assertions, cached Paillier fixtures, and security-parameter overrides. Used by both Tier 0 (fast) and Tier 2 (integration) tests.
 - `internal/wire`: strict TLV encoding for binary envelopes, key shares, presign records, MtA messages, Paillier keys, and all proof payloads.
 - `internal/zk/paillier`: ZK proof types — `ModulusProof` (Πmod), `RingPedersenProof` (Πprm), `EncProof` (Πenc, Paillier encryption in range), `AffGProof` (Πaff-g, MtA affine operation), `LogStarProof` (Πlog*, discrete-log equality in range). Current protocol flows use Πmod, Πprm, Πenc, Πaff-g, and Πlog*. Legacy proof types (Π^Enc, Π^mta, Π^log) are present for MtA Start but rejected everywhere else.
 - `internal/zk/schnorr`: Schnorr proof-of-knowledge primitive over secp256k1.
@@ -82,6 +98,26 @@ Run the commands after making substantial changes.
 - All inputs to `paillierct` must be fixed-length big-endian encodings. Never use `lambda.BitLen()`, `lambda.Bytes()` (variable-length), or any `VarTime`-suffixed `bigmod` functions.
 - Ciphertext blinding (`c' = c * r^n mod n²`) is required in `Paillier.Decrypt`. Do not apply blinding in MtA `Respond` — the ZK proof verifies the exact ciphertext relationship.
 
+## Test Architecture
+
+Tests are organized into 5 tiers, separated by build tags and `testing.Short()` guards:
+
+| Tier  | Build Tag               | Command                 | Content                                                                                             |
+| ----- | ----------------------- | ----------------------- | --------------------------------------------------------------------------------------------------- |
+| **0** | (none)                  | `make test`             | Wire TLV, state machine, malformed input, domain construction, blame evidence. No crypto keygen.    |
+| **1** | (none, `Short()` guard) | `make test-fast`        | Small-param proof correctness (512/1024-bit Paillier), MtA correctness.                             |
+| **2** | `integration`           | `make test-integration` | Full keygen→presign→sign, replay/duplicate, BIP32, refresh, reshare. 768-bit Paillier via TestMain. |
+| **3** | `slowcrypto`            | `make test-slowcrypto`  | 3072-bit Paillier, production SecurityParams, 3-of-5 flows.                                         |
+| **4** | `stress`                | `make test-stress`      | `-count=10`, race detector, long fuzz runs.                                                         |
+
+- **Tier 0 files** must NOT use Paillier keygen, full CGGMP keygen, or full presign. They test input/output, state machine, and wire/security boundaries.
+- **Tier 1 files** use reduced crypto params. Every test must check `testing.Short()` and skip when set.
+- **Tier 2 files** have `//go:build integration` and use reduced (768-bit) Paillier via `TestMain`. They cover protocol integration: keygen, presign, sign, refresh, reshare, BIP32.
+- **Tier 3 files** have `//go:build slowcrypto` and use production 3072-bit Paillier. Smoke coverage only.
+- **Tier 4 files** have `//go:build stress` and run with `-count=10` or `-race`. Nightly only.
+
+Shared test helpers live in `internal/testutil` (public) and `cggmp21/secp256k1/helpers_test.go` (package-private).
+
 ## Testing Expectations
 
 When changing protocol behavior, add or update tests for:
@@ -94,3 +130,5 @@ When changing protocol behavior, add or update tests for:
 - proof verification failures (wrong domain, wrong public key, malformed commitment/response);
 - presign consumption and nonce-reuse guards;
 - reshare and refresh flows preserving the group public key.
+
+Place fast unit tests in Tier 0 (`_test.go` files without build tags). Put integration flows in Tier 2 (`//go:build integration`). Use Tier 3 (`//go:build slowcrypto`) for production-parameter smoke coverage.

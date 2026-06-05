@@ -52,8 +52,10 @@ jobs:
       - name: Run go fix diff
         run: go fix -diff ./...
 
-  test:
-    name: Test (${{ matrix.os }})
+  # Tier 0 + Tier 1: Fast unit tests + small-param crypto correctness.
+  # Must complete in < 2m. Runs on both x86_64 and ARM64.
+  test-fast:
+    name: Test Fast (${{ matrix.os }})
     needs: check
     strategy:
       fail-fast: false
@@ -69,5 +71,49 @@ jobs:
         with:
           go-version: stable
 
-      - name: Run tests
-        run: make test-race
+      - name: Run Tier 0 + Tier 1 tests
+        run: make test-fast
+
+  # Tier 2: Integration tests with full keygen/presign/sign flows.
+  # Uses reduced (768-bit) Paillier for speed. Runs on x86_64.
+  test-integration:
+    name: Test Integration
+    needs: check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 2 integration tests
+        run: make test-integration
+
+      - name: Run race detector on integration code
+        run: go test -race -timeout 15m -tags=integration ./cggmp21/secp256k1/ ./internal/mta/ ./internal/zk/paillier/
+
+  # Tier 3 + Tier 4: Production security-parameter tests and stress.
+  # Runs on main pushes and scheduled nightly runs only.
+  test-slow:
+    name: Test Slow / Stress
+    if: github.event_name == 'push' || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    needs: test-integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 3 slowcrypto tests
+        run: make test-slowcrypto
+
+      - name: Run Tier 4 stress tests
+        run: make test-stress

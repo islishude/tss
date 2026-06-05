@@ -1,3 +1,5 @@
+//go:build integration || vectorgen
+
 package secp256k1
 
 import (

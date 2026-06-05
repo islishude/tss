@@ -13,22 +13,49 @@ build:
 
 # ---- Test -----------------------------------------------------------------
 
+# Default: Tier 0 fast unit tests only (< 30s, no crypto keygen).
 .PHONY: test
 test:
-	go test -cover -timeout 25m ./...
+	go test -short -timeout 1m ./...
 
+# Tier 0 + Tier 1: Fast unit tests + small-param crypto correctness (< 2m).
+.PHONY: test-fast
+test-fast:
+	go test -timeout 2m ./...
+
+# Tier 2: Integration tests requiring full keygen/presign/sign (< 10m).
+.PHONY: test-integration
+test-integration:
+	go test -tags=integration -timeout 10m ./cggmp21/secp256k1 ./internal/mta ./internal/zk/paillier
+
+# Tier 3: Production security-parameter smoke tests (< 45m).
+.PHONY: test-slowcrypto
+test-slowcrypto:
+	go test -tags=slowcrypto -timeout 45m ./...
+
+# Tier 4: Stress test with count=10 (3h timeout).
+.PHONY: test-stress
+test-stress:
+	go test -tags=stress -count=10 -timeout 3h ./...
+
+# Race detector over all packages (1h timeout).
 .PHONY: test-race
 test-race:
-	go test -v -race -timeout 1h ./...
+	go test -race -timeout 1h ./...
 
-.PHONY: test-count
-test-count:
-	go test -v -count=10 -cover -timeout 3h ./...
-
+# Legacy test-coverage target (includes integration tests).
 .PHONY: test-coverage
 test-coverage:
-	go test -race -coverprofile=coverage.out -covermode=atomic ./...
+	go test -tags=integration -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+# CI: Fast build + vet + lint + format + tidy + Tier 0 + Tier 1.
+.PHONY: ci
+ci: build vet lint format tidy-check test-fast
+
+# Nightly: CI + integration + slowcrypto + race + stress.
+.PHONY: nightly
+nightly: ci test-integration test-slowcrypto test-race test-stress
 
 # ---- Lint -----------------------------------------------------------------
 
@@ -80,7 +107,11 @@ tidy-check:
 	go mod tidy -diff
 
 .PHONY: all
-all: build test vet lint
+all: build test-fast vet lint
+
+# ---- Alias -----------------------------------------------------------------
+.PHONY: test-count
+test-count: test-stress
 
 # ---- Help -----------------------------------------------------------------
 
@@ -88,18 +119,22 @@ all: build test vet lint
 help:
 	@echo "TSS development targets:"
 	@echo ""
-	@echo "  build          compile all packages"
-	@echo "  test           run tests (25m timeout)"
-	@echo "  test-race      run tests with race detector (1h timeout)"
-	@echo "  test-count     CI-grade stress tests (10 iterations, 1h timeout)"
-	@echo "  test-coverage  run tests and produce coverage.{out,html}"
-	@echo "  lint           run golangci-lint"
-	@echo "  lint-fix       run golangci-lint with auto-fix"
-	@echo "  format         format go and markdown files with gofmt and prettier"
-	@echo "  format-check   check go and markdown formatting (CI)"
-	@echo "  fix            run go fix on all packages"
-	@echo "  tidy           run go mod tidy"
-	@echo "  verify         verify module integrity (go mod verify)"
-	@echo "  vet            run go vet"
-	@echo "  check          CI-ready check: build + vet + lint + format + tidy"
-	@echo "  all            default: build + test + vet + lint"
+	@echo "  build            compile all packages"
+	@echo "  test             Tier 0 fast unit tests (< 30s)"
+	@echo "  test-fast        Tier 0 + Tier 1: fast + small crypto (< 2m)"
+	@echo "  test-integration Tier 2: keygen/presign/sign flows (< 10m)"
+	@echo "  test-slowcrypto  Tier 3: production security params (< 45m)"
+	@echo "  test-stress      Tier 4: stress with count=10 (3h)"
+	@echo "  test-race        run tests with race detector (1h)"
+	@echo "  test-coverage    run integration tests with coverage report"
+	@echo "  ci               PR-ready: build + vet + lint + format + tidy + test-fast"
+	@echo "  nightly          full suite: ci + integration + slowcrypto + race + stress"
+	@echo "  lint             run golangci-lint"
+	@echo "  lint-fix         run golangci-lint with auto-fix"
+	@echo "  format           format go and markdown files with gofmt and prettier"
+	@echo "  format-check     check go and markdown formatting (CI)"
+	@echo "  fix              run go fix on all packages"
+	@echo "  tidy             run go mod tidy"
+	@echo "  verify           verify module integrity (go mod verify)"
+	@echo "  vet              run go vet"
+	@echo "  all              default: build + test-fast + vet + lint"

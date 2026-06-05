@@ -1,8 +1,9 @@
+//go:build integration || vectorgen
+
 package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"fmt"
 	"math"
 	"math/big"
@@ -10,7 +11,6 @@ import (
 
 	"github.com/islishude/tss"
 
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -429,77 +429,8 @@ func FuzzCGGMP21RefreshSharePayloadUnmarshal(f *testing.F) {
 	})
 }
 
-func minimalCGGMP21Presign(tb testing.TB) *Presign {
-	tb.Helper()
-	one := big.NewInt(1)
-	RPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
-	R, err := secp.PointBytes(RPoint)
-	if err != nil {
-		tb.Fatal(err)
-	}
-	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
-	transcript := sha256.Sum256([]byte("minimal presign"))
-	ctx := testPresignContext()
-	contextHash := presignContextHash(ctx)
-	return &Presign{
-		Version:        tss.Version,
-		Party:          1,
-		Threshold:      1,
-		Signers:        []tss.PartyID{1},
-		R:              R,
-		LittleR:        scalarBytes(littleR),
-		KShare:         scalarBytes(one),
-		ChiShare:       scalarBytes(one),
-		Delta:          scalarBytes(one),
-		TranscriptHash: transcript[:],
-		Context:        ctx,
-		ContextHash:    contextHash,
-	}
-}
-
-func cloneKeyShare(in *KeyShare) *KeyShare {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.Parties = append([]tss.PartyID(nil), in.Parties...)
-	out.PublicKey = append([]byte(nil), in.PublicKey...)
-	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.secret = append([]byte(nil), in.secret...)
-	out.GroupCommitments = cloneByteSlices(in.GroupCommitments)
-	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
-	for i := range out.VerificationShares {
-		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
-	}
-	out.PaillierPublicKey = append([]byte(nil), in.PaillierPublicKey...)
-	out.paillierPrivateKey = append([]byte(nil), in.paillierPrivateKey...)
-	out.PaillierProof = append([]byte(nil), in.PaillierProof...)
-	out.PaillierPublicKeys = append([]PaillierPublicShare(nil), in.PaillierPublicKeys...)
-	for i := range out.PaillierPublicKeys {
-		out.PaillierPublicKeys[i].PublicKey = append([]byte(nil), in.PaillierPublicKeys[i].PublicKey...)
-		out.PaillierPublicKeys[i].Proof = append([]byte(nil), in.PaillierPublicKeys[i].Proof...)
-	}
-	out.RingPedersenParams = append([]byte(nil), in.RingPedersenParams...)
-	out.RingPedersenProof = append([]byte(nil), in.RingPedersenProof...)
-	out.RingPedersenPublic = append([]RingPedersenPublicShare(nil), in.RingPedersenPublic...)
-	for i := range out.RingPedersenPublic {
-		out.RingPedersenPublic[i].Params = append([]byte(nil), in.RingPedersenPublic[i].Params...)
-		out.RingPedersenPublic[i].Proof = append([]byte(nil), in.RingPedersenPublic[i].Proof...)
-	}
-	out.PaillierProofSessionID = in.PaillierProofSessionID
-	out.PaillierProofDomain = in.PaillierProofDomain
-	out.ShareProof = append([]byte(nil), in.ShareProof...)
-	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
-	return &out
-}
-
-func cloneByteSlices(in [][]byte) [][]byte {
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = append([]byte(nil), in[i]...)
-	}
-	return out
-}
+// minimalCGGMP21Presign, cloneKeyShare, and cloneByteSlices are now defined
+// in helpers_test.go.
 
 func rewriteKeyShareField(raw []byte, tag uint16, value []byte) ([]byte, error) {
 	return rewriteWireField(raw, keyShareWireType, tag, value)

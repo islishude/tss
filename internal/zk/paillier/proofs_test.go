@@ -14,6 +14,9 @@ import (
 )
 
 func TestEncryptionProofTamper(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("encryption proof")
 	scalar := big.NewInt(42)
@@ -42,6 +45,9 @@ func TestEncryptionProofTamper(t *testing.T) {
 }
 
 func TestModulusProofCGGMP24Checks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 512)
 	domain := []byte("modulus proof")
 	party := uint32(7)
@@ -124,6 +130,9 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 }
 
 func TestRingPedersenProofChecks(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -194,6 +203,9 @@ func TestRingPedersenProofChecks(t *testing.T) {
 }
 
 func TestProofMarshalCanonicalBinary(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("canonical proof domain")
 
@@ -266,6 +278,9 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 }
 
 func TestMTAResponseProofFieldTamper(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("mta tamper")
 	a := big.NewInt(23)
@@ -308,6 +323,9 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 }
 
 func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("negative proof inputs")
 	a := big.NewInt(23)
@@ -389,6 +407,9 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 }
 
 func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping crypto proof test in short mode")
+	}
 	sk := testPaillierKey(t, 1024)
 	params := SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,

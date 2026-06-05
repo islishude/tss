@@ -1,0 +1,96 @@
+package secp256k1
+
+import (
+	"bytes"
+	"math/big"
+	"path/filepath"
+	"testing"
+)
+
+// TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
+// keygen share payloads. No keygen or crypto is required.
+func TestFast_GoldenKeygenSharePayload(t *testing.T) {
+	payload := keygenSharePayload{Share: scalarBytes(big.NewInt(1))}
+	raw, err := marshalKeygenSharePayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
+	checkGolden(t, golden, raw)
+
+	decoded, err := unmarshalKeygenSharePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalKeygenSharePayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalKeygenSharePayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+// TestFast_GoldenSignPartialPayload verifies deterministic wire encoding of
+// sign partial payloads. No keygen or crypto is required.
+func TestFast_GoldenSignPartialPayload(t *testing.T) {
+	payload := signPartialPayload{
+		S:                 scalarBytes(big.NewInt(1)),
+		PresignTranscript: bytes.Repeat([]byte{0xaa}, 32),
+		PresignContext:    bytes.Repeat([]byte{0xbb}, 32),
+	}
+	raw, err := marshalSignPartialPayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("testdata", "SignPartialPayload.golden")
+	checkGolden(t, golden, raw)
+
+	decoded, err := unmarshalSignPartialPayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalSignPartialPayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalSignPartialPayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+// TestFast_GoldenPresignRound3Payload verifies deterministic wire encoding of
+// presign round 3 payloads. No keygen or crypto is required.
+func TestFast_GoldenPresignRound3Payload(t *testing.T) {
+	payload := presignRound3Payload{Delta: scalarBytes(big.NewInt(42))}
+	raw, err := marshalPresignRound3Payload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("testdata", "PresignRound3Payload.golden")
+	checkGolden(t, golden, raw)
+
+	decoded, err := unmarshalPresignRound3Payload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalPresignRound3Payload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalPresignRound3Payload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}

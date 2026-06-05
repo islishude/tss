@@ -1,3 +1,5 @@
+//go:build integration
+
 package secp256k1
 
 import (
@@ -123,10 +125,4 @@ func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 	})
 }
 
-func fuzzSessionID() tss.SessionID {
-	var sessionID tss.SessionID
-	for i := range sessionID {
-		sessionID[i] = byte(i + 1)
-	}
-	return sessionID
-}
+// fuzzSessionID is now defined in tier0_fuzz_test.go
