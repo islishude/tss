@@ -1,51 +1,100 @@
 package edwards25519
 
 import (
+	"crypto/rand"
 	"crypto/sha512"
+	"encoding/binary"
 	"errors"
 	"io"
 	"math/big"
+	"slices"
 
 	fed "filippo.io/edwards25519"
 )
 
-var order *big.Int
-var orderBE [32]byte
+var (
+	// cofactorScalar is the Ed25519 cofactor (8) as a little-endian scalar, used to
+	// detect small-order points during deserialization.
+	cofactorScalar    = fed.NewScalar()
+	invCofactorScalar = fed.NewScalar()
 
-// cofactorScalar is the Ed25519 cofactor (8) as a little-endian scalar, used to
-// detect small-order points during deserialization.
-var cofactorScalar *fed.Scalar
-var invCofactorScalar *fed.Scalar
+	scalarOne = fed.NewScalar()
+)
 
 func init() {
-	order = new(big.Int)
-	order.SetString("7237005577332262213973186563042994240857116359379907606001950938285454250989", 10)
-	order.FillBytes(orderBE[:])
-
-	cofactorScalar = fed.NewScalar()
 	cofactorBytes := [32]byte{8}
 	if _, err := cofactorScalar.SetCanonicalBytes(cofactorBytes[:]); err != nil {
 		panic("edwards25519: failed to initialize cofactor scalar: " + err.Error())
 	}
-	invCofactorScalar = fed.NewScalar().Invert(cofactorScalar)
+	invCofactorScalar = invCofactorScalar.Invert(cofactorScalar)
+
+	oneBytes := [32]byte{1}
+	if _, err := scalarOne.SetCanonicalBytes(oneBytes[:]); err != nil {
+		panic("edwards25519: failed to initialize scalar one: " + err.Error())
+	}
+}
+
+// orderBytes is the precomputed prime subgroup order
+var orderBytes = [32]byte{
+	0x10, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x14, 0xde, 0xf9, 0xde,
+	0xa2, 0xf7, 0x9c, 0xd6,
+	0x58, 0x12, 0x63, 0x1a,
+	0x5c, 0xf5, 0xd3, 0xed,
 }
 
 // Order returns a copy of the Ed25519 prime subgroup order.
 func Order() *big.Int {
-	return new(big.Int).Set(order)
+	return new(big.Int).SetBytes(orderBytes[:])
 }
 
-// RandomScalar returns a non-zero scalar and its big.Int representation.
-func RandomScalar(reader io.Reader) (*fed.Scalar, *big.Int, error) {
-	x, err := FiatRandomScalar(reader)
-	if err != nil {
-		return nil, nil, err
+// ScalarZero returns the scalar value 0 as a new mutable scalar.
+func ScalarZero() *fed.Scalar {
+	return fed.NewScalar()
+}
+
+// ScalarOne returns the scalar value 1 as a new mutable scalar.
+func ScalarOne() *fed.Scalar {
+	return fed.NewScalar().Set(scalarOne)
+}
+
+// RandomScalar returns a uniformly random non-zero scalar using rejection sampling.
+// The reader is consumed in big-endian order to preserve deterministic test vectors
+// that rely on a fixed pseudorandom stream.
+func RandomScalar(reader io.Reader) (*fed.Scalar, error) {
+	if reader == nil {
+		reader = rand.Reader
 	}
-	s, err := x.ToFed()
-	if err != nil {
-		return nil, nil, err
+	var be [32]byte
+	var le [32]byte
+	for {
+		if _, err := io.ReadFull(reader, be[:]); err != nil {
+			return nil, err
+		}
+		// Clear the top 3 bits of the most-significant BE byte so the candidate
+		// is < 2^253 ≪ order, avoiding most rejections.
+		be[0] &= 0x1f
+		// Reject zero.
+		var allZero byte
+		for _, b := range be {
+			allZero |= b
+		}
+		if allZero == 0 {
+			continue
+		}
+		// Convert to little-endian for SetCanonicalBytes.
+		for i := range be {
+			le[i] = be[len(be)-1-i]
+		}
+		s, err := fed.NewScalar().SetCanonicalBytes(le[:])
+		if err != nil {
+			continue
+		}
+		return s, nil
 	}
-	return s, x.Big(), nil
 }
 
 // ScalarFromBig reduces x modulo the subgroup order and returns a scalar.
@@ -53,7 +102,22 @@ func ScalarFromBig(x *big.Int) (*fed.Scalar, error) {
 	if x == nil {
 		return nil, errors.New("nil scalar")
 	}
-	return fed.NewScalar().SetCanonicalBytes(FiatScalarFromBig(x).Bytes())
+	n := new(big.Int).Mod(x, Order())
+	if n.Sign() < 0 {
+		n.Add(n, Order())
+	}
+	le := n.FillBytes(make([]byte, 32))
+	slices.Reverse(le)
+	return fed.NewScalar().SetCanonicalBytes(le[:])
+}
+
+// ScalarFromUint64 returns x as a scalar. x must be less than 2^64, which is
+// far below the Ed25519 subgroup order.
+func ScalarFromUint64(x uint64) *fed.Scalar {
+	var b [32]byte
+	binary.LittleEndian.PutUint64(b[:], x)
+	s, _ := fed.NewScalar().SetCanonicalBytes(b[:])
+	return s
 }
 
 // ScalarToBig converts a scalar to a big.Int using little-endian scalar bytes.
@@ -61,14 +125,15 @@ func ScalarToBig(s *fed.Scalar) *big.Int {
 	if s == nil {
 		return new(big.Int)
 	}
-	return littleToBig(s.Bytes())
+	le := s.Bytes()
+	slices.Reverse(le)
+	return new(big.Int).SetBytes(le)
 }
 
 // ScalarFromCanonical parses a canonical 32-byte Ed25519 scalar.
 func ScalarFromCanonical(in []byte) (*fed.Scalar, error) {
-	if len(in) != 32 {
-		return nil, errors.New("edwards25519 scalar must be 32 bytes")
-	}
+	// It checks the length internally and rejects scalars that are not canonical,
+	// so we don't need to check those conditions here.
 	return fed.NewScalar().SetCanonicalBytes(in)
 }
 
@@ -79,27 +144,6 @@ func ScalarBaseMultBig(x *big.Int) (*fed.Point, error) {
 		return nil, err
 	}
 	return fed.NewIdentityPoint().ScalarBaseMult(s), nil
-}
-
-// ScalarBaseMult returns x times the Ed25519 base point.
-func ScalarBaseMult(x Scalar) (*fed.Point, error) {
-	s, err := x.ToFed()
-	if err != nil {
-		return nil, err
-	}
-	return fed.NewIdentityPoint().ScalarBaseMult(s), nil
-}
-
-// ScalarMult returns x times p.
-func ScalarMult(x Scalar, p *fed.Point) (*fed.Point, error) {
-	if p == nil {
-		return nil, errors.New("nil point")
-	}
-	s, err := x.ToFed()
-	if err != nil {
-		return nil, err
-	}
-	return fed.NewIdentityPoint().ScalarMult(s, p), nil
 }
 
 // PointFromBytes parses a native compressed 32-byte point and rejects the
@@ -196,7 +240,7 @@ func EvalCommitments(commitments [][]byte, id uint32) ([]byte, error) {
 		term := fed.NewIdentityPoint().ScalarMult(sc, c)
 		acc.Add(acc, term)
 		pow.Mul(pow, x)
-		pow.Mod(pow, order)
+		pow.Mod(pow, Order())
 	}
 	return acc.Bytes(), nil
 }
@@ -222,11 +266,11 @@ func VerifyShare(commitments [][]byte, id uint32, share *big.Int) error {
 }
 
 // VerifyScalarShare checks a private Shamir share against public commitments.
-func VerifyScalarShare(commitments [][]byte, id uint32, share Scalar) error {
-	left, err := ScalarBaseMult(share)
-	if err != nil {
-		return err
+func VerifyScalarShare(commitments [][]byte, id uint32, share *fed.Scalar) error {
+	if share == nil {
+		return errors.New("nil scalar share")
 	}
+	left := fed.NewIdentityPoint().ScalarBaseMult(share)
 	rightBytes, err := EvalCommitments(commitments, id)
 	if err != nil {
 		return err
@@ -246,59 +290,21 @@ func VerifyScalarShare(commitments [][]byte, id uint32, share Scalar) error {
 func HashToScalar(parts ...[]byte) (*fed.Scalar, *big.Int) {
 	h := sha512.New()
 	for _, p := range parts {
-		h.Write(p)
+		_, _ = h.Write(p)
 	}
-	sum := h.Sum(nil)
-	s, _ := fed.NewScalar().SetUniformBytes(sum)
+	// No error can occur since the input is always 64 bytes, so we ignore it.
+	s, _ := fed.NewScalar().SetUniformBytes(h.Sum(nil))
 	return s, ScalarToBig(s)
-}
-
-// HashToFiatScalar hashes parts into a prime-order scalar in fiat form.
-func HashToFiatScalar(parts ...[]byte) Scalar {
-	h := sha512.New()
-	for _, p := range parts {
-		h.Write(p)
-	}
-	sum := h.Sum(nil)
-	s, _ := fed.NewScalar().SetUniformBytes(sum)
-	return FiatScalarFromFed(s)
 }
 
 // Ed25519Challenge computes the RFC 8032 challenge H(R || A || msg).
 func Ed25519Challenge(R, A, msg []byte) (*fed.Scalar, *big.Int) {
 	h := sha512.New()
-	h.Write(R)
-	h.Write(A)
-	h.Write(msg)
-	sum := h.Sum(nil)
-	s, _ := fed.NewScalar().SetUniformBytes(sum)
+	_, _ = h.Write(R)
+	_, _ = h.Write(A)
+	_, _ = h.Write(msg)
+
+	// No error can occur since the input is always 64 bytes, so we ignore it.
+	s, _ := fed.NewScalar().SetUniformBytes(h.Sum(nil))
 	return s, ScalarToBig(s)
-}
-
-// Ed25519ChallengeFiat computes the RFC 8032 challenge H(R || A || msg).
-func Ed25519ChallengeFiat(R, A, msg []byte) Scalar {
-	h := sha512.New()
-	h.Write(R)
-	h.Write(A)
-	h.Write(msg)
-	sum := h.Sum(nil)
-	s, _ := fed.NewScalar().SetUniformBytes(sum)
-	return FiatScalarFromFed(s)
-}
-
-func bigToLittle(x *big.Int, size int) []byte {
-	out := make([]byte, size)
-	b := x.Bytes()
-	for i := 0; i < len(b) && i < size; i++ {
-		out[i] = b[len(b)-1-i]
-	}
-	return out
-}
-
-func littleToBig(in []byte) *big.Int {
-	be := make([]byte, len(in))
-	for i := range in {
-		be[len(in)-1-i] = in[i]
-	}
-	return new(big.Int).SetBytes(be)
 }

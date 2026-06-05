@@ -1,6 +1,7 @@
 package edwards25519
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -41,14 +42,54 @@ func TestScalarAdditionMatchesPointAddition(t *testing.T) {
 	}
 }
 
-func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
-	a := FiatScalarFromBig(big.NewInt(7))
-	b := FiatScalarFromBig(big.NewInt(11))
-	got := ScalarMul(ScalarAdd(a, b), b).Big()
-	want := new(big.Int).Mul(big.NewInt(18), big.NewInt(11))
-	want.Mod(want, Order())
-	if got.Cmp(want) != 0 {
-		t.Fatalf("fiat scalar arithmetic mismatch: got %s want %s", got, want)
+func TestScalarHelpersReturnIndependentScalars(t *testing.T) {
+	one := ScalarOne()
+	one.Set(ScalarZero())
+	if ScalarOne().Equal(fed.NewScalar()) == 1 {
+		t.Fatal("ScalarOne returned shared mutable state")
+	}
+	if ScalarZero().Equal(fed.NewScalar()) != 1 {
+		t.Fatal("ScalarZero did not return zero")
+	}
+}
+
+func TestScalarConversionsReduceModuloOrder(t *testing.T) {
+	order := Order()
+	x := new(big.Int).Add(order, big.NewInt(7))
+	fromBig, err := ScalarFromBig(x)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromUint := ScalarFromUint64(7)
+	if fromBig.Equal(fromUint) != 1 {
+		t.Fatal("ScalarFromBig did not reduce modulo the subgroup order")
+	}
+
+	minusOne, err := ScalarFromBig(big.NewInt(-1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := new(big.Int).Sub(order, big.NewInt(1))
+	if ScalarToBig(minusOne).Cmp(want) != 0 {
+		t.Fatal("negative scalar reduction mismatch")
+	}
+}
+
+func TestRandomScalarConsumesReaderAsBigEndian(t *testing.T) {
+	var sample [32]byte
+	sample[31] = 7
+	s, err := RandomScalar(bytes.NewReader(sample[:]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if ScalarToBig(s).Cmp(big.NewInt(7)) != 0 {
+		t.Fatal("RandomScalar changed deterministic reader endianness")
+	}
+}
+
+func TestVerifyScalarShareRejectsNilShare(t *testing.T) {
+	if err := VerifyScalarShare(nil, 1, nil); err == nil {
+		t.Fatal("VerifyScalarShare accepted nil scalar")
 	}
 }
 

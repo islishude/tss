@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
@@ -292,11 +293,11 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scalar, err := edcurve.ScalarFromCanonicalFiat(payload.Share)
+	scalar, err := edcurve.ScalarFromCanonical(payload.Share)
 	if err != nil {
 		t.Fatal(err)
 	}
-	badShare := edcurve.ScalarAdd(scalar, edcurve.ScalarOne())
+	badShare := fed.NewScalar().Add(scalar, edcurve.ScalarOne())
 	badShareBytes := badShare.Bytes()
 	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes})
 	if err != nil {

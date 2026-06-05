@@ -34,11 +34,7 @@ var curves = []struct {
 		pkg:     "secp256k1scalar",
 		modulus: "2^256 - 432420386565659656852420866394968145599",
 	},
-	{
-		dir:     "ed25519scalar",
-		pkg:     "ed25519scalar",
-		modulus: "2^252 + 27742317777372353535851937790883648493",
-	},
+	// ed25519 scalars are now handled by filippo.io/edwards25519 directly.
 }
 
 func main() {

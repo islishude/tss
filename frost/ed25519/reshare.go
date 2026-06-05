@@ -32,7 +32,7 @@ type ReshareSession struct {
 	cfg     tss.ThresholdConfig
 	log     tss.Logger
 	commits map[tss.PartyID][][]byte
-	shares  map[tss.PartyID]edcurve.Scalar
+	shares  map[tss.PartyID]*fed.Scalar
 
 	completed bool
 	aborted   bool
@@ -86,19 +86,16 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	if err != nil {
 		return nil, nil, err
 	}
-	weighted := edcurve.ScalarMul(lambda, oldSecret)
+	weighted := fed.NewScalar().Multiply(lambda, oldSecret)
 
 	// Generate polynomial g_i of degree newThreshold-1 with constant term w_i.
-	poly, err := randomScalarPolynomial(config.Reader(), newThreshold, &weighted)
+	poly, err := randomScalarPolynomial(config.Reader(), newThreshold, weighted)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		point, err := edcurve.ScalarBaseMult(coeff)
-		if err != nil {
-			return nil, nil, err
-		}
+		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
 		commitments[i] = point.Bytes()
 	}
 	s := &ReshareSession{
@@ -112,7 +109,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		cfg:          config,
 		log:          config.Logger(),
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:       map[tss.PartyID]edcurve.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
@@ -175,7 +172,7 @@ func StartReshareRecipient(oldPublicKey []byte, oldParties, newParties []tss.Par
 		cfg:          config,
 		log:          config.Logger(),
 		commits:      make(map[tss.PartyID][][]byte),
-		shares:       make(map[tss.PartyID]edcurve.Scalar),
+		shares:       make(map[tss.PartyID]*fed.Scalar),
 	}, nil
 }
 
@@ -197,17 +194,14 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	config.Parties = parties
 	config.Threshold = oldKey.Threshold
 	// Zero-coefficient polynomial preserves the group secret.
-	zero := edcurve.ScalarZero()
-	poly, err := randomScalarPolynomial(config.Reader(), oldKey.Threshold, &zero)
+	zero := fed.NewScalar()
+	poly, err := randomScalarPolynomial(config.Reader(), oldKey.Threshold, zero)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		point, err := edcurve.ScalarBaseMult(coeff)
-		if err != nil {
-			return nil, nil, err
-		}
+		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
 		commitments[i] = point.Bytes()
 	}
 	s := &ReshareSession{
@@ -222,7 +216,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 		cfg:          config,
 		log:          config.Logger(),
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:       map[tss.PartyID]edcurve.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
@@ -293,12 +287,12 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonicalFiat(p.Share)
+		scalar, err := edcurve.ScalarFromCanonical(p.Share)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if existing, ok := s.shares[env.From]; ok {
-			if edcurve.ScalarEqual(existing, scalar) {
+			if existing.Equal(scalar) == 1 {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting reshare share"))
@@ -361,7 +355,7 @@ func (s *ReshareSession) tryComplete() error {
 		}
 	}
 
-	newSecret := edcurve.ScalarZero()
+	newSecret := fed.NewScalar()
 	publicKey := append([]byte(nil), s.oldPublicKey...)
 	if s.refreshMode {
 		// Refresh: new_secret = old_secret + Σ f_i(self) mod L.
@@ -370,14 +364,14 @@ func (s *ReshareSession) tryComplete() error {
 		if err != nil {
 			return err
 		}
-		newSecret = oldSecret
+		newSecret.Add(newSecret, oldSecret)
 		for _, dealer := range s.oldParties {
-			newSecret = edcurve.ScalarAdd(newSecret, s.shares[dealer])
+			newSecret.Add(newSecret, s.shares[dealer])
 		}
 	} else {
 		// True reshare: new_secret = Σ g_i(self) mod L.
 		for _, dealer := range s.oldParties {
-			newSecret = edcurve.ScalarAdd(newSecret, s.shares[dealer])
+			newSecret.Add(newSecret, s.shares[dealer])
 		}
 	}
 	newSecretBytes := newSecret.Bytes()

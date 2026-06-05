@@ -18,12 +18,12 @@ type KeygenSession struct {
 	cfg         tss.ThresholdConfig
 	log         tss.Logger
 	commits     map[tss.PartyID][][]byte
-	shares      map[tss.PartyID]edcurve.Scalar
+	shares      map[tss.PartyID]*fed.Scalar
 	chainCodes  map[tss.PartyID][]byte
 	completed   bool
 	aborted     bool
 	keyShare    *KeyShare
-	ownPoly     []edcurve.Scalar
+	ownPoly     []*fed.Scalar
 	ownMessages []tss.Envelope
 }
 
@@ -55,10 +55,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		// Each coefficient commitment lets receivers validate their private share.
-		point, err := edcurve.ScalarBaseMult(coeff)
-		if err != nil {
-			return nil, nil, err
-		}
+		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
 		commitments[i] = point.Bytes()
 	}
 	var chainCode []byte
@@ -72,7 +69,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		cfg:     config,
 		log:     config.Logger(),
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:  map[tss.PartyID]edcurve.Scalar{config.Self: evalScalarPolynomial(poly, config.Self)},
+		shares:  map[tss.PartyID]*fed.Scalar{config.Self: evalScalarPolynomial(poly, config.Self)},
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
@@ -160,12 +157,12 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonicalFiat(p.Share)
+		scalar, err := edcurve.ScalarFromCanonical(p.Share)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if existing, ok := s.shares[env.From]; ok {
-			if edcurve.ScalarEqual(existing, scalar) {
+			if existing.Equal(scalar) == 1 {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting share"))
@@ -213,9 +210,9 @@ func (s *KeygenSession) tryComplete() error {
 			}
 		}
 	}
-	secret := edcurve.ScalarZero()
+	secret := fed.NewScalar()
 	for _, dealer := range s.cfg.Parties {
-		secret = edcurve.ScalarAdd(secret, s.shares[dealer])
+		secret.Add(secret, s.shares[dealer])
 	}
 	secretBytes := secret.Bytes()
 	groupCommitments := make([][]byte, s.cfg.Threshold)

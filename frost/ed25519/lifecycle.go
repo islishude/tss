@@ -1,8 +1,8 @@
 package ed25519
 
 import (
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -33,12 +33,20 @@ func (s *SignSession) Destroy() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// Zero constant-time fiat scalars in place.
-	s.d = edcurve.ScalarZero()
-	s.e = edcurve.ScalarZero()
-	s.deltaScalar = edcurve.ScalarZero()
+	// Zero scalars in place.
+	if s.d != nil {
+		s.d.Set(fed.NewScalar())
+	}
+	if s.e != nil {
+		s.e.Set(fed.NewScalar())
+	}
+	if s.deltaScalar != nil {
+		s.deltaScalar.Set(fed.NewScalar())
+	}
 	for id := range s.partials {
-		s.partials[id] = edcurve.ScalarZero()
+		if s.partials[id] != nil {
+			s.partials[id].Set(fed.NewScalar())
+		}
 		delete(s.partials, id)
 	}
 	clear(s.message)
@@ -59,15 +67,19 @@ func (s *ReshareSession) Destroy() {
 	s.newShare = nil
 }
 
-func clearScalars(xs []edcurve.Scalar) {
+func clearScalars(xs []*fed.Scalar) {
 	for i := range xs {
-		xs[i] = edcurve.ScalarZero()
+		if xs[i] != nil {
+			xs[i].Set(fed.NewScalar())
+		}
 	}
 }
 
-func clearScalarMap(xs map[tss.PartyID]edcurve.Scalar) {
+func clearScalarMap(xs map[tss.PartyID]*fed.Scalar) {
 	for id := range xs {
-		xs[id] = edcurve.ScalarZero()
+		if xs[id] != nil {
+			xs[id].Set(fed.NewScalar())
+		}
 		delete(xs, id)
 	}
 }

@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 )
 
@@ -118,11 +119,11 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if sign.d.IsZero() || sign.e.IsZero() || len(sign.partials) == 0 {
+	if sign.d.Equal(fed.NewScalar()) == 1 || sign.e.Equal(fed.NewScalar()) == 1 || len(sign.partials) == 0 {
 		t.Fatal("sign session did not retain expected local secret material")
 	}
 	sign.Destroy()
-	if !sign.d.IsZero() || !sign.e.IsZero() {
+	if sign.d.Equal(fed.NewScalar()) != 1 || sign.e.Equal(fed.NewScalar()) != 1 {
 		t.Fatal("signing nonces were not released")
 	}
 	if len(sign.partials) != 0 {

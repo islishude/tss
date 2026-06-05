@@ -221,10 +221,7 @@ func (k *KeyShare) ValidateConsistency() error {
 	if !ok {
 		return errors.New("missing verification share for local party")
 	}
-	secretPub, err := edcurve.ScalarBaseMult(secretScalar)
-	if err != nil {
-		return err
-	}
+	secretPub := fed.NewIdentityPoint().ScalarBaseMult(secretScalar)
 	if !bytes.Equal(secretPub.Bytes(), wantPub) {
 		return errors.New("secret share inconsistent with verification share")
 	}
@@ -240,8 +237,8 @@ func (k *KeyShare) Destroy() {
 	clear(k.secret)
 }
 
-func (k *KeyShare) secretScalar() (edcurve.Scalar, error) {
-	return edcurve.ScalarFromCanonicalFiat(k.secret)
+func (k *KeyShare) secretScalar() (*fed.Scalar, error) {
+	return edcurve.ScalarFromCanonical(k.secret)
 }
 
 func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
