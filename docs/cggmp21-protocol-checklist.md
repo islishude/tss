@@ -14,6 +14,8 @@ Ring-Pedersen Πprm semantics.
 | Reject mismatched Ring-Pedersen modulus vs Paillier public key                     | `types.go`, protocol receive handlers                                      | DONE   |
 | Bind keygen/refresh/reshare transcripts to Paillier keys and Ring-Pedersen records | `keygen.go`, `refresh.go`, `reshare.go`                                    | DONE   |
 | Prove share-to-verification-share discrete-log equality with Πlog\*                | `keygen.go`, `refresh.go`, `reshare.go`, `internal/zk/paillier/logstar.go` | DONE   |
+| Preserve group secret in party-set-changing reshare with Lagrange-weighted dealers | `reshare.go`, `internal/shamir`                                            | DONE   |
+| Source new Paillier/Ring-Pedersen material from the new receiver set               | `reshare.go`                                                               | DONE   |
 | Store only canonical TLV key-share records with no legacy proof fallback           | `encoding.go`, `payload_encoding.go`                                       | DONE   |
 
 ## Proof Verifier Policy

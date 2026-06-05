@@ -728,8 +728,174 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[1] = out2[1].WithTranscriptHash()
-	_, err = session.HandleReshareMessage(out2[1])
+	if _, err := session.HandleReshareMessage(out2[1]); err != nil {
+		t.Fatal(err)
+	}
+	_, err = session.HandleReshareMessage(out2[2])
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
+}
+
+func TestThresholdECDSAReshareAddsParty(t *testing.T) {
+	oldShares := secpKeygen(t, 2, 3)
+	oldPub := oldShares[1].PublicKeyBytes()
+	newParties := []tss.PartyID{1, 2, 3, 4}
+	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 2)
+	if len(newShares) != len(newParties) {
+		t.Fatalf("got %d new shares, want %d", len(newShares), len(newParties))
+	}
+	for _, id := range newParties {
+		if !bytes.Equal(newShares[id].PublicKey, oldPub) {
+			t.Fatalf("party %d public key changed after reshare", id)
+		}
+	}
+	digest := sha256.Sum256([]byte("reshare add party"))
+	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[2], newShares[4]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after add-party reshare did not verify")
+	}
+	if !bytes.Equal(pub, oldPub) {
+		t.Fatal("reshare changed group public key")
+	}
+}
+
+func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
+	oldShares := secpKeygen(t, 2, 3)
+	oldPub := oldShares[1].PublicKeyBytes()
+	newParties := []tss.PartyID{1, 3}
+	newShares, sessions := runCGGMP21Reshare(t, oldShares, newParties, 2)
+	if _, ok := newShares[2]; ok {
+		t.Fatal("removed party received a new key share")
+	}
+	if share, ok := sessions[2].KeyShare(); ok || share != nil {
+		t.Fatal("removed party session produced a key share")
+	}
+	digest := sha256.Sum256([]byte("reshare remove party"))
+	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[1], newShares[3]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after remove-party reshare did not verify")
+	}
+	if !bytes.Equal(pub, oldPub) {
+		t.Fatal("reshare changed group public key")
+	}
+}
+
+func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
+	oldShares := secpKeygen(t, 2, 3)
+	oldPub := oldShares[1].PublicKeyBytes()
+	newParties := []tss.PartyID{1, 2, 3, 4, 5}
+	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 3)
+	digest := sha256.Sum256([]byte("reshare threshold change"))
+	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[1], newShares[4], newShares[5]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after threshold-changing reshare did not verify")
+	}
+	if !bytes.Equal(pub, oldPub) {
+		t.Fatal("reshare changed group public key")
+	}
+}
+
+func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
+	t.Helper()
+	var reference *KeyShare
+	for _, share := range oldShares {
+		reference = share
+		break
+	}
+	if reference == nil { //nolint:staticcheck
+		t.Fatal("missing old shares")
+	}
+	oldParties := append([]tss.PartyID(nil), reference.Parties...) //nolint:staticcheck
+	newParties = tss.SortParties(newParties)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := make(map[tss.PartyID]*ReshareSession)
+	queue := make([]tss.Envelope, 0)
+	for _, id := range oldParties {
+		session, out, err := StartReshare(oldShares[id], tss.ThresholdConfig{Threshold: newThreshold, Self: id, SessionID: sessionID}, newParties)
+		if err != nil {
+			t.Fatalf("start old dealer %d: %v", id, err)
+		}
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	for _, id := range newParties {
+		if tss.ContainsParty(oldParties, id) {
+			continue
+		}
+		session, out, err := StartReshareRecipient(
+			reference.PublicKey,
+			reference.ChainCode,
+			reference.KeygenTranscriptHash,
+			oldParties,
+			newParties,
+			tss.ThresholdConfig{Threshold: newThreshold, Self: id, SessionID: sessionID},
+		)
+		if err != nil {
+			t.Fatalf("start new receiver %d: %v", id, err)
+		}
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	deliverCGGMP21ReshareMessages(t, newParties, queue, sessions)
+	newShares := make(map[tss.PartyID]*KeyShare, len(newParties))
+	for _, id := range newParties {
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("reshare did not complete for new party %d", id)
+		}
+		newShares[id] = share
+	}
+	confirmCGGMP21Shares(t, newShares, newParties)
+	return newShares, sessions
+}
+
+func deliverCGGMP21ReshareMessages(t testing.TB, newParties []tss.PartyID, queue []tss.Envelope, sessions map[tss.PartyID]*ReshareSession) {
+	t.Helper()
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for id, session := range sessions {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			if env.PayloadType == payloadReshareReceiverMaterial && !tss.ContainsParty(newParties, id) {
+				continue
+			}
+			out, err := session.HandleReshareMessage(env)
+			if err != nil {
+				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+}
+
+func confirmCGGMP21Shares(t testing.TB, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID) {
+	t.Helper()
+	confirmations := make([]*KeygenConfirmation, len(parties))
+	for i, id := range parties {
+		c, err := shares[id].KeygenConfirmation()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmations[i] = c
+	}
+	for _, id := range parties {
+		if err := VerifyKeygenConfirmations(shares[id], confirmations); err != nil {
+			t.Fatalf("confirm new share %d: %v", id, err)
+		}
+	}
 }
 
 func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {

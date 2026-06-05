@@ -4,13 +4,13 @@ The `cggmp21/secp256k1` package implements a CGGMP21-style ([ePrint 2021/060](ht
 
 ## Protocol Overview
 
-| Phase   | Rounds | Description                                                      |
-| ------- | ------ | ---------------------------------------------------------------- |
-| Keygen  | 1      | DKG with Paillier key setup and ZK proofs.                       |
-| Presign | 3      | Offline phase: nonce sharing via MtA, produces `Presign` record. |
-| Sign    | 1      | Online phase: fast single-round partial signature exchange.      |
-| Refresh | 1      | Key-share refresh with Paillier key rotation; fixed party set.   |
-| Reshare | 1      | Key-share refresh with optional party-set changes.               |
+| Phase   | Rounds | Description                                                                  |
+| ------- | ------ | ---------------------------------------------------------------------------- |
+| Keygen  | 1      | DKG with Paillier key setup and ZK proofs.                                   |
+| Presign | 3      | Offline phase: nonce sharing via MtA, produces `Presign` record.             |
+| Sign    | 1      | Online phase: fast single-round partial signature exchange.                  |
+| Refresh | 1      | Key-share refresh with Paillier key rotation; fixed party set and threshold. |
+| Reshare | 1      | Party-set/threshold resharing with old dealers and new receivers.            |
 
 The signing path never transmits or reconstructs private key shares or nonce shares. Each presign record is strictly one-use; reuse is caught before any partial signature leaves the process.
 
@@ -238,7 +238,7 @@ encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
 
 ## Refresh
 
-Refresh rotates key shares and Paillier keys while preserving the group public key and chain code. The participant set is **fixed** to the original key's parties.
+Refresh rotates key shares and Paillier keys while preserving the group public key and chain code. The participant set and threshold are **fixed** to the original key's parties and threshold.
 
 Each party:
 
@@ -258,16 +258,24 @@ Each party then encrypts its new share under its new Paillier key and produces a
 
 ## Reshare
 
-Reshare is similar to Refresh but allows changing the participant set and threshold. Existing parties act as dealers, and the new participant set may differ in size and identity.
+Reshare allows changing the participant set and threshold while preserving the group public key and chain code. All old parties act as dealers. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
 
 Each existing party:
 
-1. Generates a new Paillier keypair with Π^fac + Π^prm proofs.
-2. Samples `g_i(x)` with `g_i(0) = 0` and degree = `threshold_new - 1`.
-3. Broadcasts commitments + new Paillier public key + proofs.
-4. Sends private shares to each party in the **new** participant set.
+1. Computes `λ_i` for interpolation at zero over the old party set.
+2. Samples `g_i(x)` with `g_i(0) = λ_i · x_i` and degree = `threshold_new - 1`.
+3. Broadcasts dealer commitments for `g_i`.
+4. Sends private shares `g_i(j)` to each party in the **new** participant set.
 
-New participants only need to receive and verify — they don't need the old key share to participate.
+Each new receiver:
+
+1. Generates a new Paillier keypair with Πmod and Ring-Pedersen Πprm proofs.
+2. Broadcasts the new Paillier public key, Ring-Pedersen parameters, and proofs.
+3. Verifies every dealer share against dealer commitments.
+4. Aggregates `x'_j = Σ_i g_i(j) mod q`.
+5. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
+
+New-only participants call `StartReshareRecipient` with authenticated old key metadata. Overlap parties call `StartReshare` and act as both dealer and receiver. Old-only parties call `StartReshare` and complete without a new `KeyShare`.
 
 The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commitment) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Πlog\* proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
@@ -296,18 +304,19 @@ Evidence records are deterministic JSON binding protocol context, payload hash, 
 
 ## Payload Types
 
-| Payload Type                            | Direction      | Confidential | Content                                              |
-| --------------------------------------- | -------------- | ------------ | ---------------------------------------------------- |
-| `cggmp21.secp256k1.keygen.commitments`  | broadcast      | no           | Polynomial commitments + Paillier key + proofs       |
-| `cggmp21.secp256k1.keygen.share`        | point-to-point | yes          | Scalar share for one recipient                       |
-| `cggmp21.secp256k1.presign.round1`      | broadcast      | no           | `(Γ_i, Enc_i(k_i), EncryptionProof v1, PaillierPK)`  |
-| `cggmp21.secp256k1.presign.round2`      | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof) |
-| `cggmp21.secp256k1.presign.round3`      | broadcast      | no           | `δ_i` scalar share                                   |
-| `cggmp21.secp256k1.sign.partial`        | broadcast      | no           | `s_i` partial + presign transcript hash              |
-| `cggmp21.secp256k1.refresh.commitments` | broadcast      | no           | Refresh polynomial commitments + new Paillier        |
-| `cggmp21.secp256k1.refresh.share`       | point-to-point | yes          | Refresh scalar share                                 |
-| `cggmp21.secp256k1.reshare.commitments` | broadcast      | no           | Reshare commitments + new Paillier                   |
-| `cggmp21.secp256k1.reshare.share`       | point-to-point | yes          | Reshare scalar share                                 |
+| Payload Type                                   | Direction      | Confidential | Content                                              |
+| ---------------------------------------------- | -------------- | ------------ | ---------------------------------------------------- |
+| `cggmp21.secp256k1.keygen.commitments`         | broadcast      | no           | Polynomial commitments + Paillier key + proofs       |
+| `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Scalar share for one recipient                       |
+| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), EncryptionProof v1, PaillierPK)`  |
+| `cggmp21.secp256k1.presign.round2`             | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof) |
+| `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i` scalar share                                   |
+| `cggmp21.secp256k1.sign.partial`               | broadcast      | no           | `s_i` partial + presign transcript hash              |
+| `cggmp21.secp256k1.refresh.commitments`        | broadcast      | no           | Refresh polynomial commitments + new Paillier        |
+| `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Refresh scalar share                                 |
+| `cggmp21.secp256k1.reshare.dealer_commitments` | broadcast      | no           | Old dealer weighted polynomial commitments           |
+| `cggmp21.secp256k1.reshare.share`              | point-to-point | yes          | Old dealer scalar share for one new receiver         |
+| `cggmp21.secp256k1.reshare.receiver_material`  | broadcast      | no           | New receiver Paillier/Ring-Pedersen material         |
 
 ## API Reference
 
@@ -351,6 +360,7 @@ newShare, ok := rs.KeyShare()
 
 ```go
 rs, out, err := StartReshare(oldShare, config, newParties)
+recipient, out, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldKeygenTranscriptHash, oldParties, newParties, config)
 out, err := rs.HandleReshareMessage(env)
 newShare, ok := rs.KeyShare()
 ```

@@ -332,27 +332,44 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 	})
 }
 
-func FuzzCGGMP21ReshareCommitmentsPayloadUnmarshal(f *testing.F) {
+func FuzzCGGMP21ReshareDealerCommitmentsPayloadUnmarshal(f *testing.F) {
 	shares := secpKeygen(f, 1, 1)
-	payload := reshareCommitmentsPayload{
-		Commitments:        shares[1].GroupCommitments,
-		PaillierPublicKey:  shares[1].PaillierPublicKey,
-		PaillierProof:      shares[1].PaillierProof,
-		RingPedersenParams: shares[1].RingPedersenParams,
-		RingPedersenProof:  shares[1].RingPedersenProof,
-	}
-	raw, err := marshalReshareCommitmentsPayload(payload)
+	payload := reshareDealerCommitmentsPayload{Commitments: shares[1].GroupCommitments}
+	raw, err := marshalReshareDealerCommitmentsPayload(payload)
 	if err != nil {
 		f.Fatal(err)
 	}
 	f.Add(raw)
 	f.Add([]byte(`{"commitments":[]}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalReshareCommitmentsPayload(data)
+		p, err := unmarshalReshareDealerCommitmentsPayload(data)
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalReshareCommitmentsPayload, unmarshalReshareCommitmentsPayload)
+		assertPayloadRemarshals(t, p, marshalReshareDealerCommitmentsPayload, unmarshalReshareDealerCommitmentsPayload)
+	})
+}
+
+func FuzzCGGMP21ReshareReceiverMaterialPayloadUnmarshal(f *testing.F) {
+	shares := secpKeygen(f, 1, 1)
+	payload := reshareReceiverMaterialPayload{
+		PaillierPublicKey:  shares[1].PaillierPublicKey,
+		PaillierProof:      shares[1].PaillierProof,
+		RingPedersenParams: shares[1].RingPedersenParams,
+		RingPedersenProof:  shares[1].RingPedersenProof,
+	}
+	raw, err := marshalReshareReceiverMaterialPayload(payload)
+	if err != nil {
+		f.Fatal(err)
+	}
+	f.Add(raw)
+	f.Add([]byte(`{"paillier_public_key":"x"}`))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		p, err := unmarshalReshareReceiverMaterialPayload(data)
+		if err != nil {
+			return
+		}
+		assertPayloadRemarshals(t, p, marshalReshareReceiverMaterialPayload, unmarshalReshareReceiverMaterialPayload)
 	})
 }
 

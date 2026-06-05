@@ -22,8 +22,9 @@ const (
 	presignRound2PayloadWireType      = "cggmp21.secp256k1.payload.presign.round2"
 	presignRound3PayloadWireType      = "cggmp21.secp256k1.payload.presign.round3"
 	signPartialPayloadWireType        = "cggmp21.secp256k1.payload.sign.partial"
-	reshareCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.reshare.commitments"
+	reshareDealerCommitmentsWireType  = "cggmp21.secp256k1.payload.reshare.dealer_commitments"
 	reshareSharePayloadWireType       = "cggmp21.secp256k1.payload.reshare.share"
+	reshareReceiverMaterialWireType   = "cggmp21.secp256k1.payload.reshare.receiver_material"
 	refreshCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.refresh.commitments"
 	refreshSharePayloadWireType       = "cggmp21.secp256k1.payload.refresh.share"
 )
@@ -355,62 +356,38 @@ func validatePositiveIntegerBytes(in []byte) error {
 	return nil
 }
 
-const reshareCommitmentsPayloadFieldCommitments uint16 = 1
-const reshareCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
-const reshareCommitmentsPayloadFieldPaillierProof uint16 = 3
-const reshareCommitmentsPayloadFieldRingPedersenParams uint16 = 4
-const reshareCommitmentsPayloadFieldRingPedersenProof uint16 = 5
-
+const reshareDealerCommitmentsFieldCommitments uint16 = 1
 const reshareSharePayloadFieldShare uint16 = 1
 
-func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
-	return wire.Marshal(tss.Version, reshareCommitmentsPayloadWireType, []wire.Field{
-		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: reshareCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
-		{Tag: reshareCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: reshareCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
-		{Tag: reshareCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
+const (
+	reshareReceiverMaterialFieldPaillierPublicKey uint16 = iota + 1
+	reshareReceiverMaterialFieldPaillierProof
+	reshareReceiverMaterialFieldRingPedersenParams
+	reshareReceiverMaterialFieldRingPedersenProof
+)
+
+func marshalReshareDealerCommitmentsPayload(p reshareDealerCommitmentsPayload) ([]byte, error) {
+	return wire.Marshal(tss.Version, reshareDealerCommitmentsWireType, []wire.Field{
+		{Tag: reshareDealerCommitmentsFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 	})
 }
 
-func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareCommitmentsPayloadWireType)
+func unmarshalReshareDealerCommitmentsPayload(in []byte) (reshareDealerCommitmentsPayload, error) {
+	version, fields, err := wire.Unmarshal(in, reshareDealerCommitmentsWireType)
 	if err != nil {
-		return reshareCommitmentsPayload{}, err
+		return reshareDealerCommitmentsPayload{}, err
 	}
 	if version != tss.Version {
-		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
+		return reshareDealerCommitmentsPayload{}, fmt.Errorf("unexpected reshare dealer commitments payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments, reshareCommitmentsPayloadFieldPaillierPublicKey, reshareCommitmentsPayloadFieldPaillierProof, reshareCommitmentsPayloadFieldRingPedersenParams, reshareCommitmentsPayloadFieldRingPedersenProof); err != nil {
-		return reshareCommitmentsPayload{}, err
+	if err := wire.RequireExactTags(fields, reshareDealerCommitmentsFieldCommitments); err != nil {
+		return reshareDealerCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
+	commitments, err := wire.BytesListField(fields, reshareDealerCommitmentsFieldCommitments)
 	if err != nil {
-		return reshareCommitmentsPayload{}, err
+		return reshareDealerCommitmentsPayload{}, err
 	}
-	publicKey, err := wire.Require(fields, reshareCommitmentsPayloadFieldPaillierPublicKey)
-	if err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	proof, err := wire.Require(fields, reshareCommitmentsPayloadFieldPaillierProof)
-	if err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	ringPedersenParams, err := wire.Require(fields, reshareCommitmentsPayloadFieldRingPedersenParams)
-	if err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	ringPedersenProof, err := wire.Require(fields, reshareCommitmentsPayloadFieldRingPedersenProof)
-	if err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	return reshareCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
+	return reshareDealerCommitmentsPayload{Commitments: commitments}, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -438,6 +415,51 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 		return reshareSharePayload{}, err
 	}
 	return reshareSharePayload{Share: share}, nil
+}
+
+func marshalReshareReceiverMaterialPayload(p reshareReceiverMaterialPayload) ([]byte, error) {
+	return wire.Marshal(tss.Version, reshareReceiverMaterialWireType, []wire.Field{
+		{Tag: reshareReceiverMaterialFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
+		{Tag: reshareReceiverMaterialFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
+		{Tag: reshareReceiverMaterialFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
+		{Tag: reshareReceiverMaterialFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
+	})
+}
+
+func unmarshalReshareReceiverMaterialPayload(in []byte) (reshareReceiverMaterialPayload, error) {
+	version, fields, err := wire.Unmarshal(in, reshareReceiverMaterialWireType)
+	if err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	if version != tss.Version {
+		return reshareReceiverMaterialPayload{}, fmt.Errorf("unexpected reshare receiver material payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, reshareReceiverMaterialFieldPaillierPublicKey, reshareReceiverMaterialFieldPaillierProof, reshareReceiverMaterialFieldRingPedersenParams, reshareReceiverMaterialFieldRingPedersenProof); err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	publicKey, err := wire.Require(fields, reshareReceiverMaterialFieldPaillierPublicKey)
+	if err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	proof, err := wire.Require(fields, reshareReceiverMaterialFieldPaillierProof)
+	if err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	ringPedersenParams, err := wire.Require(fields, reshareReceiverMaterialFieldRingPedersenParams)
+	if err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	ringPedersenProof, err := wire.Require(fields, reshareReceiverMaterialFieldRingPedersenProof)
+	if err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
+		return reshareReceiverMaterialPayload{}, err
+	}
+	return reshareReceiverMaterialPayload{PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
 }
 
 const refreshCommitmentsPayloadFieldCommitments uint16 = 1

@@ -88,6 +88,13 @@ with the old 32-byte chain code through an authorized metadata channel; the
 chain code is not a signing secret, but losing or substituting it changes child
 key derivation.
 
+CGGMP21/secp256k1 resharing also sends confidential old-dealer shares to the
+new receiver set. New-only receivers must be provisioned with authenticated old
+key metadata, including the old group public key, chain code, keygen transcript
+hash, and old party set. Substituting any of that metadata can produce a share
+for the wrong key context even when the final public-key preservation check
+passes.
+
 Zeroization in Go is best-effort. The library clears owned byte slices and
 overwrites currently referenced `big.Int` words, but Go's garbage collector,
 compiler optimizations, stack copies, immutable prior encodings, and caller-made

@@ -22,10 +22,10 @@ const (
 )
 
 // RefreshSession refreshes CGGMP21 key shares and rotates Paillier keys while
-// preserving the group public key and chain code. Unlike ReshareSession, the
-// participant set is fixed to the original key's party set. Each existing
-// participant generates a polynomial with zero constant term (to refresh the
-// secret share) and a new Paillier keypair (to rotate encryption material).
+// preserving the group public key and chain code. The participant set and
+// threshold are fixed to the original key share. Each existing participant
+// generates a polynomial with zero constant term (to refresh the secret share)
+// and a new Paillier keypair (to rotate encryption material).
 type RefreshSession struct {
 	oldKey          *KeyShare
 	cfg             tss.ThresholdConfig
@@ -43,12 +43,15 @@ type RefreshSession struct {
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.
-// The participant set is fixed to oldKey.Parties; unlike StartReshare, the
-// caller cannot change the party set. The group public key and chain code
-// are preserved from the original key share.
+// The participant set and threshold are fixed to oldKey.Parties and
+// oldKey.Threshold. The group public key and chain code are preserved from the
+// original key share.
 func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession, []tss.Envelope, error) {
 	if err := oldKey.requireMPCMaterial(); err != nil {
 		return nil, nil, err
+	}
+	if config.Threshold != oldKey.Threshold {
+		return nil, nil, ErrUnsupportedRefreshThresholdChange
 	}
 	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
 	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)); err != nil {

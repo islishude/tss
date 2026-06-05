@@ -41,8 +41,9 @@ These rules ensure one semantic record has one binary representation. This matte
 - `cggmp21/secp256k1` presign round 2 payload
 - `cggmp21/secp256k1` presign round 3 payload
 - `cggmp21/secp256k1` online signing partial payload
-- `cggmp21/secp256k1` reshare commitments payload
+- `cggmp21/secp256k1` reshare dealer commitments payload
 - `cggmp21/secp256k1` reshare share payload
+- `cggmp21/secp256k1` reshare receiver material payload
 - `cggmp21/secp256k1` refresh commitments payload
 - `cggmp21/secp256k1` refresh share payload
 - `frost/ed25519.KeyShare`
