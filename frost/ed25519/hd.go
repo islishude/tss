@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
@@ -44,6 +45,10 @@ func DeriveBIP32(publicKey, chainCode []byte, path []uint32) (childPublicKey, ad
 	}
 	if len(path) == 0 {
 		return nil, nil, nil, errors.New("empty derivation path")
+	}
+	// depth uses uint8 in the standard BIP32 serialization, so we limit path length to 255.
+	if len(path) > math.MaxUint8 {
+		return nil, nil, nil, fmt.Errorf("derivation path too long: %d indices", len(path))
 	}
 	if _, err := edcurve.PointFromBytes(publicKey); err != nil {
 		return nil, nil, nil, fmt.Errorf("invalid public key: %w", err)
