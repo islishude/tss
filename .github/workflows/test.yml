@@ -69,4 +69,35 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: make test-stress
+        run: go test -race -tags 'slowcrypto integration' -count=10 -timeout 10h ./...
+
+  fuzzing-test:
+    name: Test Fuzzing (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run all fuzz targets
+        shell: bash
+        run: ./.github/scripts/fuzz-ci.sh
+        env:
+          FUZZTIME: 10m
+          PARALLEL: 4
+
+      - name: Upload failing corpus if generated
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            **/testdata/fuzz/**

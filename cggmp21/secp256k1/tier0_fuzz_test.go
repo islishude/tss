@@ -80,13 +80,11 @@ func FuzzFast_BlameEvidenceUnmarshal(f *testing.F) {
 			Parties:   []tss.PartyID{1, 2},
 			Signers:   []tss.PartyID{1, 2},
 		})
-		again, err := decoded.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(data, again) {
-			t.Fatal("blame evidence did not remarshal deterministically")
-		}
+		// Check deterministic remarshaling: marshal → unmarshal → marshal
+		// must produce identical bytes. We compare canonical outputs, not
+		// the raw fuzz input (which may use different JSON key casing or
+		// omit optional fields).
+		testutil.AssertDeterministicRoundTrip(t, decoded, (*tss.BlameEvidence).MarshalBinary, tss.UnmarshalBlameEvidence)
 	})
 }
 
