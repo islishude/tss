@@ -357,7 +357,13 @@ func validatePositiveIntegerBytes(in []byte) error {
 }
 
 const reshareDealerCommitmentsFieldCommitments uint16 = 1
-const reshareSharePayloadFieldShare uint16 = 1
+
+const (
+	reshareSharePayloadFieldDealer uint16 = iota + 1
+	reshareSharePayloadFieldReceiver
+	reshareSharePayloadFieldShare
+	reshareSharePayloadFieldDealerCommitmentHash
+)
 
 const (
 	reshareReceiverMaterialFieldPaillierPublicKey uint16 = iota + 1
@@ -391,11 +397,23 @@ func unmarshalReshareDealerCommitmentsPayload(in []byte) (reshareDealerCommitmen
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
+	if p.Dealer == 0 {
+		return nil, errors.New("reshare share dealer is zero")
+	}
+	if p.Receiver == 0 {
+		return nil, errors.New("reshare share receiver is zero")
+	}
 	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
+	if len(p.DealerCommitmentHash) != sha256.Size {
+		return nil, errors.New("reshare share commitment hash must be 32 bytes")
+	}
 	return wire.Marshal(tss.Version, reshareSharePayloadWireType, []wire.Field{
+		{Tag: reshareSharePayloadFieldDealer, Value: wire.Uint32(uint32(p.Dealer))},
+		{Tag: reshareSharePayloadFieldReceiver, Value: wire.Uint32(uint32(p.Receiver))},
 		{Tag: reshareSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
+		{Tag: reshareSharePayloadFieldDealerCommitmentHash, Value: wire.NonNilBytes(p.DealerCommitmentHash)},
 	})
 }
 
@@ -407,14 +425,37 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	if version != tss.Version {
 		return reshareSharePayload{}, fmt.Errorf("unexpected reshare share payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldShare); err != nil {
+	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldDealer, reshareSharePayloadFieldReceiver, reshareSharePayloadFieldShare, reshareSharePayloadFieldDealerCommitmentHash); err != nil {
 		return reshareSharePayload{}, err
+	}
+	dealer, err := wire.Uint32Field(fields, reshareSharePayloadFieldDealer)
+	if err != nil {
+		return reshareSharePayload{}, fmt.Errorf("reshare share dealer: %w", err)
+	}
+	receiver, err := wire.Uint32Field(fields, reshareSharePayloadFieldReceiver)
+	if err != nil {
+		return reshareSharePayload{}, fmt.Errorf("reshare share receiver: %w", err)
+	}
+	if dealer == 0 {
+		return reshareSharePayload{}, errors.New("reshare share dealer is zero")
+	}
+	if receiver == 0 {
+		return reshareSharePayload{}, errors.New("reshare share receiver is zero")
 	}
 	share := wire.MustField(fields, reshareSharePayloadFieldShare)
 	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return reshareSharePayload{}, err
 	}
-	return reshareSharePayload{Share: share}, nil
+	commitmentHash := wire.MustField(fields, reshareSharePayloadFieldDealerCommitmentHash)
+	if len(commitmentHash) != sha256.Size {
+		return reshareSharePayload{}, errors.New("reshare share commitment hash must be 32 bytes")
+	}
+	return reshareSharePayload{
+		Dealer:               tss.PartyID(dealer),
+		Receiver:             tss.PartyID(receiver),
+		Share:                share,
+		DealerCommitmentHash: commitmentHash,
+	}, nil
 }
 
 func marshalReshareReceiverMaterialPayload(p reshareReceiverMaterialPayload) ([]byte, error) {

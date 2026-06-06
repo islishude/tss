@@ -704,18 +704,32 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	session, _, err := StartReshare(shares[1], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID}, parties)
+	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2, SecurityParameters{})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartReshare(shares[2], tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID}, parties)
+	session, out1, err := StartReshareOverlap(shares[1], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
+	dealer2Out, err := session2.HandleReshareMessage(out1[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dealer2Out) < 2 {
+		t.Fatalf("dealer 2 emitted %d messages, want commitment and share", len(dealer2Out))
+	}
+	if _, err := session.HandleReshareMessage(dealer2Out[0]); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalReshareSharePayload(dealer2Out[1].Payload)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -725,15 +739,13 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if badShare.Sign() == 0 {
 		badShare.SetInt64(1)
 	}
-	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: scalarBytes(badShare)})
+	payload.Share = scalarBytes(badShare)
+	dealer2Out[1].Payload, err = marshalReshareSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1] = out2[1].WithTranscriptHash()
-	if _, err := session.HandleReshareMessage(out2[1]); err != nil {
-		t.Fatal(err)
-	}
-	_, err = session.HandleReshareMessage(out2[2])
+	dealer2Out[1] = dealer2Out[1].WithTranscriptHash()
+	_, err = session.HandleReshareMessage(dealer2Out[1])
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -805,6 +817,28 @@ func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSAReshareDisjointDealerSubset(t *testing.T) {
+	oldShares := secpKeygen(t, 2, 3)
+	oldPub := oldShares[1].PublicKeyBytes()
+	dealerParties := []tss.PartyID{1, 3}
+	newParties := []tss.PartyID{4, 5, 6}
+	newShares, _ := runCGGMP21ReshareWithDealers(t, oldShares, dealerParties, newParties, 2)
+	if len(newShares) != len(newParties) {
+		t.Fatalf("got %d new shares, want %d", len(newShares), len(newParties))
+	}
+	digest := sha256.Sum256([]byte("reshare disjoint dealer subset"))
+	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[4], newShares[6]})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !VerifyDigest(pub, digest[:], sig) {
+		t.Fatal("signature after disjoint reshare did not verify")
+	}
+	if !bytes.Equal(pub, oldPub) {
+		t.Fatal("reshare changed group public key")
+	}
+}
+
 func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
 	t.Helper()
 	var reference *KeyShare
@@ -815,16 +849,39 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 	if reference == nil { //nolint:staticcheck
 		t.Fatal("missing old shares")
 	}
-	oldParties := append([]tss.PartyID(nil), reference.Parties...) //nolint:staticcheck
+	return runCGGMP21ReshareWithDealers(t, oldShares, reference.Parties, newParties, newThreshold)
+}
+
+func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeyShare, dealerParties, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
+	t.Helper()
+	var reference *KeyShare
+	for _, share := range oldShares {
+		reference = share
+		break
+	}
+	if reference == nil { //nolint:staticcheck
+		t.Fatal("missing old shares")
+	}
 	newParties = tss.SortParties(newParties)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
+	dealerParties = tss.SortParties(dealerParties)
+	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold, SecurityParameters{})
+	if err != nil {
+		t.Fatal(err)
+	}
 	sessions := make(map[tss.PartyID]*ReshareSession)
 	queue := make([]tss.Envelope, 0)
-	for _, id := range oldParties {
-		session, out, err := StartReshare(oldShares[id], tss.ThresholdConfig{Threshold: newThreshold, Self: id, SessionID: sessionID}, newParties)
+	for _, id := range dealerParties {
+		var session *ReshareSession
+		var out []tss.Envelope
+		if tss.ContainsParty(newParties, id) {
+			session, out, err = StartReshareOverlap(oldShares[id], plan, nil)
+		} else {
+			session, out, err = StartReshareDealer(oldShares[id], plan, nil)
+		}
 		if err != nil {
 			t.Fatalf("start old dealer %d: %v", id, err)
 		}
@@ -832,24 +889,17 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 		queue = append(queue, out...)
 	}
 	for _, id := range newParties {
-		if tss.ContainsParty(oldParties, id) {
+		if tss.ContainsParty(dealerParties, id) {
 			continue
 		}
-		session, out, err := StartReshareRecipient(
-			reference.PublicKey,
-			reference.ChainCode,
-			reference.KeygenTranscriptHash,
-			oldParties,
-			newParties,
-			tss.ThresholdConfig{Threshold: newThreshold, Self: id, SessionID: sessionID},
-		)
+		session, out, err := StartReshareReceiver(plan, id, nil)
 		if err != nil {
 			t.Fatalf("start new receiver %d: %v", id, err)
 		}
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
-	deliverCGGMP21ReshareMessages(t, newParties, queue, sessions)
+	deliverCGGMP21ReshareMessages(t, queue, sessions)
 	newShares := make(map[tss.PartyID]*KeyShare, len(newParties))
 	for _, id := range newParties {
 		share, ok := sessions[id].KeyShare()
@@ -862,16 +912,13 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 	return newShares, sessions
 }
 
-func deliverCGGMP21ReshareMessages(t testing.TB, newParties []tss.PartyID, queue []tss.Envelope, sessions map[tss.PartyID]*ReshareSession) {
+func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions map[tss.PartyID]*ReshareSession) {
 	t.Helper()
 	for len(queue) > 0 {
 		env := queue[0]
 		queue = queue[1:]
 		for id, session := range sessions {
 			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			if env.PayloadType == payloadReshareReceiverMaterial && !tss.ContainsParty(newParties, id) {
 				continue
 			}
 			out, err := session.HandleReshareMessage(env)

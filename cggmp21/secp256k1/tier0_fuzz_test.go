@@ -170,7 +170,12 @@ func FuzzFast_PresignRound3PayloadUnmarshal(f *testing.F) {
 // FuzzFast_ReshareSharePayloadUnmarshal fuzzes reshare share payload decoding
 // (no keygen required).
 func FuzzFast_ReshareSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalReshareSharePayload(reshareSharePayload{Share: scalarBytes(big.NewInt(1))})
+	raw, err := marshalReshareSharePayload(reshareSharePayload{
+		Dealer:               1,
+		Receiver:             2,
+		Share:                scalarBytes(big.NewInt(1)),
+		DealerCommitmentHash: make([]byte, sha256.Size),
+	})
 	if err != nil {
 		f.Fatal(err)
 	}

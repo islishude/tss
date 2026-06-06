@@ -258,24 +258,28 @@ Each party then encrypts its new share under its new Paillier key and produces a
 
 ## Reshare
 
-Reshare allows changing the participant set and threshold while preserving the group public key and chain code. All old parties act as dealers. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
+Reshare allows changing the participant set and threshold while preserving the group public key and chain code. A `ResharePlan` fixes the old party set, dealer subset, new receiver set, thresholds, old commitments, old verification shares, and session id before any message is accepted. Dealers are an agreed subset of old parties with size at least the old threshold. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
 
-Each existing party:
-
-1. Computes `λ_i` for interpolation at zero over the old party set.
-2. Samples `g_i(x)` with `g_i(0) = λ_i · x_i` and degree = `threshold_new - 1`.
-3. Broadcasts dealer commitments for `g_i`.
-4. Sends private shares `g_i(j)` to each party in the **new** participant set.
-
-Each new receiver:
+Each new receiver first:
 
 1. Generates a new Paillier keypair with Πmod and Ring-Pedersen Πprm proofs.
 2. Broadcasts the new Paillier public key, Ring-Pedersen parameters, and proofs.
-3. Verifies every dealer share against dealer commitments.
-4. Aggregates `x'_j = Σ_i g_i(j) mod q`.
-5. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
 
-New-only participants call `StartReshareRecipient` with authenticated old key metadata. Overlap parties call `StartReshare` and act as both dealer and receiver. Old-only parties call `StartReshare` and complete without a new `KeyShare`.
+Each dealer waits until all receiver auxiliary material has been collected, then:
+
+1. Computes `λ_i` for interpolation at zero over the dealer set.
+2. Samples `g_i(x)` with `g_i(0) = λ_i · x_i` and degree = `threshold_new - 1`.
+3. Broadcasts dealer commitments for `g_i`, with `C_i0 = λ_i · V_i`.
+4. Sends private shares `g_i(j)` to each party in the **new** participant set. The direct share payload binds the dealer, receiver, scalar share, and hash of the accepted dealer commitments.
+
+Each new receiver:
+
+1. Verifies each dealer commitment constant against the old verification share.
+2. Verifies every dealer share against dealer commitments.
+3. Aggregates `x'_j = Σ_i g_i(j) mod q`.
+4. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
+
+New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare`. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share.
 
 The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commitment) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Πlog\* proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
@@ -359,10 +363,12 @@ newShare, ok := rs.KeyShare()
 ### Reshare
 
 ```go
-rs, out, err := StartReshare(oldShare, config, newParties)
-recipient, out, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldKeygenTranscriptHash, oldParties, newParties, config)
-out, err := rs.HandleReshareMessage(env)
-newShare, ok := rs.KeyShare()
+plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold, SecurityParameters{})
+dealer, out, err := StartReshareDealer(oldShare, plan, rng)
+receiver, out, err := StartReshareReceiver(plan, localParty, rng)
+overlap, out, err := StartReshareOverlap(oldShare, plan, rng)
+out, err := overlap.HandleMessage(env)
+newShare, err := receiver.Result()
 ```
 
 ### Presign Lifecycle

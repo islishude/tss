@@ -374,7 +374,12 @@ func FuzzCGGMP21ReshareReceiverMaterialPayloadUnmarshal(f *testing.F) {
 }
 
 func FuzzCGGMP21ReshareSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalReshareSharePayload(reshareSharePayload{Share: scalarBytes(big.NewInt(1))})
+	raw, err := marshalReshareSharePayload(reshareSharePayload{
+		Dealer:               1,
+		Receiver:             2,
+		Share:                scalarBytes(big.NewInt(1)),
+		DealerCommitmentHash: bytes.Repeat([]byte{1}, 32),
+	})
 	if err != nil {
 		f.Fatal(err)
 	}
