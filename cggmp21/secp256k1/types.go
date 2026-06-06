@@ -21,6 +21,7 @@ const protocol = "cggmp21-secp256k1"
 const (
 	payloadKeygenCommitments  = "cggmp21.secp256k1.keygen.commitments"
 	payloadKeygenShare        = "cggmp21.secp256k1.keygen.share"
+	payloadKeygenConfirmation = "cggmp21.secp256k1.keygen.confirmation"
 	payloadPresignRound1      = "cggmp21.secp256k1.presign.round1"
 	payloadPresignRound1Proof = "cggmp21.secp256k1.presign.round1-proof"
 	payloadPresignRound2      = "cggmp21.secp256k1.presign.round2"
@@ -104,7 +105,7 @@ type KeyShare struct {
 	LogCiphertext          []byte                    `json:"log_ciphertext,omitempty"`
 	LogProof               []byte                    `json:"log_proof,omitempty"`
 	logRandomness          []byte
-	KeygenConfirmed        bool `json:"keygen_confirmed"`
+	KeygenConfirmations    [][]byte `json:"keygen_confirmations,omitempty"`
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
@@ -181,7 +182,7 @@ func (k *KeyShare) Format(state fmt.State, verb rune) {
 
 func (k KeyShare) redactedString() string {
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
 		k.Version,
 		k.Party,
 		k.Threshold,
@@ -202,6 +203,7 @@ func (k KeyShare) redactedString() string {
 		k.KeygenTranscriptHash,
 		len(k.LogCiphertext),
 		len(k.LogProof),
+		len(k.KeygenConfirmations),
 	)
 }
 
@@ -217,8 +219,7 @@ func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShareWithLimits(in, limits)
 }
 
-// Validate checks share structure and canonical secp256k1/Paillier material.
-func (k *KeyShare) Validate() error {
+func (k *KeyShare) validateWithoutConfirmations() error {
 	if k == nil {
 		return errors.New("nil key share")
 	}
@@ -440,6 +441,18 @@ func (k *KeyShare) Validate() error {
 	return nil
 }
 
+// Validate checks share structure, canonical secp256k1/Paillier material, and
+// the complete keygen confirmation evidence set.
+func (k *KeyShare) Validate() error {
+	if err := k.validateWithoutConfirmations(); err != nil {
+		return err
+	}
+	if err := verifyKeygenConfirmationSet(k, k.KeygenConfirmations); err != nil {
+		return fmt.Errorf("invalid keygen confirmations: %w", err)
+	}
+	return nil
+}
+
 func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPublicKey []byte) ([]byte, error) {
 	config := tss.ThresholdConfig{
 		Threshold: k.Threshold,
@@ -485,9 +498,6 @@ func scalarBytes(x *big.Int) []byte {
 func (k *KeyShare) requireMPCMaterial() error {
 	if err := k.Validate(); err != nil {
 		return err
-	}
-	if !k.KeygenConfirmed {
-		return errors.New("key share has not been confirmed: call VerifyKeygenConfirmations before presign/sign")
 	}
 	for _, id := range k.Parties {
 		if _, err := k.paillierPublicFor(id); err != nil {
@@ -570,6 +580,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.LogCiphertext = slices.Clone(k.LogCiphertext)
 	out.LogProof = slices.Clone(k.LogProof)
 	out.logRandomness = slices.Clone(k.logRandomness)
+	out.KeygenConfirmations = cloneKeyShareByteSlices(k.KeygenConfirmations)
 	return &out
 }
 

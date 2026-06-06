@@ -52,6 +52,25 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 	return SignDigestInteractive(digest32, signers, testPresignContext())
 }
 
+func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties []tss.PartyID, messages []tss.Envelope) {
+	t.Helper()
+	queue := append([]tss.Envelope(nil), messages...)
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, id := range parties {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			out, err := sessions[id].HandleKeygenMessage(env)
+			if err != nil {
+				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+}
+
 // --- Clone helpers ---
 
 // cloneKeyShare returns a deep copy of a KeyShare for mutation testing.
@@ -91,6 +110,10 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.PaillierProofDomain = in.PaillierProofDomain
 	out.ShareProof = append([]byte(nil), in.ShareProof...)
 	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
+	out.LogCiphertext = append([]byte(nil), in.LogCiphertext...)
+	out.LogProof = append([]byte(nil), in.LogProof...)
+	out.logRandomness = append([]byte(nil), in.logRandomness...)
+	out.KeygenConfirmations = cloneByteSlices(in.KeygenConfirmations)
 	return &out
 }
 

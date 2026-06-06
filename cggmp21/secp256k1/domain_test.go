@@ -167,16 +167,7 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
-		for _, id := range parties {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
-				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
-			}
-		}
-	}
+	deliverKeygenMessages(t, sessions, parties, messages)
 	out := make(map[tss.PartyID]*KeyShare, n)
 	for _, id := range parties {
 		share, ok := sessions[id].KeyShare()
@@ -184,19 +175,6 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 			t.Fatalf("keygen not complete for %d", id)
 		}
 		out[id] = share
-	}
-	confirmations := make([]*KeygenConfirmation, n)
-	for i, id := range parties {
-		c, err := out[id].KeygenConfirmation()
-		if err != nil {
-			t.Fatal(err)
-		}
-		confirmations[i] = c
-	}
-	for _, id := range parties {
-		if err := VerifyKeygenConfirmations(out[id], confirmations); err != nil {
-			t.Fatal(err)
-		}
 	}
 	return out
 }

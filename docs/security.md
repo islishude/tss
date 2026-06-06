@@ -145,17 +145,25 @@ Presign and signing entry points are gated behind `AcceptExperimentalUsage` (dis
 
 ## Keygen Broadcast Consistency
 
-The keygen protocol assumes authenticated transport and a non-equivocating broadcast view. After keygen completes, each party produces a `KeygenConfirmation` message binding the session ID, sender, threshold, party set, public key, keygen transcript hash, and commitments hash.
+The keygen protocol assumes authenticated transport and a non-equivocating broadcast view. After local DKG material verifies, each `KeygenSession` automatically broadcasts a `KeygenConfirmation` message binding the session ID, sender, threshold, party set, public key, keygen transcript hash, and commitments hash.
 
-Applications must exchange and verify keygen confirmations before using the resulting key shares for presign or signing:
+Applications must keep delivering keygen envelopes until `Complete()` returns a share:
 
 ```go
-conf, _ := share.KeygenConfirmation()
-// ... exchange confirmations with all parties via authenticated transport ...
-err := VerifyKeygenConfirmations(share, receivedConfirmations)
+out, err := kg.HandleKeygenMessage(env)
+share, ok := kg.Complete()
 ```
 
-A CGGMP21/secp256k1 key share is not valid for signing until `VerifyKeygenConfirmations` succeeds for the full keygen party set. The `KeygenConfirmed` flag is set to `true` on success and checked by `requireMPCMaterial` before any presign or sign operation.
+A CGGMP21/secp256k1 key share is not valid for signing until the full confirmation evidence set is embedded in the share and `Validate()` succeeds. `StartPresign`, `StartSign`, refresh, and reshare entry points rely on `Validate()` and reject shares missing keygen confirmations.
+
+Transport responsibilities:
+
+- bind every envelope to an authenticated sender identity;
+- never let a payload `Sender` override the transport sender;
+- fan out broadcast envelopes to every party;
+- protect confidential share envelopes with point-to-point encryption or equivalent controls;
+- treat two different confirmations from one sender in one session as equivocation;
+- never persist or use keygen material before `Complete()` returns a confirmed `KeyShare`.
 
 ## Paillier Ciphertext Membership
 
@@ -167,7 +175,7 @@ Caller responsibilities (not provided by this library):
 - storage encryption for key shares and presign records;
 - proactive refresh scheduling (`RefreshScheduler` provides periodic key rotation with configurable interval and transport interface);
 - SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1);
-- keygen confirmation exchange after keygen and refresh before any presign/sign operation.
+- authenticated keygen message delivery through the confirmation round before any presign/sign operation.
 
 ## One-Time Presigns
 

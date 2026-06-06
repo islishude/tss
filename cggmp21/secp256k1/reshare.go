@@ -49,14 +49,15 @@ type ReshareSession struct {
 	isDealer      bool
 	isReceiver    bool
 
-	cfg       tss.ThresholdConfig
-	log       tss.Logger
-	commits   map[tss.PartyID][][]byte
-	shares    map[tss.PartyID]*big.Int
-	completed bool
-	aborted   bool
-	newShare  *KeyShare
-	ownPoly   []*big.Int
+	cfg           tss.ThresholdConfig
+	log           tss.Logger
+	commits       map[tss.PartyID][][]byte
+	shares        map[tss.PartyID]*big.Int
+	completed     bool
+	aborted       bool
+	newShare      *KeyShare
+	confirmations map[tss.PartyID][]byte
+	ownPoly       []*big.Int
 
 	newPaillier     *pai.PrivateKey
 	newPaillierPubs map[tss.PartyID]PaillierPublicShare
@@ -177,6 +178,7 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		log:             config.Logger(),
 		commits:         make(map[tss.PartyID][][]byte),
 		shares:          make(map[tss.PartyID]*big.Int),
+		confirmations:   make(map[tss.PartyID][]byte, len(plan.NewParties)),
 		newPaillierPubs: make(map[tss.PartyID]PaillierPublicShare),
 		newRingPedersen: make(map[tss.PartyID]RingPedersenPublicShare),
 	}
@@ -216,9 +218,11 @@ func (s *ReshareSession) maybeSendDealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.dealerSent = true
-	if err := s.tryComplete(); err != nil {
+	completionOut, err := s.tryComplete()
+	if err != nil {
 		return nil, err
 	}
+	out = append(out, completionOut...)
 	return out, nil
 }
 
@@ -345,7 +349,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		return nil, errors.New("nil reshare session")
 	}
 	if s.completed {
-		if !s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial {
+		if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
 			return nil, nil
 		}
 		return nil, completedSessionError(env.Round, env.From)
@@ -355,9 +359,12 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
+	if env.PayloadType == payloadKeygenConfirmation {
+		return s.handleReshareConfirmation(env)
+	}
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
 	}
@@ -465,9 +472,11 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
-	if err := s.tryComplete(); err != nil {
+	completionOut, err := s.tryComplete()
+	if err != nil {
 		return nil, err
 	}
+	out = append(out, completionOut...)
 	return out, nil
 }
 
@@ -550,31 +559,37 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 	return cloneKeyShareValue(s.newShare), true
 }
 
-func (s *ReshareSession) tryComplete() error {
+func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if s.completed {
-		return nil
+		return nil, nil
+	}
+	if s.newShare != nil {
+		if len(s.confirmations) == len(s.newParties) {
+			return nil, s.finalizeConfirmedShare()
+		}
+		return nil, nil
 	}
 	if len(s.commits) != len(s.dealerParties) {
-		return nil
+		return nil, nil
 	}
 	if !s.isReceiver {
 		newCommitments, err := s.aggregateCommitments()
 		if err != nil {
-			return err
+			return nil, err
 		}
 		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
-			return errors.New("reshared group public key does not match original")
+			return nil, errors.New("reshared group public key does not match original")
 		}
 		s.completed = true
-		return nil
+		return nil, nil
 	}
 	if len(s.shares) != len(s.dealerParties) || len(s.newPaillierPubs) != len(s.newParties) || len(s.newRingPedersen) != len(s.newParties) {
-		return nil
+		return nil, nil
 	}
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.selfID), secp.ScalarFromBigInt(share)); err != nil {
 			evidenceEnv := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil, true)
-			return &tss.ProtocolError{
+			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
@@ -601,38 +616,38 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	newCommitments, err := s.aggregateCommitments()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
-		return errors.New("reshared group public key does not match original")
+		return nil, errors.New("reshared group public key does not match original")
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
 		pub, err := secp.EvalCommitments(newCommitments, uint32(id))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		enc, err := secp.PointBytes(pub)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
 	transcriptHash := s.reshareTranscriptHash(newCommitments)
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.selfID)
 	if !ok {
-		return errors.New("missing local verification share")
+		return nil, errors.New("missing local verification share")
 	}
 	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, newSecret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
-		return errors.New("local share proof public key mismatch")
+		return nil, errors.New("local share proof public key mismatch")
 	}
 	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localProofShare := &KeyShare{
 		Party:                  s.selfID,
@@ -646,11 +661,11 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.selfID))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	paillierProofBytes, err := zkpai.Marshal(paillierProof)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.newShare = &KeyShare{
 		Version:                tss.Version,
@@ -676,16 +691,16 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localRP, err := zkpai.UnmarshalRingPedersenParams(s.newRingPedersen[s.selfID].Params)
 	if err != nil {
-		return fmt.Errorf("unmarshal local RP params: %w", err)
+		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}
 	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
-		return fmt.Errorf("invalid verification share: %w", err)
+		return nil, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   &s.newPaillier.PublicKey,
@@ -700,21 +715,121 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logProofBytes, err := logProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.newShare.LogCiphertext = logCiphertext.Bytes()
 	s.newShare.LogProof = logProofBytes
 	s.newShare.logRandomness = logRandomness.Bytes()
-	s.completed = true
-	s.log.Info(s.cfg.Ctx(), "reshare complete",
+	if err := s.newShare.validateWithoutConfirmations(); err != nil {
+		return nil, err
+	}
+	confirmation, err := s.newShare.KeygenConfirmation()
+	if err != nil {
+		return nil, err
+	}
+	encodedConfirmation, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	s.confirmations[s.selfID] = append([]byte(nil), encodedConfirmation...)
+	out := []tss.Envelope{
+		envelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	}
+	s.log.Info(s.cfg.Ctx(), "reshare local material complete",
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.newShare.Validate()
+	if len(s.confirmations) == len(s.newParties) {
+		if err := s.finalizeConfirmedShare(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+	if !s.isReceiver {
+		return nil, nil
+	}
+	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.newParties); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.Round != keygenConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
+	}
+	if env.To != 0 {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation must be broadcast"))
+	}
+	if env.ConfidentialRequired {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation must not require confidential transport"))
+	}
+	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if confirmation.Sender != env.From {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender))
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if !bytes.Equal(canonical, env.Payload) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical reshare confirmation"))
+	}
+	if existing, ok := s.confirmations[env.From]; ok {
+		if bytes.Equal(existing, canonical) {
+			return nil, nil
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
+	}
+	if s.newShare != nil {
+		if err := verifyKeygenConfirmationForShare(s.newShare, confirmation); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+	}
+	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	if s.newShare != nil && len(s.confirmations) == len(s.newParties) {
+		return nil, s.finalizeConfirmedShare()
+	}
+	return nil, nil
+}
+
+func (s *ReshareSession) finalizeConfirmedShare() error {
+	if s.newShare == nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, errors.New("missing pending reshare share"))
+	}
+	encoded := make([][]byte, len(s.newParties))
+	for i, id := range s.newParties {
+		confirmation, ok := s.confirmations[id]
+		if !ok {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
+		}
+		encoded[i] = append([]byte(nil), confirmation...)
+	}
+	if err := verifyKeygenConfirmationSet(s.newShare, encoded); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
+	}
+	s.newShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	if err := s.newShare.Validate(); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
+	}
+	s.completed = true
+	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
+	s.log.Info(s.cfg.Ctx(), "reshare complete",
+		"party_id", s.selfID,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+	)
+	return nil
 }
 
 func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
@@ -947,6 +1062,14 @@ func (s *ReshareSession) Destroy() {
 	if s == nil {
 		return
 	}
+	s.abort()
+}
+
+func (s *ReshareSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
 	clearBigIntMap(s.shares)
 	for _, coeff := range s.ownPoly {
 		secret.ClearBigInt(coeff)

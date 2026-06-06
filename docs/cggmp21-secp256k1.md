@@ -6,7 +6,7 @@ The `cggmp21/secp256k1` package implements a CGGMP21-style ([ePrint 2021/060](ht
 
 | Phase   | Rounds | Description                                                                  |
 | ------- | ------ | ---------------------------------------------------------------------------- |
-| Keygen  | 1      | DKG with Paillier key setup and ZK proofs.                                   |
+| Keygen  | 2      | DKG with Paillier key setup, ZK proofs, and mandatory confirmation evidence. |
 | Presign | 3      | Offline phase: nonce sharing via MtA, produces `Presign` record.             |
 | Sign    | 1      | Online phase: fast single-round partial signature exchange.                  |
 | Refresh | 1      | Key-share refresh with Paillier key rotation; fixed party set and threshold. |
@@ -40,7 +40,7 @@ type KeyShare struct {
     KeygenTranscriptHash    []byte
     LogCiphertext           []byte        // Πlog* ciphertext (LogStarProof): Enc(x_i, ρ) under own Paillier key
     LogProof                []byte        // Πlog* proof (LogStarProof) of discrete-log equality with Ring-Pedersen commitment
-    KeygenConfirmed         bool          // set true by VerifyKeygenConfirmations
+    KeygenConfirmations     [][]byte      // canonical KeygenConfirmation evidence, sorted by Parties
     // logRandomness          []byte      // unexported: Paillier randomness for log ciphertext
 }
 ```
@@ -49,7 +49,7 @@ The `secret` and `paillierPrivateKey` fields are unexported. `String()`, `GoStri
 
 ### MPC Material Requirement
 
-CGGMP21 key shares require full Paillier/ZK material for the signing path. `requireMPCMaterial()` validates the share, checks the `KeygenConfirmed` flag (set by `VerifyKeygenConfirmations` after keygen confirmation exchange), and verifies that every party's Paillier public key is deserializable. Unconfirmed shares are rejected.
+CGGMP21 key shares require full Paillier/ZK material and a complete keygen confirmation evidence set for the signing path. `requireMPCMaterial()` calls `Validate()`, which verifies every embedded `KeygenConfirmation` against the local keygen transcript, then checks that every party's Paillier public key is deserializable. Unconfirmed shares are rejected.
 
 ## Keygen
 
@@ -114,6 +114,14 @@ When all `n` parties' commitments and shares are received and verified:
 7. **Paillier proof domain**: The persisted local Π^fac is re-proved against `(PK, keygen_transcript_hash)` for out-of-context detection.
 
 8. **Πlog\* proof**: Each party encrypts its aggregated secret share `x_j` under its own Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share `V_j`, using the party's own Ring-Pedersen parameters for the commitment. This allows re-verification on load to detect out-of-context or tampered share material.
+
+At this point the session has only local pending material. It is not a usable `KeyShare` and cannot be serialized, presigned with, signed with, or reshared.
+
+### Phase 5: Keygen Confirmation
+
+Each party broadcasts `cggmp21.secp256k1.keygen.confirmation` in keygen round 2. The payload is a canonical binary `KeygenConfirmation` binding the session ID, sender, threshold, ordered party set, group public key, keygen transcript hash, and commitments hash.
+
+The keygen session stores one canonical confirmation from each party, sorted by `Parties`. Only after the full set verifies does `Complete()`/`KeyShare()` return a `KeyShare`. The serialized key share contains the full confirmation evidence set; old records without this evidence are invalid.
 
 ### Domain Separation
 
@@ -338,7 +346,7 @@ Evidence records are deterministic JSON binding protocol context, payload hash, 
 kg, out, err := StartKeygen(config)
 kg, out, err := StartKeygenWithOptions(config, KeygenOptions{PaillierBits: 2048, EnableHD: true})
 out, err := kg.HandleKeygenMessage(env)
-share, ok := kg.KeyShare()
+share, ok := kg.Complete()
 ```
 
 ### Presign

@@ -9,7 +9,7 @@ import (
 )
 
 // Example_full_lifecycle demonstrates the complete CGGMP21 lifecycle: keygen,
-// confirmation, serialization, presign, and signing. It requires the
+// serialization, presign, and signing. It requires the
 // integration build tag because it generates a Paillier key.
 func Example_full_lifecycle() {
 	sessionID, err := tss.NewSessionID(nil)
@@ -28,14 +28,6 @@ func Example_full_lifecycle() {
 	share, ok := keygen.KeyShare()
 	if !ok {
 		panic("keygen did not complete")
-	}
-
-	confirmation, err := share.KeygenConfirmation()
-	if err != nil {
-		panic(err)
-	}
-	if err := VerifyKeygenConfirmations(share, []*KeygenConfirmation{confirmation}); err != nil {
-		panic(err)
 	}
 
 	raw, err := share.MarshalBinary()

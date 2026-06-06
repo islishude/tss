@@ -51,7 +51,8 @@ secp256k1.SetAcceptExperimentalUsageForTesting(true)
 // DKG → Presign (offline) → Sign (online, one round)
 sessionID, _ := tss.NewSessionID(nil)
 kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
-// ... exchange kgOut messages, obtain KeyShare ...
+// ... exchange kgOut and handler-returned keygen messages through confirmation round ...
+share, _ := kg.Complete()
 
 signers := []tss.PartyID{1, 2}
 ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}

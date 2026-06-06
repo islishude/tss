@@ -42,8 +42,15 @@ type KeygenConfirmation struct {
 
 // KeygenConfirmation constructs a confirmation message from the local key share.
 func (k *KeyShare) KeygenConfirmation() (*KeygenConfirmation, error) {
-	if err := k.Validate(); err != nil {
+	if err := k.validateWithoutConfirmations(); err != nil {
 		return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
+	}
+	return k.keygenConfirmationReferenceUnchecked()
+}
+
+func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, error) {
+	if k == nil {
+		return nil, errors.New("nil key share")
 	}
 	h := sha256.New()
 	wire.WriteHashPart(h, wire.EncodeBytesList(k.GroupCommitments))
@@ -156,83 +163,156 @@ func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 	return c, nil
 }
 
-// VerifyKeygenConfirmations checks that all parties have confirmed the same
-// keygen transcript. On success, local.KeygenConfirmed is set to true.
-// Callers must exchange confirmations through authenticated transport before
-// calling this function. A key share must not be used for presign or signing
-// until this function succeeds.
-func VerifyKeygenConfirmations(local *KeyShare, confirmations []*KeygenConfirmation) error {
+func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {
 	if local == nil {
 		return errors.New("nil local key share")
 	}
-	if err := local.Validate(); err != nil {
-		return fmt.Errorf("invalid local key share: %w", err)
-	}
-
 	n := len(local.Parties)
-	if len(confirmations) != n {
-		return fmt.Errorf("got %d confirmations, want %d", len(confirmations), n)
+	if len(encoded) == 0 {
+		return errors.New("missing keygen confirmations")
+	}
+	if len(encoded) != n {
+		return fmt.Errorf("got %d keygen confirmations, want %d", len(encoded), n)
 	}
 
-	// Build reference confirmation from the local share.
-	localConf, err := local.KeygenConfirmation()
+	localConf, err := local.keygenConfirmationReferenceUnchecked()
 	if err != nil {
 		return fmt.Errorf("local confirmation: %w", err)
 	}
 
-	seen := make(map[tss.PartyID]bool)
-	for _, c := range confirmations {
-		if c == nil {
-			return errors.New("nil confirmation in set")
+	seen := make(map[tss.PartyID]struct{}, n)
+	for i, raw := range encoded {
+		expectedSender := local.Parties[i]
+		if len(raw) == 0 {
+			return fmt.Errorf("empty keygen confirmation at index %d for party %d", i, expectedSender)
 		}
-		if err := c.Validate(); err != nil {
-			return fmt.Errorf("confirmation from party %d: %w", c.Sender, err)
+		c, err := UnmarshalKeygenConfirmation(raw)
+		if err != nil {
+			return fmt.Errorf("invalid keygen confirmation at index %d for party %d: %w", i, expectedSender, err)
 		}
-
-		// No duplicate senders.
-		if seen[c.Sender] {
-			return fmt.Errorf("duplicate confirmation from party %d", c.Sender)
+		canonical, err := c.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("keygen confirmation from party %d: %w", c.Sender, err)
 		}
-		seen[c.Sender] = true
-
-		// Unknown sender.
+		if !bytes.Equal(canonical, raw) {
+			return fmt.Errorf("non-canonical keygen confirmation from party %d", c.Sender)
+		}
 		if !slices.Contains(local.Parties, c.Sender) {
-			return fmt.Errorf("confirmation from unknown party %d", c.Sender)
+			return fmt.Errorf("keygen confirmation from unknown party %d", c.Sender)
 		}
-
-		// Session ID must match.
+		if _, ok := seen[c.Sender]; ok {
+			return fmt.Errorf("duplicate keygen confirmation from party %d", c.Sender)
+		}
+		seen[c.Sender] = struct{}{}
+		if c.Sender != expectedSender {
+			return fmt.Errorf("keygen confirmation order mismatch at index %d: got party %d, want %d", i, c.Sender, expectedSender)
+		}
 		if c.SessionID != localConf.SessionID {
-			return fmt.Errorf("party %d session id mismatch", c.Sender)
+			return fmt.Errorf("keygen confirmation session mismatch from party %d", c.Sender)
 		}
-		// Threshold must match.
 		if c.Threshold != localConf.Threshold {
-			return fmt.Errorf("party %d threshold mismatch: got %d, want %d", c.Sender, c.Threshold, localConf.Threshold)
+			return fmt.Errorf("keygen confirmation threshold mismatch from party %d: got %d, want %d", c.Sender, c.Threshold, localConf.Threshold)
 		}
-		// Party set must match (order-sensitive).
 		if !slices.Equal(c.Parties, localConf.Parties) {
-			return fmt.Errorf("party %d party set mismatch", c.Sender)
+			return fmt.Errorf("keygen confirmation party set mismatch from party %d", c.Sender)
 		}
-		// Public key must match.
 		if !bytes.Equal(c.PublicKey, localConf.PublicKey) {
-			return fmt.Errorf("party %d public key mismatch", c.Sender)
+			return fmt.Errorf("keygen confirmation public key mismatch from party %d", c.Sender)
 		}
-		// Transcript hash must match.
 		if !bytes.Equal(c.TranscriptHash, localConf.TranscriptHash) {
-			return fmt.Errorf("party %d transcript hash mismatch", c.Sender)
+			return fmt.Errorf("keygen confirmation transcript mismatch from party %d", c.Sender)
 		}
-		// Commitments hash must match.
 		if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
-			return fmt.Errorf("party %d commitments hash mismatch", c.Sender)
+			return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
 		}
 	}
 
-	// Every expected party must have sent a confirmation.
 	for _, id := range local.Parties {
-		if !seen[id] {
-			return fmt.Errorf("missing confirmation from party %d", id)
+		if _, ok := seen[id]; !ok {
+			return fmt.Errorf("missing keygen confirmation from party %d", id)
 		}
 	}
 
-	local.KeygenConfirmed = true
 	return nil
+}
+
+func verifyKeygenConfirmationForShare(local *KeyShare, c *KeygenConfirmation) error {
+	if local == nil {
+		return errors.New("nil local key share")
+	}
+	if c == nil {
+		return errors.New("nil keygen confirmation")
+	}
+	localConf, err := local.keygenConfirmationReferenceUnchecked()
+	if err != nil {
+		return fmt.Errorf("local confirmation: %w", err)
+	}
+	if c.SessionID != localConf.SessionID {
+		return fmt.Errorf("keygen confirmation session mismatch from party %d", c.Sender)
+	}
+	if c.Threshold != localConf.Threshold {
+		return fmt.Errorf("keygen confirmation threshold mismatch from party %d: got %d, want %d", c.Sender, c.Threshold, localConf.Threshold)
+	}
+	if !slices.Equal(c.Parties, localConf.Parties) {
+		return fmt.Errorf("keygen confirmation party set mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.PublicKey, localConf.PublicKey) {
+		return fmt.Errorf("keygen confirmation public key mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.TranscriptHash, localConf.TranscriptHash) {
+		return fmt.Errorf("keygen confirmation transcript mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
+		return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
+	}
+	return nil
+}
+
+func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirmation) error {
+	if local == nil {
+		return errors.New("nil local key share")
+	}
+	if err := local.validateWithoutConfirmations(); err != nil {
+		return fmt.Errorf("invalid local key share: %w", err)
+	}
+	if len(confirmations) != len(local.Parties) {
+		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), len(local.Parties))
+	}
+	bySender := make(map[tss.PartyID][]byte, len(confirmations))
+	for _, confirmation := range confirmations {
+		if confirmation == nil {
+			return errors.New("nil keygen confirmation in set")
+		}
+		if !slices.Contains(local.Parties, confirmation.Sender) {
+			return fmt.Errorf("keygen confirmation from unknown party %d", confirmation.Sender)
+		}
+		if _, ok := bySender[confirmation.Sender]; ok {
+			return fmt.Errorf("duplicate keygen confirmation from party %d", confirmation.Sender)
+		}
+		encoded, err := confirmation.MarshalBinary()
+		if err != nil {
+			return fmt.Errorf("keygen confirmation from party %d: %w", confirmation.Sender, err)
+		}
+		bySender[confirmation.Sender] = encoded
+	}
+	encoded := make([][]byte, len(local.Parties))
+	for i, id := range local.Parties {
+		item, ok := bySender[id]
+		if !ok {
+			return fmt.Errorf("missing keygen confirmation from party %d", id)
+		}
+		encoded[i] = item
+	}
+	if err := verifyKeygenConfirmationSet(local, encoded); err != nil {
+		return err
+	}
+	local.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	return nil
+}
+
+func keygenConfirmationSetHash(encoded [][]byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(keygenConfirmationWireType))
+	wire.WriteHashPart(h, wire.EncodeBytesList(encoded))
+	return h.Sum(nil)
 }

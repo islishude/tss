@@ -35,6 +35,7 @@ type RefreshSession struct {
 	completed       bool
 	aborted         bool
 	newShare        *KeyShare
+	confirmations   map[tss.PartyID][]byte
 	ownPoly         []*big.Int
 	newPaillier     *pai.PrivateKey
 	newPaillierPubs map[tss.PartyID]PaillierPublicShare
@@ -116,6 +117,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		log:             config.Logger(),
 		commits:         map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:          map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
+		confirmations:   make(map[tss.PartyID][]byte, len(oldKey.Parties)),
 		ownPoly:         poly,
 		newPaillier:     newPaillierKey,
 		newPaillierPriv: newPaillierPriv,
@@ -148,9 +150,11 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		}
 		out = append(out, envelope(config, 1, oldKey.Party, id, payloadRefreshShare, payload, true))
 	}
-	if err := s.tryComplete(); err != nil {
+	completionOut, err := s.tryComplete()
+	if err != nil {
 		return nil, nil, err
 	}
+	out = append(out, completionOut...)
 	return s, out, nil
 }
 
@@ -167,7 +171,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
 	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldKey.Parties); err != nil {
@@ -175,6 +179,9 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 	}
 	if env.To != 0 && env.To != s.oldKey.Party {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	if env.PayloadType == payloadKeygenConfirmation {
+		return s.handleRefreshConfirmation(env)
 	}
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts round 1 messages"))
@@ -280,7 +287,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
-	return nil, s.tryComplete()
+	return s.tryComplete()
 }
 
 // KeyShare returns the refreshed key share when refresh completes.
@@ -291,18 +298,24 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 	return cloneKeyShareValue(s.newShare), true
 }
 
-func (s *RefreshSession) tryComplete() error {
+func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if s.completed {
-		return nil
+		return nil, nil
+	}
+	if s.newShare != nil {
+		if len(s.confirmations) == len(s.oldKey.Parties) {
+			return nil, s.finalizeConfirmedShare()
+		}
+		return nil, nil
 	}
 	if len(s.commits) != len(s.oldKey.Parties) || len(s.shares) != len(s.oldKey.Parties) || len(s.newPaillierPubs) != len(s.oldKey.Parties) || len(s.newRingPedersen) != len(s.oldKey.Parties) {
-		return nil
+		return nil, nil
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), secp.ScalarFromBigInt(share)); err != nil {
 			evidenceEnv := envelope(s.cfg, 1, dealer, s.oldKey.Party, payloadRefreshShare, nil, true)
-			return &tss.ProtocolError{
+			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
@@ -323,7 +336,7 @@ func (s *RefreshSession) tryComplete() error {
 	}
 	oldSecret, err := s.oldKey.secretBig()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	newSecret := new(big.Int).Set(oldSecret)
 	for _, dealer := range s.oldKey.Parties {
@@ -339,7 +352,7 @@ func (s *RefreshSession) tryComplete() error {
 			}
 			p, err := secp.PointFromBytes(s.commits[dealer][degree])
 			if err != nil {
-				return err
+				return nil, err
 			}
 			points = append(points, p)
 		}
@@ -347,7 +360,7 @@ func (s *RefreshSession) tryComplete() error {
 			if len(s.oldKey.GroupCommitments[degree]) > 0 {
 				oldCommitment, err := secp.PointFromBytes(s.oldKey.GroupCommitments[degree])
 				if err != nil {
-					return err
+					return nil, err
 				}
 				points = append(points, oldCommitment)
 			}
@@ -358,7 +371,7 @@ func (s *RefreshSession) tryComplete() error {
 		}
 		enc, err := secp.PointBytes(secp.AddPoints(points...))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		newCommitments[degree] = enc
 	}
@@ -366,29 +379,29 @@ func (s *RefreshSession) tryComplete() error {
 	for _, id := range s.oldKey.Parties {
 		pub, err := secp.EvalCommitments(newCommitments, uint32(id))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		enc, err := secp.PointBytes(pub)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
 	transcriptHash := s.refreshTranscriptHash(newCommitments)
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.oldKey.Party)
 	if !ok {
-		return errors.New("missing local verification share")
+		return nil, errors.New("missing local verification share")
 	}
 	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, newSecret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
-		return errors.New("local share proof public key mismatch")
+		return nil, errors.New("local share proof public key mismatch")
 	}
 	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	// Construct a temporary share for domain-separated Paillier proof binding.
 	localProofShare := &KeyShare{
@@ -403,11 +416,11 @@ func (s *RefreshSession) tryComplete() error {
 	}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.oldKey.Party))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	paillierProofBytes, err := zkpai.Marshal(paillierProof)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.newShare = &KeyShare{
 		Version:                tss.Version,
@@ -435,16 +448,16 @@ func (s *RefreshSession) tryComplete() error {
 	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localRP, err := zkpai.UnmarshalRingPedersenParams(s.newRingPedersen[s.oldKey.Party].Params)
 	if err != nil {
-		return fmt.Errorf("unmarshal local RP params: %w", err)
+		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}
 	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
-		return fmt.Errorf("invalid verification share: %w", err)
+		return nil, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   &s.newPaillier.PublicKey,
@@ -459,21 +472,115 @@ func (s *RefreshSession) tryComplete() error {
 	}
 	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logProofBytes, err := logProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	s.newShare.LogCiphertext = logCiphertext.Bytes()
 	s.newShare.LogProof = logProofBytes
 	s.newShare.logRandomness = logRandomness.Bytes()
-	s.completed = true
-	s.log.Info(s.cfg.Ctx(), "refresh complete",
+	if err := s.newShare.validateWithoutConfirmations(); err != nil {
+		return nil, err
+	}
+	confirmation, err := s.newShare.KeygenConfirmation()
+	if err != nil {
+		return nil, err
+	}
+	encodedConfirmation, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	s.confirmations[s.oldKey.Party] = append([]byte(nil), encodedConfirmation...)
+	out := []tss.Envelope{
+		envelope(s.cfg, keygenConfirmationRound, s.oldKey.Party, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	}
+	s.log.Info(s.cfg.Ctx(), "refresh local material complete",
 		"party_id", s.oldKey.Party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.newShare.Validate()
+	if len(s.confirmations) == len(s.oldKey.Parties) {
+		if err := s.finalizeConfirmedShare(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+	if env.Round != keygenConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh confirmation in wrong round"))
+	}
+	if env.To != 0 {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation must be broadcast"))
+	}
+	if env.ConfidentialRequired {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation must not require confidential transport"))
+	}
+	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if confirmation.Sender != env.From {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender))
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if !bytes.Equal(canonical, env.Payload) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical refresh confirmation"))
+	}
+	if existing, ok := s.confirmations[env.From]; ok {
+		if bytes.Equal(existing, canonical) {
+			return nil, nil
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
+	}
+	if s.newShare != nil {
+		if err := verifyKeygenConfirmationForShare(s.newShare, confirmation); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+	}
+	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	if s.newShare != nil && len(s.confirmations) == len(s.oldKey.Parties) {
+		return nil, s.finalizeConfirmedShare()
+	}
+	return nil, nil
+}
+
+func (s *RefreshSession) finalizeConfirmedShare() error {
+	if s.newShare == nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, errors.New("missing pending refresh share"))
+	}
+	encoded := make([][]byte, len(s.oldKey.Parties))
+	for i, id := range s.oldKey.Parties {
+		confirmation, ok := s.confirmations[id]
+		if !ok {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
+		}
+		encoded[i] = append([]byte(nil), confirmation...)
+	}
+	if err := verifyKeygenConfirmationSet(s.newShare, encoded); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
+	}
+	s.newShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	if err := s.newShare.Validate(); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
+	}
+	s.completed = true
+	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
+	s.log.Info(s.cfg.Ctx(), "refresh complete",
+		"party_id", s.oldKey.Party,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+	)
+	return nil
 }
 
 func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
@@ -542,7 +649,17 @@ func (s *RefreshSession) Destroy() {
 	if s == nil {
 		return
 	}
-	s.aborted = true
+	s.abort()
 	clear(s.newPaillierPriv)
 	s.newPaillier = nil
+}
+
+func (s *RefreshSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	if s.newShare != nil && !s.completed {
+		s.newShare.Destroy()
+	}
 }

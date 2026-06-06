@@ -43,17 +43,7 @@ func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare 
 		pending = append(pending, out...)
 	}
 
-	// Fan-out keygen messages.
-	for len(pending) > 0 {
-		env := pending[0]
-		pending = pending[1:]
-		kg := sessions[env.To]
-		out, err := kg.HandleKeygenMessage(env)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pending = append(pending, out...)
-	}
+	deliverKeygenMessages(t, sessions, parties, pending)
 
 	shares := make(map[tss.PartyID]*KeyShare, n)
 	for _, party := range parties {
@@ -62,21 +52,6 @@ func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare 
 			t.Fatalf("party %d keygen did not complete", party)
 		}
 		shares[party] = share
-	}
-
-	// Exchange confirmations.
-	var confirmations []*KeygenConfirmation
-	for _, party := range parties {
-		conf, err := shares[party].KeygenConfirmation()
-		if err != nil {
-			t.Fatal(err)
-		}
-		confirmations = append(confirmations, conf)
-	}
-	for _, party := range parties {
-		if err := VerifyKeygenConfirmations(shares[party], confirmations); err != nil {
-			t.Fatalf("party %d confirmation failed: %v", party, err)
-		}
 	}
 
 	return shares
@@ -202,12 +177,16 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 	for len(pending) > 0 {
 		env := pending[0]
 		pending = pending[1:]
-		rs := sessions[env.To]
-		out, err := rs.HandleRefreshMessage(env)
-		if err != nil {
-			t.Fatal(err)
+		for _, party := range parties {
+			if party == env.From || (env.To != 0 && env.To != party) {
+				continue
+			}
+			out, err := sessions[party].HandleRefreshMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending = append(pending, out...)
 		}
-		pending = append(pending, out...)
 	}
 
 	refreshed := make(map[tss.PartyID]*KeyShare, 3)
@@ -329,15 +308,7 @@ func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOpti
 		pending = append(pending, out...)
 	}
 
-	for len(pending) > 0 {
-		env := pending[0]
-		pending = pending[1:]
-		out, err := sessions[env.To].HandleKeygenMessage(env)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pending = append(pending, out...)
-	}
+	deliverKeygenMessages(t, sessions, parties, pending)
 
 	shares := make(map[tss.PartyID]*KeyShare, n)
 	for _, party := range parties {
@@ -346,20 +317,6 @@ func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOpti
 			t.Fatalf("party %d keygen did not complete", party)
 		}
 		shares[party] = share
-	}
-
-	var confirmations []*KeygenConfirmation
-	for _, party := range parties {
-		conf, err := shares[party].KeygenConfirmation()
-		if err != nil {
-			t.Fatal(err)
-		}
-		confirmations = append(confirmations, conf)
-	}
-	for _, party := range parties {
-		if err := VerifyKeygenConfirmations(shares[party], confirmations); err != nil {
-			t.Fatalf("party %d confirmation failed: %v", party, err)
-		}
 	}
 
 	return shares

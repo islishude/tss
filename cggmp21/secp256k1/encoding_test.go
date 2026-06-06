@@ -74,18 +74,33 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	}
 }
 
-func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmed(t *testing.T) {
+func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := rewriteKeyShareField(raw, keyShareFieldKeygenConfirmed, []byte{2})
+	mutated, err := rewriteKeyShareField(raw, keyShareFieldKeygenConfirmations, []byte{2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UnmarshalKeyShare(mutated); err == nil {
-		t.Fatal("key share accepted malformed KeygenConfirmed flag")
+		t.Fatal("key share accepted malformed keygen confirmations")
+	}
+}
+
+func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	mutated, err := rewriteKeyShareField(raw, keyShareFieldKeygenConfirmations, wire.EncodeBytesList(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalKeyShare(mutated); err == nil {
+		t.Fatal("key share accepted empty keygen confirmations")
 	}
 }
 

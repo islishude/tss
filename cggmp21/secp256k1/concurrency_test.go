@@ -40,29 +40,38 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 		sessions[id] = &lockedSession{KeygenSession: kg}
 		allMessages = append(allMessages, out...)
 	}
-	var wg sync.WaitGroup
-	for _, env := range allMessages {
-		wg.Add(1)
-		go func(env tss.Envelope) {
-			defer wg.Done()
-			for _, id := range parties {
-				if id == env.From {
-					continue
+	deliverWave := func(messages []tss.Envelope) []tss.Envelope {
+		t.Helper()
+		var wg sync.WaitGroup
+		var producedMu sync.Mutex
+		var produced []tss.Envelope
+		for _, env := range messages {
+			wg.Add(1)
+			go func(env tss.Envelope) {
+				defer wg.Done()
+				for _, id := range parties {
+					if id == env.From || (env.To != 0 && env.To != id) {
+						continue
+					}
+					s := sessions[id]
+					s.mu.Lock()
+					out, err := s.HandleKeygenMessage(env)
+					s.mu.Unlock()
+					if err != nil {
+						t.Errorf("concurrent keygen delivery from %d to %d: %v", env.From, id, err)
+						continue
+					}
+					producedMu.Lock()
+					produced = append(produced, out...)
+					producedMu.Unlock()
 				}
-				if env.To != 0 && env.To != id {
-					continue
-				}
-				s := sessions[id]
-				s.mu.Lock()
-				_, err := s.HandleKeygenMessage(env)
-				s.mu.Unlock()
-				if err != nil {
-					t.Errorf("concurrent keygen delivery from %d to %d: %v", env.From, id, err)
-				}
-			}
-		}(env)
+			}(env)
+		}
+		wg.Wait()
+		return produced
 	}
-	wg.Wait()
+	for wave := allMessages; len(wave) > 0; wave = deliverWave(wave) {
+	}
 	var pub []byte
 	for _, id := range parties {
 		share, ok := sessions[id].KeyShare()

@@ -197,14 +197,6 @@ func secpLifecycleKeygen(t testing.TB, enableHD bool) (*KeygenSession, *KeyShare
 	if !ok {
 		t.Fatal("keygen did not complete")
 	}
-	// Self-confirm for 1-of-1.
-	conf, err := share.KeygenConfirmation()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifyKeygenConfirmations(share, []*KeygenConfirmation{conf}); err != nil {
-		t.Fatal(err)
-	}
 	return keygen, share
 }
 

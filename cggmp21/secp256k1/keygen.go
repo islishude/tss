@@ -20,6 +20,17 @@ import (
 const (
 	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
+	keygenConfirmationRound    = 2
+)
+
+type keygenState uint8
+
+const (
+	keygenCollecting keygenState = iota
+	keygenLocalComplete
+	keygenConfirming
+	keygenConfirmed
+	keygenAborted
 )
 
 // KeygenOptions controls non-default CGGMP21 keygen parameters.
@@ -31,17 +42,24 @@ type KeygenOptions struct {
 
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
-	cfg          tss.ThresholdConfig
-	log          tss.Logger
-	commits      map[tss.PartyID][][]byte
-	shares       map[tss.PartyID]*big.Int
-	chainCodes   map[tss.PartyID][]byte
-	paillier     *pai.PrivateKey
-	paillierPubs map[tss.PartyID]PaillierPublicShare
-	ringPedersen map[tss.PartyID]RingPedersenPublicShare
-	completed    bool
-	aborted      bool
-	keyShare     *KeyShare
+	cfg           tss.ThresholdConfig
+	log           tss.Logger
+	commits       map[tss.PartyID][][]byte
+	shares        map[tss.PartyID]*big.Int
+	chainCodes    map[tss.PartyID][]byte
+	paillier      *pai.PrivateKey
+	paillierPubs  map[tss.PartyID]PaillierPublicShare
+	ringPedersen  map[tss.PartyID]RingPedersenPublicShare
+	completed     bool
+	aborted       bool
+	state         keygenState
+	pending       *pendingKeyShare
+	confirmations map[tss.PartyID][]byte
+	keyShare      *KeyShare
+}
+
+type pendingKeyShare struct {
+	share *KeyShare
 }
 
 type keygenCommitmentsPayload struct {
@@ -164,6 +182,8 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		ringPedersen: map[tss.PartyID]RingPedersenPublicShare{
 			config.Self: {Party: config.Self, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
 		},
+		state:         keygenCollecting,
+		confirmations: make(map[tss.PartyID][]byte, len(parties)),
 	}
 	out := make([]tss.Envelope, 0, len(parties))
 	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
@@ -189,9 +209,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		}
 		out = append(out, envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true))
 	}
-	if err := s.tryComplete(); err != nil {
+	completionOut, err := s.tryComplete()
+	if err != nil {
 		return nil, nil, err
 	}
+	out = append(out, completionOut...)
 	return s, out, nil
 }
 
@@ -208,7 +230,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
 	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
@@ -216,6 +238,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	}
 	if env.To != 0 && env.To != s.cfg.Self {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	if env.PayloadType == payloadKeygenConfirmation {
+		return s.handleKeygenConfirmation(env)
 	}
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen only accepts round 1 messages"))
@@ -367,23 +392,34 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
-	return nil, s.tryComplete()
+	return s.tryComplete()
 }
 
-// KeyShare returns the completed local key share when DKG has finished.
-func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
-	if s == nil || !s.completed {
+// Complete returns the confirmed local key share when keygen has finished.
+func (s *KeygenSession) Complete() (*KeyShare, bool) {
+	if s == nil || s.state != keygenConfirmed || !s.completed {
 		return nil, false
 	}
 	return cloneKeyShareValue(s.keyShare), true
 }
 
-func (s *KeygenSession) tryComplete() error {
+// KeyShare returns the confirmed local key share when keygen has finished.
+func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
+	return s.Complete()
+}
+
+func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if s.completed {
-		return nil
+		return nil, nil
+	}
+	if s.pending != nil {
+		if len(s.confirmations) == len(s.cfg.Parties) {
+			return nil, s.finalizeConfirmedKeyShare()
+		}
+		return nil, nil
 	}
 	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) || len(s.ringPedersen) != len(s.cfg.Parties) {
-		return nil
+		return nil, nil
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
@@ -393,7 +429,7 @@ func (s *KeygenSession) tryComplete() error {
 				"dealer", dealer,
 			)
 			evidenceEnv := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
-			return &tss.ProtocolError{
+			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
@@ -419,7 +455,7 @@ func (s *KeygenSession) tryComplete() error {
 	}
 	chainCode, err := aggregateChainCode(s.cfg.Parties, s.chainCodes)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
@@ -427,13 +463,13 @@ func (s *KeygenSession) tryComplete() error {
 		for _, dealer := range s.cfg.Parties {
 			p, err := secp.PointFromBytes(s.commits[dealer][degree])
 			if err != nil {
-				return err
+				return nil, err
 			}
 			points = append(points, p)
 		}
 		enc, err := secp.PointBytes(secp.AddPoints(points...))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		groupCommitments[degree] = enc
 	}
@@ -441,37 +477,37 @@ func (s *KeygenSession) tryComplete() error {
 	for _, id := range s.cfg.Parties {
 		pub, err := secp.EvalCommitments(groupCommitments, uint32(id))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		enc, err := secp.PointBytes(pub)
 		if err != nil {
-			return err
+			return nil, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
 	transcriptHash := s.keygenTranscriptHash(groupCommitments)
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.cfg.Self)
 	if !ok {
-		return errors.New("missing local verification share")
+		return nil, errors.New("missing local verification share")
 	}
 	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, secret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
-		return errors.New("local share proof public key mismatch")
+		return nil, errors.New("local share proof public key mismatch")
 	}
 	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localPaillierPub, err := s.paillier.PublicKey.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localPaillierPriv, err := s.paillier.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localProofShare := &KeyShare{
 		Party:                  s.cfg.Self,
@@ -485,14 +521,14 @@ func (s *KeygenSession) tryComplete() error {
 	}
 	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, uint32(s.cfg.Self))
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localPaillierProofBytes, err := zkpai.Marshal(localPaillierProof)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localRingPedersen := s.ringPedersen[s.cfg.Self]
-	s.keyShare = &KeyShare{
+	share := &KeyShare{
 		Version:                tss.Version,
 		Party:                  s.cfg.Self,
 		Threshold:              s.cfg.Threshold,
@@ -518,16 +554,16 @@ func (s *KeygenSession) tryComplete() error {
 	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.paillier.Encrypt(s.cfg.Reader(), secret)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	localRP, err := zkpai.UnmarshalRingPedersenParams(localRingPedersen.Params)
 	if err != nil {
-		return fmt.Errorf("unmarshal local RP params: %w", err)
+		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}
 	logDomain := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash)
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
-		return fmt.Errorf("invalid verification share: %w", err)
+		return nil, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   &s.paillier.PublicKey,
@@ -542,23 +578,154 @@ func (s *KeygenSession) tryComplete() error {
 	}
 	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	logProofBytes, err := logProof.MarshalBinary()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	s.keyShare.LogCiphertext = logCiphertext.Bytes()
-	s.keyShare.LogProof = logProofBytes
-	s.keyShare.logRandomness = logRandomness.Bytes()
-	s.completed = true
+	share.LogCiphertext = logCiphertext.Bytes()
+	share.LogProof = logProofBytes
+	share.logRandomness = logRandomness.Bytes()
+	if err := share.validateWithoutConfirmations(); err != nil {
+		return nil, err
+	}
+	confirmation, err := share.KeygenConfirmation()
+	if err != nil {
+		return nil, err
+	}
+	encodedConfirmation, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
+	s.pending = &pendingKeyShare{share: share}
+	s.state = keygenConfirming
+	out := []tss.Envelope{
+		envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	}
 	pubKeyHash := sha256.Sum256(groupCommitments[0])
-	s.log.Info(s.cfg.Ctx(), "keygen complete",
+	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
 	)
-	return s.keyShare.Validate()
+	if len(s.confirmations) == len(s.cfg.Parties) {
+		if err := s.finalizeConfirmedKeyShare(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+	if env.Round != keygenConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
+	}
+	if env.To != 0 {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must be broadcast"))
+	}
+	if env.ConfidentialRequired {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must not require confidential transport"))
+	}
+	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if confirmation.Sender != env.From {
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeInvalidMessage,
+			env.Round,
+			env.From,
+			fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender),
+		)
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if !bytes.Equal(canonical, env.Payload) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical keygen confirmation"))
+	}
+	if existing, ok := s.confirmations[env.From]; ok {
+		if bytes.Equal(existing, canonical) {
+			return nil, nil
+		}
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeVerification,
+			env.Round,
+			env.From,
+			fmt.Errorf("conflicting keygen confirmation from party %d", env.From),
+		)
+	}
+	if s.pending != nil {
+		if err := verifyKeygenConfirmationForShare(s.pending.share, confirmation); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+	}
+	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	if s.pending != nil && len(s.confirmations) == len(s.cfg.Parties) {
+		return nil, s.finalizeConfirmedKeyShare()
+	}
+	return nil, nil
+}
+
+func (s *KeygenSession) finalizeConfirmedKeyShare() error {
+	if s.pending == nil || s.pending.share == nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("missing pending key share"))
+	}
+	encoded := make([][]byte, len(s.cfg.Parties))
+	for i, id := range s.cfg.Parties {
+		confirmation, ok := s.confirmations[id]
+		if !ok {
+			s.abort()
+			return tss.NewProtocolError(
+				tss.ErrCodeVerification,
+				keygenConfirmationRound,
+				id,
+				fmt.Errorf("missing keygen confirmation from party %d", id),
+			)
+		}
+		encoded[i] = append([]byte(nil), confirmation...)
+	}
+	if err := verifyKeygenConfirmationSet(s.pending.share, encoded); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	finalShare := cloneKeyShareValue(s.pending.share)
+	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	if err := finalShare.Validate(); err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	s.pending.share.Destroy()
+	s.pending = nil
+	s.keyShare = finalShare
+	s.completed = true
+	s.state = keygenConfirmed
+	pubKeyHash := sha256.Sum256(finalShare.PublicKey)
+	confirmationSetHash := keygenConfirmationSetHash(finalShare.KeygenConfirmations)
+	s.log.Info(s.cfg.Ctx(), "keygen complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+	)
+	return nil
+}
+
+func (s *KeygenSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	s.state = keygenAborted
+	if s.pending != nil && s.pending.share != nil {
+		s.pending.share.Destroy()
+	}
+	s.pending = nil
 }
 
 func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
