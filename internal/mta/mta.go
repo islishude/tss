@@ -10,6 +10,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -25,7 +26,7 @@ const (
 	startMessageFieldCiphertext uint16 = iota + 1
 	_                                  // 2: reserved (was EncProof)
 	_                                  // 3: reserved (was RangeProof)
-	startMessageFieldEncrProof         // 4
+	_                                  // 4: reserved (was EncrProof)
 )
 
 const (
@@ -33,10 +34,16 @@ const (
 	responseMessageFieldProof
 )
 
-// StartMessage carries an encrypted multiplicand and its public proofs.
+// StartMessage carries an encrypted multiplicand.
 type StartMessage struct {
 	Ciphertext []byte `json:"ciphertext"`
-	EncrProof  []byte `json:"encr_proof,omitempty"`
+}
+
+// StartOpening carries the local witness for an MtA start ciphertext.
+type StartOpening struct {
+	Message StartMessage
+	k       *big.Int
+	rho     *big.Int
 }
 
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
@@ -52,7 +59,6 @@ func (m StartMessage) MarshalBinary() ([]byte, error) {
 	}
 	return wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
 		{Tag: startMessageFieldCiphertext, Value: m.Ciphertext},
-		{Tag: startMessageFieldEncrProof, Value: m.EncrProof},
 	})
 }
 
@@ -65,12 +71,11 @@ func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
 	if version != messageVersion {
 		return nil, fmt.Errorf("unexpected MtA start message version %d", version)
 	}
-	if err := requireExactMessageTags(fields, startMessageFieldCiphertext, startMessageFieldEncrProof); err != nil {
+	if err := requireExactMessageTags(fields, startMessageFieldCiphertext); err != nil {
 		return nil, err
 	}
 	msg := &StartMessage{
 		Ciphertext: mustMessageField(fields, startMessageFieldCiphertext),
-		EncrProof:  mustMessageField(fields, startMessageFieldEncrProof),
 	}
 	if err := msg.Validate(); err != nil {
 		return nil, err
@@ -78,16 +83,10 @@ func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
 	return msg, nil
 }
 
-// Validate checks the canonical proof records and ciphertext integer.
+// Validate checks the canonical ciphertext integer.
 func (m StartMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA start ciphertext: %w", err)
-	}
-	if len(m.EncrProof) == 0 {
-		return errors.New("missing MtA encryption proof")
-	}
-	if _, err := zkpai.UnmarshalEncryptionProof(m.EncrProof); err != nil {
-		return fmt.Errorf("invalid MtA encryption proof: %w", err)
 	}
 	return nil
 }
@@ -138,12 +137,8 @@ func (m ResponseMessage) Validate() error {
 	return nil
 }
 
-// Start encrypts scalar a and proves it is a valid secp256k1 scalar.
-// The encryption proof uses the existing Π^Enc (version 1) structure; a
-// full upgrade to Πenc requires per-verifier Ring-Pedersen commitments
-// which are incompatible with the broadcast Round 1 flow. Since k_i is
-// ephemeral (one-time nonce), the leakage risk is bounded.
-func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*StartMessage, error) {
+// Start encrypts scalar a and retains the opening for per-verifier proofs.
+func Start(reader io.Reader, a *big.Int, pk *pai.PublicKey) (*StartOpening, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -154,25 +149,86 @@ func Start(reader io.Reader, domain []byte, a *big.Int, pk *pai.PublicKey) (*Sta
 	if err != nil {
 		return nil, err
 	}
-	encrProof, err := zkpai.ProveEncryption(reader, domain, pk, c, a, r)
-	if err != nil {
-		return nil, err
-	}
-	encrProofBytes, err := zkpai.Marshal(encrProof)
-	if err != nil {
-		return nil, err
-	}
-	return &StartMessage{Ciphertext: c.Bytes(), EncrProof: encrProofBytes}, nil
+	return &StartOpening{
+		Message: StartMessage{Ciphertext: c.Bytes()},
+		k:       new(big.Int).Set(a),
+		rho:     new(big.Int).Set(r),
+	}, nil
 }
 
-// VerifyStart checks the unified encryption proof from Start.
-func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
-	c := new(big.Int).SetBytes(msg.Ciphertext)
-	encrProof, err := zkpai.UnmarshalEncryptionProof(msg.EncrProof)
-	if err != nil {
-		return false
+// Destroy clears the witness retained by StartOpening.
+func (o *StartOpening) Destroy() {
+	if o == nil {
+		return
 	}
-	return zkpai.VerifyEncryption(domain, pk, c, encrProof)
+	clear(o.Message.Ciphertext)
+	secret.ClearBigInt(o.k)
+	secret.ClearBigInt(o.rho)
+	o.k = nil
+	o.rho = nil
+}
+
+// String returns a redacted representation of the MtA start opening.
+func (o *StartOpening) String() string {
+	if o == nil {
+		return "<nil>"
+	}
+	return "StartOpening{Message:<public>, witness:<redacted>}"
+}
+
+// GoString returns a redacted representation of the MtA start opening.
+func (o *StartOpening) GoString() string {
+	return o.String()
+}
+
+// ProveStartForVerifier proves an MtA start ciphertext for one verifier.
+func ProveStartForVerifier(reader io.Reader, domain []byte, opening *StartOpening, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams) ([]byte, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if opening == nil {
+		return nil, errors.New("nil MtA start opening")
+	}
+	if err := opening.Message.Validate(); err != nil {
+		return nil, err
+	}
+	stmt := zkpai.EncStatement{
+		ProverPaillierN: proverPK,
+		CiphertextK:     new(big.Int).SetBytes(opening.Message.Ciphertext),
+		VerifierAux:     verifierAux,
+	}
+	witness := zkpai.EncWitness{
+		K:   opening.k,
+		Rho: opening.rho,
+	}
+	proof, err := zkpai.ProveEnc(zkpai.ActiveSecurityParams(), domain, stmt, witness, reader)
+	if err != nil {
+		return nil, err
+	}
+	return proof.MarshalBinary()
+}
+
+// VerifyStart checks a verifier-specific Πenc proof for an MtA start message.
+func VerifyStart(domain []byte, msg StartMessage, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams, proofBytes []byte) error {
+	if len(proofBytes) == 0 {
+		return errors.New("missing MtA start proof")
+	}
+	if err := msg.Validate(); err != nil {
+		return err
+	}
+	proof, err := zkpai.UnmarshalEncProof(proofBytes)
+	if err != nil {
+		return fmt.Errorf("invalid MtA start proof: %w", err)
+	}
+	stmt := zkpai.EncStatement{
+		ProverPaillierN: proverPK,
+		CiphertextK:     new(big.Int).SetBytes(msg.Ciphertext),
+		VerifierAux:     verifierAux,
+	}
+	if err := zkpai.VerifyEnc(zkpai.ActiveSecurityParams(), domain, stmt, proof); err != nil {
+		return fmt.Errorf("invalid MtA start proof: %w", err)
+	}
+	return nil
 }
 
 // Respond creates Enc(a*b+beta) under the initiator's Paillier key and proves
@@ -182,15 +238,16 @@ func VerifyStart(domain []byte, msg StartMessage, pk *pai.PublicKey) bool {
 // Parameters:
 //   - pkA: initiator's Paillier public key (Nj in Πaff-g)
 //   - pkB: responder's own Paillier public key (Ni in Πaff-g)
-//   - verifierAux: initiator's Ring-Pedersen parameters
+//   - startVerifierAux: responder's Ring-Pedersen parameters for checking Πenc
+//   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
-func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMessage, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
+func Respond(reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
-	if !VerifyStart(startDomain, start, pkA) {
-		return nil, nil, errors.New("invalid MtA start proof")
+	if err := VerifyStart(startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
+		return nil, nil, err
 	}
 	if b == nil || b.Sign() <= 0 || b.Cmp(secp.Order()) >= 0 {
 		return nil, nil, errors.New("b out of range")
@@ -240,7 +297,7 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 		D:                 response,
 		Y:                 yCiphertext,
 		X:                 X,
-		VerifierAux:       verifierAux,
+		VerifierAux:       affGVerifierAux,
 	}
 	witness := zkpai.AffGWitness{
 		X:    new(big.Int).Set(b),
@@ -268,12 +325,12 @@ func Respond(reader io.Reader, startDomain, responseDomain []byte, start StartMe
 //   - skA: initiator's Paillier private key
 //   - pkB: responder's Paillier public key (Ni in Πaff-g)
 //   - verifierAux: initiator's own Ring-Pedersen parameters
-func Finish(startDomain, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
+func Finish(responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
 	}
-	if !VerifyStart(startDomain, start, &skA.PublicKey) {
-		return nil, errors.New("invalid MtA start proof")
+	if err := start.Validate(); err != nil {
+		return nil, err
 	}
 	proof, err := zkpai.UnmarshalAffGProof(response.Proof)
 	if err != nil {

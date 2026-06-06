@@ -231,9 +231,197 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 			out2[0].Payload = mutated
 			out2[0] = out2[0].WithTranscriptHash()
 			_, err = s1.HandlePresignMessage(out2[0])
+			if err == nil {
+				_, err = s1.HandlePresignMessage(out2[1])
+			}
 			_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 		})
 	}
+}
+
+func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
+	h := newHarness(t, 2, 3)
+
+	t.Run("proof before public", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
+		out, err := s1.HandlePresignMessage(proof)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 0 {
+			t.Fatal("proof without public round1 emitted round2")
+		}
+		out, err = s1.HandlePresignMessage(out2[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 1 || out[0].PayloadType != payloadPresignRound2 {
+			t.Fatalf("got %d messages after public round1, want one round2", len(out))
+		}
+	})
+
+	t.Run("public before proof", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		out, err := s1.HandlePresignMessage(out2[0])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 0 {
+			t.Fatal("public round1 without proof emitted round2")
+		}
+		out, err = s1.HandlePresignMessage(presignRound1ProofEnvelopeFor(t, out2, 1))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(out) != 1 || out[0].PayloadType != payloadPresignRound2 {
+			t.Fatalf("got %d messages after proof, want one round2", len(out))
+		}
+	})
+
+	t.Run("duplicate proof", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
+		if _, err := s1.HandlePresignMessage(proof); err != nil {
+			t.Fatal(err)
+		}
+		_, err = s1.HandlePresignMessage(proof)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+	})
+
+	t.Run("wrong recipient", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
+		proof.To = 3
+		proof = proof.WithTranscriptHash()
+		_, err = s1.HandlePresignMessage(proof)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	})
+
+	t.Run("mutated public hash", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
+			t.Fatal(err)
+		}
+		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
+		mutated, err := mutatePresignRound1ProofPayload(proof.Payload, func(p *presignRound1ProofPayload) {
+			p.PublicRound1Hash[0] ^= 1
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof.Payload = mutated
+		proof = proof.WithTranscriptHash()
+		_, err = s1.HandlePresignMessage(proof)
+		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
+	})
+
+	t.Run("mutated enc proof", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
+			t.Fatal(err)
+		}
+		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
+		mutated, err := mutatePresignRound1ProofPayload(proof.Payload, func(p *presignRound1ProofPayload) {
+			p.EncKProof[len(p.EncKProof)-1] ^= 1
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		proof.Payload = mutated
+		proof = proof.WithTranscriptHash()
+		_, err = s1.HandlePresignMessage(proof)
+		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
+	})
+
+	t.Run("cross recipient proof replay", func(t *testing.T) {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2, 3})
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2, 3})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
+			t.Fatal(err)
+		}
+		proofFor3 := presignRound1ProofEnvelopeFor(t, out2, 3)
+		proofFor3.To = 1
+		proofFor3 = proofFor3.WithTranscriptHash()
+		_, err = s1.HandlePresignMessage(proofFor3)
+		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2, 3}, nil))
+	})
 }
 
 func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
@@ -311,13 +499,8 @@ func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
-		t.Fatal(err)
-	}
-	round2, err := s2.HandlePresignMessage(out1[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	_ = deliverPresignMessagesTo(t, s1, 1, out2)
+	round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 	round2[0].To = 3
 	round2[0] = round2[0].WithTranscriptHash()
 	_, err = s1.HandlePresignMessage(round2[0])
@@ -338,14 +521,8 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	round2From1, err := s1.HandlePresignMessage(out2[0])
-	if err != nil {
-		t.Fatal(err)
-	}
-	round2From2, err := s2.HandlePresignMessage(out1[0])
-	if err != nil {
-		t.Fatal(err)
-	}
+	round2From1 := deliverPresignMessagesTo(t, s1, 1, out2)
+	round2From2 := deliverPresignMessagesTo(t, s2, 2, out1)
 	round3From2, err := s2.HandlePresignMessage(round2From1[0])
 	if err != nil {
 		t.Fatal(err)

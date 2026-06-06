@@ -277,13 +277,8 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
-				t.Fatal(err)
-			}
-			round2, err := s2.HandlePresignMessage(out1[0])
-			if err != nil {
-				t.Fatal(err)
-			}
+			_ = deliverPresignMessagesTo(t, s1, 1, out2)
+			round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 			if len(round2) != 1 || round2[0].To != 1 {
 				t.Fatalf("unexpected round2 messages: %#v", round2)
 			}

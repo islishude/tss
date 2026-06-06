@@ -18,12 +18,20 @@ func TestMTAProductShares(t *testing.T) {
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	})
 	defer restoreSP()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
+	skA, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Generate Ring-Pedersen params for the test.
-	rp, _, err := zkpai.GenerateRingPedersenParams(nil, sk)
+	skB, err := pai.GenerateKey(context.Background(), nil, 1024)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Generate verifier-specific Ring-Pedersen params for both sides.
+	rpA, _, err := zkpai.GenerateRingPedersenParams(nil, skA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rpB, _, err := zkpai.GenerateRingPedersenParams(nil, skB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,15 +43,45 @@ func TestMTAProductShares(t *testing.T) {
 	}
 	startDomain := []byte("start")
 	responseDomain := []byte("response")
-	start, err := Start(nil, startDomain, a, &sk.PublicKey)
+	start, err := Start(nil, a, &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, betaShare, err := Respond(nil, startDomain, responseDomain, *start, b, bCommit, &sk.PublicKey, &sk.PublicKey, *rp)
+	startProof, err := ProveStartForVerifier(nil, startDomain, start, &skA.PublicKey, *rpB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	alphaShare, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk, &sk.PublicKey, *rp)
+	if err := VerifyStart(startDomain, start.Message, &skA.PublicKey, *rpB, startProof); err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyStart([]byte("other-start"), start.Message, &skA.PublicKey, *rpB, startProof); err == nil {
+		t.Fatal("start proof verified under wrong domain")
+	}
+	if err := VerifyStart(startDomain, start.Message, &skA.PublicKey, *rpA, startProof); err == nil {
+		t.Fatal("start proof verified for wrong verifier aux")
+	}
+	legacyProof, err := zkpai.ProveEncryption(nil, startDomain, &skA.PublicKey, new(big.Int).SetBytes(start.Message.Ciphertext), start.k, start.rho)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacyProofBytes, err := zkpai.Marshal(legacyProof)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := VerifyStart(startDomain, start.Message, &skA.PublicKey, *rpB, legacyProofBytes); err == nil {
+		t.Fatal("legacy encryption proof verified as EncProof")
+	}
+	response, betaShare, err := Respond(nil, startDomain, responseDomain, start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := Respond(nil, startDomain, responseDomain, start.Message, nil, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA); err == nil {
+		t.Fatal("missing start proof accepted")
+	}
+	if _, _, err := Respond(nil, startDomain, responseDomain, start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpA, *rpA); err == nil {
+		t.Fatal("start proof for different verifier accepted")
+	}
+	alphaShare, err := Finish(responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -54,11 +92,11 @@ func TestMTAProductShares(t *testing.T) {
 	if got.Cmp(want) != 0 {
 		t.Fatalf("alpha+beta = %s, want %s", got, want)
 	}
-	startRaw, err := start.MarshalBinary()
+	startRaw, err := start.Message.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	startRaw2, err := start.MarshalBinary()
+	startRaw2, err := start.Message.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -69,7 +107,7 @@ func TestMTAProductShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(startDecoded.Ciphertext, start.Ciphertext) {
+	if !bytes.Equal(startDecoded.Ciphertext, start.Message.Ciphertext) {
 		t.Fatal("MtA start mismatch after round trip")
 	}
 	responseRaw, err := response.MarshalBinary()
@@ -90,7 +128,7 @@ func TestMTAProductShares(t *testing.T) {
 		t.Fatal("JSON MtA response decoded")
 	}
 	response.Proof[0] ^= 1
-	if _, err := Finish(startDomain, responseDomain, *start, *response, bCommit, sk, &sk.PublicKey, *rp); err == nil {
+	if _, err := Finish(responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA); err == nil {
 		t.Fatal("tampered response proof verified")
 	}
 }
@@ -157,11 +195,19 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	})
 	defer restoreSP()
-	sk, err := pai.GenerateKey(context.Background(), nil, 1024)
+	skA, err := pai.GenerateKey(context.Background(), nil, 1024)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	rp, _, err := zkpai.GenerateRingPedersenParams(nil, sk)
+	skB, err := pai.GenerateKey(context.Background(), nil, 1024)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	rpA, _, err := zkpai.GenerateRingPedersenParams(nil, skA)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	rpB, _, err := zkpai.GenerateRingPedersenParams(nil, skB)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -171,13 +217,17 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	start, err := Start(nil, []byte("start"), a, &sk.PublicKey)
+	start, err := Start(nil, a, &skA.PublicKey)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(nil, []byte("start"), []byte("response"), *start, b, bCommit, &sk.PublicKey, &sk.PublicKey, *rp)
+	startProof, err := ProveStartForVerifier(nil, []byte("start"), start, &skA.PublicKey, *rpB)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	return start, response
+	response, _, err := Respond(nil, []byte("start"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return &start.Message, response
 }

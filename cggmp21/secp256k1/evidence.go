@@ -260,7 +260,13 @@ func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 	case tss.EvidenceKindReshareShare:
 		return expectEvidenceMessage(evidence, 1, payloadReshareShare)
 	case tss.EvidenceKindPresignRound1:
-		return expectEvidenceMessage(evidence, 1, payloadPresignRound1)
+		if evidence.Round != 1 {
+			return fmt.Errorf("evidence round %d does not match %d", evidence.Round, 1)
+		}
+		if evidence.PayloadType != payloadPresignRound1 && evidence.PayloadType != payloadPresignRound1Proof {
+			return fmt.Errorf("evidence payload type %q is not a presign round1 payload", evidence.PayloadType)
+		}
+		return nil
 	case tss.EvidenceKindPresignRound2:
 		return expectEvidenceMessage(evidence, 2, payloadPresignRound2)
 	case tss.EvidenceKindPresignRound3:

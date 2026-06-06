@@ -19,6 +19,7 @@ const (
 	keygenCommitmentsPayloadWireType  = "cggmp21.secp256k1.payload.keygen.commitments"
 	keygenSharePayloadWireType        = "cggmp21.secp256k1.payload.keygen.share"
 	presignRound1PayloadWireType      = "cggmp21.secp256k1.payload.presign.round1"
+	presignRound1ProofPayloadWireType = "cggmp21.secp256k1.payload.presign.round1-proof"
 	presignRound2PayloadWireType      = "cggmp21.secp256k1.payload.presign.round2"
 	presignRound3PayloadWireType      = "cggmp21.secp256k1.payload.presign.round3"
 	signPartialPayloadWireType        = "cggmp21.secp256k1.payload.sign.partial"
@@ -43,8 +44,12 @@ const keygenSharePayloadFieldShare uint16 = 1
 const (
 	presignRound1PayloadFieldGamma uint16 = iota + 1
 	presignRound1PayloadFieldEncK
-	presignRound1PayloadFieldEncKProof
 	presignRound1PayloadFieldPaillierPublicKey
+)
+
+const (
+	presignRound1ProofPayloadFieldPublicHash uint16 = iota + 1
+	presignRound1ProofPayloadFieldEncKProof
 )
 
 const (
@@ -168,16 +173,12 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return nil, err
 	}
-	if _, err := zkpai.UnmarshalEncryptionProof(p.EncKProof); err != nil {
-		return nil, err
-	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(tss.Version, presignRound1PayloadWireType, []wire.Field{
 		{Tag: presignRound1PayloadFieldGamma, Value: wire.NonNilBytes(p.Gamma)},
 		{Tag: presignRound1PayloadFieldEncK, Value: wire.NonNilBytes(p.EncK)},
-		{Tag: presignRound1PayloadFieldEncKProof, Value: wire.NonNilBytes(p.EncKProof)},
 		{Tag: presignRound1PayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 	})
 }
@@ -190,13 +191,12 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if version != tss.Version {
 		return presignRound1Payload{}, fmt.Errorf("unexpected presign round1 payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldEncKProof, presignRound1PayloadFieldPaillierPublicKey); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldPaillierPublicKey); err != nil {
 		return presignRound1Payload{}, err
 	}
 	p := presignRound1Payload{
 		Gamma:             wire.MustField(fields, presignRound1PayloadFieldGamma),
 		EncK:              wire.MustField(fields, presignRound1PayloadFieldEncK),
-		EncKProof:         wire.MustField(fields, presignRound1PayloadFieldEncKProof),
 		PaillierPublicKey: wire.MustField(fields, presignRound1PayloadFieldPaillierPublicKey),
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
@@ -205,11 +205,45 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return presignRound1Payload{}, err
 	}
-	if _, err := zkpai.UnmarshalEncryptionProof(p.EncKProof); err != nil {
-		return presignRound1Payload{}, err
-	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return presignRound1Payload{}, err
+	}
+	return p, nil
+}
+
+func marshalPresignRound1ProofPayload(p presignRound1ProofPayload) ([]byte, error) {
+	if len(p.PublicRound1Hash) != sha256.Size {
+		return nil, errors.New("round1 public hash must be 32 bytes")
+	}
+	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(tss.Version, presignRound1ProofPayloadWireType, []wire.Field{
+		{Tag: presignRound1ProofPayloadFieldPublicHash, Value: wire.NonNilBytes(p.PublicRound1Hash)},
+		{Tag: presignRound1ProofPayloadFieldEncKProof, Value: wire.NonNilBytes(p.EncKProof)},
+	})
+}
+
+func unmarshalPresignRound1ProofPayload(in []byte) (presignRound1ProofPayload, error) {
+	version, fields, err := wire.Unmarshal(in, presignRound1ProofPayloadWireType)
+	if err != nil {
+		return presignRound1ProofPayload{}, err
+	}
+	if version != tss.Version {
+		return presignRound1ProofPayload{}, fmt.Errorf("unexpected presign round1 proof payload version %d", version)
+	}
+	if err := wire.RequireExactTags(fields, presignRound1ProofPayloadFieldPublicHash, presignRound1ProofPayloadFieldEncKProof); err != nil {
+		return presignRound1ProofPayload{}, err
+	}
+	p := presignRound1ProofPayload{
+		PublicRound1Hash: wire.MustField(fields, presignRound1ProofPayloadFieldPublicHash),
+		EncKProof:        wire.MustField(fields, presignRound1ProofPayloadFieldEncKProof),
+	}
+	if len(p.PublicRound1Hash) != sha256.Size {
+		return presignRound1ProofPayload{}, errors.New("round1 public hash must be 32 bytes")
+	}
+	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
+		return presignRound1ProofPayload{}, err
 	}
 	return p, nil
 }

@@ -38,6 +38,7 @@ These rules ensure one semantic record has one binary representation. This matte
 - `cggmp21/secp256k1` keygen commitments payload
 - `cggmp21/secp256k1` keygen share payload
 - `cggmp21/secp256k1` presign round 1 payload
+- `cggmp21/secp256k1` presign round 1 proof payload
 - `cggmp21/secp256k1` presign round 2 payload
 - `cggmp21/secp256k1` presign round 3 payload
 - `cggmp21/secp256k1` online signing partial payload
@@ -60,7 +61,6 @@ These rules ensure one semantic record has one binary representation. This matte
 - `internal/zk/paillier.ModulusProof`
 - `internal/zk/paillier.RingPedersenParams`
 - `internal/zk/paillier.RingPedersenProof`
-- `internal/zk/paillier.EncryptionProof` (v1, MtA Start broadcast)
 - `internal/zk/paillier.EncProof` (Πenc)
 - `internal/zk/paillier.AffGProof` (Πaff-g)
 - `internal/zk/paillier.LogStarProof` (Πlog\*)
@@ -74,6 +74,14 @@ TLV encoding as other binary records. Keygen, presign, and signing payloads reje
 JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
+
+Current presign Round 1 wire shapes are:
+
+- `mta.start-message`: field 1 is the Paillier ciphertext only.
+- `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
+- `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
+
+Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
 
 ## Decoder Policy
 

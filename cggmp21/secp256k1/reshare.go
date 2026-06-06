@@ -11,6 +11,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -948,7 +949,7 @@ func (s *ReshareSession) Destroy() {
 	}
 	clearBigIntMap(s.shares)
 	for _, coeff := range s.ownPoly {
-		clearBigInt(coeff)
+		secret.ClearBigInt(coeff)
 	}
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()

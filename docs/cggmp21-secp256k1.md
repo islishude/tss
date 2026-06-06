@@ -140,7 +140,14 @@ and broadcasts:
 
 - `Γ_i = γ_i · G` (gamma commitment)
 - `Enc_i(k_i)` — Paillier encryption of `k_i` under party `i`'s public key
-- Encryption proof — unified encryption proof (v1 EncryptionProof) that the ciphertext and `Γ_i` commitment are consistent. The broadcast Round 1 retains the v1 proof because per-verifier Ring-Pedersen commitments are impractical for broadcast; the witness `k_i` is ephemeral.
+- party `i`'s Paillier public key
+
+For each verifier `j != i`, signer `i` also sends a confidential Round 1 proof payload containing:
+
+- a hash of the canonical public Round 1 payload
+- `Πenc` (`EncProof`) proving `Enc_i(k_i)` encrypts a value in range under party `i`'s Paillier key
+
+The `Πenc` proof is verifier-specific because its statement includes verifier `j`'s Ring-Pedersen auxiliary parameters. A proof generated for one verifier is rejected by another verifier. Round 2 is not emitted until both the peer's public Round 1 payload and the peer-to-local `Πenc` proof verify.
 
 Internally, each signer computes the Lagrange-adjusted secret:
 
@@ -194,7 +201,7 @@ The `Presign` record stores `(k_i, χ_i, R, r, δ, transcript_hash)`. It is loca
 
 ### Presign Transcript
 
-The transcript hash binds all signers' round-1 material (Gamma, EncK, EncKProof), all delta shares, R, r, and δ, preventing replay of presign material across sessions or signer sets.
+The transcript hash binds all signers' public round-1 material (Gamma, EncK, Paillier public key), all delta shares, R, r, and δ, preventing replay of presign material across sessions or signer sets. Per-verifier `Πenc` proof bytes are not persisted in the `Presign` record; they gate Round 2 emission during the live protocol.
 
 ## Online Signing
 
@@ -312,7 +319,8 @@ Evidence records are deterministic JSON binding protocol context, payload hash, 
 | ---------------------------------------------- | -------------- | ------------ | ---------------------------------------------------- |
 | `cggmp21.secp256k1.keygen.commitments`         | broadcast      | no           | Polynomial commitments + Paillier key + proofs       |
 | `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Scalar share for one recipient                       |
-| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), EncryptionProof v1, PaillierPK)`  |
+| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), PaillierPK)`                      |
+| `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific Πenc proof    |
 | `cggmp21.secp256k1.presign.round2`             | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof) |
 | `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i` scalar share                                   |
 | `cggmp21.secp256k1.sign.partial`               | broadcast      | no           | `s_i` partial + presign transcript hash              |

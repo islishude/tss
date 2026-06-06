@@ -12,23 +12,23 @@ const (
 	proofDomainVersion = "cggmp21-secp256k1-proof-domain-v1"
 
 	// Domain labels identify the protocol phase for domain separation.
-	domainLabelKeygenModulus       = "keygen.modulus"
-	domainLabelKeygenRingPedersen  = "keygen.ring-pedersen"
-	domainLabelKeySharePaillier    = "keyshare.paillier-modulus"
-	domainLabelPresignMTAStart     = "presign.mta-start"
-	domainLabelPresignMTAResponse  = "presign.mta-response"
-	domainLabelResharePaillier     = "reshare.paillier-modulus"
-	domainLabelReshareRingPedersen = "reshare.ring-pedersen"
-	domainLabelRefreshPaillier     = "refresh.paillier-modulus"
-	domainLabelRefreshRingPedersen = "refresh.ring-pedersen"
-	domainLabelKeyShareLogProof    = "keyshare.log-proof"
-	domainLabelReshareLogProof     = "reshare.log-proof"
-	domainLabelRefreshLogProof     = "refresh.log-proof"
+	domainLabelKeygenModulus        = "keygen.modulus"
+	domainLabelKeygenRingPedersen   = "keygen.ring-pedersen"
+	domainLabelKeySharePaillier     = "keyshare.paillier-modulus"
+	domainLabelPresignMTAStartProof = "presign.mta-start.enc-proof"
+	domainLabelPresignMTAResponse   = "presign.mta-response"
+	domainLabelResharePaillier      = "reshare.paillier-modulus"
+	domainLabelReshareRingPedersen  = "reshare.ring-pedersen"
+	domainLabelRefreshPaillier      = "refresh.paillier-modulus"
+	domainLabelRefreshRingPedersen  = "refresh.ring-pedersen"
+	domainLabelKeyShareLogProof     = "keyshare.log-proof"
+	domainLabelReshareLogProof      = "reshare.log-proof"
+	domainLabelRefreshLogProof      = "refresh.log-proof"
 
 	// Domain kinds identify the cryptographic object bound into a proof.
 	domainKindPaillierModulus = "paillier-modulus"
 	domainKindRingPedersen    = "ring-pedersen"
-	domainKindEncryptedK      = "encrypted-k"
+	domainKindEncProof        = "enc-proof"
 	domainKindLogProof        = "log-proof"
 )
 
@@ -110,18 +110,19 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []
 	}
 }
 
-func mtaStartDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, owner tss.PartyID, paillierPublicKey, presignContextHash []byte) []byte {
+func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, prover, verifier tss.PartyID, proverPaillierPublicKey, presignContextHash []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:                domainLabelPresignMTAStart,
+		label:                domainLabelPresignMTAStartProof,
 		sessionID:            sessionID,
 		threshold:            key.Threshold,
 		parties:              key.Parties,
 		signers:              signers,
-		sender:               owner,
-		kind:                 domainKindEncryptedK,
+		sender:               prover,
+		receiver:             verifier,
+		kind:                 domainKindEncProof,
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
-		paillierPublicKey:    paillierPublicKey,
+		paillierPublicKey:    proverPaillierPublicKey,
 		presignContextHash:   presignContextHash,
 	})
 }

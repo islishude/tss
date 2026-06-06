@@ -317,10 +317,7 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	round2, err := s2.HandlePresignMessage(out1[0])
-	if err != nil {
-		f.Fatal(err)
-	}
+	round2 := deliverPresignMessagesTo(f, s2, 2, out1)
 	f.Add(round2[0].Payload)
 	f.Add([]byte(`{"delta":{},"sigma":{}}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
@@ -491,13 +488,29 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 	if !bytes.Equal(original.EncK, payload.EncK) {
 		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncK, payload.EncK)
 	}
-	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
-		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncKProof, payload.EncKProof)
-	}
 	if !bytes.Equal(original.PaillierPublicKey, payload.PaillierPublicKey) {
 		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
 	}
 	return marshalPresignRound1Payload(payload)
+}
+
+func mutatePresignRound1ProofPayload(raw []byte, mutate func(*presignRound1ProofPayload)) ([]byte, error) {
+	original, err := unmarshalPresignRound1ProofPayload(raw)
+	if err != nil {
+		return nil, err
+	}
+	payload, err := unmarshalPresignRound1ProofPayload(raw)
+	if err != nil {
+		return nil, err
+	}
+	mutate(&payload)
+	if !bytes.Equal(original.PublicRound1Hash, payload.PublicRound1Hash) {
+		return rewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldPublicHash, payload.PublicRound1Hash)
+	}
+	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
+		return rewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldEncKProof, payload.EncKProof)
+	}
+	return marshalPresignRound1ProofPayload(payload)
 }
 
 func mutatePresignRound2Payload(raw []byte, mutate func(*presignRound2Payload)) ([]byte, error) {

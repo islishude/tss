@@ -21,6 +21,7 @@ const (
 	presignTranscriptHashLabel = "cggmp21-secp256k1-presign-transcript-v1"
 	presignContextHashLabel    = "cggmp21-secp256k1-presign-context-v1"
 	presignRound1EchoLabel     = "cggmp21-secp256k1-presign-round1-echo-v1"
+	presignRound1PublicLabel   = "cggmp21-secp256k1-presign-round1-public-v1"
 	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
 	aggregateSignEvidenceLabel = "cggmp21-secp256k1-aggregate-sign-evidence-v1"
@@ -98,9 +99,13 @@ type PresignSession struct {
 	gammaComm []byte
 	xBarComm  []byte
 
-	round1 map[tss.PartyID]presignRound1Payload
-	round2 map[tss.PartyID]presignRound2Payload
-	deltas map[tss.PartyID]*big.Int
+	round1               map[tss.PartyID]presignRound1Payload
+	round1Proofs         map[tss.PartyID]presignRound1ProofPayload
+	round1ProofEnvelopes map[tss.PartyID]tss.Envelope
+	round1Verified       map[tss.PartyID]bool
+	round2               map[tss.PartyID]presignRound2Payload
+	deltas               map[tss.PartyID]*big.Int
+	startOpening         *mta.StartOpening
 
 	alphaDelta map[tss.PartyID]*big.Int
 	betaDelta  map[tss.PartyID]*big.Int
@@ -132,8 +137,12 @@ type SignSession struct {
 type presignRound1Payload struct {
 	Gamma             []byte `json:"gamma"`
 	EncK              []byte `json:"enc_k"`
-	EncKProof         []byte `json:"enc_k_proof"`
 	PaillierPublicKey []byte `json:"paillier_public_key"`
+}
+
+type presignRound1ProofPayload struct {
+	PublicRound1Hash []byte `json:"public_round1_hash"`
+	EncKProof        []byte `json:"enc_k_proof"`
 }
 
 type presignRound2Payload struct {
@@ -217,48 +226,83 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	// Round 1 starts MtA by publishing Enc_i(k_i) with scalar/range proofs.
-	startDomain := mtaStartDomain(key, sessionID, signers, key.Party, key.PaillierPublicKey, contextHash)
-	startMsg, err := mta.Start(nil, startDomain, kShare.BigInt(), &paillierKey.PublicKey)
+	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
+	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
+	// Πenc proof bound to that public payload and the peer's RP parameters.
+	startOpening, err := mta.Start(config.Reader(), kShare.BigInt(), &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
-	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
+	openingReturned := false
+	defer func() {
+		if !openingReturned {
+			startOpening.Destroy()
+		}
+	}()
 	presignPayload := presignRound1Payload{
 		Gamma:             gammaComm,
-		EncK:              startMsg.Ciphertext,
-		EncKProof:         startMsg.EncrProof,
+		EncK:              startOpening.Message.Ciphertext,
 		PaillierPublicKey: slices.Clone(key.PaillierPublicKey),
 	}
 	payload, err := marshalPresignRound1Payload(presignPayload)
 	if err != nil {
 		return nil, nil, err
 	}
+	publicHash, err := presignRound1PublicHash(presignPayload)
+	if err != nil {
+		return nil, nil, err
+	}
 	env := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
 	s := &PresignSession{
-		key:           key,
-		sessionID:     sessionID,
-		config:        config,
-		log:           config.Logger(),
-		signers:       signers,
-		context:       ctx,
-		contextHash:   contextHash,
-		additiveShift: additiveShift,
-		paillier:      paillierKey,
-		kShare:        kShare.BigInt(),
-		gamma:         gamma.BigInt(),
-		xBar:          xBar,
-		gammaComm:     gammaComm,
-		xBarComm:      xBarComm,
-		round1:        map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
-		round2:        make(map[tss.PartyID]presignRound2Payload),
-		deltas:        make(map[tss.PartyID]*big.Int),
-		alphaDelta:    make(map[tss.PartyID]*big.Int),
-		betaDelta:     make(map[tss.PartyID]*big.Int),
-		alphaSigma:    make(map[tss.PartyID]*big.Int),
-		betaSigma:     make(map[tss.PartyID]*big.Int),
+		key:                  key,
+		sessionID:            sessionID,
+		config:               config,
+		log:                  config.Logger(),
+		signers:              signers,
+		context:              ctx,
+		contextHash:          contextHash,
+		additiveShift:        additiveShift,
+		paillier:             paillierKey,
+		kShare:               kShare.BigInt(),
+		gamma:                gamma.BigInt(),
+		xBar:                 xBar,
+		gammaComm:            gammaComm,
+		xBarComm:             xBarComm,
+		round1:               map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
+		round1Proofs:         make(map[tss.PartyID]presignRound1ProofPayload),
+		round1ProofEnvelopes: make(map[tss.PartyID]tss.Envelope),
+		round1Verified:       map[tss.PartyID]bool{key.Party: true},
+		round2:               make(map[tss.PartyID]presignRound2Payload),
+		deltas:               make(map[tss.PartyID]*big.Int),
+		alphaDelta:           make(map[tss.PartyID]*big.Int),
+		betaDelta:            make(map[tss.PartyID]*big.Int),
+		alphaSigma:           make(map[tss.PartyID]*big.Int),
+		betaSigma:            make(map[tss.PartyID]*big.Int),
+		startOpening:         startOpening,
 	}
 	out := []tss.Envelope{env}
+	for _, peer := range signers {
+		if peer == key.Party {
+			continue
+		}
+		peerRP, err := key.ringPedersenPublicFor(peer)
+		if err != nil {
+			return nil, nil, err
+		}
+		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.Party, peer, key.PaillierPublicKey, contextHash)
+		proofBytes, err := mta.ProveStartForVerifier(config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
+		if err != nil {
+			return nil, nil, err
+		}
+		proofPayload, err := marshalPresignRound1ProofPayload(presignRound1ProofPayload{
+			PublicRound1Hash: publicHash,
+			EncKProof:        proofBytes,
+		})
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, envelope(config, 1, key.Party, peer, payloadPresignRound1Proof, proofPayload, true))
+	}
 	round2, err := s.tryEmitRound2()
 	if err != nil {
 		return nil, nil, err
@@ -269,6 +313,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		return nil, nil, err
 	}
 	out = append(out, round3...)
+	openingReturned = true
 	return s, out, nil
 }
 
@@ -302,6 +347,12 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		if env.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 payload in wrong round"))
 		}
+		if env.To != 0 {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign round1 public payload must be broadcast"))
+		}
+		if env.ConfidentialRequired {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign round1 public payload must not require confidential transport"))
+		}
 		if _, ok := s.round1[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))
 		}
@@ -318,17 +369,68 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 				fields...,
 			)
 		}
-		if err := s.validateRound1(env.From, p); err != nil {
+		if err := s.validateRound1Public(env.From, p); err != nil {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindPresignRound1,
-				"invalid presign round1 proof",
+				"invalid presign round1 public payload",
 				[]tss.PartyID{env.From},
 				err,
 				s.presignRound1EvidenceFields(env.From, p)...,
 			)
 		}
 		s.round1[env.From] = p
+		if err := s.maybeValidateRound1Proof(env.From); err != nil {
+			proofEnv := s.round1ProofEnvelopes[env.From]
+			return nil, verificationErrorWithEvidence(
+				proofEnv,
+				tss.EvidenceKindPresignRound1,
+				"invalid presign round1 proof",
+				[]tss.PartyID{env.From},
+				err,
+				s.presignRound1ProofEvidenceFields(env.From, p, s.round1Proofs[env.From])...,
+			)
+		}
+		return s.tryEmitRound2()
+	case payloadPresignRound1Proof:
+		if env.Round != 1 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 proof payload in wrong round"))
+		}
+		if env.From == s.key.Party {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("self presign round1 proof is not expected"))
+		}
+		if err := requireDirectConfidential(env, s.key.Party, payloadPresignRound1Proof); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if _, ok := s.round1Proofs[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1 proof"))
+		}
+		p, err := unmarshalPresignRound1ProofPayload(env.Payload)
+		if err != nil {
+			fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+			return nil, protocolErrorWithEvidence(
+				tss.ErrCodeInvalidMessage,
+				env,
+				tss.EvidenceKindPresignRound1,
+				"malformed presign round1 proof payload",
+				[]tss.PartyID{env.From},
+				err,
+				fields...,
+			)
+		}
+		s.round1Proofs[env.From] = p
+		s.round1ProofEnvelopes[env.From] = env
+		if err := s.maybeValidateRound1Proof(env.From); err != nil {
+			public := s.round1[env.From]
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindPresignRound1,
+				"invalid presign round1 proof",
+				[]tss.PartyID{env.From},
+				err,
+				s.presignRound1ProofEvidenceFields(env.From, public, p)...,
+			)
+		}
 		return s.tryEmitRound2()
 	case payloadPresignRound2:
 		if env.Round != 2 {
@@ -411,8 +513,10 @@ func (s *PresignSession) Presign() (*Presign, bool) {
 
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
+	publicHash, _ := presignRound1PublicHash(p)
 	fields = append(fields,
 		hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		rawEvidenceField("round1_public_hash", publicHash),
 		hashEvidenceField("gamma_hash", p.Gamma),
 		hashEvidenceField("enc_k_hash", p.EncK),
 	)
@@ -424,13 +528,20 @@ func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presign
 	return fields
 }
 
+func (s *PresignSession) presignRound1ProofEvidenceFields(from tss.PartyID, public presignRound1Payload, proof presignRound1ProofPayload) []tss.EvidenceField {
+	fields := s.presignRound1EvidenceFields(from, public)
+	return append(fields,
+		rawEvidenceField("proof_public_round1_hash", proof.PublicRound1Hash),
+		hashEvidenceField("enc_k_proof_hash", proof.EncKProof),
+	)
+}
+
 func (s *PresignSession) presignRound2EvidenceFields(p presignRound2Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 	return append(fields,
 		rawEvidenceField(evidenceFieldDeltaResponseHash, mtaResponseHash("delta", p.Delta)),
 		rawEvidenceField(evidenceFieldSigmaResponseHash, mtaResponseHash("sigma", p.Sigma)),
 		hashEvidenceField("round1_echo_hash", p.Round1Echo),
-		hashEvidenceField("enc_k_proof_hash", s.round1[s.key.Party].EncKProof),
 	)
 }
 
@@ -439,7 +550,7 @@ func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []t
 	return append(fields, hashEvidenceField("delta_hash", p.Delta))
 }
 
-func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload) error {
+func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1Payload) error {
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return fmt.Errorf("invalid gamma: %w", err)
 	}
@@ -454,18 +565,75 @@ func (s *PresignSession) validateRound1(from tss.PartyID, p presignRound1Payload
 	if !bytes.Equal(expectedPKBytes, p.PaillierPublicKey) {
 		return errors.New("round1 Paillier public key does not match keygen")
 	}
-	start := mta.StartMessage{Ciphertext: p.EncK, EncrProof: p.EncKProof}
-	if !mta.VerifyStart(mtaStartDomain(s.key, s.sessionID, s.signers, from, p.PaillierPublicKey, s.contextHash), start, expectedPK) {
-		return errors.New("invalid encrypted nonce proof")
+	ciphertext := new(big.Int).SetBytes(p.EncK)
+	if err := expectedPK.ValidateCiphertext(ciphertext); err != nil {
+		return fmt.Errorf("invalid encrypted nonce ciphertext: %w", err)
 	}
 	return nil
+}
+
+func (s *PresignSession) maybeValidateRound1Proof(from tss.PartyID) error {
+	if from == s.key.Party {
+		s.round1Verified[from] = true
+		return nil
+	}
+	if s.round1Verified[from] {
+		return nil
+	}
+	public, havePublic := s.round1[from]
+	proof, haveProof := s.round1Proofs[from]
+	if !havePublic || !haveProof {
+		return nil
+	}
+	if err := s.validateRound1Proof(from, public, proof); err != nil {
+		return err
+	}
+	s.round1Verified[from] = true
+	return nil
+}
+
+func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRound1Payload, proof presignRound1ProofPayload) error {
+	publicHash, err := presignRound1PublicHash(public)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(publicHash, proof.PublicRound1Hash) {
+		return errors.New("presign round1 proof public hash mismatch")
+	}
+	proverPK, err := s.key.paillierPublicFor(from)
+	if err != nil {
+		return err
+	}
+	localRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	if err != nil {
+		return err
+	}
+	start := mta.StartMessage{Ciphertext: public.EncK}
+	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.Party, public.PaillierPublicKey, s.contextHash)
+	return mta.VerifyStart(domain, start, proverPK, localRP, proof.EncKProof)
 }
 
 func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 	if s.round2Sent || len(s.round1) != len(s.signers) {
 		return nil, nil
 	}
+	for _, peer := range s.signers {
+		if peer == s.key.Party {
+			continue
+		}
+		if !s.round1Verified[peer] {
+			return nil, nil
+		}
+	}
 	out := make([]tss.Envelope, 0, len(s.signers)-1)
+	selfPK, err := s.key.paillierPublic()
+	if err != nil {
+		return nil, err
+	}
+	localRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	if err != nil {
+		return nil, err
+	}
 	for _, peer := range s.signers {
 		if peer == s.key.Party {
 			continue
@@ -474,26 +642,25 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		selfPK, err := s.key.paillierPublic()
-		if err != nil {
-			return nil, err
-		}
 		peerRP, err := s.key.ringPedersenPublicFor(peer)
 		if err != nil {
 			return nil, err
 		}
-		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK, EncrProof: s.round1[peer].EncKProof}
-		startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, peer, s.round1[peer].PaillierPublicKey, s.contextHash)
+		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK}
+		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, s.round1[peer].PaillierPublicKey, s.contextHash)
+		startProof := s.round1Proofs[peer].EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
 			nil,
-			startDomain,
+			startProofDomain,
 			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
+			startProof,
 			s.gamma,
 			s.gammaComm,
 			peerPK,
 			selfPK,
+			localRP,
 			peerRP,
 		)
 		if err != nil {
@@ -503,13 +670,15 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		// is already adjusted by the signer-set Lagrange coefficient.
 		sigmaResp, betaSigma, err := mta.Respond(
 			nil,
-			startDomain,
+			startProofDomain,
 			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
+			startProof,
 			s.xBar,
 			s.xBarComm,
 			peerPK,
 			selfPK,
+			localRP,
 			peerRP,
 		)
 		if err != nil {
@@ -531,7 +700,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
 		return errors.New("presign round1 echo mismatch")
 	}
-	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK, EncrProof: s.round1[s.key.Party].EncKProof}
+	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK}
 	gammaCommit := s.round1[from].Gamma
 
 	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
@@ -545,9 +714,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 
-	startDomain := mtaStartDomain(s.key, s.sessionID, s.signers, s.key.Party, s.key.PaillierPublicKey, s.contextHash)
 	alphaDelta, err := mta.Finish(
-		startDomain,
 		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "delta", s.key.PaillierPublicKey, s.contextHash),
 		start,
 		p.Delta,
@@ -564,7 +731,6 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 	alphaSigma, err := mta.Finish(
-		startDomain,
 		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "sigma", s.key.PaillierPublicKey, s.contextHash),
 		start,
 		p.Sigma,
@@ -705,12 +871,11 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	wire.WriteHashPart(h, s.contextHash)
 	wire.WriteHashPart(h, s.additiveShift)
 	for _, id := range s.signers {
-		// Binding every signer id, nonce commitment, encrypted nonce proof, and
-		// delta share prevents replaying presign material across signer sets.
+		// Binding every signer id, nonce commitment, encrypted nonce, and delta
+		// share prevents replaying presign material across signer sets.
 		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		wire.WriteHashPart(h, s.round1[id].Gamma)
 		wire.WriteHashPart(h, s.round1[id].EncK)
-		wire.WriteHashPart(h, s.round1[id].EncKProof)
 		wire.WriteHashPart(h, scalarBytes(s.deltas[id]))
 	}
 	wire.WriteHashPart(h, R)
@@ -730,10 +895,20 @@ func (s *PresignSession) round1Echo() []byte {
 		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		wire.WriteHashPart(h, p.Gamma)
 		wire.WriteHashPart(h, p.EncK)
-		wire.WriteHashPart(h, p.EncKProof)
 		wire.WriteHashPart(h, p.PaillierPublicKey)
 	}
 	return h.Sum(nil)
+}
+
+func presignRound1PublicHash(p presignRound1Payload) ([]byte, error) {
+	payload, err := marshalPresignRound1Payload(p)
+	if err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(presignRound1PublicLabel))
+	wire.WriteHashPart(h, payload)
+	return h.Sum(nil), nil
 }
 
 // StartSign starts online signing using a context-bound presignature.

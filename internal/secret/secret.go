@@ -6,6 +6,7 @@ package secret
 import (
 	"errors"
 	"fmt"
+	"math/big"
 )
 
 // Scalar is a fixed-length secret scalar. It deliberately exposes no variable-length
@@ -63,6 +64,16 @@ func (s *Scalar) Destroy() {
 		return
 	}
 	clear(s.buf)
+}
+
+// ClearBigInt zeros the allocated words behind x and resets x to zero.
+func ClearBigInt(x *big.Int) {
+	if x == nil {
+		return
+	}
+	words := x.Bits()
+	clear(words[:cap(words)])
+	x.SetBits(nil)
 }
 
 // Equal reports whether s and t encode the same scalar in constant time.

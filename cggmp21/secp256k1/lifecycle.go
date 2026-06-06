@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -30,9 +31,9 @@ func (s *PresignSession) Destroy() {
 	if s == nil {
 		return
 	}
-	clearBigInt(s.kShare)
-	clearBigInt(s.gamma)
-	clearBigInt(s.xBar)
+	secret.ClearBigInt(s.kShare)
+	secret.ClearBigInt(s.gamma)
+	secret.ClearBigInt(s.xBar)
 	s.kShare = nil
 	s.gamma = nil
 	s.xBar = nil
@@ -46,7 +47,15 @@ func (s *PresignSession) Destroy() {
 	clearBigIntMap(s.alphaSigma)
 	clearBigIntMap(s.betaSigma)
 	clearPresignRound1Map(s.round1)
+	clearPresignRound1ProofMap(s.round1Proofs)
+	for id := range s.round1ProofEnvelopes {
+		delete(s.round1ProofEnvelopes, id)
+	}
 	clearPresignRound2Map(s.round2)
+	if s.startOpening != nil {
+		s.startOpening.Destroy()
+		s.startOpening = nil
+	}
 	if s.presign != nil {
 		s.presign.Destroy()
 	}
@@ -63,37 +72,36 @@ func (s *SignSession) Destroy() {
 }
 
 func clearBigIntMap(xs map[tss.PartyID]*big.Int) {
-	for id, x := range xs {
-		clearBigInt(x)
-		delete(xs, id)
+	for _, x := range xs {
+		secret.ClearBigInt(x)
 	}
-}
-
-func clearBigInt(x *big.Int) {
-	if x == nil {
-		return
-	}
-	clear(x.Bits())
-	x.SetInt64(0)
+	clear(xs)
 }
 
 func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
-	for id, payload := range xs {
+	for _, payload := range xs {
 		clear(payload.Gamma)
 		clear(payload.EncK)
-		clear(payload.EncKProof)
 		clear(payload.PaillierPublicKey)
-		delete(xs, id)
 	}
+	clear(xs)
+}
+
+func clearPresignRound1ProofMap(xs map[tss.PartyID]presignRound1ProofPayload) {
+	for _, payload := range xs {
+		clear(payload.PublicRound1Hash)
+		clear(payload.EncKProof)
+	}
+	clear(xs)
 }
 
 func clearPresignRound2Map(xs map[tss.PartyID]presignRound2Payload) {
-	for id, payload := range xs {
+	for _, payload := range xs {
 		clear(payload.Delta.Ciphertext)
 		clear(payload.Delta.Proof)
 		clear(payload.Sigma.Ciphertext)
 		clear(payload.Sigma.Proof)
 		clear(payload.Round1Echo)
-		delete(xs, id)
 	}
+	clear(xs)
 }

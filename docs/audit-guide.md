@@ -15,7 +15,7 @@ the CGGMP24 revision for Πmod and Ring-Pedersen Πprm.
 | Πlog\* (`LogStarProof`)    | `zk.paillier.logstar-proof`       | `internal/zk/paillier/logstar.go` `ProveLogStar` / `VerifyLogStar`          |
 | Schnorr proof              | `zk.schnorr.proof`                | `internal/zk/schnorr/schnorr.go`                                            |
 
-Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta), and `LogProof` (Π^log) remain in `proofs.go` for the MtA Start broadcast path but are rejected everywhere else.
+Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta), and `LogProof` (Π^log) remain in `proofs.go` for compatibility tests and deletion tracking. Production presign code rejects these proof bytes; Round 1 uses per-verifier `EncProof` (`Πenc`).
 
 ## Review Focus
 

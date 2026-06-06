@@ -49,8 +49,8 @@ func (sk *PrivateKey) Destroy() {
 	}
 	sk.Lambda.Destroy()
 	sk.Mu.Destroy()
-	clearBigInt(sk.P)
-	clearBigInt(sk.Q)
+	secret.ClearBigInt(sk.P)
+	secret.ClearBigInt(sk.Q)
 }
 
 const paillierWireVersion = 1
@@ -302,14 +302,6 @@ func scalarToBig(s *secret.Scalar) *big.Int {
 		return nil
 	}
 	return new(big.Int).SetBytes(s.FixedBytes())
-}
-
-func clearBigInt(x *big.Int) {
-	if x == nil {
-		return
-	}
-	clear(x.Bits())
-	x.SetInt64(0)
 }
 
 // MarshalBinary returns a deterministic TLV public-key record.

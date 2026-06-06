@@ -72,35 +72,48 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	round1ProofFrom2, err := unmarshalPresignRound1ProofPayload(out2[1].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
 	startFrom2 := mta.StartMessage{
 		Ciphertext: round1From2.EncK,
-		EncrProof:  round1From2.EncKProof,
 	}
 	pk2, err := shares[1].paillierPublicFor(2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !mta.VerifyStart(mtaStartDomain(shares[1], sessionID, signers, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
+	rp1, err := shares[1].ringPedersenPublicFor(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err != nil {
 		t.Fatal("MtA start proof did not verify")
 	}
 	mutatedKey := cloneKeyShare(shares[1])
 	mutatedKey.KeygenTranscriptHash[0] ^= 1
-	if mta.VerifyStart(mtaStartDomain(mutatedKey, sessionID, signers, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
+	if err := mta.VerifyStart(mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
-	if mta.VerifyStart(mtaStartDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2) {
+	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated signer set")
 	}
 	wrongContextHash := slices.Clone(s1.contextHash)
 	wrongContextHash[0] ^= 1
-	if mta.VerifyStart(mtaStartDomain(shares[1], sessionID, signers, 2, round1From2.PaillierPublicKey, wrongContextHash), startFrom2, pk2) {
+	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, wrongContextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
 	if _, err := s1.HandlePresignMessage(out2[0]); err != nil {
 		t.Fatal(err)
 	}
-	round2, err := s2.HandlePresignMessage(out1[0])
+	if _, err := s1.HandlePresignMessage(out2[1]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s2.HandlePresignMessage(out1[0]); err != nil {
+		t.Fatal(err)
+	}
+	round2, err := s2.HandlePresignMessage(out1[1])
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,9 +126,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	localStart := mta.StartMessage{
 		Ciphertext: s1.round1[s1.key.Party].EncK,
-		EncrProof:  s1.round1[s1.key.Party].EncKProof,
 	}
-	startDomain := mtaStartDomain(s1.key, sessionID, signers, s1.key.Party, s1.key.PaillierPublicKey, s1.contextHash)
 	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey, s1.contextHash)
 
 	responderPK, err := s1.key.paillierPublicFor(2)
@@ -127,11 +138,11 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mta.Finish(startDomain, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
+	if _, err := mta.Finish(responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
 	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "sigma", s1.key.PaillierPublicKey, s1.contextHash)
-	if _, err := mta.Finish(startDomain, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
+	if _, err := mta.Finish(wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}
 }
