@@ -800,8 +800,9 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 		reference = share
 		break
 	}
-	if reference == nil { //nolint:staticcheck
+	if reference == nil {
 		t.Fatal("missing old shares")
+		return nil, nil
 	}
 	return runCGGMP21ReshareWithDealers(t, oldShares, reference.Parties, newParties, newThreshold)
 }
@@ -813,7 +814,7 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		reference = share
 		break
 	}
-	if reference == nil { //nolint:staticcheck
+	if reference == nil {
 		t.Fatal("missing old shares")
 	}
 	newParties = tss.SortParties(newParties)

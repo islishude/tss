@@ -75,8 +75,6 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 
 // cloneKeyShare returns a deep copy of a KeyShare for mutation testing.
 // Used by integration-tagged test files.
-//
-//nolint:unused
 func cloneKeyShare(in *KeyShare) *KeyShare {
 	if in == nil {
 		return nil
@@ -119,8 +117,6 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 
 // clonePresign returns a deep copy of a Presign for mutation testing.
 // Used by integration-tagged test files.
-//
-//nolint:unused
 func clonePresign(in *Presign) *Presign {
 	if in == nil {
 		return nil
@@ -142,8 +138,6 @@ func clonePresign(in *Presign) *Presign {
 
 // cloneByteSlices returns a deep copy of a [][]byte slice.
 // Used by integration-tagged test files.
-//
-//nolint:unused
 func cloneByteSlices(in [][]byte) [][]byte {
 	out := make([][]byte, len(in))
 	for i := range in {
