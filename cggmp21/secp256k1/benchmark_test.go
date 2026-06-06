@@ -3,21 +3,11 @@
 package secp256k1
 
 import (
-	"context"
 	"crypto/sha256"
 	"testing"
 
 	"github.com/islishude/tss"
-	pai "github.com/islishude/tss/internal/paillier"
 )
-
-func BenchmarkPaillierKeygen2048(b *testing.B) {
-	for b.Loop() {
-		if _, err := pai.GenerateKey(context.Background(), nil, DefaultPaillierBits); err != nil {
-			b.Fatal(err)
-		}
-	}
-}
 
 func BenchmarkThresholdECDSAPresign2of3(b *testing.B) {
 	shares := secpKeygen(b, 2, 3)

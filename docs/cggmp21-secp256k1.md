@@ -57,7 +57,7 @@ CGGMP21 key shares require full Paillier/ZK material and a complete keygen confi
 
 Each party `i`:
 
-1. **Paillier key generation**: Generates a Paillier keypair `(N_i, λ_i, μ_i)` with safe primes `p ≡ q ≡ 3 mod 4`. Default modulus size is 2048 bits (minimum 768 bits for MtA correctness).
+1. **Paillier key generation**: Generates a Paillier keypair `(N_i, λ_i, μ_i)` with safe primes `p ≡ q ≡ 3 mod 4`. The production default modulus size and minimum are 3072 bits; tests may override this to reduced sizes.
 
 2. **ZK proofs**: Produces proofs bound to the keygen session domain:
    - **Πmod** — CGGMP24 Paillier-Blum modulus proof.
