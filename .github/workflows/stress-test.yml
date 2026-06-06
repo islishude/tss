@@ -1,4 +1,4 @@
-name: CI
+name: Schedule Test
 
 on:
   schedule:
