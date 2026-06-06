@@ -144,8 +144,8 @@ func OMul(pk *pai.PublicKey, k, c *big.Int) (*big.Int, error) {
 }
 
 // OMulCT homomorphically multiplies a Paillier ciphertext by a secret scalar
-// using fixed-width constant-time exponentiation. Negative scalars are handled
-// through the ciphertext inverse, preserving the exact Paillier relationship.
+// using fixed-width constant-time exponentiation. It delegates the sign-handling
+// and constant-time exponentiation to ExpSignedModCT.
 func OMulCT(pk *pai.PublicKey, k, c *big.Int, expLen int) (*big.Int, error) {
 	if pk == nil {
 		return nil, errors.New("nil Paillier public key")
@@ -163,15 +163,6 @@ func OMulCT(pk *pai.PublicKey, k, c *big.Int, expLen int) (*big.Int, error) {
 		return nil, errors.New("invalid OMulCT exponent length")
 	}
 
-	exp := new(big.Int).Set(k)
-	base := new(big.Int).Set(c)
-	if exp.Sign() < 0 {
-		exp.Neg(exp)
-		base.ModInverse(base, pk.NSquared)
-		if base == nil {
-			return nil, errors.New("ciphertext is not invertible modulo N^2")
-		}
-	}
 	nSquaredLen := 2 * modulusBytes(pk.N)
-	return expSecretMod(pk.NSquared, base, exp, nSquaredLen, expLen)
+	return ExpSignedModCT(pk.NSquared, c, k, nSquaredLen, expLen)
 }

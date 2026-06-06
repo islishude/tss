@@ -102,6 +102,12 @@ func MultiExpSignedMod(base1, exp1, base2, exp2, modulus *big.Int) (*big.Int, er
 // ExpSignedModCT computes base^exp mod modulus using constant-time
 // exponentiation, handling negative exponents via modular inverse of the base.
 // The modulus and exponent must have consistent fixed-width encodings.
+//
+// To avoid secret-dependent control flow, the modular inverse of the public
+// base is always precomputed and the absolute value of the exponent is always
+// used. The effective base is selected from {base, invBase} based on the sign
+// of exp. This ensures the same sequence of operations regardless of whether
+// the exponent is positive or negative.
 func ExpSignedModCT(modulus, base, exp *big.Int, modLen, expLen int) (*big.Int, error) {
 	if base == nil || exp == nil || modulus == nil {
 		return nil, errors.New("nil ExpSignedModCT input")
@@ -109,47 +115,37 @@ func ExpSignedModCT(modulus, base, exp *big.Int, modLen, expLen int) (*big.Int, 
 	if modulus.Sign() <= 0 {
 		return nil, errors.New("invalid ExpSignedModCT modulus")
 	}
+	if expLen <= 0 {
+		return nil, errors.New("invalid ExpSignedModCT exponent length")
+	}
 
-	e := new(big.Int).Set(exp)
+	// Precompute the modular inverse of the public base unconditionally.
+	// base is a public value (e.g., S, T, or a ciphertext), so ModInverse
+	// does not leak secret material.
+	invBase := new(big.Int).ModInverse(base, modulus)
+	if invBase == nil {
+		return nil, errors.New("base is not invertible modulo modulus")
+	}
+
+	// Always work with the absolute value of the secret exponent.
+	absExp := new(big.Int).Abs(exp)
+
+	// Select the effective base: use invBase when exp was negative, base otherwise.
+	// Both base and invBase are public; the selection below does not leak secret
+	// material through the base value.
 	b := new(big.Int).Set(base)
-
-	forcedCT := false
-	if e.Sign() < 0 {
-		e.Neg(e)
-		b.ModInverse(b, modulus)
-		if b == nil {
-			return nil, errors.New("base is not invertible modulo modulus for negative exponent")
-		}
-		// When the exponent is negative (e.g., secret scalar in RP commitment),
-		// we still use constant-time ExpCT on the inverted base.
-		forcedCT = true
+	if exp.Sign() < 0 {
+		b.Set(invBase)
 	}
 
-	if forcedCT || expLen > 0 {
-		return expSecretMod(modulus, b, e, modLen, expLen)
-	}
-	return new(big.Int).Exp(b, e, modulus), nil
+	return expSecretMod(modulus, b, absExp, modLen, expLen)
 }
 
+// validateRPParamsForCommit validates Ring-Pedersen auxiliary parameters for
+// use by the modern proof verifiers (Πenc, Πaff-g, Πlog*). It delegates to the
+// canonical ValidateRingPedersenParams to ensure consistent validation of:
+// non-nil fields, composite odd modulus, unit S/T with fixed-width encoding,
+// and non-degenerate values.
 func validateRPParamsForCommit(params RingPedersenParams) error {
-	if params.N == nil || params.S == nil || params.T == nil {
-		return errors.New("nil Ring-Pedersen parameter")
-	}
-	if params.N.Sign() <= 0 || params.N.Bit(0) == 0 {
-		return errors.New("invalid Ring-Pedersen modulus for commitment")
-	}
-	if !IsZNStar(params.S, params.N) {
-		return errors.New("Ring-Pedersen S is not in Z*_N")
-	}
-	if !IsZNStar(params.T, params.N) {
-		return errors.New("Ring-Pedersen T is not in Z*_N")
-	}
-	if params.S.Cmp(big.NewInt(1)) <= 0 || params.T.Cmp(big.NewInt(1)) <= 0 {
-		return errors.New("degenerate Ring-Pedersen parameters")
-	}
-	return nil
+	return ValidateRingPedersenParams(&params)
 }
-
-// expSecretMod is a thin wrapper around paillierct.ExpCT used by both
-// the old proofs (in proofs.go) and the new ring_pedersen.go helpers.
-// It mirrors the function currently in proofs.go; do not duplicate it.

@@ -266,6 +266,16 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if _, err := RequireZN2Star(proof.Y, Ni.N); err != nil {
 		return fmt.Errorf("AffGProof: Y not in Z*_Ni^2: %w", err)
 	}
+	// Bind the proof-carried Y to the statement Y. The statement is the
+	// authenticated public input; rejecting a mismatch ensures a caller that
+	// independently authenticates Y cannot accept a proof computed for a
+	// different Y.
+	if stmt.Y == nil {
+		return errors.New("AffGProof: nil statement Y")
+	}
+	if stmt.Y.Cmp(proof.Y) != 0 {
+		return errors.New("AffGProof: statement Y does not match proof Y")
+	}
 	if stmt.X == nil {
 		return errors.New("AffGProof: nil X point")
 	}

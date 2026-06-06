@@ -9,6 +9,22 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+// primeRingPedersenFixture returns a VerifierAux whose modulus is a 512-bit
+// prime. ValidateRingPedersenParams (called by validateRPParamsForCommit)
+// rejects prime moduli because Ring-Pedersen commitments require a composite N.
+func primeRingPedersenFixture() RingPedersenParams {
+	// 2^511 + 111, a 512-bit prime.
+	primeN, ok := new(big.Int).SetString("6703903964971298549787012499102923063739682910296196688861780721860882015036773488400937149083451713845015929093243025426876941405973284973216824503042159", 10)
+	if !ok {
+		panic("failed to parse hardcoded prime")
+	}
+	return RingPedersenParams{
+		N: primeN,
+		S: big.NewInt(2),
+		T: big.NewInt(3),
+	}
+}
+
 func TestEncProofVerificationMatrix(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
@@ -27,6 +43,14 @@ func TestEncProofVerificationMatrix(t *testing.T) {
 	wrongStmt.ProverPaillierN = &wrongKey.PublicKey
 	if err := VerifyEnc(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("EncProof verified under wrong Paillier key")
+	}
+
+	// A VerifierAux with a prime modulus must be rejected — Ring-Pedersen
+	// commitments require a composite modulus with unknown factorisation.
+	primeStmt := stmt
+	primeStmt.VerifierAux = primeRingPedersenFixture()
+	if err := VerifyEnc(params, state, primeStmt, proof); err == nil {
+		t.Fatal("EncProof verified with prime VerifierAux modulus")
 	}
 
 	for _, tc := range []struct {
@@ -77,6 +101,21 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 	wrongStmt.ProverPaillierN = &wrongKey.PublicKey
 	if err := VerifyAffG(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("AffGProof verified under wrong prover Paillier key")
+	}
+
+	// A proof computed for one Y must not verify against a statement
+	// that expects a different Y.
+	wrongYStmt := stmt
+	wrongYStmt.Y = new(big.Int).Add(stmt.Y, big.NewInt(1))
+	if err := VerifyAffG(params, state, wrongYStmt, proof); err == nil {
+		t.Fatal("AffGProof verified under wrong statement Y")
+	}
+
+	// A VerifierAux with a prime modulus must be rejected.
+	primeStmt := stmt
+	primeStmt.VerifierAux = primeRingPedersenFixture()
+	if err := VerifyAffG(params, state, primeStmt, proof); err == nil {
+		t.Fatal("AffGProof verified with prime VerifierAux modulus")
 	}
 
 	for _, tc := range []struct {
@@ -138,6 +177,13 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 	wrongStmt.PaillierN = &wrongKey.PublicKey
 	if err := VerifyLogStar(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("LogStarProof verified under wrong Paillier key")
+	}
+
+	// A VerifierAux with a prime modulus must be rejected.
+	primeStmt := stmt
+	primeStmt.VerifierAux = primeRingPedersenFixture()
+	if err := VerifyLogStar(params, state, primeStmt, proof); err == nil {
+		t.Fatal("LogStarProof verified with prime VerifierAux modulus")
 	}
 
 	for _, tc := range []struct {
