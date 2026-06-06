@@ -1,0 +1,72 @@
+name: CI
+
+on:
+  schedule:
+    - cron: "00 12 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+# Tier 3 + Tier 4: Production security-parameter tests and stress tests.
+# Runs scheduled nightly runs only.
+
+jobs:
+  test-race:
+    name: Test Race (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run race detector
+        run: make test-race
+
+  test-slow:
+    name: Test Slow (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 3 slowcrypto tests
+        run: make test-slowcrypto
+
+  test-stress:
+    name: Test Stress (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: make test-stress

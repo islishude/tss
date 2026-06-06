@@ -26,22 +26,22 @@ test-fast:
 # Tier 2: Integration tests requiring full keygen/presign/sign (< 10m).
 .PHONY: test-integration
 test-integration:
-	go test -tags=integration -timeout 20m ./cggmp21/secp256k1 ./internal/mta ./internal/zk/paillier
+	go test -tags=integration -timeout 20m ./...
 
-# Tier 3: Production security-parameter smoke tests (< 45m).
+# Tier 3: Production security-parameter smoke tests (1h).
 .PHONY: test-slowcrypto
 test-slowcrypto:
-	go test -tags=slowcrypto -timeout 45m ./...
+	go test -tags 'slowcrypto' -timeout 1h ./...
 
-# Tier 4: Stress test with count=10 (3h timeout).
+# Tier 4: Stress test with count=10 (>3h).
 .PHONY: test-stress
 test-stress:
-	go test -tags=stress -count=10 -timeout 3h ./...
+	go test -race -tags 'stress slowcrypto integration' -count=10 -timeout 5h ./...
 
 # Race detector over all packages (1h timeout).
 .PHONY: test-race
 test-race:
-	go test -race -timeout 1h ./...
+	go test -race -tags=integration -timeout 1h ./...
 
 # Legacy test-coverage target (includes integration tests).
 .PHONY: test-coverage
