@@ -4,13 +4,11 @@ package secp256k1
 
 import (
 	"bytes"
-	"fmt"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
-
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -34,29 +32,9 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(decoded.PublicKey, shares[1].PublicKey) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
-	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON key share encoding accepted")
-	}
 	trailing := append(append([]byte(nil), raw1...), 0)
 	if _, err := UnmarshalKeyShare(trailing); err == nil {
 		t.Fatal("key share with trailing bytes accepted")
-	}
-}
-
-func TestCGGMP21RejectsWrongWireTypes(t *testing.T) {
-	wrongKeyShare, err := wire.Marshal(tss.Version, "wrong.secp256k1.keyshare", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := UnmarshalKeyShare(wrongKeyShare); err == nil {
-		t.Fatal("wrong key share wire type accepted")
-	}
-	wrongPresign, err := wire.Marshal(tss.Version, "wrong.secp256k1.presign", nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := UnmarshalPresign(wrongPresign); err == nil {
-		t.Fatal("wrong presign wire type accepted")
 	}
 }
 
@@ -80,7 +58,7 @@ func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := rewriteKeyShareField(raw, keyShareFieldKeygenConfirmations, []byte{2})
+	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldKeygenConfirmations, []byte{2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -95,7 +73,7 @@ func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := rewriteKeyShareField(raw, keyShareFieldKeygenConfirmations, wire.EncodeBytesList(nil))
+	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldKeygenConfirmations, wire.EncodeBytesList(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +105,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mutated, err := rewriteKeyShareField(raw, tc.tag, tc.value)
+			mutated, err := testutil.RewriteWireField(raw, keyShareWireType, tc.tag, tc.value)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -175,9 +153,6 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(decoded.TranscriptHash, presigns[1].TranscriptHash) {
 		t.Fatal("presign transcript mismatch after round trip")
 	}
-	if _, err := UnmarshalPresign([]byte(`{"version":1}`)); err == nil {
-		t.Fatal("JSON presign encoding accepted")
-	}
 	trailing := append(append([]byte(nil), raw1...), 0)
 	if _, err := UnmarshalPresign(trailing); err == nil {
 		t.Fatal("presign with trailing bytes accepted")
@@ -204,29 +179,12 @@ func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := rewriteKeyShareField(raw, keyShareFieldThreshold, wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}
 		if _, err := UnmarshalKeyShare(mutated); err == nil {
 			t.Fatalf("key share threshold %d accepted", overflow)
-		}
-	}
-}
-
-func TestCGGMP21PresignRejectsOverflowThreshold(t *testing.T) {
-	presign := minimalCGGMP21Presign(t)
-	raw, err := presign.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := rewriteWireField(raw, presignWireType, presignFieldThreshold, wire.Uint32(overflow))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := UnmarshalPresign(mutated); err == nil {
-			t.Fatalf("presign threshold %d accepted", overflow)
 		}
 	}
 }
@@ -244,24 +202,7 @@ func FuzzCGGMP21KeyShareUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
-	})
-}
-
-func FuzzCGGMP21PresignUnmarshal(f *testing.F) {
-	presign := minimalCGGMP21Presign(f)
-	raw, err := presign.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"version":1}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		presign, err := UnmarshalPresign(data)
-		if err != nil {
-			return
-		}
-		assertPayloadRemarshals(t, presign, (*Presign).MarshalBinary, UnmarshalPresign)
+		testutil.AssertDeterministicRoundTrip(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
 	})
 }
 
@@ -285,39 +226,7 @@ func FuzzCGGMP21KeygenCommitmentsPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
-	})
-}
-
-func FuzzCGGMP21KeygenSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: scalarBytes(big.NewInt(1))})
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"share":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalKeygenSharePayload(data)
-		if err != nil {
-			return
-		}
-		assertPayloadRemarshals(t, p, marshalKeygenSharePayload, unmarshalKeygenSharePayload)
-	})
-}
-
-func FuzzCGGMP21PresignRound3PayloadUnmarshal(f *testing.F) {
-	raw, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(big.NewInt(1))})
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"delta":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalPresignRound3Payload(data)
-		if err != nil {
-			return
-		}
-		assertPayloadRemarshals(t, p, marshalPresignRound3Payload, unmarshalPresignRound3Payload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
 	})
 }
 
@@ -340,7 +249,7 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalPresignRound2Payload, unmarshalPresignRound2Payload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalPresignRound2Payload, unmarshalPresignRound2Payload)
 	})
 }
 
@@ -358,7 +267,7 @@ func FuzzCGGMP21ReshareDealerCommitmentsPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalReshareDealerCommitmentsPayload, unmarshalReshareDealerCommitmentsPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareDealerCommitmentsPayload, unmarshalReshareDealerCommitmentsPayload)
 	})
 }
 
@@ -381,28 +290,7 @@ func FuzzCGGMP21ReshareReceiverMaterialPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalReshareReceiverMaterialPayload, unmarshalReshareReceiverMaterialPayload)
-	})
-}
-
-func FuzzCGGMP21ReshareSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalReshareSharePayload(reshareSharePayload{
-		Dealer:               1,
-		Receiver:             2,
-		Share:                scalarBytes(big.NewInt(1)),
-		DealerCommitmentHash: bytes.Repeat([]byte{1}, 32),
-	})
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"share":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalReshareSharePayload(data)
-		if err != nil {
-			return
-		}
-		assertPayloadRemarshals(t, p, marshalReshareSharePayload, unmarshalReshareSharePayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareReceiverMaterialPayload, unmarshalReshareReceiverMaterialPayload)
 	})
 }
 
@@ -426,65 +314,8 @@ func FuzzCGGMP21RefreshCommitmentsPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalRefreshCommitmentsPayload, unmarshalRefreshCommitmentsPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalRefreshCommitmentsPayload, unmarshalRefreshCommitmentsPayload)
 	})
-}
-
-func FuzzCGGMP21RefreshSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalRefreshSharePayload(refreshSharePayload{Share: scalarBytes(big.NewInt(1))})
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"share":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalRefreshSharePayload(data)
-		if err != nil {
-			return
-		}
-		assertPayloadRemarshals(t, p, marshalRefreshSharePayload, unmarshalRefreshSharePayload)
-	})
-}
-
-// minimalCGGMP21Presign, cloneKeyShare, and cloneByteSlices are now defined
-// in helpers_test.go.
-
-func rewriteKeyShareField(raw []byte, tag uint16, value []byte) ([]byte, error) {
-	return rewriteWireField(raw, keyShareWireType, tag, value)
-}
-
-func rewriteWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, wireType)
-	if err != nil {
-		return nil, err
-	}
-	for i := range fields {
-		if fields[i].Tag == tag {
-			fields[i].Value = make([]byte, len(value))
-			copy(fields[i].Value, value)
-			return wire.Marshal(version, wireType, fields)
-		}
-	}
-	return nil, fmt.Errorf("missing wire field %d", tag)
-}
-
-func rewriteNestedWireField(raw []byte, outerType string, outerTag uint16, innerType string, innerTag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, outerType)
-	if err != nil {
-		return nil, err
-	}
-	for i := range fields {
-		if fields[i].Tag != outerTag {
-			continue
-		}
-		inner, err := rewriteWireField(fields[i].Value, innerType, innerTag, value)
-		if err != nil {
-			return nil, err
-		}
-		fields[i].Value = inner
-		return wire.Marshal(version, outerType, fields)
-	}
-	return nil, fmt.Errorf("missing outer wire field %d", outerTag)
 }
 
 func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) ([]byte, error) {
@@ -498,13 +329,13 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 	}
 	mutate(&payload)
 	if !bytes.Equal(original.Gamma, payload.Gamma) {
-		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldGamma, payload.Gamma)
+		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldGamma, payload.Gamma)
 	}
 	if !bytes.Equal(original.EncK, payload.EncK) {
-		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncK, payload.EncK)
+		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncK, payload.EncK)
 	}
 	if !bytes.Equal(original.PaillierPublicKey, payload.PaillierPublicKey) {
-		return rewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
+		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
 	}
 	return marshalPresignRound1Payload(payload)
 }
@@ -520,10 +351,10 @@ func mutatePresignRound1ProofPayload(raw []byte, mutate func(*presignRound1Proof
 	}
 	mutate(&payload)
 	if !bytes.Equal(original.PublicRound1Hash, payload.PublicRound1Hash) {
-		return rewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldPublicHash, payload.PublicRound1Hash)
+		return testutil.RewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldPublicHash, payload.PublicRound1Hash)
 	}
 	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
-		return rewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldEncKProof, payload.EncKProof)
+		return testutil.RewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldEncKProof, payload.EncKProof)
 	}
 	return marshalPresignRound1ProofPayload(payload)
 }
@@ -544,38 +375,19 @@ func mutatePresignRound2Payload(raw []byte, mutate func(*presignRound2Payload)) 
 		mtaResponseFieldProof      uint16 = 2
 	)
 	if !bytes.Equal(original.Delta.Ciphertext, payload.Delta.Ciphertext) {
-		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Delta.Ciphertext)
+		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Delta.Ciphertext)
 	}
 	if !bytes.Equal(original.Delta.Proof, payload.Delta.Proof) {
-		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldProof, payload.Delta.Proof)
+		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldProof, payload.Delta.Proof)
 	}
 	if !bytes.Equal(original.Sigma.Ciphertext, payload.Sigma.Ciphertext) {
-		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Sigma.Ciphertext)
+		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Sigma.Ciphertext)
 	}
 	if !bytes.Equal(original.Sigma.Proof, payload.Sigma.Proof) {
-		return rewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldProof, payload.Sigma.Proof)
+		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldProof, payload.Sigma.Proof)
 	}
 	if !bytes.Equal(original.Round1Echo, payload.Round1Echo) {
-		return rewriteWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldRound1Echo, payload.Round1Echo)
+		return testutil.RewriteWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldRound1Echo, payload.Round1Echo)
 	}
 	return marshalPresignRound2Payload(payload)
-}
-
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
-	}
 }

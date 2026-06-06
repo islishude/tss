@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
@@ -101,7 +102,7 @@ func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, payload, marshalPresignRound1Payload, unmarshalPresignRound1Payload)
+		testutil.AssertDeterministicRoundTrip(t, payload, marshalPresignRound1Payload, unmarshalPresignRound1Payload)
 	})
 }
 
@@ -121,8 +122,6 @@ func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, payload, marshalSignPartialPayload, unmarshalSignPartialPayload)
+		testutil.AssertDeterministicRoundTrip(t, payload, marshalSignPartialPayload, unmarshalSignPartialPayload)
 	})
 }
-
-// fuzzSessionID is now defined in tier0_fuzz_test.go

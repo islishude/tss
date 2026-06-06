@@ -146,35 +146,3 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}
 }
-
-func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) map[tss.PartyID]*KeyShare {
-	t.Helper()
-	session, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parties := make([]tss.PartyID, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
-	sessions := make(map[tss.PartyID]*KeygenSession, n)
-	messages := make([]tss.Envelope, 0)
-	for _, id := range parties {
-		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session}, opts)
-		if err != nil {
-			t.Fatal(err)
-		}
-		sessions[id] = kg
-		messages = append(messages, out...)
-	}
-	deliverKeygenMessages(t, sessions, parties, messages)
-	out := make(map[tss.PartyID]*KeyShare, n)
-	for _, id := range parties {
-		share, ok := sessions[id].KeyShare()
-		if !ok {
-			t.Fatalf("keygen not complete for %d", id)
-		}
-		out[id] = share
-	}
-	return out
-}

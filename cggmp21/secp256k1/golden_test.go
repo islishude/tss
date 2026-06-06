@@ -210,5 +210,3 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 		t.Error("accepted trailing byte")
 	}
 }
-
-// checkGolden is now defined in helpers_test.go

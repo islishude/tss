@@ -80,12 +80,16 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 	for len(pending) > 0 {
 		env := pending[0]
 		pending = pending[1:]
-		ps := sessions[env.To]
-		out, err := ps.HandlePresignMessage(env)
-		if err != nil {
-			t.Fatal(err)
+		for _, party := range signers {
+			if party == env.From || (env.To != 0 && env.To != party) {
+				continue
+			}
+			out, err := sessions[party].HandlePresignMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending = append(pending, out...)
 		}
-		pending = append(pending, out...)
 	}
 
 	presigns := make(map[tss.PartyID]*Presign, len(signers))
@@ -259,14 +263,18 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	for len(pending) > 0 {
 		env := pending[0]
 		pending = pending[1:]
-		ss := sessions[env.To]
-		out, err := ss.HandleSignMessage(env)
-		if err != nil {
-			t.Fatal(err)
-		}
-		pending = append(pending, out...)
-		if s, ok := ss.Signature(); ok {
-			sig = s
+		for _, party := range signers {
+			if party == env.From || (env.To != 0 && env.To != party) {
+				continue
+			}
+			out, err := sessions[party].HandleSignMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending = append(pending, out...)
+			if s, ok := sessions[party].Signature(); ok {
+				sig = s
+			}
 		}
 	}
 	if sig == nil {
@@ -344,11 +352,16 @@ func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare
 	for len(pending) > 0 {
 		env := pending[0]
 		pending = pending[1:]
-		out, err := sessions[env.To].HandlePresignMessage(env)
-		if err != nil {
-			t.Fatal(err)
+		for _, party := range signers {
+			if party == env.From || (env.To != 0 && env.To != party) {
+				continue
+			}
+			out, err := sessions[party].HandlePresignMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pending = append(pending, out...)
 		}
-		pending = append(pending, out...)
 	}
 
 	presigns := make(map[tss.PartyID]*Presign, len(signers))

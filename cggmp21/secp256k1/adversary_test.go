@@ -4,37 +4,12 @@ package secp256k1
 
 import (
 	"crypto/sha256"
-	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
-
-type protocolHarness struct {
-	threshold int
-	parties   []tss.PartyID
-	shares    map[tss.PartyID]*KeyShare
-}
-
-func newHarness(t testing.TB, threshold, n int) *protocolHarness {
-	t.Helper()
-	parties := make([]tss.PartyID, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
-	return &protocolHarness{
-		threshold: threshold,
-		parties:   parties,
-		shares:    secpKeygen(t, threshold, n),
-	}
-}
-
-func (h *protocolHarness) evidenceContext(sessionID tss.SessionID, receiver tss.PartyID, signers []tss.PartyID, presign *Presign) EvidenceContext {
-	ctx := secpEvidenceContext(h.shares[receiver], signers, presign)
-	ctx.SessionID = sessionID
-	return ctx
-}
 
 func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 	sessionID, err := tss.NewSessionID(nil)
@@ -131,7 +106,7 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := rewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, wire.EncodeBytesList([][]byte{{0x02}}))
+	mutated, err := testutil.RewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, wire.EncodeBytesList([][]byte{{0x02}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -537,7 +512,7 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if len(round3From2) != 1 {
 		t.Fatalf("expected one round3 message, got %d", len(round3From2))
 	}
-	mutated, err := rewriteWireField(round3From2[0].Payload, presignRound3PayloadWireType, presignRound3PayloadFieldDelta, []byte{0})
+	mutated, err := testutil.RewriteWireField(round3From2[0].Payload, presignRound3PayloadWireType, presignRound3PayloadFieldDelta, []byte{0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -601,7 +576,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mutated, err := rewriteWireField(out2[0].Payload, signPartialPayloadWireType, signPartialPayloadFieldS, []byte{0})
+		mutated, err := testutil.RewriteWireField(out2[0].Payload, signPartialPayloadWireType, signPartialPayloadFieldS, []byte{0})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -653,24 +628,3 @@ func TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound(t *testing.T) 
 		t.Fatalf("presign reuse should fail before creating session/outbound message: session=%v out=%d err=%v", session, len(out), err)
 	}
 }
-
-func assertProtocolErrorCode(t testing.TB, err error, code string) *tss.ProtocolError {
-	t.Helper()
-	var protocolErr *tss.ProtocolError
-	if !errors.As(err, &protocolErr) {
-		t.Fatalf("expected ProtocolError %s, got %T: %v", code, err, err)
-	}
-	if protocolErr.Code != code {
-		t.Fatalf("expected code %s, got %s: %v", code, protocolErr.Code, err)
-	}
-	return protocolErr
-}
-
-func assertNoBlame(t testing.TB, protocolErr *tss.ProtocolError) {
-	t.Helper()
-	if protocolErr.Blame != nil {
-		t.Fatalf("%s unexpectedly carried blame: %#v", protocolErr.Code, protocolErr.Blame)
-	}
-}
-
-// clonePresign is now defined in helpers_test.go
