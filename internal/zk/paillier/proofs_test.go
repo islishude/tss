@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"sync"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -12,6 +13,8 @@ import (
 	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/wire"
 )
+
+var testPaillierKeyCache sync.Map
 
 func TestEncryptionProofTamper(t *testing.T) {
 	if testing.Short() {
@@ -642,9 +645,16 @@ func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
 	t.Helper()
 	restore := pai.SetMinimumModulusBitsForTesting(bits)
 	t.Cleanup(restore)
+	if sk, ok := testPaillierKeyCache.Load(bits); ok {
+		return sk.(*pai.PrivateKey)
+	}
 	sk, err := pai.GenerateKey(context.Background(), nil, bits)
 	if err != nil {
 		t.Fatal(err)
+	}
+	actual, _ := testPaillierKeyCache.LoadOrStore(bits, sk)
+	if actual != sk {
+		return actual.(*pai.PrivateKey)
 	}
 	return sk
 }
