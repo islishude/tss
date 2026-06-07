@@ -10,6 +10,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
@@ -57,7 +58,7 @@ func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 		false,
 	)
 	evidence, err := tss.NewBlameEvidence(env, tss.EvidenceKindPresignRound1, "fuzz seed", []tss.EvidenceField{
-		rawEvidenceField(evidenceFieldPartiesHash, partySetHash([]tss.PartyID{1, 2})),
+		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash([]tss.PartyID{1, 2}, partySetHashLabel)),
 	})
 	if err != nil {
 		f.Fatal(err)

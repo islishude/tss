@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func ExampleVerifyDigest() {
@@ -47,8 +48,8 @@ func ExampleVerifyBlameEvidence() {
 		Payload:     []byte("bad sign partial"),
 	}.WithTranscriptHash()
 	evidence, err := tss.NewBlameEvidence(envelope, tss.EvidenceKindSignPartial, "invalid sign partial", []tss.EvidenceField{
-		{Key: evidenceFieldPartiesHash, Value: partySetHash([]tss.PartyID{1})},
-		{Key: evidenceFieldSignerSetHash, Value: partySetHash([]tss.PartyID{1})},
+		{Key: evidenceFieldPartiesHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},
+		{Key: evidenceFieldSignerSetHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},
 	})
 	if err != nil {
 		panic(err)

@@ -40,12 +40,12 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 
 func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
-	unsorted := cloneKeyShare(shares[1])
+	unsorted := (shares[1]).Clone()
 	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted party set encoded")
 	}
-	nonCanonicalPaillier := cloneKeyShare(shares[1])
+	nonCanonicalPaillier := (shares[1]).Clone()
 	nonCanonicalPaillier.PaillierPublicKey = append(nonCanonicalPaillier.PaillierPublicKey, ' ')
 	if _, err := nonCanonicalPaillier.MarshalBinary(); err == nil {
 		t.Fatal("non-canonical Paillier public key encoded")
@@ -119,13 +119,13 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 
-	badModulusProof := cloneKeyShare(shares[1])
+	badModulusProof := (shares[1]).Clone()
 	badModulusProof.PaillierPublicKeys[0].Proof = append([]byte(nil), badModulusProof.PaillierPublicKeys[1].Proof...)
 	if err := badModulusProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Paillier modulus proof")
 	}
 
-	badRingPedersenProof := cloneKeyShare(shares[1])
+	badRingPedersenProof := (shares[1]).Clone()
 	badRingPedersenProof.RingPedersenPublic[0].Proof = append([]byte(nil), badRingPedersenProof.RingPedersenPublic[1].Proof...)
 	if err := badRingPedersenProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Ring-Pedersen proof")
@@ -162,7 +162,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
-	unsorted := clonePresign(presigns[1])
+	unsorted := (presigns[1]).Clone()
 	unsorted.Signers[0], unsorted.Signers[1] = unsorted.Signers[1], unsorted.Signers[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted signer set encoded")

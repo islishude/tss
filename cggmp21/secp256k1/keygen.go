@@ -13,6 +13,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
@@ -257,7 +258,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"malformed keygen commitment payload",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
@@ -267,8 +268,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"invalid keygen commitment",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 			)
 		}
 		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
@@ -280,7 +281,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"malformed Paillier public key",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -293,7 +294,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"malformed Paillier modulus proof",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -308,7 +309,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"invalid Paillier modulus proof",
 				[]tss.PartyID{env.From},
 				errors.New("invalid Paillier modulus proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -321,7 +322,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"malformed Ring-Pedersen parameters",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -332,7 +333,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"Ring-Pedersen modulus mismatch",
 				[]tss.PartyID{env.From},
 				errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -345,7 +346,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"malformed Ring-Pedersen proof",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -360,7 +361,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 				"invalid Ring-Pedersen proof",
 				[]tss.PartyID{env.From},
 				errors.New("invalid Ring-Pedersen proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -438,8 +439,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 						evidenceEnv,
 						tss.EvidenceKindKeygenShare,
 						"invalid DKG share",
-						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.cfg.Parties)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
+						rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
 				Err: err,

@@ -12,6 +12,7 @@ import (
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 // --- PresignContext factory ---
@@ -72,46 +73,6 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 	}
 }
 
-// --- Clone helpers ---
-
-// cloneKeyShare delegates to KeyShare.Clone() for test helpers.
-func cloneKeyShare(in *KeyShare) *KeyShare { return in.Clone() }
-
-// clonePresign returns a deep copy of a Presign for mutation testing.
-// Used by integration-tagged test files.
-func clonePresign(in *Presign) *Presign {
-	if in == nil {
-		return nil
-	}
-	cp := &Presign{
-		mu:             &sync.Mutex{},
-		Version:        in.Version,
-		Party:          in.Party,
-		Threshold:      in.Threshold,
-		Signers:        append([]tss.PartyID(nil), in.Signers...),
-		R:              append([]byte(nil), in.R...),
-		LittleR:        append([]byte(nil), in.LittleR...),
-		TranscriptHash: append([]byte(nil), in.TranscriptHash...),
-		Context: PresignContext{
-			KeyID:          in.Context.KeyID,
-			ChainID:        in.Context.ChainID,
-			DerivationPath: append([]uint32(nil), in.Context.DerivationPath...),
-			PolicyDomain:   in.Context.PolicyDomain,
-			MessageDomain:  in.Context.MessageDomain,
-		},
-		ContextHash:          append([]byte(nil), in.ContextHash...),
-		AdditiveShift:        append([]byte(nil), in.AdditiveShift...),
-		PublicKey:            append([]byte(nil), in.PublicKey...),
-		KeygenTranscriptHash: append([]byte(nil), in.KeygenTranscriptHash...),
-		PartiesHash:          append([]byte(nil), in.PartiesHash...),
-		Consumed:             false,
-		kShare:               in.kShare.Clone(),
-		chiShare:             in.chiShare.Clone(),
-		delta:                in.delta.Clone(),
-	}
-	return cp
-}
-
 // --- Minimal presign fixture ---
 
 // minimalCGGMP21Presign creates a Presign with minimal valid fields for
@@ -140,7 +101,7 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{
-		mu:                   &sync.Mutex{},
+		mu:                   new(sync.Mutex),
 		Version:              tss.Version,
 		Party:                1,
 		Threshold:            1,
@@ -152,7 +113,7 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 		ContextHash:          contextHash,
 		PublicKey:            R,
 		KeygenTranscriptHash: transcript[:],
-		PartiesHash:          partySetHash([]tss.PartyID{1}),
+		PartiesHash:          wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel),
 		kShare:               kShare,
 		chiShare:             chiShare,
 		delta:                delta,

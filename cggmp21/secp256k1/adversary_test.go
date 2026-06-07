@@ -552,7 +552,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	}
 
 	t.Run("transcript mismatch", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -572,7 +572,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("malformed scalar", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -587,7 +587,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("wrong round", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -598,7 +598,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], clonePresign(presigns[1]), signID, digest[:])
+		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
 		if err != nil {
 			t.Fatal(err)
 		}

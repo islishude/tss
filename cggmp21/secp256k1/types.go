@@ -51,11 +51,29 @@ type PaillierPublicShare struct {
 	Proof     []byte      `json:"proof"`
 }
 
+// Clone returns a deep copy of the PaillierPublicShare.
+func (p PaillierPublicShare) Clone() PaillierPublicShare {
+	return PaillierPublicShare{
+		Party:     p.Party,
+		PublicKey: slices.Clone(p.PublicKey),
+		Proof:     slices.Clone(p.Proof),
+	}
+}
+
 // RingPedersenPublicShare records a participant Ring-Pedersen parameters and proof.
 type RingPedersenPublicShare struct {
 	Party  tss.PartyID `json:"party"`
 	Params []byte      `json:"params"`
 	Proof  []byte      `json:"proof"`
+}
+
+// Clone returns a deep copy of the RingPedersenPublicShare.
+func (r RingPedersenPublicShare) Clone() RingPedersenPublicShare {
+	return RingPedersenPublicShare{
+		Party:  r.Party,
+		Params: slices.Clone(r.Params),
+		Proof:  slices.Clone(r.Proof),
+	}
 }
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.

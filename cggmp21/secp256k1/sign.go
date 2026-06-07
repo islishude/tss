@@ -17,6 +17,7 @@ import (
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const (
@@ -852,7 +853,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		AdditiveShift:        append([]byte(nil), s.additiveShift...),
 		PublicKey:            append([]byte(nil), s.key.PublicKey...),
 		KeygenTranscriptHash: append([]byte(nil), s.key.KeygenTranscriptHash...),
-		PartiesHash:          partySetHash(s.key.Parties),
+		PartiesHash:          wireutil.PartySetHash(s.key.Parties, partySetHashLabel),
 		kShare:               s.kShare.Clone(),
 	}
 	s.presign.chiShare, err = secpSecretScalarFromBig(chiShare)
@@ -941,7 +942,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	wire.WriteHashPart(h, s.additiveShift)
 	wire.WriteHashPart(h, s.key.PublicKey)
 	wire.WriteHashPart(h, s.key.KeygenTranscriptHash)
-	wire.WriteHashPart(h, partySetHash(s.key.Parties))
+	wire.WriteHashPart(h, wireutil.PartySetHash(s.key.Parties, partySetHashLabel))
 	for _, id := range s.signers {
 		// Binding every signer id, nonce commitment, encrypted nonce, and delta
 		// share prevents replaying presign material across signer sets.
@@ -1475,7 +1476,7 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	if !bytes.Equal(presign.KeygenTranscriptHash, key.KeygenTranscriptHash) {
 		return errors.New("presign keygen transcript binding mismatch")
 	}
-	if !bytes.Equal(presign.PartiesHash, partySetHash(key.Parties)) {
+	if !bytes.Equal(presign.PartiesHash, wireutil.PartySetHash(key.Parties, partySetHashLabel)) {
 		return errors.New("presign participant set binding mismatch")
 	}
 	if len(presign.Signers) < key.Threshold || !tss.ContainsParty(presign.Signers, key.Party) {

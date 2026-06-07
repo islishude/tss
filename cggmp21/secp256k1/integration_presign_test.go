@@ -5,9 +5,10 @@ package secp256k1
 import (
 	"crypto/sha256"
 	"errors"
-	"github.com/islishude/tss"
 	"strings"
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
@@ -225,7 +226,7 @@ func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing
 	shares := secpKeygen(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
-	presign := clonePresign(presigns[1])
+	presign := (presigns[1]).Clone()
 	presign.KeygenTranscriptHash = append([]byte(nil), presign.KeygenTranscriptHash...)
 	presign.KeygenTranscriptHash[0] ^= 1
 	signID, err := tss.NewSessionID(nil)

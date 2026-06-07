@@ -39,7 +39,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 		{name: "paillier public key", mutate: func(k *KeyShare) { k.PaillierPublicKey = shares[2].PaillierPublicKey }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mutated := cloneKeyShare(share)
+			mutated := share.Clone()
 			tc.mutate(mutated)
 			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, uint32(mutated.Party), proof) {
 				t.Fatal("key-share Paillier proof verified under mutated context")
@@ -86,7 +86,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err != nil {
 		t.Fatal("MtA start proof did not verify")
 	}
-	mutatedKey := cloneKeyShare(shares[1])
+	mutatedKey := (shares[1]).Clone()
 	mutatedKey.KeygenTranscriptHash[0] ^= 1
 	if err := mta.VerifyStart(mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")

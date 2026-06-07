@@ -55,7 +55,7 @@ func (p *Presign) Clone() *Presign {
 		return nil
 	}
 	return &Presign{
-		mu:             &sync.Mutex{},
+		mu:             new(sync.Mutex),
 		Version:        p.Version,
 		Party:          p.Party,
 		Threshold:      p.Threshold,

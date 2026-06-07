@@ -12,6 +12,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
@@ -216,7 +217,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				"invalid refresh Paillier modulus proof",
 				[]tss.PartyID{env.From},
 				errors.New("invalid refresh Paillier modulus proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -229,7 +230,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				"malformed refresh Ring-Pedersen parameters",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -240,7 +241,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				"refresh Ring-Pedersen modulus mismatch",
 				[]tss.PartyID{env.From},
 				errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -253,7 +254,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				"malformed refresh Ring-Pedersen proof",
 				[]tss.PartyID{env.From},
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -264,7 +265,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				"invalid refresh Ring-Pedersen proof",
 				[]tss.PartyID{env.From},
 				errors.New("invalid refresh Ring-Pedersen proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
@@ -329,8 +330,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 						evidenceEnv,
 						tss.EvidenceKindRefreshShare,
 						"invalid refresh share",
-						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.oldKey.Parties)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
+						rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
+						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
 				Err: err,

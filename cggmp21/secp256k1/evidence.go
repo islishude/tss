@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const (
@@ -67,10 +68,10 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 	if evidence.From != 0 && len(ctx.Signers) > 0 && isSignerScopedEvidence(evidence.Kind) && !tss.ContainsParty(ctx.Signers, evidence.From) {
 		return fmt.Errorf("evidence sender %d is not in signer set", evidence.From)
 	}
-	if err := compareEvidenceField(evidence, evidenceFieldPartiesHash, partySetHash(ctx.Parties), len(ctx.Parties) > 0); err != nil {
+	if err := compareEvidenceField(evidence, evidenceFieldPartiesHash, wireutil.PartySetHash(ctx.Parties, partySetHashLabel), len(ctx.Parties) > 0); err != nil {
 		return err
 	}
-	if err := compareEvidenceField(evidence, evidenceFieldSignerSetHash, partySetHash(ctx.Signers), len(ctx.Signers) > 0); err != nil {
+	if err := compareEvidenceField(evidence, evidenceFieldSignerSetHash, wireutil.PartySetHash(ctx.Signers, partySetHashLabel), len(ctx.Signers) > 0); err != nil {
 		return err
 	}
 	if err := compareEvidenceField(evidence, evidenceFieldPublicKeyHash, hashBytes(ctx.PublicKey), len(ctx.PublicKey) > 0); err != nil {
@@ -133,7 +134,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 		return nil
 	}
 	fields := []tss.EvidenceField{
-		rawEvidenceField(evidenceFieldPartiesHash, partySetHash(key.Parties)),
+		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.Parties, partySetHashLabel)),
 		hashEvidenceField(evidenceFieldPublicKeyHash, key.PublicKey),
 		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(key.PaillierPublicKeys)),
 	}
@@ -144,7 +145,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 }
 
 func signerEvidenceFields(signers []tss.PartyID) []tss.EvidenceField {
-	return []tss.EvidenceField{rawEvidenceField(evidenceFieldSignerSetHash, partySetHash(signers))}
+	return []tss.EvidenceField{rawEvidenceField(evidenceFieldSignerSetHash, wireutil.PartySetHash(signers, partySetHashLabel))}
 }
 
 func rawEvidenceField(key string, value []byte) tss.EvidenceField {
@@ -160,16 +161,6 @@ func hashBytes(value []byte) []byte {
 	return sum[:]
 }
 
-func partySetHash(parties []tss.PartyID) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(partySetHashLabel))
-	sorted := tss.SortParties(parties)
-	for _, id := range sorted {
-		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-	}
-	return h.Sum(nil)
-}
-
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(paillierPublicSharesHashLabel))
@@ -178,18 +169,9 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 		return int(a.Party) - int(b.Party)
 	})
 	for _, share := range sorted {
-		wire.WriteHashPart(h, []byte{byte(share.Party >> 24), byte(share.Party >> 16), byte(share.Party >> 8), byte(share.Party)})
+		wire.WritePartyID(h, share.Party)
 		wire.WriteHashPart(h, share.PublicKey)
 		wire.WriteHashPart(h, share.Proof)
-	}
-	return h.Sum(nil)
-}
-
-func byteSlicesHash(label string, values [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(label))
-	for _, value := range values {
-		wire.WriteHashPart(h, value)
 	}
 	return h.Sum(nil)
 }
@@ -200,11 +182,7 @@ func clonePaillierPublicShares(in []PaillierPublicShare) []PaillierPublicShare {
 	}
 	out := make([]PaillierPublicShare, len(in))
 	for i, share := range in {
-		out[i] = PaillierPublicShare{
-			Party:     share.Party,
-			PublicKey: append([]byte(nil), share.PublicKey...),
-			Proof:     append([]byte(nil), share.Proof...),
-		}
+		out[i] = share.Clone()
 	}
 	return out
 }
@@ -215,11 +193,7 @@ func cloneRingPedersenPublicShares(in []RingPedersenPublicShare) []RingPedersenP
 	}
 	out := make([]RingPedersenPublicShare, len(in))
 	for i, share := range in {
-		out[i] = RingPedersenPublicShare{
-			Party:  share.Party,
-			Params: append([]byte(nil), share.Params...),
-			Proof:  append([]byte(nil), share.Proof...),
-		}
+		out[i] = share.Clone()
 	}
 	return out
 }
