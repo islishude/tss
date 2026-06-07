@@ -30,9 +30,9 @@ func FuzzStartMessageUnmarshal(f *testing.F) {
 
 func TestStartMessageValidate(t *testing.T) {
 	tests := []struct {
-		name      string
+		name       string
 		ciphertext []byte
-		wantErr   bool
+		wantErr    bool
 	}{
 		{name: "valid", ciphertext: []byte{0x01}, wantErr: false},
 		{name: "empty", ciphertext: nil, wantErr: true},

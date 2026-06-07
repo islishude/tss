@@ -135,7 +135,7 @@ func TestScalarFixedBytes(t *testing.T) {
 	})
 	t.Run("exact 32 byte scalar", func(t *testing.T) {
 		x := new(big.Int)
-		for i := 0; i < 32; i++ {
+		for i := range 32 {
 			x.Lsh(x, 8)
 			x.Or(x, big.NewInt(int64(i+1)))
 		}
@@ -226,7 +226,7 @@ func TestRandomScalar(t *testing.T) {
 	if x.Cmp(secp.Order()) >= 0 {
 		t.Fatal("random scalar out of range")
 	}
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		y, err := randomScalar(rand.Reader)
 		if err != nil {
 			t.Fatal(err)
