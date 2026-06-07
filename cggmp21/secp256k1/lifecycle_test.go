@@ -23,7 +23,7 @@ func TestCGGMP21KeyShareJSONAndDestroy(t *testing.T) {
 	}
 	publicKey := append([]byte(nil), share.PublicKey...)
 	share.Destroy()
-	if !allZeroBytes(share.secret) {
+	if !allZeroBytes(share.secret.FixedBytes()) {
 		t.Fatal("key share secret was not cleared")
 	}
 	if !allZeroBytes(share.paillierPrivateKey) {
@@ -47,10 +47,10 @@ func TestCGGMP21KeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 	if !strings.Contains(formattedValue, "Secret:<redacted>") || !strings.Contains(formattedValue, "PaillierPrivateKey:<redacted>") {
 		t.Fatalf("formatted key share value did not mark secret fields redacted: %s", formattedValue)
 	}
-	if strings.Contains(formatted, fmt.Sprint(string(share.secret))) {
+	if strings.Contains(formatted, fmt.Sprint(string(share.secret.FixedBytes()))) {
 		t.Fatal("formatted key share exposed secret scalar bytes")
 	}
-	if strings.Contains(formattedValue, fmt.Sprint(string(share.secret))) {
+	if strings.Contains(formattedValue, fmt.Sprint(string(share.secret.FixedBytes()))) {
 		t.Fatal("formatted key share value exposed secret scalar bytes")
 	}
 	if strings.Contains(formatted, fmt.Sprint(string(share.paillierPrivateKey))) {
@@ -63,13 +63,13 @@ func TestCGGMP21KeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 		t.Fatal("missing session-retained key share")
 	}
 	internalPublic := append([]byte(nil), keygen.keyShare.PublicKey...)
-	internalSecret := append([]byte(nil), keygen.keyShare.secret...)
+	internalSecret := keygen.keyShare.secret.FixedBytes()
 	share.PublicKey[0] ^= 1
-	share.secret[0] ^= 1
+	share.secret.Destroy()
 	if !bytes.Equal(keygen.keyShare.PublicKey, internalPublic) {
 		t.Fatal("mutating returned key share changed session public key")
 	}
-	if !bytes.Equal(keygen.keyShare.secret, internalSecret) {
+	if !bytes.Equal(keygen.keyShare.secret.FixedBytes(), internalSecret) {
 		t.Fatal("mutating returned key share changed session secret scalar")
 	}
 }
@@ -90,7 +90,7 @@ func TestCGGMP21PresignJSONAndDestroy(t *testing.T) {
 	if !presign.Consumed {
 		t.Fatal("presign was not marked consumed")
 	}
-	if !allZeroBytes(presign.KShare) || !allZeroBytes(presign.ChiShare) || !allZeroBytes(presign.Delta) {
+	if !allZeroBytes(presign.kShare.FixedBytes()) || !allZeroBytes(presign.chiShare.FixedBytes()) || !allZeroBytes(presign.delta.FixedBytes()) {
 		t.Fatal("presign secret shares were not cleared")
 	}
 	if !bytes.Equal(presign.R, r) || !bytes.Equal(presign.LittleR, littleR) || !bytes.Equal(presign.TranscriptHash, transcript) {
@@ -111,7 +111,7 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.paillier != nil {
 		t.Fatal("Paillier private key was not released")
 	}
-	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret) || !allZeroBytes(keygen.keyShare.paillierPrivateKey) {
+	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret.FixedBytes()) || !allZeroBytes(keygen.keyShare.paillierPrivateKey) {
 		t.Fatal("completed key share secret material was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
@@ -142,7 +142,7 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 	if len(presignSession.alphaDelta) != 0 || len(presignSession.betaDelta) != 0 || len(presignSession.alphaSigma) != 0 || len(presignSession.betaSigma) != 0 {
 		t.Fatal("presign MtA share maps were not cleared")
 	}
-	if !presign.Consumed || !allZeroBytes(presign.KShare) || !allZeroBytes(presign.ChiShare) || !allZeroBytes(presign.Delta) {
+	if !presign.Consumed || !allZeroBytes(presign.kShare.FixedBytes()) || !allZeroBytes(presign.chiShare.FixedBytes()) || !allZeroBytes(presign.delta.FixedBytes()) {
 		t.Fatal("completed presign was not destroyed")
 	}
 	if !bytes.Equal(presign.R, r) {

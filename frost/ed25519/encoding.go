@@ -27,12 +27,16 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 	if err := k.Validate(); err != nil {
 		return nil, err
 	}
+	secretBytes, err := edSecretScalarBytes(k.secret)
+	if err != nil {
+		return nil, err
+	}
 	return wire.Marshal(tss.Version, keyShareWireType, []wire.Field{
 		{Tag: keyShareFieldParty, Value: wire.Uint32(uint32(k.Party))},
 		{Tag: keyShareFieldThreshold, Value: wire.Uint32(uint32(k.Threshold))},
 		{Tag: keyShareFieldParties, Value: wire.EncodeUint32List(k.Parties)},
 		{Tag: keyShareFieldPublicKey, Value: wire.NonNilBytes(k.PublicKey)},
-		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(k.secret)},
+		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(secretBytes)},
 		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
@@ -84,6 +88,10 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if err != nil {
 		return nil, err
 	}
+	secretScalar, err := newEdSecretScalar(wire.MustField(fields, keyShareFieldSecret))
+	if err != nil {
+		return nil, fmt.Errorf("invalid secret scalar: %w", err)
+	}
 	k := &KeyShare{
 		Version:              tss.Version,
 		Party:                tss.PartyID(party),
@@ -91,7 +99,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		Parties:              parties,
 		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
 		ChainCode:            wire.MustField(fields, keyShareFieldChainCode),
-		secret:               wire.MustField(fields, keyShareFieldSecret),
+		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),

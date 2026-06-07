@@ -241,7 +241,7 @@ func cloneFROSTKeyShare(in *KeyShare) *KeyShare {
 	out := *in
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
-	out.secret = append([]byte(nil), in.secret...)
+	out.secret = cloneEdSecretScalar(in.secret)
 	out.GroupCommitments = cloneFROSTByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
 	for i := range out.VerificationShares {

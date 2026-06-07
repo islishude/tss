@@ -203,8 +203,8 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	if err := config.ValidateWithLimits(limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if !tss.ContainsParty(oldKey.Parties, config.Self) {
-		return nil, nil, errors.New("local party is not in the participant set")
+	if config.Self != oldKey.Party {
+		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
 	parties := append([]tss.PartyID(nil), oldKey.Parties...)
 	config.Parties = parties
@@ -404,7 +404,10 @@ func (s *ReshareSession) tryComplete() error {
 			newSecret.Add(newSecret, s.shares[dealer])
 		}
 	}
-	newSecretBytes := newSecret.Bytes()
+	newSecretScalar, err := newEdSecretScalar(newSecret.Bytes())
+	if err != nil {
+		return err
+	}
 
 	newCommitments, err := s.aggregateCommitments()
 	if err != nil {
@@ -428,8 +431,8 @@ func (s *ReshareSession) tryComplete() error {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
-	reshareTranscriptHash := keygenDomain(s.cfg.SessionID, s.newThreshold, s.newParties, s.selfID, publicKey)
 	chainCode := append([]byte(nil), s.chainCode...)
+	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.refreshMode, s.commits, newCommitments, verificationShares)
 	s.newShare = &KeyShare{
 		Version:              tss.Version,
 		Party:                s.selfID,
@@ -437,7 +440,7 @@ func (s *ReshareSession) tryComplete() error {
 		Parties:              append([]tss.PartyID(nil), s.newParties...),
 		PublicKey:            append([]byte(nil), publicKey...),
 		ChainCode:            chainCode,
-		secret:               newSecretBytes,
+		secret:               newSecretScalar,
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: reshareTranscriptHash,

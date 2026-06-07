@@ -23,14 +23,14 @@ type KeyShare struct {
     Parties              []tss.PartyID
     PublicKey            []byte        // group Ed25519 public key (32 bytes)
     ChainCode            []byte        // optional 32-byte BIP32 chain code
-    secret               []byte        // unexported: local scalar share x_i (32 bytes)
+    secret               *secret.Scalar // unexported: local scalar share x_i (fixed 32 bytes)
     GroupCommitments     [][]byte      // degree 0..threshold-1 public polynomial commitments
     VerificationShares   []VerificationShare
     KeygenTranscriptHash []byte
 }
 ```
 
-The `secret` field is unexported. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact it. `Destroy()` zeroes `secret` and `ChainCode` in place.
+The `secret` field is unexported and stored as `internal/secret.Scalar` fixed-length bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact it. `Destroy()` zeroes `secret` and `ChainCode` in place.
 
 ## Distributed Key Generation
 
@@ -83,7 +83,7 @@ When all `n` dealers' commitments and shares are collected and verified:
 3. **Group public key:** `PK = GC_0` (the aggregated degree-zero commitment)
 4. **Verification shares:** For each party `p`, `V_p = Σ_{k=0}^{t-1} (p^k · GC_k)`
 5. **Chain code:** If HD is enabled, `chain = XOR_{i=1}^{n} chainCode_i`
-6. **Transcript hash:** Domain-separated SHA-256 binding `(sessionID, threshold, parties, self, PK)`
+6. **Transcript hash:** Domain-separated SHA-256 binding the session ID, threshold, sorted parties, aggregate chain code, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
 The resulting `KeyShare` stores the local scalar share `x_j`, group public key `PK`, group commitments, verification shares, chain code, and keygen transcript hash.
 
@@ -233,9 +233,12 @@ refresh shares to the existing local share.
 
 New group commitments are the sum of all reshare commitments, plus the old
 commitments in refresh mode. The chain code is preserved from the original key
-metadata. A new recipient that does not hold an old `KeyShare` must receive the
-old 32-byte chain code out of band and pass it to `StartReshareRecipient`; use
-`nil` for non-HD keys.
+metadata. The reshare/refresh transcript hash is global across recipients and
+binds old and new party sets, the old public key, chain code, refresh mode, all
+dealer commitments, new commitments, and verification shares. `StartRefresh`
+requires `config.Self` to match the supplied old key's party id. A new recipient
+that does not hold an old `KeyShare` must receive the old 32-byte chain code out
+of band and pass it to `StartReshareRecipient`; use `nil` for non-HD keys.
 
 ## BIP32 HD Derivation
 

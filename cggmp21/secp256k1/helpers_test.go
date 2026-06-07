@@ -83,7 +83,7 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
 	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.secret = append([]byte(nil), in.secret...)
+	out.secret = cloneSecpSecretScalar(in.secret)
 	out.GroupCommitments = cloneByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
 	for i := range out.VerificationShares {
@@ -125,13 +125,16 @@ func clonePresign(in *Presign) *Presign {
 	out.Signers = append([]tss.PartyID(nil), in.Signers...)
 	out.R = append([]byte(nil), in.R...)
 	out.LittleR = append([]byte(nil), in.LittleR...)
-	out.KShare = append([]byte(nil), in.KShare...)
-	out.ChiShare = append([]byte(nil), in.ChiShare...)
-	out.Delta = append([]byte(nil), in.Delta...)
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
 	out.Context.DerivationPath = append([]uint32(nil), in.Context.DerivationPath...)
 	out.ContextHash = append([]byte(nil), in.ContextHash...)
 	out.AdditiveShift = append([]byte(nil), in.AdditiveShift...)
+	out.PublicKey = append([]byte(nil), in.PublicKey...)
+	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
+	out.PartiesHash = append([]byte(nil), in.PartiesHash...)
+	out.kShare = cloneSecpSecretScalar(in.kShare)
+	out.chiShare = cloneSecpSecretScalar(in.chiShare)
+	out.delta = cloneSecpSecretScalar(in.delta)
 	out.Consumed = false
 	return &out
 }
@@ -161,19 +164,34 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	ctx := testPresignContext()
 	contextHash := presignContextHash(ctx)
+	kShare, err := secpSecretScalarFromBig(one)
+	if err != nil {
+		tb.Fatal("k share: " + err.Error())
+	}
+	chiShare, err := secpSecretScalarFromBig(one)
+	if err != nil {
+		tb.Fatal("chi share: " + err.Error())
+	}
+	delta, err := secpSecretScalarFromBig(one)
+	if err != nil {
+		tb.Fatal("delta: " + err.Error())
+	}
 	return &Presign{
-		Version:        tss.Version,
-		Party:          1,
-		Threshold:      1,
-		Signers:        []tss.PartyID{1},
-		R:              R,
-		LittleR:        scalarBytes(littleR),
-		KShare:         scalarBytes(one),
-		ChiShare:       scalarBytes(one),
-		Delta:          scalarBytes(one),
-		TranscriptHash: transcript[:],
-		Context:        ctx,
-		ContextHash:    contextHash,
+		Version:              tss.Version,
+		Party:                1,
+		Threshold:            1,
+		Signers:              []tss.PartyID{1},
+		R:                    R,
+		LittleR:              scalarBytes(littleR),
+		TranscriptHash:       transcript[:],
+		Context:              ctx,
+		ContextHash:          contextHash,
+		PublicKey:            R,
+		KeygenTranscriptHash: transcript[:],
+		PartiesHash:          partySetHash([]tss.PartyID{1}),
+		kShare:               kShare,
+		chiShare:             chiShare,
+		delta:                delta,
 	}
 }
 

@@ -95,6 +95,51 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
+func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
+	shares := secpKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err == nil || !strings.Contains(err.Error(), "config.Self") {
+		t.Fatalf("expected config.Self mismatch rejection, got %v", err)
+	}
+}
+
+func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
+	shares := secpKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalRefreshCommitmentsPayload(out2[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Commitments[0], err = secp.PointBytes(secp.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[0].Payload, err = marshalRefreshCommitmentsPayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[0] = out2[0].WithTranscriptHash()
+	_, err = session.HandleRefreshMessage(out2[0])
+	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
+		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)
+	}
+}
+
 func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 	shares := secpKeygen(t, 2, 3)
 	oldPub := shares[1].PublicKeyBytes()

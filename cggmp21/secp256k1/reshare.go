@@ -64,6 +64,7 @@ type ReshareSession struct {
 	newPaillierPriv []byte
 	newRingPedersen map[tss.PartyID]RingPedersenPublicShare
 	dealerSent      bool
+	pendingShares   map[tss.PartyID]pendingReshareShare
 }
 
 type reshareDealerCommitmentsPayload struct {
@@ -82,6 +83,11 @@ type reshareSharePayload struct {
 	Receiver             tss.PartyID
 	Share                []byte
 	DealerCommitmentHash []byte
+}
+
+type pendingReshareShare struct {
+	payload reshareSharePayload
+	raw     []byte
 }
 
 // StartReshare starts CGGMP21 resharing as an old-party dealer.
@@ -181,6 +187,7 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		confirmations:   make(map[tss.PartyID][]byte, len(plan.NewParties)),
 		newPaillierPubs: make(map[tss.PartyID]PaillierPublicShare),
 		newRingPedersen: make(map[tss.PartyID]RingPedersenPublicShare),
+		pendingShares:   make(map[tss.PartyID]pendingReshareShare),
 	}
 	if receiver {
 		if err := s.initReceiverMaterial(); err != nil {
@@ -376,11 +383,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if env.To != 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer commitments must be broadcast"))
 		}
-		// Dealer-only sessions (not receivers) can validate commitments without
-		// waiting for receiver material — they do not derive a new key share.
-		if s.isReceiver && (len(s.newPaillierPubs) != len(s.newParties) || len(s.newRingPedersen) != len(s.newParties)) {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer commitments arrived before receiver material completed"))
-		}
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
 		}
@@ -392,6 +394,12 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		s.commits[env.From] = p.Commitments
+		if pending, ok := s.pendingShares[env.From]; ok {
+			if err := s.applyReshareShare(env.From, pending.payload, pending.raw); err != nil {
+				return nil, err
+			}
+			delete(s.pendingShares, env.From)
+		}
 	case payloadReshareShare:
 		if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.dealerParties); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -402,52 +410,26 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err := requireDirectConfidential(env, s.selfID, payloadReshareShare); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if _, ok := s.shares[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
-		}
-		commitments, ok := s.commits[env.From]
-		if !ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer share arrived before dealer commitments"))
-		}
 		p, err := unmarshalReshareSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if p.Dealer != env.From {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer share payload sender mismatch"))
+		if _, ok := s.shares[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
 		}
-		if p.Receiver != s.selfID {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer share payload receiver mismatch"))
+		if _, ok := s.pendingShares[env.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate pending reshare share"))
 		}
-		if !bytes.Equal(p.DealerCommitmentHash, byteSlicesHash(reshareCommitmentsHashLabel, commitments)) {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer share commitment hash mismatch"))
-		}
-		share, err := secp.ScalarFromBytes(p.Share)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
-		if err := secp.VerifyShare(commitments, uint32(s.selfID), share); err != nil {
-			evidenceEnv := envelope(s.dealerConfig(), 1, env.From, s.selfID, payloadReshareShare, env.Payload, true)
-			return nil, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: 1,
-				Party: env.From,
-				Blame: &tss.Blame{
-					Reason:  "invalid reshare share",
-					Parties: []tss.PartyID{env.From},
-					Evidence: marshalEvidence(
-						evidenceEnv,
-						tss.EvidenceKindReshareShare,
-						"invalid reshare share",
-						rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.dealerParties)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(reshareCommitmentsHashLabel, commitments)),
-						hashEvidenceField("dealer_share_payload_hash", env.Payload),
-					),
-				},
-				Err: err,
+		if _, ok := s.commits[env.From]; !ok {
+			s.pendingShares[env.From] = pendingReshareShare{
+				payload: cloneReshareSharePayload(p),
+				raw:     append([]byte(nil), env.Payload...),
 			}
+			return nil, nil
 		}
-		s.shares[env.From] = share.BigInt()
+		if err := s.applyReshareShare(env.From, p, env.Payload); err != nil {
+			return nil, err
+		}
 	case payloadReshareReceiverMaterial:
 		if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.newParties); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -549,6 +531,58 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 	s.newRingPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
 	return nil
+}
+
+func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePayload, rawPayload []byte) error {
+	if p.Dealer != from {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload sender mismatch"))
+	}
+	if p.Receiver != s.selfID {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload receiver mismatch"))
+	}
+	commitments, ok := s.commits[from]
+	if !ok {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share has no dealer commitments"))
+	}
+	if !bytes.Equal(p.DealerCommitmentHash, byteSlicesHash(reshareCommitmentsHashLabel, commitments)) {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
+	}
+	share, err := secp.ScalarFromBytes(p.Share)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
+	}
+	if err := secp.VerifyShare(commitments, uint32(s.selfID), share); err != nil {
+		evidenceEnv := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload, true)
+		return &tss.ProtocolError{
+			Code:  tss.ErrCodeVerification,
+			Round: 1,
+			Party: from,
+			Blame: &tss.Blame{
+				Reason:  "invalid reshare share",
+				Parties: []tss.PartyID{from},
+				Evidence: marshalEvidence(
+					evidenceEnv,
+					tss.EvidenceKindReshareShare,
+					"invalid reshare share",
+					rawEvidenceField(evidenceFieldPartiesHash, partySetHash(s.dealerParties)),
+					rawEvidenceField(evidenceFieldCommitmentsHash, byteSlicesHash(reshareCommitmentsHashLabel, commitments)),
+					hashEvidenceField("dealer_share_payload_hash", rawPayload),
+				),
+			},
+			Err: err,
+		}
+	}
+	s.shares[from] = share.BigInt()
+	return nil
+}
+
+func cloneReshareSharePayload(p reshareSharePayload) reshareSharePayload {
+	return reshareSharePayload{
+		Dealer:               p.Dealer,
+		Receiver:             p.Receiver,
+		Share:                append([]byte(nil), p.Share...),
+		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
+	}
 }
 
 // KeyShare returns the new key share when this session is a new receiver and resharing completes.
@@ -667,6 +701,10 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	newSecretScalar, err := secpSecretScalarFromBig(newSecret)
+	if err != nil {
+		return nil, err
+	}
 	s.newShare = &KeyShare{
 		Version:                tss.Version,
 		Party:                  s.selfID,
@@ -674,7 +712,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		Parties:                append([]tss.PartyID(nil), s.newParties...),
 		PublicKey:              append([]byte(nil), newCommitments[0]...),
 		ChainCode:              append([]byte(nil), s.oldChainCode...),
-		secret:                 scalarBytes(newSecret),
+		secret:                 newSecretScalar,
 		GroupCommitments:       newCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      append([]byte(nil), s.newPaillierPubs[s.selfID].PublicKey...),
@@ -1071,6 +1109,12 @@ func (s *ReshareSession) abort() {
 	}
 	s.aborted = true
 	clearBigIntMap(s.shares)
+	for id, pending := range s.pendingShares {
+		clear(pending.payload.Share)
+		clear(pending.payload.DealerCommitmentHash)
+		clear(pending.raw)
+		delete(s.pendingShares, id)
+	}
 	for _, coeff := range s.ownPoly {
 		secret.ClearBigInt(coeff)
 	}

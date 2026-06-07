@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math"
@@ -57,6 +58,9 @@ const (
 	presignFieldContextHash
 	presignFieldAdditiveShift
 	presignFieldConsumed
+	presignFieldPublicKey
+	presignFieldKeygenTranscriptHash
+	presignFieldPartiesHash
 )
 
 const (
@@ -71,13 +75,17 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 	if err := k.Validate(); err != nil {
 		return nil, err
 	}
+	secretBytes, err := secpSecretScalarBytes(k.secret)
+	if err != nil {
+		return nil, err
+	}
 	return wire.Marshal(tss.Version, keyShareWireType, []wire.Field{
 		{Tag: keyShareFieldParty, Value: wire.Uint32(uint32(k.Party))},
 		{Tag: keyShareFieldThreshold, Value: wire.Uint32(uint32(k.Threshold))},
 		{Tag: keyShareFieldParties, Value: wire.EncodeUint32List(k.Parties)},
 		{Tag: keyShareFieldPublicKey, Value: wire.NonNilBytes(k.PublicKey)},
 		{Tag: keyShareFieldChainCode, Value: wire.NonNilBytes(k.ChainCode)},
-		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(k.secret)},
+		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(secretBytes)},
 		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
 		{Tag: keyShareFieldPaillierPublicKey, Value: wire.NonNilBytes(k.PaillierPublicKey)},
@@ -156,6 +164,10 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmations: %w", err)
 	}
+	secretScalar, err := newSecpSecretScalar(wire.MustField(fields, keyShareFieldSecret))
+	if err != nil {
+		return nil, fmt.Errorf("invalid secret scalar: %w", err)
+	}
 	k := &KeyShare{
 		Version:                tss.Version,
 		Party:                  tss.PartyID(party),
@@ -163,7 +175,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		Parties:                parties,
 		PublicKey:              wire.MustField(fields, keyShareFieldPublicKey),
 		ChainCode:              wire.MustField(fields, keyShareFieldChainCode),
-		secret:                 wire.MustField(fields, keyShareFieldSecret),
+		secret:                 secretScalar,
 		GroupCommitments:       groupCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      wire.MustField(fields, keyShareFieldPaillierPublicKey),
@@ -192,20 +204,35 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+	kShare, err := secpSecretScalarBytes(p.kShare)
+	if err != nil {
+		return nil, fmt.Errorf("invalid k share: %w", err)
+	}
+	chiShare, err := secpSecretScalarBytes(p.chiShare)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chi share: %w", err)
+	}
+	delta, err := secpSecretScalarBytes(p.delta)
+	if err != nil {
+		return nil, fmt.Errorf("invalid delta: %w", err)
+	}
 	return wire.Marshal(tss.Version, presignWireType, []wire.Field{
 		{Tag: presignFieldParty, Value: wire.Uint32(uint32(p.Party))},
 		{Tag: presignFieldThreshold, Value: wire.Uint32(uint32(p.Threshold))},
 		{Tag: presignFieldSigners, Value: wire.EncodeUint32List(p.Signers)},
 		{Tag: presignFieldR, Value: wire.NonNilBytes(p.R)},
 		{Tag: presignFieldLittleR, Value: wire.NonNilBytes(p.LittleR)},
-		{Tag: presignFieldKShare, Value: wire.NonNilBytes(p.KShare)},
-		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(p.ChiShare)},
-		{Tag: presignFieldDelta, Value: wire.NonNilBytes(p.Delta)},
+		{Tag: presignFieldKShare, Value: wire.NonNilBytes(kShare)},
+		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(chiShare)},
+		{Tag: presignFieldDelta, Value: wire.NonNilBytes(delta)},
 		{Tag: presignFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
 		{Tag: presignFieldContext, Value: encodePresignContext(p.Context)},
 		{Tag: presignFieldContextHash, Value: wire.NonNilBytes(p.ContextHash)},
 		{Tag: presignFieldAdditiveShift, Value: wire.NonNilBytes(p.AdditiveShift)},
 		{Tag: presignFieldConsumed, Value: wire.Bool(p.Consumed)},
+		{Tag: presignFieldPublicKey, Value: wire.NonNilBytes(p.PublicKey)},
+		{Tag: presignFieldKeygenTranscriptHash, Value: wire.NonNilBytes(p.KeygenTranscriptHash)},
+		{Tag: presignFieldPartiesHash, Value: wire.NonNilBytes(p.PartiesHash)},
 	})
 }
 
@@ -233,7 +260,7 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected presign wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed); err != nil {
+	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed, presignFieldPublicKey, presignFieldKeygenTranscriptHash, presignFieldPartiesHash); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, presignFieldParty)
@@ -264,21 +291,36 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if err != nil {
 		return nil, err
 	}
+	kShare, err := newSecpSecretScalar(wire.MustField(fields, presignFieldKShare))
+	if err != nil {
+		return nil, fmt.Errorf("invalid k share: %w", err)
+	}
+	chiShare, err := newSecpSecretScalar(wire.MustField(fields, presignFieldChiShare))
+	if err != nil {
+		return nil, fmt.Errorf("invalid chi share: %w", err)
+	}
+	delta, err := newSecpSecretScalar(wire.MustField(fields, presignFieldDelta))
+	if err != nil {
+		return nil, fmt.Errorf("invalid delta: %w", err)
+	}
 	p := &Presign{
-		Version:        tss.Version,
-		Party:          tss.PartyID(party),
-		Threshold:      int(threshold),
-		Signers:        signers,
-		R:              wire.MustField(fields, presignFieldR),
-		LittleR:        wire.MustField(fields, presignFieldLittleR),
-		KShare:         wire.MustField(fields, presignFieldKShare),
-		ChiShare:       wire.MustField(fields, presignFieldChiShare),
-		Delta:          wire.MustField(fields, presignFieldDelta),
-		TranscriptHash: wire.MustField(fields, presignFieldTranscriptHash),
-		Context:        ctx,
-		ContextHash:    wire.MustField(fields, presignFieldContextHash),
-		AdditiveShift:  wire.MustField(fields, presignFieldAdditiveShift),
-		Consumed:       consumed,
+		Version:              tss.Version,
+		Party:                tss.PartyID(party),
+		Threshold:            int(threshold),
+		Signers:              signers,
+		R:                    wire.MustField(fields, presignFieldR),
+		LittleR:              wire.MustField(fields, presignFieldLittleR),
+		TranscriptHash:       wire.MustField(fields, presignFieldTranscriptHash),
+		Context:              ctx,
+		ContextHash:          wire.MustField(fields, presignFieldContextHash),
+		AdditiveShift:        wire.MustField(fields, presignFieldAdditiveShift),
+		PublicKey:            wire.MustField(fields, presignFieldPublicKey),
+		KeygenTranscriptHash: wire.MustField(fields, presignFieldKeygenTranscriptHash),
+		PartiesHash:          wire.MustField(fields, presignFieldPartiesHash),
+		Consumed:             consumed,
+		kShare:               kShare,
+		chiShare:             chiShare,
+		delta:                delta,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -309,13 +351,13 @@ func (p *Presign) Validate() error {
 	if _, err := secp.ScalarFromBytes(p.LittleR); err != nil {
 		return fmt.Errorf("invalid little r: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.KShare); err != nil {
+	if _, err := secpScalarFromSecret(p.kShare); err != nil {
 		return fmt.Errorf("invalid k share: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.ChiShare); err != nil {
+	if _, err := secpScalarFromSecret(p.chiShare); err != nil {
 		return fmt.Errorf("invalid chi share: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
+	if _, err := secpScalarFromSecret(p.delta); err != nil {
 		return fmt.Errorf("invalid delta: %w", err)
 	}
 	if len(p.TranscriptHash) != 32 {
@@ -331,6 +373,15 @@ func (p *Presign) Validate() error {
 		if _, err := secp.ScalarFromBytes(p.AdditiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
+	}
+	if _, err := secp.PointFromBytes(p.PublicKey); err != nil {
+		return fmt.Errorf("invalid presign public key binding: %w", err)
+	}
+	if len(p.KeygenTranscriptHash) != sha256.Size {
+		return errors.New("invalid presign keygen transcript hash binding")
+	}
+	if len(p.PartiesHash) != sha256.Size {
+		return errors.New("invalid presign party-set hash binding")
 	}
 	if !bytes.Equal(presignContextHash(p.Context), p.ContextHash) {
 		return errors.New("presign context hash mismatch")

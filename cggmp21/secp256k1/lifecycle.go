@@ -31,9 +31,9 @@ func (s *PresignSession) Destroy() {
 	if s == nil {
 		return
 	}
-	secret.ClearBigInt(s.kShare)
-	secret.ClearBigInt(s.gamma)
-	secret.ClearBigInt(s.xBar)
+	s.kShare.Destroy()
+	s.gamma.Destroy()
+	s.xBar.Destroy()
 	s.kShare = nil
 	s.gamma = nil
 	s.xBar = nil

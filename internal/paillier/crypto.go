@@ -207,8 +207,15 @@ func (pk PublicKey) MulPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.
 	if ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
 		return nil, errors.New("ciphertext out of range")
 	}
-	out := new(big.Int).Exp(ciphertext, mod(plaintext, pk.N), pk.NSquared)
-	return out, nil
+	nLen := (pk.N.BitLen() + 7) / 8
+	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
+	ciphertextBytes := paillierct.FixedEncode(ciphertext, 2*nLen)
+	exponentBytes := paillierct.FixedEncode(mod(plaintext, pk.N), nLen)
+	out, err := paillierct.ExpCT(nSquaredBytes, ciphertextBytes, exponentBytes)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Int).SetBytes(out), nil
 }
 
 // L computes Paillier's L(u) = (u - 1) / n helper.

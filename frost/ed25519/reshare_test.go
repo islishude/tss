@@ -88,6 +88,23 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	}
 }
 
+func TestStartRefreshRequiresMatchingSelf(t *testing.T) {
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = StartRefresh(shares[1], tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   []tss.PartyID{1, 2},
+		Self:      2,
+		SessionID: sessionID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "config.Self") {
+		t.Fatalf("expected config.Self mismatch rejection, got %v", err)
+	}
+}
+
 func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 	oldShares := frostKeygen(t, 2, 3)
 	oldParties := []tss.PartyID{1, 2, 3}

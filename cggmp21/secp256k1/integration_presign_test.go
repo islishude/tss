@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"github.com/islishude/tss"
+	"strings"
 	"testing"
 )
 
@@ -218,4 +219,25 @@ func TestThresholdECDSA_PresignRejectReuse(t *testing.T) {
 	}
 	_, _, err = StartSignDigest(shares[1], presign, sessionID2, digest[:])
 	_ = assertProtocolErrorCode(t, err, tss.ErrCodeConsumed)
+}
+
+func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing.T) {
+	shares := secpKeygen(t, 2, 3)
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	presign := clonePresign(presigns[1])
+	presign.KeygenTranscriptHash = append([]byte(nil), presign.KeygenTranscriptHash...)
+	presign.KeygenTranscriptHash[0] ^= 1
+	signID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("key binding mismatch"))
+	_, _, err = StartSignDigest(shares[1], presign, signID, digest[:])
+	if err == nil || !strings.Contains(err.Error(), "keygen transcript binding") {
+		t.Fatalf("expected key binding rejection, got %v", err)
+	}
+	if presign.Consumed {
+		t.Fatal("presign was consumed before key binding validation completed")
+	}
 }

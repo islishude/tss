@@ -24,7 +24,7 @@ type KeyShare struct {
     Parties                 []tss.PartyID
     PublicKey               []byte        // group secp256k1 public key (33 bytes compressed)
     ChainCode               []byte        // optional BIP32 chain code (32 bytes, XOR-aggregated)
-    secret                  []byte        // unexported: local scalar share x_i (32 bytes)
+    secret                  *secret.Scalar // unexported: local scalar share x_i (fixed 32 bytes)
     GroupCommitments        [][]byte
     VerificationShares      []VerificationShare
     PaillierPublicKey       []byte        // local Paillier public key (TLV-encoded)
@@ -45,7 +45,7 @@ type KeyShare struct {
 }
 ```
 
-The `secret` and `paillierPrivateKey` fields are unexported. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact them. `Destroy()` zeroes secret material in place. `KeyShare()` accessors return caller-owned copies.
+The `secret` and `paillierPrivateKey` fields are unexported. The local secp256k1 share is stored as `internal/secret.Scalar` fixed-length bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact secret material. `Destroy()` zeroes secret material in place. `KeyShare()` accessors return caller-owned copies.
 
 ### MPC Material Requirement
 
@@ -205,11 +205,11 @@ R = δ^{-1} · Γ
 r = x(R) mod q
 ```
 
-The `Presign` record stores `(k_i, χ_i, R, r, δ, transcript_hash)`. It is local-only and must not be shared with other parties.
+The `Presign` record stores fixed-length secret scalars `(k_i, χ_i, δ)`, public values `(R, r)`, the presign transcript hash, the presign context hash, additive HD shift, and key binding metadata `(group public key, keygen transcript hash, participant-set hash)`. It is local-only and must not be shared with other parties.
 
 ### Presign Transcript
 
-The transcript hash binds all signers' public round-1 material (Gamma, EncK, Paillier public key), all delta shares, R, r, and δ, preventing replay of presign material across sessions or signer sets. Per-verifier `Πenc` proof bytes are not persisted in the `Presign` record; they gate Round 2 emission during the live protocol.
+The transcript hash binds the session ID, presign context hash, additive HD shift, group public key, keygen transcript hash, participant-set hash, all signers' public round-1 material (Gamma and EncK), all delta shares, R, r, and δ. This prevents replay of presign material across sessions, signer sets, or key shares. Per-verifier `Πenc` proof bytes are not persisted in the `Presign` record; they gate Round 2 emission during the live protocol.
 
 ## Online Signing
 
@@ -219,7 +219,7 @@ Online signing is a single round. For a 32-byte message digest `m`:
 s_i = m·k_i + r·χ_i   mod q
 ```
 
-The only outbound message is the scalar `s_i` together with the presign transcript hash. No private key share, nonce share, or Paillier secret material leaves the process.
+Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and additive shift as the supplied `KeyShare`. The only outbound message is the scalar `s_i` together with the presign transcript hash. No private key share, nonce share, or Paillier secret material leaves the process.
 
 ### Aggregation
 
@@ -227,11 +227,11 @@ The only outbound message is the scalar `s_i` together with the presign transcri
 s = Σ_i s_i  mod q
 ```
 
-Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the group public key before being returned. A failed verification returns `ProtocolError` with `EvidenceKindAggregateSign` blame.
+Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the group public key before being returned. A failed verification returns `ProtocolError` with `EvidenceKindAggregateSign` blame and public hashes of every received online partial. The online phase does not claim individual mathematical attribution for malformed-but-scalar partials.
 
 ### HD Derivation
 
-Set `PresignContext.DerivationPath` before calling `StartPresignWithContext`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain.
+Set `PresignContext.DerivationPath` before calling `StartPresignWithContext`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
 
 ## Presign Lifecycle
 
@@ -269,7 +269,7 @@ Receivers verify shares, then:
 x'_j = x_j + Σ_i g_i(j)   mod q
 ```
 
-Each party then encrypts its new share under its new Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
+Refresh commitment validation rejects any non-empty degree-zero commitment. After aggregation, every party also checks that the refreshed group public key exactly equals the old key's public key before producing a new `KeyShare`. Each party then encrypts its new share under its new Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
 
 ## Reshare
 
@@ -294,7 +294,7 @@ Each new receiver:
 3. Aggregates `x'_j = Σ_i g_i(j) mod q`.
 4. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
 
-New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare`. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share.
+New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare`. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
 
 The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commitment) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Πlog\* proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
@@ -410,7 +410,7 @@ pubKey, sig, err := Sign(message, shares, ctx) // in-memory exchange
 | `c^b mod n²` (MtA)     | `paillierct.ExpCT` (no blinding — ZK proof verifies exact relation) |
 | `Enc(m, r)`            | `math/big.Int.Exp` (public exponent — acceptable)                   |
 
-All Paillier secret exponents (`λ`, `μ`, MtA responder scalar `b`) are stored as `secret.Scalar` fixed-length bytes. They never expose `String()`, variable-length `Bytes()`, `BigInt()`, or JSON.
+All Paillier secret exponents (`λ`, `μ`, MtA responder scalar `b`) and CGGMP key/presign scalar shares are stored as `secret.Scalar` fixed-length bytes at rest in key-share and presign records. They never expose `String()`, variable-length `Bytes()`, `BigInt()`, or JSON. Existing Shamir and MtA arithmetic may decode fixed-length scalars into local `big.Int` temporaries, which are kept internal and cleared on session destroy.
 
 See [docs/security.md](security.md) for the full constant-time policy.
 

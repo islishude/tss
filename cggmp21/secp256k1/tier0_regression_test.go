@@ -4,6 +4,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // TestFast_StaticNoSecretShareRegression scans sign.go for forbidden
@@ -19,5 +21,18 @@ func TestFast_StaticNoSecretShareRegression(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("sign.go still contains forbidden regression marker %q", forbidden)
 		}
+	}
+}
+
+func TestFast_RefreshCommitmentsRejectNonzeroConstant(t *testing.T) {
+	const threshold = 2
+	commitments := make([][]byte, threshold)
+	var err error
+	commitments[0], err = secp.PointBytes(secp.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := validateRefreshCommitments(commitments, threshold); err == nil || !strings.Contains(err.Error(), "constant commitment") {
+		t.Fatalf("expected refresh constant commitment rejection, got %v", err)
 	}
 }

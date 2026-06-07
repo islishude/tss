@@ -62,10 +62,12 @@ CGGMP21 `Presign` values only through their explicit binary encoders, then store
 the resulting bytes under caller-managed encryption.
 
 Algorithm-specific `KeyShare` structs keep secret scalar and Paillier private-key
-bytes in unexported fields. Their string and Go-string formatting is redacted.
-Session `KeyShare()` accessors return caller-owned copies, so mutating a returned
-share does not mutate session-retained state. Callers must still destroy returned
-shares when they are no longer needed.
+bytes in unexported fields. Key shares and CGGMP21 presign records store local
+scalar shares as fixed-length `secret.Scalar` values rather than exported byte
+slices. Their string and Go-string formatting is redacted. Session `KeyShare()`
+accessors return caller-owned copies, so mutating a returned share does not
+mutate session-retained state. Callers must still destroy returned shares when
+they are no longer needed.
 
 Call `Destroy` on key shares, presigns, keygen sessions, presign sessions, and
 signing sessions once they are no longer needed. These methods clear local
@@ -179,7 +181,7 @@ Caller responsibilities (not provided by this library):
 
 ## One-Time Presigns
 
-CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` sets `Presign.Consumed` before constructing any outbound online signing envelope so reuse fails before a second partial signature leaves the process. Presigns are also bound to `PresignContext` fields: key id, chain id, derivation path, policy domain, and message domain.
+CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` verifies the presign's key binding fields against the supplied `KeyShare` before constructing any outbound partial, then sets `Presign.Consumed` before constructing the online signing envelope so reuse fails before a second partial signature leaves the process. Presigns are bound to both the key share `(group public key, keygen transcript hash, participant-set hash)` and `PresignContext` fields: key id, chain id, derivation path, policy domain, and message domain.
 
 ## Blame Evidence
 

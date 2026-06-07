@@ -13,6 +13,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 )
 
 const protocol = "frost-ed25519"
@@ -38,7 +39,7 @@ type KeyShare struct {
 	Parties              []tss.PartyID `json:"parties"`
 	PublicKey            []byte        `json:"public_key"`
 	ChainCode            []byte        `json:"chain_code,omitempty"`
-	secret               []byte
+	secret               *secret.Scalar
 	GroupCommitments     [][]byte            `json:"group_commitments"`
 	VerificationShares   []VerificationShare `json:"verification_shares"`
 	KeygenTranscriptHash []byte              `json:"keygen_transcript_hash,omitempty"`
@@ -147,7 +148,7 @@ func (k *KeyShare) Validate() error {
 	if len(k.KeygenTranscriptHash) == 0 {
 		return errors.New("key share has no keygen transcript hash")
 	}
-	if _, err := edcurve.ScalarFromCanonical(k.secret); err != nil {
+	if _, err := edScalarFromSecret(k.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if len(k.GroupCommitments) != k.Threshold {
@@ -235,11 +236,11 @@ func (k *KeyShare) Destroy() {
 		return
 	}
 	clear(k.ChainCode)
-	clear(k.secret)
+	k.secret.Destroy()
 }
 
 func (k *KeyShare) secretScalar() (*fed.Scalar, error) {
-	return edcurve.ScalarFromCanonical(k.secret)
+	return edScalarFromSecret(k.secret)
 }
 
 func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
@@ -259,7 +260,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.Parties = slices.Clone(k.Parties)
 	out.PublicKey = slices.Clone(k.PublicKey)
 	out.ChainCode = slices.Clone(k.ChainCode)
-	out.secret = slices.Clone(k.secret)
+	out.secret = cloneEdSecretScalar(k.secret)
 	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)

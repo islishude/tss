@@ -57,6 +57,29 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
+	shares := secpKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
+	signers := []*KeyShare{shares[1], shares[2]}
+	path := []uint32{0, 9}
+	derived, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx := testPresignContext()
+	ctx.DerivationPath = path
+	request := SignRequest{Context: ctx, Message: []byte("interactive hd"), LowS: true}
+	pub, sig, err := Sign(request.Message, signers, ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(pub, derived) {
+		t.Fatal("interactive signing returned master key instead of derived key")
+	}
+	if !VerifySignature(pub, request, sig) {
+		t.Fatal("interactive signature did not verify with returned key")
+	}
+}
+
 func TestBIP32SingleLevel(t *testing.T) {
 	shares := secpKeygenWithOptions(t, 1, 1, KeygenOptions{EnableHD: true})
 	pubKey := shares[1].PublicKey

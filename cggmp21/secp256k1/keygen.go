@@ -517,6 +517,10 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	localRingPedersen := s.ringPedersen[s.cfg.Self]
+	secretScalar, err := secpSecretScalarFromBig(secret)
+	if err != nil {
+		return nil, err
+	}
 	share := &KeyShare{
 		Version:                tss.Version,
 		Party:                  s.cfg.Self,
@@ -524,7 +528,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		Parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:              append([]byte(nil), groupCommitments[0]...),
 		ChainCode:              chainCode,
-		secret:                 scalarBytes(secret),
+		secret:                 secretScalar,
 		GroupCommitments:       groupCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      localPaillierPub,

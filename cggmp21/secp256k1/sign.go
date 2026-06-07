@@ -13,6 +13,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -48,20 +49,24 @@ type SignRequest struct {
 
 // Presign contains one local offline signing record and must be consumed once.
 type Presign struct {
-	Version        uint16         `json:"version"`
-	Party          tss.PartyID    `json:"party"`
-	Threshold      int            `json:"threshold"`
-	Signers        []tss.PartyID  `json:"signers"`
-	R              []byte         `json:"r"`
-	LittleR        []byte         `json:"little_r"`
-	KShare         []byte         `json:"k_share"`
-	ChiShare       []byte         `json:"chi_share"`
-	Delta          []byte         `json:"delta"`
-	TranscriptHash []byte         `json:"transcript_hash"`
-	Context        PresignContext `json:"context"`
-	ContextHash    []byte         `json:"context_hash"`
-	AdditiveShift  []byte         `json:"additive_shift"`
-	Consumed       bool           `json:"consumed"`
+	Version              uint16         `json:"version"`
+	Party                tss.PartyID    `json:"party"`
+	Threshold            int            `json:"threshold"`
+	Signers              []tss.PartyID  `json:"signers"`
+	R                    []byte         `json:"r"`
+	LittleR              []byte         `json:"little_r"`
+	TranscriptHash       []byte         `json:"transcript_hash"`
+	Context              PresignContext `json:"context"`
+	ContextHash          []byte         `json:"context_hash"`
+	AdditiveShift        []byte         `json:"additive_shift"`
+	PublicKey            []byte         `json:"public_key"`
+	KeygenTranscriptHash []byte         `json:"keygen_transcript_hash"`
+	PartiesHash          []byte         `json:"parties_hash"`
+	Consumed             bool           `json:"consumed"`
+
+	kShare   *secret.Scalar
+	chiShare *secret.Scalar
+	delta    *secret.Scalar
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -75,9 +80,9 @@ func (p *Presign) Destroy() {
 		return
 	}
 	p.Consumed = true
-	clear(p.KShare)
-	clear(p.ChiShare)
-	clear(p.Delta)
+	p.kShare.Destroy()
+	p.chiShare.Destroy()
+	p.delta.Destroy()
 	clear(p.AdditiveShift)
 }
 
@@ -93,9 +98,9 @@ type PresignSession struct {
 	additiveShift []byte
 	paillier      *pai.PrivateKey
 
-	kShare    *big.Int
-	gamma     *big.Int
-	xBar      *big.Int
+	kShare    *secret.Scalar
+	gamma     *secret.Scalar
+	xBar      *secret.Scalar
 	gammaComm []byte
 	xBarComm  []byte
 
@@ -211,6 +216,18 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	// chi = k*x. The public commitment is derived from the verification share.
 	xBar := new(big.Int).Mul(lambda, secret)
 	xBar.Mod(xBar, secp.Order())
+	kShareSecret, err := newSecpSecretScalar(kShare.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
+	gammaSecret, err := newSecpSecretScalar(gamma.Bytes())
+	if err != nil {
+		return nil, nil, err
+	}
+	xBarSecret, err := secpSecretScalarFromBig(xBar)
+	if err != nil {
+		return nil, nil, err
+	}
 	localVerificationShare, ok := key.verificationShare(key.Party)
 	if !ok {
 		return nil, nil, errors.New("missing local verification share")
@@ -260,9 +277,9 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		contextHash:          contextHash,
 		additiveShift:        additiveShift,
 		paillier:             paillierKey,
-		kShare:               kShare.BigInt(),
-		gamma:                gamma.BigInt(),
-		xBar:                 xBar,
+		kShare:               kShareSecret,
+		gamma:                gammaSecret,
+		xBar:                 xBarSecret,
 		gammaComm:            gammaComm,
 		xBarComm:             xBarComm,
 		round1:               map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
@@ -631,6 +648,16 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	gamma, err := secpSecretBig(s.gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gamma)
+	xBar, err := secpSecretBig(s.xBar)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(xBar)
 	for _, peer := range s.signers {
 		if peer == s.key.Party {
 			continue
@@ -653,7 +680,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			startProof,
-			s.gamma,
+			gamma,
 			s.gammaComm,
 			peerPK,
 			selfPK,
@@ -671,7 +698,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			startProof,
-			s.xBar,
+			xBar,
 			s.xBarComm,
 			peerPK,
 			selfPK,
@@ -748,8 +775,23 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if s.round3Sent || len(s.round2) != len(s.signers)-1 {
 		return nil, nil
 	}
-	deltaShare := new(big.Int).Mul(s.kShare, s.gamma)
-	chiShare := new(big.Int).Mul(s.kShare, s.xBar)
+	kShare, err := secpSecretBig(s.kShare)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(kShare)
+	gamma, err := secpSecretBig(s.gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gamma)
+	xBar, err := secpSecretBig(s.xBar)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(xBar)
+	deltaShare := new(big.Int).Mul(kShare, gamma)
+	chiShare := new(big.Int).Mul(kShare, xBar)
 	order := secp.Order()
 	for _, peer := range s.signers {
 		if peer == s.key.Party {
@@ -769,7 +811,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		shiftTerm := new(big.Int).Mul(s.kShare, shift.BigInt())
+		shiftTerm := new(big.Int).Mul(kShare, shift.BigInt())
 		chiShare.Add(chiShare, shiftTerm)
 		chiShare.Mod(chiShare, order)
 	}
@@ -780,15 +822,21 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	s.round3Sent = true
 	s.presign = &Presign{
-		Version:       tss.Version,
-		Party:         s.key.Party,
-		Threshold:     s.key.Threshold,
-		Signers:       append([]tss.PartyID(nil), s.signers...),
-		KShare:        scalarBytes(s.kShare),
-		ChiShare:      scalarBytes(chiShare),
-		Context:       s.context,
-		ContextHash:   append([]byte(nil), s.contextHash...),
-		AdditiveShift: append([]byte(nil), s.additiveShift...),
+		Version:              tss.Version,
+		Party:                s.key.Party,
+		Threshold:            s.key.Threshold,
+		Signers:              append([]tss.PartyID(nil), s.signers...),
+		Context:              s.context,
+		ContextHash:          append([]byte(nil), s.contextHash...),
+		AdditiveShift:        append([]byte(nil), s.additiveShift...),
+		PublicKey:            append([]byte(nil), s.key.PublicKey...),
+		KeygenTranscriptHash: append([]byte(nil), s.key.KeygenTranscriptHash...),
+		PartiesHash:          partySetHash(s.key.Parties),
+		kShare:               cloneSecpSecretScalar(s.kShare),
+	}
+	s.presign.chiShare, err = secpSecretScalarFromBig(chiShare)
+	if err != nil {
+		return nil, err
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, err
@@ -835,7 +883,10 @@ func (s *PresignSession) tryComplete() error {
 	// R = delta^{-1} * Gamma, with Gamma=sum_i Gamma_i. LittleR is the ECDSA r.
 	s.presign.R = R
 	s.presign.LittleR = scalarBytes(littleR)
-	s.presign.Delta = scalarBytes(delta)
+	s.presign.delta, err = secpSecretScalarFromBig(delta)
+	if err != nil {
+		return err
+	}
 	s.presign.TranscriptHash = s.presignTranscriptHash(R, littleR, delta)
 	s.completed = true
 	s.log.Info(s.config.Ctx(), "presign complete",
@@ -867,6 +918,9 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	wire.WriteHashPart(h, s.sessionID[:])
 	wire.WriteHashPart(h, s.contextHash)
 	wire.WriteHashPart(h, s.additiveShift)
+	wire.WriteHashPart(h, s.key.PublicKey)
+	wire.WriteHashPart(h, s.key.KeygenTranscriptHash)
+	wire.WriteHashPart(h, partySetHash(s.key.Parties))
 	for _, id := range s.signers {
 		// Binding every signer id, nonce commitment, encrypted nonce, and delta
 		// share prevents replaying presign material across signer sets.
@@ -949,11 +1003,11 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	// Mark the presign consumed before constructing the outbound sign envelope
 	// so accidental reuse fails before any new partial signature can leave.
 	presign.Consumed = true
-	kShare, err := secp.ScalarFromBytes(presign.KShare)
+	kShare, err := secpScalarFromSecret(presign.kShare)
 	if err != nil {
 		return nil, nil, err
 	}
-	chiShare, err := secp.ScalarFromBytes(presign.ChiShare)
+	chiShare, err := secpScalarFromSecret(presign.chiShare)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1110,12 +1164,16 @@ func (s *SignSession) signPartialEvidenceFields(p signPartialPayload) []tss.Evid
 
 func (s *SignSession) aggregateEvidenceFields(r, sigS *big.Int) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
-	return append(fields,
+	fields = append(fields,
 		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
 		hashEvidenceField(evidenceFieldRHash, secp.ScalarFromBigInt(r).Bytes()),
 		hashEvidenceField(evidenceFieldSHash, secp.ScalarFromBigInt(sigS).Bytes()),
 	)
+	for _, id := range s.presign.Signers {
+		fields = append(fields, hashEvidenceField(fmt.Sprintf("sign_partial_%d_hash", id), secp.ScalarFromBigInt(s.partials[id]).Bytes()))
+	}
+	return fields
 }
 
 func (s *SignSession) tryComplete() error {
@@ -1303,7 +1361,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	}
 	for _, id := range ids {
 		if sig, ok := signSessions[id].Signature(); ok {
-			return signers[0].PublicKeyBytes(), sig, nil
+			return append([]byte(nil), signSessions[id].publicKey...), sig, nil
 		}
 	}
 	return nil, nil, errors.New("signature not completed")
@@ -1381,6 +1439,15 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	}
 	if presign.Threshold != key.Threshold {
 		return errors.New("presign threshold mismatch")
+	}
+	if !bytes.Equal(presign.PublicKey, key.PublicKey) {
+		return errors.New("presign public key binding mismatch")
+	}
+	if !bytes.Equal(presign.KeygenTranscriptHash, key.KeygenTranscriptHash) {
+		return errors.New("presign keygen transcript binding mismatch")
+	}
+	if !bytes.Equal(presign.PartiesHash, partySetHash(key.Parties)) {
+		return errors.New("presign participant set binding mismatch")
 	}
 	if len(presign.Signers) < key.Threshold || !tss.ContainsParty(presign.Signers, key.Party) {
 		return errors.New("invalid presign signer set")

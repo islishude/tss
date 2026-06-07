@@ -83,6 +83,13 @@ Current presign Round 1 wire shapes are:
 
 Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
 
+The canonical `cggmp21.secp256k1.presign` record contains the local fixed-length
+secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
+hashes, additive HD shift, consumed flag, and key binding fields for the group
+public key, keygen transcript hash, and participant-set hash. Decoders require
+this complete field set; prior presign records without key binding fields are
+not accepted.
+
 ## Decoder Policy
 
 Default `UnmarshalBinary` methods do not auto-detect JSON or any prior wire

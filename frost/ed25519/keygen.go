@@ -214,7 +214,10 @@ func (s *KeygenSession) tryComplete() error {
 	for _, dealer := range s.cfg.Parties {
 		secret.Add(secret, s.shares[dealer])
 	}
-	secretBytes := secret.Bytes()
+	secretScalar, err := newEdSecretScalar(secret.Bytes())
+	if err != nil {
+		return err
+	}
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*fed.Point, 0, len(s.cfg.Parties))
@@ -243,7 +246,7 @@ func (s *KeygenSession) tryComplete() error {
 	if err != nil {
 		return err
 	}
-	keygenTranscriptHash := keygenDomain(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, s.cfg.Self, groupCommitments[0])
+	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCode, s.commits, groupCommitments, verificationShares)
 	s.keyShare = &KeyShare{
 		Version:              tss.Version,
 		Party:                s.cfg.Self,
@@ -251,7 +254,7 @@ func (s *KeygenSession) tryComplete() error {
 		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:            append([]byte(nil), groupCommitments[0]...),
 		ChainCode:            chainCode,
-		secret:               secretBytes,
+		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: keygenTranscriptHash,

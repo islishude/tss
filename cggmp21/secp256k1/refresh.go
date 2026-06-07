@@ -51,6 +51,9 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 	if err := oldKey.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
+	if config.Self != oldKey.Party {
+		return nil, nil, errors.New("config.Self must match the old key's party ID")
+	}
 	if config.Threshold != oldKey.Threshold {
 		return nil, nil, ErrUnsupportedRefreshThresholdChange
 	}
@@ -375,6 +378,9 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		newCommitments[degree] = enc
 	}
+	if !bytes.Equal(newCommitments[0], s.oldKey.PublicKey) {
+		return nil, errors.New("refreshed group public key does not match original")
+	}
 	verificationShares := make([]VerificationShare, 0, len(s.oldKey.Parties))
 	for _, id := range s.oldKey.Parties {
 		pub, err := secp.EvalCommitments(newCommitments, uint32(id))
@@ -422,6 +428,10 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	newSecretScalar, err := secpSecretScalarFromBig(newSecret)
+	if err != nil {
+		return nil, err
+	}
 	s.newShare = &KeyShare{
 		Version:                tss.Version,
 		Party:                  s.oldKey.Party,
@@ -429,7 +439,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		Parties:                append([]tss.PartyID(nil), s.oldKey.Parties...),
 		PublicKey:              append([]byte(nil), newCommitments[0]...),
 		ChainCode:              append([]byte(nil), s.oldKey.ChainCode...),
-		secret:                 scalarBytes(newSecret),
+		secret:                 newSecretScalar,
 		GroupCommitments:       newCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      append([]byte(nil), s.newPaillierPubs[s.oldKey.Party].PublicKey...),
@@ -606,12 +616,15 @@ func validateRefreshCommitments(commitments [][]byte, threshold int) error {
 	if len(commitments) != threshold {
 		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
 	}
-	for _, commitment := range commitments {
+	if len(commitments[0]) != 0 {
+		return errors.New("refresh constant commitment must be empty")
+	}
+	for i, commitment := range commitments {
 		if len(commitment) == 0 {
 			continue
 		}
 		if _, err := secp.PointFromBytes(commitment); err != nil {
-			return err
+			return fmt.Errorf("invalid refresh commitment %d: %w", i, err)
 		}
 	}
 	return nil

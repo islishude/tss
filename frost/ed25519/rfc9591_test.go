@@ -303,13 +303,17 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
+	secretScalar, err := newEdSecretScalar(secret)
+	if err != nil {
+		t.Fatal(err)
+	}
 	key := &KeyShare{
 		Version:              tss.Version,
 		Party:                party,
 		Threshold:            2,
 		Parties:              parties,
 		PublicKey:            append([]byte(nil), v.groupPublicKey...),
-		secret:               append([]byte(nil), secret...),
+		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
 		KeygenTranscriptHash: []byte("rfc9591-appendix-e1"),

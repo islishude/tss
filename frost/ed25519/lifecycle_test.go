@@ -21,7 +21,7 @@ func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
 	}
 	publicKey := append([]byte(nil), share.PublicKey...)
 	share.Destroy()
-	if !allZeroBytes(share.secret) {
+	if !allZeroBytes(share.secret.FixedBytes()) {
 		t.Fatal("key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
@@ -55,23 +55,23 @@ func TestFROSTKeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 	if !strings.Contains(formattedValue, "Secret:<redacted>") {
 		t.Fatalf("formatted key share value did not mark secret field redacted: %s", formattedValue)
 	}
-	if strings.Contains(formatted, string(share.secret)) {
+	if strings.Contains(formatted, string(share.secret.FixedBytes())) {
 		t.Fatal("formatted key share exposed secret scalar bytes")
 	}
-	if strings.Contains(formattedValue, string(share.secret)) {
+	if strings.Contains(formattedValue, string(share.secret.FixedBytes())) {
 		t.Fatal("formatted key share value exposed secret scalar bytes")
 	}
 	if keygen.keyShare == nil {
 		t.Fatal("missing session-retained key share")
 	}
 	internalPublic := append([]byte(nil), keygen.keyShare.PublicKey...)
-	internalSecret := append([]byte(nil), keygen.keyShare.secret...)
+	internalSecret := keygen.keyShare.secret.FixedBytes()
 	share.PublicKey[0] ^= 1
-	share.secret[0] ^= 1
+	share.secret.Destroy()
 	if !bytes.Equal(keygen.keyShare.PublicKey, internalPublic) {
 		t.Fatal("mutating returned key share changed session public key")
 	}
-	if !bytes.Equal(keygen.keyShare.secret, internalSecret) {
+	if !bytes.Equal(keygen.keyShare.secret.FixedBytes(), internalSecret) {
 		t.Fatal("mutating returned key share changed session secret scalar")
 	}
 }
@@ -102,7 +102,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.ownPoly != nil {
 		t.Fatal("keygen polynomial was not released")
 	}
-	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret) {
+	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret.FixedBytes()) {
 		t.Fatal("completed key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {

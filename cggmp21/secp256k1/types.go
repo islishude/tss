@@ -12,6 +12,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
@@ -65,7 +66,7 @@ type KeyShare struct {
 	Parties                []tss.PartyID `json:"parties"`
 	PublicKey              []byte        `json:"public_key"`
 	ChainCode              []byte        `json:"chain_code,omitempty"`
-	secret                 []byte
+	secret                 *secret.Scalar
 	GroupCommitments       [][]byte            `json:"group_commitments"`
 	VerificationShares     []VerificationShare `json:"verification_shares"`
 	PaillierPublicKey      []byte              `json:"paillier_public_key,omitempty"`
@@ -218,7 +219,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if len(k.ChainCode) != 0 && len(k.ChainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
 	}
-	if _, err := secp.ScalarFromBytes(k.secret); err != nil {
+	if _, err := secpScalarFromSecret(k.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	if len(k.GroupCommitments) != k.Threshold {
@@ -455,17 +456,13 @@ func (k *KeyShare) Destroy() {
 		return
 	}
 	clear(k.ChainCode)
-	clear(k.secret)
+	k.secret.Destroy()
 	clear(k.paillierPrivateKey)
 	clear(k.logRandomness)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
-	s, err := secp.ScalarFromBytes(k.secret)
-	if err != nil {
-		return nil, err
-	}
-	return s.BigInt(), nil
+	return secpSecretBig(k.secret)
 }
 
 func scalarBytes(x *big.Int) []byte {
@@ -542,7 +539,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.Parties = slices.Clone(k.Parties)
 	out.PublicKey = slices.Clone(k.PublicKey)
 	out.ChainCode = slices.Clone(k.ChainCode)
-	out.secret = slices.Clone(k.secret)
+	out.secret = cloneSecpSecretScalar(k.secret)
 	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
 	out.PaillierPublicKey = slices.Clone(k.PaillierPublicKey)

@@ -63,6 +63,66 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
+func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
+	shares := secpKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := []tss.PartyID{1, 2}
+	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, out1, err := StartReshareOverlap(shares[1], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dealer2Out, err := session2.HandleReshareMessage(out1[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(dealer2Out) < 2 {
+		t.Fatalf("dealer 2 emitted %d messages, want commitment and share", len(dealer2Out))
+	}
+	var commitment, share tss.Envelope
+	for _, env := range dealer2Out {
+		switch env.PayloadType {
+		case payloadReshareDealerCommitments:
+			commitment = env
+		case payloadReshareShare:
+			if env.To == 1 {
+				share = env
+			}
+		}
+	}
+	if commitment.Payload == nil || share.Payload == nil {
+		t.Fatal("missing dealer 2 commitment or share")
+	}
+	if _, err := session1.HandleReshareMessage(share); err != nil {
+		t.Fatalf("share before commitments should be buffered: %v", err)
+	}
+	if len(session1.pendingShares) != 1 {
+		t.Fatalf("got %d pending shares, want 1", len(session1.pendingShares))
+	}
+	if _, err := session1.HandleReshareMessage(out2[0]); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.HandleReshareMessage(commitment); err != nil {
+		t.Fatal(err)
+	}
+	if len(session1.pendingShares) != 0 {
+		t.Fatalf("got %d pending shares after commitment, want 0", len(session1.pendingShares))
+	}
+	if _, ok := session1.shares[2]; !ok {
+		t.Fatal("pending share was not applied after commitment arrived")
+	}
+}
+
 func TestThresholdECDSAReshareAddsParty(t *testing.T) {
 	oldShares := secpKeygen(t, 2, 3)
 	oldPub := oldShares[1].PublicKeyBytes()
