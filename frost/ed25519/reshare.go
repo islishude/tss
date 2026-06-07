@@ -443,6 +443,7 @@ func (s *ReshareSession) tryComplete() error {
 		secret:               newSecretScalar,
 		GroupCommitments:     newCommitments,
 		VerificationShares:   verificationShares,
+		KeygenSessionID:      s.cfg.SessionID,
 		KeygenTranscriptHash: reshareTranscriptHash,
 	}
 	s.completed = true

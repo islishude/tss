@@ -1,19 +1,21 @@
-package secp256k1
+package ed25519
 
 import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"math"
 	"slices"
 
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
 
 const keygenConfirmationWireVersion = 1
 
-const keygenConfirmationWireType = "cggmp21.secp256k1.keygen-confirmation"
+const keygenConfirmationWireType = "frost.ed25519.keygen-confirmation"
 
 const (
 	keygenConfirmationFieldSessionID uint16 = iota + 1
@@ -26,11 +28,14 @@ const (
 	keygenConfirmationFieldChainCode
 )
 
-// KeygenConfirmation is a post-keygen consistency artifact. Each party produces
-// one after keygen completes and exchanges it with all other parties. If any
-// party's confirmation disagrees on the global transcript (public key, party set,
-// transcript hash, or commitments hash), the transport may have equivocated and
-// the resulting key shares must not be used.
+// KeygenConfirmation is a post-keygen consistency artifact. Each party
+// broadcasts one after local DKG material verifies. The transcript hash binds
+// the session ID, threshold, sorted party set, aggregate chain code, every
+// dealer commitment set, group commitments, group public key, and verification
+// shares. ChainCode is revealed here (round 2) after its hash commitment was
+// broadcast in round 1, preventing last-sender bias on the XOR-aggregated group
+// chain code. If any confirmation disagrees, the transport may have equivocated
+// and the resulting key shares must not be used.
 type KeygenConfirmation struct {
 	SessionID       tss.SessionID
 	Sender          tss.PartyID
@@ -42,7 +47,8 @@ type KeygenConfirmation struct {
 	ChainCode       []byte
 }
 
-// KeygenConfirmation constructs a confirmation message from the local key share.
+// KeygenConfirmation constructs a confirmation message from the local key
+// share.
 func (k *KeyShare) KeygenConfirmation() (*KeygenConfirmation, error) {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
@@ -54,16 +60,14 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 	if k == nil {
 		return nil, errors.New("nil key share")
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, wire.EncodeBytesList(k.GroupCommitments))
 	return &KeygenConfirmation{
-		SessionID:       k.PaillierProofSessionID,
+		SessionID:       k.KeygenSessionID,
 		Sender:          k.Party,
 		Threshold:       k.Threshold,
 		Parties:         slices.Clone(k.Parties),
 		PublicKey:       slices.Clone(k.PublicKey),
 		TranscriptHash:  slices.Clone(k.KeygenTranscriptHash),
-		CommitmentsHash: h.Sum(nil),
+		CommitmentsHash: keygenGroupCommitmentsHash(k.GroupCommitments),
 		ChainCode:       slices.Clone(k.ChainCode),
 	}, nil
 }
@@ -79,8 +83,8 @@ func (c KeygenConfirmation) Validate() error {
 	if len(c.Parties) == 0 {
 		return errors.New("keygen confirmation: empty party set")
 	}
-	if len(c.PublicKey) == 0 {
-		return errors.New("keygen confirmation: empty public key")
+	if _, err := edcurve.PointFromBytes(c.PublicKey); err != nil {
+		return fmt.Errorf("keygen confirmation: invalid public key: %w", err)
 	}
 	if len(c.TranscriptHash) != sha256.Size {
 		return errors.New("keygen confirmation: invalid transcript hash length")
@@ -150,6 +154,9 @@ func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 	threshold, err := wire.Uint32Field(fields, keygenConfirmationFieldThreshold)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmation threshold: %w", err)
+	}
+	if threshold > math.MaxInt32 {
+		return nil, fmt.Errorf("keygen confirmation threshold overflows platform int: %d", threshold)
 	}
 	parties, err := wire.Uint32ListField[tss.PartyID](fields, keygenConfirmationFieldParties)
 	if err != nil {
@@ -317,6 +324,13 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	}
 	local.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
 	return nil
+}
+
+func keygenGroupCommitmentsHash(commitments [][]byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(keygenConfirmationWireType))
+	wire.WriteHashPart(h, wire.EncodeBytesList(commitments))
+	return h.Sum(nil)
 }
 
 func keygenConfirmationSetHash(encoded [][]byte) []byte {

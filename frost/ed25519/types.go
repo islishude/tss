@@ -19,10 +19,11 @@ import (
 const protocol = "frost-ed25519"
 
 const (
-	payloadKeygenCommitments = "frost.ed25519.keygen.commitments"
-	payloadKeygenShare       = "frost.ed25519.keygen.share"
-	payloadSignCommitment    = "frost.ed25519.sign.commitment"
-	payloadSignPartial       = "frost.ed25519.sign.partial"
+	payloadKeygenCommitments  = "frost.ed25519.keygen.commitments"
+	payloadKeygenShare        = "frost.ed25519.keygen.share"
+	payloadKeygenConfirmation = "frost.ed25519.keygen.confirmation"
+	payloadSignCommitment     = "frost.ed25519.sign.commitment"
+	payloadSignPartial        = "frost.ed25519.sign.partial"
 )
 
 // VerificationShare is a participant public share derived from DKG commitments.
@@ -42,7 +43,9 @@ type KeyShare struct {
 	secret               *secret.Scalar
 	GroupCommitments     [][]byte            `json:"group_commitments"`
 	VerificationShares   []VerificationShare `json:"verification_shares"`
+	KeygenSessionID      tss.SessionID       `json:"keygen_session_id"`
 	KeygenTranscriptHash []byte              `json:"keygen_transcript_hash,omitempty"`
+	KeygenConfirmations  [][]byte            `json:"keygen_confirmations,omitempty"`
 }
 
 // Algorithm returns the common algorithm identifier.
@@ -97,7 +100,7 @@ func (k *KeyShare) Format(state fmt.State, verb rune) {
 
 func (k KeyShare) redactedString() string {
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenTranscriptHash:%x}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenSessionID:%s KeygenTranscriptHash:%x KeygenConfirmations:%d}",
 		k.Version,
 		k.Party,
 		k.Threshold,
@@ -106,7 +109,9 @@ func (k KeyShare) redactedString() string {
 		len(k.ChainCode),
 		len(k.GroupCommitments),
 		len(k.VerificationShares),
+		k.KeygenSessionID,
 		k.KeygenTranscriptHash,
+		len(k.KeygenConfirmations),
 	)
 }
 
@@ -122,8 +127,7 @@ func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShareWithLimits(in, limits)
 }
 
-// Validate checks share structure and canonical scalar/point encodings.
-func (k *KeyShare) Validate() error {
+func (k *KeyShare) validateWithoutConfirmations() error {
 	if k == nil {
 		return errors.New("nil key share")
 	}
@@ -187,6 +191,21 @@ func (k *KeyShare) Validate() error {
 	return nil
 }
 
+// Validate checks share structure and canonical scalar/point encodings. When a
+// share carries keygen confirmation evidence, the complete confirmation set is
+// verified as well.
+func (k *KeyShare) Validate() error {
+	if err := k.validateWithoutConfirmations(); err != nil {
+		return err
+	}
+	if len(k.KeygenConfirmations) > 0 {
+		if err := verifyKeygenConfirmationSet(k, k.KeygenConfirmations); err != nil {
+			return fmt.Errorf("invalid keygen confirmations: %w", err)
+		}
+	}
+	return nil
+}
+
 // ValidateConsistency checks that the key share's cryptographic invariants hold:
 // the public key matches the group commitments, each verification share is derived
 // from those commitments, and the local secret share is consistent with its
@@ -194,6 +213,13 @@ func (k *KeyShare) Validate() error {
 // share recovered from persistent storage.
 func (k *KeyShare) ValidateConsistency() error {
 	if err := k.Validate(); err != nil {
+		return err
+	}
+	return k.validateConsistencyWithoutConfirmations()
+}
+
+func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
+	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
 	}
 	// PublicKey must equal GroupCommitments evaluated at 0.
@@ -263,7 +289,9 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.secret = k.secret.Clone()
 	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
+	out.KeygenSessionID = k.KeygenSessionID
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
+	out.KeygenConfirmations = cloneKeyShareByteSlices(k.KeygenConfirmations)
 	return &out
 }
 

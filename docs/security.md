@@ -1,5 +1,7 @@
 # Security Notes
 
+**Hard precondition**: Envelopes with `ConfidentialRequired` set MUST be encrypted by the transport layer before transmission. This library validates the flag to reject incorrectly flagged secret-bearing envelopes, but it does **not** seal or open transport ciphertexts. Unencrypted transport of secret-bearing envelopes will expose keygen shares, nonce material, and MtA responses to any observer on the message path.
+
 This repository is not a production-audited TSS stack.
 
 ## Threat Model
@@ -147,16 +149,27 @@ Presign and signing entry points are enabled. The Paillier MtA/ZK proof layer ha
 
 ## Keygen Broadcast Consistency
 
-The keygen protocol assumes authenticated transport and a non-equivocating broadcast view. After local DKG material verifies, each `KeygenSession` automatically broadcasts a `KeygenConfirmation` message binding the session ID, sender, threshold, party set, public key, keygen transcript hash, and commitments hash.
+The keygen protocols assume authenticated transport and converge through an
+explicit confirmation round. After local DKG material verifies, FROST Ed25519
+and CGGMP21 secp256k1 `KeygenSession` instances automatically broadcast a
+`KeygenConfirmation` message binding the session ID, sender, threshold, party
+set, public key, keygen transcript hash, and commitments hash. A `KeyShare` is
+not exposed by `KeygenSession.KeyShare()` until the full confirmation set is
+received and verified.
 
-Applications must keep delivering keygen envelopes until `Complete()` returns a share:
+Applications must keep delivering keygen envelopes until the protocol-specific
+completion accessor returns a share:
 
 ```go
 out, err := kg.HandleKeygenMessage(env)
-share, ok := kg.Complete()
+share, ok := kg.KeyShare() // FROST; CGGMP21 also exposes Complete()
 ```
 
-A CGGMP21/secp256k1 key share is not valid for signing until the full confirmation evidence set is embedded in the share and `Validate()` succeeds. `StartPresign`, `StartSign`, refresh, and reshare entry points rely on `Validate()` and reject shares missing keygen confirmations.
+CGGMP21/secp256k1 key shares are not valid for signing until the full
+confirmation evidence set is embedded in the share and `Validate()` succeeds.
+FROST keygen shares produced by `KeygenSession` also embed and verify keygen
+confirmations; FROST reshare/refresh shares continue to rely on their own
+reshare transcript and group-key preservation checks.
 
 Transport responsibilities:
 
@@ -164,8 +177,9 @@ Transport responsibilities:
 - never let a payload `Sender` override the transport sender;
 - fan out broadcast envelopes to every party;
 - protect confidential share envelopes with point-to-point encryption or equivalent controls;
+- treat `ConfidentialRequired` as an enforcement signal, not encryption itself; this library rejects incorrectly flagged secret-bearing envelopes but does not seal or open transport ciphertexts;
 - treat two different confirmations from one sender in one session as equivocation;
-- never persist or use keygen material before `Complete()` returns a confirmed `KeyShare`.
+- never persist or use keygen material before the completion accessor returns a confirmed `KeyShare`.
 
 ## Paillier Ciphertext Membership
 

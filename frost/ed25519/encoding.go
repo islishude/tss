@@ -21,6 +21,8 @@ const (
 	keyShareFieldVerificationShares
 	keyShareFieldKeygenTranscriptHash
 	keyShareFieldChainCode
+	keyShareFieldKeygenSessionID
+	keyShareFieldKeygenConfirmations
 )
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
@@ -41,6 +43,8 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
 		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
 		{Tag: keyShareFieldChainCode, Value: wire.NonNilBytes(k.ChainCode)},
+		{Tag: keyShareFieldKeygenSessionID, Value: k.KeygenSessionID[:]},
+		{Tag: keyShareFieldKeygenConfirmations, Value: wire.EncodeBytesList(k.KeygenConfirmations)},
 	})
 }
 
@@ -56,7 +60,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected key share wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash, keyShareFieldChainCode); err != nil {
+	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash, keyShareFieldChainCode, keyShareFieldKeygenSessionID, keyShareFieldKeygenConfirmations); err != nil {
 		return nil, err
 	}
 	party, err := wire.Uint32Field(fields, keyShareFieldParty)
@@ -88,6 +92,14 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if err != nil {
 		return nil, err
 	}
+	keygenConfirmations, err := wire.BytesListFieldWithLimit(fields, keyShareFieldKeygenConfirmations, limits.MaxParties, limits.MaxWireFieldBytes)
+	if err != nil {
+		return nil, fmt.Errorf("keygen confirmations: %w", err)
+	}
+	keygenSessionID, err := tss.SessionIDFromBytes(wire.MustField(fields, keyShareFieldKeygenSessionID))
+	if err != nil {
+		return nil, fmt.Errorf("keygen session id: %w", err)
+	}
 	secretScalar, err := newEdSecretScalar(wire.MustField(fields, keyShareFieldSecret))
 	if err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
@@ -102,7 +114,9 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
+		KeygenSessionID:      keygenSessionID,
 		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		KeygenConfirmations:  keygenConfirmations,
 	}
 	if err := k.ValidateConsistency(); err != nil {
 		return nil, err

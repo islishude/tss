@@ -31,19 +31,7 @@ func TestGoldenKeyShare(t *testing.T) {
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
-		for _, id := range parties {
-			if id == env.From {
-				continue
-			}
-			if env.To != 0 && env.To != id {
-				continue
-			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
-				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
-			}
-		}
-	}
+	deliverFROSTKeygenMessages(t, parties, sessions, messages)
 	share, ok := sessions[1].KeyShare()
 	if !ok {
 		t.Fatal("keygen not complete")

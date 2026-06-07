@@ -131,6 +131,7 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 	if !ok {
 		t.Fatal("presign did not complete")
 	}
+	internalPresign := presignSession.presign
 	r := append([]byte(nil), presign.R...)
 	presignSession.Destroy()
 	if presignSession.kShare != nil || presignSession.gamma != nil || presignSession.xBar != nil {
@@ -142,8 +143,11 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 	if len(presignSession.alphaDelta) != 0 || len(presignSession.betaDelta) != 0 || len(presignSession.alphaSigma) != 0 || len(presignSession.betaSigma) != 0 {
 		t.Fatal("presign MtA share maps were not cleared")
 	}
-	if !presign.Consumed || !allZeroBytes(presign.kShare.FixedBytes()) || !allZeroBytes(presign.chiShare.FixedBytes()) || !allZeroBytes(presign.delta.FixedBytes()) {
-		t.Fatal("completed presign was not destroyed")
+	if internalPresign == nil || !internalPresign.Consumed || !allZeroBytes(internalPresign.kShare.FixedBytes()) || !allZeroBytes(internalPresign.chiShare.FixedBytes()) || !allZeroBytes(internalPresign.delta.FixedBytes()) {
+		t.Fatal("session-retained presign was not destroyed")
+	}
+	if presign.Consumed || allZeroBytes(presign.kShare.FixedBytes()) || allZeroBytes(presign.chiShare.FixedBytes()) || allZeroBytes(presign.delta.FixedBytes()) {
+		t.Fatal("returned presign copy was unexpectedly destroyed with the session")
 	}
 	if !bytes.Equal(presign.R, r) {
 		t.Fatal("presign public metadata changed")

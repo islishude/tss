@@ -82,14 +82,14 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return nil, err
 	}
-	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
+	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
 		return nil, errors.New("chain code must be 32 bytes")
 	}
 	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
 		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
+		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCodeCommit)},
 		{Tag: keygenCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
 		{Tag: keygenCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
 	})
@@ -117,7 +117,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 		Commitments:        commitments,
 		PaillierPublicKey:  wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
 		PaillierProof:      wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
-		ChainCode:          wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
+		ChainCodeCommit:    wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
 		RingPedersenParams: wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenParams),
 		RingPedersenProof:  wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenProof),
 	}
@@ -133,7 +133,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
+	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
 		return keygenCommitmentsPayload{}, errors.New("chain code must be 32 bytes")
 	}
 	return p, nil

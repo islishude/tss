@@ -35,27 +35,28 @@ const (
 
 // KeygenOptions controls non-default CGGMP21 keygen parameters.
 type KeygenOptions struct {
-	PaillierBits  int
-	SecurityLevel int
-	EnableHD      bool
+	PaillierBits int
+	EnableHD     bool
 }
 
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
-	cfg           tss.ThresholdConfig
-	log           tss.Logger
-	commits       map[tss.PartyID][][]byte
-	shares        map[tss.PartyID]*big.Int
-	chainCodes    map[tss.PartyID][]byte
-	paillier      *pai.PrivateKey
-	paillierPubs  map[tss.PartyID]PaillierPublicShare
-	ringPedersen  map[tss.PartyID]RingPedersenPublicShare
-	completed     bool
-	aborted       bool
-	state         keygenState
-	pending       *pendingKeyShare
-	confirmations map[tss.PartyID][]byte
-	keyShare      *KeyShare
+	cfg            tss.ThresholdConfig
+	log            tss.Logger
+	commits        map[tss.PartyID][][]byte
+	shares         map[tss.PartyID]*big.Int
+	chainCodes     map[tss.PartyID][]byte
+	chainCodeComms map[tss.PartyID][]byte
+	enableHD       bool
+	paillier       *pai.PrivateKey
+	paillierPubs   map[tss.PartyID]PaillierPublicShare
+	ringPedersen   map[tss.PartyID]RingPedersenPublicShare
+	completed      bool
+	aborted        bool
+	state          keygenState
+	pending        *pendingKeyShare
+	confirmations  map[tss.PartyID][]byte
+	keyShare       *KeyShare
 }
 
 type pendingKeyShare struct {
@@ -66,7 +67,7 @@ type keygenCommitmentsPayload struct {
 	Commitments        [][]byte `json:"commitments"`
 	PaillierPublicKey  []byte   `json:"paillier_public_key"`
 	PaillierProof      []byte   `json:"paillier_proof"`
-	ChainCode          []byte   `json:"chain_code,omitempty"`
+	ChainCodeCommit    []byte   `json:"chain_code_commit,omitempty"`
 	RingPedersenParams []byte   `json:"ring_pedersen_params"`
 	RingPedersenProof  []byte   `json:"ring_pedersen_proof"`
 }
@@ -80,7 +81,9 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
 
-// StartKeygenWithOptions starts keygen with explicit Paillier key-size options.
+// StartKeygenWithOptions starts keygen with explicit Paillier key-size or HD
+// chain-code options. ZK security parameters are governed by
+// [zkpai.ActiveSecurityParams], not by a per-keygen option.
 //
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
 // to all parties. The caller MUST ensure that every recipient receives identical
@@ -105,11 +108,13 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", opts.PaillierBits, defPaillierBits))
 	}
 	var chainCode []byte
+	var chainCodeCommit []byte
 	if opts.EnableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
 		}
+		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	}
 	paillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), opts.PaillierBits)
 	if err != nil {
@@ -164,6 +169,10 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
+		chainCodeComms: map[tss.PartyID][]byte{
+			config.Self: append([]byte(nil), chainCodeCommit...),
+		},
+		enableHD: opts.EnableHD,
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
@@ -179,7 +188,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		Commitments:        commitments,
 		PaillierPublicKey:  paillierPubBytes,
 		PaillierProof:      modProofBytes,
-		ChainCode:          chainCode,
+		ChainCodeCommit:    chainCodeCommit,
 		RingPedersenParams: ringPedersenParamsBytes,
 		RingPedersenProof:  ringPedersenProofBytes,
 	})
@@ -356,10 +365,10 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 			)
 		}
 		s.commits[env.From] = p.Commitments
-		if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("chain code must be 32 bytes"))
+		if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be %d bytes, got %d", sha256.Size, len(p.ChainCodeCommit)))
 		}
-		s.chainCodes[env.From] = append([]byte(nil), p.ChainCode...)
+		s.chainCodeComms[env.From] = append([]byte(nil), p.ChainCodeCommit...)
 		s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 		s.ringPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
 	case payloadKeygenShare:
@@ -389,7 +398,7 @@ func (s *KeygenSession) Complete() (*KeyShare, bool) {
 	if s == nil || s.state != keygenConfirmed || !s.completed {
 		return nil, false
 	}
-	return cloneKeyShareValue(s.keyShare), true
+	return s.keyShare.Clone(), true
 }
 
 // KeyShare returns the confirmed local key share when keygen has finished.
@@ -407,7 +416,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		return nil, nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) || len(s.ringPedersen) != len(s.cfg.Parties) {
+	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.paillierPubs) != len(s.cfg.Parties) || len(s.chainCodeComms) != len(s.cfg.Parties) || len(s.ringPedersen) != len(s.cfg.Parties) {
 		return nil, nil
 	}
 	order := secp.Order()
@@ -442,10 +451,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		secret.Add(secret, s.shares[dealer])
 		secret.Mod(secret, order)
 	}
-	chainCode, err := aggregateChainCode(s.cfg.Parties, s.chainCodes)
-	if err != nil {
-		return nil, err
-	}
+	// Chain code is aggregated from round 2 confirmation reveals (commit-reveal).
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*secp.Point, 0, len(s.cfg.Parties))
@@ -527,7 +533,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		Threshold:              s.cfg.Threshold,
 		Parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:              append([]byte(nil), groupCommitments[0]...),
-		ChainCode:              chainCode,
+		ChainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
 		GroupCommitments:       groupCommitments,
 		VerificationShares:     verificationShares,
@@ -580,6 +586,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	share.LogCiphertext = logCiphertext.Bytes()
 	share.LogProof = logProofBytes
 	share.logRandomness = logRandomness.Bytes()
+	// Carry the local chain code into the confirmation for commit-reveal.
+	share.ChainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
 	if err := share.validateWithoutConfirmations(); err != nil {
 		return nil, err
 	}
@@ -588,6 +596,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	encodedConfirmation, err := confirmation.MarshalBinary()
+	// Don't leak the per-party chain code into the KeyShare — overwritten with aggregate after confirmations.
+	share.ChainCode = nil
 	if err != nil {
 		return nil, err
 	}
@@ -656,6 +666,12 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
+	// Verify the revealed chain code against the round 1 hash commitment.
+	if !verifyCGGMPChainCodeCommit(s.cfg.SessionID, env.From, confirmation.ChainCode, s.chainCodeComms[env.From]) {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", env.From))
+	}
+	// Store the revealed chain code for XOR aggregation.
+	s.chainCodes[env.From] = append([]byte(nil), confirmation.ChainCode...)
 	s.confirmations[env.From] = append([]byte(nil), canonical...)
 	if s.pending != nil && len(s.confirmations) == len(s.cfg.Parties) {
 		return nil, s.finalizeConfirmedKeyShare()
@@ -686,7 +702,21 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
-	finalShare := cloneKeyShareValue(s.pending.share)
+	// Aggregate chain codes from all revealed confirmations.
+	var chainCode []byte
+	if s.enableHD {
+		cc, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodes)
+		if err != nil {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		}
+		chainCode = cc
+	}
+	finalShare := s.pending.share.Clone()
+	finalShare.ChainCode = chainCode
+	// Recomputation: now that we have the real chain codes, produce the final
+	// transcript hash that binds them.
+	finalShare.KeygenTranscriptHash = s.keygenTranscriptHash(finalShare.GroupCommitments)
 	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
 	if err := finalShare.Validate(); err != nil {
 		finalShare.Destroy()
@@ -762,38 +792,12 @@ func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 		rp := s.ringPedersen[id]
 		wire.WriteHashPart(h, rp.Params)
 		wire.WriteHashPart(h, rp.Proof)
-		wire.WriteHashPart(h, s.chainCodes[id])
+		wire.WriteHashPart(h, s.chainCodeComms[id])
 	}
 	for _, commitment := range groupCommitments {
 		wire.WriteHashPart(h, commitment)
 	}
 	return h.Sum(nil)
-}
-
-func aggregateChainCode(parties []tss.PartyID, chainCodes map[tss.PartyID][]byte) ([]byte, error) {
-	enabled := false
-	for _, id := range parties {
-		switch len(chainCodes[id]) {
-		case 0:
-		case 32:
-			enabled = true
-		default:
-			return nil, fmt.Errorf("invalid chain code for party %d", id)
-		}
-	}
-	if !enabled {
-		return nil, nil
-	}
-	out := make([]byte, 32)
-	for _, id := range parties {
-		if len(chainCodes[id]) != 32 {
-			return nil, fmt.Errorf("missing chain code for party %d", id)
-		}
-		for i := range out {
-			out[i] ^= chainCodes[id][i]
-		}
-	}
-	return out, nil
 }
 
 func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, bool) {
@@ -803,6 +807,34 @@ func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, b
 		}
 	}
 	return nil, false
+}
+
+const cggmpChainCodeCommitLabel = "cggmp21-secp256k1-chain-code-commit-v1"
+
+// cggmpChainCodeCommit produces a hash commitment for a party's HD chain code.
+// The chain code is revealed in round 2 (keygen confirmation) to prevent last-sender bias.
+func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
+	if len(chainCode) == 0 {
+		return nil
+	}
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(cggmpChainCodeCommitLabel))
+	wire.WriteHashPart(h, sessionID[:])
+	wire.WriteHashPart(h, []byte{byte(partyID >> 24), byte(partyID >> 16), byte(partyID >> 8), byte(partyID)})
+	wire.WriteHashPart(h, chainCode)
+	return h.Sum(nil)
+}
+
+// verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.
+func verifyCGGMPChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
+	if len(commit) == 0 {
+		return len(chainCode) == 0
+	}
+	if len(commit) != sha256.Size || len(chainCode) != 32 {
+		return false
+	}
+	expected := cggmpChainCodeCommit(sessionID, partyID, chainCode)
+	return bytes.Equal(expected, commit)
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {

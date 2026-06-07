@@ -6,7 +6,7 @@ The `frost/ed25519` package implements a dealerless FROST-style threshold Ed2551
 
 | Phase     | Rounds | Description                                               |
 | --------- | ------ | --------------------------------------------------------- |
-| DKG       | 1      | Dealerless distributed key generation.                    |
+| DKG       | 2      | Dealerless distributed key generation plus confirmation.  |
 | Signing   | 2      | Nonce commitment (round 1), partial signature (round 2).  |
 | Resharing | 1      | Zero-coefficient polynomial refresh; group key preserved. |
 | BIP32 HD  | local  | Khovratovich-Law non-hardened child key derivation.       |
@@ -26,7 +26,9 @@ type KeyShare struct {
     secret               *secret.Scalar // unexported: local scalar share x_i (fixed 32 bytes)
     GroupCommitments     [][]byte      // degree 0..threshold-1 public polynomial commitments
     VerificationShares   []VerificationShare
+    KeygenSessionID      tss.SessionID
     KeygenTranscriptHash []byte
+    KeygenConfirmations  [][]byte
 }
 ```
 
@@ -74,7 +76,7 @@ s_{i→j} · B  ≟  Σ_{k=0}^{t-1} (j^k · C_{i,k})
 
 A failed verification returns a `ProtocolError` with `Blame` evidence binding the dealer ID, commitment hash, and reason.
 
-### Completion
+### Confirmation and Completion
 
 When all `n` dealers' commitments and shares are collected and verified:
 
@@ -85,7 +87,18 @@ When all `n` dealers' commitments and shares are collected and verified:
 5. **Chain code:** If HD is enabled, `chain = XOR_{i=1}^{n} chainCode_i`
 6. **Transcript hash:** Domain-separated SHA-256 binding the session ID, threshold, sorted parties, aggregate chain code, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
-The resulting `KeyShare` stores the local scalar share `x_j`, group public key `PK`, group commitments, verification shares, chain code, and keygen transcript hash.
+At this point the session has only local pending material. It then broadcasts a
+round-2 `KeygenConfirmation` payload binding the session ID, sender, threshold,
+party set, group public key, keygen transcript hash, and group commitments hash.
+Because the transcript hash binds every dealer commitment set and the aggregate
+chain code, any equivocated broadcast view produces a mismatching confirmation.
+
+`KeygenSession.KeyShare()` returns `false` until confirmations from every party
+are received, canonical, non-confidential broadcasts, and consistent with the
+local pending material. The resulting `KeyShare` stores the local scalar share
+`x_j`, group public key `PK`, group commitments, verification shares, chain
+code, keygen session ID, keygen transcript hash, and keygen confirmation
+evidence.
 
 ### Domain Separation
 

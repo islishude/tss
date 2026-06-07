@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -213,16 +214,7 @@ func frostKeygenForFuzz(f *testing.F, threshold, n int) map[tss.PartyID]*KeyShar
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
-		for _, id := range parties {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
-				f.Fatal(err)
-			}
-		}
-	}
+	deliverFROSTKeygenMessages(f, parties, sessions, messages)
 	out := make(map[tss.PartyID]*KeyShare, n)
 	for _, id := range parties {
 		share, ok := sessions[id].KeyShare()
@@ -241,21 +233,17 @@ func cloneFROSTKeyShare(in *KeyShare) *KeyShare {
 	out := *in
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
+	out.ChainCode = append([]byte(nil), in.ChainCode...)
 	out.secret = in.secret.Clone()
-	out.GroupCommitments = cloneFROSTByteSlices(in.GroupCommitments)
+	out.GroupCommitments = testutil.CloneByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
 	for i := range out.VerificationShares {
 		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
 	}
+	out.KeygenSessionID = in.KeygenSessionID
+	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
+	out.KeygenConfirmations = testutil.CloneByteSlices(in.KeygenConfirmations)
 	return &out
-}
-
-func cloneFROSTByteSlices(in [][]byte) [][]byte {
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = append([]byte(nil), in[i]...)
-	}
-	return out
 }
 
 func seedFROSTPoint(tb testing.TB) []byte {

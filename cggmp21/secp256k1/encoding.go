@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	"github.com/islishude/tss"
 
@@ -304,6 +305,7 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 		return nil, fmt.Errorf("invalid delta: %w", err)
 	}
 	p := &Presign{
+		mu:                   &sync.Mutex{},
 		Version:              tss.Version,
 		Party:                tss.PartyID(party),
 		Threshold:            int(threshold),

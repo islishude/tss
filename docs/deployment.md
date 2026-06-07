@@ -21,7 +21,9 @@ config := tss.ThresholdConfig{
     SessionID: sessionID,
 }
 session, envelopes, err := secp256k1.StartKeygen(config)
-// Route envelopes to other parties via authenticated transport.
+// Route envelopes to other parties via authenticated transport. Keep routing
+// any envelopes returned by HandleKeygenMessage; keygen emits a confirmation
+// round before KeyShare() becomes available.
 ```
 
 After all parties exchange messages, each obtains a `KeyShare`:
@@ -147,6 +149,9 @@ err := received.UnmarshalBinary(data)
   `ConfidentialRequired=true`; protocol handlers reject broadcast or
   non-confidential secret shares.
 - Point-to-point messages (`To != 0`, `ConfidentialRequired=true`) must be delivered with confidentiality.
+- `ConfidentialRequired` is metadata checked by protocol handlers; it is not
+  encryption. Sending those payloads through a plaintext broker, relay, log, or
+  WebSocket is unsafe even though the flag is set.
 - Within a round, messages can be delivered in any order.
 - Across rounds, messages must be processed sequentially — round N must complete before round N+1.
 

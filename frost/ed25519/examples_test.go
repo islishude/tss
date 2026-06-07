@@ -64,7 +64,9 @@ func ExampleSign_multiParty() {
 		messages = append(messages, out...)
 	}
 
-	for _, env := range messages {
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
 		for _, id := range parties {
 			if id == env.From {
 				continue
@@ -72,9 +74,11 @@ func ExampleSign_multiParty() {
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
+			out, err := sessions[id].HandleKeygenMessage(env)
+			if err != nil {
 				panic(err)
 			}
+			messages = append(messages, out...)
 		}
 	}
 

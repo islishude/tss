@@ -6,12 +6,12 @@ import (
 	"encoding/hex"
 	"math/big"
 	"os"
+	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
 )
 
 // --- PresignContext factory ---
@@ -38,7 +38,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 	if presign == nil {
 		return nil, nil, errNilPresign
 	}
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true)
+	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, nil)
 }
 
 // errNilPresign is a sentinel error for nil presign in test helpers.
@@ -74,47 +74,8 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 
 // --- Clone helpers ---
 
-// cloneKeyShare returns a deep copy of a KeyShare for mutation testing.
-// Used by integration-tagged test files.
-func cloneKeyShare(in *KeyShare) *KeyShare {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.Parties = append([]tss.PartyID(nil), in.Parties...)
-	out.PublicKey = append([]byte(nil), in.PublicKey...)
-	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.secret = in.secret.Clone()
-	out.GroupCommitments = testutil.CloneByteSlices(in.GroupCommitments)
-	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
-	for i := range out.VerificationShares {
-		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
-	}
-	out.PaillierPublicKey = append([]byte(nil), in.PaillierPublicKey...)
-	out.paillierPrivateKey = append([]byte(nil), in.paillierPrivateKey...)
-	out.PaillierProof = append([]byte(nil), in.PaillierProof...)
-	out.PaillierPublicKeys = append([]PaillierPublicShare(nil), in.PaillierPublicKeys...)
-	for i := range out.PaillierPublicKeys {
-		out.PaillierPublicKeys[i].PublicKey = append([]byte(nil), in.PaillierPublicKeys[i].PublicKey...)
-		out.PaillierPublicKeys[i].Proof = append([]byte(nil), in.PaillierPublicKeys[i].Proof...)
-	}
-	out.RingPedersenParams = append([]byte(nil), in.RingPedersenParams...)
-	out.RingPedersenProof = append([]byte(nil), in.RingPedersenProof...)
-	out.RingPedersenPublic = append([]RingPedersenPublicShare(nil), in.RingPedersenPublic...)
-	for i := range out.RingPedersenPublic {
-		out.RingPedersenPublic[i].Params = append([]byte(nil), in.RingPedersenPublic[i].Params...)
-		out.RingPedersenPublic[i].Proof = append([]byte(nil), in.RingPedersenPublic[i].Proof...)
-	}
-	out.PaillierProofSessionID = in.PaillierProofSessionID
-	out.PaillierProofDomain = in.PaillierProofDomain
-	out.ShareProof = append([]byte(nil), in.ShareProof...)
-	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
-	out.LogCiphertext = append([]byte(nil), in.LogCiphertext...)
-	out.LogProof = append([]byte(nil), in.LogProof...)
-	out.logRandomness = append([]byte(nil), in.logRandomness...)
-	out.KeygenConfirmations = testutil.CloneByteSlices(in.KeygenConfirmations)
-	return &out
-}
+// cloneKeyShare delegates to KeyShare.Clone() for test helpers.
+func cloneKeyShare(in *KeyShare) *KeyShare { return in.Clone() }
 
 // clonePresign returns a deep copy of a Presign for mutation testing.
 // Used by integration-tagged test files.
@@ -122,22 +83,33 @@ func clonePresign(in *Presign) *Presign {
 	if in == nil {
 		return nil
 	}
-	out := *in
-	out.Signers = append([]tss.PartyID(nil), in.Signers...)
-	out.R = append([]byte(nil), in.R...)
-	out.LittleR = append([]byte(nil), in.LittleR...)
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.Context.DerivationPath = append([]uint32(nil), in.Context.DerivationPath...)
-	out.ContextHash = append([]byte(nil), in.ContextHash...)
-	out.AdditiveShift = append([]byte(nil), in.AdditiveShift...)
-	out.PublicKey = append([]byte(nil), in.PublicKey...)
-	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
-	out.PartiesHash = append([]byte(nil), in.PartiesHash...)
-	out.kShare = in.kShare.Clone()
-	out.chiShare = in.chiShare.Clone()
-	out.delta = in.delta.Clone()
-	out.Consumed = false
-	return &out
+	cp := &Presign{
+		mu:             &sync.Mutex{},
+		Version:        in.Version,
+		Party:          in.Party,
+		Threshold:      in.Threshold,
+		Signers:        append([]tss.PartyID(nil), in.Signers...),
+		R:              append([]byte(nil), in.R...),
+		LittleR:        append([]byte(nil), in.LittleR...),
+		TranscriptHash: append([]byte(nil), in.TranscriptHash...),
+		Context: PresignContext{
+			KeyID:          in.Context.KeyID,
+			ChainID:        in.Context.ChainID,
+			DerivationPath: append([]uint32(nil), in.Context.DerivationPath...),
+			PolicyDomain:   in.Context.PolicyDomain,
+			MessageDomain:  in.Context.MessageDomain,
+		},
+		ContextHash:          append([]byte(nil), in.ContextHash...),
+		AdditiveShift:        append([]byte(nil), in.AdditiveShift...),
+		PublicKey:            append([]byte(nil), in.PublicKey...),
+		KeygenTranscriptHash: append([]byte(nil), in.KeygenTranscriptHash...),
+		PartiesHash:          append([]byte(nil), in.PartiesHash...),
+		Consumed:             false,
+		kShare:               in.kShare.Clone(),
+		chiShare:             in.chiShare.Clone(),
+		delta:                in.delta.Clone(),
+	}
+	return cp
 }
 
 // --- Minimal presign fixture ---
@@ -168,6 +140,7 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{
+		mu:                   &sync.Mutex{},
 		Version:              tss.Version,
 		Party:                1,
 		Threshold:            1,

@@ -402,22 +402,22 @@ func frostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		sessions[id] = &sessionState{session: session, envelopes: out}
 	}
 
-	// Broadcast all round 1 messages.
+	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		for _, env := range sessions[id].envelopes {
-			for _, receiver := range parties {
-				if receiver == id {
-					continue
-				}
-				// Only peer-to-peer messages check To.
-				if env.To != 0 && env.To != receiver {
-					continue
-				}
-				_, err := sessions[receiver].session.HandleKeygenMessage(env)
-				if err != nil {
-					t.Fatal(err)
-				}
+		queue = append(queue, sessions[id].envelopes...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, receiver := range parties {
+			if receiver == env.From || (env.To != 0 && env.To != receiver) {
+				continue
 			}
+			out, err := sessions[receiver].session.HandleKeygenMessage(env)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
 		}
 	}
 

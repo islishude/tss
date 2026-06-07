@@ -442,19 +442,7 @@ func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
-		for _, id := range parties {
-			if id == env.From {
-				continue
-			}
-			if env.To != 0 && env.To != id {
-				continue
-			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
-				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
-			}
-		}
-	}
+	deliverFROSTKeygenMessages(t, parties, sessions, messages)
 	out := make(map[tss.PartyID]*KeyShare, n)
 	var pub []byte
 	for _, id := range parties {
@@ -470,6 +458,28 @@ func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		out[id] = share
 	}
 	return out
+}
+
+func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions map[tss.PartyID]*KeygenSession, messages []tss.Envelope) {
+	t.Helper()
+	queue := append([]tss.Envelope(nil), messages...)
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, id := range parties {
+			if id == env.From {
+				continue
+			}
+			if env.To != 0 && env.To != id {
+				continue
+			}
+			out, err := sessions[id].HandleKeygenMessage(env)
+			if err != nil {
+				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			queue = append(queue, out...)
+		}
+	}
 }
 
 func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, message []byte) (map[tss.PartyID]*SignSession, []tss.Envelope) {

@@ -531,7 +531,9 @@ func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
 	return nil, false
 }
 
-func cloneKeyShareValue(k *KeyShare) *KeyShare {
+// Clone returns a deep copy of the key share. The returned copy owns
+// its own slice and secret storage — mutations do not affect the original.
+func (k *KeyShare) Clone() *KeyShare {
 	if k == nil {
 		return nil
 	}

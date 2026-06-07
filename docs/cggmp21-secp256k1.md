@@ -134,7 +134,11 @@ Paillier proof domains bind `(protocol, version, session, threshold, parties, se
 
 ## Presign (Offline Phase)
 
-Presign produces a one-use `Presign` record containing local nonce shares. It must be run in advance of signing and the result persisted securely.
+Presign produces a one-use `Presign` record containing local nonce shares. It
+must be run in advance of signing and the result persisted securely.
+`PresignSession.Presign()` returns a deep copy of the completed record so
+callers can persist or hand it to the online signer without mutating
+session-owned material.
 
 ### Round 1: Nonce Commitments
 
@@ -249,7 +253,11 @@ consumed, _ := MarkPresignConsumed(presign)
 encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
 ```
 
-`StartSign` sets `Consumed = true` **before** constructing the outbound signature envelope, so reuse fails before any partial signature leaves the process.
+`StartSign` sets `Consumed = true` **before** constructing the outbound signature
+envelope, so reuse of the same in-process `*Presign` pointer fails before any
+partial signature leaves the process. This local claim is serialized inside the
+package, but distributed deployments still need a durable atomic claim in
+storage before online signing.
 
 ## Refresh
 
@@ -356,6 +364,7 @@ ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy"
 ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
+// presign is a deep copy; persist it immediately.
 ```
 
 ### Online Signing

@@ -24,6 +24,10 @@ func (s *KeygenSession) Destroy() {
 	if s.keyShare != nil {
 		s.keyShare.Destroy()
 	}
+	if s.pending != nil {
+		s.pending.Destroy()
+		s.pending = nil
+	}
 }
 
 // Destroy clears local nonces and partial signatures retained by the signing session.

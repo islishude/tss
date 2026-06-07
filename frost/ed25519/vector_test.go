@@ -55,16 +55,7 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
-		for _, id := range parties {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
-				t.Fatalf("deliver %s %d->%d: %v", env.PayloadType, env.From, id, err)
-			}
-		}
-	}
+	deliverFROSTKeygenMessages(t, parties, sessions, messages)
 	shares := make([]*KeyShare, n)
 	for i, id := range parties {
 		s, ok := sessions[id].KeyShare()

@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -10,26 +11,31 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/wire"
 )
 
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
-	mu          sync.Mutex
-	cfg         tss.ThresholdConfig
-	log         tss.Logger
-	commits     map[tss.PartyID][][]byte
-	shares      map[tss.PartyID]*fed.Scalar
-	chainCodes  map[tss.PartyID][]byte
-	completed   bool
-	aborted     bool
-	keyShare    *KeyShare
-	ownPoly     []*fed.Scalar
-	ownMessages []tss.Envelope
+	mu             sync.Mutex
+	cfg            tss.ThresholdConfig
+	log            tss.Logger
+	commits        map[tss.PartyID][][]byte
+	shares         map[tss.PartyID]*fed.Scalar
+	chainCodes     map[tss.PartyID][]byte
+	chainCodeComms map[tss.PartyID][]byte
+	enableHD       bool
+	completed      bool
+	aborted        bool
+	pending        *KeyShare
+	confirmations  map[tss.PartyID][]byte
+	keyShare       *KeyShare
+	ownPoly        []*fed.Scalar
+	ownMessages    []tss.Envelope
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments"`
-	ChainCode   []byte   `json:"chain_code,omitempty"`
+	Commitments     [][]byte `json:"commitments"`
+	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty"`
 }
 
 type keygenSharePayload struct {
@@ -59,11 +65,13 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		commitments[i] = point.Bytes()
 	}
 	var chainCode []byte
+	var chainCodeCommit []byte
 	if opts.EnableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
 		}
+		chainCodeCommit = chainCodeCommitment(config.SessionID, config.Self, chainCode)
 	}
 	s := &KeygenSession{
 		cfg:     config,
@@ -73,11 +81,16 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
-		ownPoly: poly,
+		enableHD: opts.EnableHD,
+		chainCodeComms: map[tss.PartyID][]byte{
+			config.Self: append([]byte(nil), chainCodeCommit...),
+		},
+		confirmations: make(map[tss.PartyID][]byte, len(parties)),
+		ownPoly:       poly,
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments, ChainCode: chainCode})
+	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -96,9 +109,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		out = append(out, envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true))
 	}
 	s.ownMessages = append([]tss.Envelope(nil), out...)
-	if err := s.tryComplete(); err != nil {
+	completionOut, err := s.tryComplete()
+	if err != nil {
 		return nil, nil, err
 	}
+	out = append(out, completionOut...)
 	return s, out, nil
 }
 
@@ -117,7 +132,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
 	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
@@ -126,8 +141,11 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	if env.To != 0 && env.To != s.cfg.Self {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
+	if env.PayloadType == payloadKeygenConfirmation {
+		return s.handleKeygenConfirmation(env)
+	}
 	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen only accepts round 1 messages"))
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
 	}
 	switch env.PayloadType {
 	case payloadKeygenCommitments:
@@ -139,16 +157,16 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		if existing, ok := s.commits[env.From]; ok {
-			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodes[env.From], p.ChainCode) {
+			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodeComms[env.From], p.ChainCodeCommit) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting commitments"))
 		}
 		s.commits[env.From] = p.Commitments
-		if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code must be 32 bytes, got %d", len(p.ChainCode)))
+		if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}
-		s.chainCodes[env.From] = append([]byte(nil), p.ChainCode...)
+		s.chainCodeComms[env.From] = append([]byte(nil), p.ChainCodeCommit...)
 	case payloadKeygenShare:
 		if err := requireDirectConfidential(env, s.cfg.Self, payloadKeygenShare); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -171,7 +189,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
-	return nil, s.tryComplete()
+	return s.tryComplete()
 }
 
 // KeyShare returns the completed local key share when DKG has finished.
@@ -187,12 +205,18 @@ func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	return cloneKeyShareValue(s.keyShare), true
 }
 
-func (s *KeygenSession) tryComplete() error {
+func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if s.completed {
-		return nil
+		return nil, nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.chainCodes) != len(s.cfg.Parties) {
-		return nil
+	if s.pending != nil {
+		if len(s.confirmations) == len(s.cfg.Parties) {
+			return nil, s.finalizeConfirmedKeyShare()
+		}
+		return nil, nil
+	}
+	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.chainCodeComms) != len(s.cfg.Parties) {
+		return nil, nil
 	}
 	for dealer, share := range s.shares {
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
@@ -201,7 +225,7 @@ func (s *KeygenSession) tryComplete() error {
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
 			)
-			return &tss.ProtocolError{
+			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
@@ -216,7 +240,7 @@ func (s *KeygenSession) tryComplete() error {
 	}
 	secretScalar, err := newEdSecretScalar(secret.Bytes())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
@@ -224,7 +248,7 @@ func (s *KeygenSession) tryComplete() error {
 		for _, dealer := range s.cfg.Parties {
 			p, err := edcurve.PointFromBytesAllowIdentity(s.commits[dealer][degree])
 			if err != nil {
-				return err
+				return nil, err
 			}
 			points = append(points, p)
 		}
@@ -232,39 +256,186 @@ func (s *KeygenSession) tryComplete() error {
 		groupCommitments[degree] = edcurve.AddPoints(points...).Bytes()
 	}
 	if _, err := edcurve.PointFromBytes(groupCommitments[0]); err != nil {
-		return fmt.Errorf("invalid group public key: %w", err)
+		return nil, fmt.Errorf("invalid group public key: %w", err)
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		pub, err := edcurve.EvalCommitments(groupCommitments, uint32(id))
 		if err != nil {
-			return err
+			return nil, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
-	chainCode, err := aggregateChainCode(s.cfg.Parties, s.chainCodes)
-	if err != nil {
-		return err
+	// Chain code commitment binds the aggregate of all round-1 chain code
+	// commitments into the transcript. Individual chain codes are revealed
+	// and verified in round 2 confirmations.
+	var chainCodeCommitAggregate []byte
+	if s.enableHD {
+		agg, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodeComms)
+		if err != nil {
+			return nil, err
+		}
+		chainCodeCommitAggregate = agg
 	}
-	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCode, s.commits, groupCommitments, verificationShares)
-	s.keyShare = &KeyShare{
+	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.commits, groupCommitments, verificationShares)
+	share := &KeyShare{
 		Version:              tss.Version,
 		Party:                s.cfg.Self,
 		Threshold:            s.cfg.Threshold,
 		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
 		PublicKey:            append([]byte(nil), groupCommitments[0]...),
-		ChainCode:            chainCode,
+		ChainCode:            nil, // filled in after confirmation round
 		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
+		KeygenSessionID:      s.cfg.SessionID,
 		KeygenTranscriptHash: keygenTranscriptHash,
 	}
-	s.completed = true
-	s.log.Info(s.cfg.Ctx(), "keygen complete",
+	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
+		return nil, err
+	}
+	// Carry the local chain code into the confirmation for commit-reveal.
+	share.ChainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
+	confirmation, err := share.KeygenConfirmation()
+	// Do not leak the per-party chain code into the KeyShare.
+	share.ChainCode = nil
+	if err != nil {
+		return nil, err
+	}
+	encodedConfirmation, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
+	s.pending = share
+	out := []tss.Envelope{
+		envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	}
+	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.keyShare.ValidateConsistency()
+	if len(s.confirmations) == len(s.cfg.Parties) {
+		if err := s.finalizeConfirmedKeyShare(); err != nil {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+const keygenConfirmationRound = 2
+
+func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+	if env.Round != keygenConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
+	}
+	if env.To != 0 {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must be broadcast"))
+	}
+	if env.ConfidentialRequired {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must not require confidential transport"))
+	}
+	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if confirmation.Sender != env.From {
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeInvalidMessage,
+			env.Round,
+			env.From,
+			fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender),
+		)
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if !bytes.Equal(canonical, env.Payload) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical keygen confirmation"))
+	}
+	if existing, ok := s.confirmations[env.From]; ok {
+		if bytes.Equal(existing, canonical) {
+			return nil, nil
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
+	}
+	// Verify the revealed chain code against the round 1 hash commitment.
+	if !verifyChainCodeCommit(s.cfg.SessionID, env.From, confirmation.ChainCode, s.chainCodeComms[env.From]) {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", env.From))
+	}
+	// Store the revealed chain code for XOR aggregation.
+	s.chainCodes[env.From] = append([]byte(nil), confirmation.ChainCode...)
+	if s.pending != nil {
+		if err := verifyKeygenConfirmationForShare(s.pending, confirmation); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+	}
+	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	if s.pending != nil && len(s.confirmations) == len(s.cfg.Parties) {
+		return nil, s.finalizeConfirmedKeyShare()
+	}
+	return nil, nil
+}
+
+func (s *KeygenSession) finalizeConfirmedKeyShare() error {
+	if s.pending == nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("missing pending key share"))
+	}
+	encoded := make([][]byte, len(s.cfg.Parties))
+	for i, id := range s.cfg.Parties {
+		confirmation, ok := s.confirmations[id]
+		if !ok {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
+		}
+		encoded[i] = append([]byte(nil), confirmation...)
+	}
+	if err := verifyKeygenConfirmationSet(s.pending, encoded); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	// Aggregate chain codes from all revealed confirmations.
+	var chainCode []byte
+	if s.enableHD {
+		cc, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodes)
+		if err != nil {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		}
+		chainCode = cc
+	}
+	finalShare := cloneKeyShareValue(s.pending)
+	finalShare.ChainCode = chainCode
+	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	if err := finalShare.ValidateConsistency(); err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	s.pending.Destroy()
+	s.pending = nil
+	s.keyShare = finalShare
+	s.completed = true
+	confirmationSetHash := keygenConfirmationSetHash(finalShare.KeygenConfirmations)
+	s.log.Info(s.cfg.Ctx(), "keygen complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+	)
+	return nil
+}
+
+func (s *KeygenSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	if s.pending != nil {
+		s.pending.Destroy()
+	}
+	s.pending = nil
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {
@@ -285,34 +456,6 @@ func validateCommitments(commitments [][]byte, threshold int) error {
 	return nil
 }
 
-// aggregateChainCode XORs all parties' 32-byte chain codes together to produce
-// the group chain code. Returns nil when no party provided a chain code (HD disabled).
-func aggregateChainCode(parties []tss.PartyID, chainCodes map[tss.PartyID][]byte) ([]byte, error) {
-	enabled := false
-	for _, id := range parties {
-		switch len(chainCodes[id]) {
-		case 0:
-		case 32:
-			enabled = true
-		default:
-			return nil, fmt.Errorf("invalid chain code for party %d", id)
-		}
-	}
-	if !enabled {
-		return nil, nil
-	}
-	out := make([]byte, 32)
-	for _, id := range parties {
-		if len(chainCodes[id]) != 32 {
-			return nil, fmt.Errorf("missing chain code for party %d", id)
-		}
-		for i := range out {
-			out[i] ^= chainCodes[id][i]
-		}
-	}
-	return out, nil
-}
-
 func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType string, payload []byte, confidential bool) tss.Envelope {
 	return tss.Envelope{
 		Protocol:             protocol,
@@ -325,4 +468,33 @@ func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, pay
 		Payload:              payload,
 		ConfidentialRequired: confidential,
 	}.WithTranscriptHash()
+}
+
+const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"
+
+// chainCodeCommitment produces a hash commitment for a party's HD chain code.
+// The chain code is revealed in round 2 (keygen confirmation) and verified
+// against this commitment to prevent last-sender bias.
+func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
+	if len(chainCode) == 0 {
+		return nil
+	}
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(chainCodeCommitLabel))
+	wire.WriteHashPart(h, sessionID[:])
+	wire.WriteHashPart(h, []byte{byte(partyID >> 24), byte(partyID >> 16), byte(partyID >> 8), byte(partyID)})
+	wire.WriteHashPart(h, chainCode)
+	return h.Sum(nil)
+}
+
+// verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
+func verifyChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
+	if len(commit) == 0 {
+		return len(chainCode) == 0
+	}
+	if len(commit) != sha256.Size || len(chainCode) != 32 {
+		return false
+	}
+	expected := chainCodeCommitment(sessionID, partyID, chainCode)
+	return bytes.Equal(expected, commit)
 }

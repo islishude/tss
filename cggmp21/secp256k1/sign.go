@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"sync"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -39,16 +40,33 @@ type PresignContext struct {
 	MessageDomain  string   `json:"message_domain"`
 }
 
+// PresignStore is an optional durable claim interface. When provided to StartSign,
+// the library calls MarkConsumed with the presign's unique transcript hash before
+// it constructs any outbound signing partial. If the store write fails, StartSign
+// reverts the in-memory consumed flag and returns an error — the presign is not
+// consumed and can be retried.
+//
+// A typical implementation persists the presign record with Consumed=true in an
+// atomic compare-and-swap or conditional-insert operation keyed by the transcript
+// hash. The transcript hash uniquely identifies one presign instance and can be
+// used as an idempotency key.
+type PresignStore interface {
+	MarkConsumed(presignTranscriptHash []byte) error
+}
+
 // SignRequest is the context-bound online signing request for a persisted
 // presignature. Message is hashed with the presign context before ECDSA.
 type SignRequest struct {
-	Context PresignContext `json:"context"`
-	Message []byte         `json:"message"`
-	LowS    bool           `json:"low_s"`
+	Context      PresignContext `json:"context"`
+	Message      []byte         `json:"message"`
+	LowS         bool           `json:"low_s"`
+	PresignStore PresignStore   `json:"-"` // optional durable claim hook
 }
 
 // Presign contains one local offline signing record and must be consumed once.
 type Presign struct {
+	mu *sync.Mutex
+
 	Version              uint16         `json:"version"`
 	Party                tss.PartyID    `json:"party"`
 	Threshold            int            `json:"threshold"`
@@ -79,7 +97,9 @@ func (p *Presign) Destroy() {
 	if p == nil {
 		return
 	}
+	p.mu.Lock()
 	p.Consumed = true
+	p.mu.Unlock()
 	p.kShare.Destroy()
 	p.chiShare.Destroy()
 	p.delta.Destroy()
@@ -517,12 +537,12 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 	}
 }
 
-// Presign returns the completed local presign record.
+// Presign returns a deep copy of the completed local presign record.
 func (s *PresignSession) Presign() (*Presign, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return s.presign, true
+	return s.presign.Clone(), true
 }
 
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
@@ -822,6 +842,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	s.round3Sent = true
 	s.presign = &Presign{
+		mu:                   &sync.Mutex{},
 		Version:              tss.Version,
 		Party:                s.key.Party,
 		Threshold:            s.key.Threshold,
@@ -981,10 +1002,10 @@ func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request
 		return nil, nil, errors.New("presign additive shift mismatch")
 	}
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
-	return startSignDigestBound(key, presign, sessionID, digest, contextHash, request.LowS)
+	return startSignDigestBound(key, presign, sessionID, digest, contextHash, request.LowS, request.PresignStore)
 }
 
-func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store PresignStore) (*SignSession, []tss.Envelope, error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -997,12 +1018,20 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.ContextHash) {
 		return nil, nil, errors.New("presign context mismatch")
 	}
-	if presign.Consumed {
+	if !claimPresignForSigning(presign) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
 	}
-	// Mark the presign consumed before constructing the outbound sign envelope
-	// so accidental reuse fails before any new partial signature can leave.
-	presign.Consumed = true
+	// Durable claim: if the caller provided a store, persist Consumed=true before
+	// we construct any outbound partial. If persistence fails, revert the in-memory
+	// flag so the presign can be retried.
+	if store != nil {
+		if err := store.MarkConsumed(slices.Clone(presign.TranscriptHash)); err != nil {
+			presign.mu.Lock()
+			presign.Consumed = false
+			presign.mu.Unlock()
+			return nil, nil, fmt.Errorf("presign durable claim failed: %w", err)
+		}
+	}
 	kShare, err := secpScalarFromSecret(presign.kShare)
 	if err != nil {
 		return nil, nil, err
@@ -1335,7 +1364,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		var out []tss.Envelope
 		var err error
 		if rawDigest {
-			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true)
+			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, nil)
 		} else {
 			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
 				Context: ctx,
@@ -1451,6 +1480,35 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	}
 	if len(presign.Signers) < key.Threshold || !tss.ContainsParty(presign.Signers, key.Party) {
 		return errors.New("invalid presign signer set")
+	}
+	return nil
+}
+
+func claimPresignForSigning(presign *Presign) bool {
+	presign.mu.Lock()
+	defer presign.mu.Unlock()
+	if presign.Consumed {
+		return false
+	}
+	// Mark consumed before constructing the outbound sign envelope so accidental
+	// reuse fails before any new partial signature can leave the process.
+	presign.Consumed = true
+	return true
+}
+
+// ClaimPresign atomically checks and marks a presign as consumed.
+// It returns [tss.ErrCodeConsumed] if the presign has already been consumed.
+// Callers can use this as a pre-flight check before [StartSign] to avoid
+// double-consumption across concurrent signing attempts.
+//
+// ClaimPresign does not perform durable persistence — use [SignRequest.PresignStore]
+// for durable consumption tracking during [StartSign].
+func ClaimPresign(presign *Presign) error {
+	if presign == nil {
+		return errors.New("nil presign")
+	}
+	if !claimPresignForSigning(presign) {
+		return tss.NewProtocolError(tss.ErrCodeConsumed, 1, presign.Party, errors.New("presign already consumed"))
 	}
 	return nil
 }

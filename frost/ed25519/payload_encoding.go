@@ -38,12 +38,12 @@ const (
 )
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
-	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
-		return nil, fmt.Errorf("chain code must be empty or 32 bytes, got %d", len(p.ChainCode))
+	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
+		return nil, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
 	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
 		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCode)},
+		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCodeCommit)},
 	})
 }
 
@@ -62,11 +62,11 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	chainCode := wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode)
-	if len(chainCode) != 0 && len(chainCode) != 32 {
-		return keygenCommitmentsPayload{}, fmt.Errorf("chain code must be empty or 32 bytes, got %d", len(chainCode))
+	chainCodeCommit := wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode)
+	if len(chainCodeCommit) != 0 && len(chainCodeCommit) != 32 {
+		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(chainCodeCommit))
 	}
-	return keygenCommitmentsPayload{Commitments: commitments, ChainCode: chainCode}, nil
+	return keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit}, nil
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {

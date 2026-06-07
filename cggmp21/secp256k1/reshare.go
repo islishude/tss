@@ -590,7 +590,7 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 	if s == nil || !s.completed || s.newShare == nil {
 		return nil, false
 	}
-	return cloneKeyShareValue(s.newShare), true
+	return s.newShare.Clone(), true
 }
 
 func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {

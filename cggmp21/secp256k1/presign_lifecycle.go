@@ -2,8 +2,8 @@ package secp256k1
 
 import (
 	"errors"
-
-	"github.com/islishude/tss"
+	"slices"
+	"sync"
 )
 
 // Presign consumption lifecycle:
@@ -21,6 +21,13 @@ import (
 //  5. If the signing session fails after StartSign but the caller is
 //     uncertain whether a partial signature was emitted, the presign MUST be
 //     discarded rather than reused.
+//  6. For durable consumption tracking, provide a [PresignStore] via
+//     [SignRequest.PresignStore]. The library calls MarkConsumed with the
+//     presign's unique TranscriptHash after the in-memory claim but before
+//     constructing any outbound partial. If the store write fails, the
+//     in-memory consumed flag is reverted and StartSign returns an error.
+//     This integrates with atomic compare-and-swap storage to prevent reuse
+//     across concurrent process instances.
 //
 // The library refuses to sign with a Consumed presign (see StartSign),
 // so as long as the caller persists the Consumed flag, reuse is prevented
@@ -33,24 +40,46 @@ func MarkPresignConsumed(p *Presign) (*Presign, error) {
 	if p == nil {
 		return nil, errors.New("nil presign")
 	}
-	cp := *p
+	p.mu.Lock()
+	cp := p.Clone()
+	p.mu.Unlock()
 	cp.Consumed = true
-	// Deep-copy variable-length slices so the copy shares no backing storage
-	// with the original.
-	cp.R = append([]byte(nil), p.R...)
-	cp.LittleR = append([]byte(nil), p.LittleR...)
-	cp.TranscriptHash = append([]byte(nil), p.TranscriptHash...)
-	cp.Context.DerivationPath = append([]uint32(nil), p.Context.DerivationPath...)
-	cp.ContextHash = append([]byte(nil), p.ContextHash...)
-	cp.AdditiveShift = append([]byte(nil), p.AdditiveShift...)
-	cp.PublicKey = append([]byte(nil), p.PublicKey...)
-	cp.KeygenTranscriptHash = append([]byte(nil), p.KeygenTranscriptHash...)
-	cp.PartiesHash = append([]byte(nil), p.PartiesHash...)
-	cp.Signers = append([]tss.PartyID(nil), p.Signers...)
-	cp.kShare = p.kShare.Clone()
-	cp.chiShare = p.chiShare.Clone()
-	cp.delta = p.delta.Clone()
-	return &cp, nil
+	return cp, nil
+}
+
+// Clone returns a deep copy of the presign. The returned copy has a fresh
+// mutex and owns its own slice/secret storage — mutations do not affect
+// the original.
+func (p *Presign) Clone() *Presign {
+	if p == nil {
+		return nil
+	}
+	return &Presign{
+		mu:             &sync.Mutex{},
+		Version:        p.Version,
+		Party:          p.Party,
+		Threshold:      p.Threshold,
+		Signers:        slices.Clone(p.Signers),
+		R:              slices.Clone(p.R),
+		LittleR:        slices.Clone(p.LittleR),
+		TranscriptHash: slices.Clone(p.TranscriptHash),
+		Context: PresignContext{
+			KeyID:          p.Context.KeyID,
+			ChainID:        p.Context.ChainID,
+			DerivationPath: slices.Clone(p.Context.DerivationPath),
+			PolicyDomain:   p.Context.PolicyDomain,
+			MessageDomain:  p.Context.MessageDomain,
+		},
+		ContextHash:          slices.Clone(p.ContextHash),
+		AdditiveShift:        slices.Clone(p.AdditiveShift),
+		PublicKey:            slices.Clone(p.PublicKey),
+		KeygenTranscriptHash: slices.Clone(p.KeygenTranscriptHash),
+		PartiesHash:          slices.Clone(p.PartiesHash),
+		Consumed:             p.Consumed,
+		kShare:               p.kShare.Clone(),
+		chiShare:             p.chiShare.Clone(),
+		delta:                p.delta.Clone(),
+	}
 }
 
 // IsPresignConsumed reports whether the presign has been consumed.
@@ -58,5 +87,7 @@ func IsPresignConsumed(p *Presign) bool {
 	if p == nil {
 		return true // treat nil as consumed
 	}
+	p.mu.Lock()
+	defer p.mu.Unlock()
 	return p.Consumed
 }
