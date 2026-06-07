@@ -4,9 +4,10 @@
 package secret
 
 import (
+	"crypto/subtle"
 	"errors"
 	"fmt"
-	"math/big"
+	"slices"
 )
 
 // Scalar is a fixed-length secret scalar. It deliberately exposes no variable-length
@@ -58,22 +59,21 @@ func (s *Scalar) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("secret.Scalar must not be JSON-encoded")
 }
 
+// Clone returns an independent copy of the scalar, or nil if s is nil.
+func (s *Scalar) Clone() *Scalar {
+	if s == nil {
+		return nil
+	}
+	return &Scalar{buf: slices.Clone(s.buf)}
+}
+
 // Destroy zeros the internal buffer in place.
 func (s *Scalar) Destroy() {
 	if s == nil {
 		return
 	}
 	clear(s.buf)
-}
-
-// ClearBigInt zeros the allocated words behind x and resets x to zero.
-func ClearBigInt(x *big.Int) {
-	if x == nil {
-		return
-	}
-	words := x.Bits()
-	clear(words[:cap(words)])
-	x.SetBits(nil)
+	s.buf = nil
 }
 
 // Equal reports whether s and t encode the same scalar in constant time.
@@ -81,14 +81,7 @@ func (s *Scalar) Equal(t *Scalar) bool {
 	if s == nil || t == nil {
 		return s == t
 	}
-	if len(s.buf) != len(t.buf) {
-		return false
-	}
-	var acc byte
-	for i := range s.buf {
-		acc |= s.buf[i] ^ t.buf[i]
-	}
-	return acc == 0
+	return subtle.ConstantTimeCompare(s.buf, t.buf) == 1
 }
 
 // MarshalBinary returns a compact big-endian encoding with no leading zero byte.

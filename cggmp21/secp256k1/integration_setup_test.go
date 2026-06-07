@@ -10,10 +10,8 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
-		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 768,
-	})
+	restore := zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams())
 	code := m.Run()
-	restoreSP()
+	restore()
 	os.Exit(code)
 }

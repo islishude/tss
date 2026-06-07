@@ -12,6 +12,11 @@ import (
 	fed "filippo.io/edwards25519"
 )
 
+const (
+	// ScalarSize is the fixed byte length of Ed25519 scalars.
+	ScalarSize = 32
+)
+
 var (
 	// cofactorScalar is the Ed25519 cofactor (8) as a little-endian scalar, used to
 	// detect small-order points during deserialization.

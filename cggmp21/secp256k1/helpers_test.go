@@ -11,6 +11,7 @@ import (
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // --- PresignContext factory ---
@@ -83,8 +84,8 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.Parties = append([]tss.PartyID(nil), in.Parties...)
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
 	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.secret = cloneSecpSecretScalar(in.secret)
-	out.GroupCommitments = cloneByteSlices(in.GroupCommitments)
+	out.secret = in.secret.Clone()
+	out.GroupCommitments = testutil.CloneByteSlices(in.GroupCommitments)
 	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
 	for i := range out.VerificationShares {
 		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
@@ -111,7 +112,7 @@ func cloneKeyShare(in *KeyShare) *KeyShare {
 	out.LogCiphertext = append([]byte(nil), in.LogCiphertext...)
 	out.LogProof = append([]byte(nil), in.LogProof...)
 	out.logRandomness = append([]byte(nil), in.logRandomness...)
-	out.KeygenConfirmations = cloneByteSlices(in.KeygenConfirmations)
+	out.KeygenConfirmations = testutil.CloneByteSlices(in.KeygenConfirmations)
 	return &out
 }
 
@@ -132,21 +133,11 @@ func clonePresign(in *Presign) *Presign {
 	out.PublicKey = append([]byte(nil), in.PublicKey...)
 	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
 	out.PartiesHash = append([]byte(nil), in.PartiesHash...)
-	out.kShare = cloneSecpSecretScalar(in.kShare)
-	out.chiShare = cloneSecpSecretScalar(in.chiShare)
-	out.delta = cloneSecpSecretScalar(in.delta)
+	out.kShare = in.kShare.Clone()
+	out.chiShare = in.chiShare.Clone()
+	out.delta = in.delta.Clone()
 	out.Consumed = false
 	return &out
-}
-
-// cloneByteSlices returns a deep copy of a [][]byte slice.
-// Used by integration-tagged test files.
-func cloneByteSlices(in [][]byte) [][]byte {
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = append([]byte(nil), in[i]...)
-	}
-	return out
 }
 
 // --- Minimal presign fixture ---

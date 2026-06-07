@@ -10,6 +10,9 @@ import (
 	fiatscalar "github.com/islishude/tss/internal/fiat/secp256k1scalar"
 )
 
+// ScalarSize is the fixed byte length of secp256k1 scalars
+const ScalarSize = 32
+
 // Scalar is a secp256k1 subgroup scalar backed by fiat-crypto arithmetic.
 type Scalar struct {
 	mont fiatscalar.MontgomeryDomainFieldElement
@@ -45,11 +48,11 @@ var halfOrder = Scalar{mont: fiatscalar.MontgomeryDomainFieldElement{0xbfd25e8cd
 
 // ScalarFromBytes parses a canonical 32-byte big-endian non-zero scalar.
 func ScalarFromBytes(in []byte) (Scalar, error) {
-	if len(in) != 32 {
+	if len(in) != ScalarSize {
 		return Scalar{}, errors.New("secp256k1 scalar must be 32 bytes")
 	}
-	var be = [32]byte(in)
-	if be == [32]byte{} {
+	var be = [ScalarSize]byte(in)
+	if be == [ScalarSize]byte{} {
 		return Scalar{}, errors.New("secp256k1 scalar is zero")
 	}
 	if !lt32BE(be, scalarModulus) {
@@ -67,7 +70,7 @@ func ScalarFromBytes(in []byte) (Scalar, error) {
 func (s Scalar) Bytes() []byte {
 	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
 	fiatscalar.FromMontgomery(&nonMont, &s.mont)
-	var raw [32]byte
+	var raw [ScalarSize]byte
 	fiatscalar.ToBytes(&raw, (*[4]uint64)(&nonMont))
 	slices.Reverse(raw[:])
 	return raw[:]
@@ -152,10 +155,10 @@ func ScalarInvert(a Scalar) (Scalar, error) {
 
 // FieldElementFromBytes parses a canonical 32-byte big-endian field element.
 func FieldElementFromBytes(in []byte) (FieldElement, error) {
-	if len(in) != 32 {
+	if len(in) != ScalarSize {
 		return FieldElement{}, errors.New("secp256k1 field element must be 32 bytes")
 	}
-	be := [32]byte(in)
+	be := [ScalarSize]byte(in)
 	if !lt32BE(be, fieldModulus) {
 		return FieldElement{}, errors.New("secp256k1 field element out of range")
 	}
@@ -171,7 +174,7 @@ func FieldElementFromBytes(in []byte) (FieldElement, error) {
 func (f FieldElement) Bytes() []byte {
 	var nonMont fiatfield.NonMontgomeryDomainFieldElement
 	fiatfield.FromMontgomery(&nonMont, &f.mont)
-	var raw [32]byte
+	var raw [ScalarSize]byte
 	fiatfield.ToBytes(&raw, (*[4]uint64)(&nonMont))
 	slices.Reverse(raw[:]) // convert to big-endian for output
 	return raw[:]

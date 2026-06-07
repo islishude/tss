@@ -4,16 +4,13 @@
 package testutil
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"io"
 	"math/rand/v2"
-	"sync"
+	"slices"
 
 	"github.com/islishude/tss"
-	pai "github.com/islishude/tss/internal/paillier"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // deterministicReader adapts *rand.Rand to io.Reader.
@@ -133,44 +130,16 @@ func AssertProtocolError(tb interface{ Fatal(...any) }, err error, code string) 
 	return pe
 }
 
-// FastSecurityParams returns reduced security parameters suitable for
-// fast test-only proof generation. These do NOT provide production security.
-func FastSecurityParams() zkpai.SecurityParams {
-	return zkpai.SecurityParams{
-		Ell:             256,
-		EllPrime:        512,
-		Epsilon:         64,
-		ChallengeBits:   128,
-		MinPaillierBits: 512,
+// CloneByteSlices returns a deep copy of a [][]byte slice.
+// Both the outer slice and each inner slice are independently copied.
+// Nil inner slices are preserved as nil.
+func CloneByteSlices(in [][]byte) [][]byte {
+	if in == nil {
+		return nil
 	}
-}
-
-// --- Cached Paillier fixtures ---
-
-var (
-	cachedPaillierMu  sync.Mutex
-	cachedPaillierMap = make(map[int]*pai.PrivateKey)
-)
-
-// CachedPaillierFixture returns a Paillier private key at the requested bit
-// length, generating it once and reusing across subsequent calls within the
-// same process. The key is NOT destroyed between tests — callers must not
-// mutate it. Use only in tests.
-func CachedPaillierFixture(bits int) *pai.PrivateKey {
-	cachedPaillierMu.Lock()
-	if sk, ok := cachedPaillierMap[bits]; ok {
-		cachedPaillierMu.Unlock()
-		return sk
+	out := make([][]byte, len(in))
+	for i := range in {
+		out[i] = slices.Clone(in[i])
 	}
-	cachedPaillierMu.Unlock()
-
-	sk, err := pai.GenerateKey(context.Background(), nil, bits)
-	if err != nil {
-		panic(fmt.Sprintf("CachedPaillierFixture(%d): %v", bits, err))
-	}
-
-	cachedPaillierMu.Lock()
-	cachedPaillierMap[bits] = sk
-	cachedPaillierMu.Unlock()
-	return sk
+	return out
 }

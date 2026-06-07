@@ -11,6 +11,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -683,19 +684,19 @@ func cloneModulusProof(in *ModulusProof) *ModulusProof {
 	out := *in
 	out.W = append([]byte(nil), in.W...)
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.X = cloneByteSlices(in.X)
+	out.X = testutil.CloneByteSlices(in.X)
 	out.A = append([]byte(nil), in.A...)
 	out.B = append([]byte(nil), in.B...)
-	out.Z = cloneByteSlices(in.Z)
+	out.Z = testutil.CloneByteSlices(in.Z)
 	return &out
 }
 
 func cloneRingPedersenProof(in *RingPedersenProof) *RingPedersenProof {
 	out := *in
 	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.Commitments = cloneByteSlices(in.Commitments)
+	out.Commitments = testutil.CloneByteSlices(in.Commitments)
 	out.Challenges = append([]byte(nil), in.Challenges...)
-	out.Responses = cloneByteSlices(in.Responses)
+	out.Responses = testutil.CloneByteSlices(in.Responses)
 	return &out
 }
 
@@ -722,17 +723,6 @@ func cloneMTAResponseProof(in *MTAResponseProof) *MTAResponseProof {
 	out.BetaResponse = append([]byte(nil), in.BetaResponse...)
 	out.Randomness = append([]byte(nil), in.Randomness...)
 	return &out
-}
-
-func cloneByteSlices(in [][]byte) [][]byte {
-	if in == nil {
-		return nil
-	}
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = append([]byte(nil), in[i]...)
-	}
-	return out
 }
 
 func prependZero(in []byte) []byte {

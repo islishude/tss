@@ -3,7 +3,6 @@ package secret
 import (
 	"bytes"
 	"encoding/json"
-	"math/big"
 	"testing"
 )
 
@@ -78,30 +77,6 @@ func TestScalarDestroy(t *testing.T) {
 	nilS.Destroy() // must not panic
 }
 
-func TestClearBigIntClearsBackingWords(t *testing.T) {
-	words := make([]big.Word, 2, 4)
-	for i := range words[:cap(words)] {
-		words[:cap(words)][i] = big.Word(i + 1)
-	}
-	x := new(big.Int).SetBits(words)
-
-	ClearBigInt(x)
-
-	if x.Sign() != 0 {
-		t.Fatal("big.Int was not reset to zero")
-	}
-	if len(x.Bits()) != 0 {
-		t.Fatal("big.Int still has backing words")
-	}
-	for i, word := range words[:cap(words)] {
-		if word != 0 {
-			t.Fatalf("word %d was not cleared", i)
-		}
-	}
-	var nilX *big.Int
-	ClearBigInt(nilX)
-}
-
 func TestScalarMarshalBinary(t *testing.T) {
 	s, _ := NewScalar([]byte{0x01, 0x02, 0x03}, 4)
 	raw, err := s.MarshalBinary()
@@ -155,5 +130,34 @@ func TestScalarNoLeakVectors(t *testing.T) {
 	// JSON must fail
 	if _, err := json.Marshal(s); err == nil {
 		t.Fatal("scalar JSON encoded")
+	}
+}
+
+func TestScalar_Clone(t *testing.T) {
+	var nilS *Scalar
+	if clone := nilS.Clone(); clone != nil {
+		t.Fatal("Clone of nil should be nil")
+	}
+	if b := nilS.FixedBytes(); b != nil {
+		t.Fatal("FixedBytes of nil should be nil")
+	}
+	if l := nilS.FixedLen(); l != 0 {
+		t.Fatal("FixedLen of nil should be 0")
+	}
+	if _, err := nilS.MarshalBinary(); err == nil {
+		t.Fatal("MarshalBinary of nil should error")
+	}
+
+	s, err := NewScalar([]byte{0x01, 0x02}, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
+	clone := s.Clone()
+	if !s.Equal(clone) {
+		t.Fatal("clone not equal to original")
+	}
+	clone.buf[0] = 0xff
+	if s.buf[0] != 0x00 {
+		t.Fatal("original modified when clone changed")
 	}
 }

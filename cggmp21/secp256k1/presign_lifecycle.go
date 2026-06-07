@@ -47,9 +47,9 @@ func MarkPresignConsumed(p *Presign) (*Presign, error) {
 	cp.KeygenTranscriptHash = append([]byte(nil), p.KeygenTranscriptHash...)
 	cp.PartiesHash = append([]byte(nil), p.PartiesHash...)
 	cp.Signers = append([]tss.PartyID(nil), p.Signers...)
-	cp.kShare = cloneSecpSecretScalar(p.kShare)
-	cp.chiShare = cloneSecpSecretScalar(p.chiShare)
-	cp.delta = cloneSecpSecretScalar(p.delta)
+	cp.kShare = p.kShare.Clone()
+	cp.chiShare = p.chiShare.Clone()
+	cp.delta = p.delta.Clone()
 	return &cp, nil
 }
 

@@ -260,7 +260,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.Parties = slices.Clone(k.Parties)
 	out.PublicKey = slices.Clone(k.PublicKey)
 	out.ChainCode = slices.Clone(k.ChainCode)
-	out.secret = cloneEdSecretScalar(k.secret)
+	out.secret = k.secret.Clone()
 	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)

@@ -50,6 +50,18 @@ func DefaultSecurityParams() SecurityParams {
 	}
 }
 
+// FastSecurityParams returns reduced security parameters suitable for
+// fast test-only proof generation. These do NOT provide production security.
+func FastSecurityParams() SecurityParams {
+	return SecurityParams{
+		Ell:             256,
+		EllPrime:        512,
+		Epsilon:         64,
+		ChallengeBits:   128,
+		MinPaillierBits: 768,
+	}
+}
+
 // Validate checks that all security parameters are within acceptable bounds.
 func (sp SecurityParams) Validate() error {
 	if sp.Ell == 0 {

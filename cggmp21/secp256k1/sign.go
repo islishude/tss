@@ -832,7 +832,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		PublicKey:            append([]byte(nil), s.key.PublicKey...),
 		KeygenTranscriptHash: append([]byte(nil), s.key.KeygenTranscriptHash...),
 		PartiesHash:          partySetHash(s.key.Parties),
-		kShare:               cloneSecpSecretScalar(s.kShare),
+		kShare:               s.kShare.Clone(),
 	}
 	s.presign.chiShare, err = secpSecretScalarFromBig(chiShare)
 	if err != nil {
