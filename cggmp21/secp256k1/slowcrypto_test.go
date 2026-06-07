@@ -230,10 +230,11 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	path := []uint32{0, 17}
 
 	// Verify derivation produces valid child key.
-	derivedPub, _, _, err := DeriveBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
+	result, err := DeriveNonHardenedBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
+	derivedPub := result.ChildPublicKey
 
 	ctx := testPresignContext()
 	ctx.DerivationPath = path

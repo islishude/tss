@@ -63,27 +63,27 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	}
 
 	path := []uint32{0, 1, 2}
-	childPub2, shift2, childChain2, err := DeriveBIP32(newShares[2].PublicKey, newShares[2].ChainCode, path)
+	r2, err := DeriveNonHardenedBIP32(newShares[2].PublicKey, newShares[2].ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	childPub4, shift4, childChain4, err := DeriveBIP32(newShares[4].PublicKey, newShares[4].ChainCode, path)
+	r4, err := DeriveNonHardenedBIP32(newShares[4].PublicKey, newShares[4].ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(childPub2, childPub4) || !bytes.Equal(shift2, shift4) || !bytes.Equal(childChain2, childChain4) {
+	if !bytes.Equal(r2.ChildPublicKey, r4.ChildPublicKey) || !bytes.Equal(r2.AdditiveShift, r4.AdditiveShift) || !bytes.Equal(r2.ChildChainCode, r4.ChildChainCode) {
 		t.Fatal("HD derivation diverged across reshared recipients")
 	}
 
 	message := []byte("HD reshare recipient signing")
-	pub, sig, err := SignWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{AdditiveShift: shift2})
+	pub, sig, err := SignWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{AdditiveShift: r2.AdditiveShift})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(pub, childPub2) {
+	if !bytes.Equal(pub, r2.ChildPublicKey) {
 		t.Fatal("HD signing returned the wrong derived public key")
 	}
-	if !stded25519.Verify(stded25519.PublicKey(childPub2), message, sig) {
+	if !stded25519.Verify(stded25519.PublicKey(r2.ChildPublicKey), message, sig) {
 		t.Fatal("HD reshared signature failed verification")
 	}
 }

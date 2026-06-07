@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -1411,7 +1412,7 @@ func validatePresignContext(ctx PresignContext) error {
 		return errors.New("presign context message domain is required")
 	}
 	for _, index := range ctx.DerivationPath {
-		if index >= HardenedKeyStart {
+		if index >= bip32util.HardenedKeyStart {
 			return fmt.Errorf("hardened derivation index %d is not supported", index)
 		}
 	}
@@ -1425,11 +1426,11 @@ func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, [
 	ctx.DerivationPath = append([]uint32(nil), ctx.DerivationPath...)
 	var additiveShift []byte
 	if len(ctx.DerivationPath) > 0 {
-		_, shift, _, err := DeriveBIP32(key.PublicKey, key.ChainCode, ctx.DerivationPath)
+		result, err := DeriveNonHardenedBIP32Extended(key.PublicKey, key.ChainCode, ctx.DerivationPath)
 		if err != nil {
 			return PresignContext{}, nil, nil, err
 		}
-		additiveShift = shift
+		additiveShift = result.AdditiveShift
 	}
 	return ctx, presignContextHash(ctx), additiveShift, nil
 }
