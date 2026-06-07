@@ -2,18 +2,16 @@
 
 Go threshold-signature building blocks.
 
-| Package             | Description                                                        |
-| ------------------- | ------------------------------------------------------------------ |
-| `frost/ed25519`     | FROST-style threshold Ed25519 (RFC 9591).                          |
-| `cggmp21/secp256k1` | **Experimental.** CGGMP21-style threshold ECDSA with Paillier MtA. |
-
-References: [RFC 9591 (FROST)](https://www.rfc-editor.org/rfc/rfc9591), [CGGMP21 (ePrint 2021/060)](https://eprint.iacr.org/2021/060).
+| Package             | Description                                                                                 |
+| ------------------- | ------------------------------------------------------------------------------------------- |
+| `frost/ed25519`     | FROST-style threshold Ed25519 ([RFC 9591 (FROST)](https://www.rfc-editor.org/rfc/rfc9591)). |
+| `cggmp21/secp256k1` | [CGGMP21-style](https://eprint.iacr.org/2021/060) threshold ECDSA with Paillier MtA.        |
 
 ## Status
 
 `frost/ed25519` implements a usable FROST flow: dealerless DKG, two-round signing, partial verification, Ed25519-compatible aggregation, resharing, and BIP32-Ed25519 HD derivation.
 
-`cggmp21/secp256k1` signs without exposing private key shares or nonce shares. The ZK proof layer is prepared for independent review but **not yet audited**. The experimental warning stays until Paillier/ZK review is complete. See [docs/audit-guide.md](docs/audit-guide.md).
+`cggmp21/secp256k1` implements dealerless DKG, offline presigning, single-round online signing, proactive refresh, resharing, BIP32 HD derivation, and blame attribution. Paillier proof layer uses CGGMP24 Πmod and Ring-Pedersen Πprm semantics.
 
 ## Quick Start
 
@@ -42,12 +40,11 @@ sig, _ := ed25519.Sign(message, map[tss.PartyID]*ed25519.KeyShare{1: share, 2: s
 ed25519.Verify(share.PublicKey, message, sig) // true
 ```
 
+Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go).
+
 ### secp256k1 (CGGMP21)
 
 ```go
-// presign and signing are experimental features
-secp256k1.SetAcceptExperimentalUsageForTesting(true)
-
 // DKG → Presign (offline) → Sign (online, one round)
 sessionID, _ := tss.NewSessionID(nil)
 kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
@@ -68,7 +65,7 @@ sig, _ := signSess.Signature()
 secp256k1.VerifySignature(share.PublicKey, request, sig) // true
 ```
 
-Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go) and [`cggmp21/secp256k1/examples_test.go`](cggmp21/secp256k1/examples_test.go).
+Full examples in [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp256k1/integration_example_test.go) and [`cggmp21/secp256k1/examples_test.go`](cggmp21/secp256k1/examples_test.go).
 
 ## Documentation
 
@@ -113,11 +110,4 @@ make help         # list all targets
 
 ## Security
 
-- Never log secret scalar, nonce, Paillier private-key, or key-share bytes.
-- Call `Destroy()` on shares, presigns, and sessions when done.
-- `ConfidentialRequired` envelopes carry secret material — deliver them encrypted.
-- `Blame.Evidence` contains public hashes only; safe to log and share.
-- CGGMP21 presigns are one-use; reuse breaks ECDSA security.
-- Go zeroization is best-effort. Use short-lived processes, encrypted persistence, and process isolation for stronger guarantees.
-
-See [docs/security.md](docs/security.md) for the full threat model and caller responsibilities.
+See [docs/security.md](docs/security.md) for the threat model, caller responsibilities, secret-material lifecycle, constant-time Paillier constraints, and production checklist.

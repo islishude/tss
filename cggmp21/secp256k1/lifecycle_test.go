@@ -11,7 +11,6 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	pai "github.com/islishude/tss/internal/paillier"
 )
 
 func TestCGGMP21KeyShareJSONAndDestroy(t *testing.T) {
@@ -178,8 +177,6 @@ func TestCGGMP21SessionDestroyClearsLocalSecrets(t *testing.T) {
 
 func secpLifecycleKeygen(t testing.TB, enableHD bool) (*KeygenSession, *KeyShare) {
 	t.Helper()
-	restore := pai.SetMinimumModulusBitsForTesting(minKeygenPaillierBits)
-	t.Cleanup(restore)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -189,7 +186,7 @@ func secpLifecycleKeygen(t testing.TB, enableHD bool) (*KeygenSession, *KeyShare
 		Parties:   []tss.PartyID{1},
 		Self:      1,
 		SessionID: sessionID,
-	}, KeygenOptions{PaillierBits: minKeygenPaillierBits, EnableHD: enableHD})
+	}, KeygenOptions{PaillierBits: defaultPaillierBits(), EnableHD: enableHD})
 	if err != nil {
 		t.Fatal(err)
 	}

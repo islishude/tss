@@ -9,8 +9,6 @@ import (
 )
 
 func TestPrivateKeyJSONAndDestroy(t *testing.T) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	t.Cleanup(restore)
 	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)

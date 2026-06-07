@@ -12,8 +12,6 @@ import (
 )
 
 func TestMTAProductShares(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	defer restore()
 	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	})

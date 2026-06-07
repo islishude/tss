@@ -80,19 +80,6 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
 
-// minKeygenPaillierBits is the minimum Paillier modulus size accepted for keygen.
-// Production default is 3072 bits (~128-bit security matching secp256k1).
-// Tests that need smaller moduli must call SetMinKeygenPaillierBitsForTesting.
-var minKeygenPaillierBits = 3072
-
-// SetMinKeygenPaillierBitsForTesting overrides the minimum keygen Paillier size
-// and returns a function that restores the previous value. DO NOT use outside tests.
-func SetMinKeygenPaillierBitsForTesting(bits int) func() {
-	old := minKeygenPaillierBits
-	minKeygenPaillierBits = bits
-	return func() { minKeygenPaillierBits = old }
-}
-
 // StartKeygenWithOptions starts keygen with explicit Paillier key-size options.
 //
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
@@ -105,15 +92,17 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	if err := config.ValidateWithLimits(tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	parties := config.SortedParties()
-	config.Parties = parties
-	paillierBits := opts.PaillierBits
-	if paillierBits == 0 {
-		paillierBits = defaultPaillierBits
+
+	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
+	config.Parties = config.SortedParties()
+
+	defPaillierBits := defaultPaillierBits()
+	if opts.PaillierBits == 0 {
+		opts.PaillierBits = defPaillierBits
 	}
-	if paillierBits < minKeygenPaillierBits {
+	if opts.PaillierBits < defPaillierBits {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self,
-			fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, minKeygenPaillierBits))
+			fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", opts.PaillierBits, defPaillierBits))
 	}
 	var chainCode []byte
 	if opts.EnableHD {
@@ -122,7 +111,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			return nil, nil, err
 		}
 	}
-	paillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), paillierBits)
+	paillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), opts.PaillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -183,9 +172,9 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			config.Self: {Party: config.Self, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
 		},
 		state:         keygenCollecting,
-		confirmations: make(map[tss.PartyID][]byte, len(parties)),
+		confirmations: make(map[tss.PartyID][]byte, len(config.Parties)),
 	}
-	out := make([]tss.Envelope, 0, len(parties))
+	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
 		Commitments:        commitments,
 		PaillierPublicKey:  paillierPubBytes,
@@ -198,7 +187,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		return nil, nil, err
 	}
 	out = append(out, envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false))
-	for _, id := range parties {
+	for _, id := range config.Parties {
 		if id == config.Self {
 			continue
 		}

@@ -164,9 +164,7 @@ func CachedPaillierFixture(bits int) *pai.PrivateKey {
 	}
 	cachedPaillierMu.Unlock()
 
-	restore := pai.SetMinimumModulusBitsForTesting(bits)
 	sk, err := pai.GenerateKey(context.Background(), nil, bits)
-	restore()
 	if err != nil {
 		panic(fmt.Sprintf("CachedPaillierFixture(%d): %v", bits, err))
 	}

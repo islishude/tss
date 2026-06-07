@@ -12,7 +12,7 @@ import (
 
 func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	params := DefaultSecurityParams()
-	sk := testPaillierKey(t, int(params.MinPaillierBits))
+	sk := testPaillierKey(t, params.MinPaillierBits)
 	domain := []byte("slowcrypto paillier zk")
 
 	modProof, err := ProveModulus(nil, domain, sk, 1)

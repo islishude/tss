@@ -108,7 +108,7 @@ type primeSearchResult struct {
 type primeSearchFunc func(context.Context, primeSide, int, int) (*big.Int, error)
 
 func generatePrimePair(ctx context.Context, reader io.Reader, bits int) (*big.Int, *big.Int, error) {
-	return generatePrimePairWithSearch(ctx, bits, func(ctx context.Context, _ primeSide, bits, workers int) (*big.Int, error) {
+	return generatePrimePairWithSearch(ctx, bits, func(ctx context.Context, _ primeSide, bits int, workers int) (*big.Int, error) {
 		return safePrimeWithWorkers(ctx, reader, bits, workers)
 	})
 }
@@ -125,7 +125,7 @@ func generatePrimePairWithSearch(ctx context.Context, bits int, search primeSear
 	defer cancel()
 
 	resultCh := make(chan primeSearchResult, 2)
-	launch := func(side primeSide, bits, workers int) {
+	launch := func(side primeSide, bits int, workers int) {
 		go func() {
 			prime, err := search(searchCtx, side, bits, workers)
 			resultCh <- primeSearchResult{side: side, prime: prime, err: err}

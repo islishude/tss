@@ -11,12 +11,9 @@ import (
 )
 
 // slowCryptoKeygen runs a full keygen with production 3072-bit Paillier and
-// returns the confirmed key shares. It enables experimental usage and sets
-// production security parameters, restoring them on cleanup.
+// returns the confirmed key shares.
 func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	restore := SetAcceptExperimentalUsageForTesting(true)
-	t.Cleanup(restore)
 
 	parties := make([]tss.PartyID, n)
 	for i := range parties {
@@ -288,8 +285,6 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 // slowCryptoKeygenWithOptions runs keygen with explicit options and production params.
 func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOptions) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	restore := SetAcceptExperimentalUsageForTesting(true)
-	t.Cleanup(restore)
 
 	parties := make([]tss.PartyID, n)
 	for i := range parties {

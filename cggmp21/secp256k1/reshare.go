@@ -97,7 +97,7 @@ func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
-	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.Parties, newParties, config.Threshold, SecurityParameters{})
+	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.Parties, newParties, config.Threshold)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -286,7 +286,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) initReceiverMaterial() error {
-	newPaillierKey, err := pai.GenerateKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.SecurityParameters.paillierBits())
+	newPaillierKey, err := pai.GenerateKey(s.cfg.Ctx(), s.cfg.Reader(), defaultPaillierBits())
 	if err != nil {
 		return err
 	}
@@ -869,7 +869,7 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	wire.WriteHashPart(h, wire.Uint32(uint32(s.plan.OldThreshold)))
 	wire.WriteHashPart(h, wire.Uint32(uint32(s.newThreshold)))
 	wire.WriteHashPart(h, s.plan.ChainCode)
-	wire.WriteHashPart(h, wire.Uint32(uint32(s.plan.SecurityParameters.paillierBits())))
+	wire.WriteHashPart(h, wire.Uint32(uint32(defaultPaillierBits())))
 	for _, dealer := range s.oldParties {
 		wire.WritePartyID(h, dealer)
 		wire.WriteHashPart(h, s.plan.OldVerificationShares[dealer])

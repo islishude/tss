@@ -9,7 +9,6 @@ This repository contains a Go TSS library under module `github.com/islishude/tss
 - Keep the protocol boundary honest: CGGMP21 applies to ECDSA/secp256k1; Ed25519 uses FROST-style EdDSA.
 - Do not preserve prior-format fallback paths while moving toward the production target. Existing conversion code for retired wire shapes must be removed rather than supported.
 - Do not introduce backward-compatibility versioning (v2, v3, etc.) for wire formats, proofs, or challenge labels before production-readiness. There is no legacy data to be compatible with. Use v1 and evolve it in place.
-- Do not remove the experimental warning from `cggmp21/secp256k1` until an independent cryptographic review of the full Paillier MtA/ZK proof layer is complete.
 - Never use `math/big.Int.Exp` when the exponent is a secret (`λ`, `μ`, `b` in MtA). All secret-exponent modular exponentiation must go through `internal/paillier/paillierct` (`filippo.io/bigmod`).
 - Secret scalars must use `secret.Scalar` (fixed-length bytes). Never expose them via `String()`, variable-length `Bytes()`, `BigInt()`, or JSON.
 

@@ -164,9 +164,6 @@ type signPartialPayload struct {
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
 // signers and binds the resulting presignature to ctx before nonce generation.
 func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (*PresignSession, []tss.Envelope, error) {
-	if !acceptExperimentalUsage {
-		return nil, nil, errors.New("cggmp21/secp256k1 presign is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
-	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -913,9 +910,6 @@ func presignRound1PublicHash(p presignRound1Payload) ([]byte, error) {
 
 // StartSign starts online signing using a context-bound presignature.
 func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest) (*SignSession, []tss.Envelope, error) {
-	if !acceptExperimentalUsage {
-		return nil, nil, errors.New("cggmp21/secp256k1 signing is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
-	}
 	if err := key.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -937,9 +931,6 @@ func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request
 }
 
 func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool) (*SignSession, []tss.Envelope, error) {
-	if !acceptExperimentalUsage {
-		return nil, nil, errors.New("cggmp21/secp256k1 signing is disabled: ZK proof layer not yet independently reviewed; see docs/security.md")
-	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}

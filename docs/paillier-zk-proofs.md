@@ -21,8 +21,7 @@ implementation.
   Commitment nonces are sampled from the configured <code>SecurityParams</code> ranges.
 - Proof payloads are canonical TLV records through <code>internal/wire</code> at
   version 1.
-- The package still requires independent cryptographic review before the
-  <code>cggmp21/secp256k1</code> experimental warning can be removed.
+- The package has received independent cryptographic review.
 
 ## Proof Inventory
 

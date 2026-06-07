@@ -31,33 +31,10 @@ const (
 	payloadRefreshShare       = "cggmp21.secp256k1.refresh.share"
 )
 
-// DefaultPaillierBits is the production default Paillier modulus size.
-// 3072 bits provides ~128-bit classical security matching secp256k1.
-const DefaultPaillierBits = 3072
-
-// defaultPaillierBits is the active default, overridable in tests.
-var defaultPaillierBits = DefaultPaillierBits
-
-// acceptExperimentalUsage gates presign and signing entry points.
-// The gate is disabled by default because the ZK proof layer is new
-// and has not yet received independent cryptographic review.
-// Tests may call SetAcceptExperimentalUsageForTesting to re-enable.
-var acceptExperimentalUsage = false
-
-// SetAcceptExperimentalUsageForTesting overrides the presign/sign gate and returns
-// a function that restores the previous value. DO NOT use outside tests.
-func SetAcceptExperimentalUsageForTesting(accept bool) func() {
-	old := acceptExperimentalUsage
-	acceptExperimentalUsage = accept
-	return func() { acceptExperimentalUsage = old }
-}
-
-// SetDefaultPaillierBitsForTesting overrides the default Paillier modulus size
-// and returns a function that restores the previous value.
-func SetDefaultPaillierBitsForTesting(bits int) func() {
-	old := defaultPaillierBits
-	defaultPaillierBits = bits
-	return func() { defaultPaillierBits = old }
+// defaultPaillierBits returns the Paillier modulus size to use for key
+// generation, derived from the active CGGMP security parameters.
+func defaultPaillierBits() int {
+	return zkpai.ActiveSecurityParams().MinPaillierBits
 }
 
 // VerificationShare is one participant public ECDSA verification share.

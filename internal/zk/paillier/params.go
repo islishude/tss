@@ -29,7 +29,7 @@ type SecurityParams struct {
 
 	// MinPaillierBits is the Paillier modulus security floor.
 	// 3072 bits provides ~128-bit classical security matching secp256k1.
-	MinPaillierBits uint
+	MinPaillierBits int
 }
 
 // DefaultSecurityParams returns the production CGGMP security parameters for
@@ -64,8 +64,9 @@ func (sp SecurityParams) Validate() error {
 	if sp.ChallengeBits == 0 || sp.ChallengeBits > 256 {
 		return errors.New("SecurityParams.ChallengeBits must be in [1, 256]")
 	}
-	// MinPaillierBits is enforced by CheckPaillierModulus at proof verification time,
-	// not by Validate, so tests can use reduced bounds.
+	if sp.MinPaillierBits <= 0 {
+		return errors.New("SecurityParams.MinPaillierBits must be positive")
+	}
 	return nil
 }
 
@@ -75,7 +76,7 @@ func (sp SecurityParams) CheckPaillierModulus(n *pai.PublicKey) error {
 	if n == nil || n.N == nil {
 		return errors.New("nil Paillier public key")
 	}
-	bits := uint(n.N.BitLen())
+	bits := n.N.BitLen()
 	if bits < sp.MinPaillierBits {
 		return fmt.Errorf("paillier modulus is %d bits, minimum is %d", bits, sp.MinPaillierBits)
 	}

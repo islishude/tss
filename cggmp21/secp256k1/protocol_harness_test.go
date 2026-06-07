@@ -292,7 +292,7 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		t.Fatal(err)
 	}
 	dealerParties = tss.SortParties(dealerParties)
-	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold, SecurityParameters{})
+	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold)
 	if err != nil {
 		t.Fatal(err)
 	}

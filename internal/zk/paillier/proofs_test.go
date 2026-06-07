@@ -643,8 +643,6 @@ func assertMTAResponseProofRoundTrip(t *testing.T, proof *MTAResponseProof) {
 
 func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
 	t.Helper()
-	restore := pai.SetMinimumModulusBitsForTesting(bits)
-	t.Cleanup(restore)
 	if sk, ok := testPaillierKeyCache.Load(bits); ok {
 		return sk.(*pai.PrivateKey)
 	}

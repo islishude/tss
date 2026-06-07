@@ -15,9 +15,6 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping 1024-bit safe-prime factor keygen in short mode")
 	}
-	restore := SetMinimumModulusBitsForTesting(2048)
-	t.Cleanup(restore)
-
 	sk, err := GenerateKey(context.Background(), nil, 2048)
 	if err != nil {
 		t.Fatal(err)
@@ -34,9 +31,6 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 // The lockedReader wrapper serialises Read calls so the reader implementation
 // never sees overlapping calls.
 func TestGenerateKeyCustomReaderSafety(t *testing.T) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	t.Cleanup(restore)
-
 	reader := new(concurrencyDetectingReader)
 	sk, err := GenerateKey(context.Background(), reader, 512)
 	if err != nil {
@@ -128,7 +122,7 @@ func BenchmarkGenerateKey2048(b *testing.B) {
 
 func BenchmarkGenerateKeyDefaultBits(b *testing.B) {
 	for b.Loop() {
-		_, err := GenerateKey(context.Background(), nil, DefaultMinModulusBits)
+		_, err := GenerateKey(context.Background(), nil, 3072)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -138,12 +132,12 @@ func BenchmarkGenerateKeyDefaultBits(b *testing.B) {
 // func TestGenerateKeyTimeCost(t *testing.T) {
 // 	for range 10 {
 // 		start := time.Now()
-// 		_, err := GenerateKey(context.Background(), nil, DefaultMinModulusBits)
+// 		_, err := GenerateKey(context.Background(), nil, 3072)
 // 		if err != nil {
 // 			t.Fatal(err)
 // 		}
 // 		duration := time.Since(start)
-// 		t.Logf("GenerateKey(%d) took %s", DefaultMinModulusBits, duration)
+// 		t.Logf("GenerateKey(%d) took %s", 3072, duration)
 // 	}
 // }
 

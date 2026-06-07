@@ -7,12 +7,6 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
-// DefaultMinModulusBits is the minimum modulus size accepted outside tests.
-// 3072 bits provides ~128-bit classical security matching secp256k1 (NIST SP 800-57).
-const DefaultMinModulusBits = 3072
-
-var minModulusBits = DefaultMinModulusBits
-
 // PublicKey contains Paillier public parameters and cached n^2.
 type PublicKey struct {
 	N        *big.Int
@@ -67,10 +61,3 @@ const (
 	privateKeyFieldP
 	privateKeyFieldQ
 )
-
-// SetMinimumModulusBitsForTesting overrides validation policy for tests.
-func SetMinimumModulusBitsForTesting(bits int) func() {
-	old := minModulusBits
-	minModulusBits = bits
-	return func() { minModulusBits = old }
-}

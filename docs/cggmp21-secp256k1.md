@@ -1,6 +1,6 @@
 # CGGMP21 secp256k1
 
-The `cggmp21/secp256k1` package implements a CGGMP21-style ([ePrint 2021/060](https://eprint.iacr.org/2021/060)) threshold ECDSA protocol over the secp256k1 curve. The ZK proof layer is prepared for independent review but **not yet audited** — the experimental warning stays until review is complete.
+The `cggmp21/secp256k1` package implements a ([CGGMP21-style](https://eprint.iacr.org/2021/060)) threshold ECDSA protocol over the secp256k1 curve.
 
 ## Protocol Overview
 
@@ -417,5 +417,4 @@ See [docs/security.md](security.md) for the full constant-time policy.
 ## Unsupported
 
 - Network transport, storage encryption, peer authentication (caller responsibilities).
-- Full CGGMP21 identifiable-abort security review (experimental warning active).
 - Production-audited ZK proofs (see [docs/audit-guide.md](audit-guide.md)).

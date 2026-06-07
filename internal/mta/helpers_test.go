@@ -17,8 +17,6 @@ import (
 // reduced security parameters for Tier 1 tests.
 func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.RingPedersenParams) {
 	tb.Helper()
-	restore := pai.SetMinimumModulusBitsForTesting(1024)
-	tb.Cleanup(restore)
 	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	})

@@ -10,7 +10,7 @@ import (
 
 // Validate checks the public key against the package minimum modulus size.
 func (pk PublicKey) Validate() error {
-	return pk.ValidateBits(minModulusBits)
+	return pk.ValidateBits(MinimumModulusBits)
 }
 
 // ValidateBits checks public key structure against an explicit minimum size.

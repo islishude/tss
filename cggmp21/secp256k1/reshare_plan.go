@@ -12,11 +12,6 @@ import (
 
 const reshareCurveID = "secp256k1"
 
-// SecurityParameters records reshare-time auxiliary-material requirements.
-type SecurityParameters struct {
-	PaillierBits int
-}
-
 // ResharePlan is the canonical public input agreed by old dealers and new receivers.
 type ResharePlan struct {
 	SessionID             tss.SessionID
@@ -30,7 +25,6 @@ type ResharePlan struct {
 	NewParties            []tss.PartyID
 	NewThreshold          int
 	ChainCode             []byte
-	SecurityParameters    SecurityParameters
 }
 
 // ReshareMessageHeader identifies one logical resharing message.
@@ -102,7 +96,7 @@ type ReshareReceiverSession = ReshareSession
 type ReshareOverlapSession = ReshareSession
 
 // NewResharePlan constructs a canonical plan from authenticated old key metadata.
-func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int, params SecurityParameters) (ResharePlan, error) {
+func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int) (ResharePlan, error) {
 	if oldKey == nil {
 		return ResharePlan{}, errors.New("nil old key share")
 	}
@@ -125,7 +119,6 @@ func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, ne
 		NewParties:            tss.SortParties(newParties),
 		NewThreshold:          newThreshold,
 		ChainCode:             append([]byte(nil), oldKey.ChainCode...),
-		SecurityParameters:    params,
 	}
 	if len(plan.DealerParties) == 0 {
 		plan.DealerParties = append([]tss.PartyID(nil), plan.OldParties...)
@@ -207,9 +200,6 @@ func (p ResharePlan) Validate() error {
 	if len(p.ChainCode) != 0 && len(p.ChainCode) != 32 {
 		return errors.New("chain code must be empty or 32 bytes")
 	}
-	if err := p.SecurityParameters.validate(); err != nil {
-		return err
-	}
 	return nil
 }
 
@@ -226,18 +216,4 @@ func IsReceiver(plan ResharePlan, party tss.PartyID) bool {
 // IsOverlap reports whether party is both an old dealer and a new receiver.
 func IsOverlap(plan ResharePlan, party tss.PartyID) bool {
 	return IsDealer(plan, party) && IsReceiver(plan, party)
-}
-
-func (sp SecurityParameters) validate() error {
-	if sp.PaillierBits != 0 && sp.PaillierBits < minKeygenPaillierBits {
-		return fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", sp.PaillierBits, minKeygenPaillierBits)
-	}
-	return nil
-}
-
-func (sp SecurityParameters) paillierBits() int {
-	if sp.PaillierBits != 0 {
-		return sp.PaillierBits
-	}
-	return defaultPaillierBits
 }

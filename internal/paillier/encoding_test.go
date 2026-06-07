@@ -10,8 +10,6 @@ import (
 )
 
 func TestMarshalRoundTrip(t *testing.T) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	t.Cleanup(restore)
 	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -55,8 +53,6 @@ func TestMarshalRoundTrip(t *testing.T) {
 }
 
 func TestRejectsNonCanonicalPublicKey(t *testing.T) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	t.Cleanup(restore)
 	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -103,8 +99,6 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 }
 
 func FuzzPublicKeyUnmarshal(f *testing.F) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	f.Cleanup(restore)
 	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)
@@ -125,8 +119,6 @@ func FuzzPublicKeyUnmarshal(f *testing.F) {
 }
 
 func FuzzPrivateKeyUnmarshal(f *testing.F) {
-	restore := SetMinimumModulusBitsForTesting(512)
-	f.Cleanup(restore)
 	sk, err := GenerateKey(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)

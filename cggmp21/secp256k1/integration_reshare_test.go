@@ -18,7 +18,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2, SecurityParameters{})
+	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2)
 	if err != nil {
 		t.Fatal(err)
 	}

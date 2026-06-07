@@ -13,9 +13,7 @@ import (
 )
 
 func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(minKeygenPaillierBits)
-	defer restore()
-	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: minKeygenPaillierBits})
+	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: defaultPaillierBits()})
 	share := shares[1]
 	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKey)
 	if err != nil {
@@ -51,9 +49,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 }
 
 func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
-	restore := pai.SetMinimumModulusBitsForTesting(minKeygenPaillierBits)
-	defer restore()
-	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: minKeygenPaillierBits})
+	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: defaultPaillierBits()})
 	signers := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
