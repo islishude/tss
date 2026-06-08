@@ -21,7 +21,9 @@ implementation.
   Commitment nonces are sampled from the configured <code>SecurityParams</code> ranges.
 - Proof payloads are canonical TLV records through <code>internal/wire</code> at
   version 1.
-- The package has received independent cryptographic review.
+- The package has not yet received independent cryptographic review. The audit
+  guide ([docs/audit-guide.md](audit-guide.md)) maps the active proof surface to
+  facilitate such a review.
 
 ## Proof Inventory
 
