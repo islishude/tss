@@ -15,6 +15,29 @@ import (
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
+// testCGGMP21Guard is a helper that creates an EnvelopeGuard for CGGMP21 protocol tests.
+// It uses the production policy set but relaxes broadcast consistency requirements
+// since test harnesses don't coordinate BroadcastCertificates.
+func testCGGMP21Guard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
+	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, testCGGMP21Policies(), tss.NewInMemoryReplayCache())
+	if err != nil {
+		panic(err)
+	}
+	return g
+}
+
+// testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
+// consistency relaxed to None for all payload types. Tests that specifically
+// exercise broadcast consistency should use CGGMP21Policies directly.
+func testCGGMP21Policies() tss.PolicySet {
+	relaxed := make(tss.PolicySet, len(CGGMP21Policies))
+	for i, p := range CGGMP21Policies {
+		relaxed[i] = p
+		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+	}
+	return relaxed
+}
+
 // --- PresignContext factory ---
 
 func testPresignContext() PresignContext {
@@ -56,6 +79,15 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 
 func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties []tss.PartyID, messages []tss.Envelope) {
 	t.Helper()
+	// Attach test guards to sessions that don't already have one. Authenticated
+	// transport delivery requires a guard from v1 onwards.
+	ps := tss.PartySet(parties)
+	for _, id := range parties {
+		s := sessions[id]
+		if s.Guard() == nil {
+			s.SetGuard(testCGGMP21Guard(id, ps, s.cfg.SessionID))
+		}
+	}
 	queue := append([]tss.Envelope(nil), messages...)
 	for len(queue) > 0 {
 		env := queue[0]
@@ -64,7 +96,14 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(env)
+			// Simulate authenticated, optionally confidential transport delivery.
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
+			if env.To != 0 {
+				delivered.Security.Confidential = true
+			}
+			out, err := sessions[id].HandleKeygenMessage(delivered)
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}

@@ -31,6 +31,7 @@ type SignSession struct {
 	aborted       bool
 	signature     []byte
 	commitMessage tss.Envelope
+	guard         *tss.EnvelopeGuard
 }
 
 type nonceCommitment struct {
@@ -112,7 +113,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		clear(eBytes)
 		return nil, nil, err
 	}
-	env := tss.Envelope{
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   sessionID,
@@ -120,7 +121,12 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		From:        key.Party,
 		PayloadType: payloadSignCommitment,
 		Payload:     payload,
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		clear(dBytes)
+		clear(eBytes)
+		return nil, nil, err
+	}
 	s := &SignSession{
 		key:           key,
 		sessionID:     sessionID,
@@ -145,6 +151,57 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	return s, out, nil
 }
 
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *SignSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *SignSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this signing session.
+// cache may be nil to use an in-memory cache suitable for testing.
+func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil sign session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, FROSTPolicies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to basic structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *SignSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.key.Party {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
+}
+
 // HandleSignMessage validates and applies one FROST signing envelope.
 func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
@@ -164,14 +221,11 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			s.clearNonceBytes()
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, env.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
-	}
-	if env.To != 0 && env.To != s.key.Party {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
 	switch env.PayloadType {
 	case payloadSignCommitment:
@@ -304,7 +358,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		s.clearNonceBytes()
 		return nil, err
 	}
-	env := tss.Envelope{
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   s.sessionID,
@@ -312,7 +366,11 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		From:        s.key.Party,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		s.clearNonceBytes()
+		return nil, err
+	}
 	s.partialSent = true
 	s.clearNonceBytes()
 	if err := s.tryAggregate(); err != nil {

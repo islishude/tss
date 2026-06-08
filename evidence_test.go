@@ -21,7 +21,7 @@ func TestBlameEvidenceField(t *testing.T) {
 			From:        1,
 			PayloadType: "test.payload",
 			Payload:     []byte("public payload"),
-		}.WithTranscriptHash()
+		}
 		evidence, err := NewBlameEvidence(env, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
 			{Key: "sender_commitment", Value: []byte{0x01, 0x02, 0x03}},
 			{Key: "proof_response", Value: []byte{0xaa, 0xbb}},
@@ -149,7 +149,7 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 		To:          2,
 		PayloadType: "test.payload",
 		Payload:     []byte("public payload"),
-	}.WithTranscriptHash()
+	}
 	evidence, err := NewBlameEvidence(env, EvidenceKindPresignRound2, "invalid proof", []EvidenceField{
 		{Key: "z_field", Value: []byte{3}},
 		{Key: "a_field", Value: []byte{1}},
@@ -203,7 +203,7 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 		Round:       1,
 		From:        1,
 		PayloadType: "test.payload",
-	}.WithTranscriptHash()
+	}
 	if _, err := NewBlameEvidence(env, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
 		{Key: "dup", Value: []byte{1}},
 		{Key: "dup", Value: []byte{2}},
@@ -225,7 +225,7 @@ func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
 		From:        1,
 		PayloadType: "test.payload",
 		Payload:     []byte("public payload"),
-	}.WithTranscriptHash()
+	}
 	evidence, err := NewBlameEvidence(env, EvidenceKindAggregateSign, "aggregate check failed", []EvidenceField{
 		{Key: "public_key_hash", Value: []byte{1}},
 	})

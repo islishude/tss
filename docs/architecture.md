@@ -10,9 +10,9 @@ This module is a transport-neutral threshold-signature library. The public API i
 
 ## Transport Model
 
-All protocol APIs return `tss.Envelope` values. The library does not open sockets, retry messages, authenticate peers, encrypt payloads, or persist state. Integrators must provide authenticated delivery, confidentiality for envelopes with `ConfidentialRequired`, reliable ordering, and replay protection.
+All protocol APIs return `tss.Envelope` values. The library does not open sockets, retry messages, authenticate peers, encrypt payloads, or persist state. Integrators must provide authenticated delivery (set `SecurityContext.Authenticated` and `AuthenticatedParty`), confidentiality for secret-bearing envelopes (set `SecurityContext.Confidential` where the protocol `PolicySet` requires it), reliable ordering, and replay protection via `ReplayCache`.
 
-`Envelope.ValidateBasic` is the first fail-closed boundary. It checks protocol name, version, session id, transcript hash, and sender membership before package-specific state machines decode payloads.
+`EnvelopeGuard.Validate` is the first fail-closed boundary. It checks protocol name, version, session id, transcript hash, sender membership, transport authentication, identity binding, delivery mode, confidentiality policy, broadcast consistency, and replay before package-specific state machines decode payloads. `ValidateEnvelope` is a transitional helper that checks protocol, version, session, transcript, and sender membership.
 
 ## Key-Share Lifecycle
 

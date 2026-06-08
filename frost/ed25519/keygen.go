@@ -31,6 +31,7 @@ type KeygenSession struct {
 	keyShare       *KeyShare
 	ownPoly        []*fed.Scalar
 	ownMessages    []tss.Envelope
+	guard          *tss.EnvelopeGuard
 }
 
 type keygenCommitmentsPayload struct {
@@ -117,6 +118,58 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	return s, out, nil
 }
 
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *KeygenSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this keygen session from the
+// production FROST policy set. cache may be nil to use an in-memory cache
+// suitable for testing; production deployments must supply a durable ReplayCache.
+func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil keygen session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, FROSTPolicies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to basic structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *KeygenSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.cfg.Self {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
+}
+
 // HandleKeygenMessage validates and applies one DKG envelope.
 func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
@@ -135,11 +188,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 			s.abort()
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if env.To != 0 && env.To != s.cfg.Self {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleKeygenConfirmation(env)
@@ -332,9 +382,6 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 	if env.To != 0 {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must be broadcast"))
 	}
-	if env.ConfidentialRequired {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must not require confidential transport"))
-	}
 	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -456,18 +503,24 @@ func validateCommitments(commitments [][]byte, threshold int) error {
 	return nil
 }
 
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType string, payload []byte, confidential bool) tss.Envelope {
-	return tss.Envelope{
-		Protocol:             protocol,
-		Version:              tss.Version,
-		SessionID:            config.SessionID,
-		Round:                round,
-		From:                 from,
-		To:                   to,
-		PayloadType:          payloadType,
-		Payload:              payload,
-		ConfidentialRequired: confidential,
-	}.WithTranscriptHash()
+func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) tss.Envelope {
+	e, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   config.SessionID,
+		Round:       round,
+		From:        from,
+		To:          to,
+		PayloadType: payloadType,
+		Payload:     payload,
+	})
+	if err != nil {
+		panic(err)
+	}
+	if confidential {
+		e.Security.Confidential = true
+	}
+	return e
 }
 
 const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"

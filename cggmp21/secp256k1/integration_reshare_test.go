@@ -58,7 +58,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dealer2Out[1] = dealer2Out[1].WithTranscriptHash()
+	dealer2Out[1] = dealer2Out[1].RecomputeTranscriptHash()
 	_, err = session.HandleReshareMessage(dealer2Out[1])
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }

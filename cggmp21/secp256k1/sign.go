@@ -110,6 +110,7 @@ type PresignSession struct {
 	contextHash   []byte
 	additiveShift []byte
 	paillier      *pai.PrivateKey
+	guard         *tss.EnvelopeGuard
 
 	kShare    *secret.Scalar
 	gamma     *secret.Scalar
@@ -142,6 +143,7 @@ type SignSession struct {
 	key       *KeyShare
 	presign   *Presign
 	sessionID tss.SessionID
+	guard     *tss.EnvelopeGuard
 	log       tss.Logger
 	digest    []byte
 	lowS      bool
@@ -179,6 +181,57 @@ type signPartialPayload struct {
 	PresignContext    []byte `json:"presign_context"`
 }
 
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *PresignSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *PresignSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this presign session.
+// cache may be nil to use an in-memory cache suitable for testing.
+func (s *PresignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil presign session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to basic structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *PresignSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.key.Party {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
+}
+
 // HandlePresignMessage validates and applies one presign envelope.
 // It dispatches to per-round handlers that each follow the template:
 // parse → policy validate → cryptographic verify → mutate state → emit.
@@ -197,14 +250,11 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 			s.aborted = true
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, env.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
-	}
-	if env.To != 0 && env.To != s.key.Party {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
 
 	switch env.PayloadType {
@@ -214,9 +264,6 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		}
 		if env.To != 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign round1 public payload must be broadcast"))
-		}
-		if env.ConfidentialRequired {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign round1 public payload must not require confidential transport"))
 		}
 		if _, ok := s.round1[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))

@@ -51,18 +51,36 @@ All protocol state machines communicate through `tss.Envelope`. It is the **only
 
 ```go
 type Envelope struct {
-    Protocol             string    // protocol name (e.g. "frost-ed25519-v1")
-    Version              uint16    // wire version (currently 1)
-    SessionID            SessionID // scopes this message to a run
-    Round                uint8     // protocol round number
-    From                 PartyID   // sender
-    To                   PartyID   // recipient; 0 means broadcast
-    PayloadType          string    // identifies the payload schema
-    Payload              []byte    // TLV-encoded protocol payload
-    TranscriptHash       []byte    // SHA-256 of public envelope metadata
-    ConfidentialRequired bool      // transport must encrypt this message
+    Protocol       ProtocolID       // e.g. ProtocolCGGMP21Secp256k1
+    Version        uint16           // wire version (currently 1)
+    SessionID      SessionID        // scopes this message to a run
+    Round          uint8            // protocol round number
+    From           PartyID          // sender
+    To             PartyID          // recipient; 0 means broadcast
+    PayloadType    PayloadType      // identifies the payload schema
+    Payload        []byte           // TLV-encoded protocol payload
+    TranscriptHash [32]byte         // SHA-256 of public envelope metadata
+    Security       SecurityContext  // transport-verified facts
+    Broadcast      *BroadcastCertificate // consistency proof for broadcast messages
 }
 ```
+
+### Construction
+
+Production code must use `NewEnvelope(EnvelopeInput{...})` which validates fields and computes the transcript hash. Direct struct literals are not safe — they bypass transcript hash computation.
+
+```go
+env, err := tss.NewEnvelope(tss.EnvelopeInput{
+    Protocol:    tss.ProtocolCGGMP21Secp256k1,
+    SessionID:   sessionID,
+    Round:       1,
+    From:        1,
+    PayloadType: "cggmp21.secp256k1.keygen.share",
+    Payload:     payload,
+})
+```
+
+`OpenEnvelope(raw, security, broadcast)` decodes wire bytes and attaches transport-verified security context.
 
 ### Encoding
 
@@ -77,19 +95,92 @@ See [docs/wire.md](wire.md) for the full canonical encoding specification.
 
 ### Transcript Binding
 
-`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, confidential, payload_type, payload)`. `WithTranscriptHash()` returns a copy of the envelope with its transcript hash set.
+`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `ValidateEnvelope()` and `EnvelopeGuard.Validate()`.
 
-`ValidateBasic(protocol, session, parties)` checks protocol name, version, session ID, transcript integrity, and sender membership. This is the **first fail-closed boundary** every protocol handler calls before decoding the payload.
+`ValidateEnvelope(env, protocol, session, parties)` checks protocol name, version, session ID, transcript integrity, and sender membership. **Prefer `EnvelopeGuard`** for production code; `ValidateEnvelope` is a transitional helper.
 
-### Transport Semantics
+### Transport Semantics (SecurityContext)
 
-| `To`     | `ConfidentialRequired` | Meaning                                       |
-| -------- | ---------------------- | --------------------------------------------- |
-| `0`      | `false`                | Broadcast to all parties.                     |
-| non-zero | `true`                 | Point-to-point, must be encrypted in transit. |
-| non-zero | `false`                | Point-to-point, non-confidential.             |
+Transport security is no longer self-declared by the envelope. The transport adapter must set `Envelope.Security` on received messages:
 
-Keygen shares, presign pairwise MtA messages, and reshare/refresh shares all set `ConfidentialRequired = true`. Broadcast commitments and online signing partials are non-confidential.
+```go
+type SecurityContext struct {
+    Authenticated      bool    // message arrived over authenticated transport
+    Confidential       bool    // message arrived over confidential channel
+    AuthenticatedParty PartyID // transport-verified sender identity
+    ChannelID          string  // audit: TLS/Noise session identifier
+    PeerKeyID          string  // audit: peer certificate/key identifier
+    ReceivedAtUnix     int64  // receive timestamp for replay/cache decisions
+}
+```
+
+Delivery requirements (confidentiality, broadcast consistency) are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`. There is no `ConfidentialRequired` flag — the guard checks `Security.Confidential` against the policy.
+
+### DeliveryPolicy & PolicySet
+
+Each protocol defines a `PolicySet` that maps `(protocol, round, payloadType)` to delivery requirements:
+
+```go
+type DeliveryPolicy struct {
+    Protocol             ProtocolID
+    Round                uint8
+    PayloadType          PayloadType
+    Mode                 DeliveryMode              // Direct or Broadcast
+    Confidentiality      ConfidentialityPolicy     // Required, Optional, or Forbidden
+    BroadcastConsistency BroadcastConsistencyPolicy // None or Required
+}
+```
+
+Unregistered payload types are **rejected by default** (fail-closed). See `cggmp21/secp256k1/policy.go` and `frost/ed25519/policy.go` for the complete matrices.
+
+### EnvelopeGuard
+
+`EnvelopeGuard` performs centralized security validation before any protocol handler processes an envelope. It enforces 12 checks in order:
+
+1. Protocol match
+2. Version check
+3. Transcript hash integrity
+4. Sender membership in party set
+5. Transport authentication (`Security.Authenticated`)
+6. Identity binding (`AuthenticatedParty == From`)
+7. Recipient correctness
+8. Policy lookup (fail-closed for unknown payloads)
+9. Delivery mode enforcement (direct vs broadcast)
+10. Confidentiality enforcement against policy
+11. Broadcast consistency certificate verification (when required)
+12. Replay detection via `ReplayCache`
+
+Each protocol session should hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler.
+
+### BroadcastCertificate
+
+When a policy requires `BroadcastConsistencyRequired`, the transport must supply a `BroadcastCertificate` proving all parties received the same payload:
+
+```go
+type BroadcastCertificate struct {
+    Protocol       ProtocolID
+    SessionID      SessionID
+    Round          uint8
+    From           PartyID
+    PayloadType    PayloadType
+    PayloadHash    [32]byte
+    TranscriptHash [32]byte
+    Recipients     PartySet
+    Acks           []BroadcastAck
+}
+```
+
+CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates.
+
+### ReplayCache
+
+```go
+type ReplayCache interface {
+    MarkIfNew(key ReplayKey) bool
+}
+```
+
+`MarkIfNew` returns true on first use and false on replay. Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache` is provided for single-process use.
 
 ## ProtocolError
 

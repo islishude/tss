@@ -1,6 +1,6 @@
 # Security Notes
 
-**Hard precondition**: Envelopes with `ConfidentialRequired` set MUST be encrypted by the transport layer before transmission. This library validates the flag to reject incorrectly flagged secret-bearing envelopes, but it does **not** seal or open transport ciphertexts. Unencrypted transport of secret-bearing envelopes will expose keygen shares, nonce material, and MtA responses to any observer on the message path.
+**Hard precondition**: The transport layer must set `SecurityContext` (authenticated identity, confidentiality) on every received envelope. `EnvelopeGuard` enforces confidentiality requirements per payload type via the protocol `PolicySet`. This library does **not** seal or open transport ciphertexts — it validates `Security.Confidential` at the guard boundary. Unencrypted transport of secret-bearing envelopes will expose keygen shares, nonce material, and MtA responses to any observer on the message path.
 
 This repository is not a production-audited TSS stack.
 
@@ -14,13 +14,13 @@ The library does not protect against a transport that lies about sender identity
 
 Callers must provide:
 
-- authenticated peer identity for every envelope;
-- encryption for envelopes with `ConfidentialRequired`;
+- authenticated peer identity for every envelope, set via `Envelope.Security.AuthenticatedParty` and `Authenticated`;
+- encryption for secret-bearing envelopes, signalled by `Envelope.Security.Confidential`. Confidentiality requirements are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`;
 - **equivocation-resistant broadcast** for CGGMP21 keygen round 1: every
   participant must receive identical commitment, Paillier, and
-  Ring-Pedersen payloads. After keygen completes, compare
-  `KeygenTranscriptHash` across parties to detect equivocation;
-- replay protection and session-id freshness;
+  Ring-Pedersen payloads, verified by `BroadcastCertificate`. After keygen completes, compare
+  `KeygenTranscriptHash` across parties as an additional defense-in-depth check;
+- replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
 - operational monitoring for protocol errors and blame evidence.
@@ -32,14 +32,19 @@ same authorization checks used for key-share metadata.
 
 ## Production Integration Checklist
 
+`EnvelopeGuard` is the mandatory first fail-closed boundary for every inbound
+envelope. Construct a guard via `tss.NewEnvelopeGuard` (or `GuardConfig.BuildGuard`)
+and attach it to every session with `SetGuard` **before** processing any inbound
+messages. Sessions reject authenticated transport envelopes that arrive without a
+guard.
+
 Before passing an inbound envelope to any state machine, the caller must verify
 that the authenticated transport identity for the peer exactly matches
-`Envelope.From`. The library checks that `Envelope.From` is a participant or
-signer where applicable, but it cannot know whether the transport authenticated
-the same party id.
+`Envelope.From`. The guard checks that `Envelope.From` is a participant and that
+`Security.AuthenticatedParty == Envelope.From`, rejecting identity mismatches.
 
 Every inbound envelope must include the transcript hash produced by
-`Envelope.WithTranscriptHash`. `ValidateBasic` rejects missing or mismatched
+`NewEnvelope`. `EnvelopeGuard.Validate` rejects missing or mismatched
 transcript hashes before payload decoding, so callers should recompute the hash
 after any relay, storage, or framing layer changes an envelope.
 
@@ -85,9 +90,9 @@ and attributable signing failures clear those bytes immediately. `Destroy`
 should still be called after completion or abort to clear message copies,
 partials, shifted verification keys, and any remaining session-owned material.
 
-FROST resharing share envelopes carry confidential scalar shares and have
-`ConfidentialRequired` set. Transports must authenticate the sender and encrypt
-these point-to-point messages. New HD reshare recipients must be provisioned
+FROST resharing share envelopes carry confidential scalar shares.
+Transports must authenticate the sender and encrypt these point-to-point
+messages, setting `Security.Confidential` so the guard enforces the policy. New HD reshare recipients must be provisioned
 with the old 32-byte chain code through an authorized metadata channel; the
 chain code is not a signing secret, but losing or substituting it changes child
 key derivation.
@@ -177,11 +182,12 @@ reshare transcript and group-key preservation checks.
 
 Transport responsibilities:
 
-- bind every envelope to an authenticated sender identity;
-- never let a payload `Sender` override the transport sender;
+- bind every envelope to an authenticated sender identity, set `Envelope.Security.AuthenticatedParty` and `Authenticated`;
+- never let a payload field override the transport-authenticated sender;
 - fan out broadcast envelopes to every party;
-- protect confidential share envelopes with point-to-point encryption or equivalent controls;
-- treat `ConfidentialRequired` as an enforcement signal, not encryption itself; this library rejects incorrectly flagged secret-bearing envelopes but does not seal or open transport ciphertexts;
+- protect confidential share envelopes with point-to-point encryption or equivalent controls, set `Envelope.Security.Confidential`;
+- supply `BroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (CGGMP21 keygen round 1, refresh/reshare round 1);
+- treat `SecurityContext` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;
 - treat two different confirmations from one sender in one session as equivocation;
 - never persist or use keygen material before the completion accessor returns a confirmed `KeyShare`.
 

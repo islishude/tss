@@ -66,6 +66,7 @@ type ReshareSession struct {
 	newRingPedersen map[tss.PartyID]RingPedersenPublicShare
 	dealerSent      bool
 	pendingShares   map[tss.PartyID]pendingReshareShare
+	guard           *tss.EnvelopeGuard
 }
 
 type reshareDealerCommitmentsPayload struct {
@@ -89,6 +90,74 @@ type reshareSharePayload struct {
 type pendingReshareShare struct {
 	payload reshareSharePayload
 	raw     []byte
+}
+
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *ReshareSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this reshare session.
+// cache may be nil to use an in-memory cache suitable for testing.
+// The guard party set is the union of dealers and new receivers since both
+// sets may send messages during the reshare protocol.
+func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil reshare session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	// Union of dealer parties and new parties: both sets may send envelopes.
+	union := make(tss.PartySet, 0, len(s.dealerParties)+len(s.newParties))
+	seen := make(map[tss.PartyID]bool)
+	for _, id := range s.dealerParties {
+		if !seen[id] {
+			seen[id] = true
+			union = append(union, id)
+		}
+	}
+	for _, id := range s.newParties {
+		if !seen[id] {
+			seen[id] = true
+			union = append(union, id)
+		}
+	}
+	return tss.NewEnvelopeGuard(s.selfID, union, protocol, s.cfg.SessionID, CGGMP21Policies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, allowedParties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.selfID {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
 }
 
 // StartReshare starts CGGMP21 resharing as an old-party dealer.
@@ -370,17 +439,28 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			s.abort()
 		}
 	}()
+
 	if env.PayloadType == payloadKeygenConfirmation {
+		if err := s.validateInbound(env, s.newParties); err != nil {
+			return nil, err
+		}
 		return s.handleReshareConfirmation(env)
 	}
+
+	// Validate against the appropriate party set based on payload type.
+	allowedParties := s.dealerParties
+	if env.PayloadType == payloadReshareReceiverMaterial {
+		allowedParties = s.newParties
+	}
+	if err := s.validateInbound(env, allowedParties); err != nil {
+		return nil, err
+	}
+
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
 	}
 	switch env.PayloadType {
 	case payloadReshareDealerCommitments:
-		if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.dealerParties); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		if env.To != 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer commitments must be broadcast"))
 		}
@@ -402,9 +482,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			delete(s.pendingShares, env.From)
 		}
 	case payloadReshareShare:
-		if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.dealerParties); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		if !s.isReceiver {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
 		}
@@ -432,9 +509,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			return nil, err
 		}
 	case payloadReshareReceiverMaterial:
-		if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.newParties); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		if env.To != 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("receiver material must be broadcast"))
 		}
@@ -794,17 +868,12 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	if !s.isReceiver {
 		return nil, nil
 	}
-	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.newParties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
+	// validateInbound was already called by HandleReshareMessage.
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
 	}
 	if env.To != 0 {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation must be broadcast"))
-	}
-	if env.ConfidentialRequired {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation must not require confidential transport"))
 	}
 	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
 	if err != nil {
@@ -1015,11 +1084,6 @@ func (s *ReshareSession) sortedNewRingPedersenPublic() []RingPedersenPublicShare
 		})
 	}
 	return out
-}
-
-// HandleMessage validates and applies one reshare envelope.
-func (s *ReshareSession) HandleMessage(msg IncomingMessage) ([]OutgoingMessage, error) {
-	return s.HandleReshareMessage(msg)
 }
 
 // Result returns the completed receiver key share.

@@ -252,7 +252,7 @@ func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 	}
 }
 
-func expectEvidenceMessage(evidence *tss.BlameEvidence, round uint8, payloadType string) error {
+func expectEvidenceMessage(evidence *tss.BlameEvidence, round uint8, payloadType tss.PayloadType) error {
 	if evidence.Round != round {
 		return fmt.Errorf("evidence round %d does not match %d", evidence.Round, round)
 	}

@@ -97,7 +97,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	if err != nil {
 		return nil, nil, err
 	}
-	env := tss.Envelope{
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   sessionID,
@@ -105,7 +105,11 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		From:        key.Party,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	env.Security.Confidential = true
 	s := &SignSession{
 		key:       key,
 		presign:   presign,
@@ -120,6 +124,57 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		return nil, nil, err
 	}
 	return s, []tss.Envelope{env}, nil
+}
+
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *SignSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *SignSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this signing session.
+// cache may be nil to use an in-memory cache suitable for testing.
+func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil sign session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to basic structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *SignSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.key.Party {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
@@ -140,14 +195,11 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			s.aborted = true
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.sessionID, s.key.Parties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if !tss.ContainsParty(s.presign.Signers, env.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
-	}
-	if env.To != 0 && env.To != s.key.Party {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
 	}
 
 	// ---- 1 & 2. PARSE + POLICY VALIDATE ----
@@ -271,14 +323,14 @@ func (s *SignSession) tryCompleteSign() error {
 		return err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, secp.ScalarFromBigInt(sigS)) {
-		env := tss.Envelope{
+		env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 			Protocol:    protocol,
 			Version:     tss.Version,
 			SessionID:   s.sessionID,
 			Round:       1,
 			PayloadType: payloadSignPartial,
 			Payload:     aggregateEvidencePayload(s.digest, r.Bytes(), secp.ScalarFromBigInt(sigS).Bytes(), s.presign.TranscriptHash),
-		}.WithTranscriptHash()
+		})
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: 1,

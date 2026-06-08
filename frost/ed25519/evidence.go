@@ -63,14 +63,14 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 
 // frostSignBlame builds Blame evidence for an invalid FROST partial signature.
 func frostSignBlame(sessionID tss.SessionID, signers []tss.PartyID, signer tss.PartyID, publicKey []byte) *tss.Blame {
-	env := tss.Envelope{
+	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       2,
 		From:        signer,
 		PayloadType: payloadSignPartial,
-	}.WithTranscriptHash()
+	})
 	return &tss.Blame{
 		Reason:  "invalid FROST partial signature",
 		Parties: []tss.PartyID{signer},
@@ -86,13 +86,13 @@ func frostSignBlame(sessionID tss.SessionID, signers []tss.PartyID, signer tss.P
 
 // frostAggregateBlame builds Blame evidence for a failed aggregate Ed25519 signature.
 func frostAggregateBlame(sessionID tss.SessionID, signers []tss.PartyID, publicKey, message, sig []byte) *tss.Blame {
-	env := tss.Envelope{
+	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       2,
 		PayloadType: payloadSignPartial,
-	}.WithTranscriptHash()
+	})
 	return &tss.Blame{
 		Reason:  "aggregated Ed25519 signature failed verification",
 		Parties: append([]tss.PartyID(nil), signers...),

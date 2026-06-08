@@ -44,7 +44,7 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload[0] ^= 1
-	out2[0] = out2[0].WithTranscriptHash()
+	out2[0] = out2[0].RecomputeTranscriptHash()
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected tampered EncK rejection")
 	} else {
@@ -85,7 +85,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 				t.Fatal(err)
 			}
 			round2[0].Payload = mutated
-			round2[0] = round2[0].WithTranscriptHash()
+			round2[0] = round2[0].RecomputeTranscriptHash()
 			_, err = s1.HandlePresignMessage(round2[0])
 			if err == nil {
 				t.Fatal("expected tampered round2 proof rejection")
@@ -123,7 +123,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	out2[0] = out2[0].WithTranscriptHash()
+	out2[0] = out2[0].RecomputeTranscriptHash()
 	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {

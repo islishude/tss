@@ -10,7 +10,7 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := Envelope{
+	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
 		Version:     Version,
 		SessionID:   session,
@@ -19,7 +19,10 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 		To:          2,
 		PayloadType: "payload",
 		Payload:     []byte("hello"),
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := env.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -28,22 +31,20 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	if err := decoded.UnmarshalBinary(raw); err != nil {
 		t.Fatal(err)
 	}
-	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err != nil {
+	// Recompute transcript hash from wire-decoded fields
+	decoded.TranscriptHash = decoded.domainSeparatedHash()
+	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err != nil {
 		t.Fatal(err)
 	}
-	decoded.TranscriptHash = nil
-	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
+	// Zero out transcript hash and check failure
+	decoded.TranscriptHash = [32]byte{}
+	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected missing transcript hash rejection")
 	}
 	decoded.TranscriptHash = env.TranscriptHash
 	decoded.Payload[0] ^= 1
-	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
+	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected transcript mismatch")
-	}
-	decoded = env
-	decoded.ConfidentialRequired = !decoded.ConfidentialRequired
-	if err := decoded.ValidateBasic("test", session, []PartyID{1, 2}); err == nil {
-		t.Fatal("expected confidentiality flag transcript mismatch")
 	}
 }
 
@@ -56,14 +57,17 @@ func TestEnvelopeUnmarshalRejectsNonCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := Envelope{
+	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
 		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
 		PayloadType: "payload",
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
 	raw, err := env.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -79,14 +83,17 @@ func FuzzEnvelopeUnmarshalBinary(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
-	env := Envelope{
+	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
 		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
 		PayloadType: "payload",
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		f.Fatal(err)
+	}
 	raw, err := env.MarshalBinary()
 	if err != nil {
 		f.Fatal(err)
@@ -98,7 +105,8 @@ func FuzzEnvelopeUnmarshalBinary(f *testing.F) {
 		if err := decoded.UnmarshalBinary(data); err != nil {
 			return
 		}
-		_ = decoded.ValidateBasic("test", session, []PartyID{1, 2})
+		decoded.TranscriptHash = decoded.domainSeparatedHash()
+		_ = ValidateEnvelope(decoded, "test", session, []PartyID{1, 2})
 		again, err := decoded.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)

@@ -100,7 +100,7 @@ func TestFROSTRejectsConflictingCommitment(t *testing.T) {
 	}
 	conflict := out3[0]
 	conflict.From = 2
-	conflict = conflict.WithTranscriptHash()
+	conflict = conflict.RecomputeTranscriptHash()
 	_, err = s1.HandleSignMessage(conflict)
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 }
@@ -144,7 +144,7 @@ func TestFROSTRejectsConflictingPartial(t *testing.T) {
 	}
 	conflict := partialFrom3
 	conflict.From = 2
-	conflict = conflict.WithTranscriptHash()
+	conflict = conflict.RecomputeTranscriptHash()
 	_, err := sessions[1].HandleSignMessage(conflict)
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 }
@@ -224,7 +224,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	round2[0].Payload = mutated
-	round2[0] = round2[0].WithTranscriptHash()
+	round2[0] = round2[0].RecomputeTranscriptHash()
 	var delivered bool
 	for _, id := range signers {
 		if id == round2[0].From {
@@ -258,14 +258,13 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 	t.Run("broadcast", func(t *testing.T) {
 		mutated := share
 		mutated.To = 0
-		mutated = mutated.WithTranscriptHash()
+		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(mutated)
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("non-confidential", func(t *testing.T) {
 		mutated := share
-		mutated.ConfidentialRequired = false
-		mutated = mutated.WithTranscriptHash()
+		mutated.To = 99 // wrong recipient
 		_, err := kg1.HandleKeygenMessage(mutated)
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -303,7 +302,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1] = out2[1].WithTranscriptHash()
+	out2[1] = out2[1].RecomputeTranscriptHash()
 	_, err = session.HandleReshareMessage(out2[1])
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
@@ -338,7 +337,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		env := out[0]
 		env.To = 2
-		env = env.WithTranscriptHash()
+		env = env.RecomputeTranscriptHash()
 		_, err = keygen.HandleKeygenMessage(env)
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
@@ -358,7 +357,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := out2[0]
-		env.TranscriptHash = nil
+		env.TranscriptHash = [32]byte{}
 		_, err = sign.HandleSignMessage(env)
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -397,7 +396,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		bad := round2[0]
 		bad.Payload = mutated
-		bad = bad.WithTranscriptHash()
+		bad = bad.RecomputeTranscriptHash()
 		_, err = sessions[1].HandleSignMessage(bad)
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		_, err = sessions[1].HandleSignMessage(round2[0])
@@ -1140,7 +1139,7 @@ func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
 		From:        99, // not in participant set
 		To:          1,
 		PayloadType: payloadReshareCommitments,
-	}.WithTranscriptHash()
+	}
 	_, err = session.HandleReshareMessage(fakeEnv)
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 }

@@ -13,17 +13,18 @@ func TestGoldenEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env := Envelope{
-		Protocol:             "test.v1",
-		Version:              Version,
-		SessionID:            sessionID,
-		Round:                1,
-		From:                 1,
-		To:                   0,
-		PayloadType:          "test.payload",
-		Payload:              []byte{0x01, 0x02, 0x03},
-		TranscriptHash:       bytes.Repeat([]byte{0xaa}, 32),
-		ConfidentialRequired: false,
+	env, err := NewEnvelope(EnvelopeInput{
+		Protocol:    "test.v1",
+		Version:     Version,
+		SessionID:   sessionID,
+		Round:       1,
+		From:        1,
+		To:          0,
+		PayloadType: "test.payload",
+		Payload:     []byte{0x01, 0x02, 0x03},
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	raw, err := env.MarshalBinary()
 	if err != nil {

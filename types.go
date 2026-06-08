@@ -31,11 +31,23 @@ const (
 	envelopeFieldPayloadType
 	envelopeFieldPayload
 	envelopeFieldTranscriptHash
-	envelopeFieldConfidentialRequired
 )
 
 // PartyID identifies one protocol participant; zero is reserved as "unset".
 type PartyID uint32
+
+// ProtocolID names a threshold signature protocol implemented by this module.
+type ProtocolID string
+
+const (
+	// ProtocolCGGMP21Secp256k1 identifies the CGGMP21-style threshold ECDSA protocol.
+	ProtocolCGGMP21Secp256k1 ProtocolID = "cggmp21-secp256k1"
+	// ProtocolFROSTEd25519 identifies the FROST-style threshold Ed25519 protocol.
+	ProtocolFROSTEd25519 ProtocolID = "frost-ed25519"
+)
+
+// PayloadType names a protocol message payload kind.
+type PayloadType string
 
 // Algorithm names a threshold signature algorithm implemented by this module.
 type Algorithm string
@@ -46,6 +58,265 @@ const (
 	// AlgorithmFROSTEd25519 identifies the FROST-style threshold Ed25519 package.
 	AlgorithmFROSTEd25519 Algorithm = "frost-ed25519"
 )
+
+// PartySet is an ordered set of protocol participants.
+type PartySet []PartyID
+
+// Contains reports whether id is in the party set.
+func (ps PartySet) Contains(id PartyID) bool {
+	return ContainsParty(ps, id)
+}
+
+// Sorted returns a sorted copy of the party set.
+func (ps PartySet) Sorted() PartySet {
+	return SortParties(ps)
+}
+
+// Clone returns a deep copy of the party set.
+func (ps PartySet) Clone() PartySet {
+	return slices.Clone(ps)
+}
+
+// SecurityContext records transport-layer facts verified by the receiving adapter.
+// It must NOT be set by protocol callers; only the transport receive path sets it.
+type SecurityContext struct {
+	Authenticated      bool
+	Confidential       bool
+	AuthenticatedParty PartyID
+	ChannelID          string
+	PeerKeyID          string
+	ReceivedAtUnix     int64
+}
+
+// DeliveryMode classifies an envelope delivery path.
+type DeliveryMode uint8
+
+const (
+	// DeliveryDirect is a point-to-point message addressed to a single recipient.
+	DeliveryDirect DeliveryMode = iota
+	// DeliveryBroadcast is a message sent to all parties.
+	DeliveryBroadcast
+)
+
+// ConfidentialityPolicy specifies whether a message must be encrypted in transit.
+type ConfidentialityPolicy uint8
+
+const (
+	// ConfidentialityForbidden means the message must NOT be sent over a confidential channel.
+	ConfidentialityForbidden ConfidentialityPolicy = iota
+	// ConfidentialityOptional means either plaintext or confidential transport is acceptable.
+	ConfidentialityOptional
+	// ConfidentialityRequired means the message MUST be sent over a confidential channel.
+	ConfidentialityRequired
+)
+
+// BroadcastConsistencyPolicy specifies whether broadcast messages require a consistency certificate.
+type BroadcastConsistencyPolicy uint8
+
+const (
+	// BroadcastConsistencyNone means no broadcast certificate is required.
+	BroadcastConsistencyNone BroadcastConsistencyPolicy = iota
+	// BroadcastConsistencyRequired means a valid BroadcastCertificate must be present.
+	BroadcastConsistencyRequired
+)
+
+// DeliveryPolicy defines the transport requirements for one protocol message kind.
+type DeliveryPolicy struct {
+	Protocol    ProtocolID
+	Round       uint8
+	PayloadType PayloadType
+
+	Mode DeliveryMode
+
+	Confidentiality ConfidentialityPolicy
+
+	BroadcastConsistency BroadcastConsistencyPolicy
+}
+
+// PolicySet is a collection of delivery policies keyed by (protocol, round, payloadType).
+// It must return ErrUnknownPayloadPolicy for unregistered payload types.
+type PolicySet []DeliveryPolicy
+
+// Match returns the policy for a given message kind or ErrUnknownPayloadPolicy.
+func (ps PolicySet) Match(protocol ProtocolID, round uint8, payloadType PayloadType) (DeliveryPolicy, error) {
+	for _, p := range ps {
+		if p.Protocol == protocol && p.Round == round && p.PayloadType == payloadType {
+			return p, nil
+		}
+	}
+	return DeliveryPolicy{}, ErrUnknownPayloadPolicy
+}
+
+// ReplayKey uniquely identifies one protocol message for replay detection.
+type ReplayKey struct {
+	Protocol       ProtocolID
+	SessionID      SessionID
+	Round          uint8
+	From           PartyID
+	To             PartyID
+	PayloadType    PayloadType
+	TranscriptHash [32]byte
+}
+
+// ReplayCache detects replayed protocol messages.
+// MarkIfNew returns true on first use of a key and false on subsequent uses.
+type ReplayCache interface {
+	MarkIfNew(key ReplayKey) bool
+}
+
+// BroadcastAck is one party's signed acknowledgment of a broadcast message.
+type BroadcastAck struct {
+	Party PartyID
+
+	PayloadHash    [32]byte
+	TranscriptHash [32]byte
+
+	Signature []byte
+}
+
+// Clone returns a deep copy of the broadcast ack.
+func (a BroadcastAck) Clone() BroadcastAck {
+	return BroadcastAck{
+		Party:          a.Party,
+		PayloadHash:    a.PayloadHash,
+		TranscriptHash: a.TranscriptHash,
+		Signature:      slices.Clone(a.Signature),
+	}
+}
+
+// BroadcastCertificate proves that all parties received the same broadcast payload.
+type BroadcastCertificate struct {
+	Protocol    ProtocolID
+	SessionID   SessionID
+	Round       uint8
+	From        PartyID
+	PayloadType PayloadType
+
+	PayloadHash    [32]byte
+	TranscriptHash [32]byte
+
+	Recipients PartySet
+	Acks       []BroadcastAck
+}
+
+// Clone returns a deep copy of the broadcast certificate.
+func (c *BroadcastCertificate) Clone() *BroadcastCertificate {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	clone.Recipients = c.Recipients.Clone()
+	clone.Acks = cloneBroadcastAcks(c.Acks)
+	return &clone
+}
+
+// Verify checks that the certificate binds to env and that
+// every party acknowledged the same digest. It does not verify individual ack
+// signatures; the caller must supply a verifier for that.
+func (c *BroadcastCertificate) Verify(env Envelope, parties PartySet) error {
+	if c == nil {
+		return ErrMissingBroadcastCertificate
+	}
+	if c.Protocol != env.Protocol {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.SessionID != env.SessionID {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.Round != env.Round {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.From != env.From {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.PayloadType != env.PayloadType {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.PayloadHash != sha256.Sum256(env.Payload) {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.TranscriptHash != env.TranscriptHash {
+		return ErrInvalidBroadcastCertificate
+	}
+	if len(c.Recipients) != len(parties) {
+		return ErrInvalidBroadcastCertificate
+	}
+	for _, id := range parties {
+		if !c.Recipients.Contains(id) {
+			return ErrInvalidBroadcastCertificate
+		}
+	}
+	if len(c.Acks) != len(parties) {
+		return ErrInvalidBroadcastCertificate
+	}
+	seen := make(map[PartyID]bool, len(c.Acks))
+	for _, ack := range c.Acks {
+		if !parties.Contains(ack.Party) {
+			return ErrInvalidBroadcastCertificate
+		}
+		if seen[ack.Party] {
+			return ErrInvalidBroadcastCertificate
+		}
+		seen[ack.Party] = true
+		if ack.PayloadHash != c.PayloadHash {
+			return ErrInvalidBroadcastCertificate
+		}
+		if ack.TranscriptHash != c.TranscriptHash {
+			return ErrInvalidBroadcastCertificate
+		}
+	}
+	return nil
+}
+
+// EnvelopeInput carries the caller-provided fields for constructing an Envelope.
+type EnvelopeInput struct {
+	Protocol    ProtocolID
+	Version     uint16
+	SessionID   SessionID
+	Round       uint8
+	From        PartyID
+	To          PartyID
+	PayloadType PayloadType
+	Payload     []byte
+}
+
+// SessionConfig carries the security configuration required to construct a protocol session.
+type SessionConfig struct {
+	Self        PartyID
+	Parties     PartySet
+	SessionID   SessionID
+	PolicySet   PolicySet
+	ReplayCache ReplayCache
+}
+
+// GuardConfig carries the guard configuration for protocol sessions that process
+// inbound envelopes. It is required for production sessions.
+type GuardConfig struct {
+	Self      PartyID
+	Parties   PartySet
+	Protocol  ProtocolID
+	SessionID SessionID
+	Policies  PolicySet
+	Cache     ReplayCache
+}
+
+// BuildGuard constructs an EnvelopeGuard from the configuration or returns an error.
+func (c GuardConfig) BuildGuard() (*EnvelopeGuard, error) {
+	return NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
+}
+
+// TestGuardConfig returns a GuardConfig suitable for tests using an in-memory replay cache.
+// The caller must provide the protocol-specific PolicySet.
+func TestGuardConfig(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet) GuardConfig {
+	return GuardConfig{
+		Self:      self,
+		Parties:   parties,
+		Protocol:  protocol,
+		SessionID: sessionID,
+		Policies:  policies,
+		Cache:     NewInMemoryReplayCache(),
+	}
+}
 
 // SessionID is a 32-byte nonce that separates independent protocol executions.
 type SessionID [32]byte
@@ -101,6 +372,11 @@ func (id *SessionID) UnmarshalText(text []byte) error {
 	}
 	*id = parsed
 	return nil
+}
+
+// Valid reports whether the session identifier is non-zero.
+func (id SessionID) Valid() bool {
+	return id != (SessionID{})
 }
 
 // ThresholdConfig contains local participant configuration for a protocol run.
@@ -190,34 +466,52 @@ func (c ThresholdConfig) Reader() io.Reader {
 	return rand.Reader
 }
 
-// Envelope is a transport-neutral protocol message.
+// Envelope is a transport-neutral protocol message with transport-verified security context.
 type Envelope struct {
-	Protocol             string    `json:"protocol"`
-	Version              uint16    `json:"version"`
-	SessionID            SessionID `json:"session_id"`
-	Round                uint8     `json:"round"`
-	From                 PartyID   `json:"from"`
-	To                   PartyID   `json:"to,omitempty"` // zero means broadcast
-	PayloadType          string    `json:"payload_type"`
-	Payload              []byte    `json:"payload"`
-	TranscriptHash       []byte    `json:"transcript_hash"`
-	ConfidentialRequired bool      `json:"confidential_required,omitempty"` // transport must encrypt/authenticate this envelope
+	Protocol    ProtocolID
+	Version     uint16
+	SessionID   SessionID
+	Round       uint8
+	From        PartyID
+	To          PartyID // zero means broadcast
+	PayloadType PayloadType
+	Payload     []byte
+
+	TranscriptHash [32]byte
+
+	Security SecurityContext
+
+	Broadcast *BroadcastCertificate
 }
 
 // Clone returns a deep copy of the envelope.
 func (e Envelope) Clone() Envelope {
-	return Envelope{
-		Protocol:             e.Protocol,
-		Version:              e.Version,
-		SessionID:            e.SessionID,
-		Round:                e.Round,
-		From:                 e.From,
-		To:                   e.To,
-		PayloadType:          e.PayloadType,
-		Payload:              append([]byte(nil), e.Payload...),
-		TranscriptHash:       append([]byte(nil), e.TranscriptHash...),
-		ConfidentialRequired: e.ConfidentialRequired,
+	clone := Envelope{
+		Protocol:       e.Protocol,
+		Version:        e.Version,
+		SessionID:      e.SessionID,
+		Round:          e.Round,
+		From:           e.From,
+		To:             e.To,
+		PayloadType:    e.PayloadType,
+		Payload:        append([]byte(nil), e.Payload...),
+		TranscriptHash: e.TranscriptHash,
+		Security:       e.Security,
+		Broadcast:      e.Broadcast.Clone(),
 	}
+	return clone
+}
+
+// cloneBroadcastAcks returns a deep copy of a broadcast ack slice.
+func cloneBroadcastAcks(acks []BroadcastAck) []BroadcastAck {
+	if acks == nil {
+		return nil
+	}
+	out := make([]BroadcastAck, len(acks))
+	for i, ack := range acks {
+		out[i] = ack.Clone()
+	}
+	return out
 }
 
 // MarshalBinary encodes the envelope using strict canonical TLV wire format.
@@ -239,9 +533,6 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
 		return nil, fmt.Errorf("envelope payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
 	}
-	if len(e.TranscriptHash) != 0 && len(e.TranscriptHash) != sha256.Size {
-		return nil, errors.New("invalid envelope transcript hash")
-	}
 	if len(e.Payload) > limits.MaxEnvelopePayloadBytes {
 		return nil, fmt.Errorf("envelope payload too large: %d > %d", len(e.Payload), limits.MaxEnvelopePayloadBytes)
 	}
@@ -254,8 +545,7 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 		{Tag: envelopeFieldTo, Value: wire.Uint32(uint32(e.To))},
 		{Tag: envelopeFieldPayloadType, Value: []byte(e.PayloadType)},
 		{Tag: envelopeFieldPayload, Value: wire.NonNilBytes(e.Payload)},
-		{Tag: envelopeFieldTranscriptHash, Value: wire.NonNilBytes(e.TranscriptHash)},
-		{Tag: envelopeFieldConfidentialRequired, Value: wire.Bool(e.ConfidentialRequired)},
+		{Tag: envelopeFieldTranscriptHash, Value: e.TranscriptHash[:]},
 	})
 }
 
@@ -355,34 +645,85 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return err
 	}
-	if len(transcript) != 0 && len(transcript) != sha256.Size {
-		return errors.New("invalid envelope transcript hash")
-	}
-	confidentialBytes, err := wire.Require(fields, envelopeFieldConfidentialRequired)
-	if err != nil {
-		return err
-	}
-	confidential, err := wire.DecodeBool(confidentialBytes)
-	if err != nil {
-		return err
+	var transcriptHash [32]byte
+	if len(transcript) > 0 {
+		if len(transcript) != sha256.Size {
+			return errors.New("invalid envelope transcript hash")
+		}
+		copy(transcriptHash[:], transcript)
 	}
 	*e = Envelope{
-		Protocol:             string(protocol),
-		Version:              envVersion,
-		SessionID:            session,
-		Round:                round[0],
-		From:                 PartyID(from),
-		To:                   PartyID(to),
-		PayloadType:          string(payloadType),
-		Payload:              payload,
-		TranscriptHash:       transcript,
-		ConfidentialRequired: confidential,
+		Protocol:       ProtocolID(protocol),
+		Version:        envVersion,
+		SessionID:      session,
+		Round:          round[0],
+		From:           PartyID(from),
+		To:             PartyID(to),
+		PayloadType:    PayloadType(payloadType),
+		Payload:        payload,
+		TranscriptHash: transcriptHash,
 	}
 	return nil
 }
 
+// NewEnvelope constructs an envelope from caller-provided fields.
+// It validates basic fields, canonical-encodes the payload, and computes the transcript hash.
+func NewEnvelope(input EnvelopeInput) (Envelope, error) {
+	if input.Protocol == "" {
+		return Envelope{}, errors.New("envelope protocol is empty")
+	}
+	if input.Version != Version {
+		return Envelope{}, fmt.Errorf("unexpected envelope version %d", input.Version)
+	}
+	if input.PayloadType == "" {
+		return Envelope{}, errors.New("envelope payload type is empty")
+	}
+	limits := DefaultLimits()
+	if len(input.Protocol) > limits.MaxProtocolNameBytes {
+		return Envelope{}, fmt.Errorf("envelope protocol name too long: %d > %d", len(input.Protocol), limits.MaxProtocolNameBytes)
+	}
+	if len(input.PayloadType) > limits.MaxPayloadTypeBytes {
+		return Envelope{}, fmt.Errorf("envelope payload type too long: %d > %d", len(input.PayloadType), limits.MaxPayloadTypeBytes)
+	}
+	if len(input.Payload) > limits.MaxEnvelopePayloadBytes {
+		return Envelope{}, fmt.Errorf("envelope payload too large: %d > %d", len(input.Payload), limits.MaxEnvelopePayloadBytes)
+	}
+	e := Envelope{
+		Protocol:    input.Protocol,
+		Version:     input.Version,
+		SessionID:   input.SessionID,
+		Round:       input.Round,
+		From:        input.From,
+		To:          input.To,
+		PayloadType: input.PayloadType,
+		Payload:     input.Payload,
+	}
+	e.TranscriptHash = e.domainSeparatedHash()
+	return e, nil
+}
+
+// OpenEnvelope decodes a wire envelope and attaches transport-verified security context.
+// It recomputes the transcript hash from the wire bytes and stores the provided
+// SecurityContext and BroadcastCertificate. No protocol policy checks are performed.
+func OpenEnvelope(raw []byte, security SecurityContext, broadcast *BroadcastCertificate) (Envelope, error) {
+	var env Envelope
+	if err := env.UnmarshalBinary(raw); err != nil {
+		return Envelope{}, err
+	}
+	// Recompute transcript hash from wire-decoded fields.
+	env.TranscriptHash = env.domainSeparatedHash()
+	env.Security = security
+	env.Broadcast = broadcast
+	return env, nil
+}
+
 // DomainSeparatedHash hashes the public envelope metadata and payload.
 func (e Envelope) DomainSeparatedHash() []byte {
+	hash := e.domainSeparatedHash()
+	return hash[:]
+}
+
+func (e Envelope) domainSeparatedHash() [32]byte {
 	h := sha256.New()
 	// The protocol/version/session/round tuple keeps transcripts from one
 	// algorithm or session from being replayed into another.
@@ -393,41 +734,48 @@ func (e Envelope) DomainSeparatedHash() []byte {
 	h.Write(e.SessionID[:])
 	h.Write(wire.Uint32(uint32(e.From)))
 	h.Write(wire.Uint32(uint32(e.To)))
-	h.Write(wire.Bool(e.ConfidentialRequired))
 	h.Write([]byte(e.PayloadType))
 	h.Write([]byte{0})
 	h.Write(e.Payload)
-	return h.Sum(nil)
+	var out [32]byte
+	h.Sum(out[:0])
+	return out
 }
 
-// WithTranscriptHash returns a copy of the envelope with its transcript hash set.
-func (e Envelope) WithTranscriptHash() Envelope {
-	e.TranscriptHash = e.DomainSeparatedHash()
+// VerifyTranscriptHash recomputes the transcript hash and compares it against the stored value.
+func VerifyTranscriptHash(env Envelope) error {
+	want := env.domainSeparatedHash()
+	if want != env.TranscriptHash {
+		return errors.New("transcript hash mismatch")
+	}
+	return nil
+}
+
+// RecomputeTranscriptHash returns a copy of the envelope with the transcript hash recomputed.
+// This is intended for tests that mutate envelope fields; production code should use NewEnvelope.
+func (e Envelope) RecomputeTranscriptHash() Envelope {
+	e.TranscriptHash = e.domainSeparatedHash()
 	return e
 }
 
-// ValidateBasic checks envelope metadata before protocol-specific decoding.
-func (e Envelope) ValidateBasic(protocol string, session SessionID, parties []PartyID) error {
-	// Validate common envelope metadata before protocol-specific decoding. This
-	// keeps malformed or cross-session messages from reaching state machines.
-	if e.Protocol != protocol {
-		return fmt.Errorf("unexpected protocol %q", e.Protocol)
+// ValidateEnvelope performs common envelope validation without a guard.
+// This is a transitional helper for handlers that have not yet adopted EnvelopeGuard.
+// New code should use EnvelopeGuard.Validate instead.
+func ValidateEnvelope(env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties []PartyID) error {
+	if env.Protocol != expectedProtocol {
+		return fmt.Errorf("unexpected protocol %q", env.Protocol)
 	}
-	if e.Version != Version {
-		return fmt.Errorf("unexpected version %d", e.Version)
+	if env.Version != Version {
+		return fmt.Errorf("unexpected version %d", env.Version)
 	}
-	if e.SessionID != session {
+	if env.SessionID != expectedSession {
 		return errors.New("session mismatch")
 	}
-	if len(e.TranscriptHash) != sha256.Size {
-		return errors.New("missing or invalid envelope transcript hash")
+	if err := VerifyTranscriptHash(env); err != nil {
+		return err
 	}
-	want := e.DomainSeparatedHash()
-	if !slices.Equal(want, e.TranscriptHash) {
-		return errors.New("transcript hash mismatch")
-	}
-	if len(parties) > 0 && !ContainsParty(parties, e.From) {
-		return fmt.Errorf("sender %d is not a participant", e.From)
+	if len(parties) > 0 && !ContainsParty(parties, env.From) {
+		return fmt.Errorf("sender %d is not a participant", env.From)
 	}
 	return nil
 }

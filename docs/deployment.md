@@ -131,13 +131,17 @@ signSession.Destroy()
 Envelopes are the only message type exchanged between parties. They have a deterministic binary encoding:
 
 ```go
-env := tss.Envelope{...}.WithTranscriptHash()
+env, err := tss.NewEnvelope(tss.EnvelopeInput{...})
 raw, err := env.MarshalBinary()
 // Transmit `raw` bytes.
 
 // On the receiving side:
 var received tss.Envelope
 err := received.UnmarshalBinary(data)
+// Transport adapter must set received.Security from authenticated channel:
+received.Security.Authenticated = true
+received.Security.AuthenticatedParty = peerID
+received.Security.Confidential = isEncrypted
 ```
 
 ### Recommended Transport Patterns
@@ -145,13 +149,12 @@ err := received.UnmarshalBinary(data)
 **Message delivery guarantees:**
 
 - Broadcast messages (`To == 0`) must reach all participants.
-- Secret-bearing point-to-point messages must have `To` set to the receiver and
-  `ConfidentialRequired=true`; protocol handlers reject broadcast or
-  non-confidential secret shares.
-- Point-to-point messages (`To != 0`, `ConfidentialRequired=true`) must be delivered with confidentiality.
-- `ConfidentialRequired` is metadata checked by protocol handlers; it is not
-  encryption. Sending those payloads through a plaintext broker, relay, log, or
-  WebSocket is unsafe even though the flag is set.
+- Secret-bearing point-to-point messages must have `To` set to the receiver;
+  the transport must set `Security.Confidential = true` and the `EnvelopeGuard`
+  enforces confidentiality per the protocol `PolicySet`.
+- `Security.Confidential` is a transport-verified fact set by the receive path;
+  it is not encryption. Sending those payloads through a plaintext broker,
+  relay, log, or WebSocket is unsafe even when the flag is set.
 - Within a round, messages can be delivered in any order.
 - Across rounds, messages must be processed sequentially — round N must complete before round N+1.
 

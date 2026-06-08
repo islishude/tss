@@ -35,6 +35,7 @@ type RefreshSession struct {
 	shares          map[tss.PartyID]*big.Int
 	completed       bool
 	aborted         bool
+	guard           *tss.EnvelopeGuard
 	newShare        *KeyShare
 	confirmations   map[tss.PartyID][]byte
 	ownPoly         []*big.Int
@@ -162,6 +163,57 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 	return s, out, nil
 }
 
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *RefreshSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this refresh session.
+// cache may be nil to use an in-memory cache suitable for testing.
+func (s *RefreshSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil refresh session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to basic structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *RefreshSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.cfg.Self {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
+}
+
 // HandleRefreshMessage validates and applies one refresh envelope.
 func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
@@ -178,11 +230,8 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 			s.abort()
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldKey.Parties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if env.To != 0 && env.To != s.oldKey.Party {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleRefreshConfirmation(env)
@@ -525,9 +574,6 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 	}
 	if env.To != 0 {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation must be broadcast"))
-	}
-	if env.ConfidentialRequired {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation must not require confidential transport"))
 	}
 	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
 	if err != nil {

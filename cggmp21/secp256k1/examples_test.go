@@ -46,7 +46,7 @@ func ExampleVerifyBlameEvidence() {
 		From:        1,
 		PayloadType: payloadSignPartial,
 		Payload:     []byte("bad sign partial"),
-	}.WithTranscriptHash()
+	}
 	evidence, err := tss.NewBlameEvidence(envelope, tss.EvidenceKindSignPartial, "invalid sign partial", []tss.EvidenceField{
 		{Key: evidenceFieldPartiesHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},
 		{Key: evidenceFieldSignerSetHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},

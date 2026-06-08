@@ -64,7 +64,7 @@ Each party computes private shares for every other party and delivers them in co
 s_{i→j} = f_i(j)   (mod q)
 ```
 
-The share is encoded as a canonical 32-byte scalar and sent with `ConfidentialRequired = true`.
+The share is encoded as a canonical 32-byte scalar and sent as a direct confidential message (`To != 0`, transport must set `Security.Confidential = true`).
 
 ### Share Verification
 

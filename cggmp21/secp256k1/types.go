@@ -17,19 +17,19 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
-const protocol = "cggmp21-secp256k1"
+const protocol = tss.ProtocolCGGMP21Secp256k1
 
 const (
-	payloadKeygenCommitments  = "cggmp21.secp256k1.keygen.commitments"
-	payloadKeygenShare        = "cggmp21.secp256k1.keygen.share"
-	payloadKeygenConfirmation = "cggmp21.secp256k1.keygen.confirmation"
-	payloadPresignRound1      = "cggmp21.secp256k1.presign.round1"
-	payloadPresignRound1Proof = "cggmp21.secp256k1.presign.round1-proof"
-	payloadPresignRound2      = "cggmp21.secp256k1.presign.round2"
-	payloadPresignRound3      = "cggmp21.secp256k1.presign.round3"
-	payloadSignPartial        = "cggmp21.secp256k1.sign.partial"
-	payloadRefreshCommitments = "cggmp21.secp256k1.refresh.commitments"
-	payloadRefreshShare       = "cggmp21.secp256k1.refresh.share"
+	payloadKeygenCommitments  tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
+	payloadKeygenShare        tss.PayloadType = "cggmp21.secp256k1.keygen.share"
+	payloadKeygenConfirmation tss.PayloadType = "cggmp21.secp256k1.keygen.confirmation"
+	payloadPresignRound1      tss.PayloadType = "cggmp21.secp256k1.presign.round1"
+	payloadPresignRound1Proof tss.PayloadType = "cggmp21.secp256k1.presign.round1-proof"
+	payloadPresignRound2      tss.PayloadType = "cggmp21.secp256k1.presign.round2"
+	payloadPresignRound3      tss.PayloadType = "cggmp21.secp256k1.presign.round3"
+	payloadSignPartial        tss.PayloadType = "cggmp21.secp256k1.sign.partial"
+	payloadRefreshCommitments tss.PayloadType = "cggmp21.secp256k1.refresh.commitments"
+	payloadRefreshShare       tss.PayloadType = "cggmp21.secp256k1.refresh.share"
 )
 
 // defaultPaillierBits returns the Paillier modulus size to use for key
@@ -603,26 +603,38 @@ func cloneVerificationShares(in []VerificationShare) []VerificationShare {
 	return out
 }
 
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType string, payload []byte, confidential bool) tss.Envelope {
-	return tss.Envelope{
-		Protocol:             protocol,
-		Version:              tss.Version,
-		SessionID:            config.SessionID,
-		Round:                round,
-		From:                 from,
-		To:                   to,
-		PayloadType:          payloadType,
-		Payload:              payload,
-		ConfidentialRequired: confidential,
-	}.WithTranscriptHash()
+func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) tss.Envelope {
+	e, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   config.SessionID,
+		Round:       round,
+		From:        from,
+		To:          to,
+		PayloadType: payloadType,
+		Payload:     payload,
+	})
+	if err != nil {
+		// NewEnvelope only fails on invalid inputs; all callers pass validated data.
+		panic(err)
+	}
+	if confidential {
+		e.Security.Confidential = true
+	}
+	return e
 }
 
-func requireDirectConfidential(env tss.Envelope, self tss.PartyID, payloadType string) error {
+func requireDirectConfidential(env tss.Envelope, self tss.PartyID, payloadType tss.PayloadType) error {
 	if env.To != self {
 		return fmt.Errorf("%s must be addressed to receiver", payloadType)
 	}
-	if !env.ConfidentialRequired {
-		return fmt.Errorf("%s must require confidential transport", payloadType)
+	// Secret-bearing direct messages must be delivered over a confidential transport.
+	// This check is defense-in-depth: EnvelopeGuard already enforces confidentiality
+	// per the protocol policy when a guard is configured. When no guard is set
+	// (test-only path), we always check the confidential flag regardless of whether
+	// the transport has set an authenticated security context.
+	if !env.Security.Confidential {
+		return fmt.Errorf("%s must be delivered over a confidential transport", payloadType)
 	}
 	return nil
 }

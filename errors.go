@@ -1,6 +1,9 @@
 package tss
 
-import "fmt"
+import (
+	"errors"
+	"fmt"
+)
 
 const (
 	// ErrCodeInvalidConfig marks invalid local protocol configuration.
@@ -34,6 +37,48 @@ const (
 	// ErrCodeProofTooLarge marks a proof input that exceeds its byte cap.
 	ErrCodeProofTooLarge = "proof_too_large"
 )
+
+// ErrUnauthenticatedTransport is returned when an envelope arrives over an unauthenticated transport.
+var ErrUnauthenticatedTransport = errors.New("unauthenticated transport")
+
+// ErrSenderIdentityMismatch is returned when the transport-authenticated party differs from Envelope.From.
+var ErrSenderIdentityMismatch = errors.New("sender identity mismatch")
+
+// ErrMissingConfidentiality is returned when a confidential-required payload arrives over plaintext.
+var ErrMissingConfidentiality = errors.New("missing transport confidentiality")
+
+// ErrUnexpectedConfidentiality is returned when a confidential-forbidden payload arrives over a confidential channel.
+var ErrUnexpectedConfidentiality = errors.New("unexpected transport confidentiality")
+
+// ErrMissingBroadcastCertificate is returned when a broadcast-consistency-required payload has no certificate.
+var ErrMissingBroadcastCertificate = errors.New("missing broadcast certificate")
+
+// ErrInvalidBroadcastCertificate is returned when a broadcast certificate fails validation.
+var ErrInvalidBroadcastCertificate = errors.New("invalid broadcast certificate")
+
+// ErrBroadcastEquivocation is returned when a sender sends different payloads to different parties.
+var ErrBroadcastEquivocation = errors.New("broadcast equivocation detected")
+
+// ErrReplay is returned when a previously-processed envelope is replayed.
+var ErrReplay = errors.New("replayed envelope")
+
+// ErrWrongRecipient is returned when a direct message is addressed to the wrong party.
+var ErrWrongRecipient = errors.New("wrong envelope recipient")
+
+// ErrExpectedDirectMessage is returned when a broadcast envelope arrives for a direct-only payload type.
+var ErrExpectedDirectMessage = errors.New("expected direct message")
+
+// ErrExpectedBroadcastMessage is returned when a direct envelope arrives for a broadcast-only payload type.
+var ErrExpectedBroadcastMessage = errors.New("expected broadcast message")
+
+// ErrUnknownPayloadPolicy is returned when no delivery policy matches the envelope's protocol/round/payloadType.
+var ErrUnknownPayloadPolicy = errors.New("unknown payload delivery policy")
+
+// ErrMissingReplayCache is returned when a session constructor receives a nil ReplayCache.
+var ErrMissingReplayCache = errors.New("missing replay cache")
+
+// ErrInvalidSessionID is returned when a session is created with a zero or invalid session ID.
+var ErrInvalidSessionID = errors.New("invalid session id")
 
 // ProtocolError is the stable error shape returned by protocol state machines.
 type ProtocolError struct {

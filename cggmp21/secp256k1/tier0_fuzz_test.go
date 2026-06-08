@@ -35,7 +35,7 @@ func FuzzFast_EnvelopeValidateBasic(f *testing.F) {
 		if err := env.UnmarshalBinary(data); err != nil {
 			return
 		}
-		_ = env.ValidateBasic(protocol, sessionID, []tss.PartyID{1, 2})
+		_ = tss.ValidateEnvelope(env, protocol, sessionID, []tss.PartyID{1, 2})
 		again, err := env.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)

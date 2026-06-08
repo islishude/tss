@@ -116,7 +116,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflicting = conflicting.WithTranscriptHash()
+	conflicting = conflicting.RecomputeTranscriptHash()
 	_, err = sessions[1].HandleKeygenMessage(conflicting)
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {

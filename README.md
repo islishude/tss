@@ -18,21 +18,31 @@ Go threshold-signature building blocks.
 ### Ed25519 (FROST)
 
 ```go
-import "crypto/ed25519";
+import (
+    "crypto/ed25519"
+    "github.com/islishude/tss"
+    ed25519 "github.com/islishude/tss/frost/ed25519"
+)
 
-// DKG
+// DKG with guard — every production session must attach an EnvelopeGuard
+// that enforces transport authentication, confidentiality, and replay protection.
 sessionID, _ := tss.NewSessionID(nil)
 parties := []tss.PartyID{1, 2, 3}
+ps := tss.PartySet(parties)
+guard := tss.TestGuardConfig(1, ps, tss.ProtocolFROSTEd25519, sessionID, ed25519.FROSTPolicies)
+g, _ := guard.BuildGuard()
+
 sessions := make(map[tss.PartyID]*ed25519.KeygenSession)
 var messages []tss.Envelope
 for _, id := range parties {
     kg, out, _ := ed25519.StartKeygen(tss.ThresholdConfig{
         Threshold: 2, Parties: parties, Self: id, SessionID: sessionID,
     })
+    kg.SetGuard(g) // produces "guard required" error if skipped
     sessions[id] = kg
     messages = append(messages, out...)
 }
-for _, env := range messages { /* deliver to recipients via HandleKeygenMessage */ }
+for _, env := range messages { /* deliver authenticated+confidential to recipients */ }
 share, _ := sessions[1].KeyShare()
 
 // Sign
@@ -47,14 +57,20 @@ Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.
 ```go
 // DKG → Presign (offline) → Sign (online, one round)
 sessionID, _ := tss.NewSessionID(nil)
+parties := tss.PartySet{1, 2, 3}
+guard := tss.TestGuardConfig(1, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, secp256k1.CGGMP21Policies)
+g, _ := guard.BuildGuard()
+
 kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
+kg.SetGuard(g) // mandatory for authenticated transport
 // ... exchange kgOut and handler-returned keygen messages through confirmation round ...
-share, _ := kg.Complete()
+share, _ := kg.KeyShare()
 
 signers := []tss.PartyID{1, 2}
 ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
 presign, presignOut, _ := secp256k1.StartPresignWithContext(share, sessionID, signers, ctx)
-// ... exchange presignOut messages ...
+presign.SetGuard(g)
+// ... exchange presignOut messages over authenticated+confidential transport ...
 pre, _ := presign.Presign()
 
 message := []byte("payload")

@@ -93,7 +93,7 @@ Each party sends private Shamir shares to every other party:
 s_{i→j} = f_i(j)  mod q
 ```
 
-Sent with `ConfidentialRequired = true`.
+Sent as a direct confidential message (`To != 0`, transport must set `Security.Confidential = true`).
 
 ### Phase 4: Completion
 

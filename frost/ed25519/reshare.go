@@ -13,8 +13,8 @@ import (
 )
 
 const (
-	payloadReshareCommitments = "frost.ed25519.reshare.commitments"
-	payloadReshareShare       = "frost.ed25519.reshare.share"
+	payloadReshareCommitments tss.PayloadType = "frost.ed25519.reshare.commitments"
+	payloadReshareShare       tss.PayloadType = "frost.ed25519.reshare.share"
 )
 
 // ReshareSession tracks a FROST key resharing exchange.
@@ -39,6 +39,7 @@ type ReshareSession struct {
 	completed bool
 	aborted   bool
 	newShare  *KeyShare
+	guard     *tss.EnvelopeGuard
 }
 
 type reshareCommitmentsPayload struct {
@@ -47,6 +48,58 @@ type reshareCommitmentsPayload struct {
 
 type reshareSharePayload struct {
 	Share []byte `json:"share"`
+}
+
+// Guard returns the session's envelope guard for use by transport adapters.
+func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
+	if s == nil {
+		return nil
+	}
+	return s.guard
+}
+
+// SetGuard attaches an envelope guard to the session. When set, all inbound
+// envelopes are validated against protocol policies, transport authentication,
+// confidentiality requirements, broadcast consistency, and replay detection.
+func (s *ReshareSession) SetGuard(g *tss.EnvelopeGuard) {
+	if s != nil {
+		s.guard = g
+	}
+}
+
+// NewGuard creates an EnvelopeGuard configured for this reshare session.
+// cache may be nil to use an in-memory cache suitable for testing.
+func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
+	if s == nil {
+		return nil, errors.New("nil reshare session")
+	}
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	// Use old parties as the guard's party set (the dealer set is the trusted set).
+	return tss.NewEnvelopeGuard(s.selfID, tss.PartySet(s.oldParties), protocol, s.cfg.SessionID, FROSTPolicies, cache)
+}
+
+// validateInbound runs envelope validation through the guard when set, or
+// falls back to structural checks for sessions without a guard (tests).
+// Production deployments MUST attach a guard via SetGuard before processing
+// authenticated transport messages.
+func (s *ReshareSession) validateInbound(env tss.Envelope) error {
+	if s.guard != nil {
+		return s.guard.Validate(env)
+	}
+	// Guard is required when the transport authenticates the sender.
+	if env.Security.Authenticated {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.oldParties); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if env.To != 0 && env.To != s.selfID {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	}
+	return nil
 }
 
 // StartReshare starts a FROST key resharing as an old-party dealer.
@@ -277,8 +330,8 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			s.clearSensitive()
 		}
 	}()
-	if err := env.ValidateBasic(protocol, s.cfg.SessionID, s.oldParties); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	if err := s.validateInbound(env); err != nil {
+		return nil, err
 	}
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))

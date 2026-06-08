@@ -80,12 +80,6 @@ type ReshareConfirmationBroadcast struct {
 	ShareBindingsHash         []byte
 }
 
-// IncomingMessage is the transport envelope accepted by reshare sessions.
-type IncomingMessage = tss.Envelope
-
-// OutgoingMessage is the transport envelope emitted by reshare sessions.
-type OutgoingMessage = tss.Envelope
-
 // ReshareDealerSession is an old-party dealer-only reshare session.
 type ReshareDealerSession = ReshareSession
 

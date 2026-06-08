@@ -61,12 +61,12 @@ func (f EvidenceField) Clone() EvidenceField {
 // should be represented by hashes or other public inputs, not by plaintext.
 type BlameEvidence struct {
 	Version        uint16          `json:"version"`
-	Protocol       string          `json:"protocol"`
+	Protocol       ProtocolID      `json:"protocol"`
 	SessionID      SessionID       `json:"session_id"`
 	Round          uint8           `json:"round"`
 	From           PartyID         `json:"from"`
 	To             PartyID         `json:"to,omitempty"`
-	PayloadType    string          `json:"payload_type"`
+	PayloadType    PayloadType     `json:"payload_type"`
 	PayloadHash    []byte          `json:"payload_hash"`
 	TranscriptHash []byte          `json:"transcript_hash,omitempty"`
 	Kind           EvidenceKind    `json:"kind"`
@@ -86,7 +86,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		To:             env.To,
 		PayloadType:    env.PayloadType,
 		PayloadHash:    payloadHash[:],
-		TranscriptHash: slices.Clone(env.TranscriptHash),
+		TranscriptHash: slices.Clone(env.TranscriptHash[:]),
 		Kind:           kind,
 		Reason:         reason,
 		PublicInputs:   cloneEvidenceFields(inputs),

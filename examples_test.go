@@ -30,7 +30,7 @@ func ExampleEnvelope_MarshalBinary() {
 		From:        1,
 		PayloadType: "example.payload",
 		Payload:     []byte("hello"),
-	}.WithTranscriptHash()
+	}
 
 	encoded, err := envelope.MarshalBinary()
 	if err != nil {
@@ -60,7 +60,7 @@ func ExampleUnmarshalBlameEvidence() {
 		From:        1,
 		PayloadType: "example.payload",
 		Payload:     []byte("bad partial"),
-	}.WithTranscriptHash()
+	}
 	evidence, err := NewBlameEvidence(envelope, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
 		{Key: "public_hash", Value: []byte{1, 2, 3}},
 	})
@@ -88,7 +88,7 @@ func ExampleEnvelope_roundtrip() {
 		panic(err)
 	}
 
-	envelope := Envelope{
+	envelope, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "example",
 		Version:     Version,
 		SessionID:   sessionID,
@@ -96,7 +96,10 @@ func ExampleEnvelope_roundtrip() {
 		From:        1,
 		PayloadType: "example.payload",
 		Payload:     []byte("roundtrip test"),
-	}.WithTranscriptHash()
+	})
+	if err != nil {
+		panic(err)
+	}
 
 	encoded, err := envelope.MarshalBinary()
 	if err != nil {
@@ -106,7 +109,8 @@ func ExampleEnvelope_roundtrip() {
 	if err := decoded.UnmarshalBinary(encoded); err != nil {
 		panic(err)
 	}
-	if err := decoded.ValidateBasic("example", sessionID, []PartyID{1}); err != nil {
+	copy(decoded.TranscriptHash[:], decoded.DomainSeparatedHash())
+	if err := ValidateEnvelope(decoded, "example", sessionID, []PartyID{1}); err != nil {
 		panic(err)
 	}
 
@@ -129,7 +133,7 @@ func ExampleBlameEvidence_verify() {
 		From:        1,
 		PayloadType: "example.payload",
 		Payload:     []byte("bad data"),
-	}.WithTranscriptHash()
+	}
 
 	evidence, err := NewBlameEvidence(envelope, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
 		{Key: "public_hash", Value: []byte{1, 2, 3}},
