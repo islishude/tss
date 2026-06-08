@@ -205,7 +205,7 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	}
 
 	// Verify: A ⊕ (e ⊙ K) == Enc_Ni(z1; z2).
-	eMulK, err := OMul(Ni, e, statement.CiphertextK)
+	eMulK, err := OMulPublic(Ni, e, statement.CiphertextK)
 	if err != nil {
 		return fmt.Errorf("EncProof: e ⊙ K: %w", err)
 	}

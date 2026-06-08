@@ -48,3 +48,9 @@ func secpSecretBig(s *secret.Scalar) (*big.Int, error) {
 	}
 	return scalar.BigInt(), nil
 }
+
+// scalarBytes encodes x as a fixed-length secp256k1 scalar in canonical
+// big-endian form. x is reduced modulo the subgroup order before encoding.
+func scalarBytes(x *big.Int) []byte {
+	return secp.ScalarFromBigInt(x).Bytes()
+}

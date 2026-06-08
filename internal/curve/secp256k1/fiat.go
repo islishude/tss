@@ -93,7 +93,11 @@ func (s *Scalar) Set(t Scalar) {
 	s.mont = t.mont
 }
 
-// BigInt returns s as a *big.Int for shamir compatibility only.
+// BigInt returns s as a *big.Int for shamir compatibility and public
+// cryptographic operations only. Callers MUST NOT call BigInt on scalars
+// that represent secret key material (nonces, shares, private keys) —
+// *big.Int values are not constant-time, are heap-allocated, and can be
+// accidentally logged or serialized. Use [secret.Scalar] for secret scalars.
 func (s Scalar) BigInt() *big.Int {
 	return new(big.Int).SetBytes(s.Bytes())
 }

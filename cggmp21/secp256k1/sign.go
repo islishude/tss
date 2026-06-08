@@ -57,23 +57,26 @@ type SignRequest struct {
 }
 
 // Presign contains one local offline signing record and must be consumed once.
+// Fields are exported for binary encoding via [Presign.MarshalBinary]; JSON encoding
+// is intentionally rejected by [Presign.MarshalJSON] to prevent accidental exposure
+// of secret material.
 type Presign struct {
 	mu *sync.Mutex
 
-	Version              uint16         `json:"version"`
-	Party                tss.PartyID    `json:"party"`
-	Threshold            int            `json:"threshold"`
-	Signers              []tss.PartyID  `json:"signers"`
-	R                    []byte         `json:"r"`
-	LittleR              []byte         `json:"little_r"`
-	TranscriptHash       []byte         `json:"transcript_hash"`
-	Context              PresignContext `json:"context"`
-	ContextHash          []byte         `json:"context_hash"`
-	AdditiveShift        []byte         `json:"additive_shift"`
-	PublicKey            []byte         `json:"public_key"`
-	KeygenTranscriptHash []byte         `json:"keygen_transcript_hash"`
-	PartiesHash          []byte         `json:"parties_hash"`
-	Consumed             bool           `json:"consumed"`
+	Version              uint16
+	Party                tss.PartyID
+	Threshold            int
+	Signers              []tss.PartyID
+	R                    []byte
+	LittleR              []byte
+	TranscriptHash       []byte
+	Context              PresignContext
+	ContextHash          []byte
+	AdditiveShift        []byte
+	PublicKey            []byte
+	KeygenTranscriptHash []byte
+	PartiesHash          []byte
+	Consumed             bool
 
 	kShare   *secret.Scalar
 	chiShare *secret.Scalar

@@ -210,7 +210,7 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	}
 
 	// Equation 1: A ⊕ (e ⊙ C) == Enc_N(z1; z2).
-	eMulC, err := OMul(N, e, stmt.C)
+	eMulC, err := OMulPublic(N, e, stmt.C)
 	if err != nil {
 		return fmt.Errorf("LogStarProof: e ⊙ C: %w", err)
 	}

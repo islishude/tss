@@ -33,19 +33,22 @@ type VerificationShare struct {
 }
 
 // KeyShare is one local FROST Ed25519 signing share.
+// Fields are exported for binary encoding via [KeyShare.MarshalBinary]; JSON
+// encoding is intentionally rejected by [KeyShare.MarshalJSON] to prevent
+// accidental exposure of secret material.
 type KeyShare struct {
-	Version              uint16        `json:"version"`
-	Party                tss.PartyID   `json:"party"`
-	Threshold            int           `json:"threshold"`
-	Parties              []tss.PartyID `json:"parties"`
-	PublicKey            []byte        `json:"public_key"`
-	ChainCode            []byte        `json:"chain_code,omitempty"`
+	Version              uint16
+	Party                tss.PartyID
+	Threshold            int
+	Parties              []tss.PartyID
+	PublicKey            []byte
+	ChainCode            []byte
 	secret               *secret.Scalar
-	GroupCommitments     [][]byte            `json:"group_commitments"`
-	VerificationShares   []VerificationShare `json:"verification_shares"`
-	KeygenSessionID      tss.SessionID       `json:"keygen_session_id"`
-	KeygenTranscriptHash []byte              `json:"keygen_transcript_hash,omitempty"`
-	KeygenConfirmations  [][]byte            `json:"keygen_confirmations,omitempty"`
+	GroupCommitments     [][]byte
+	VerificationShares   []VerificationShare
+	KeygenSessionID      tss.SessionID
+	KeygenTranscriptHash []byte
+	KeygenConfirmations  [][]byte
 }
 
 // Algorithm returns the common algorithm identifier.

@@ -1,20 +1,17 @@
 package paillier
 
 import (
+	"bytes"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
+	"io"
 	"math/big"
-)
 
-// RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
-// the party Paillier modulus and s,t must be non-degenerate elements of Z*_N.
-// This type is re-exported here for the new proof system; the canonical
-// definition and marshal/unmarshal remain in proofs.go for backward
-// compatibility with ModulusProof and RingPedersenProof.
-//
-// NOTE: Eventually RingPedersenParams and its marshal/unmarshal should be
-// moved here from proofs.go. For now, this file provides the commitment
-// helpers that the new proofs (Πenc, Πaff-g, Πlog*) consume.
+	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/wire"
+)
 
 // RPCommit computes the Ring-Pedersen commitment: S^x * T^mu mod N.
 // Both x and mu may be negative; negative exponents are handled via
@@ -148,4 +145,316 @@ func ExpSignedModCT(modulus, base, exp *big.Int, modLen, expLen int) (*big.Int, 
 // and non-degenerate values.
 func validateRPParamsForCommit(params RingPedersenParams) error {
 	return ValidateRingPedersenParams(&params)
+}
+
+// --- Ring-Pedersen parameter generation and Πprm proof ---
+
+// GenerateRingPedersenParams creates Ring-Pedersen public parameters tied to
+// sk.N and returns the secret lambda needed to prove Πprm.
+func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPedersenParams, *big.Int, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if sk == nil {
+		return nil, nil, errors.New("nil Paillier private key")
+	}
+	if err := sk.Validate(); err != nil {
+		return nil, nil, err
+	}
+	phi := paillierPhi(sk)
+	nLen := modulusBytes(sk.N)
+	var lambda *big.Int
+	for {
+		v, err := rand.Int(reader, phi)
+		if err != nil {
+			return nil, nil, err
+		}
+		if v.Sign() != 0 {
+			lambda = v
+			break
+		}
+	}
+	for {
+		t, err := randomCoprime(reader, sk.N)
+		if err != nil {
+			return nil, nil, err
+		}
+		if t.Cmp(big.NewInt(1)) <= 0 {
+			continue
+		}
+		s, err := expSecretMod(sk.N, t, lambda, nLen, nLen)
+		if err != nil {
+			return nil, nil, err
+		}
+		if s.Cmp(big.NewInt(1)) <= 0 {
+			continue
+		}
+		params := &RingPedersenParams{
+			N: new(big.Int).Set(sk.N),
+			S: s,
+			T: t,
+		}
+		if err := ValidateRingPedersenParams(params); err != nil {
+			continue
+		}
+		return params, lambda, nil
+	}
+}
+
+// ProveRingPedersen creates CGGMP24 Πprm for Ring-Pedersen parameters.
+func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, params *RingPedersenParams, lambda *big.Int, party uint32) (*RingPedersenProof, error) {
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if sk == nil {
+		return nil, errors.New("nil Paillier private key")
+	}
+	if err := sk.Validate(); err != nil {
+		return nil, err
+	}
+	if err := ValidateRingPedersenParams(params); err != nil {
+		return nil, err
+	}
+	if params.N.Cmp(sk.N) != 0 {
+		return nil, errors.New("Ring-Pedersen modulus does not match Paillier key")
+	}
+	if lambda == nil || lambda.Sign() <= 0 {
+		return nil, errors.New("invalid Ring-Pedersen lambda")
+	}
+	nLen := modulusBytes(sk.N)
+	s, err := expSecretMod(sk.N, params.T, lambda, nLen, nLen)
+	if err != nil {
+		return nil, err
+	}
+	if s.Cmp(params.S) != 0 {
+		return nil, errors.New("Ring-Pedersen lambda does not open s")
+	}
+	phi := paillierPhi(sk)
+	commitments := make([][]byte, ringPedersenProofRounds)
+	nonces := make([]*big.Int, ringPedersenProofRounds)
+	for i := range ringPedersenProofRounds {
+		nonce, err := rand.Int(reader, phi)
+		if err != nil {
+			return nil, err
+		}
+		commitment, err := expSecretMod(sk.N, params.T, nonce, nLen, nLen)
+		if err != nil {
+			return nil, err
+		}
+		nonces[i] = nonce
+		commitments[i] = fixedModNBytes(commitment, nLen)
+	}
+	transcript := ringPedersenTranscript(domain, params, party, commitments)
+	challenges := make([]byte, ringPedersenProofRounds)
+	responses := make([][]byte, ringPedersenProofRounds)
+	for i := range ringPedersenProofRounds {
+		e := ringPedersenChallenge(transcript, i)
+		challenges[i] = e
+		z := new(big.Int).Set(nonces[i])
+		if e == 1 {
+			z.Add(z, lambda)
+		}
+		z.Mod(z, phi)
+		responses[i] = fixedModNBytes(z, nLen)
+	}
+	return &RingPedersenProof{
+		Version:        proofVersion,
+		TranscriptHash: transcript,
+		Commitments:    commitments,
+		Challenges:     challenges,
+		Responses:      responses,
+	}, nil
+}
+
+// VerifyRingPedersen verifies CGGMP24 Πprm for Ring-Pedersen parameters.
+func VerifyRingPedersen(domain []byte, params *RingPedersenParams, party uint32, proof *RingPedersenProof) bool {
+	if ValidateRingPedersenParams(params) != nil || validateRingPedersenProof(proof) != nil {
+		return false
+	}
+	nLen := modulusBytes(params.N)
+	for i := range ringPedersenProofRounds {
+		if _, err := decodeFixedUnit("Ring-Pedersen commitment", proof.Commitments[i], params.N, nLen); err != nil {
+			return false
+		}
+		if err := validateFixedResponse("Ring-Pedersen response", proof.Responses[i], params.N, nLen); err != nil {
+			return false
+		}
+		if proof.Challenges[i] != 0 && proof.Challenges[i] != 1 {
+			return false
+		}
+	}
+	transcript := ringPedersenTranscript(domain, params, party, proof.Commitments)
+	if !bytes.Equal(transcript, proof.TranscriptHash) {
+		return false
+	}
+	for i := range ringPedersenProofRounds {
+		e := ringPedersenChallenge(transcript, i)
+		if proof.Challenges[i] != e {
+			return false
+		}
+		commitment := new(big.Int).SetBytes(proof.Commitments[i])
+		z := new(big.Int).SetBytes(proof.Responses[i])
+		left := new(big.Int).Exp(params.T, z, params.N)
+		right := new(big.Int).Set(commitment)
+		if e == 1 {
+			right.Mul(right, params.S)
+			right.Mod(right, params.N)
+		}
+		if left.Cmp(right) != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// ValidateRingPedersenParams validates Ring-Pedersen public parameters.
+func ValidateRingPedersenParams(params *RingPedersenParams) error {
+	if params == nil || params.N == nil || params.S == nil || params.T == nil {
+		return errors.New("nil Ring-Pedersen parameters")
+	}
+	if params.N.Sign() <= 0 || params.N.Bit(0) == 0 || params.N.ProbablyPrime(64) {
+		return errors.New("invalid Ring-Pedersen modulus")
+	}
+	if params.S.Sign() <= 0 || params.S.Cmp(params.N) >= 0 || params.T.Sign() <= 0 || params.T.Cmp(params.N) >= 0 {
+		return errors.New("Ring-Pedersen parameter out of range")
+	}
+	nLen := modulusBytes(params.N)
+	if _, err := decodeFixedUnit("Ring-Pedersen s", fixedModNBytes(params.S, nLen), params.N, nLen); err != nil {
+		return err
+	}
+	if _, err := decodeFixedUnit("Ring-Pedersen t", fixedModNBytes(params.T, nLen), params.N, nLen); err != nil {
+		return err
+	}
+	if params.S.Cmp(big.NewInt(1)) <= 0 || params.T.Cmp(big.NewInt(1)) <= 0 {
+		return errors.New("degenerate Ring-Pedersen parameters")
+	}
+	return nil
+}
+
+// MarshalRingPedersenParams encodes Ring-Pedersen parameters canonically.
+func MarshalRingPedersenParams(params *RingPedersenParams) ([]byte, error) {
+	if err := ValidateRingPedersenParams(params); err != nil {
+		return nil, err
+	}
+	nLen := modulusBytes(params.N)
+	return wire.Marshal(proofVersion, ringPedersenParamsWireType, []wire.Field{
+		{Tag: ringPedersenParamsFieldN, Value: fixedModNBytes(params.N, nLen)},
+		{Tag: ringPedersenParamsFieldS, Value: fixedModNBytes(params.S, nLen)},
+		{Tag: ringPedersenParamsFieldT, Value: fixedModNBytes(params.T, nLen)},
+	})
+}
+
+// UnmarshalRingPedersenParams decodes Ring-Pedersen parameters.
+func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
+	version, fields, err := wire.Unmarshal(in, ringPedersenParamsWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected Ring-Pedersen parameter version %d", version)
+	}
+	if err := requireExactProofTags(fields, ringPedersenParamsFieldN, ringPedersenParamsFieldS, ringPedersenParamsFieldT); err != nil {
+		return nil, err
+	}
+	n := new(big.Int).SetBytes(wire.MustField(fields, ringPedersenParamsFieldN))
+	nLen := modulusBytes(n)
+	if nLen == 0 || len(wire.MustField(fields, ringPedersenParamsFieldN)) != nLen {
+		return nil, errors.New("invalid Ring-Pedersen modulus encoding")
+	}
+	sRaw := wire.MustField(fields, ringPedersenParamsFieldS)
+	tRaw := wire.MustField(fields, ringPedersenParamsFieldT)
+	if len(sRaw) != nLen || len(tRaw) != nLen {
+		return nil, errors.New("invalid Ring-Pedersen parameter width")
+	}
+	params := &RingPedersenParams{
+		N: n,
+		S: new(big.Int).SetBytes(sRaw),
+		T: new(big.Int).SetBytes(tRaw),
+	}
+	if err := ValidateRingPedersenParams(params); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+func marshalRingPedersenProof(p *RingPedersenProof) ([]byte, error) {
+	if err := validateRingPedersenProof(p); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(proofVersion, ringPedersenProofWireType, []wire.Field{
+		{Tag: ringPedersenProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: ringPedersenProofFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
+		{Tag: ringPedersenProofFieldChallenges, Value: wire.NonNilBytes(p.Challenges)},
+		{Tag: ringPedersenProofFieldResponses, Value: wire.EncodeBytesList(p.Responses)},
+	})
+}
+
+// UnmarshalRingPedersenProof decodes and structurally validates Πprm.
+func UnmarshalRingPedersenProof(in []byte) (*RingPedersenProof, error) {
+	version, fields, err := wire.Unmarshal(in, ringPedersenProofWireType)
+	if err != nil {
+		return nil, err
+	}
+	if version != proofVersion {
+		return nil, fmt.Errorf("unexpected Ring-Pedersen proof version %d", version)
+	}
+	if err := requireExactProofTags(fields, ringPedersenProofFieldTranscriptHash, ringPedersenProofFieldCommitments, ringPedersenProofFieldChallenges, ringPedersenProofFieldResponses); err != nil {
+		return nil, err
+	}
+	commitments, err := wire.BytesListField(fields, ringPedersenProofFieldCommitments)
+	if err != nil {
+		return nil, err
+	}
+	responses, err := wire.BytesListField(fields, ringPedersenProofFieldResponses)
+	if err != nil {
+		return nil, err
+	}
+	p := &RingPedersenProof{
+		Version:        proofVersion,
+		TranscriptHash: wire.MustField(fields, ringPedersenProofFieldTranscriptHash),
+		Commitments:    commitments,
+		Challenges:     wire.MustField(fields, ringPedersenProofFieldChallenges),
+		Responses:      responses,
+	}
+	if err := validateRingPedersenProof(p); err != nil {
+		return nil, err
+	}
+	return p, nil
+}
+
+func validateRingPedersenProof(p *RingPedersenProof) error {
+	if p == nil {
+		return errors.New("nil Ring-Pedersen proof")
+	}
+	if p.Version != proofVersion {
+		return fmt.Errorf("unexpected Ring-Pedersen proof version %d", p.Version)
+	}
+	if len(p.TranscriptHash) != sha256.Size {
+		return errors.New("invalid Ring-Pedersen transcript hash")
+	}
+	if len(p.Commitments) != ringPedersenProofRounds || len(p.Responses) != ringPedersenProofRounds || len(p.Challenges) != ringPedersenProofRounds {
+		return errors.New("invalid Ring-Pedersen proof round count")
+	}
+	for i := range ringPedersenProofRounds {
+		if len(p.Commitments[i]) == 0 || len(p.Responses[i]) == 0 {
+			return fmt.Errorf("incomplete Ring-Pedersen proof round %d", i)
+		}
+		if p.Challenges[i] != 0 && p.Challenges[i] != 1 {
+			return fmt.Errorf("invalid Ring-Pedersen challenge bit %d", i)
+		}
+	}
+	return nil
+}
+
+func ringPedersenTranscript(domain []byte, params *RingPedersenParams, party uint32, commitments [][]byte) []byte {
+	paramsBytes, _ := MarshalRingPedersenParams(params)
+	return proofTranscript(ringPedersenProofTag, domain,
+		[][]byte{partyBytes(party), paramsBytes},
+		[][]byte{wire.EncodeBytesList(commitments)},
+	)
+}
+
+func ringPedersenChallenge(transcript []byte, round int) byte {
+	digest := hashParts([]byte(ringPedersenChallengeLabel), transcript, wire.Uint32(uint32(round)))
+	return digest[0] & 1
 }

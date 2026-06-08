@@ -633,3 +633,27 @@ func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
 	}
 	return refreshSharePayload{Share: share}, nil
 }
+
+// envelope creates a protocol envelope with the cggmp21-secp256k1 protocol id
+// and current wire version. It panics on invalid input since all callers pass
+// validated data.
+func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) tss.Envelope {
+	e, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   config.SessionID,
+		Round:       round,
+		From:        from,
+		To:          to,
+		PayloadType: payloadType,
+		Payload:     payload,
+	})
+	if err != nil {
+		// NewEnvelope only fails on invalid inputs; all callers pass validated data.
+		panic(err)
+	}
+	if confidential {
+		e.Security.Confidential = true
+	}
+	return e
+}

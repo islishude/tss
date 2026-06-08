@@ -110,9 +110,13 @@ func OAdd(pk *pai.PublicKey, a, b *big.Int) (*big.Int, error) {
 	return c, nil
 }
 
-// OMul homomorphically multiplies a Paillier ciphertext by a scalar: k ⊙ c mod N^2.
-// A negative scalar is handled via modular inverse of the ciphertext.
-func OMul(pk *pai.PublicKey, k, c *big.Int) (*big.Int, error) {
+// OMulPublic homomorphically multiplies a Paillier ciphertext by a public scalar:
+// k ⊙ c mod N^2. A negative scalar is handled via modular inverse of the ciphertext.
+//
+// OMulPublic uses variable-time math/big.Int.Exp and MUST only be called with
+// public exponents (Fiat–Shamir challenges, proof responses). For secret-exponent
+// scalar multiplication, use [OMulCT].
+func OMulPublic(pk *pai.PublicKey, k, c *big.Int) (*big.Int, error) {
 	if pk == nil {
 		return nil, errors.New("nil Paillier public key")
 	}

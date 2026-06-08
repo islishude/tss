@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 )
 
@@ -175,8 +176,11 @@ func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uin
 
 // Commit records the canonical broadcast digest for this consistency session.
 // Any subsequent ack with a different digest is treated as equivocation.
-// Returns ErrBroadcastEquivocation if a different digest was already committed.
-func (bc *BroadcastConsistency) Commit(env Envelope) error {
+//
+// The first call to Commit returns (true, nil). Subsequent calls with the same
+// digest return (false, nil). A call with a different digest returns
+// (false, ErrBroadcastEquivocation).
+func (bc *BroadcastConsistency) Commit(env Envelope) (bool, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
@@ -187,14 +191,14 @@ func (bc *BroadcastConsistency) Commit(env Envelope) error {
 		bc.payloadHash = ph
 		bc.transcriptHash = th
 		bc.committed = true
-		return nil
+		return true, nil
 	}
 
 	if bc.payloadHash != ph || bc.transcriptHash != th {
-		return fmt.Errorf("%w: protocol=%s session=%s round=%d from=%d payloadType=%s",
+		return false, fmt.Errorf("%w: protocol=%s session=%s round=%d from=%d payloadType=%s",
 			ErrBroadcastEquivocation, bc.protocol, bc.sessionID, bc.round, bc.from, bc.payloadType)
 	}
-	return nil
+	return false, nil
 }
 
 // AddAck records a party's broadcast acknowledgment. It verifies the ack
@@ -312,4 +316,108 @@ func NewInMemoryAckVerifier(verifyFn func(party PartyID, digest [32]byte, signat
 // VerifyAck implements BroadcastAckVerifier.
 func (v *InMemoryAckVerifier) VerifyAck(party PartyID, digest [32]byte, signature []byte) error {
 	return v.verify(party, digest, signature)
+}
+
+// BroadcastAck is one party's signed acknowledgment of a broadcast message.
+type BroadcastAck struct {
+	Party PartyID
+
+	PayloadHash    [32]byte
+	TranscriptHash [32]byte
+
+	Signature []byte
+}
+
+// Clone returns a deep copy of the broadcast ack.
+func (a BroadcastAck) Clone() BroadcastAck {
+	return BroadcastAck{
+		Party:          a.Party,
+		PayloadHash:    a.PayloadHash,
+		TranscriptHash: a.TranscriptHash,
+		Signature:      slices.Clone(a.Signature),
+	}
+}
+
+// BroadcastCertificate proves that all parties received the same broadcast payload.
+type BroadcastCertificate struct {
+	Protocol    ProtocolID
+	SessionID   SessionID
+	Round       uint8
+	From        PartyID
+	PayloadType PayloadType
+
+	PayloadHash    [32]byte
+	TranscriptHash [32]byte
+
+	Recipients PartySet
+	Acks       []BroadcastAck
+}
+
+// Clone returns a deep copy of the broadcast certificate.
+func (c *BroadcastCertificate) Clone() *BroadcastCertificate {
+	if c == nil {
+		return nil
+	}
+	clone := *c
+	clone.Recipients = c.Recipients.Clone()
+	clone.Acks = cloneBroadcastAcks(c.Acks)
+	return &clone
+}
+
+// Verify checks that the certificate binds to env and that
+// every party acknowledged the same digest. It does not verify individual ack
+// signatures; the caller must supply a verifier for that.
+func (c *BroadcastCertificate) Verify(env Envelope, parties PartySet) error {
+	if c == nil {
+		return ErrMissingBroadcastCertificate
+	}
+	if c.Protocol != env.Protocol {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.SessionID != env.SessionID {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.Round != env.Round {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.From != env.From {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.PayloadType != env.PayloadType {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.PayloadHash != sha256.Sum256(env.Payload) {
+		return ErrInvalidBroadcastCertificate
+	}
+	if c.TranscriptHash != env.TranscriptHash {
+		return ErrInvalidBroadcastCertificate
+	}
+	if len(c.Recipients) != len(parties) {
+		return ErrInvalidBroadcastCertificate
+	}
+	for _, id := range parties {
+		if !c.Recipients.Contains(id) {
+			return ErrInvalidBroadcastCertificate
+		}
+	}
+	if len(c.Acks) != len(parties) {
+		return ErrInvalidBroadcastCertificate
+	}
+	seen := make(map[PartyID]bool, len(c.Acks))
+	for _, ack := range c.Acks {
+		if !parties.Contains(ack.Party) {
+			return ErrInvalidBroadcastCertificate
+		}
+		if seen[ack.Party] {
+			return ErrInvalidBroadcastCertificate
+		}
+		seen[ack.Party] = true
+		if ack.PayloadHash != c.PayloadHash {
+			return ErrInvalidBroadcastCertificate
+		}
+		if ack.TranscriptHash != c.TranscriptHash {
+			return ErrInvalidBroadcastCertificate
+		}
+	}
+	return nil
 }

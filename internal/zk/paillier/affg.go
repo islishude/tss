@@ -340,7 +340,7 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	}
 
 	// Equation 1: A ⊕ (e ⊙ D) == (z1 ⊙ C) ⊕ Enc_Nj(z2; w)
-	eMulD, err := OMul(Nj, e, stmt.D)
+	eMulD, err := OMulPublic(Nj, e, stmt.D)
 	if err != nil {
 		return fmt.Errorf("AffGProof: e ⊙ D: %w", err)
 	}
@@ -348,7 +348,7 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if err != nil {
 		return fmt.Errorf("AffGProof: A ⊕ (e ⊙ D): %w", err)
 	}
-	z1MulC, err := OMul(Nj, proof.Z1, stmt.C)
+	z1MulC, err := OMulPublic(Nj, proof.Z1, stmt.C)
 	if err != nil {
 		return fmt.Errorf("AffGProof: z1 ⊙ C: %w", err)
 	}
@@ -372,7 +372,7 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	}
 
 	// Equation 3: By ⊕ (e ⊙ Y) == Enc_Ni(z2; wY)
-	eMulY, err := OMul(Ni, e, proof.Y)
+	eMulY, err := OMulPublic(Ni, e, proof.Y)
 	if err != nil {
 		return fmt.Errorf("AffGProof: e ⊙ Y: %w", err)
 	}

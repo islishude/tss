@@ -17,7 +17,7 @@ import (
 
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
 // signers and binds the resulting presignature to ctx before nonce generation.
-func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (*PresignSession, []tss.Envelope, error) {
+func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (s *PresignSession, out []tss.Envelope, err error) {
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -57,26 +57,41 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	secret, err := key.secretBig()
+	sec, err := key.secretBig()
 	if err != nil {
 		return nil, nil, err
 	}
 	// xBar is lambda_i*x_i, the signer-set-adjusted secret share used in
 	// chi = k*x. The public commitment is derived from the verification share.
-	xBar := new(big.Int).Mul(lambda, secret)
+	xBar := new(big.Int).Mul(lambda, sec)
 	xBar.Mod(xBar, secp.Order())
 	kShareSecret, err := newSecpSecretScalar(kShare.Bytes())
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			kShareSecret.Destroy()
+		}
+	}()
 	gammaSecret, err := newSecpSecretScalar(gamma.Bytes())
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			gammaSecret.Destroy()
+		}
+	}()
 	xBarSecret, err := secpSecretScalarFromBig(xBar)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer func() {
+		if err != nil {
+			xBarSecret.Destroy()
+		}
+	}()
 	localVerificationShare, ok := key.verificationShare(key.Party)
 	if !ok {
 		return nil, nil, errors.New("missing local verification share")
@@ -116,7 +131,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		return nil, nil, err
 	}
 	env := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
-	s := &PresignSession{
+	s = &PresignSession{
 		key:                  key,
 		sessionID:            sessionID,
 		config:               config,
@@ -143,7 +158,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		betaSigma:            make(map[tss.PartyID]*big.Int),
 		startOpening:         startOpening,
 	}
-	out := []tss.Envelope{env}
+	out = []tss.Envelope{env}
 	for _, peer := range signers {
 		if peer == key.Party {
 			continue
