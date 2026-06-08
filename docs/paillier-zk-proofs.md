@@ -76,3 +76,142 @@ All Paillier private-key operations use <code>filippo.io/bigmod</code> via
   secret-key material.
 - Complete an independent cryptographic review of the Paillier/ZK layer and
   identifiable-abort behavior.
+
+## Security Audit Coverage
+
+The proof system has been systematically audited through a multi-phase test
+campaign (see `internal/zk/paillier/*_test.go` and
+`cggmp21/secp256k1/proof_omission_test.go`). Each phase targets a specific
+security property required for production CGGMP TSS.
+
+### Phase 1: Special Soundness (Σ-Protocol Extractor)
+
+**Covered by**: `extractor_test.go` (Tier 1)
+
+Every Σ-protocol proof type has a corresponding test demonstrating that two
+accepting transcripts with identical commitments but different challenges allow
+witness extraction:
+
+- `TestEncryptionProofSpecialSoundness` — extracts `m = (z − z′)/(e − e′) mod q`
+- `TestMTAResponseProofSpecialSoundness` — extracts `b` and `beta`
+- `TestLogProofSpecialSoundness` — extracts discrete log `a`
+- `TestEncProofSpecialSoundness` — extracts `k`
+- `TestAffGProofSpecialSoundness` — extracts `x` and `y`
+- `TestLogStarProofSpecialSoundness` — extracts `x`
+
+These tests use a deterministic RNG (`replayReader`) to produce identical
+commitments with different challenges via distinct domain labels.
+
+### Phase 2: Challenge Distribution (Fiat-Shamir Soundness)
+
+**Covered by**: `challenge_distribution_test.go` (Tier 3, `slowcrypto`)
+
+- Πmod challenge (y_i) bit distribution via chi-squared test (10000 samples)
+- Πprm single-bit challenge binomial test (100 proofs × 128 rounds = 12800 bits)
+- Πprm bit independence (lag-1 autocorrelation test)
+- New proof ChallengeSigned distribution (5000 challenges, 128-bit chi-squared)
+- Modular bias test for ChallengeSigned (MSB uniformity)
+- Legacy challenge distribution and zero-probability analysis
+
+### Phase 3: Range Bound Boundary Precision
+
+**Covered by**: `range_boundary_test.go` (Tier 0/1)
+
+- `InSignedPowerOfTwo` accepts at ±2^bits, rejects at ±(2^bits+1)
+- `InUnsignedPowerOfTwo` accepts [0, 2^bits), rejects at 2^bits
+- `inMultRange` accepts at ±N·2^bits, rejects at ±(N·2^bits+1)
+- `zkRangeBound(e)` formula correctness: 2^{l+ε} + e·q
+- Every new proof type: out-of-range responses rejected at exact boundary
+- Legacy proofs: zkRangeBound boundary rejection verified
+
+### Phase 4: Parameter Consistency
+
+**Covered by**: `params_consistency_test.go` (Tier 0/1)
+
+- DefaultSecurityParams values match documentation (Ell=256, EllPrime=848, Epsilon=230, ChallengeBits=128, MinPaillierBits=3072)
+- EncRange() = Ell + max(ChallengeBits, Epsilon) = 486
+- AffGRange() = EllPrime + max(ChallengeBits, Epsilon) = 1078
+- Statistical hiding analysis: ~358 bits with production params
+- ChallengeBits ≤ 256 (SHA-256 output limit)
+- Every new proof transcript binds all SecurityParams fields
+- FastSecurityParams are strictly weaker than production
+
+### Phase 5: Witness-Statement Relation Completeness
+
+**Covered by**: `relation_audit_test.go` (Tier 1)
+
+- Every EncProof/AffGProof/LogStarProof statement field is transcript-bound
+- Every algebraic verification equation tested independently
+- Statement Y == proof Y check in AffGProof
+- EncryptionProof.Bound validated against secp256k1 order
+- Wrong public key / wrong ciphertext / wrong verifier aux all rejected
+- Paillier key domain separation (all proof tags verified distinct)
+
+### Phase 6: Adversarial Proof Construction
+
+**Covered by**: `adversarial_test.go` (Tier 1)
+
+- EncProof rejects S=N (non-unit) and S=1 (trivial commitment)
+- Cross-proof field substitution (z1 from proof A in proof B) rejected
+- Proof replay across different statements (C, D, ciphertext) rejected
+- Proof replay across different domains rejected
+- Zero-witness edge cases handled correctly (k=0, y=0)
+- Ring-Pedersen commitment collision resistance verified
+- Non-unit commitments (0, N, N²) rejected for all proof types
+- Degenerate Ring-Pedersen parameters (S=1) rejected
+- Parameter downgrade attack: 512-bit proof rejected under 3072-bit params
+
+### Phase 7: Protocol-Level Proof Omission
+
+**Covered by**: `proof_omission_test.go` (Tier 2, `integration`)
+
+- Corrupted Πmod → keygen HandleKeygenMessage returns error
+- Corrupted Πprm → keygen HandleKeygenMessage returns error
+- Corrupted PaillierPublicKey → keygen HandleKeygenMessage returns error
+- bit-flipped Πmod/Πprm → rejected at protocol level
+- Missing LogStarProof → KeyShare.MarshalBinary returns error
+- Tampered LogStarProof → KeyShare.MarshalBinary returns error
+- Missing ShareProof (Schnorr) → KeyShare.MarshalBinary returns error
+- Missing PaillierProof → KeyShare.MarshalBinary returns error
+- Missing RingPedersenProof → KeyShare.MarshalBinary returns error
+
+### Phase 8: Challenge Zero Guard
+
+**Covered by**: `challenge_zero_test.go` (Tier 0)
+
+- Legacy `challenge()` (proofs.go) does NOT reject zero (2^-256 probability, documented)
+- New `Transcript.ChallengeSigned()` (transcript.go) REJECTS zero with error
+- 1-bit challenge zero-guard tested: ~50% rejection rate confirmed
+- All challenge labels (mta, log, encryption) verified distinct
+
+### Known Limitations
+
+1. **Legacy proofs** (`EncryptionProof`, `MTAResponseProof`, `LogProof`) do not bind
+   `SecurityParams` to the transcript. A verifier using different parameters than
+   the prover would not detect the mismatch through the challenge.
+
+2. **Legacy `challenge()`** in `proofs.go` does not reject zero challenges
+   (probability 2^-256, considered cryptographically negligible but not
+   cryptographically impossible).
+
+3. **Πmod proof** verifier-derived y_i values use `expandHash` which may have
+   subtle biases when deriving values in Z\*\_N for small N. With production
+   (3072-bit) moduli, the rejection sampling rate is negligible.
+
+4. **Statistical hiding** with production params provides ~358 bits of hiding
+   (EncRange − ChallengeBits = 486 − 128). This exceeds the 128-bit target
+   but is less than the 128-bit statistical security parameter (ε=230) might
+   suggest when considered as an additive bound.
+
+### Files
+
+| File                                       | Tier | Contents                              |
+| ------------------------------------------ | ---- | ------------------------------------- |
+| `extractor_test.go`                        | 1    | Special soundness extractor tests     |
+| `challenge_distribution_test.go`           | 3    | Challenge distribution (slowcrypto)   |
+| `range_boundary_test.go`                   | 0/1  | Range bound boundary precision        |
+| `params_consistency_test.go`               | 0/1  | Parameter consistency verification    |
+| `relation_audit_test.go`                   | 1    | Witness-statement relation audit      |
+| `adversarial_test.go`                      | 1    | Adversarial proof construction        |
+| `challenge_zero_test.go`                   | 0    | Challenge zero guard audit            |
+| `cggmp21/secp256k1/proof_omission_test.go` | 2    | Protocol-level omission (integration) |
