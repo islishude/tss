@@ -208,8 +208,8 @@ func (s *RefreshSession) validateInbound(env tss.Envelope) error {
 	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.cfg.Self {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.cfg.Self, CGGMP21Policies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }
@@ -322,9 +322,6 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
 		s.newRingPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
 	case payloadRefreshShare:
-		if err := requireDirectConfidential(env, s.oldKey.Party, payloadRefreshShare); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
 		}
@@ -571,9 +568,6 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh confirmation in wrong round"))
-	}
-	if env.To != 0 {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("refresh confirmation must be broadcast"))
 	}
 	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
 	if err != nil {

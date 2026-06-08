@@ -42,9 +42,18 @@ func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessi
 	}, nil
 }
 
-// Validate executes the full security validation sequence on an incoming envelope.
-// It returns nil only when the envelope passes all checks.
+// Validate executes the full security validation sequence on an incoming envelope
+// against the guard's configured party set. It returns nil only when the envelope
+// passes all checks.
 func (g *EnvelopeGuard) Validate(env Envelope) error {
+	return g.ValidateWithParties(env, g.Parties)
+}
+
+// ValidateWithParties is like Validate but validates sender membership and
+// broadcast certificates against the provided party set instead of the guard's
+// configured set. This is used by sessions (e.g. reshare) that accept messages
+// from different participant subsets depending on payload type.
+func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) error {
 	// 1. Protocol match.
 	if env.Protocol != g.Protocol {
 		s := fmt.Sprintf("unexpected protocol %q", env.Protocol)
@@ -66,8 +75,8 @@ func (g *EnvelopeGuard) Validate(env Envelope) error {
 		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 
-	// 5. Sender membership.
-	if !g.Parties.Contains(env.From) {
+	// 5. Sender membership in the provided party set.
+	if !parties.Contains(env.From) {
 		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("sender %d is not a participant", env.From))
 	}
 
@@ -116,12 +125,12 @@ func (g *EnvelopeGuard) Validate(env Envelope) error {
 		}
 	}
 
-	// 12. Broadcast consistency enforcement.
+	// 12. Broadcast consistency enforcement against the provided party set.
 	if policy.BroadcastConsistency == BroadcastConsistencyRequired {
 		if env.Broadcast == nil {
 			return fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, env.PayloadType)
 		}
-		if err := env.Broadcast.Verify(env, g.Parties); err != nil {
+		if err := env.Broadcast.Verify(env, parties); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err)
 		}
 	}

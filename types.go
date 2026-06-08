@@ -780,6 +780,50 @@ func ValidateEnvelope(env Envelope, expectedProtocol ProtocolID, expectedSession
 	return nil
 }
 
+// ValidateEnvelopePolicy checks delivery mode and confidentiality against a PolicySet.
+// It is a lightweight complement to ValidateEnvelope for the test fallback path
+// (when no EnvelopeGuard is set and the transport is unauthenticated).
+// It does NOT check broadcast consistency or replay — those require guard infrastructure.
+func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) error {
+	policy, err := policies.Match(env.Protocol, env.Round, env.PayloadType)
+	if err != nil {
+		return err
+	}
+
+	// Delivery mode enforcement.
+	switch policy.Mode {
+	case DeliveryDirect:
+		if env.To == 0 {
+			return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType)
+		}
+		if env.To != self {
+			return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, self, env.To)
+		}
+	case DeliveryBroadcast:
+		if env.To != 0 {
+			return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType)
+		}
+	}
+
+	// Confidentiality enforcement.
+	// ConfidentialityRequired is always checked — even unauthenticated test
+	// transports must set Security.Confidential for secret-bearing payloads.
+	// ConfidentialityForbidden is only checked when the transport is
+	// authenticated, since a zero-value Security is already non-confidential.
+	switch policy.Confidentiality {
+	case ConfidentialityRequired:
+		if !env.Security.Confidential {
+			return fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType)
+		}
+	case ConfidentialityForbidden:
+		if env.Security.Authenticated && env.Security.Confidential {
+			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType)
+		}
+	}
+
+	return nil
+}
+
 // KeyShare is the common interface implemented by algorithm-specific shares.
 type KeyShare interface {
 	Algorithm() Algorithm

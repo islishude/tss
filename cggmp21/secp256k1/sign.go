@@ -226,8 +226,8 @@ func (s *PresignSession) validateInbound(env tss.Envelope) error {
 	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.key.Party {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.key.Party, CGGMP21Policies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }
@@ -262,9 +262,6 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		if env.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 payload in wrong round"))
 		}
-		if env.To != 0 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("presign round1 public payload must be broadcast"))
-		}
 		if _, ok := s.round1[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))
 		}
@@ -276,9 +273,6 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		}
 		if env.From == s.key.Party {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("self presign round1 proof is not expected"))
-		}
-		if err := requireDirectConfidential(env, s.key.Party, payloadPresignRound1Proof); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		if _, ok := s.round1Proofs[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1 proof"))

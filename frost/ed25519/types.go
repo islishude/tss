@@ -360,18 +360,3 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 	shifted := edcurve.AddPoints(base, fed.NewIdentityPoint().ScalarBaseMult(shift))
 	return shifted.Bytes(), nil
 }
-
-func requireDirectConfidential(env tss.Envelope, self tss.PartyID, payloadType tss.PayloadType) error {
-	if env.To != self {
-		return fmt.Errorf("%s must be addressed to receiver", payloadType)
-	}
-	// Secret-bearing direct messages must be delivered over a confidential transport.
-	// This check is defense-in-depth: EnvelopeGuard already enforces confidentiality
-	// per the protocol policy when a guard is configured. When no guard is set
-	// (test-only path), we always check the confidential flag regardless of whether
-	// the transport has set an authenticated security context.
-	if !env.Security.Confidential {
-		return fmt.Errorf("%s must be delivered over a confidential transport", payloadType)
-	}
-	return nil
-}

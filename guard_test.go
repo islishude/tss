@@ -360,3 +360,93 @@ func TestBroadcastRejectsWrongDigestAck(t *testing.T) {
 		t.Fatalf("expected ErrInvalidBroadcastCertificate, got %v", err)
 	}
 }
+
+// --- ValidateEnvelopePolicy tests ---
+
+func TestValidateEnvelopePolicyRejectsUnknownPayloadType(t *testing.T) {
+	env := testEnvelope("test-proto", 1, "test.unknown.payload", 2, 0)
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrUnknownPayloadPolicy) {
+		t.Fatalf("expected ErrUnknownPayloadPolicy, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyRejectsDirectAsBroadcast(t *testing.T) {
+	// Direct-only payload sent with To=0 (broadcast) should fail.
+	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 0)
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrExpectedDirectMessage) {
+		t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyRejectsBroadcastAsDirect(t *testing.T) {
+	// Broadcast-only payload sent with To!=0 should fail.
+	env := testEnvelope("test-proto", 1, "test.broadcast.plain", 2, 1)
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrExpectedBroadcastMessage) {
+		t.Fatalf("expected ErrExpectedBroadcastMessage, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyRejectsWrongRecipient(t *testing.T) {
+	// Direct message addressed to wrong party.
+	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 3)
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrWrongRecipient) {
+		t.Fatalf("expected ErrWrongRecipient, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyRejectsMissingConfidentiality(t *testing.T) {
+	// Confidential-required payload with Confidential=false.
+	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 1)
+	env.Security.Authenticated = true
+	env.Security.Confidential = false
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrMissingConfidentiality) {
+		t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyRejectsUnexpectedConfidentiality(t *testing.T) {
+	// Confidential-forbidden payload with Confidential=true.
+	env := testEnvelope("test-proto", 1, "test.direct.plain", 2, 1)
+	env.Security.Authenticated = true
+	env.Security.Confidential = true
+	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
+	if !errors.Is(err, ErrUnexpectedConfidentiality) {
+		t.Fatalf("expected ErrUnexpectedConfidentiality, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyAllowsDirectConfidential(t *testing.T) {
+	// Correct direct+confidential should pass.
+	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 1)
+	env.Security.Authenticated = true
+	env.Security.Confidential = true
+	if err := ValidateEnvelopePolicy(env, 1, testPolicySet()); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestValidateEnvelopePolicyAllowsBroadcast(t *testing.T) {
+	env := testEnvelope("test-proto", 1, "test.broadcast.plain", 2, 0)
+	if err := ValidateEnvelopePolicy(env, 1, testPolicySet()); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+// testEnvelope builds a minimal envelope for policy testing.
+func testEnvelope(protocol ProtocolID, round uint8, payloadType PayloadType, from, to PartyID) Envelope {
+	return Envelope{
+		Protocol:    protocol,
+		Version:     Version,
+		SessionID:   SessionID{1},
+		Round:       round,
+		From:        from,
+		To:          to,
+		PayloadType: payloadType,
+		Payload:     []byte("test"),
+	}
+}

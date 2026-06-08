@@ -171,8 +171,8 @@ func (s *SignSession) validateInbound(env tss.Envelope) error {
 	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.key.Party {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.key.Party, CGGMP21Policies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }

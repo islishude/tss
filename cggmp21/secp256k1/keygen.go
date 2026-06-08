@@ -116,8 +116,8 @@ func (s *KeygenSession) validateInbound(env tss.Envelope) error {
 	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.cfg.Parties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.cfg.Self {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.cfg.Self, CGGMP21Policies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }
@@ -149,9 +149,6 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		if env.Round != keygenConfirmationRound {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
 		}
-		if env.To != 0 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("keygen confirmation must be broadcast"))
-		}
 		return s.handleKeygenConfirmation(env)
 	}
 
@@ -167,9 +164,6 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		return s.handleKeygenCommitments(env)
 
 	case payloadKeygenShare:
-		if err := requireDirectConfidential(env, s.cfg.Self, payloadKeygenShare); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 		}

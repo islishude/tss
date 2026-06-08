@@ -50,7 +50,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated.Round = 2
 		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(mutated)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := share
@@ -155,7 +155,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.Round = 2
 		mutated = mutated.RecomputeTranscriptHash()
 		_, err := s1.HandlePresignMessage(mutated)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := round1
@@ -595,7 +595,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		env.Round = 2
 		env = env.RecomputeTranscriptHash()
 		_, err = session.HandleSignMessage(env)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeRound)
+		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
 		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])

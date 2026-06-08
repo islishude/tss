@@ -144,7 +144,7 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 // authenticated transport messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
 	if s.guard != nil {
-		return s.guard.Validate(env)
+		return s.guard.ValidateWithParties(env, tss.PartySet(allowedParties))
 	}
 	// Guard is required when the transport authenticates the sender.
 	if env.Security.Authenticated {
@@ -154,8 +154,8 @@ func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.
 	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, allowedParties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.selfID {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.selfID, CGGMP21Policies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }
@@ -461,9 +461,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	}
 	switch env.PayloadType {
 	case payloadReshareDealerCommitments:
-		if env.To != 0 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("dealer commitments must be broadcast"))
-		}
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
 		}
@@ -484,9 +481,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	case payloadReshareShare:
 		if !s.isReceiver {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
-		}
-		if err := requireDirectConfidential(env, s.selfID, payloadReshareShare); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		p, err := unmarshalReshareSharePayload(env.Payload)
 		if err != nil {
@@ -509,9 +503,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 			return nil, err
 		}
 	case payloadReshareReceiverMaterial:
-		if env.To != 0 {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("receiver material must be broadcast"))
-		}
 		if _, ok := s.newPaillierPubs[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
 		}
@@ -871,9 +862,6 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	// validateInbound was already called by HandleReshareMessage.
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
-	}
-	if env.To != 0 {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("reshare confirmation must be broadcast"))
 	}
 	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
 	if err != nil {

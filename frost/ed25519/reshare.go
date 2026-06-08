@@ -96,8 +96,8 @@ func (s *ReshareSession) validateInbound(env tss.Envelope) error {
 	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.oldParties); err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if env.To != 0 && env.To != s.selfID {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
+	if err := tss.ValidateEnvelopePolicy(env, s.selfID, FROSTPolicies); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	return nil
 }
@@ -336,9 +336,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	if env.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
 	}
-	if env.To != 0 && env.To != s.selfID {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("message addressed to another party"))
-	}
 	switch env.PayloadType {
 	case payloadReshareCommitments:
 		p, err := unmarshalReshareCommitmentsPayload(env.Payload)
@@ -356,9 +353,6 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		}
 		s.commits[env.From] = p.Commitments
 	case payloadReshareShare:
-		if err := requireDirectConfidential(env, s.selfID, payloadReshareShare); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-		}
 		p, err := unmarshalReshareSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
