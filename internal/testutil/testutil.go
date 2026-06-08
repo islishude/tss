@@ -93,22 +93,6 @@ func MutateBytes(in []byte) []byte {
 	return out
 }
 
-// CloneEnvelope returns a deep copy of the given envelope.
-func CloneEnvelope(in tss.Envelope) tss.Envelope {
-	return tss.Envelope{
-		Protocol:             in.Protocol,
-		Version:              in.Version,
-		SessionID:            in.SessionID,
-		Round:                in.Round,
-		From:                 in.From,
-		To:                   in.To,
-		PayloadType:          in.PayloadType,
-		Payload:              append([]byte(nil), in.Payload...),
-		TranscriptHash:       append([]byte(nil), in.TranscriptHash...),
-		ConfidentialRequired: in.ConfidentialRequired,
-	}
-}
-
 // AssertProtocolError asserts that err is a *tss.ProtocolError with the given
 // code. Returns the typed error for further inspection.
 func AssertProtocolError(tb interface{ Fatal(...any) }, err error, code string) *tss.ProtocolError {

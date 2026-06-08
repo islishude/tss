@@ -204,6 +204,22 @@ type Envelope struct {
 	ConfidentialRequired bool      `json:"confidential_required,omitempty"` // transport must encrypt/authenticate this envelope
 }
 
+// Clone returns a deep copy of the envelope.
+func (e Envelope) Clone() Envelope {
+	return Envelope{
+		Protocol:             e.Protocol,
+		Version:              e.Version,
+		SessionID:            e.SessionID,
+		Round:                e.Round,
+		From:                 e.From,
+		To:                   e.To,
+		PayloadType:          e.PayloadType,
+		Payload:              append([]byte(nil), e.Payload...),
+		TranscriptHash:       append([]byte(nil), e.TranscriptHash...),
+		ConfidentialRequired: e.ConfidentialRequired,
+	}
+}
+
 // MarshalBinary encodes the envelope using strict canonical TLV wire format.
 // It rejects locally-constructed payloads that exceed size limits.
 func (e Envelope) MarshalBinary() ([]byte, error) {
