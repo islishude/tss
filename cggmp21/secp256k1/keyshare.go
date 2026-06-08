@@ -43,6 +43,7 @@ func (k *KeyShare) MarshalBinary() ([]byte, error) {
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
+// The value receiver ensures json.Marshal is blocked for both KeyShare and *KeyShare.
 func (k KeyShare) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 key share contains secret material; use MarshalBinary")
 }
@@ -364,7 +365,6 @@ func (k *KeyShare) Destroy() {
 	clear(k.ChainCode)
 	k.secret.Destroy()
 	clear(k.paillierPrivateKey)
-	clear(k.logRandomness)
 }
 
 func (k *KeyShare) secretBig() (*big.Int, error) {
@@ -457,7 +457,6 @@ func (k *KeyShare) Clone() *KeyShare {
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
 	out.LogCiphertext = slices.Clone(k.LogCiphertext)
 	out.LogProof = slices.Clone(k.LogProof)
-	out.logRandomness = slices.Clone(k.logRandomness)
 	out.KeygenConfirmations = cloneKeyShareByteSlices(k.KeygenConfirmations)
 	return &out
 }

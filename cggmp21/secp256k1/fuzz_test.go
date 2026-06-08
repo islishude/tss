@@ -36,11 +36,22 @@ func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
 			return
 		}
 		_ = tss.ValidateEnvelope(env, protocol, sessionID, []tss.PartyID{1, 2})
+		// Use semantic round-trip: re-marshal → re-unmarshal → re-marshal
+		// and compare canonical outputs. Raw fuzz input may carry extra
+		// TLV fields or non-canonical encodings that MarshalBinary normalizes.
 		again, err := env.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(data, again) {
+		var roundTripped tss.Envelope
+		if err := roundTripped.UnmarshalBinary(again); err != nil {
+			t.Fatalf("failed to unmarshal remarshaled envelope: %v", err)
+		}
+		again2, err := roundTripped.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(again, again2) {
 			t.Fatal("envelope did not remarshal deterministically")
 		}
 	})
@@ -79,13 +90,7 @@ func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 			Parties:   []tss.PartyID{1, 2},
 			Signers:   []tss.PartyID{1, 2},
 		})
-		again, err := decoded.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(data, again) {
-			t.Fatal("blame evidence did not remarshal deterministically")
-		}
+		testutil.AssertDeterministicRoundTrip(t, decoded, (*tss.BlameEvidence).MarshalBinary, tss.UnmarshalBlameEvidence)
 	})
 }
 

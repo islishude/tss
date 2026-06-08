@@ -158,6 +158,13 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		betaSigma:            make(map[tss.PartyID]*big.Int),
 		startOpening:         startOpening,
 	}
+	// Defensive: clear local secret scalar references so only session fields
+	// own the secrets. The defer guards above will not fire since err is nil.
+	// startOpening is kept alive for the per-verifier proof loop below.
+	kShareSecret = nil
+	gammaSecret = nil
+	xBarSecret = nil
+
 	out = []tss.Envelope{env}
 	for _, peer := range signers {
 		if peer == key.Party {
@@ -181,6 +188,14 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		}
 		out = append(out, envelope(config, 1, key.Party, peer, payloadPresignRound1Proof, proofPayload, true))
 	}
+	// Clear startOpening after all per-verifier proofs are generated.
+	// The MtA Finish path in round 2 only uses the Paillier private key and the
+	// StartMessage ciphertext — the StartOpening witness (k, rho) is never read
+	// after the proofs are generated. Clear it early to reduce the window of
+	// secret material exposure.
+	startOpening = nil
+	s.startOpening = nil
+
 	round2, err := s.tryEmitRound2()
 	if err != nil {
 		return nil, nil, err
@@ -197,7 +212,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 
 // handlePresignRound1 validates and applies a presign round 1 public payload.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalPresignRound1Payload(env.Payload)
@@ -249,7 +264,7 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 
 // handlePresignRound1Proof validates and applies a presign round 1 proof payload.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalPresignRound1ProofPayload(env.Payload)

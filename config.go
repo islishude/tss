@@ -22,18 +22,62 @@ type DeliveryPolicy struct {
 	BroadcastConsistency BroadcastConsistencyPolicy
 }
 
-// PolicySet is a collection of delivery policies keyed by (protocol, round, payloadType).
-// It must return ErrUnknownPayloadPolicy for unregistered payload types.
-type PolicySet []DeliveryPolicy
+// policyKey is the lookup key for the policy index.
+type policyKey struct {
+	protocol    ProtocolID
+	round       uint8
+	payloadType PayloadType
+}
+
+// PolicySet is a collection of delivery policies with O(1) lookup by
+// (protocol, round, payloadType). Use [NewPolicySet] to construct.
+// It must return [ErrUnknownPayloadPolicy] for unregistered payload types.
+type PolicySet struct {
+	entries []DeliveryPolicy
+	index   map[policyKey]int // maps key → index into entries
+}
+
+// NewPolicySet builds a PolicySet from a list of delivery policies.
+// Duplicate keys are rejected.
+func NewPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
+	idx := make(map[policyKey]int, len(policies))
+	for i, p := range policies {
+		k := policyKey{protocol: p.Protocol, round: p.Round, payloadType: p.PayloadType}
+		if _, exists := idx[k]; exists {
+			return PolicySet{}, fmt.Errorf("duplicate delivery policy for protocol=%q round=%d payloadType=%q", p.Protocol, p.Round, p.PayloadType)
+		}
+		idx[k] = i
+	}
+	return PolicySet{entries: policies, index: idx}, nil
+}
+
+// MustNewPolicySet is like [NewPolicySet] but panics on duplicate keys.
+// It is intended for package-level var initialization where duplicates are a
+// programmer error.
+func MustNewPolicySet(policies ...DeliveryPolicy) PolicySet {
+	ps, err := NewPolicySet(policies...)
+	if err != nil {
+		panic(err)
+	}
+	return ps
+}
+
+// Entries returns the policy entries in registration order.
+func (ps PolicySet) Entries() []DeliveryPolicy {
+	return ps.entries
+}
 
 // Match returns the policy for a given message kind or ErrUnknownPayloadPolicy.
 func (ps PolicySet) Match(protocol ProtocolID, round uint8, payloadType PayloadType) (DeliveryPolicy, error) {
-	for _, p := range ps {
-		if p.Protocol == protocol && p.Round == round && p.PayloadType == payloadType {
-			return p, nil
-		}
+	if ps.index == nil {
+		return DeliveryPolicy{}, ErrUnknownPayloadPolicy
 	}
-	return DeliveryPolicy{}, ErrUnknownPayloadPolicy
+	k := policyKey{protocol: protocol, round: round, payloadType: payloadType}
+	i, ok := ps.index[k]
+	if !ok {
+		return DeliveryPolicy{}, ErrUnknownPayloadPolicy
+	}
+	return ps.entries[i], nil
 }
 
 // SessionConfig carries the security configuration required to construct a protocol session.
@@ -54,11 +98,20 @@ type GuardConfig struct {
 	SessionID SessionID
 	Policies  PolicySet
 	Cache     ReplayCache
+
+	// AckVerifier, when non-nil, enables broadcast ack signature verification
+	// during guard validation. Production deployments SHOULD set this.
+	AckVerifier BroadcastAckVerifier
 }
 
 // BuildGuard constructs an EnvelopeGuard from the configuration or returns an error.
 func (c GuardConfig) BuildGuard() (*EnvelopeGuard, error) {
-	return NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
+	g, err := NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
+	if err != nil {
+		return nil, err
+	}
+	g.AckVerifier = c.AckVerifier
+	return g, nil
 }
 
 // TestGuardConfig returns a GuardConfig suitable for tests using an in-memory replay cache.

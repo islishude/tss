@@ -143,22 +143,23 @@ func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 		return nil, err
 	}
 
-	sessionID, err := tss.SessionIDFromBytes(wire.MustField(fields, keygenConfirmationFieldSessionID))
+	// Tags validated; access fields by index.
+	sessionID, err := tss.SessionIDFromBytes(fields[0].Value)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmation session id: %w", err)
 	}
-	sender, err := wire.Uint32Field(fields, keygenConfirmationFieldSender)
+	sender, err := wire.DecodeUint32(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmation sender: %w", err)
 	}
-	threshold, err := wire.Uint32Field(fields, keygenConfirmationFieldThreshold)
+	threshold, err := wire.DecodeUint32(fields[2].Value)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmation threshold: %w", err)
 	}
 	if threshold > math.MaxInt32 {
 		return nil, fmt.Errorf("keygen confirmation threshold overflows platform int: %d", threshold)
 	}
-	parties, err := wire.Uint32ListField[tss.PartyID](fields, keygenConfirmationFieldParties)
+	parties, err := wire.DecodeUint32List[tss.PartyID](fields[3].Value)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmation parties: %w", err)
 	}
@@ -168,10 +169,10 @@ func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 		Sender:          tss.PartyID(sender),
 		Threshold:       int(threshold),
 		Parties:         slices.Clone(parties),
-		PublicKey:       slices.Clone(wire.MustField(fields, keygenConfirmationFieldPublicKey)),
-		TranscriptHash:  slices.Clone(wire.MustField(fields, keygenConfirmationFieldTranscriptHash)),
-		CommitmentsHash: slices.Clone(wire.MustField(fields, keygenConfirmationFieldCommitmentsHash)),
-		ChainCode:       slices.Clone(wire.MustField(fields, keygenConfirmationFieldChainCode)),
+		PublicKey:       slices.Clone(fields[4].Value),
+		TranscriptHash:  slices.Clone(fields[5].Value),
+		CommitmentsHash: slices.Clone(fields[6].Value),
+		ChainCode:       slices.Clone(fields[7].Value),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err

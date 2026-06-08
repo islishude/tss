@@ -49,12 +49,12 @@ func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
 	if version != messageVersion {
 		return nil, fmt.Errorf("unexpected MtA response message version %d", version)
 	}
-	if err := requireExactMessageTags(fields, responseMessageFieldCiphertext, responseMessageFieldProof); err != nil {
+	if err := wire.RequireExactTags(fields, responseMessageFieldCiphertext, responseMessageFieldProof); err != nil {
 		return nil, err
 	}
 	msg := &ResponseMessage{
-		Ciphertext: mustMessageField(fields, responseMessageFieldCiphertext),
-		Proof:      mustMessageField(fields, responseMessageFieldProof),
+		Ciphertext: fields[0].Value,
+		Proof:      fields[1].Value,
 	}
 	if err := msg.Validate(); err != nil {
 		return nil, err

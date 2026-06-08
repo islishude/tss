@@ -19,26 +19,24 @@ func TestWireFieldHelpers(t *testing.T) {
 	if err := RequireExactTags(fields, 1, 2, 3, 4, 5, 6); err != nil {
 		t.Fatal(err)
 	}
-	if got, err := Uint32Field(fields, 1); err != nil || got != 7 {
-		t.Fatalf("Uint32Field got %d, %v", got, err)
+	// Tags validated; access fields by index via Decode* functions.
+	if got, err := DecodeUint32(fields[0].Value); err != nil || got != 7 {
+		t.Fatalf("DecodeUint32 got %d, %v", got, err)
 	}
-	if got, err := BoolField(fields, 2); err != nil || !got {
-		t.Fatalf("BoolField got %v, %v", got, err)
+	if got, err := DecodeBool(fields[1].Value); err != nil || !got {
+		t.Fatalf("DecodeBool got %v, %v", got, err)
 	}
-	if got := MustField(fields, 1); !bytes.Equal(got, Uint32(7)) {
-		t.Fatalf("MustField got %x", got)
+	if got, err := DecodeUint32List[testID](fields[2].Value); err != nil || len(got) != 2 || got[0] != 1 || got[1] != 2 {
+		t.Fatalf("DecodeUint32List got %v, %v", got, err)
 	}
-	if got, err := Uint32ListField[testID](fields, 3); err != nil || len(got) != 2 || got[0] != 1 || got[1] != 2 {
-		t.Fatalf("Uint32ListField got %v, %v", got, err)
+	if got, err := DecodeBytesList(fields[3].Value); err != nil || len(got) != 1 || !bytes.Equal(got[0], []byte{3}) {
+		t.Fatalf("DecodeBytesList got %x, %v", got, err)
 	}
-	if got, err := BytesListField(fields, 4); err != nil || len(got) != 1 || !bytes.Equal(got[0], []byte{3}) {
-		t.Fatalf("BytesListField got %x, %v", got, err)
+	if got, err := DecodePartyBytes[testID](fields[4].Value, "verification share"); err != nil || len(got) != 1 || got[0].Party != 1 || !bytes.Equal(got[0].Bytes, []byte{4}) {
+		t.Fatalf("DecodePartyBytes got %#v, %v", got, err)
 	}
-	if got, err := PartyBytesField[testID](fields, 5, "verification share"); err != nil || len(got) != 1 || got[0].Party != 1 || !bytes.Equal(got[0].Bytes, []byte{4}) {
-		t.Fatalf("PartyBytesField got %#v, %v", got, err)
-	}
-	if got, err := PartyBytePairsField[testID](fields, 6, "Paillier public share"); err != nil || len(got) != 1 || got[0].Party != 1 || !bytes.Equal(got[0].First, []byte{5}) || !bytes.Equal(got[0].Second, []byte{6}) {
-		t.Fatalf("PartyBytePairsField got %#v, %v", got, err)
+	if got, err := DecodePartyBytePairs[testID](fields[5].Value, "Paillier public share"); err != nil || len(got) != 1 || got[0].Party != 1 || !bytes.Equal(got[0].First, []byte{5}) || !bytes.Equal(got[0].Second, []byte{6}) {
+		t.Fatalf("DecodePartyBytePairs got %#v, %v", got, err)
 	}
 }
 
@@ -46,11 +44,5 @@ func TestWireFieldHelperErrors(t *testing.T) {
 	fields := []Field{{Tag: 1, Value: Uint32(7)}}
 	if err := RequireExactTags(fields, 2); err == nil {
 		t.Fatal("RequireExactTags accepted wrong tag")
-	}
-	if _, err := Uint32Field([]Field{{Tag: 1, Value: append(Uint32(7), 0)}}, 1); err == nil {
-		t.Fatal("Uint32Field accepted trailing bytes")
-	}
-	if _, err := BoolField([]Field{{Tag: 1, Value: []byte{2}}}, 1); err == nil {
-		t.Fatal("BoolField accepted non-canonical bool")
 	}
 }

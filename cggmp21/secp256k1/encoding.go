@@ -118,51 +118,50 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldChainCode, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldPaillierPublicKey, keyShareFieldPaillierPrivateKey, keyShareFieldPaillierProof, keyShareFieldRingPedersenParams, keyShareFieldRingPedersenProof, keyShareFieldRingPedersenPublic, keyShareFieldPaillierPublicKeys, keyShareFieldShareProof, keyShareFieldKeygenTranscriptHash, keyShareFieldPaillierProofSessionID, keyShareFieldPaillierProofDomain, keyShareFieldLogCiphertext, keyShareFieldLogProof, keyShareFieldKeygenConfirmations); err != nil {
 		return nil, err
 	}
-	party, err := wire.Uint32Field(fields, keyShareFieldParty)
+	// Tags validated; access fields by index.
+	party, err := wire.DecodeUint32(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := wire.Uint32Field(fields, keyShareFieldThreshold)
+	threshold, err := wire.DecodeUint32(fields[1].Value)
 	if err != nil {
 		return nil, err
 	}
-	// Guard int conversion: on 32-bit platforms int is int32, so any uint32
-	// above MaxInt32 would overflow.
 	if threshold > math.MaxInt32 {
 		return nil, fmt.Errorf("threshold overflows platform int: %d", threshold)
 	}
 	if int(threshold) > limits.MaxThreshold {
 		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.MaxThreshold)
 	}
-	parties, err := wire.Uint32ListFieldWithLimit[tss.PartyID](fields, keyShareFieldParties, limits.MaxParties)
+	parties, err := wire.DecodeUint32ListWithLimit[tss.PartyID](fields[2].Value, limits.MaxParties)
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments, err := wire.BytesListFieldWithLimit(fields, keyShareFieldGroupCommitments, limits.MaxThreshold, limits.MaxPointBytes)
+	groupCommitments, err := wire.DecodeBytesListWithLimit(fields[6].Value, limits.MaxThreshold, limits.MaxPointBytes)
 	if err != nil {
 		return nil, err
 	}
-	verificationShares, err := decodeVerificationSharesFieldWithLimit(fields, keyShareFieldVerificationShares, limits)
+	verificationShares, err := decodeVerificationSharesBytesWithLimit(fields[7].Value, limits)
 	if err != nil {
 		return nil, err
 	}
-	paillierPublicKeys, err := decodePaillierPublicSharesFieldWithLimit(fields, keyShareFieldPaillierPublicKeys, limits)
+	paillierPublicKeys, err := decodePaillierPublicSharesBytesWithLimit(fields[14].Value, limits)
 	if err != nil {
 		return nil, err
 	}
-	ringPedersenPublic, err := decodeRingPedersenPublicSharesFieldWithLimit(fields, keyShareFieldRingPedersenPublic, limits)
+	ringPedersenPublic, err := decodeRingPedersenPublicSharesBytesWithLimit(fields[13].Value, limits)
 	if err != nil {
 		return nil, err
 	}
-	paillierProofSessionID, err := tss.SessionIDFromBytes(wire.MustField(fields, keyShareFieldPaillierProofSessionID))
+	paillierProofSessionID, err := tss.SessionIDFromBytes(fields[17].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid paillier proof session id: %w", err)
 	}
-	keygenConfirmations, err := wire.BytesListFieldWithLimit(fields, keyShareFieldKeygenConfirmations, limits.MaxParties, limits.MaxWireFieldBytes)
+	keygenConfirmations, err := wire.DecodeBytesListWithLimit(fields[21].Value, limits.MaxParties, limits.MaxWireFieldBytes)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmations: %w", err)
 	}
-	secretScalar, err := newSecpSecretScalar(wire.MustField(fields, keyShareFieldSecret))
+	secretScalar, err := newSecpSecretScalar(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
@@ -171,24 +170,24 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		Party:                  tss.PartyID(party),
 		Threshold:              int(threshold),
 		Parties:                parties,
-		PublicKey:              wire.MustField(fields, keyShareFieldPublicKey),
-		ChainCode:              wire.MustField(fields, keyShareFieldChainCode),
+		PublicKey:              fields[3].Value,
+		ChainCode:              fields[4].Value,
 		secret:                 secretScalar,
 		GroupCommitments:       groupCommitments,
 		VerificationShares:     verificationShares,
-		PaillierPublicKey:      wire.MustField(fields, keyShareFieldPaillierPublicKey),
-		paillierPrivateKey:     wire.MustField(fields, keyShareFieldPaillierPrivateKey),
-		PaillierProof:          wire.MustField(fields, keyShareFieldPaillierProof),
-		RingPedersenParams:     wire.MustField(fields, keyShareFieldRingPedersenParams),
-		RingPedersenProof:      wire.MustField(fields, keyShareFieldRingPedersenProof),
+		PaillierPublicKey:      fields[8].Value,
+		paillierPrivateKey:     fields[9].Value,
+		PaillierProof:          fields[10].Value,
+		RingPedersenParams:     fields[11].Value,
+		RingPedersenProof:      fields[12].Value,
 		RingPedersenPublic:     ringPedersenPublic,
 		PaillierPublicKeys:     paillierPublicKeys,
-		ShareProof:             wire.MustField(fields, keyShareFieldShareProof),
-		KeygenTranscriptHash:   wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		ShareProof:             fields[15].Value,
+		KeygenTranscriptHash:   fields[16].Value,
 		PaillierProofSessionID: paillierProofSessionID,
-		PaillierProofDomain:    string(wire.MustField(fields, keyShareFieldPaillierProofDomain)),
-		LogCiphertext:          wire.MustField(fields, keyShareFieldLogCiphertext),
-		LogProof:               wire.MustField(fields, keyShareFieldLogProof),
+		PaillierProofDomain:    string(fields[18].Value),
+		LogCiphertext:          fields[19].Value,
+		LogProof:               fields[20].Value,
 		KeygenConfirmations:    keygenConfirmations,
 	}
 	if err := k.Validate(); err != nil {
@@ -224,43 +223,42 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed, presignFieldPublicKey, presignFieldKeygenTranscriptHash, presignFieldPartiesHash); err != nil {
 		return nil, err
 	}
-	party, err := wire.Uint32Field(fields, presignFieldParty)
+	// Tags validated; access fields by index.
+	party, err := wire.DecodeUint32(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := wire.Uint32Field(fields, presignFieldThreshold)
+	threshold, err := wire.DecodeUint32(fields[1].Value)
 	if err != nil {
 		return nil, err
 	}
-	// Guard int conversion: on 32-bit platforms int is int32, so any uint32
-	// above MaxInt32 would overflow.
 	if threshold > math.MaxInt32 {
 		return nil, fmt.Errorf("threshold overflows platform int: %d", threshold)
 	}
 	if int(threshold) > limits.MaxThreshold {
 		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.MaxThreshold)
 	}
-	signers, err := wire.Uint32ListFieldWithLimit[tss.PartyID](fields, presignFieldSigners, limits.MaxSigners)
+	signers, err := wire.DecodeUint32ListWithLimit[tss.PartyID](fields[2].Value, limits.MaxSigners)
 	if err != nil {
 		return nil, err
 	}
-	consumed, err := wire.BoolField(fields, presignFieldConsumed)
+	consumed, err := wire.DecodeBool(fields[12].Value)
 	if err != nil {
 		return nil, err
 	}
-	ctx, err := decodePresignContext(wire.MustField(fields, presignFieldContext))
+	ctx, err := decodePresignContext(fields[9].Value)
 	if err != nil {
 		return nil, err
 	}
-	kShare, err := newSecpSecretScalar(wire.MustField(fields, presignFieldKShare))
+	kShare, err := newSecpSecretScalar(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid k share: %w", err)
 	}
-	chiShare, err := newSecpSecretScalar(wire.MustField(fields, presignFieldChiShare))
+	chiShare, err := newSecpSecretScalar(fields[6].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid chi share: %w", err)
 	}
-	delta, err := newSecpSecretScalar(wire.MustField(fields, presignFieldDelta))
+	delta, err := newSecpSecretScalar(fields[7].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid delta: %w", err)
 	}
@@ -270,15 +268,15 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 		Party:                tss.PartyID(party),
 		Threshold:            int(threshold),
 		Signers:              signers,
-		R:                    wire.MustField(fields, presignFieldR),
-		LittleR:              wire.MustField(fields, presignFieldLittleR),
-		TranscriptHash:       wire.MustField(fields, presignFieldTranscriptHash),
+		R:                    fields[3].Value,
+		LittleR:              fields[4].Value,
+		TranscriptHash:       fields[8].Value,
 		Context:              ctx,
-		ContextHash:          wire.MustField(fields, presignFieldContextHash),
-		AdditiveShift:        wire.MustField(fields, presignFieldAdditiveShift),
-		PublicKey:            wire.MustField(fields, presignFieldPublicKey),
-		KeygenTranscriptHash: wire.MustField(fields, presignFieldKeygenTranscriptHash),
-		PartiesHash:          wire.MustField(fields, presignFieldPartiesHash),
+		ContextHash:          fields[10].Value,
+		AdditiveShift:        fields[11].Value,
+		PublicKey:            fields[13].Value,
+		KeygenTranscriptHash: fields[14].Value,
+		PartiesHash:          fields[15].Value,
 		Consumed:             consumed,
 		kShare:               kShare,
 		chiShare:             chiShare,
@@ -298,8 +296,8 @@ func encodeVerificationShares(shares []VerificationShare) []byte {
 	return wire.EncodePartyBytes(records)
 }
 
-func decodeVerificationSharesFieldWithLimit(fields []wire.Field, tag uint16, limits tss.Limits) ([]VerificationShare, error) {
-	records, err := wire.PartyBytesFieldWithLimit[tss.PartyID](fields, tag, limits.MaxParties, limits.MaxPointBytes, "verification share")
+func decodeVerificationSharesBytesWithLimit(raw []byte, limits tss.Limits) ([]VerificationShare, error) {
+	records, err := wire.DecodePartyBytesWithLimit[tss.PartyID](raw, limits.MaxParties, limits.MaxPointBytes, "verification share")
 	if err != nil {
 		return nil, err
 	}
@@ -322,9 +320,8 @@ func encodePaillierPublicShares(shares []PaillierPublicShare) []byte {
 	return wire.EncodePartyBytePairs(records)
 }
 
-func decodePaillierPublicSharesFieldWithLimit(fields []wire.Field, tag uint16, limits tss.Limits) ([]PaillierPublicShare, error) {
-	// The proof item inside a pair dominates; use the proof byte cap as per-item limit.
-	records, err := wire.PartyBytePairsFieldWithLimit[tss.PartyID](fields, tag, limits.MaxParties, limits.MaxPaillierProofBytes, "Paillier public share")
+func decodePaillierPublicSharesBytesWithLimit(raw []byte, limits tss.Limits) ([]PaillierPublicShare, error) {
+	records, err := wire.DecodePartyBytePairsWithLimit[tss.PartyID](raw, limits.MaxParties, limits.MaxPaillierProofBytes, "Paillier public share")
 	if err != nil {
 		return nil, err
 	}
@@ -351,9 +348,8 @@ func encodeRingPedersenPublicShares(shares []RingPedersenPublicShare) []byte {
 	return wire.EncodePartyBytePairs(records)
 }
 
-func decodeRingPedersenPublicSharesFieldWithLimit(fields []wire.Field, tag uint16, limits tss.Limits) ([]RingPedersenPublicShare, error) {
-	// The proof item inside a pair dominates; use the proof byte cap as per-item limit.
-	records, err := wire.PartyBytePairsFieldWithLimit[tss.PartyID](fields, tag, limits.MaxParties, limits.MaxPaillierProofBytes, "Ring-Pedersen public share")
+func decodeRingPedersenPublicSharesBytesWithLimit(raw []byte, limits tss.Limits) ([]RingPedersenPublicShare, error) {
+	records, err := wire.DecodePartyBytePairsWithLimit[tss.PartyID](raw, limits.MaxParties, limits.MaxPaillierProofBytes, "Ring-Pedersen public share")
 	if err != nil {
 		return nil, err
 	}
@@ -393,16 +389,16 @@ func decodePresignContext(in []byte) (PresignContext, error) {
 	if err := wire.RequireExactTags(fields, presignContextFieldKeyID, presignContextFieldChainID, presignContextFieldDerivationPath, presignContextFieldPolicyDomain, presignContextFieldMessageDomain); err != nil {
 		return PresignContext{}, err
 	}
-	path, err := wire.Uint32ListField[uint32](fields, presignContextFieldDerivationPath)
+	path, err := wire.DecodeUint32List[uint32](fields[2].Value)
 	if err != nil {
 		return PresignContext{}, err
 	}
 	ctx := PresignContext{
-		KeyID:          string(wire.MustField(fields, presignContextFieldKeyID)),
-		ChainID:        string(wire.MustField(fields, presignContextFieldChainID)),
+		KeyID:          string(fields[0].Value),
+		ChainID:        string(fields[1].Value),
 		DerivationPath: path,
-		PolicyDomain:   string(wire.MustField(fields, presignContextFieldPolicyDomain)),
-		MessageDomain:  string(wire.MustField(fields, presignContextFieldMessageDomain)),
+		PolicyDomain:   string(fields[3].Value),
+		MessageDomain:  string(fields[4].Value),
 	}
 	if err := validatePresignContext(ctx); err != nil {
 		return PresignContext{}, err

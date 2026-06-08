@@ -9,7 +9,6 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -148,69 +147,6 @@ func TestScalarFixedBytes(t *testing.T) {
 			t.Fatalf("truncation mismatch")
 		}
 	})
-}
-
-func TestRequireExactMessageTags(t *testing.T) {
-	tests := []struct {
-		name    string
-		fields  []wire.Field
-		tags    []uint16
-		wantErr string
-	}{
-		{
-			name:    "exact match",
-			fields:  []wire.Field{{Tag: 1}, {Tag: 2}},
-			tags:    []uint16{1, 2},
-			wantErr: "",
-		},
-		{
-			name:    "single field",
-			fields:  []wire.Field{{Tag: 42}},
-			tags:    []uint16{42},
-			wantErr: "",
-		},
-		{
-			name:    "too few fields",
-			fields:  []wire.Field{{Tag: 1}},
-			tags:    []uint16{1, 2},
-			wantErr: "got 1 fields, want 2",
-		},
-		{
-			name:    "too many fields",
-			fields:  []wire.Field{{Tag: 1}, {Tag: 2}, {Tag: 3}},
-			tags:    []uint16{1, 2},
-			wantErr: "got 3 fields, want 2",
-		},
-		{
-			name:    "wrong tag order",
-			fields:  []wire.Field{{Tag: 2}, {Tag: 1}},
-			tags:    []uint16{1, 2},
-			wantErr: "unexpected field tag 2 at index 0",
-		},
-		{
-			name:    "wrong tag at position",
-			fields:  []wire.Field{{Tag: 1}, {Tag: 99}},
-			tags:    []uint16{1, 2},
-			wantErr: "unexpected field tag 99 at index 1",
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := requireExactMessageTags(tt.fields, tt.tags...)
-			if tt.wantErr == "" {
-				if err != nil {
-					t.Fatalf("unexpected error: %v", err)
-				}
-			} else {
-				if err == nil {
-					t.Fatal("expected error, got nil")
-				}
-				if err.Error() != tt.wantErr {
-					t.Fatalf("got error %q, want %q", err.Error(), tt.wantErr)
-				}
-			}
-		})
-	}
 }
 
 func TestRandomScalar(t *testing.T) {

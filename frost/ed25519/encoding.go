@@ -63,44 +63,42 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash, keyShareFieldChainCode, keyShareFieldKeygenSessionID, keyShareFieldKeygenConfirmations); err != nil {
 		return nil, err
 	}
-	party, err := wire.Uint32Field(fields, keyShareFieldParty)
+	// Tags validated; access fields by index.
+	party, err := wire.DecodeUint32(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
-	threshold, err := wire.Uint32Field(fields, keyShareFieldThreshold)
+	threshold, err := wire.DecodeUint32(fields[1].Value)
 	if err != nil {
 		return nil, err
 	}
-	// Guard int conversion: on 32-bit platforms int is int32, so any uint32
-	// above MaxInt32 would overflow. The check is harmless (always false) on
-	// 64-bit where int is int64.
 	if threshold > math.MaxInt32 {
 		return nil, fmt.Errorf("threshold overflows platform int: %d", threshold)
 	}
 	if int(threshold) > limits.MaxThreshold {
 		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.MaxThreshold)
 	}
-	parties, err := wire.Uint32ListFieldWithLimit[tss.PartyID](fields, keyShareFieldParties, limits.MaxParties)
+	parties, err := wire.DecodeUint32ListWithLimit[tss.PartyID](fields[2].Value, limits.MaxParties)
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments, err := wire.BytesListFieldWithLimit(fields, keyShareFieldGroupCommitments, limits.MaxThreshold, limits.MaxPointBytes)
+	groupCommitments, err := wire.DecodeBytesListWithLimit(fields[5].Value, limits.MaxThreshold, limits.MaxPointBytes)
 	if err != nil {
 		return nil, err
 	}
-	verificationShares, err := decodeVerificationSharesFieldWithLimit(fields, keyShareFieldVerificationShares, limits)
+	verificationShares, err := decodeVerificationSharesBytesWithLimit(fields[6].Value, limits)
 	if err != nil {
 		return nil, err
 	}
-	keygenConfirmations, err := wire.BytesListFieldWithLimit(fields, keyShareFieldKeygenConfirmations, limits.MaxParties, limits.MaxWireFieldBytes)
+	keygenConfirmations, err := wire.DecodeBytesListWithLimit(fields[10].Value, limits.MaxParties, limits.MaxWireFieldBytes)
 	if err != nil {
 		return nil, fmt.Errorf("keygen confirmations: %w", err)
 	}
-	keygenSessionID, err := tss.SessionIDFromBytes(wire.MustField(fields, keyShareFieldKeygenSessionID))
+	keygenSessionID, err := tss.SessionIDFromBytes(fields[9].Value)
 	if err != nil {
 		return nil, fmt.Errorf("keygen session id: %w", err)
 	}
-	secretScalar, err := newEdSecretScalar(wire.MustField(fields, keyShareFieldSecret))
+	secretScalar, err := newEdSecretScalar(fields[4].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
@@ -109,13 +107,13 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		Party:                tss.PartyID(party),
 		Threshold:            int(threshold),
 		Parties:              parties,
-		PublicKey:            wire.MustField(fields, keyShareFieldPublicKey),
-		ChainCode:            wire.MustField(fields, keyShareFieldChainCode),
+		PublicKey:            fields[3].Value,
+		ChainCode:            fields[8].Value,
 		secret:               secretScalar,
 		GroupCommitments:     groupCommitments,
 		VerificationShares:   verificationShares,
 		KeygenSessionID:      keygenSessionID,
-		KeygenTranscriptHash: wire.MustField(fields, keyShareFieldKeygenTranscriptHash),
+		KeygenTranscriptHash: fields[7].Value,
 		KeygenConfirmations:  keygenConfirmations,
 	}
 	if err := k.ValidateConsistency(); err != nil {
@@ -124,8 +122,8 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 	return k, nil
 }
 
-func decodeVerificationSharesFieldWithLimit(fields []wire.Field, tag uint16, limits tss.Limits) ([]VerificationShare, error) {
-	records, err := wire.PartyBytesFieldWithLimit[tss.PartyID](fields, tag, limits.MaxParties, limits.MaxPointBytes, "verification share")
+func decodeVerificationSharesBytesWithLimit(raw []byte, limits tss.Limits) ([]VerificationShare, error) {
+	records, err := wire.DecodePartyBytesWithLimit[tss.PartyID](raw, limits.MaxParties, limits.MaxPointBytes, "verification share")
 	if err != nil {
 		return nil, err
 	}

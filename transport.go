@@ -67,6 +67,11 @@ func (t *InMemoryTransport) Inbox() <-chan Envelope {
 	return t.inbox
 }
 
+// Parties returns the party set for this transport instance.
+func (t *InMemoryTransport) Parties() PartySet {
+	return t.parties.Clone()
+}
+
 // Send delivers a direct envelope to the addressed recipient with full
 // SecurityContext.
 func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
@@ -226,15 +231,75 @@ func (m *MaliciousTransport) Send(ctx context.Context, env Envelope) error {
 
 // Broadcast applies the attack mode and delegates to the inner transport.
 func (m *MaliciousTransport) Broadcast(ctx context.Context, env Envelope) error {
-	modified := env.Clone()
 	switch m.mode {
 	case AttackBroadcastEquivocation:
-		// Send original to first party, tampered to others
-		// (simplified: this requires integration with the transport internals)
-		fallthrough
+		// Send the original payload to the first party and a tampered
+		// version (with a different payload) to all other parties.
+		// This simulates a sender equivocating on broadcast content.
+		return m.broadcastEquivocation(env)
 	default:
 	}
-	return m.inner.Broadcast(ctx, modified)
+	return m.inner.Broadcast(ctx, env.Clone())
+}
+
+func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
+	policy, err := m.inner.policies.Match(env.Protocol, env.Round, env.PayloadType)
+	if err != nil {
+		return err
+	}
+	if policy.Mode != DeliveryBroadcast {
+		return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType)
+	}
+
+	// Build a tampered clone with a different payload.
+	tampered := env.Clone()
+	if len(tampered.Payload) > 0 {
+		tampered.Payload = append([]byte(nil), tampered.Payload...)
+		tampered.Payload[0] ^= 0xff // flip bits to create a different payload
+	} else {
+		tampered.Payload = []byte{0xde, 0xad}
+	}
+	// Recompute transcript hash so structural checks still pass.
+	tampered = tampered.RecomputeTranscriptHash()
+
+	// Pre-compute values so we don't repeat work while holding the lock.
+	confidential := policy.Confidentiality == ConfidentialityRequired
+	peerKeyID, timeNow := fmt.Sprintf("party-%d", env.From), time.Now().Unix()
+
+	m.inner.mu.RLock()
+	defer m.inner.mu.RUnlock()
+
+	firstSent := false
+	for _, id := range m.inner.parties {
+		if id == m.inner.self {
+			continue
+		}
+		outbox, ok := m.inner.outboxes[id]
+		if !ok {
+			return fmt.Errorf("no route to party %d", id)
+		}
+		var secured Envelope
+		if !firstSent {
+			secured = env.Clone()
+			firstSent = true
+		} else {
+			secured = tampered.Clone()
+		}
+		secured.Security = SecurityContext{
+			Authenticated:      true,
+			Confidential:       confidential,
+			AuthenticatedParty: env.From,
+			ChannelID:          "inmemory-equivocation",
+			PeerKeyID:          peerKeyID,
+			ReceivedAtUnix:     timeNow,
+		}
+		select {
+		case outbox <- secured:
+		default:
+			return fmt.Errorf("outbox full for party %d", id)
+		}
+	}
+	return nil
 }
 
 // Receive delegates to the inner transport.

@@ -14,7 +14,7 @@ import (
 
 // handlePresignRound2 validates and applies a presign round 2 payload.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound2(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalPresignRound2Payload(env.Payload)

@@ -187,18 +187,18 @@ func UnmarshalEncryptionProof(in []byte) (*EncryptionProof, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected encryption proof version %d", version)
 	}
-	if err := requireExactProofTags(fields, encryptionProofFieldScalarCommitment, encryptionProofFieldCipherCommitment, encryptionProofFieldPointCommitment, encryptionProofFieldBound, encryptionProofFieldResponse, encryptionProofFieldRandomness, encryptionProofFieldTranscriptHash); err != nil {
+	if err := wire.RequireExactTags(fields, encryptionProofFieldScalarCommitment, encryptionProofFieldCipherCommitment, encryptionProofFieldPointCommitment, encryptionProofFieldBound, encryptionProofFieldResponse, encryptionProofFieldRandomness, encryptionProofFieldTranscriptHash); err != nil {
 		return nil, err
 	}
 	p := &EncryptionProof{
 		Version:          proofVersion,
-		ScalarCommitment: wire.MustField(fields, encryptionProofFieldScalarCommitment),
-		CipherCommitment: wire.MustField(fields, encryptionProofFieldCipherCommitment),
-		PointCommitment:  wire.MustField(fields, encryptionProofFieldPointCommitment),
-		Bound:            wire.MustField(fields, encryptionProofFieldBound),
-		Response:         wire.MustField(fields, encryptionProofFieldResponse),
-		Randomness:       wire.MustField(fields, encryptionProofFieldRandomness),
-		TranscriptHash:   wire.MustField(fields, encryptionProofFieldTranscriptHash),
+		ScalarCommitment: fields[0].Value,
+		CipherCommitment: fields[1].Value,
+		PointCommitment:  fields[2].Value,
+		Bound:            fields[3].Value,
+		Response:         fields[4].Value,
+		Randomness:       fields[5].Value,
+		TranscriptHash:   fields[6].Value,
 	}
 	if err := validateEncryptionProof(p); err != nil {
 		return nil, err

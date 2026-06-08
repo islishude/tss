@@ -174,17 +174,17 @@ func UnmarshalLogProof(in []byte) (*LogProof, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected log proof version %d", version)
 	}
-	if err := requireExactProofTags(fields, logProofFieldPoint, logProofFieldCipherCommitment, logProofFieldPointCommitment, logProofFieldResponse, logProofFieldRandomness, logProofFieldTranscriptHash); err != nil {
+	if err := wire.RequireExactTags(fields, logProofFieldPoint, logProofFieldCipherCommitment, logProofFieldPointCommitment, logProofFieldResponse, logProofFieldRandomness, logProofFieldTranscriptHash); err != nil {
 		return nil, err
 	}
 	p := &LogProof{
 		Version:          proofVersion,
-		Point:            wire.MustField(fields, logProofFieldPoint),
-		CipherCommitment: wire.MustField(fields, logProofFieldCipherCommitment),
-		PointCommitment:  wire.MustField(fields, logProofFieldPointCommitment),
-		Response:         wire.MustField(fields, logProofFieldResponse),
-		Randomness:       wire.MustField(fields, logProofFieldRandomness),
-		TranscriptHash:   wire.MustField(fields, logProofFieldTranscriptHash),
+		Point:            fields[0].Value,
+		CipherCommitment: fields[1].Value,
+		PointCommitment:  fields[2].Value,
+		Response:         fields[3].Value,
+		Randomness:       fields[4].Value,
+		TranscriptHash:   fields[5].Value,
 	}
 	if err := validateLogProof(p); err != nil {
 		return nil, err

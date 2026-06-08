@@ -353,16 +353,17 @@ func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected Ring-Pedersen parameter version %d", version)
 	}
-	if err := requireExactProofTags(fields, ringPedersenParamsFieldN, ringPedersenParamsFieldS, ringPedersenParamsFieldT); err != nil {
+	if err := wire.RequireExactTags(fields, ringPedersenParamsFieldN, ringPedersenParamsFieldS, ringPedersenParamsFieldT); err != nil {
 		return nil, err
 	}
-	n := new(big.Int).SetBytes(wire.MustField(fields, ringPedersenParamsFieldN))
+	nRaw := fields[0].Value
+	n := new(big.Int).SetBytes(nRaw)
 	nLen := modulusBytes(n)
-	if nLen == 0 || len(wire.MustField(fields, ringPedersenParamsFieldN)) != nLen {
+	if nLen == 0 || len(nRaw) != nLen {
 		return nil, errors.New("invalid Ring-Pedersen modulus encoding")
 	}
-	sRaw := wire.MustField(fields, ringPedersenParamsFieldS)
-	tRaw := wire.MustField(fields, ringPedersenParamsFieldT)
+	sRaw := fields[1].Value
+	tRaw := fields[2].Value
 	if len(sRaw) != nLen || len(tRaw) != nLen {
 		return nil, errors.New("invalid Ring-Pedersen parameter width")
 	}
@@ -398,22 +399,22 @@ func UnmarshalRingPedersenProof(in []byte) (*RingPedersenProof, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected Ring-Pedersen proof version %d", version)
 	}
-	if err := requireExactProofTags(fields, ringPedersenProofFieldTranscriptHash, ringPedersenProofFieldCommitments, ringPedersenProofFieldChallenges, ringPedersenProofFieldResponses); err != nil {
+	if err := wire.RequireExactTags(fields, ringPedersenProofFieldTranscriptHash, ringPedersenProofFieldCommitments, ringPedersenProofFieldChallenges, ringPedersenProofFieldResponses); err != nil {
 		return nil, err
 	}
-	commitments, err := wire.BytesListField(fields, ringPedersenProofFieldCommitments)
+	commitments, err := wire.DecodeBytesList(fields[1].Value)
 	if err != nil {
 		return nil, err
 	}
-	responses, err := wire.BytesListField(fields, ringPedersenProofFieldResponses)
+	responses, err := wire.DecodeBytesList(fields[3].Value)
 	if err != nil {
 		return nil, err
 	}
 	p := &RingPedersenProof{
 		Version:        proofVersion,
-		TranscriptHash: wire.MustField(fields, ringPedersenProofFieldTranscriptHash),
+		TranscriptHash: fields[0].Value,
 		Commitments:    commitments,
-		Challenges:     wire.MustField(fields, ringPedersenProofFieldChallenges),
+		Challenges:     fields[2].Value,
 		Responses:      responses,
 	}
 	if err := validateRingPedersenProof(p); err != nil {

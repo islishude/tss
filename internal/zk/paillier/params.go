@@ -3,6 +3,7 @@ package paillier
 import (
 	"errors"
 	"fmt"
+	"sync"
 
 	pai "github.com/islishude/tss/internal/paillier"
 )
@@ -108,20 +109,35 @@ func (sp SecurityParams) AffGRange() uint {
 }
 
 // overrideSecurityParams allows tests to replace the global security parameters.
-// Nil means use DefaultSecurityParams.
-var overrideSecurityParams *SecurityParams
+// Nil means use DefaultSecurityParams. Protected by paramsMu.
+var (
+	overrideSecurityParams *SecurityParams
+	paramsMu               sync.Mutex
+)
 
 // SetSecurityParamsForTesting overrides the global security parameters and
 // returns a function that restores the previous value. DO NOT use outside tests.
+//
+// The returned restore function is safe to use with t.Cleanup:
+//
+//	t.Cleanup(zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams()))
 func SetSecurityParamsForTesting(sp SecurityParams) func() {
+	paramsMu.Lock()
 	old := overrideSecurityParams
 	spCopy := sp
 	overrideSecurityParams = &spCopy
-	return func() { overrideSecurityParams = old }
+	paramsMu.Unlock()
+	return func() {
+		paramsMu.Lock()
+		overrideSecurityParams = old
+		paramsMu.Unlock()
+	}
 }
 
 // ActiveSecurityParams returns the currently active security parameters.
 func ActiveSecurityParams() SecurityParams {
+	paramsMu.Lock()
+	defer paramsMu.Unlock()
 	if overrideSecurityParams != nil {
 		return *overrideSecurityParams
 	}

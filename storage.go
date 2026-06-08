@@ -42,6 +42,12 @@ const (
 	maxKDFTime    = 1000
 	maxKDFMemory  = 1024 * 1024 // 1 GiB
 	maxKDFThreads = math.MaxUint8
+
+	// Default Argon2id parameters as recommended by RFC 9106 §7.3 for
+	// non-interactive passphrase-based key derivation.
+	defaultKDFTime    = 3
+	defaultKDFMemory  = 64 * 1024 // 64 MiB
+	defaultKDFThreads = 4
 )
 
 // PassphraseParams holds Argon2id parameters for passphrase-based key derivation.
@@ -62,9 +68,9 @@ type PassphraseParams struct {
 // non-interactive passphrase-based key derivation (time=3, memory=64 MiB, threads=4).
 func DefaultPassphraseParams() *PassphraseParams {
 	return &PassphraseParams{
-		Time:    3,
-		Memory:  64 * 1024, // 64 MiB
-		Threads: 4,
+		Time:    defaultKDFTime,
+		Memory:  defaultKDFMemory,
+		Threads: defaultKDFThreads,
 	}
 }
 

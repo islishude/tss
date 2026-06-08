@@ -79,26 +79,10 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	return tss.NewEnvelopeGuard(s.selfID, tss.PartySet(s.oldParties), protocol, s.cfg.SessionID, FROSTPolicies, cache)
 }
 
-// validateInbound runs envelope validation through the guard when set, or
-// falls back to structural checks for sessions without a guard (tests).
-// Production deployments MUST attach a guard via SetGuard before processing
-// authenticated transport messages.
+// validateInbound runs envelope validation through the shared ValidateInboundWithParties helper.
+// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope) error {
-	if s.guard != nil {
-		return s.guard.Validate(env)
-	}
-	// Guard is required when the transport authenticates the sender.
-	if env.Security.Authenticated {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
-			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
-	}
-	if err := tss.ValidateEnvelope(env, protocol, s.cfg.SessionID, s.oldParties); err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if err := tss.ValidateEnvelopePolicy(env, s.selfID, FROSTPolicies); err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	return nil
+	return tss.ValidateInboundWithParties(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID, FROSTPolicies)
 }
 
 // StartReshare starts a FROST key resharing as an old-party dealer.

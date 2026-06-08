@@ -5,9 +5,9 @@ import "github.com/islishude/tss"
 // FROSTPolicies defines the delivery policy matrix for the FROST Ed25519 protocol.
 // Every payload type that a handler may receive must be registered here.
 // Unregistered payload types are rejected by EnvelopeGuard.
-var FROSTPolicies = tss.PolicySet{
+var FROSTPolicies = tss.MustNewPolicySet(
 	// --- Keygen ---
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                1,
 		PayloadType:          payloadKeygenCommitments,
@@ -15,7 +15,7 @@ var FROSTPolicies = tss.PolicySet{
 		Confidentiality:      tss.ConfidentialityForbidden,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                1,
 		PayloadType:          payloadKeygenShare,
@@ -23,7 +23,7 @@ var FROSTPolicies = tss.PolicySet{
 		Confidentiality:      tss.ConfidentialityRequired,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                2,
 		PayloadType:          payloadKeygenConfirmation,
@@ -33,7 +33,7 @@ var FROSTPolicies = tss.PolicySet{
 	},
 
 	// --- Sign ---
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                1,
 		PayloadType:          payloadSignCommitment,
@@ -41,7 +41,7 @@ var FROSTPolicies = tss.PolicySet{
 		Confidentiality:      tss.ConfidentialityForbidden,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                2,
 		PayloadType:          payloadSignPartial,
@@ -51,7 +51,7 @@ var FROSTPolicies = tss.PolicySet{
 	},
 
 	// --- Reshare ---
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                1,
 		PayloadType:          payloadReshareCommitments,
@@ -59,7 +59,7 @@ var FROSTPolicies = tss.PolicySet{
 		Confidentiality:      tss.ConfidentialityForbidden,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
-	{
+	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
 		Round:                1,
 		PayloadType:          payloadReshareShare,
@@ -68,4 +68,4 @@ var FROSTPolicies = tss.PolicySet{
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 	// FROST reshare confirmations use payloadKeygenConfirmation (already registered)
-}
+)

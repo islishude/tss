@@ -162,24 +162,3 @@ func UnmarshalWithLimits(in []byte, expectedTypeID string, limits Limits) (uint1
 	}
 	return version, fields, nil
 }
-
-// Find returns a copy of a field value by tag.
-func Find(fields []Field, tag uint16) ([]byte, bool) {
-	for _, field := range fields {
-		if field.Tag == tag {
-			value := make([]byte, len(field.Value))
-			copy(value, field.Value)
-			return value, true
-		}
-	}
-	return nil, false
-}
-
-// Require returns a field value or an error when the tag is absent.
-func Require(fields []Field, tag uint16) ([]byte, error) {
-	value, ok := Find(fields, tag)
-	if !ok {
-		return nil, fmt.Errorf("missing wire field %d", tag)
-	}
-	return value, nil
-}

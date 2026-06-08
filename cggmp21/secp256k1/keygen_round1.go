@@ -156,7 +156,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 
 // handleKeygenCommitments validates and applies a keygen commitments payload.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
@@ -296,7 +296,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 
 // handleKeygenShare validates and applies a keygen share payload.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalKeygenSharePayload(env.Payload)

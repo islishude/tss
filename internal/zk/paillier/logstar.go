@@ -290,8 +290,8 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 		return nil, err
 	}
 
-	versionBytes := wire.MustField(fields, logStarProofFieldVersion)
-	pVersion, err := wire.DecodeUint16(versionBytes)
+	// Tags validated; access fields by index.
+	pVersion, err := wire.DecodeUint16(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
@@ -299,32 +299,32 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 		return nil, fmt.Errorf("unsupported LogStarProof version %d", pVersion)
 	}
 
-	s, err := DecodePositive(wire.MustField(fields, logStarProofFieldS))
+	s, err := DecodePositive(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid S: %w", err)
 	}
-	a, err := DecodePositive(wire.MustField(fields, logStarProofFieldA))
+	a, err := DecodePositive(fields[2].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid A: %w", err)
 	}
-	Y, err := secp.PointFromBytes(wire.MustField(fields, logStarProofFieldY))
+	Y, err := secp.PointFromBytes(fields[3].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid Y: %w", err)
 	}
-	d, err := DecodePositive(wire.MustField(fields, logStarProofFieldD))
+	d, err := DecodePositive(fields[4].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid D: %w", err)
 	}
 
-	z1, err := DecodeSigned(wire.MustField(fields, logStarProofFieldZ1))
+	z1, err := DecodeSigned(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z1: %w", err)
 	}
-	z2, err := DecodePositive(wire.MustField(fields, logStarProofFieldZ2))
+	z2, err := DecodePositive(fields[6].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(wire.MustField(fields, logStarProofFieldZ3))
+	z3, err := DecodeSigned(fields[7].Value)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z3: %w", err)
 	}
@@ -338,7 +338,7 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 		Z1:             z1,
 		Z2:             z2,
 		Z3:             z3,
-		TranscriptHash: wire.MustField(fields, logStarProofFieldTranscriptHash),
+		TranscriptHash: fields[8].Value,
 	}, nil
 }
 

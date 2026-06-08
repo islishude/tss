@@ -469,8 +469,8 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 		return nil, err
 	}
 
-	versionBytes := wire.MustField(fields, affGProofFieldVersion)
-	pVersion, err := wire.DecodeUint16(versionBytes)
+	// Tags validated; access fields by index.
+	pVersion, err := wire.DecodeUint16(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
@@ -478,60 +478,60 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 		return nil, fmt.Errorf("unsupported AffGProof version %d", pVersion)
 	}
 
-	a, err := DecodePositive(wire.MustField(fields, affGProofFieldA))
+	a, err := DecodePositive(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid A: %w", err)
 	}
-	Bx, err := secp.PointFromBytes(wire.MustField(fields, affGProofFieldBx))
+	Bx, err := secp.PointFromBytes(fields[2].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid Bx: %w", err)
 	}
-	by, err := DecodePositive(wire.MustField(fields, affGProofFieldBy))
+	by, err := DecodePositive(fields[3].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid By: %w", err)
 	}
-	eVal, err := DecodePositive(wire.MustField(fields, affGProofFieldE))
+	eVal, err := DecodePositive(fields[4].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid E: %w", err)
 	}
-	sVal, err := DecodePositive(wire.MustField(fields, affGProofFieldS))
+	sVal, err := DecodePositive(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid S: %w", err)
 	}
-	fVal, err := DecodePositive(wire.MustField(fields, affGProofFieldF))
+	fVal, err := DecodePositive(fields[6].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid F: %w", err)
 	}
-	tVal, err := DecodePositive(wire.MustField(fields, affGProofFieldT))
+	tVal, err := DecodePositive(fields[7].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid T: %w", err)
 	}
-	y, err := DecodePositive(wire.MustField(fields, affGProofFieldY))
+	y, err := DecodePositive(fields[8].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid Y: %w", err)
 	}
 
-	z1, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ1))
+	z1, err := DecodeSigned(fields[9].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z1: %w", err)
 	}
-	z2, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ2))
+	z2, err := DecodeSigned(fields[10].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ3))
+	z3, err := DecodeSigned(fields[11].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z3: %w", err)
 	}
-	z4, err := DecodeSigned(wire.MustField(fields, affGProofFieldZ4))
+	z4, err := DecodeSigned(fields[12].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z4: %w", err)
 	}
-	wVal, err := DecodePositive(wire.MustField(fields, affGProofFieldW))
+	wVal, err := DecodePositive(fields[13].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid W: %w", err)
 	}
-	wy, err := DecodePositive(wire.MustField(fields, affGProofFieldWY))
+	wy, err := DecodePositive(fields[14].Value)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid WY: %w", err)
 	}
@@ -552,7 +552,7 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 		Z4:             z4,
 		W:              wVal,
 		WY:             wy,
-		TranscriptHash: wire.MustField(fields, affGProofFieldTranscriptHash),
+		TranscriptHash: fields[15].Value,
 	}, nil
 }
 

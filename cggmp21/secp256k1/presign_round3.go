@@ -16,7 +16,7 @@ import (
 
 // handlePresignRound3 validates and applies a presign round 3 delta share.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
 	p, err := unmarshalPresignRound3Payload(env.Payload)

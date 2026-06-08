@@ -155,31 +155,15 @@ func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error
 	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies, cache)
 }
 
-// validateInbound runs envelope validation through the guard when set, or
-// falls back to basic structural checks for sessions without a guard (tests).
-// Production deployments MUST attach a guard via SetGuard before processing
-// authenticated transport messages.
+// validateInbound runs envelope validation through the shared ValidateInbound helper.
+// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
-	if s.guard != nil {
-		return s.guard.Validate(env)
-	}
-	// Guard is required when the transport authenticates the sender.
-	if env.Security.Authenticated {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From,
-			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
-	}
-	if err := tss.ValidateEnvelope(env, protocol, s.sessionID, s.key.Parties); err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if err := tss.ValidateEnvelopePolicy(env, s.key.Party, CGGMP21Policies); err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	return nil
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party, CGGMP21Policies)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
 //
-// Template: parse → policy validate → cryptographic verify → mutate state → emit.
+// Follows the handler template (see doc.go).
 func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")

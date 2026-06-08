@@ -38,14 +38,14 @@ func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 	if version != paillierWireVersion {
 		return nil, fmt.Errorf("unexpected Paillier public-key version %d", version)
 	}
-	if err := requireExactKeyTags(fields, publicKeyFieldN, publicKeyFieldG); err != nil {
+	if err := wire.RequireExactTags(fields, publicKeyFieldN, publicKeyFieldG); err != nil {
 		return nil, err
 	}
-	n, err := decodePositiveIntField(fields, publicKeyFieldN)
+	n, err := decodePositiveIntBytes(fields[0].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := decodePositiveIntField(fields, publicKeyFieldG)
+	g, err := decodePositiveIntBytes(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
@@ -108,30 +108,31 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	if version != paillierWireVersion {
 		return nil, fmt.Errorf("unexpected Paillier private-key version %d", version)
 	}
-	if err := requireExactKeyTags(fields, privateKeyFieldN, privateKeyFieldG, privateKeyFieldLambda, privateKeyFieldMu, privateKeyFieldP, privateKeyFieldQ); err != nil {
+	if err := wire.RequireExactTags(fields, privateKeyFieldN, privateKeyFieldG, privateKeyFieldLambda, privateKeyFieldMu, privateKeyFieldP, privateKeyFieldQ); err != nil {
 		return nil, err
 	}
-	n, err := decodePositiveIntField(fields, privateKeyFieldN)
+	// Tags validated; access fields by index.
+	n, err := decodePositiveIntBytes(fields[0].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := decodePositiveIntField(fields, privateKeyFieldG)
+	g, err := decodePositiveIntBytes(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
-	lambdaBig, err := decodePositiveIntField(fields, privateKeyFieldLambda)
+	lambdaBig, err := decodePositiveIntBytes(fields[2].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lambda: %w", err)
 	}
-	muBig, err := decodePositiveIntField(fields, privateKeyFieldMu)
+	muBig, err := decodePositiveIntBytes(fields[3].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mu: %w", err)
 	}
-	p, err := decodePositiveIntField(fields, privateKeyFieldP)
+	p, err := decodePositiveIntBytes(fields[4].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid p: %w", err)
 	}
-	q, err := decodePositiveIntField(fields, privateKeyFieldQ)
+	q, err := decodePositiveIntBytes(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("invalid q: %w", err)
 	}
@@ -161,18 +162,6 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	return sk, nil
 }
 
-func requireExactKeyTags(fields []wire.Field, tags ...uint16) error {
-	if len(fields) != len(tags) {
-		return fmt.Errorf("got %d fields, want %d", len(fields), len(tags))
-	}
-	for i, tag := range tags {
-		if fields[i].Tag != tag {
-			return fmt.Errorf("unexpected field tag %d at index %d", fields[i].Tag, i)
-		}
-	}
-	return nil
-}
-
 func encodePositiveInt(x *big.Int) ([]byte, error) {
 	if x == nil || x.Sign() <= 0 {
 		return nil, errors.New("integer must be positive")
@@ -180,11 +169,8 @@ func encodePositiveInt(x *big.Int) ([]byte, error) {
 	return x.Bytes(), nil
 }
 
-func decodePositiveIntField(fields []wire.Field, tag uint16) (*big.Int, error) {
-	raw, err := wire.Require(fields, tag)
-	if err != nil {
-		return nil, err
-	}
+// decodePositiveIntBytes decodes a non-minimal, positive big.Int from raw bytes.
+func decodePositiveIntBytes(raw []byte) (*big.Int, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("empty integer")
 	}

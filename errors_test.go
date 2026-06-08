@@ -10,8 +10,8 @@ func TestProtocolErrorError(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
 		var pe *ProtocolError
 		got := pe.Error()
-		if got != "<nil>" {
-			t.Errorf("got %q, want %q", got, "<nil>")
+		if got != "" {
+			t.Errorf("got %q, want empty string", got)
 		}
 	})
 

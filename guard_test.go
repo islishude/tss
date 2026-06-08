@@ -17,8 +17,8 @@ func testSessionID(t *testing.T) SessionID {
 }
 
 func testPolicySet() PolicySet {
-	return PolicySet{
-		{
+	return MustNewPolicySet(
+		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
 			PayloadType:          "test.direct.plain",
@@ -26,7 +26,7 @@ func testPolicySet() PolicySet {
 			Confidentiality:      ConfidentialityForbidden,
 			BroadcastConsistency: BroadcastConsistencyNone,
 		},
-		{
+		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
 			PayloadType:          "test.direct.confidential",
@@ -34,7 +34,7 @@ func testPolicySet() PolicySet {
 			Confidentiality:      ConfidentialityRequired,
 			BroadcastConsistency: BroadcastConsistencyNone,
 		},
-		{
+		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
 			PayloadType:          "test.broadcast.plain",
@@ -42,7 +42,7 @@ func testPolicySet() PolicySet {
 			Confidentiality:      ConfidentialityForbidden,
 			BroadcastConsistency: BroadcastConsistencyNone,
 		},
-		{
+		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
 			PayloadType:          "test.broadcast.cert",
@@ -50,7 +50,7 @@ func testPolicySet() PolicySet {
 			Confidentiality:      ConfidentialityForbidden,
 			BroadcastConsistency: BroadcastConsistencyRequired,
 		},
-	}
+	)
 }
 
 type guardTestEnv struct {

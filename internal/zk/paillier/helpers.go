@@ -177,18 +177,6 @@ func validatePositiveIntBytes(name string, in []byte) error {
 	return nil
 }
 
-func requireExactProofTags(fields []wire.Field, tags ...uint16) error {
-	if len(fields) != len(tags) {
-		return fmt.Errorf("unexpected proof field count %d", len(fields))
-	}
-	for i, tag := range tags {
-		if fields[i].Tag != tag {
-			return fmt.Errorf("unexpected proof field tag %d", fields[i].Tag)
-		}
-	}
-	return nil
-}
-
 // --- Random helpers ---
 
 // randomLargeMask returns a uniform mask in [0, 2^{l+ε}) for statistical

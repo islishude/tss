@@ -92,7 +92,7 @@ type ProtocolError struct {
 // Error formats the protocol code with optional round, party, and wrapped error.
 func (e *ProtocolError) Error() string {
 	if e == nil {
-		return "<nil>"
+		return ""
 	}
 	msg := e.Code
 	if e.Round != 0 {

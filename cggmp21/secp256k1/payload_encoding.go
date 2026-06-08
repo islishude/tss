@@ -106,7 +106,8 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode, keygenCommitmentsPayloadFieldRingPedersenParams, keygenCommitmentsPayloadFieldRingPedersenProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
+	// Tags validated; access fields by index to avoid redundant linear scans.
+	commitments, err := wire.DecodeBytesList(fields[0].Value)
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
@@ -115,11 +116,11 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	}
 	p := keygenCommitmentsPayload{
 		Commitments:        commitments,
-		PaillierPublicKey:  wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierPublicKey),
-		PaillierProof:      wire.MustField(fields, keygenCommitmentsPayloadFieldPaillierProof),
-		ChainCodeCommit:    wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode),
-		RingPedersenParams: wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenParams),
-		RingPedersenProof:  wire.MustField(fields, keygenCommitmentsPayloadFieldRingPedersenProof),
+		PaillierPublicKey:  fields[1].Value,
+		PaillierProof:      fields[2].Value,
+		ChainCodeCommit:    fields[3].Value,
+		RingPedersenParams: fields[4].Value,
+		RingPedersenProof:  fields[5].Value,
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return keygenCommitmentsPayload{}, err
@@ -159,7 +160,7 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 	if err := wire.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := wire.MustField(fields, keygenSharePayloadFieldShare)
+	share := fields[0].Value
 	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return keygenSharePayload{}, err
 	}
@@ -195,9 +196,9 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 		return presignRound1Payload{}, err
 	}
 	p := presignRound1Payload{
-		Gamma:             wire.MustField(fields, presignRound1PayloadFieldGamma),
-		EncK:              wire.MustField(fields, presignRound1PayloadFieldEncK),
-		PaillierPublicKey: wire.MustField(fields, presignRound1PayloadFieldPaillierPublicKey),
+		Gamma:             fields[0].Value,
+		EncK:              fields[1].Value,
+		PaillierPublicKey: fields[2].Value,
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return presignRound1Payload{}, err
@@ -236,8 +237,8 @@ func unmarshalPresignRound1ProofPayload(in []byte) (presignRound1ProofPayload, e
 		return presignRound1ProofPayload{}, err
 	}
 	p := presignRound1ProofPayload{
-		PublicRound1Hash: wire.MustField(fields, presignRound1ProofPayloadFieldPublicHash),
-		EncKProof:        wire.MustField(fields, presignRound1ProofPayloadFieldEncKProof),
+		PublicRound1Hash: fields[0].Value,
+		EncKProof:        fields[1].Value,
 	}
 	if len(p.PublicRound1Hash) != sha256.Size {
 		return presignRound1ProofPayload{}, errors.New("round1 public hash must be 32 bytes")
@@ -278,15 +279,15 @@ func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
 	if err := wire.RequireExactTags(fields, presignRound2PayloadFieldDelta, presignRound2PayloadFieldSigma, presignRound2PayloadFieldRound1Echo); err != nil {
 		return presignRound2Payload{}, err
 	}
-	delta, err := mta.UnmarshalResponseMessage(wire.MustField(fields, presignRound2PayloadFieldDelta))
+	delta, err := mta.UnmarshalResponseMessage(fields[0].Value)
 	if err != nil {
 		return presignRound2Payload{}, err
 	}
-	sigma, err := mta.UnmarshalResponseMessage(wire.MustField(fields, presignRound2PayloadFieldSigma))
+	sigma, err := mta.UnmarshalResponseMessage(fields[1].Value)
 	if err != nil {
 		return presignRound2Payload{}, err
 	}
-	echo := wire.MustField(fields, presignRound2PayloadFieldRound1Echo)
+	echo := fields[2].Value
 	if len(echo) != sha256.Size {
 		return presignRound2Payload{}, errors.New("round1 echo must be 32 bytes")
 	}
@@ -313,7 +314,7 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 	if err := wire.RequireExactTags(fields, presignRound3PayloadFieldDelta); err != nil {
 		return presignRound3Payload{}, err
 	}
-	delta := wire.MustField(fields, presignRound3PayloadFieldDelta)
+	delta := fields[0].Value
 	if _, err := secp.ScalarFromBytes(delta); err != nil {
 		return presignRound3Payload{}, err
 	}
@@ -349,9 +350,9 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 		return signPartialPayload{}, err
 	}
 	p := signPartialPayload{
-		S:                 wire.MustField(fields, signPartialPayloadFieldS),
-		PresignTranscript: wire.MustField(fields, signPartialPayloadFieldPresignTranscript),
-		PresignContext:    wire.MustField(fields, signPartialPayloadFieldPresignContext),
+		S:                 fields[0].Value,
+		PresignTranscript: fields[1].Value,
+		PresignContext:    fields[2].Value,
 	}
 	if _, err := secp.ScalarFromBytes(p.S); err != nil {
 		return signPartialPayload{}, err
@@ -423,7 +424,7 @@ func unmarshalReshareDealerCommitmentsPayload(in []byte) (reshareDealerCommitmen
 	if err := wire.RequireExactTags(fields, reshareDealerCommitmentsFieldCommitments); err != nil {
 		return reshareDealerCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, reshareDealerCommitmentsFieldCommitments)
+	commitments, err := wire.DecodeBytesList(fields[0].Value)
 	if err != nil {
 		return reshareDealerCommitmentsPayload{}, err
 	}
@@ -462,11 +463,11 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldDealer, reshareSharePayloadFieldReceiver, reshareSharePayloadFieldShare, reshareSharePayloadFieldDealerCommitmentHash); err != nil {
 		return reshareSharePayload{}, err
 	}
-	dealer, err := wire.Uint32Field(fields, reshareSharePayloadFieldDealer)
+	dealer, err := wire.DecodeUint32(fields[0].Value)
 	if err != nil {
 		return reshareSharePayload{}, fmt.Errorf("reshare share dealer: %w", err)
 	}
-	receiver, err := wire.Uint32Field(fields, reshareSharePayloadFieldReceiver)
+	receiver, err := wire.DecodeUint32(fields[1].Value)
 	if err != nil {
 		return reshareSharePayload{}, fmt.Errorf("reshare share receiver: %w", err)
 	}
@@ -476,11 +477,11 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	if receiver == 0 {
 		return reshareSharePayload{}, errors.New("reshare share receiver is zero")
 	}
-	share := wire.MustField(fields, reshareSharePayloadFieldShare)
+	share := fields[2].Value
 	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return reshareSharePayload{}, err
 	}
-	commitmentHash := wire.MustField(fields, reshareSharePayloadFieldDealerCommitmentHash)
+	commitmentHash := fields[3].Value
 	if len(commitmentHash) != sha256.Size {
 		return reshareSharePayload{}, errors.New("reshare share commitment hash must be 32 bytes")
 	}
@@ -512,22 +513,10 @@ func unmarshalReshareReceiverMaterialPayload(in []byte) (reshareReceiverMaterial
 	if err := wire.RequireExactTags(fields, reshareReceiverMaterialFieldPaillierPublicKey, reshareReceiverMaterialFieldPaillierProof, reshareReceiverMaterialFieldRingPedersenParams, reshareReceiverMaterialFieldRingPedersenProof); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
-	publicKey, err := wire.Require(fields, reshareReceiverMaterialFieldPaillierPublicKey)
-	if err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
-	proof, err := wire.Require(fields, reshareReceiverMaterialFieldPaillierProof)
-	if err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
-	ringPedersenParams, err := wire.Require(fields, reshareReceiverMaterialFieldRingPedersenParams)
-	if err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
-	ringPedersenProof, err := wire.Require(fields, reshareReceiverMaterialFieldRingPedersenProof)
-	if err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
+	publicKey := fields[0].Value
+	proof := fields[1].Value
+	ringPedersenParams := fields[2].Value
+	ringPedersenProof := fields[3].Value
 	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
@@ -578,26 +567,15 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof, refreshCommitmentsPayloadFieldRingPedersenParams, refreshCommitmentsPayloadFieldRingPedersenProof); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, refreshCommitmentsPayloadFieldCommitments)
+	// Tags validated; access fields by index to avoid redundant linear scans.
+	commitments, err := wire.DecodeBytesList(fields[0].Value)
 	if err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	publicKey, err := wire.Require(fields, refreshCommitmentsPayloadFieldPaillierPublicKey)
-	if err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
-	proof, err := wire.Require(fields, refreshCommitmentsPayloadFieldPaillierProof)
-	if err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
-	ringPedersenParams, err := wire.Require(fields, refreshCommitmentsPayloadFieldRingPedersenParams)
-	if err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
-	ringPedersenProof, err := wire.Require(fields, refreshCommitmentsPayloadFieldRingPedersenProof)
-	if err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
+	publicKey := fields[1].Value
+	proof := fields[2].Value
+	ringPedersenParams := fields[3].Value
+	ringPedersenProof := fields[4].Value
 	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
@@ -627,7 +605,7 @@ func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
 	if err := wire.RequireExactTags(fields, refreshSharePayloadFieldShare); err != nil {
 		return refreshSharePayload{}, err
 	}
-	share := wire.MustField(fields, refreshSharePayloadFieldShare)
+	share := fields[0].Value
 	if _, err := secp.ScalarFromBytes(share); err != nil {
 		return refreshSharePayload{}, err
 	}

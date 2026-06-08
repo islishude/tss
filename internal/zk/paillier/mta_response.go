@@ -273,19 +273,19 @@ func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected MtA response proof version %d", version)
 	}
-	if err := requireExactProofTags(fields, mtaResponseProofFieldTranscriptHash, mtaResponseProofFieldBetaCommitment, mtaResponseProofFieldCipherCommitment, mtaResponseProofFieldBCommitment, mtaResponseProofFieldBetaNonce, mtaResponseProofFieldBResponse, mtaResponseProofFieldBetaResponse, mtaResponseProofFieldRandomness); err != nil {
+	if err := wire.RequireExactTags(fields, mtaResponseProofFieldTranscriptHash, mtaResponseProofFieldBetaCommitment, mtaResponseProofFieldCipherCommitment, mtaResponseProofFieldBCommitment, mtaResponseProofFieldBetaNonce, mtaResponseProofFieldBResponse, mtaResponseProofFieldBetaResponse, mtaResponseProofFieldRandomness); err != nil {
 		return nil, err
 	}
 	p := &MTAResponseProof{
 		Version:          proofVersion,
-		TranscriptHash:   wire.MustField(fields, mtaResponseProofFieldTranscriptHash),
-		BetaCommitment:   wire.MustField(fields, mtaResponseProofFieldBetaCommitment),
-		CipherCommitment: wire.MustField(fields, mtaResponseProofFieldCipherCommitment),
-		BCommitment:      wire.MustField(fields, mtaResponseProofFieldBCommitment),
-		BetaNonce:        wire.MustField(fields, mtaResponseProofFieldBetaNonce),
-		BResponse:        wire.MustField(fields, mtaResponseProofFieldBResponse),
-		BetaResponse:     wire.MustField(fields, mtaResponseProofFieldBetaResponse),
-		Randomness:       wire.MustField(fields, mtaResponseProofFieldRandomness),
+		TranscriptHash:   fields[0].Value,
+		BetaCommitment:   fields[1].Value,
+		CipherCommitment: fields[2].Value,
+		BCommitment:      fields[3].Value,
+		BetaNonce:        fields[4].Value,
+		BResponse:        fields[5].Value,
+		BetaResponse:     fields[6].Value,
+		Randomness:       fields[7].Value,
 	}
 	if err := validateMTAResponseProof(p); err != nil {
 		return nil, err

@@ -24,13 +24,11 @@ type replayCacheKey struct {
 	transcriptHash [32]byte
 }
 
-// NewInMemoryReplayCache returns an initialized in-memory replay cache with no
-// size limit. For production single-process deployments, prefer
-// [NewBoundedReplayCache] to bound memory usage.
+// NewInMemoryReplayCache returns an initialized in-memory replay cache with a
+// default bound of 100000 entries to prevent unbounded memory growth in
+// long-running processes. For an explicit bound, use [NewBoundedReplayCache].
 func NewInMemoryReplayCache() *InMemoryReplayCache {
-	return &InMemoryReplayCache{
-		seen: make(map[replayCacheKey]struct{}),
-	}
+	return NewBoundedReplayCache(100000)
 }
 
 // NewBoundedReplayCache returns an in-memory replay cache that evicts an

@@ -275,8 +275,8 @@ func UnmarshalEncProof(in []byte) (*EncProof, error) {
 		return nil, err
 	}
 
-	versionBytes := wire.MustField(fields, encProofFieldVersion)
-	pVersion, err := wire.DecodeUint16(versionBytes)
+	// Tags validated; access fields by index.
+	pVersion, err := wire.DecodeUint16(fields[0].Value)
 	if err != nil {
 		return nil, err
 	}
@@ -284,27 +284,27 @@ func UnmarshalEncProof(in []byte) (*EncProof, error) {
 		return nil, fmt.Errorf("unsupported EncProof version %d", pVersion)
 	}
 
-	s, err := DecodePositive(wire.MustField(fields, encProofFieldS))
+	s, err := DecodePositive(fields[1].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid S: %w", err)
 	}
-	a, err := DecodePositive(wire.MustField(fields, encProofFieldA))
+	a, err := DecodePositive(fields[2].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid A: %w", err)
 	}
-	c, err := DecodePositive(wire.MustField(fields, encProofFieldC))
+	c, err := DecodePositive(fields[3].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid C: %w", err)
 	}
-	z1, err := DecodeSigned(wire.MustField(fields, encProofFieldZ1))
+	z1, err := DecodeSigned(fields[4].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z1: %w", err)
 	}
-	z2, err := DecodePositive(wire.MustField(fields, encProofFieldZ2))
+	z2, err := DecodePositive(fields[5].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(wire.MustField(fields, encProofFieldZ3))
+	z3, err := DecodeSigned(fields[6].Value)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z3: %w", err)
 	}
@@ -317,7 +317,7 @@ func UnmarshalEncProof(in []byte) (*EncProof, error) {
 		Z1:             z1,
 		Z2:             z2,
 		Z3:             z3,
-		TranscriptHash: wire.MustField(fields, encProofFieldTranscriptHash),
+		TranscriptHash: fields[7].Value,
 	}, nil
 }
 

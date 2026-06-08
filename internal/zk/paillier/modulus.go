@@ -162,24 +162,24 @@ func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
 	if version != proofVersion {
 		return nil, fmt.Errorf("unexpected modulus proof version %d", version)
 	}
-	if err := requireExactProofTags(fields, modulusProofFieldW, modulusProofFieldTranscriptHash, modulusProofFieldX, modulusProofFieldA, modulusProofFieldB, modulusProofFieldZ); err != nil {
+	if err := wire.RequireExactTags(fields, modulusProofFieldW, modulusProofFieldTranscriptHash, modulusProofFieldX, modulusProofFieldA, modulusProofFieldB, modulusProofFieldZ); err != nil {
 		return nil, err
 	}
-	xs, err := wire.BytesListField(fields, modulusProofFieldX)
+	xs, err := wire.DecodeBytesList(fields[2].Value)
 	if err != nil {
 		return nil, err
 	}
-	zs, err := wire.BytesListField(fields, modulusProofFieldZ)
+	zs, err := wire.DecodeBytesList(fields[5].Value)
 	if err != nil {
 		return nil, err
 	}
 	p := &ModulusProof{
 		Version:        proofVersion,
-		W:              wire.MustField(fields, modulusProofFieldW),
-		TranscriptHash: wire.MustField(fields, modulusProofFieldTranscriptHash),
+		W:              fields[0].Value,
+		TranscriptHash: fields[1].Value,
 		X:              xs,
-		A:              wire.MustField(fields, modulusProofFieldA),
-		B:              wire.MustField(fields, modulusProofFieldB),
+		A:              fields[3].Value,
+		B:              fields[4].Value,
 		Z:              zs,
 	}
 	if err := validateModulusProof(p); err != nil {

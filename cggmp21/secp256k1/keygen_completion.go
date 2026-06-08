@@ -194,7 +194,6 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	share.LogCiphertext = logCiphertext.Bytes()
 	share.LogProof = logProofBytes
-	share.logRandomness = logRandomness.Bytes()
 	// Carry the local chain code into the confirmation for commit-reveal.
 	share.ChainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
 	if err := share.validateWithoutConfirmations(); err != nil {

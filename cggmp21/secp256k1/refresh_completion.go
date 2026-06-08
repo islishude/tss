@@ -204,7 +204,6 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	s.newShare.LogCiphertext = logCiphertext.Bytes()
 	s.newShare.LogProof = logProofBytes
-	s.newShare.logRandomness = logRandomness.Bytes()
 	if err := s.newShare.validateWithoutConfirmations(); err != nil {
 		return nil, err
 	}

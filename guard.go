@@ -15,6 +15,13 @@ type EnvelopeGuard struct {
 
 	Policies    PolicySet
 	ReplayCache ReplayCache
+
+	// AckVerifier, when non-nil, verifies individual broadcast ack signatures
+	// during broadcast certificate validation. When nil, only structural
+	// certificate checks are performed (backward-compatible behavior).
+	// Production deployments SHOULD set this to ensure end-to-end broadcast
+	// integrity.
+	AckVerifier BroadcastAckVerifier
 }
 
 // NewEnvelopeGuard constructs a guard with the required security configuration.
@@ -85,23 +92,27 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 		return fmt.Errorf("%w", ErrUnauthenticatedTransport)
 	}
 
-	// 7. Transport identity must match envelope sender.
+	// 7. Transport identity must be set.
+	if env.Security.AuthenticatedParty == 0 {
+		return fmt.Errorf("%w: authenticated party is zero (unset)", ErrUnauthenticatedTransport)
+	}
+	// 8. Transport identity must match envelope sender.
 	if env.Security.AuthenticatedParty != env.From {
 		return fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, env.Security.AuthenticatedParty, env.From)
 	}
 
-	// 8. Recipient check for direct messages.
+	// 9. Recipient check for direct messages.
 	if env.To != 0 && env.To != g.Self {
 		return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, env.To)
 	}
 
-	// 9. Policy lookup.
+	// 10. Policy lookup.
 	policy, err := g.Policies.Match(env.Protocol, env.Round, env.PayloadType)
 	if err != nil {
 		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 
-	// 10. Delivery mode enforcement.
+	// 11. Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
 		if env.To == 0 {
@@ -113,7 +124,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 		}
 	}
 
-	// 11. Confidentiality enforcement.
+	// 12. Confidentiality enforcement.
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
 		if !env.Security.Confidential {
@@ -125,7 +136,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 		}
 	}
 
-	// 12. Broadcast consistency enforcement against the provided party set.
+	// 13. Broadcast consistency enforcement against the provided party set.
 	if policy.BroadcastConsistency == BroadcastConsistencyRequired {
 		if env.Broadcast == nil {
 			return fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, env.PayloadType)
@@ -133,14 +144,75 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 		if err := env.Broadcast.Verify(env, parties); err != nil {
 			return fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err)
 		}
+		// Verify individual ack signatures when a verifier is configured.
+		// This closes the gap where a transport adapter attaches a structurally
+		// valid certificate without verifying the underlying signatures.
+		if g.AckVerifier != nil {
+			for _, ack := range env.Broadcast.Acks {
+				if err := VerifyBroadcastAck(env, ack, g.AckVerifier); err != nil {
+					return fmt.Errorf("%w: party %d: %w", ErrInvalidBroadcastCertificate, ack.Party, err)
+				}
+			}
+		}
 	}
 
-	// 13. Replay detection.
+	// 14. Replay detection.
 	key := ReplayKeyFromEnvelope(env)
 	if !g.ReplayCache.MarkIfNew(key) {
 		return fmt.Errorf("%w: protocol=%s session=%s round=%d from=%d", ErrReplay, env.Protocol, env.SessionID, env.Round, env.From)
 	}
 
+	return nil
+}
+
+// ValidateInbound validates an incoming envelope through the provided guard.
+// Production code must always provide a non-nil guard — this ensures transport
+// authentication, confidentiality enforcement, broadcast consistency, and replay
+// detection are applied uniformly.
+//
+// When guard is nil and the transport is unauthenticated, a limited set of
+// structural checks is applied as a test-only fallback. This path MUST NOT be
+// relied upon in production; it exists solely for Tier 0 unit tests that
+// exercise protocol logic without a full transport simulation.
+func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
+	if guard != nil {
+		return guard.Validate(env)
+	}
+	// Test-only fallback: structural checks without transport security.
+	// Production transports must always authenticate — an unauthenticated
+	// envelope in production is a configuration error caught by the guard.
+	if env.Security.Authenticated {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := ValidateEnvelope(env, expectedProtocol, expectedSession, parties); err != nil {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if err := ValidateEnvelopePolicy(env, self, policies); err != nil {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	return nil
+}
+
+// ValidateInboundWithParties is like [ValidateInbound] but validates sender
+// membership and broadcast certificates against the provided party set instead
+// of the guard's configured set. This is used by sessions (e.g. reshare) that
+// accept messages from different participant subsets depending on payload type.
+func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
+	if guard != nil {
+		return guard.ValidateWithParties(env, parties)
+	}
+	// Test-only fallback: structural checks without transport security.
+	if env.Security.Authenticated {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From,
+			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
+	}
+	if err := ValidateEnvelope(env, expectedProtocol, expectedSession, parties); err != nil {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if err := ValidateEnvelopePolicy(env, self, policies); err != nil {
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
 	return nil
 }
 

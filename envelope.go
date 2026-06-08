@@ -114,85 +114,65 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if version != Version {
 		return fmt.Errorf("unexpected envelope wire version %d", version)
 	}
-	protocol, err := wire.Require(fields, envelopeFieldProtocol)
-	if err != nil {
+	// Verify exact field set and order in a single pass — avoids nine
+	// individual linear scans through the field list.
+	if err := wire.RequireExactTags(fields,
+		envelopeFieldProtocol,
+		envelopeFieldVersion,
+		envelopeFieldSessionID,
+		envelopeFieldRound,
+		envelopeFieldFrom,
+		envelopeFieldTo,
+		envelopeFieldPayloadType,
+		envelopeFieldPayload,
+		envelopeFieldTranscriptHash,
+	); err != nil {
 		return err
 	}
+	protocol := fields[0].Value
 	if len(protocol) == 0 {
 		return errors.New("envelope protocol is empty")
 	}
 	if len(protocol) > limits.MaxProtocolNameBytes {
 		return fmt.Errorf("envelope protocol name too long: %d > %d", len(protocol), limits.MaxProtocolNameBytes)
 	}
-	versionBytes, err := wire.Require(fields, envelopeFieldVersion)
-	if err != nil {
-		return err
-	}
-	envVersion, err := wire.DecodeUint16(versionBytes)
+	envVersion, err := wire.DecodeUint16(fields[1].Value)
 	if err != nil {
 		return fmt.Errorf("invalid envelope version field: %w", err)
 	}
 	if envVersion != Version {
 		return fmt.Errorf("unexpected envelope version %d", envVersion)
 	}
-	sessionBytes, err := wire.Require(fields, envelopeFieldSessionID)
+	session, err := SessionIDFromBytes(fields[2].Value)
 	if err != nil {
 		return err
 	}
-	session, err := SessionIDFromBytes(sessionBytes)
-	if err != nil {
-		return err
-	}
-	round, err := wire.Require(fields, envelopeFieldRound)
-	if err != nil {
-		return err
-	}
+	round := fields[3].Value
 	if len(round) != 1 {
 		return errors.New("invalid envelope round")
 	}
-	fromBytes, err := wire.Require(fields, envelopeFieldFrom)
-	if err != nil {
-		return err
-	}
-	from, err := wire.DecodeUint32(fromBytes)
+	from, err := wire.DecodeUint32(fields[4].Value)
 	if err != nil {
 		return fmt.Errorf("invalid envelope sender: %w", err)
 	}
-	toBytes, err := wire.Require(fields, envelopeFieldTo)
-	if err != nil {
-		return err
-	}
-	to, err := wire.DecodeUint32(toBytes)
+	to, err := wire.DecodeUint32(fields[5].Value)
 	if err != nil {
 		return fmt.Errorf("invalid envelope recipient: %w", err)
 	}
-	payloadType, err := wire.Require(fields, envelopeFieldPayloadType)
-	if err != nil {
-		return err
-	}
+	payloadType := fields[6].Value
 	if len(payloadType) == 0 {
 		return errors.New("envelope payload type is empty")
 	}
 	if len(payloadType) > limits.MaxPayloadTypeBytes {
 		return fmt.Errorf("envelope payload type too long: %d > %d", len(payloadType), limits.MaxPayloadTypeBytes)
 	}
-	payload, err := wire.Require(fields, envelopeFieldPayload)
-	if err != nil {
-		return err
-	}
+	payload := fields[7].Value
 	if len(payload) > limits.MaxEnvelopePayloadBytes {
 		return fmt.Errorf("envelope payload too large: %d > %d", len(payload), limits.MaxEnvelopePayloadBytes)
 	}
-	transcript, err := wire.Require(fields, envelopeFieldTranscriptHash)
-	if err != nil {
-		return err
-	}
-	var transcriptHash [32]byte
-	if len(transcript) > 0 {
-		if len(transcript) != sha256.Size {
-			return errors.New("invalid envelope transcript hash")
-		}
-		copy(transcriptHash[:], transcript)
+	transcript := fields[8].Value
+	if len(transcript) != sha256.Size {
+		return errors.New("invalid envelope transcript hash")
 	}
 	*e = Envelope{
 		Protocol:       ProtocolID(protocol),
@@ -203,7 +183,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 		To:             PartyID(to),
 		PayloadType:    PayloadType(payloadType),
 		Payload:        payload,
-		TranscriptHash: transcriptHash,
+		TranscriptHash: [32]byte(transcript),
 	}
 	return nil
 }
@@ -348,17 +328,17 @@ func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) erro
 	}
 
 	// Confidentiality enforcement.
-	// ConfidentialityRequired is always checked — even unauthenticated test
-	// transports must set Security.Confidential for secret-bearing payloads.
-	// ConfidentialityForbidden is only checked when the transport is
-	// authenticated, since a zero-value Security is already non-confidential.
+	// Both ConfidentialityRequired and ConfidentialityForbidden are always
+	// checked regardless of the Authenticated flag. The guard path and this
+	// fallback path must be consistent: a confidential-forbidden payload
+	// arriving over a confidential channel is always a policy violation.
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
 		if !env.Security.Confidential {
 			return fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType)
 		}
 	case ConfidentialityForbidden:
-		if env.Security.Authenticated && env.Security.Confidential {
+		if env.Security.Confidential {
 			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType)
 		}
 	}

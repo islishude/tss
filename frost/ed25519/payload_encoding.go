@@ -58,11 +58,11 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldChainCode); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, keygenCommitmentsPayloadFieldCommitments)
+	commitments, err := wire.DecodeBytesList(fields[0].Value)
 	if err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	chainCodeCommit := wire.MustField(fields, keygenCommitmentsPayloadFieldChainCode)
+	chainCodeCommit := fields[1].Value
 	if len(chainCodeCommit) != 0 && len(chainCodeCommit) != 32 {
 		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(chainCodeCommit))
 	}
@@ -89,7 +89,7 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 	if err := wire.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := wire.MustField(fields, keygenSharePayloadFieldShare)
+	share := fields[0].Value
 	if _, err := edcurve.ScalarFromCanonical(share); err != nil {
 		return keygenSharePayload{}, err
 	}
@@ -121,8 +121,8 @@ func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
 		return nonceCommitment{}, err
 	}
 	p := nonceCommitment{
-		D: wire.MustField(fields, nonceCommitmentPayloadFieldD),
-		E: wire.MustField(fields, nonceCommitmentPayloadFieldE),
+		D: fields[0].Value,
+		E: fields[1].Value,
 	}
 	if _, err := edcurve.PointFromBytes(p.D); err != nil {
 		return nonceCommitment{}, err
@@ -153,7 +153,7 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if err := wire.RequireExactTags(fields, signPartialPayloadFieldZ); err != nil {
 		return signPartialPayload{}, err
 	}
-	z := wire.MustField(fields, signPartialPayloadFieldZ)
+	z := fields[0].Value
 	if _, err := edcurve.ScalarFromCanonical(z); err != nil {
 		return signPartialPayload{}, err
 	}
@@ -177,7 +177,7 @@ func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, e
 	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments); err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	commitments, err := wire.BytesListField(fields, reshareCommitmentsPayloadFieldCommitments)
+	commitments, err := wire.DecodeBytesList(fields[0].Value)
 	if err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
@@ -204,7 +204,7 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldShare); err != nil {
 		return reshareSharePayload{}, err
 	}
-	share := wire.MustField(fields, reshareSharePayloadFieldShare)
+	share := fields[0].Value
 	if _, err := edcurve.ScalarFromCanonical(share); err != nil {
 		return reshareSharePayload{}, err
 	}

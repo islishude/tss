@@ -56,11 +56,11 @@ func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
 	if version != messageVersion {
 		return nil, fmt.Errorf("unexpected MtA start message version %d", version)
 	}
-	if err := requireExactMessageTags(fields, startMessageFieldCiphertext); err != nil {
+	if err := wire.RequireExactTags(fields, startMessageFieldCiphertext); err != nil {
 		return nil, err
 	}
 	msg := &StartMessage{
-		Ciphertext: mustMessageField(fields, startMessageFieldCiphertext),
+		Ciphertext: fields[0].Value,
 	}
 	if err := msg.Validate(); err != nil {
 		return nil, err

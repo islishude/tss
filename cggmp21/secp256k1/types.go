@@ -94,7 +94,6 @@ type KeyShare struct {
 	KeygenTranscriptHash   []byte
 	LogCiphertext          []byte
 	LogProof               []byte
-	logRandomness          []byte
 	KeygenConfirmations    [][]byte
 }
 
