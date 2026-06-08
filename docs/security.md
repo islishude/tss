@@ -21,7 +21,7 @@ Callers must provide:
   Ring-Pedersen payloads. After keygen completes, compare
   `KeygenTranscriptHash` across parties to detect equivocation;
 - replay protection and session-id freshness;
-- durable storage encryption for key shares and presigns;
+- durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
 - operational monitoring for protocol errors and blame evidence.
 
@@ -192,7 +192,7 @@ All Paillier public operations (`Decrypt`, `AddCiphertexts`, `AddPlaintext`, `Mu
 Caller responsibilities (not provided by this library):
 
 - network transport with peer authentication and encryption;
-- storage encryption for key shares and presign records;
+- storage encryption for key shares and presign records (the built-in `EncryptKeyShareWithPassphrase`/`EncryptPresignWithPassphrase` helpers are Argon2id-based reference/demo implementations — production deployments should integrate a KMS or HSM);
 - proactive refresh scheduling (`RefreshScheduler` provides periodic key rotation with configurable interval and transport interface);
 - SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1);
 - authenticated keygen message delivery through the confirmation round before any presign/sign operation.

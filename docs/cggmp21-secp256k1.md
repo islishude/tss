@@ -250,7 +250,7 @@ sess, out, err := StartSign(share, presign, sessionID, request)
 
 // After signing, persist the consumed record:
 consumed, _ := MarkPresignConsumed(presign)
-encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
+encrypted, _ := tss.EncryptPresignWithPassphrase(consumed.MarshalBinary(), passphrase, "presign-1", nil)
 ```
 
 `StartSign` sets `Consumed = true` **before** constructing the outbound signature

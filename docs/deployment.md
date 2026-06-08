@@ -41,7 +41,7 @@ Serialise the key share to TLV bytes and encrypt before storage:
 
 ```go
 raw, _ := share.MarshalBinary()
-encrypted, _ := tss.EncryptKeyShare(raw, passphrase)
+encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
 // Store `encrypted` in durable storage (database, file, secrets manager).
 ```
 
@@ -49,24 +49,24 @@ For CGGMP21, presign records must also be persisted:
 
 ```go
 raw, _ := presign.MarshalBinary()
-encrypted, _ := tss.EncryptPresign(raw, passphrase)
+encrypted, _ := tss.EncryptPresignWithPassphrase(raw, passphrase, "presign-1", nil)
 ```
 
-The `tss.EncryptKeyShare` and `tss.EncryptPresign` helpers use AES-256-GCM with HKDF key derivation from a passphrase. These are **reference implementations**. Production deployments should prefer a KMS or HSM.
+The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` helpers use AES-256-GCM with Argon2id key derivation from a passphrase. These are **reference/demo implementations**. Production deployments should prefer a KMS or HSM.
 
 ### 3. Loading
 
 On process restart, load and decrypt the key share:
 
 ```go
-raw, _ := tss.DecryptKeyShare(encrypted, passphrase)
+raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
 share, err := secp256k1.UnmarshalKeyShare(raw)
 ```
 
 For CGGMP21 presign records, check the consumed flag before use:
 
 ```go
-raw, _ := tss.DecryptPresign(encrypted, passphrase)
+raw, _ := tss.DecryptPresignWithPassphrase(encrypted, passphrase)
 presign, _ := secp256k1.UnmarshalPresign(raw)
 if secp256k1.IsPresignConsumed(presign) {
     // Discard; do not reuse.
@@ -94,7 +94,7 @@ presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionI
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
 // Persist presign immediately.
-encrypted, _ := tss.EncryptPresign(presign.MarshalBinary(), passphrase)
+encrypted, _ := tss.EncryptPresignWithPassphrase(presign.MarshalBinary(), passphrase, "presign-1", nil)
 
 // Online signing (fast, one round):
 message := []byte("payload")
@@ -109,7 +109,7 @@ After signing, mark the presign consumed:
 
 ```go
 consumed, _ := secp256k1.MarkPresignConsumed(presign)
-encrypted, _ := tss.EncryptPresign(consumed.MarshalBinary(), passphrase)
+encrypted, _ := tss.EncryptPresignWithPassphrase(consumed.MarshalBinary(), passphrase, "presign-1", nil)
 // Persist updated record so restart won't reuse.
 ```
 
@@ -203,11 +203,11 @@ func encrypt(plaintext, key []byte) ([]byte, error) {
 
 ### Key Management
 
-- **Key derivation:** Derive encryption keys from a master secret using HKDF-SHA256 with per-record salt.
+- **Key derivation:** Derive encryption keys from a passphrase using Argon2id with per-record salt. This is a reference/demo implementation; prefer a KMS or HSM in production.
 - **Nonce management:** Use random 12-byte nonces. Never reuse a nonce with the same key.
 - **Key rotation:** Rotate encryption keys when rotating TSS key shares (proactive refresh).
 
-The `tss.EncryptKeyShare` and `tss.EncryptPresign` helpers implement this pattern as a reference.
+The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` helpers implement this pattern as a reference.
 
 ## Backup and Disaster Recovery
 

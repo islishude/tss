@@ -198,18 +198,18 @@ Both `frost/ed25519.KeyShare` and `cggmp21/secp256k1.KeyShare` implement this in
 
 ## Persistence Helpers
 
-`EncryptKeyShare` / `DecryptKeyShare` and `EncryptPresign` / `DecryptPresign` provide AES-256-GCM encryption with HKDF-SHA256 key derivation from a passphrase:
+`EncryptKeyShareWithPassphrase` / `DecryptKeyShareWithPassphrase` and `EncryptPresignWithPassphrase` / `DecryptPresignWithPassphrase` provide AES-256-GCM encryption with Argon2id key derivation from a passphrase. KDF parameters, version, algorithm, record type, and key ID are stored as authenticated metadata in the envelope:
 
 ```go
 raw, _ := share.MarshalBinary()
-encrypted, _ := tss.EncryptKeyShare(raw, passphrase)
+encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
 // store encrypted...
 
-raw, _ := tss.DecryptKeyShare(encrypted, passphrase)
+raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
 share, _ := secp256k1.UnmarshalKeyShare(raw)
 ```
 
-These are **reference implementations**. Production deployments should use a KMS or HSM. See [docs/deployment.md](deployment.md) for the full persistence guide.
+These are **reference/demo implementations**. Production deployments should use a KMS or HSM. See [docs/deployment.md](deployment.md) for the full persistence guide.
 
 ## Party Utilities
 
