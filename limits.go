@@ -65,6 +65,17 @@ const (
 	// DefaultMaxZKProofBytes caps any ZK proof input (512 KiB).
 	DefaultMaxZKProofBytes = 512 << 10
 
+	// DefaultMaxBlameEvidenceBytes caps the total encoded blame evidence size (1 MiB).
+	DefaultMaxBlameEvidenceBytes = 1 << 20
+	// DefaultMaxEvidenceReasonBytes caps the reason string length in blame evidence.
+	DefaultMaxEvidenceReasonBytes = 256
+	// DefaultMaxEvidenceFieldCount caps the number of public input fields in blame evidence.
+	DefaultMaxEvidenceFieldCount = 64
+	// DefaultMaxEvidenceFieldKeyBytes caps a single evidence field key length.
+	DefaultMaxEvidenceFieldKeyBytes = 128
+	// DefaultMaxEvidenceFieldValueBytes caps a single evidence field value length.
+	DefaultMaxEvidenceFieldValueBytes = 1 << 20
+
 	// MaxFROSTParties is the algorithm-specific party cap for FROST Ed25519.
 	MaxFROSTParties = 64
 	// MaxFROSTThreshold is the algorithm-specific threshold cap for FROST Ed25519.
@@ -120,6 +131,12 @@ type Limits struct {
 	MaxRingPedersenParamsBytes int
 	MaxMTAResponseBytes        int
 	MaxZKProofBytes            int
+
+	MaxBlameEvidenceBytes      int
+	MaxEvidenceReasonBytes     int
+	MaxEvidenceFieldCount      int
+	MaxEvidenceFieldKeyBytes   int
+	MaxEvidenceFieldValueBytes int
 }
 
 // DefaultLimits returns a conservative fail-closed Limits suitable as a fallback
@@ -163,6 +180,12 @@ func DefaultLimits() Limits {
 		MaxRingPedersenParamsBytes: DefaultMaxRingPedersenParamsBytes,
 		MaxMTAResponseBytes:        DefaultMaxMTAResponseBytes,
 		MaxZKProofBytes:            DefaultMaxZKProofBytes,
+
+		MaxBlameEvidenceBytes:      DefaultMaxBlameEvidenceBytes,
+		MaxEvidenceReasonBytes:     DefaultMaxEvidenceReasonBytes,
+		MaxEvidenceFieldCount:      DefaultMaxEvidenceFieldCount,
+		MaxEvidenceFieldKeyBytes:   DefaultMaxEvidenceFieldKeyBytes,
+		MaxEvidenceFieldValueBytes: DefaultMaxEvidenceFieldValueBytes,
 	}
 }
 
@@ -201,6 +224,21 @@ func (l Limits) Validate() error {
 	}
 	if l.MaxWireFieldBytes <= 0 {
 		return errors.New("MaxWireFieldBytes must be positive")
+	}
+	if l.MaxBlameEvidenceBytes <= 0 {
+		return errors.New("MaxBlameEvidenceBytes must be positive")
+	}
+	if l.MaxEvidenceReasonBytes <= 0 {
+		return errors.New("MaxEvidenceReasonBytes must be positive")
+	}
+	if l.MaxEvidenceFieldCount <= 0 {
+		return errors.New("MaxEvidenceFieldCount must be positive")
+	}
+	if l.MaxEvidenceFieldKeyBytes <= 0 {
+		return errors.New("MaxEvidenceFieldKeyBytes must be positive")
+	}
+	if l.MaxEvidenceFieldValueBytes <= 0 {
+		return errors.New("MaxEvidenceFieldValueBytes must be positive")
 	}
 	return nil
 }

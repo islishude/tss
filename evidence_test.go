@@ -189,8 +189,13 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 }
 
 func TestBlameEvidenceRejectsMalformed(t *testing.T) {
-	if _, err := UnmarshalBlameEvidence([]byte(`{"version":1}`)); err == nil {
+	// Garbage bytes that don't match the TLV magic prefix.
+	if _, err := UnmarshalBlameEvidence([]byte("not a valid TLV message")); err == nil {
 		t.Fatal("malformed evidence decoded")
+	}
+	// Valid TLV magic but wrong type ID.
+	if _, err := UnmarshalBlameEvidence(append([]byte("TSS1"), make([]byte, 100)...)); err == nil {
+		t.Fatal("malformed evidence with wrong type decoded")
 	}
 	session, err := NewSessionID(nil)
 	if err != nil {
@@ -239,7 +244,13 @@ func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
 	lower := strings.ToLower(string(encoded))
 	for _, forbidden := range []string{"secret", "nonce", "k_share", "sigma_share", "paillier_private"} {
 		if strings.Contains(lower, forbidden) {
-			t.Fatalf("evidence contains sensitive field marker %q: %s", forbidden, encoded)
+			t.Fatalf("evidence contains sensitive field marker %q: %x", forbidden, encoded)
+		}
+	}
+	// TLV encoding must not contain JSON structural characters or field names.
+	for _, jsonMarker := range []string{`"version"`, `"protocol"`, `"payload_type"`, `"public_inputs"`, `"reason"`, `"kind"`} {
+		if strings.Contains(lower, jsonMarker) {
+			t.Fatalf("evidence contains JSON field name %s: evidence is not using TLV encoding", jsonMarker)
 		}
 	}
 }
