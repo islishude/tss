@@ -10,8 +10,12 @@ import (
 )
 
 func TestMain(m *testing.M) {
-	restore := zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams())
+	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams())
+	// Integration tests use reduced Paillier moduli (768-bit) and may
+	// test 1-of-1 flows — apply relaxed limits.
+	restoreLimits := SetLimitsForTesting(TestLimits())
 	code := m.Run()
-	restore()
+	restoreLimits()
+	restoreSP()
 	os.Exit(code)
 }

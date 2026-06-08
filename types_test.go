@@ -50,8 +50,6 @@ func TestThresholdConfigValidate(t *testing.T) {
 		}{
 			{"2-of-3", ThresholdConfig{Threshold: 2, Parties: []PartyID{1, 2, 3}, Self: 1}},
 			{"3-of-3", ThresholdConfig{Threshold: 3, Parties: []PartyID{1, 2, 3}, Self: 1}},
-			{"1-of-1", ThresholdConfig{Threshold: 1, Parties: []PartyID{5}, Self: 5}},
-			{"1-of-5", ThresholdConfig{Threshold: 1, Parties: []PartyID{10, 20, 30, 40, 50}, Self: 30}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -62,6 +60,20 @@ func TestThresholdConfigValidate(t *testing.T) {
 		}
 	})
 
+	t.Run("1-of-1 requires explicit AllowOneOfOne", func(t *testing.T) {
+		// Production DefaultLimits rejects 1-of-1.
+		cfg1 := ThresholdConfig{Threshold: 1, Parties: []PartyID{5}, Self: 5}
+		if err := cfg1.Validate(); err == nil {
+			t.Error("expected error for 1-of-1 without explicit AllowOneOfOne")
+		}
+		// Explicitly enabling AllowOneOfOne with MinProductionThreshold=1 allows it.
+		limits := DefaultLimits()
+		limits.AllowOneOfOne = true
+		limits.MinProductionThreshold = 1
+		if err := cfg1.ValidateWithLimits(limits); err != nil {
+			t.Errorf("1-of-1 with explicit AllowOneOfOne should pass: %v", err)
+		}
+	})
 	t.Run("threshold zero or negative", func(t *testing.T) {
 		cfg := valid()
 		cfg.Threshold = 0

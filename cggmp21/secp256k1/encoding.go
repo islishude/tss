@@ -239,7 +239,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 
 // UnmarshalPresign decodes a canonical CGGMP21 presign record with size caps.
 func UnmarshalPresign(in []byte) (*Presign, error) {
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)
+	limits := DefaultLimits()
 	if len(in) == 0 {
 		return nil, errors.New("empty presign")
 	}

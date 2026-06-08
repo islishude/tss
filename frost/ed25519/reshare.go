@@ -60,7 +60,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	limits := DefaultLimits()
 	if err := config.ValidateWithLimits(limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
@@ -141,7 +141,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 // config.Self is the recipient ID. The function validates membership against
 // newParties and validates incoming dealer messages against oldParties.
 func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, error) {
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	limits := DefaultLimits()
 	if _, err := edcurve.PointFromBytes(oldPublicKey); err != nil {
 		return nil, fmt.Errorf("invalid old public key: %w", err)
 	}
@@ -199,7 +199,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	limits := DefaultLimits()
 	if err := config.ValidateWithLimits(limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}

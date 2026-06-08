@@ -468,7 +468,7 @@ func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmFROSTEd25519)
+	limits := DefaultLimits()
 	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
 }
 

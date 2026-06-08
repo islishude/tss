@@ -205,7 +205,7 @@ func (k KeyShare) redactedString() string {
 
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record with size caps.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)
+	limits := DefaultLimits()
 	if len(in) == 0 {
 		return nil, errors.New("empty key share")
 	}

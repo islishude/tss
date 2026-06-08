@@ -81,8 +81,9 @@ const (
 )
 
 // Limits defines finite caps for all security-sensitive parameters.
-// Each protocol entry point should use algorithm-specific limits obtained via
-// DefaultLimitsForAlgorithm. Test code should use TestLimits.
+// Each algorithm package provides its own DefaultLimits() returning fail-closed
+// production settings. Test code should use each package's TestLimits() or
+// internal/testutil.TestLimits.
 type Limits struct {
 	MaxParties              int
 	MaxThreshold            int
@@ -121,18 +122,18 @@ type Limits struct {
 	MaxZKProofBytes            int
 }
 
-// DefaultLimits returns a permissive Limits suitable as a backward-compatible
-// fallback for callers that do not specify an algorithm. It allows 1-of-1
-// configurations for test and example code. Production callers should use
-// DefaultLimitsForAlgorithm for stricter algorithm-specific defaults.
+// DefaultLimits returns a conservative fail-closed Limits suitable as a fallback
+// for callers that do not specify an algorithm. It rejects 1-of-1, oversized
+// signer sets, and thresholds below 2. Callers that need relaxed limits for
+// testing must use algorithm-specific TestLimits or internal/testutil.TestLimits.
 func DefaultLimits() Limits {
 	return Limits{
 		MaxParties:              DefaultMaxParties,
 		MaxThreshold:            DefaultMaxThreshold,
 		MaxSigners:              DefaultMaxSigners,
-		MinProductionThreshold:  1,
-		AllowOneOfOne:           true,
-		AllowOversizedSignerSet: true,
+		MinProductionThreshold:  2,
+		AllowOneOfOne:           false,
+		AllowOversizedSignerSet: false,
 
 		MaxEnvelopeBytes:        DefaultMaxEnvelopeBytes,
 		MaxEnvelopePayloadBytes: DefaultMaxEnvelopePayloadBytes,
@@ -163,69 +164,6 @@ func DefaultLimits() Limits {
 		MaxMTAResponseBytes:        DefaultMaxMTAResponseBytes,
 		MaxZKProofBytes:            DefaultMaxZKProofBytes,
 	}
-}
-
-// DefaultLimitsForAlgorithm returns algorithm-specific limits.
-// FROST Ed25519 allows larger party sets (up to 64). CGGMP21 secp256k1 is
-// capped at 16 due to Paillier, ZK proof, and MtA pairwise costs.
-func DefaultLimitsForAlgorithm(alg Algorithm) Limits {
-	l := DefaultLimits()
-
-	switch alg {
-	case AlgorithmFROSTEd25519:
-		l.MaxParties = MaxFROSTParties
-		l.MaxThreshold = MaxFROSTThreshold
-		l.MaxSigners = MaxFROSTSigners
-		// Phase 1: keep MinProductionThreshold=1 and AllowOneOfOne=true for backward
-		// compatibility with existing tests and examples. Phase 3 tightens these.
-		l.MinProductionThreshold = 1
-		l.AllowOneOfOne = true
-		l.AllowOversizedSignerSet = true
-
-	case AlgorithmCGGMP21Secp256k1:
-		l.MaxParties = MaxCGGMPParties
-		l.MaxThreshold = MaxCGGMPThreshold
-		l.MaxSigners = MaxCGGMPSigners
-		// Phase 1: keep MinProductionThreshold=1 and AllowOneOfOne=true for backward
-		// compatibility. Phase 3 tightens these.
-		l.MinProductionThreshold = 1
-		l.AllowOneOfOne = true
-		l.AllowOversizedSignerSet = true
-
-		l.MinPaillierModulusBits = 512
-		l.MaxPaillierModulusBits = 8192
-		l.MaxPaillierPublicKeyBytes = 2048
-		l.MaxPaillierPrivateKeyBytes = 8192
-		l.MaxPaillierCiphertextBytes = 2048
-		l.MaxPaillierProofBytes = 512 << 10
-		l.MaxRingPedersenParamsBytes = 16384
-		l.MaxMTAResponseBytes = 512 << 10
-		l.MaxZKProofBytes = 512 << 10
-	}
-
-	return l
-}
-
-// TestLimits returns relaxed limits suitable for test code. Test limits
-// allow small Paillier moduli (512 bits) and 1-of-1 configurations.
-// These limits must not be used in production entry points.
-func TestLimits() Limits {
-	l := DefaultLimits()
-	l.MaxParties = 8
-	l.MaxThreshold = 8
-	l.MaxSigners = 8
-	l.AllowOneOfOne = true
-	l.MinProductionThreshold = 1
-	l.MinPaillierModulusBits = 512
-	l.MaxPaillierModulusBits = 8192
-	l.MaxPaillierPublicKeyBytes = 4096
-	l.MaxPaillierPrivateKeyBytes = 8192
-	l.MaxPaillierCiphertextBytes = 4096
-	l.MaxPaillierProofBytes = 512 << 10
-	l.MaxRingPedersenParamsBytes = 8192
-	l.MaxMTAResponseBytes = 512 << 10
-	l.MaxZKProofBytes = 512 << 10
-	return l
 }
 
 // Validate checks that the Limits values are self-consistent.

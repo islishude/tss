@@ -1516,7 +1516,7 @@ func ClaimPresign(presign *Presign) error {
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
-	limits := tss.DefaultLimitsForAlgorithm(tss.AlgorithmCGGMP21Secp256k1)
+	limits := DefaultLimits()
 	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
 }
 

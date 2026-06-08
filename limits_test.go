@@ -33,14 +33,14 @@ func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
 }
 
 func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
-	// DefaultLimits allows 1-of-1 (backward-compat).
+	// DefaultLimits is fail-closed: rejects 1-of-1.
 	cfg := ThresholdConfig{
 		Threshold: 1,
 		Parties:   []PartyID{1},
 		Self:      1,
 	}
-	if err := cfg.Validate(); err != nil {
-		t.Fatalf("DefaultLimits should allow 1-of-1: %v", err)
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("DefaultLimits should reject 1-of-1")
 	}
 
 	// Explicit block: AllowOneOfOne=false, MinProductionThreshold=2
@@ -51,8 +51,9 @@ func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
 		t.Fatal("expected error for 1-of-1 when blocked")
 	}
 
-	// Explicit allow with AllowOneOfOne=true
+	// Explicit allow with AllowOneOfOne=true and MinProductionThreshold=1
 	limits.AllowOneOfOne = true
+	limits.MinProductionThreshold = 1
 	if err := cfg.ValidateWithLimits(limits); err != nil {
 		t.Fatalf("1-of-1 should be allowed when explicitly enabled: %v", err)
 	}
@@ -93,7 +94,7 @@ func TestThresholdConfigRejectsDuplicatePartyIDs(t *testing.T) {
 
 func TestThresholdConfigRejectsSelfNotInParties(t *testing.T) {
 	cfg := ThresholdConfig{
-		Threshold: 1,
+		Threshold: 2,
 		Parties:   []PartyID{1, 2},
 		Self:      3,
 	}
@@ -181,30 +182,29 @@ func TestLimitsValidateSelfConsistency(t *testing.T) {
 	}
 }
 
-func TestDefaultLimitsForAlgorithm(t *testing.T) {
-	frost := DefaultLimitsForAlgorithm(AlgorithmFROSTEd25519)
-	if frost.MaxParties != MaxFROSTParties {
-		t.Errorf("FROST MaxParties: got %d, want %d", frost.MaxParties, MaxFROSTParties)
+func TestDefaultLimitsIsFailClosed(t *testing.T) {
+	l := DefaultLimits()
+	if l.MinProductionThreshold != 2 {
+		t.Errorf("MinProductionThreshold: got %d, want 2", l.MinProductionThreshold)
 	}
-	if frost.MaxThreshold != MaxFROSTThreshold {
-		t.Errorf("FROST MaxThreshold: got %d, want %d", frost.MaxThreshold, MaxFROSTThreshold)
+	if l.AllowOneOfOne {
+		t.Error("AllowOneOfOne should be false")
 	}
-
-	cggmp := DefaultLimitsForAlgorithm(AlgorithmCGGMP21Secp256k1)
-	if cggmp.MaxParties != MaxCGGMPParties {
-		t.Errorf("CGGMP MaxParties: got %d, want %d", cggmp.MaxParties, MaxCGGMPParties)
+	if l.AllowOversizedSignerSet {
+		t.Error("AllowOversizedSignerSet should be false")
 	}
-	if cggmp.MaxThreshold != MaxCGGMPThreshold {
-		t.Errorf("CGGMP MaxThreshold: got %d, want %d", cggmp.MaxThreshold, MaxCGGMPThreshold)
+	if l.MinPaillierModulusBits != DefaultMinPaillierModulusBits {
+		t.Errorf("MinPaillierModulusBits: got %d, want %d", l.MinPaillierModulusBits, DefaultMinPaillierModulusBits)
 	}
 }
 
-func TestTestLimitsAllowsSmallPaillier(t *testing.T) {
-	tl := TestLimits()
-	if tl.MinPaillierModulusBits != 512 {
-		t.Errorf("TestLimits MinPaillierModulusBits: got %d, want 512", tl.MinPaillierModulusBits)
+func TestDefaultLimitsRejectsBelowMinThreshold(t *testing.T) {
+	cfg := ThresholdConfig{
+		Threshold: 1,
+		Parties:   []PartyID{1, 2},
+		Self:      1,
 	}
-	if !tl.AllowOneOfOne {
-		t.Error("TestLimits should allow 1-of-1")
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected error for threshold below production minimum")
 	}
 }
