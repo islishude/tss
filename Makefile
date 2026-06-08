@@ -43,11 +43,16 @@ test-stress:
 test-race:
 	go test -race -tags=integration -timeout 1h ./...
 
-# Legacy test-coverage target (includes integration tests).
+# Legacy test-coverage target (includes integration and slowcrypto tests).
 .PHONY: test-coverage
 test-coverage:
-	go test -tags=integration -race -coverprofile=coverage.out -covermode=atomic ./...
+	go test -v -tags 'integration slowcrypto' -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
+
+# Fuzzing testing
+.PHONY: test-fuzzing
+test-fuzzing:
+	@./.github/scripts/fuzz-ci.sh
 
 # CI: Fast build + vet + lint + format + tidy + Tier 0 + Tier 1.
 .PHONY: ci
