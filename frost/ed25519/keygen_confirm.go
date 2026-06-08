@@ -339,3 +339,99 @@ func keygenConfirmationSetHash(encoded [][]byte) []byte {
 	wire.WriteHashPart(h, wire.EncodeBytesList(encoded))
 	return h.Sum(nil)
 }
+
+func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+	if env.Round != keygenConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
+	}
+	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if confirmation.Sender != env.From {
+		return nil, tss.NewProtocolError(
+			tss.ErrCodeInvalidMessage,
+			env.Round,
+			env.From,
+			fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender),
+		)
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if !bytes.Equal(canonical, env.Payload) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical keygen confirmation"))
+	}
+	if existing, ok := s.confirmations[env.From]; ok {
+		if bytes.Equal(existing, canonical) {
+			return nil, nil
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
+	}
+	// Verify the revealed chain code against the round 1 hash commitment.
+	if !verifyChainCodeCommit(s.cfg.SessionID, env.From, confirmation.ChainCode, s.chainCodeComms[env.From]) {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", env.From))
+	}
+	// Store the revealed chain code for XOR aggregation.
+	s.chainCodes[env.From] = append([]byte(nil), confirmation.ChainCode...)
+	if s.pending != nil {
+		if err := verifyKeygenConfirmationForShare(s.pending, confirmation); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
+	}
+	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	if s.pending != nil && len(s.confirmations) == len(s.cfg.Parties) {
+		return nil, s.finalizeConfirmedKeyShare()
+	}
+	return nil, nil
+}
+
+func (s *KeygenSession) finalizeConfirmedKeyShare() error {
+	if s.pending == nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("missing pending key share"))
+	}
+	encoded := make([][]byte, len(s.cfg.Parties))
+	for i, id := range s.cfg.Parties {
+		confirmation, ok := s.confirmations[id]
+		if !ok {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
+		}
+		encoded[i] = append([]byte(nil), confirmation...)
+	}
+	if err := verifyKeygenConfirmationSet(s.pending, encoded); err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	// Aggregate chain codes from all revealed confirmations.
+	var chainCode []byte
+	if s.enableHD {
+		cc, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodes)
+		if err != nil {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		}
+		chainCode = cc
+	}
+	finalShare := cloneKeyShareValue(s.pending)
+	finalShare.ChainCode = chainCode
+	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	if err := finalShare.ValidateConsistency(); err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	s.pending.Destroy()
+	s.pending = nil
+	s.keyShare = finalShare
+	s.completed = true
+	confirmationSetHash := keygenConfirmationSetHash(finalShare.KeygenConfirmations)
+	s.log.Info(s.cfg.Ctx(), "keygen complete",
+		"party_id", s.cfg.Self,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+	)
+	return nil
+}

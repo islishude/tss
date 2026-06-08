@@ -1,15 +1,19 @@
 package secp256k1
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
 	"sync"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const (
@@ -86,6 +90,104 @@ type Presign struct {
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
 func (p Presign) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 presign contains secret material; use MarshalBinary")
+}
+
+// MarshalBinary encodes the presign record using canonical TLV wire format.
+func (p *Presign) MarshalBinary() ([]byte, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	kShare, err := secpSecretScalarBytes(p.kShare)
+	if err != nil {
+		return nil, fmt.Errorf("invalid k share: %w", err)
+	}
+	chiShare, err := secpSecretScalarBytes(p.chiShare)
+	if err != nil {
+		return nil, fmt.Errorf("invalid chi share: %w", err)
+	}
+	delta, err := secpSecretScalarBytes(p.delta)
+	if err != nil {
+		return nil, fmt.Errorf("invalid delta: %w", err)
+	}
+	return wire.Marshal(tss.Version, presignWireType, []wire.Field{
+		{Tag: presignFieldParty, Value: wire.Uint32(uint32(p.Party))},
+		{Tag: presignFieldThreshold, Value: wire.Uint32(uint32(p.Threshold))},
+		{Tag: presignFieldSigners, Value: wire.EncodeUint32List(p.Signers)},
+		{Tag: presignFieldR, Value: wire.NonNilBytes(p.R)},
+		{Tag: presignFieldLittleR, Value: wire.NonNilBytes(p.LittleR)},
+		{Tag: presignFieldKShare, Value: wire.NonNilBytes(kShare)},
+		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(chiShare)},
+		{Tag: presignFieldDelta, Value: wire.NonNilBytes(delta)},
+		{Tag: presignFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+		{Tag: presignFieldContext, Value: encodePresignContext(p.Context)},
+		{Tag: presignFieldContextHash, Value: wire.NonNilBytes(p.ContextHash)},
+		{Tag: presignFieldAdditiveShift, Value: wire.NonNilBytes(p.AdditiveShift)},
+		{Tag: presignFieldConsumed, Value: wire.Bool(p.Consumed)},
+		{Tag: presignFieldPublicKey, Value: wire.NonNilBytes(p.PublicKey)},
+		{Tag: presignFieldKeygenTranscriptHash, Value: wire.NonNilBytes(p.KeygenTranscriptHash)},
+		{Tag: presignFieldPartiesHash, Value: wire.NonNilBytes(p.PartiesHash)},
+	})
+}
+
+// Validate checks local presign structure and scalar/point encodings.
+func (p *Presign) Validate() error {
+	if p == nil {
+		return errors.New("nil presign")
+	}
+	if p.Version != tss.Version {
+		return fmt.Errorf("unexpected presign version %d", p.Version)
+	}
+	if p.Threshold <= 0 || p.Threshold > len(p.Signers) {
+		return errors.New("invalid presign threshold")
+	}
+	if err := wire.ValidateStrictSortedIDs(p.Signers); err != nil {
+		return err
+	}
+	if !tss.ContainsParty(p.Signers, p.Party) {
+		return errors.New("presign party is not in signer set")
+	}
+	if _, err := secp.PointFromBytes(p.R); err != nil {
+		return fmt.Errorf("invalid presign R: %w", err)
+	}
+	if _, err := secp.ScalarFromBytes(p.LittleR); err != nil {
+		return fmt.Errorf("invalid little r: %w", err)
+	}
+	if _, err := secpScalarFromSecret(p.kShare); err != nil {
+		return fmt.Errorf("invalid k share: %w", err)
+	}
+	if _, err := secpScalarFromSecret(p.chiShare); err != nil {
+		return fmt.Errorf("invalid chi share: %w", err)
+	}
+	if _, err := secpScalarFromSecret(p.delta); err != nil {
+		return fmt.Errorf("invalid delta: %w", err)
+	}
+	if len(p.TranscriptHash) != 32 {
+		return errors.New("invalid presign transcript hash")
+	}
+	if err := validatePresignContext(p.Context); err != nil {
+		return err
+	}
+	if len(p.ContextHash) != 32 {
+		return errors.New("invalid presign context hash")
+	}
+	if len(p.AdditiveShift) > 0 {
+		if _, err := secp.ScalarFromBytes(p.AdditiveShift); err != nil {
+			return fmt.Errorf("invalid additive shift: %w", err)
+		}
+	}
+	if _, err := secp.PointFromBytes(p.PublicKey); err != nil {
+		return fmt.Errorf("invalid presign public key binding: %w", err)
+	}
+	if len(p.KeygenTranscriptHash) != sha256.Size {
+		return errors.New("invalid presign keygen transcript hash binding")
+	}
+	if len(p.PartiesHash) != sha256.Size {
+		return errors.New("invalid presign party-set hash binding")
+	}
+	if !bytes.Equal(presignContextHash(p.Context), p.ContextHash) {
+		return errors.New("presign context hash mismatch")
+	}
+	return nil
 }
 
 // Destroy marks the presign consumed and clears its local secret shares.
