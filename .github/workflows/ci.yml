@@ -42,7 +42,7 @@ jobs:
       - name: Check go mod tidy
         run: make tidy-check
 
-      - name: Check Markdown formatting
+      - name: Check formatting
         run: make format-check
 
       - name: Run go fix diff

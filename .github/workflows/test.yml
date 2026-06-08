@@ -11,8 +11,8 @@ permissions:
 # Tier 3 + Tier 4: Production security-parameter tests and stress tests.
 # Runs scheduled nightly runs only.
 jobs:
-  test-slowcrypto-zk:
-    name: Test ZK (${{ matrix.os }})
+  test-race:
+    name: Test Race (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -29,30 +29,10 @@ jobs:
           go-version: stable
 
       - name: Run Tier 3 slowcrypto tests
-        run: go test -v -race -tags 'integration slowcrypto' -timeout 5h ./internal/zk/paillier
+        run: go test -v -race -tags 'integration slowcrypto' -timeout 5h ./...
 
-  test-slowcrypto-secp256k1:
-    name: Test Secp256k1 (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 180
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: stable
-
-      - name: Run Tier 3 slowcrypto tests
-        run: go test -v -race -tags 'integration slowcrypto' -timeout 5h ./cggmp21/secp256k1
-
-  test-stress:
-    name: Test Stress (${{ matrix.os }})
+  test-stress-integration:
+    name: Test Stress Integration(${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -69,7 +49,47 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -race -tags 'slowcrypto integration' -count=10 -timeout 10h ./...
+        run: go test -tags 'integration' -count=10 -timeout 5h ./...
+
+  test-slowcrypto-zk:
+    name: Test Stress ZK(${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: go test -v -tags 'slowcrypto' -timeout 1h ./internal/zk/...
+
+  test-slowcrypto-secp256k1:
+    name: Test Stress Secp256k1(${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: go test -v -tags 'slowcrypto' -timeout 1h ./cggmp21/secp256k1/...
 
   fuzzing-test:
     name: Test Fuzzing (${{ matrix.os }})
