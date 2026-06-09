@@ -1,4 +1,5 @@
 name: Schedule Test
+run-name: Schedule Test(${{ github.event_name }} - ${{ github.ref_name }} - #${{ github.run_number }})
 
 on:
   schedule:
@@ -91,8 +92,8 @@ jobs:
       - name: Run Tier 4 stress tests
         run: go test -v -tags 'slowcrypto' -timeout 1h ./cggmp21/secp256k1/...
 
-  fuzzing-test:
-    name: Test Fuzzing (${{ matrix.os }})
+  fuzzing-test-cggmp21:
+    name: Test Fuzzing cggmp21 (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -109,7 +110,7 @@ jobs:
 
       - name: Run all fuzz targets
         shell: bash
-        run: ./.github/scripts/fuzz-ci.sh
+        run: ./.github/scripts/fuzz-ci.sh ./cggmp21/...
         env:
           FUZZTIME: 10m
           PARALLEL: 4
@@ -118,6 +119,68 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          name: fuzz-secp256k1-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            **/testdata/fuzz/**
+
+  fuzzing-test-frost:
+    name: Test Fuzzing frost (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run all fuzz targets
+        shell: bash
+        run: ./.github/scripts/fuzz-ci.sh ./frost/...
+        env:
+          FUZZTIME: 10m
+          PARALLEL: 4
+
+      - name: Upload failing corpus if generated
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-frost-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            **/testdata/fuzz/**
+
+  fuzzing-test-internal:
+    name: Test Fuzzing internal (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run all fuzz targets
+        shell: bash
+        run: ./.github/scripts/fuzz-ci.sh ./internal/...
+        env:
+          FUZZTIME: 10m
+          PARALLEL: 4
+
+      - name: Upload failing corpus if generated
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-internal-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
           path: |
             **/testdata/fuzz/**

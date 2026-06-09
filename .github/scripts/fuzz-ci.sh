@@ -4,7 +4,18 @@ set -euo pipefail
 FUZZTIME="${FUZZTIME:-60s}"
 PARALLEL="${PARALLEL:-2}"
 
-for pkg in $(go list ./...); do
+# Usage:
+#   ./fuzz.sh                     # fuzz all packages: ./...
+#   ./fuzz.sh ./pkg/foo           # fuzz one package
+#   ./fuzz.sh ./pkg/foo ./pkg/bar # fuzz multiple packages
+#   ./fuzz.sh ./internal/...      # fuzz package pattern
+PKG_PATTERNS=("$@")
+
+if [ "${#PKG_PATTERNS[@]}" -eq 0 ]; then
+  PKG_PATTERNS=("./...")
+fi
+
+for pkg in $(go list "${PKG_PATTERNS[@]}"); do
   targets=$(go test -run=^$ -list='^Fuzz' "$pkg" | grep '^Fuzz' || true)
 
   for target in $targets; do
