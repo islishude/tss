@@ -1,5 +1,5 @@
 name: Schedule Test
-run-name: Schedule Test(${{ github.event_name }} - ${{ github.ref_name }} - #${{ github.run_number }})
+run-name: "Schedule Test(${{ github.event_name }} - ${{ github.ref_name }} - ${{ github.run_number }})"
 
 on:
   schedule:
