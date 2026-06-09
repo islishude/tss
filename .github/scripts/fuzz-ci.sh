@@ -2,7 +2,7 @@
 set -euo pipefail
 
 FUZZTIME="${FUZZTIME:-60s}"
-PARALLEL="${PARALLEL:-2}"
+PARALLEL="${PARALLEL:-4}"
 
 # Usage:
 #   ./fuzz.sh                     # fuzz all packages: ./...

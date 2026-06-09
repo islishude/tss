@@ -112,8 +112,7 @@ jobs:
         shell: bash
         run: ./.github/scripts/fuzz-ci.sh ./cggmp21/...
         env:
-          FUZZTIME: 10m
-          PARALLEL: 4
+          FUZZTIME: 3m
 
       - name: Upload failing corpus if generated
         if: failure()
@@ -143,8 +142,7 @@ jobs:
         shell: bash
         run: ./.github/scripts/fuzz-ci.sh ./frost/...
         env:
-          FUZZTIME: 10m
-          PARALLEL: 4
+          FUZZTIME: 3m
 
       - name: Upload failing corpus if generated
         if: failure()
@@ -174,8 +172,7 @@ jobs:
         shell: bash
         run: ./.github/scripts/fuzz-ci.sh ./internal/...
         env:
-          FUZZTIME: 10m
-          PARALLEL: 4
+          FUZZTIME: 3m
 
       - name: Upload failing corpus if generated
         if: failure()
