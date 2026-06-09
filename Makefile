@@ -31,7 +31,7 @@ test-integration:
 # Tier 3: Production security-parameter smoke tests (1h).
 .PHONY: test-slowcrypto
 test-slowcrypto:
-	go test -tags 'slowcrypto' -timeout 1h ./...
+	go test -tags 'slowcrypto'  -run '^TestSlowCrypto' -timeout 1h ./...
 
 # Tier 4: Stress test with count=10 (>3h).
 .PHONY: test-stress
