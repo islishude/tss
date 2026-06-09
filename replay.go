@@ -1,27 +1,29 @@
 package tss
 
-import "sync"
+import (
+	"crypto/sha256"
+	"sync"
+)
 
-// InMemoryReplayCache is a simple sync.Map-backed ReplayCache for use in tests
+// InMemoryReplayCache is a simple mutex-protected ReplayCache for use in tests
 // and single-process deployments. Production multi-process deployments should
-// use a durable shared cache (e.g. Redis) keyed by session ID + replay key.
+// use a durable shared cache (e.g. Redis) keyed by session ID + slot key.
 //
-// MaxEntries limits the number of cached replay keys (0 = unlimited). When the
+// MaxEntries limits the number of cached slots (0 = unlimited). When the
 // limit is exceeded, an arbitrary entry is evicted to bound memory usage.
 type InMemoryReplayCache struct {
 	mu         sync.Mutex
-	seen       map[replayCacheKey]struct{}
+	seen       map[messageSlotKey][32]byte
 	maxEntries int
 }
 
-type replayCacheKey struct {
-	protocol       ProtocolID
-	sessionID      SessionID
-	round          uint8
-	from           PartyID
-	to             PartyID
-	payloadType    PayloadType
-	transcriptHash [32]byte
+type messageSlotKey struct {
+	protocol    ProtocolID
+	sessionID   SessionID
+	round       uint8
+	from        PartyID
+	to          PartyID
+	payloadType PayloadType
 }
 
 // NewInMemoryReplayCache returns an initialized in-memory replay cache with a
@@ -39,41 +41,66 @@ func NewBoundedReplayCache(maxEntries int) *InMemoryReplayCache {
 		maxEntries = 10000
 	}
 	return &InMemoryReplayCache{
-		seen:       make(map[replayCacheKey]struct{}),
+		seen:       make(map[messageSlotKey][32]byte),
 		maxEntries: maxEntries,
 	}
 }
 
-// MarkIfNew returns true and marks the key as seen on first encounter.
-// Subsequent calls with the same key return false.
-// A nil receiver returns false (fail-closed) — callers must initialize the cache.
+// CheckAndStore implements [ReplayCache]. It atomically checks whether a message slot
+// has been seen and returns nil on first use, [ErrDuplicateMessage] when the same
+// transcript hash is replayed, or [ErrEquivocation] when a different transcript hash
+// occupies the same slot.
 //
-// When maxEntries is non-zero and the map has reached the limit, an arbitrary
-// entry is evicted before inserting the new key to bound memory usage.
-func (c *InMemoryReplayCache) MarkIfNew(key ReplayKey) bool {
+// A nil receiver returns [ErrMissingReplayCache] (fail-closed) — callers must
+// initialize the cache.
+func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error {
 	if c == nil {
-		return false
+		return ErrMissingReplayCache
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	rk := replayCacheKey{
-		protocol:       key.Protocol,
-		sessionID:      key.SessionID,
-		round:          key.Round,
-		from:           key.From,
-		to:             key.To,
-		payloadType:    key.PayloadType,
-		transcriptHash: key.TranscriptHash,
+	sk := messageSlotKey{
+		protocol:    slot.Protocol,
+		sessionID:   slot.SessionID,
+		round:       slot.Round,
+		from:        slot.From,
+		to:          slot.To,
+		payloadType: slot.PayloadType,
 	}
-	if _, ok := c.seen[rk]; ok {
-		return false
-	}
-	if c.maxEntries > 0 && len(c.seen) >= c.maxEntries {
-		for old := range c.seen {
-			delete(c.seen, old)
-			break
+	existing, ok := c.seen[sk]
+	if !ok {
+		if c.maxEntries > 0 && len(c.seen) >= c.maxEntries {
+			for old := range c.seen {
+				delete(c.seen, old)
+				break
+			}
 		}
+		c.seen[sk] = transcriptHash
+		return nil
 	}
-	c.seen[rk] = struct{}{}
-	return true
+	if existing == transcriptHash {
+		return ErrDuplicateMessage
+	}
+	return ErrEquivocation
+}
+
+// SlotKeyFromEnvelope constructs a [MessageSlotKey] from the envelope's identifying fields,
+// excluding the transcript hash so that different payloads for the same slot are detected
+// as equivocation.
+func SlotKeyFromEnvelope(env Envelope) MessageSlotKey {
+	return MessageSlotKey{
+		Protocol:    env.Protocol,
+		SessionID:   env.SessionID,
+		Round:       env.Round,
+		From:        env.From,
+		To:          env.To,
+		PayloadType: env.PayloadType,
+	}
+}
+
+// PayloadHashFromEnvelope returns the SHA-256 hash of the envelope payload.
+// It is used with [ReplayCache.CheckAndStore] as the content discriminator:
+// two messages in the same slot with different payload hashes are equivocation.
+func PayloadHashFromEnvelope(env Envelope) [32]byte {
+	return sha256.Sum256(env.Payload)
 }

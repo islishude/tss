@@ -79,7 +79,7 @@ func TestNewBroadcastCertificateValid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("valid certificate should be created: %v", err)
 	}
-	if err := cert.Verify(env, parties); err != nil {
+	if err := cert.VerifyStructure(env, parties); err != nil {
 		t.Fatalf("valid certificate should verify: %v", err)
 	}
 }

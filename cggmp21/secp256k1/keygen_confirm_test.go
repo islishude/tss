@@ -189,6 +189,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
 		session, out, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID})
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), sessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -202,7 +203,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(env)
+			out, err := sessions[id].HandleKeygenMessage(deliverCGGMPEnv(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -224,7 +225,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if fromParty2.PayloadType == "" {
 		t.Fatal("missing confirmation from party 2")
 	}
-	if _, err := sessions[1].HandleKeygenMessage(fromParty2); err != nil {
+	if _, err := sessions[1].HandleKeygenMessage(deliverCGGMPEnv(fromParty2)); err != nil {
 		t.Fatal(err)
 	}
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
@@ -243,7 +244,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	conflicting = conflicting.RecomputeTranscriptHash()
-	_, err = sessions[1].HandleKeygenMessage(conflicting)
+	_, err = sessions[1].HandleKeygenMessage(deliverCGGMPEnv(conflicting))
 	_ = assertProtocolErrorCode(t, err, tss.ErrCodeVerification)
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
 		t.Fatal("aborted session returned a key share")

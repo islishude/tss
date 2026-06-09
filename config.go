@@ -51,12 +51,28 @@ func NewPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
 	return PolicySet{entries: policies, index: idx}, nil
 }
 
-// MustNewPolicySet is like [NewPolicySet] but panics on duplicate keys.
-// It is intended for package-level var initialization where duplicates are a
-// programmer error.
+// ValidateBroadcastConsistency checks that every broadcast-mode DeliveryPolicy requires
+// BroadcastConsistencyRequired. It returns an error listing any broadcast policy that
+// does not. Production callers should invoke this once during initialization.
+func (ps PolicySet) ValidateBroadcastConsistency() error {
+	for _, p := range ps.entries {
+		if p.Mode == DeliveryBroadcast && p.BroadcastConsistency != BroadcastConsistencyRequired {
+			return fmt.Errorf("broadcast message %q (round %d, protocol %q) must require BroadcastConsistencyRequired", p.PayloadType, p.Round, p.Protocol)
+		}
+	}
+	return nil
+}
+
+// MustNewPolicySet is like [NewPolicySet] but panics on duplicate keys or when
+// a broadcast-mode policy does not require BroadcastConsistencyRequired.
+// It is intended for package-level var initialization where errors are a
+// programmer mistake.
 func MustNewPolicySet(policies ...DeliveryPolicy) PolicySet {
 	ps, err := NewPolicySet(policies...)
 	if err != nil {
+		panic(err)
+	}
+	if err := ps.ValidateBroadcastConsistency(); err != nil {
 		panic(err)
 	}
 	return ps
@@ -105,7 +121,12 @@ type GuardConfig struct {
 }
 
 // BuildGuard constructs an EnvelopeGuard from the configuration or returns an error.
+// Production deployments must provide a non-nil AckVerifier; test code should use
+// [NewTestEnvelopeGuard] instead.
 func (c GuardConfig) BuildGuard() (*EnvelopeGuard, error) {
+	if c.AckVerifier == nil {
+		return nil, ErrMissingAckVerifier
+	}
 	g, err := NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
 	if err != nil {
 		return nil, err

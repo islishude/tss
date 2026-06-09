@@ -39,13 +39,14 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	out2[0].Payload[0] ^= 1
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
+	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("expected tampered EncK rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
@@ -71,10 +72,12 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 			s2, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
+			s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 			_ = deliverPresignMessagesTo(t, s1, 1, out2)
 			round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 			if len(round2) != 1 || round2[0].To != 1 {
@@ -86,7 +89,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			}
 			round2[0].Payload = mutated
 			round2[0] = round2[0].RecomputeTranscriptHash()
-			_, err = s1.HandlePresignMessage(round2[0])
+			_, err = s1.HandlePresignMessage(deliverCGGMPEnv(round2[0]))
 			if err == nil {
 				t.Fatal("expected tampered round2 proof rejection")
 			}
@@ -109,6 +112,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
@@ -124,7 +128,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := s1.HandlePresignMessage(out2[0]); err == nil {
+	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))

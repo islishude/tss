@@ -16,11 +16,10 @@ type EnvelopeGuard struct {
 	Policies    PolicySet
 	ReplayCache ReplayCache
 
-	// AckVerifier, when non-nil, verifies individual broadcast ack signatures
-	// during broadcast certificate validation. When nil, only structural
-	// certificate checks are performed (backward-compatible behavior).
-	// Production deployments SHOULD set this to ensure end-to-end broadcast
-	// integrity.
+	// AckVerifier verifies individual broadcast ack signatures during broadcast
+	// certificate validation. Production guards must set a non-nil verifier;
+	// [NewTestEnvelopeGuard] provides a no-op verifier for tests that do not
+	// exercise broadcast consistency.
 	AckVerifier BroadcastAckVerifier
 }
 
@@ -47,6 +46,28 @@ func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessi
 		Policies:    policies,
 		ReplayCache: cache,
 	}, nil
+}
+
+// NewTestEnvelopeGuard constructs a guard suitable for tests. It uses an in-memory
+// replay cache and a no-op ack verifier. This function MUST NOT be used in production
+// code — production callers must use [GuardConfig.BuildGuard] with a real verifier.
+func NewTestEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet) *EnvelopeGuard {
+	g, err := NewEnvelopeGuard(self, parties, protocol, sessionID, policies, NewInMemoryReplayCache())
+	if err != nil {
+		panic(fmt.Sprintf("NewTestEnvelopeGuard: %v", err))
+	}
+	g.AckVerifier = &noopAckVerifier{}
+	return g
+}
+
+// noopAckVerifier is a BroadcastAckVerifier that accepts any signature.
+// It is used exclusively by [NewTestEnvelopeGuard] for tests that do not
+// exercise broadcast ack signature verification.
+type noopAckVerifier struct{}
+
+// VerifyAck implements BroadcastAckVerifier by accepting any signature.
+func (noopAckVerifier) VerifyAck(party PartyID, digest [32]byte, signature []byte) error {
+	return nil
 }
 
 // Validate executes the full security validation sequence on an incoming envelope
@@ -89,21 +110,21 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 
 	// 6. Transport authentication.
 	if !env.Security.Authenticated {
-		return fmt.Errorf("%w", ErrUnauthenticatedTransport)
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, ErrUnauthenticatedTransport)
 	}
 
 	// 7. Transport identity must be set.
 	if env.Security.AuthenticatedParty == 0 {
-		return fmt.Errorf("%w: authenticated party is zero (unset)", ErrUnauthenticatedTransport)
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: authenticated party is zero (unset)", ErrUnauthenticatedTransport))
 	}
 	// 8. Transport identity must match envelope sender.
 	if env.Security.AuthenticatedParty != env.From {
-		return fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, env.Security.AuthenticatedParty, env.From)
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, env.Security.AuthenticatedParty, env.From))
 	}
 
 	// 9. Recipient check for direct messages.
 	if env.To != 0 && env.To != g.Self {
-		return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, env.To)
+		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, env.To))
 	}
 
 	// 10. Policy lookup.
@@ -116,11 +137,11 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 	switch policy.Mode {
 	case DeliveryDirect:
 		if env.To == 0 {
-			return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType)
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType))
 		}
 	case DeliveryBroadcast:
 		if env.To != 0 {
-			return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType)
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType))
 		}
 	}
 
@@ -128,70 +149,51 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
 		if !env.Security.Confidential {
-			return fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType)
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType))
 		}
 	case ConfidentialityForbidden:
 		if env.Security.Confidential {
-			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType)
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType))
 		}
 	}
 
 	// 13. Broadcast consistency enforcement against the provided party set.
 	if policy.BroadcastConsistency == BroadcastConsistencyRequired {
 		if env.Broadcast == nil {
-			return fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, env.PayloadType)
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, env.PayloadType))
 		}
-		if err := env.Broadcast.Verify(env, parties); err != nil {
-			return fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err)
-		}
-		// Verify individual ack signatures when a verifier is configured.
-		// This closes the gap where a transport adapter attaches a structurally
-		// valid certificate without verifying the underlying signatures.
-		if g.AckVerifier != nil {
-			for _, ack := range env.Broadcast.Acks {
-				if err := VerifyBroadcastAck(env, ack, g.AckVerifier); err != nil {
-					return fmt.Errorf("%w: party %d: %w", ErrInvalidBroadcastCertificate, ack.Party, err)
-				}
-			}
+		if err := env.Broadcast.VerifyFull(env, parties, g.AckVerifier); err != nil {
+			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err))
 		}
 	}
 
-	// 14. Replay detection.
-	key := ReplayKeyFromEnvelope(env)
-	if !g.ReplayCache.MarkIfNew(key) {
-		return fmt.Errorf("%w: protocol=%s session=%s round=%d from=%d", ErrReplay, env.Protocol, env.SessionID, env.Round, env.From)
+	// 14. Replay and equivocation detection.
+	// Duplicate messages (same slot, same transcript) are silently dropped;
+	// handlers have their own per-round duplicate detection and may ignore
+	// harmless duplicates (e.g., commitment re-delivery).
+	// Equivocation (same slot, different transcript) is always an error
+	// because it indicates a malicious or faulty sender.
+	slot := SlotKeyFromEnvelope(env)
+	payloadHash := PayloadHashFromEnvelope(env)
+	if err := g.ReplayCache.CheckAndStore(slot, payloadHash); err != nil {
+		if errors.Is(err, ErrDuplicateMessage) {
+			return nil // silently drop duplicate
+		}
+		return NewProtocolError(ErrCodeVerification, env.Round, env.From, err)
 	}
 
 	return nil
 }
 
 // ValidateInbound validates an incoming envelope through the provided guard.
-// Production code must always provide a non-nil guard — this ensures transport
-// authentication, confidentiality enforcement, broadcast consistency, and replay
-// detection are applied uniformly.
-//
-// When guard is nil and the transport is unauthenticated, a limited set of
-// structural checks is applied as a test-only fallback. This path MUST NOT be
-// relied upon in production; it exists solely for Tier 0 unit tests that
-// exercise protocol logic without a full transport simulation.
+// The guard must be non-nil — a nil guard returns [ErrMissingEnvelopeGuard].
+// This ensures transport authentication, confidentiality enforcement, broadcast
+// consistency, and replay detection are applied uniformly in all code paths.
 func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
-	if guard != nil {
-		return guard.Validate(env)
+	if guard == nil {
+		return ErrMissingEnvelopeGuard
 	}
-	// Test-only fallback: structural checks without transport security.
-	// Production transports must always authenticate — an unauthenticated
-	// envelope in production is a configuration error caught by the guard.
-	if env.Security.Authenticated {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From,
-			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
-	}
-	if err := ValidateEnvelope(env, expectedProtocol, expectedSession, parties); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if err := ValidateEnvelopePolicy(env, self, policies); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	return nil
+	return guard.Validate(env)
 }
 
 // ValidateInboundWithParties is like [ValidateInbound] but validates sender
@@ -199,32 +201,8 @@ func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol Protoc
 // of the guard's configured set. This is used by sessions (e.g. reshare) that
 // accept messages from different participant subsets depending on payload type.
 func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
-	if guard != nil {
-		return guard.ValidateWithParties(env, parties)
+	if guard == nil {
+		return ErrMissingEnvelopeGuard
 	}
-	// Test-only fallback: structural checks without transport security.
-	if env.Security.Authenticated {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From,
-			errors.New("envelope guard is required for authenticated transport; call SetGuard before processing messages"))
-	}
-	if err := ValidateEnvelope(env, expectedProtocol, expectedSession, parties); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	if err := ValidateEnvelopePolicy(env, self, policies); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
-	return nil
-}
-
-// ReplayKeyFromEnvelope constructs a replay key from the envelope's identifying fields.
-func ReplayKeyFromEnvelope(env Envelope) ReplayKey {
-	return ReplayKey{
-		Protocol:       env.Protocol,
-		SessionID:      env.SessionID,
-		Round:          env.Round,
-		From:           env.From,
-		To:             env.To,
-		PayloadType:    env.PayloadType,
-		TranscriptHash: env.TranscriptHash,
-	}
+	return guard.ValidateWithParties(env, parties)
 }

@@ -206,6 +206,8 @@ func (p *Presign) Destroy() {
 
 // PresignSession tracks the CGGMP21-style offline presign exchange.
 type PresignSession struct {
+	mu sync.Mutex
+
 	key           *KeyShare
 	sessionID     tss.SessionID
 	config        tss.ThresholdConfig
@@ -280,6 +282,8 @@ func (s *PresignSession) abort() {
 
 // SignSession tracks the online threshold ECDSA signing exchange.
 type SignSession struct {
+	mu sync.Mutex
+
 	key       *KeyShare
 	presign   *Presign
 	sessionID tss.SessionID
@@ -375,6 +379,8 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 	if s == nil {
 		return nil, errors.New("nil presign session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}

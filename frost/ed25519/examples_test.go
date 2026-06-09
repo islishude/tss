@@ -60,6 +60,7 @@ func ExampleSign_multiParty() {
 		if err != nil {
 			panic(err)
 		}
+		kg.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -74,7 +75,7 @@ func ExampleSign_multiParty() {
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(env)
+			out, err := sessions[id].HandleKeygenMessage(deliverEnv(env))
 			if err != nil {
 				panic(err)
 			}

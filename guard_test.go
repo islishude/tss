@@ -17,7 +17,7 @@ func testSessionID(t *testing.T) SessionID {
 }
 
 func testPolicySet() PolicySet {
-	return MustNewPolicySet(
+	ps, err := NewPolicySet(
 		DeliveryPolicy{
 			Protocol:             "test-proto",
 			Round:                1,
@@ -51,6 +51,10 @@ func testPolicySet() PolicySet {
 			BroadcastConsistency: BroadcastConsistencyRequired,
 		},
 	)
+	if err != nil {
+		panic(err)
+	}
+	return ps
 }
 
 type guardTestEnv struct {
@@ -61,10 +65,7 @@ type guardTestEnv struct {
 func newGuardTestEnv(t *testing.T) guardTestEnv {
 	t.Helper()
 	sid := testSessionID(t)
-	guard, err := NewEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, testPolicySet(), NewInMemoryReplayCache())
-	if err != nil {
-		t.Fatal(err)
-	}
+	guard := NewTestEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, testPolicySet())
 	return guardTestEnv{guard: guard, sessionID: sid}
 }
 
@@ -216,16 +217,15 @@ func TestGuardRejectsUnexpectedConfidentiality(t *testing.T) {
 	}
 }
 
-func TestGuardRejectsReplay(t *testing.T) {
+func TestGuardDropsDuplicate(t *testing.T) {
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	if err := env.guard.Validate(e); err != nil {
 		t.Fatalf("first validation should pass, got %v", err)
 	}
-	// Second validation with same envelope must fail
-	err := env.guard.Validate(e)
-	if !errors.Is(err, ErrReplay) {
-		t.Fatalf("expected ErrReplay, got %v", err)
+	// Second delivery of the same message is silently dropped (nil return).
+	if err := env.guard.Validate(e); err != nil {
+		t.Fatalf("duplicate should be silently dropped, got %v", err)
 	}
 }
 

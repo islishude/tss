@@ -42,6 +42,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	}
 	parties := []tss.PartyID{1, 2}
 	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +64,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("expected keygen Paillier key mismatch rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, EvidenceContext{Parties: parties})

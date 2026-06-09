@@ -27,6 +27,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -50,7 +51,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted modulus proof")
 	}
 }
@@ -70,6 +71,7 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -89,7 +91,7 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Ring-Pedersen proof")
 	}
 }
@@ -157,6 +159,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -176,7 +179,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid modulus proof")
 	}
 }
@@ -194,6 +197,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +216,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid Ring-Pedersen proof")
 	}
 }
@@ -354,6 +358,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -379,7 +384,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(out2[0]); err == nil {
+	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Paillier public key")
 	}
 }

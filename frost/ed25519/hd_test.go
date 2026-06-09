@@ -493,6 +493,7 @@ func frostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = &sessionState{session: session, envelopes: out}
 	}
 
@@ -507,7 +508,10 @@ func frostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 			if receiver == env.From || (env.To != 0 && env.To != receiver) {
 				continue
 			}
-			out, err := sessions[receiver].session.HandleKeygenMessage(env)
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
+			out, err := sessions[receiver].session.HandleKeygenMessage(delivered)
 			if err != nil {
 				t.Fatal(err)
 			}

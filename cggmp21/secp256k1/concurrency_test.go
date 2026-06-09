@@ -37,6 +37,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = &lockedSession{KeygenSession: kg}
 		allMessages = append(allMessages, out...)
 	}
@@ -49,13 +50,16 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 			wg.Add(1)
 			go func(env tss.Envelope) {
 				defer wg.Done()
+				delivered := env
+				delivered.Security.Authenticated = true
+				delivered.Security.AuthenticatedParty = env.From
 				for _, id := range parties {
 					if id == env.From || (env.To != 0 && env.To != id) {
 						continue
 					}
 					s := sessions[id]
 					s.mu.Lock()
-					out, err := s.HandleKeygenMessage(env)
+					out, err := s.HandleKeygenMessage(delivered)
 					s.mu.Unlock()
 					if err != nil {
 						t.Errorf("concurrent keygen delivery from %d to %d: %v", env.From, id, err)
@@ -106,6 +110,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			s.SetGuard(testCGGMP21Guard(id, tss.PartySet(signers), sessionID))
 			sess[id] = s
 			for _, env := range out {
 				switch env.Round {
@@ -123,6 +128,9 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			rng.Shuffle(len(msgs), func(i, j int) { msgs[i], msgs[j] = msgs[j], msgs[i] })
 			var nextRound []tss.Envelope
 			for _, env := range msgs {
+				delivered := env
+				delivered.Security.Authenticated = true
+				delivered.Security.AuthenticatedParty = env.From
 				for _, id := range signers {
 					if id == env.From {
 						continue
@@ -130,7 +138,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 					if env.To != 0 && env.To != id {
 						continue
 					}
-					out, _ := sess[id].HandlePresignMessage(env)
+					out, _ := sess[id].HandlePresignMessage(delivered)
 					nextRound = append(nextRound, out...)
 				}
 			}
@@ -161,16 +169,20 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			s.SetGuard(testCGGMP21Guard(id, tss.PartySet(signers), signID))
 			signSessions[id] = s
 			sigMessages = append(sigMessages, out...)
 		}
 		rng.Shuffle(len(sigMessages), func(i, j int) { sigMessages[i], sigMessages[j] = sigMessages[j], sigMessages[i] })
 		for _, env := range sigMessages {
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
 			for _, id := range signers {
 				if id == env.From {
 					continue
 				}
-				_, _ = signSessions[id].HandleSignMessage(env)
+				_, _ = signSessions[id].HandleSignMessage(delivered)
 			}
 		}
 		for _, id := range signers {

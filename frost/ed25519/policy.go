@@ -34,7 +34,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 
 	// --- Sign ---
@@ -44,7 +44,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		PayloadType:          payloadSignCommitment,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
@@ -52,7 +52,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		PayloadType:          payloadSignPartial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 
 	// --- Reshare ---

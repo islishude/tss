@@ -293,6 +293,45 @@ func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
 }
 
 // Sign runs an in-memory FROST signing exchange for tests and simple integrations.
+// newInProcessGuard creates an EnvelopeGuard for in-process signing where all
+// signer keys are available locally (e.g., Sign, SignWithOptions, SignDigest).
+// It uses relaxed broadcast consistency since there is no actual transport layer.
+// A noop ack verifier is safe here because inProcessPolicies relaxes all broadcast
+// consistency requirements — VerifyFull is never invoked.
+func newInProcessGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
+	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, inProcessPolicies(), tss.NewInMemoryReplayCache())
+	if err != nil {
+		panic(err)
+	}
+	g.AckVerifier = &noopSignVerifier{}
+	return g
+}
+
+// noopSignVerifier accepts any signature — used only by newInProcessGuard with
+// relaxed policies where broadcast consistency is never required.
+type noopSignVerifier struct{}
+
+// VerifyAck implements [tss.BroadcastAckVerifier] by accepting any signature.
+func (noopSignVerifier) VerifyAck(party tss.PartyID, digest [32]byte, signature []byte) error {
+	return nil
+}
+
+// inProcessPolicies returns FROSTPolicies with broadcast consistency relaxed.
+func inProcessPolicies() tss.PolicySet {
+	entries := FROSTPolicies.Entries()
+	relaxed := make([]tss.DeliveryPolicy, len(entries))
+	for i, p := range entries {
+		relaxed[i] = p
+		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+	}
+	ps, err := tss.NewPolicySet(relaxed...)
+	if err != nil {
+		panic(err)
+	}
+	return ps
+}
+
+// Sign runs an in-memory FROST signing exchange and returns the public key and signature.
 func Sign(message []byte, signers []*KeyShare) ([]byte, []byte, error) {
 	return SignWithOptions(message, signers, SignOptions{})
 }
@@ -324,8 +363,12 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		if err != nil {
 			return nil, nil, err
 		}
+		// Set up a guard for this in-process signing session.
+		session.SetGuard(newInProcessGuard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		for _, env := range out {
+			env.Security.Authenticated = true
+			env.Security.AuthenticatedParty = env.From
 			if env.Round == 1 {
 				round1 = append(round1, env)
 			} else {
@@ -341,6 +384,10 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			out, err := sessions[id].HandleSignMessage(env)
 			if err != nil {
 				return nil, nil, err
+			}
+			for i := range out {
+				out[i].Security.Authenticated = true
+				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			round2 = append(round2, out...)
 		}

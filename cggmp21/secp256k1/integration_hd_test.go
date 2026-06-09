@@ -35,6 +35,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -43,7 +44,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(env); err != nil {
+			if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -174,6 +175,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -182,7 +184,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(env); err != nil {
+			if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env)); err != nil {
 				t.Fatal(err)
 			}
 		}

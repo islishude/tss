@@ -15,9 +15,16 @@ func deliverPresignMessagesTo(t testing.TB, session *PresignSession, receiver ts
 		if env.From == receiver || (env.To != 0 && env.To != receiver) {
 			continue
 		}
-		next, err := session.HandlePresignMessage(env)
+		delivered := env
+		delivered.Security.Authenticated = true
+		delivered.Security.AuthenticatedParty = env.From
+		next, err := session.HandlePresignMessage(delivered)
 		if err != nil {
 			t.Fatal(err)
+		}
+		for i := range next {
+			next[i].Security.Authenticated = true
+			next[i].Security.AuthenticatedParty = next[i].From
 		}
 		out = append(out, next...)
 	}

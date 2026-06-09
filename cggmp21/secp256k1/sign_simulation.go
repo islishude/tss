@@ -43,12 +43,19 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	}
 	presignSessions := make(map[tss.PartyID]*PresignSession, len(ids))
 	presignQueue := make([]tss.Envelope, 0)
+	simPolicies := simulationCGGMP21Policies()
+	ps := tss.PartySet(ids)
 	for _, id := range ids {
 		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx)
 		if err != nil {
 			return nil, nil, err
 		}
+		session.SetGuard(tss.NewTestEnvelopeGuard(id, ps, protocol, presignID, simPolicies))
 		presignSessions[id] = session
+		for i := range out {
+			out[i].Security.Authenticated = true
+			out[i].Security.AuthenticatedParty = out[i].From
+		}
 		presignQueue = append(presignQueue, out...)
 	}
 	for len(presignQueue) > 0 {
@@ -61,6 +68,10 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			out, err := presignSessions[id].HandlePresignMessage(env)
 			if err != nil {
 				return nil, nil, err
+			}
+			for i := range out {
+				out[i].Security.Authenticated = true
+				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			presignQueue = append(presignQueue, out...)
 		}
@@ -91,7 +102,12 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err != nil {
 			return nil, nil, err
 		}
+		session.SetGuard(tss.NewTestEnvelopeGuard(id, ps, protocol, signID, simPolicies))
 		signSessions[id] = session
+		for i := range out {
+			out[i].Security.Authenticated = true
+			out[i].Security.AuthenticatedParty = out[i].From
+		}
 		signMessages = append(signMessages, out...)
 	}
 	for _, env := range signMessages {
@@ -110,4 +126,22 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 	}
 	return nil, nil, errors.New("signature not completed")
+}
+
+// simulationCGGMP21Policies returns the production CGGMP21 policy set with
+// broadcast consistency relaxed to None for all payload types. It is used by
+// in-memory simulation helpers ([Sign], [SignDigestInteractive]) that route
+// messages directly without broadcast certificate coordination.
+func simulationCGGMP21Policies() tss.PolicySet {
+	entries := CGGMP21Policies.Entries()
+	relaxed := make([]tss.DeliveryPolicy, len(entries))
+	for i, p := range entries {
+		relaxed[i] = p
+		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+	}
+	ps, err := tss.NewPolicySet(relaxed...)
+	if err != nil {
+		panic(err)
+	}
+	return ps
 }

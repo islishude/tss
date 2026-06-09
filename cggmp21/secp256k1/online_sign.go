@@ -134,17 +134,17 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
+// SetGuard attaches an envelope guard to the session. It must be called before
+// processing any inbound messages. A nil guard causes [HandleSignMessage] to
+// return [tss.ErrMissingEnvelopeGuard].
 func (s *SignSession) SetGuard(g *tss.EnvelopeGuard) {
 	if s != nil {
 		s.guard = g
 	}
 }
 
-// NewGuard creates an EnvelopeGuard configured for this signing session.
-// cache may be nil to use an in-memory cache suitable for testing.
+// NewGuard creates an EnvelopeGuard suitable for testing this session.
+// Production callers must use [tss.GuardConfig.BuildGuard] with a real AckVerifier.
 func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
 	if s == nil {
 		return nil, errors.New("nil sign session")
@@ -156,7 +156,6 @@ func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party, CGGMP21Policies)
 }
@@ -168,6 +167,8 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}
@@ -316,19 +317,19 @@ func (s *SignSession) tryCompleteSign() error {
 			Payload:     aggregateEvidencePayload(s.digest, r.Bytes(), secp.ScalarFromBigInt(sigS).Bytes(), s.presign.TranscriptHash),
 		})
 		return &tss.ProtocolError{
-			Code:  tss.ErrCodeVerification,
+			Code:  tss.ErrCodeAggregateSignInvalid,
 			Round: 1,
 			Blame: &tss.Blame{
-				Reason:  "aggregated ECDSA signature failed verification",
+				Reason:  "aggregated ECDSA signature failed verification (suspect set)",
 				Parties: append([]tss.PartyID(nil), s.presign.Signers...),
 				Evidence: marshalEvidence(
 					env,
 					tss.EvidenceKindAggregateSign,
-					"aggregated ECDSA signature failed verification",
+					"aggregated ECDSA signature failed verification — suspect set, individual partial not independently verifiable",
 					s.aggregateEvidenceFields(r.BigInt(), sigS)...,
 				),
 			},
-			Err: errors.New("ECDSA signature failed verification"),
+			Err: errors.New("aggregate ECDSA signature verification failed"),
 		}
 	}
 	s.signature = &Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes()}

@@ -16,6 +16,11 @@ const (
 	ErrCodeRound = "wrong_round"
 	// ErrCodeVerification marks a failed cryptographic or transcript check.
 	ErrCodeVerification = "verification_failed"
+	// ErrCodeAggregateSignInvalid marks an aggregate signature that failed verification.
+	// The blamed parties form a suspect set — individual partials cannot be verified
+	// independently in the current protocol, so all signers are listed as candidate
+	// sources. This is not a proof that any specific signer acted maliciously.
+	ErrCodeAggregateSignInvalid = "aggregate_sign_invalid"
 	// ErrCodeNotReady marks a protocol state that has not collected enough messages.
 	ErrCodeNotReady = "not_ready"
 	// ErrCodeConsumed marks one-use material that has already been consumed.
@@ -59,8 +64,20 @@ var ErrInvalidBroadcastCertificate = errors.New("invalid broadcast certificate")
 // ErrBroadcastEquivocation is returned when a sender sends different payloads to different parties.
 var ErrBroadcastEquivocation = errors.New("broadcast equivocation detected")
 
-// ErrReplay is returned when a previously-processed envelope is replayed.
-var ErrReplay = errors.New("replayed envelope")
+// ErrDuplicateMessage is returned when an identical message (same slot, same transcript hash)
+// is delivered more than once.
+var ErrDuplicateMessage = errors.New("duplicate message")
+
+// ErrEquivocation is returned when a party sends different payloads to different recipients
+// for the same protocol message slot — the slot exists but with a different transcript hash.
+var ErrEquivocation = errors.New("equivocation detected")
+
+// ErrMissingEnvelopeGuard is returned when an envelope arrives without a configured guard.
+var ErrMissingEnvelopeGuard = errors.New("missing envelope guard")
+
+// ErrMissingAckVerifier is returned when broadcast ACK verification is required but no
+// verifier is configured.
+var ErrMissingAckVerifier = errors.New("missing broadcast ack verifier")
 
 // ErrWrongRecipient is returned when a direct message is addressed to the wrong party.
 var ErrWrongRecipient = errors.New("wrong envelope recipient")

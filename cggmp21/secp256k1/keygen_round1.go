@@ -16,6 +16,8 @@ import (
 )
 
 // StartKeygen starts CGGMP21-style threshold ECDSA key generation.
+// Callers must attach an EnvelopeGuard via [KeygenSession.SetGuard] before
+// processing inbound messages.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
 	return StartKeygenWithOptions(config, KeygenOptions{})
 }
@@ -23,6 +25,9 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 // StartKeygenWithOptions starts keygen with explicit Paillier key-size or HD
 // chain-code options. ZK security parameters are governed by
 // [zkpai.ActiveSecurityParams], not by a per-keygen option.
+//
+// Callers must attach an EnvelopeGuard via [KeygenSession.SetGuard] before
+// processing inbound messages.
 //
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
 // to all parties. The caller MUST ensure that every recipient receives identical

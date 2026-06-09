@@ -216,15 +216,15 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 	commitEnv.Security.Authenticated = true
 	commitEnv.Security.AuthenticatedParty = 52
 
-	// First delivery: may fail (invalid payload) but should NOT fail with ErrReplay.
+	// First delivery: may fail (invalid payload) but should NOT fail with ErrDuplicateMessage.
 	_, _ = session.HandleKeygenMessage(commitEnv)
 
-	// Second delivery: must fail with ErrReplay if it passed the guard the first time.
+	// Second delivery: must fail with ErrDuplicateMessage if it passed the guard the first time.
 	_, err = session.HandleKeygenMessage(commitEnv)
-	if !errors.Is(err, tss.ErrReplay) {
-		// If it wasn't ErrReplay, ensure it's some other valid error (not nil).
+	if !errors.Is(err, tss.ErrDuplicateMessage) {
+		// If it wasn't ErrDuplicateMessage, ensure it's some other valid error (not nil).
 		if err == nil {
-			t.Error("expected ErrReplay or other error on second delivery, got nil")
+			t.Error("expected ErrDuplicateMessage or other error on second delivery, got nil")
 		}
 		// The first delivery may have failed before the replay check for other reasons
 		// (wrong round, etc.). That's acceptable - we're testing that when the guard

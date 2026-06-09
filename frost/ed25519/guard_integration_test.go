@@ -11,14 +11,8 @@ import (
 	"github.com/islishude/tss"
 )
 
-// testFROSTGuard is a helper that creates an EnvelopeGuard for FROST Ed25519 protocol sessions.
-func testFROSTGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, FROSTPolicies, tss.NewInMemoryReplayCache())
-	if err != nil {
-		panic(err)
-	}
-	return g
-}
+// testFROSTGuard and testFROSTPolicies are defined in frost_test.go.
+// They are shared when running with -tags integration.
 
 // frosted25519DKG runs a full FROST DKG and returns the key shares.
 func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss.PartyID]*KeyShare, tss.SessionID) {
@@ -40,6 +34,7 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 		if err != nil {
 			t.Fatal(err)
 		}
+		s.SetGuard(testFROSTGuard(id, parties, sessionID))
 		sessions[id] = s
 		queue = append(queue, out...)
 	}
@@ -52,7 +47,10 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(env)
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
+			out, err := sessions[id].HandleKeygenMessage(delivered)
 			if err != nil {
 				t.Fatalf("DKG delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -90,7 +88,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testFROSTGuard(11, parties, sessionID))
+	session.SetGuard(tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies))
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
@@ -237,11 +235,11 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 	// First pass — may fail with non-replay error.
 	_, _ = session.HandleKeygenMessage(confirmEnv)
 
-	// Second pass — must fail with ErrReplay.
+	// Second pass — must fail with ErrDuplicateMessage.
 	_, err = session.HandleKeygenMessage(confirmEnv)
-	if !errors.Is(err, tss.ErrReplay) {
+	if !errors.Is(err, tss.ErrDuplicateMessage) {
 		if err == nil {
-			t.Error("expected ErrReplay or other error on second delivery, got nil")
+			t.Error("expected ErrDuplicateMessage or other error on second delivery, got nil")
 		}
 	}
 }

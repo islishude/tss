@@ -161,6 +161,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			t.Fatal(err)
 		}
 		session.SetGuard(g)
+		g.AckVerifier = km.verifier
 		kgSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -211,6 +212,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			t.Fatal(err)
 		}
 		session.SetGuard(g)
+		g.AckVerifier = km.verifier
 		psSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -262,6 +264,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			t.Fatal(err)
 		}
 		session.SetGuard(g)
+		g.AckVerifier = km.verifier
 		signSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -317,6 +320,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 	session.SetGuard(g)
+	g.AckVerifier = km.verifier
 
 	// Create a valid broadcast envelope.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{

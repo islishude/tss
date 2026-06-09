@@ -71,6 +71,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -91,7 +92,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].HandleSignMessage(messages[0]); err == nil {
+		if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(messages[0])); err == nil {
 			t.Fatal("expected tampered partial rejection")
 		} else {
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))

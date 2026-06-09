@@ -26,21 +26,23 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
+	session2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
+	if _, err := session.HandleReshareMessage(deliverCGGMPEnv(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	dealer2Out, err := session2.HandleReshareMessage(out1[0])
+	dealer2Out, err := session2.HandleReshareMessage(deliverCGGMPEnv(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(dealer2Out) < 2 {
 		t.Fatalf("dealer 2 emitted %d messages, want commitment and share", len(dealer2Out))
 	}
-	if _, err := session.HandleReshareMessage(dealer2Out[0]); err != nil {
+	if _, err := session.HandleReshareMessage(deliverCGGMPEnv(dealer2Out[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalReshareSharePayload(dealer2Out[1].Payload)
@@ -59,7 +61,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	dealer2Out[1] = dealer2Out[1].RecomputeTranscriptHash()
-	_, err = session.HandleReshareMessage(dealer2Out[1])
+	_, err = session.HandleReshareMessage(deliverCGGMPEnv(dealer2Out[1]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -78,11 +80,13 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	dealer2Out, err := session2.HandleReshareMessage(out1[0])
+	session2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
+	dealer2Out, err := session2.HandleReshareMessage(deliverCGGMPEnv(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -103,16 +107,16 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if commitment.Payload == nil || share.Payload == nil {
 		t.Fatal("missing dealer 2 commitment or share")
 	}
-	if _, err := session1.HandleReshareMessage(share); err != nil {
+	if _, err := session1.HandleReshareMessage(deliverCGGMPEnv(share)); err != nil {
 		t.Fatalf("share before commitments should be buffered: %v", err)
 	}
 	if len(session1.pendingShares) != 1 {
 		t.Fatalf("got %d pending shares, want 1", len(session1.pendingShares))
 	}
-	if _, err := session1.HandleReshareMessage(out2[0]); err != nil {
+	if _, err := session1.HandleReshareMessage(deliverCGGMPEnv(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session1.HandleReshareMessage(commitment); err != nil {
+	if _, err := session1.HandleReshareMessage(deliverCGGMPEnv(commitment)); err != nil {
 		t.Fatal(err)
 	}
 	if len(session1.pendingShares) != 0 {

@@ -12,6 +12,7 @@ import (
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
+	"sync"
 )
 
 const (
@@ -25,6 +26,8 @@ const (
 // generates a polynomial with zero constant term (to refresh the secret share)
 // and a new Paillier keypair (to rotate encryption material).
 type RefreshSession struct {
+	mu sync.Mutex
+
 	oldKey          *KeyShare
 	cfg             tss.ThresholdConfig
 	log             tss.Logger
@@ -208,6 +211,8 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 	if s == nil {
 		return nil, errors.New("nil refresh session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}

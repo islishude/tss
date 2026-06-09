@@ -19,11 +19,7 @@ import (
 // It uses the production policy set but relaxes broadcast consistency requirements
 // since test harnesses don't coordinate BroadcastCertificates.
 func testCGGMP21Guard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, testCGGMP21Policies(), tss.NewInMemoryReplayCache())
-	if err != nil {
-		panic(err)
-	}
-	return g
+	return tss.NewTestEnvelopeGuard(self, parties, protocol, sessionID, testCGGMP21Policies())
 }
 
 // testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
@@ -182,4 +178,11 @@ func checkGolden(t *testing.T, golden string, raw []byte) {
 	if gotHex != string(bytes.TrimSpace(wantHex)) {
 		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
 	}
+}
+
+// deliverCGGMPEnv returns a copy of env with transport authentication set for guard validation.
+func deliverCGGMPEnv(env tss.Envelope) tss.Envelope {
+	env.Security.Authenticated = true
+	env.Security.AuthenticatedParty = env.From
+	return env
 }

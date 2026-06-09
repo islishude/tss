@@ -118,6 +118,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sign.SetGuard(testFROSTGuard(shares[1].Party, tss.PartySet(shares[1].Parties), signID))
 	if len(sign.dNonce) == 0 || len(sign.eNonce) == 0 {
 		t.Fatal("sign session did not retain expected local nonce bytes before round 2")
 	}
@@ -125,7 +126,10 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := sign.HandleSignMessage(out2[0]); err != nil {
+	env := out2[0]
+	env.Security.Authenticated = true
+	env.Security.AuthenticatedParty = env.From
+	if _, err := sign.HandleSignMessage(env); err != nil {
 		t.Fatal(err)
 	}
 	if sign.dNonce != nil || sign.eNonce != nil {

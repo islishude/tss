@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"sync"
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -31,6 +32,8 @@ var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: thresh
 // parties, including old/new overlap parties, generate fresh Paillier and
 // Ring-Pedersen material and receive a new key share.
 type ReshareSession struct {
+	mu sync.Mutex
+
 	plan          ResharePlan
 	oldKey        *KeyShare
 	oldPublicKey  []byte
@@ -282,6 +285,8 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
 			return nil, nil

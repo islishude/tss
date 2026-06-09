@@ -70,6 +70,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 		if err != nil {
 			t.Fatal(err)
 		}
+		ps.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), sessionID))
 		sessions[party] = ps
 		pending = append(pending, out...)
 	}
@@ -81,7 +82,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandlePresignMessage(env)
+			out, err := sessions[party].HandlePresignMessage(deliverCGGMPEnv(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -182,7 +183,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandleRefreshMessage(env)
+			out, err := sessions[party].HandleRefreshMessage(deliverCGGMPEnv(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -265,7 +266,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandleSignMessage(env)
+			out, err := sessions[party].HandleSignMessage(deliverCGGMPEnv(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -352,7 +353,7 @@ func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandlePresignMessage(env)
+			out, err := sessions[party].HandlePresignMessage(deliverCGGMPEnv(env))
 			if err != nil {
 				t.Fatal(err)
 			}

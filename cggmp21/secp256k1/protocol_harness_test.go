@@ -46,11 +46,13 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 	}
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
+	ps := tss.PartySet(parties)
 	for _, id := range parties {
 		kg, out, err := StartKeygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
 		if err != nil {
 			t.Fatal(err)
 		}
+		kg.SetGuard(testCGGMP21Guard(id, ps, session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -62,7 +64,10 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			if _, err := sessions[id].HandleKeygenMessage(env); err != nil {
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
+			if _, err := sessions[id].HandleKeygenMessage(delivered); err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
 		}
@@ -94,6 +99,7 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 		if err != nil {
 			t.Fatal(err)
 		}
+		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -159,12 +165,18 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 	}
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
+	ps := tss.PartySet(signers)
 	for _, id := range signers {
 		session, out, err := StartPresignWithContext(shares[id], sessionID, signers, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testCGGMP21Guard(id, ps, sessionID))
 		presignSessions[id] = session
+		for i := range out {
+			out[i].Security.Authenticated = true
+			out[i].Security.AuthenticatedParty = out[i].From
+		}
 		messages = append(messages, out...)
 	}
 	for len(messages) > 0 {
@@ -177,6 +189,10 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 			out, err := presignSessions[id].HandlePresignMessage(env)
 			if err != nil {
 				t.Fatal(err)
+			}
+			for i := range out {
+				out[i].Security.Authenticated = true
+				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			messages = append(messages, out...)
 		}
@@ -292,6 +308,14 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		t.Fatal(err)
 	}
 	dealerParties = tss.SortParties(dealerParties)
+	allParties := make(tss.PartySet, 0, len(dealerParties)+len(newParties))
+	allParties = append(allParties, dealerParties...)
+	for _, id := range newParties {
+		if !allParties.Contains(id) {
+			allParties = append(allParties, id)
+		}
+	}
+	allParties = allParties.Sorted()
 	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold)
 	if err != nil {
 		t.Fatal(err)
@@ -310,6 +334,7 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 			t.Fatalf("start old dealer %d: %v", id, err)
 		}
 		sessions[id] = session
+		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		queue = append(queue, out...)
 	}
 	for _, id := range newParties {
@@ -321,6 +346,7 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 			t.Fatalf("start new receiver %d: %v", id, err)
 		}
 		sessions[id] = session
+		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		queue = append(queue, out...)
 	}
 	deliverCGGMP21ReshareMessages(t, queue, sessions)
@@ -345,9 +371,16 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := session.HandleReshareMessage(env)
+			delivered := env
+			delivered.Security.Authenticated = true
+			delivered.Security.AuthenticatedParty = env.From
+			out, err := session.HandleReshareMessage(delivered)
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			for i := range out {
+				out[i].Security.Authenticated = true
+				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			queue = append(queue, out...)
 		}

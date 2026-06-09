@@ -35,7 +35,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 
 	// --- Presign ---
@@ -45,7 +45,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		PayloadType:          payloadPresignRound1,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
@@ -69,7 +69,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		PayloadType:          payloadPresignRound3,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 
 	// --- Sign ---
@@ -79,7 +79,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		PayloadType:          payloadSignPartial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityRequired,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 
 	// --- Refresh ---
@@ -124,7 +124,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		PayloadType:          payloadReshareReceiverMaterial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
-		BroadcastConsistency: tss.BroadcastConsistencyNone,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	// Reshare round 2 uses payloadKeygenConfirmation (already registered in keygen section)
 )

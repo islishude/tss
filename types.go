@@ -96,21 +96,25 @@ const (
 	BroadcastConsistencyRequired
 )
 
-// ReplayKey uniquely identifies one protocol message for replay detection.
-type ReplayKey struct {
-	Protocol       ProtocolID
-	SessionID      SessionID
-	Round          uint8
-	From           PartyID
-	To             PartyID
-	PayloadType    PayloadType
-	TranscriptHash [32]byte
+// MessageSlotKey identifies a unique protocol message slot for equivocation detection.
+// It does NOT include the transcript hash — two different payloads occupying the same
+// slot with different transcript hashes constitute equivocation.
+type MessageSlotKey struct {
+	Protocol    ProtocolID
+	SessionID   SessionID
+	Round       uint8
+	From        PartyID
+	To          PartyID
+	PayloadType PayloadType
 }
 
-// ReplayCache detects replayed protocol messages.
-// MarkIfNew returns true on first use of a key and false on subsequent uses.
+// ReplayCache detects replayed and equivocating protocol messages.
+// CheckAndStore atomically checks whether a message slot has been seen and:
+//   - Stores the transcript hash and returns nil when the slot is new.
+//   - Returns [ErrDuplicateMessage] when the slot exists with the same transcript hash.
+//   - Returns [ErrEquivocation] when the slot exists with a different transcript hash.
 type ReplayCache interface {
-	MarkIfNew(key ReplayKey) bool
+	CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error
 }
 
 // EnvelopeInput carries the caller-provided fields for constructing an Envelope.

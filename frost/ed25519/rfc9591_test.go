@@ -142,19 +142,24 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	key1 := rfc9591KeyShare(t, 1, v.p1Share, v)
 	key3 := rfc9591KeyShare(t, 3, v.p3Share, v)
 
-	var sessionID tss.SessionID
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
 	s1, out1, err := StartSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
 		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	s1.SetGuard(testFROSTGuard(key1.Party, tss.PartySet(key1.Parties), sessionID))
 	s3, out3, err := StartSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
 		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
+	s3.SetGuard(testFROSTGuard(key3.Party, tss.PartySet(key3.Parties), sessionID))
 
 	if !bytes.Equal(s1.dNonce, v.p1HidingNonce) || !bytes.Equal(s1.eNonce, v.p1BindingNonce) {
 		t.Fatal("P1 nonce generation does not match RFC vector")
@@ -165,18 +170,18 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	assertCommitmentEnvelope(t, out1[0], v.p1HidingCommitment, v.p1BindingCommitment)
 	assertCommitmentEnvelope(t, out3[0], v.p3HidingCommitment, v.p3BindingCommitment)
 
-	p1Partial, err := s1.HandleSignMessage(out3[0])
+	p1Partial, err := s1.HandleSignMessage(deliverEnv(out3[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p3Partial, err := s3.HandleSignMessage(out1[0])
+	p3Partial, err := s3.HandleSignMessage(deliverEnv(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertPartialEnvelope(t, p1Partial[0], v.p1SignatureShare)
 	assertPartialEnvelope(t, p3Partial[0], v.p3SignatureShare)
 
-	if _, err := s1.HandleSignMessage(p3Partial[0]); err != nil {
+	if _, err := s1.HandleSignMessage(deliverEnv(p3Partial[0])); err != nil {
 		t.Fatal(err)
 	}
 	sig, ok := s1.Signature()

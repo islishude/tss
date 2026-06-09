@@ -25,6 +25,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 
 	reshareSessions := make(map[tss.PartyID]*ReshareSession, 4)
 	messages := make([]tss.Envelope, 0)
+	allPs := tss.PartySet{1, 2, 3, 4}
 	for _, id := range oldParties {
 		session, out, err := StartReshare(oldShares[id], newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
@@ -35,6 +36,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testFROSTGuard(id, allPs, sessionID))
 		reshareSessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -48,6 +50,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	recipient.SetGuard(testFROSTGuard(4, allPs, sessionID))
 	reshareSessions[4] = recipient
 
 	deliverReshareMessages(t, []tss.PartyID{1, 2, 3, 4}, messages, reshareSessions)
@@ -185,6 +188,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sessionID))
 	_, out2, err := StartReshare(shares[2], parties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   parties,
@@ -194,7 +198,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(out2[0]); err != nil {
+	if _, err := session.HandleReshareMessage(deliverEnv(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 
@@ -216,7 +220,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	bad.Payload = badPayload
 	bad = bad.RecomputeTranscriptHash()
 
-	_, err = session.HandleReshareMessage(bad)
+	_, err = session.HandleReshareMessage(deliverEnv(bad))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if !session.aborted {
 		t.Fatal("verification error did not abort reshare session")
@@ -225,7 +229,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 		t.Fatal("aborted reshare session retained share references")
 	}
 
-	_, err = session.HandleReshareMessage(out2[1])
+	_, err = session.HandleReshareMessage(deliverEnv(out2[1]))
 	if err == nil || !strings.Contains(err.Error(), "reshare session is aborted") {
 		t.Fatalf("expected terminal aborted error, got %v", err)
 	}

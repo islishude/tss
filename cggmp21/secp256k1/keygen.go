@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sync"
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -33,6 +34,8 @@ type KeygenOptions struct {
 
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
+	mu sync.Mutex
+
 	cfg            tss.ThresholdConfig
 	log            tss.Logger
 	commits        map[tss.PartyID][][]byte
@@ -77,18 +80,17 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
+// SetGuard attaches an envelope guard to the session. It must be called before
+// processing any inbound messages. A nil guard causes [HandleKeygenMessage] to
+// return [tss.ErrMissingEnvelopeGuard].
 func (s *KeygenSession) SetGuard(g *tss.EnvelopeGuard) {
 	if s != nil {
 		s.guard = g
 	}
 }
 
-// NewGuard creates an EnvelopeGuard configured for this session from the
-// production CGGMP21 policy set. cache may be nil to use an in-memory cache
-// suitable for testing; production deployments must supply a durable ReplayCache.
+// NewGuard creates an EnvelopeGuard suitable for testing this session.
+// Production callers must use [tss.GuardConfig.BuildGuard] with a real AckVerifier.
 func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
 	if s == nil {
 		return nil, errors.New("nil keygen session")
@@ -100,7 +102,6 @@ func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, err
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *KeygenSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self, CGGMP21Policies)
 }
@@ -112,6 +113,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if s.completed {
 		return nil, completedSessionError(env.Round, env.From)
 	}

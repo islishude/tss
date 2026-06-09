@@ -126,18 +126,33 @@ func VerifyBroadcastAck(env Envelope, ack BroadcastAck, verifier BroadcastAckVer
 	return verifier.VerifyAck(ack.Party, digest, ack.Signature)
 }
 
-// VerifyBroadcastCertificateWithSignatures performs full certificate validation
-// including individual ack signature verification.
-func VerifyBroadcastCertificateWithSignatures(env Envelope, parties PartySet, cert *BroadcastCertificate, verifier BroadcastAckVerifier) error {
-	if err := cert.Verify(env, parties); err != nil {
+// VerifyFull performs complete certificate validation: structure checks plus
+// individual ack signature verification against the provided verifier.
+// Production code must use this method; [VerifyStructure] is for tests and
+// low-level parsing only.
+func (c *BroadcastCertificate) VerifyFull(env Envelope, parties PartySet, verifier BroadcastAckVerifier) error {
+	if err := c.VerifyStructure(env, parties); err != nil {
 		return err
 	}
-	for _, ack := range cert.Acks {
+	if verifier == nil {
+		return fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, ErrMissingAckVerifier)
+	}
+	for _, ack := range c.Acks {
 		if err := VerifyBroadcastAck(env, ack, verifier); err != nil {
 			return fmt.Errorf("%w: party %d: %w", ErrInvalidBroadcastCertificate, ack.Party, err)
 		}
 	}
 	return nil
+}
+
+// VerifyBroadcastCertificateWithSignatures performs full certificate validation
+// including individual ack signature verification.
+// Prefer [BroadcastCertificate.VerifyFull] for new code.
+func VerifyBroadcastCertificateWithSignatures(env Envelope, parties PartySet, cert *BroadcastCertificate, verifier BroadcastAckVerifier) error {
+	if cert == nil {
+		return ErrMissingBroadcastCertificate
+	}
+	return cert.VerifyFull(env, parties, verifier)
 }
 
 // BroadcastConsistency tracks the collection of broadcast acks for one
@@ -371,10 +386,10 @@ func (c *BroadcastCertificate) Clone() *BroadcastCertificate {
 	return &clone
 }
 
-// Verify checks that the certificate binds to env and that
-// every party acknowledged the same digest. It does not verify individual ack
-// signatures; the caller must supply a verifier for that.
-func (c *BroadcastCertificate) Verify(env Envelope, parties PartySet) error {
+// VerifyStructure checks that the certificate binds to env and that
+// every party acknowledged the same digest. It does NOT verify individual ack
+// signatures — use [VerifyFull] for production paths that require signature verification.
+func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) error {
 	if c == nil {
 		return ErrMissingBroadcastCertificate
 	}

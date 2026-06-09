@@ -52,6 +52,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	session.SetGuard(testFROSTGuard(shares[1].Party, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartSignWithOptions(shares[2], sessionID, signers, []byte("clear nonce"), SignOptions{
 		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x22}, 64)),
 	})
@@ -59,7 +60,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	round2, err := session.HandleSignMessage(out2[0])
+	round2, err := session.HandleSignMessage(deliverEnv(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -98,6 +99,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		session.SetGuard(testFROSTGuard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		round1[id] = out[0]
 	}
@@ -108,7 +110,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 			if env.From == receiver {
 				continue
 			}
-			out, err := sessions[receiver].HandleSignMessage(env)
+			out, err := sessions[receiver].HandleSignMessage(deliverEnv(env))
 			if err != nil {
 				t.Fatalf("deliver commitment from %d to %d: %v", env.From, receiver, err)
 			}
@@ -119,11 +121,11 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("expected two remote partials, got %d", len(round2))
 	}
 
-	if _, err := sessions[1].HandleSignMessage(round1[2]); err != nil {
+	if _, err := sessions[1].HandleSignMessage(deliverEnv(round1[2])); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range round2 {
-		if _, err := sessions[1].HandleSignMessage(env); err != nil {
+		if _, err := sessions[1].HandleSignMessage(deliverEnv(env)); err != nil {
 			t.Fatalf("early partial from %d returned fatal error: %v", env.From, err)
 		}
 	}
@@ -131,7 +133,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("signature completed before all commitments arrived: %x", sig)
 	}
 
-	out, err := sessions[1].HandleSignMessage(round1[3])
+	out, err := sessions[1].HandleSignMessage(deliverEnv(round1[3]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -164,3 +166,5 @@ func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, s
 	}
 	return commitment
 }
+
+// Helper to add test guards is already in frost_test.go (same package)

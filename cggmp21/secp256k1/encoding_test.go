@@ -241,6 +241,7 @@ func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
 	if err != nil {
 		f.Fatal(err)
 	}
+	s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 	round2 := deliverPresignMessagesTo(f, s2, 2, out1)
 	f.Add(round2[0].Payload)
 	f.Add([]byte(`{"delta":{},"sigma":{}}`))
