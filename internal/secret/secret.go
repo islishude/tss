@@ -59,6 +59,36 @@ func (s *Scalar) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("secret.Scalar must not be JSON-encoded")
 }
 
+// MarshalWireValue returns the fixed-length big-endian encoding for use by
+// internal/wire's "custom" field kind. It implements the wire.ValueMarshaler
+// interface via Go structural typing (no import of internal/wire required).
+func (s *Scalar) MarshalWireValue() ([]byte, error) {
+	if s == nil {
+		return nil, errors.New("nil scalar")
+	}
+	out := s.FixedBytes()
+	if len(out) == 0 {
+		return nil, errors.New("empty scalar")
+	}
+	return out, nil
+}
+
+// UnmarshalWireValue sets the scalar from fixed-length big-endian bytes for
+// use by internal/wire's "custom" field kind. It implements the
+// wire.ValueUnmarshaler interface via Go structural typing.
+// The input is copied so the caller retains ownership.
+func (s *Scalar) UnmarshalWireValue(in []byte) error {
+	if s == nil {
+		return errors.New("nil scalar")
+	}
+	if len(in) == 0 {
+		return errors.New("empty scalar")
+	}
+	s.buf = make([]byte, len(in))
+	copy(s.buf, in)
+	return nil
+}
+
 // Clone returns an independent copy of the scalar, or nil if s is nil.
 func (s *Scalar) Clone() *Scalar {
 	if s == nil {

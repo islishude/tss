@@ -22,18 +22,6 @@ func secpSecretScalarFromBig(x *big.Int) (*secret.Scalar, error) {
 	return newSecpSecretScalar(scalarBytes(x))
 }
 
-func secpSecretScalarBytes(s *secret.Scalar) ([]byte, error) {
-	if s == nil {
-		return nil, errors.New("nil secret scalar")
-	}
-	out := s.FixedBytes()
-	// check if the bytes encode a valid scalar
-	if _, err := secp.ScalarFromBytes(out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func secpScalarFromSecret(s *secret.Scalar) (secp.Scalar, error) {
 	if s == nil {
 		return secp.Scalar{}, errors.New("nil secret scalar")
@@ -53,4 +41,37 @@ func secpSecretBig(s *secret.Scalar) (*big.Int, error) {
 // big-endian form. x is reduced modulo the subgroup order before encoding.
 func scalarBytes(x *big.Int) []byte {
 	return secp.ScalarFromBigInt(x).Bytes()
+}
+
+// validateScalarRange checks that x is a strictly positive scalar below the
+// secp256k1 group order. Used in payload marshal/unmarshal wrappers to
+// complement wire-level bigpos validation (which cannot check the group order).
+func validateScalarRange(x *big.Int) error {
+	if x == nil {
+		return errors.New("nil scalar")
+	}
+	if x.Sign() <= 0 {
+		return errors.New("scalar must be positive")
+	}
+	if x.Cmp(secp.Order()) >= 0 {
+		return errors.New("scalar exceeds group order")
+	}
+	return nil
+}
+
+// validateScalarRangeNonZero checks that x is non-negative and below the
+// secp256k1 group order. Zero is allowed. It complements wire-level biguint
+// validation for protocol fields where zero is a valid value (e.g. partial
+// signature s_i before aggregation).
+func validateScalarRangeNonZero(x *big.Int) error {
+	if x == nil {
+		return errors.New("nil scalar")
+	}
+	if x.Sign() < 0 {
+		return errors.New("scalar must not be negative")
+	}
+	if x.Cmp(secp.Order()) >= 0 {
+		return errors.New("scalar exceeds group order")
+	}
+	return nil
 }

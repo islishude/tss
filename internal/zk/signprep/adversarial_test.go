@@ -177,14 +177,14 @@ func TestSignPrepProofFuzzVerify(t *testing.T) {
 		{
 			MPoint: kPoint, KCommitment: kPoint, MCommitment: kPoint,
 			DLEQA1: kPoint, DLEQA2: kPoint,
-			KResponse: scalarFixedBytes(one), MResponse: scalarFixedBytes(one),
-			DLEQResponse: scalarFixedBytes(one),
+			KResponse: mustNewSecretScalar(one.Bytes()), MResponse: scalarFixedBytes(one),
+			DLEQResponse: mustNewSecretScalar(one.Bytes()),
 		}, // structurally valid but semantically wrong
 		{
 			MPoint: make([]byte, 33), KCommitment: kPoint, MCommitment: kPoint,
 			DLEQA1: kPoint, DLEQA2: kPoint,
-			KResponse: []byte{0x00}, MResponse: scalarFixedBytes(one),
-			DLEQResponse: scalarFixedBytes(one),
+			KResponse: mustNewSecretScalar([]byte{0x00}), MResponse: scalarFixedBytes(one),
+			DLEQResponse: mustNewSecretScalar(one.Bytes()),
 		}, // invalid response
 	}
 	for i, p := range randomProofs {

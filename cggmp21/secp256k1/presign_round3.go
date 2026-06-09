@@ -40,7 +40,7 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 	// (round and duplicate checks done in dispatcher)
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	delta, err := secp.ScalarFromBytes(p.Delta)
+	delta := secp.ScalarFromBigInt(p.Delta)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -117,7 +117,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		EncK:                 slices.Clone(s.round1[from].EncK),
 		PaillierPublicKey:    slices.Clone(s.round1[from].PaillierPublicKey),
 		Round1Echo:           s.round1Echo(),
-		Delta:                slices.Clone(p.Delta),
+		Delta:                scalarBytes(p.Delta),
 	}
 	return signprep.Verify(stmt, proof)
 }
@@ -125,7 +125,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 	return append(fields,
-		hashEvidenceField("delta_hash", p.Delta),
+		hashEvidenceField("delta_hash", scalarBytes(p.Delta)),
 		hashEvidenceField(evidenceFieldSignVerifyKPointHash, p.KPoint),
 		hashEvidenceField(evidenceFieldSignVerifyChiPointHash, p.ChiPoint),
 		hashEvidenceField(evidenceFieldSignPrepProofHash, p.Proof),
@@ -249,7 +249,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 
 	payload, err := marshalPresignRound3Payload(presignRound3Payload{
-		Delta:    scalarBytes(deltaShare),
+		Delta:    deltaShare,
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proofBytes,

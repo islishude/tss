@@ -49,13 +49,13 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badShare := new(big.Int).SetBytes(payload.Share)
+	badShare := new(big.Int).Set(payload.Share)
 	badShare.Add(badShare, big.NewInt(1))
 	badShare.Mod(badShare, secp.Order())
 	if badShare.Sign() == 0 {
 		badShare.SetInt64(1)
 	}
-	payload.Share = scalarBytes(badShare)
+	payload.Share = badShare
 	dealer2Out[1].Payload, err = marshalReshareSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)

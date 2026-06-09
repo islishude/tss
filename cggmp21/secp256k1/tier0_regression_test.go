@@ -142,7 +142,7 @@ func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
 
 func TestFast_SignPartialPayloadRejectsMissingDigestHash(t *testing.T) {
 	p := signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          nil, // missing
@@ -155,7 +155,7 @@ func TestFast_SignPartialPayloadRejectsMissingDigestHash(t *testing.T) {
 
 func TestFast_SignPartialPayloadRejectsMissingPartialEquationHash(t *testing.T) {
 	p := signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -233,7 +233,7 @@ func TestFast_PresignRound3PayloadRejectsEmptyProof(t *testing.T) {
 	one := big.NewInt(1)
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 	chiPoint := kPoint
-	p := presignRound3Payload{Delta: scalarBytes(one), KPoint: kPoint, ChiPoint: chiPoint, Proof: nil}
+	p := presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: chiPoint, Proof: nil}
 	if _, err := marshalPresignRound3Payload(p); err == nil {
 		t.Fatal("expected rejection of empty proof in round3 payload")
 	}
@@ -243,7 +243,7 @@ func TestFast_PresignRound3PayloadRejectsNonCanonicalKPoint(t *testing.T) {
 	one := big.NewInt(1)
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 	proof := mustMinimalSignPrepProofForTest(t)
-	p := presignRound3Payload{Delta: scalarBytes(one), KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof}
+	p := presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof}
 	if _, err := marshalPresignRound3Payload(p); err == nil {
 		t.Fatal("expected rejection of non-canonical KPoint in round3 payload")
 	}

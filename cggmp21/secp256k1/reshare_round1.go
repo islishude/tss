@@ -86,7 +86,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		sharePayload, err := marshalReshareSharePayload(reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
-			Share:                scalarBytes(share),
+			Share:                share,
 			DealerCommitmentHash: commitmentsHash,
 		})
 		if err != nil {
@@ -231,10 +231,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)) {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
 	}
-	share, err := secp.ScalarFromBytes(p.Share)
-	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
-	}
+	share := secp.ScalarFromBigInt(p.Share)
 	if err := secp.VerifyShare(commitments, uint32(s.selfID), share); err != nil {
 		verifyErr := err
 		evidenceEnv, evErr := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload, true)

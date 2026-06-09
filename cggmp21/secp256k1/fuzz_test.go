@@ -120,7 +120,7 @@ func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
 
 func FuzzCGGMP21SignPartialDecode(f *testing.F) {
 	seed, err := marshalSignPartialPayload(signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   make([]byte, sha256.Size),
 		PresignContext:      bytes.Repeat([]byte{1}, sha256.Size),
 		DigestHash:          make([]byte, sha256.Size),

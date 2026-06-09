@@ -5,6 +5,7 @@ import (
 
 	"github.com/islishude/tss"
 
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -22,7 +23,7 @@ type keyShareWire struct {
 	Threshold            int                            `wire:"2,u32"`
 	Parties              []tss.PartyID                  `wire:"3,u32list"`
 	PublicKey            []byte                         `wire:"4,bytes"`
-	Secret               []byte                         `wire:"5,bytes"`
+	Secret               *secret.Scalar                 `wire:"5,custom,len=32"`
 	GroupCommitments     [][]byte                       `wire:"6,byteslist"`
 	VerificationShares   []wire.PartyBytes[tss.PartyID] `wire:"7,partybytes"`
 	KeygenTranscriptHash []byte                         `wire:"8,bytes"`
@@ -38,10 +39,6 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
 func (k *KeyShare) toWire() (*keyShareWire, error) {
-	secretBytes, err := edSecretScalarBytes(k.secret)
-	if err != nil {
-		return nil, err
-	}
 	shares := make([]wire.PartyBytes[tss.PartyID], len(k.VerificationShares))
 	for i, s := range k.VerificationShares {
 		shares[i] = wire.PartyBytes[tss.PartyID]{Party: s.Party, Bytes: s.PublicKey}
@@ -51,7 +48,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		Threshold:            k.Threshold,
 		Parties:              k.Parties,
 		PublicKey:            k.PublicKey,
-		Secret:               secretBytes,
+		Secret:               k.secret,
 		GroupCommitments:     k.GroupCommitments,
 		VerificationShares:   shares,
 		KeygenTranscriptHash: k.KeygenTranscriptHash,
@@ -66,8 +63,7 @@ func (w keyShareWire) toKeyShare() (*KeyShare, error) {
 	if err != nil {
 		return nil, fmt.Errorf("keygen session id: %w", err)
 	}
-	secretScalar, err := newEdSecretScalar(w.Secret)
-	if err != nil {
+	if _, err := edScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	shares := make([]VerificationShare, len(w.VerificationShares))
@@ -81,7 +77,7 @@ func (w keyShareWire) toKeyShare() (*KeyShare, error) {
 		Parties:              w.Parties,
 		PublicKey:            w.PublicKey,
 		ChainCode:            w.ChainCode,
-		secret:               secretScalar,
+		secret:               w.Secret,
 		GroupCommitments:     w.GroupCommitments,
 		VerificationShares:   shares,
 		KeygenSessionID:      sid,

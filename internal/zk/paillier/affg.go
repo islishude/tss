@@ -429,22 +429,22 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 
 // affGProofWire is the wire DTO for AffGProof.
 type affGProofWire struct {
-	Version        uint16 `wire:"1,u16"`
-	A              []byte `wire:"2,bytes"`
-	Bx             []byte `wire:"3,bytes"`
-	By             []byte `wire:"4,bytes"`
-	E              []byte `wire:"5,bytes"`
-	S              []byte `wire:"6,bytes"`
-	F              []byte `wire:"7,bytes"`
-	T              []byte `wire:"8,bytes"`
-	Y              []byte `wire:"9,bytes"`
-	Z1             []byte `wire:"10,bytes"`
-	Z2             []byte `wire:"11,bytes"`
-	Z3             []byte `wire:"12,bytes"`
-	Z4             []byte `wire:"13,bytes"`
-	W              []byte `wire:"14,bytes"`
-	WY             []byte `wire:"15,bytes"`
-	TranscriptHash []byte `wire:"16,bytes"`
+	Version        uint16         `wire:"1,u16"`
+	A              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	Bx             secp.WirePoint `wire:"3,custom,max_bytes=point"`
+	By             *big.Int       `wire:"4,bigpos,max_bytes=paillier_modulus"`
+	E              *big.Int       `wire:"5,bigpos,max_bytes=challenge"`
+	S              *big.Int       `wire:"6,bigpos,max_bytes=paillier_modulus"`
+	F              *big.Int       `wire:"7,bigpos,max_bytes=paillier_modulus"`
+	T              *big.Int       `wire:"8,bigpos,max_bytes=paillier_modulus"`
+	Y              *big.Int       `wire:"9,bigpos,max_bytes=challenge"`
+	Z1             *big.Int       `wire:"10,bigint,max_bytes=signed_response"`
+	Z2             *big.Int       `wire:"11,bigint,max_bytes=signed_response"`
+	Z3             *big.Int       `wire:"12,bigint,max_bytes=signed_response"`
+	Z4             *big.Int       `wire:"13,bigint,max_bytes=signed_response"`
+	W              *big.Int       `wire:"14,bigpos,max_bytes=paillier_modulus"`
+	WY             *big.Int       `wire:"15,bigpos,max_bytes=challenge"`
+	TranscriptHash []byte         `wire:"16,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for affGProofWire.
@@ -458,26 +458,22 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil AffGProof")
 	}
-	bxBytes, err := secp.PointBytes(p.Bx)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: Bx: %w", err)
-	}
 	return wire.Marshal(affGProofWire{
 		Version:        p.Version,
-		A:              p.A.Bytes(),
-		Bx:             bxBytes,
-		By:             p.By.Bytes(),
-		E:              p.E.Bytes(),
-		S:              p.S.Bytes(),
-		F:              p.F.Bytes(),
-		T:              p.T.Bytes(),
-		Y:              p.Y.Bytes(),
-		Z1:             EncodeSigned(p.Z1),
-		Z2:             EncodeSigned(p.Z2),
-		Z3:             EncodeSigned(p.Z3),
-		Z4:             EncodeSigned(p.Z4),
-		W:              p.W.Bytes(),
-		WY:             p.WY.Bytes(),
+		A:              p.A,
+		Bx:             secp.WirePoint{P: p.Bx},
+		By:             p.By,
+		E:              p.E,
+		S:              p.S,
+		F:              p.F,
+		T:              p.T,
+		Y:              p.Y,
+		Z1:             p.Z1,
+		Z2:             p.Z2,
+		Z3:             p.Z3,
+		Z4:             p.Z4,
+		W:              p.W,
+		WY:             p.WY,
 		TranscriptHash: p.TranscriptHash,
 	})
 }
@@ -491,78 +487,22 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 	if w.Version != affGProofVersion {
 		return nil, fmt.Errorf("unsupported AffGProof version %d", w.Version)
 	}
-	a, err := DecodePositive(w.A)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid A: %w", err)
-	}
-	Bx, err := secp.PointFromBytes(w.Bx)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid Bx: %w", err)
-	}
-	by, err := DecodePositive(w.By)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid By: %w", err)
-	}
-	eVal, err := DecodePositive(w.E)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid E: %w", err)
-	}
-	sVal, err := DecodePositive(w.S)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid S: %w", err)
-	}
-	fVal, err := DecodePositive(w.F)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid F: %w", err)
-	}
-	tVal, err := DecodePositive(w.T)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid T: %w", err)
-	}
-	y, err := DecodePositive(w.Y)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid Y: %w", err)
-	}
-	z1, err := DecodeSigned(w.Z1)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid z1: %w", err)
-	}
-	z2, err := DecodeSigned(w.Z2)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid z2: %w", err)
-	}
-	z3, err := DecodeSigned(w.Z3)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid z3: %w", err)
-	}
-	z4, err := DecodeSigned(w.Z4)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid z4: %w", err)
-	}
-	wVal, err := DecodePositive(w.W)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid W: %w", err)
-	}
-	wy, err := DecodePositive(w.WY)
-	if err != nil {
-		return nil, fmt.Errorf("AffGProof: invalid WY: %w", err)
-	}
 	return &AffGProof{
 		Version:        w.Version,
-		A:              a,
-		Bx:             Bx,
-		By:             by,
-		E:              eVal,
-		S:              sVal,
-		F:              fVal,
-		T:              tVal,
-		Y:              y,
-		Z1:             z1,
-		Z2:             z2,
-		Z3:             z3,
-		Z4:             z4,
-		W:              wVal,
-		WY:             wy,
+		A:              w.A,
+		Bx:             w.Bx.P,
+		By:             w.By,
+		E:              w.E,
+		S:              w.S,
+		F:              w.F,
+		T:              w.T,
+		Y:              w.Y,
+		Z1:             w.Z1,
+		Z2:             w.Z2,
+		Z3:             w.Z3,
+		Z4:             w.Z4,
+		W:              w.W,
+		WY:             w.WY,
 		TranscriptHash: w.TranscriptHash,
 	}, nil
 }

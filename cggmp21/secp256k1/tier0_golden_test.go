@@ -41,7 +41,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 // TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
-	payload := keygenSharePayload{Share: scalarBytes(big.NewInt(1))}
+	payload := keygenSharePayload{Share: big.NewInt(1)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 // sign partial payloads. No keygen or crypto is required.
 func TestFast_GoldenSignPartialPayload(t *testing.T) {
 	payload := signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -107,7 +107,7 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
 	proof := mustMinimalSignPrepProofForTest(t)
 	payload := presignRound3Payload{
-		Delta:    scalarBytes(big.NewInt(42)),
+		Delta:    big.NewInt(42),
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,

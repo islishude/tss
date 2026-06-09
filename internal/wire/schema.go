@@ -2,6 +2,7 @@ package wire
 
 import (
 	"fmt"
+	"math/big"
 	"reflect"
 	"sort"
 	"strconv"
@@ -24,6 +25,10 @@ const (
 	kindPartyBytes
 	kindPartyBytePairs
 	kindNested
+	kindCustom
+	kindBigInt
+	kindBigUint
+	kindBigPos
 )
 
 // fieldSchema holds the parsed information for a single wire-tagged struct field.
@@ -170,6 +175,12 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		}
 	}
 
+	// Validate len=N against array length for bytes fields.
+	if fs.kind == kindBytes && fs.fixedLen > 0 && f.Type.Kind() == reflect.Array {
+		if f.Type.Len() != fs.fixedLen {
+			return fieldSchema{}, fmt.Errorf("field %s: len=%d does not match array length %d", f.Name, fs.fixedLen, f.Type.Len())
+		}
+	}
 	return fs, nil
 }
 
@@ -242,6 +253,31 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 			return 0, fmt.Errorf("nested requires Message implementation, got %s", t)
 		}
 		return kindNested, nil
+	case "custom":
+		// Any type is accepted at schema-parse time. Interface checks
+		// (ValueMarshaler / ValueUnmarshaler) happen at encode/decode.
+		return kindCustom, nil
+	case "bigint":
+		bigType := reflect.TypeFor[big.Int]()
+		ptrBigType := reflect.TypeFor[*big.Int]()
+		if t != bigType && t != ptrBigType {
+			return 0, fmt.Errorf("bigint requires big.Int or *big.Int, got %s", t)
+		}
+		return kindBigInt, nil
+	case "biguint":
+		bigType := reflect.TypeFor[big.Int]()
+		ptrBigType := reflect.TypeFor[*big.Int]()
+		if t != bigType && t != ptrBigType {
+			return 0, fmt.Errorf("biguint requires big.Int or *big.Int, got %s", t)
+		}
+		return kindBigUint, nil
+	case "bigpos":
+		bigType := reflect.TypeFor[big.Int]()
+		ptrBigType := reflect.TypeFor[*big.Int]()
+		if t != bigType && t != ptrBigType {
+			return 0, fmt.Errorf("bigpos requires big.Int or *big.Int, got %s", t)
+		}
+		return kindBigPos, nil
 	default:
 		return 0, fmt.Errorf("unknown wire kind %q", kindStr)
 	}

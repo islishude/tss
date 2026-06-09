@@ -149,7 +149,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: scalarBytes(share)})
+		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: share})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -321,7 +321,7 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	// (direct-confidential, duplicate checks done in dispatcher)
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	share, err := secp.ScalarFromBytes(p.Share)
+	share := secp.ScalarFromBigInt(p.Share)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

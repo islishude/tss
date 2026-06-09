@@ -91,7 +91,7 @@ func (reshareReceiverMaterialPayload) WireVersion() uint16 { return tss.Version 
 type reshareSharePayload struct {
 	Dealer               tss.PartyID `wire:"1,u32"`
 	Receiver             tss.PartyID `wire:"2,u32"`
-	Share                []byte      `wire:"3,bytes"`
+	Share                *big.Int    `wire:"3,bigpos,max_bytes=scalar"`
 	DealerCommitmentHash []byte      `wire:"4,bytes"`
 }
 
@@ -412,7 +412,7 @@ func cloneReshareSharePayload(p reshareSharePayload) reshareSharePayload {
 	return reshareSharePayload{
 		Dealer:               p.Dealer,
 		Receiver:             p.Receiver,
-		Share:                append([]byte(nil), p.Share...),
+		Share:                new(big.Int).Set(p.Share),
 		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
 	}
 }
@@ -514,7 +514,7 @@ func (s *ReshareSession) abort() {
 	s.aborted = true
 	clearBigIntMap(s.shares)
 	for id, pending := range s.pendingShares {
-		clear(pending.payload.Share)
+		pending.payload.Share = nil
 		clear(pending.payload.DealerCommitmentHash)
 		clear(pending.raw)
 		delete(s.pendingShares, id)

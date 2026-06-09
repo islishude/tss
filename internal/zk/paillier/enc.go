@@ -241,14 +241,14 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 
 // encProofWire is the wire DTO for EncProof.
 type encProofWire struct {
-	Version        uint16 `wire:"1,u16"`
-	S              []byte `wire:"2,bytes"`
-	A              []byte `wire:"3,bytes"`
-	C              []byte `wire:"4,bytes"`
-	Z1             []byte `wire:"5,bytes"`
-	Z2             []byte `wire:"6,bytes"`
-	Z3             []byte `wire:"7,bytes"`
-	TranscriptHash []byte `wire:"8,bytes"`
+	Version        uint16   `wire:"1,u16"`
+	S              *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	A              *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"`
+	C              *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"`
+	Z1             *big.Int `wire:"5,bigint,max_bytes=signed_response"`
+	Z2             *big.Int `wire:"6,bigpos,max_bytes=paillier_signed"`
+	Z3             *big.Int `wire:"7,bigint,max_bytes=signed_response"`
+	TranscriptHash []byte   `wire:"8,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for encProofWire.
@@ -267,12 +267,12 @@ func (p *EncProof) MarshalBinary() ([]byte, error) {
 	}
 	return wire.Marshal(encProofWire{
 		Version:        p.Version,
-		S:              p.S.Bytes(),
-		A:              p.A.Bytes(),
-		C:              p.C.Bytes(),
-		Z1:             EncodeSigned(p.Z1),
-		Z2:             p.Z2.Bytes(),
-		Z3:             EncodeSigned(p.Z3),
+		S:              p.S,
+		A:              p.A,
+		C:              p.C,
+		Z1:             p.Z1,
+		Z2:             p.Z2,
+		Z3:             p.Z3,
 		TranscriptHash: p.TranscriptHash,
 	})
 }
@@ -286,38 +286,14 @@ func UnmarshalEncProof(in []byte) (*EncProof, error) {
 	if w.Version != encProofVersion {
 		return nil, fmt.Errorf("unsupported EncProof version %d", w.Version)
 	}
-	s, err := DecodePositive(w.S)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid S: %w", err)
-	}
-	a, err := DecodePositive(w.A)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid A: %w", err)
-	}
-	c, err := DecodePositive(w.C)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid C: %w", err)
-	}
-	z1, err := DecodeSigned(w.Z1)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid z1: %w", err)
-	}
-	z2, err := DecodePositive(w.Z2)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid z2: %w", err)
-	}
-	z3, err := DecodeSigned(w.Z3)
-	if err != nil {
-		return nil, fmt.Errorf("EncProof: invalid z3: %w", err)
-	}
 	return &EncProof{
 		Version:        w.Version,
-		S:              s,
-		A:              a,
-		C:              c,
-		Z1:             z1,
-		Z2:             z2,
-		Z3:             z3,
+		S:              w.S,
+		A:              w.A,
+		C:              w.C,
+		Z1:             w.Z1,
+		Z2:             w.Z2,
+		Z3:             w.Z3,
 		TranscriptHash: w.TranscriptHash,
 	}, nil
 }

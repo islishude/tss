@@ -2,6 +2,9 @@ package wire
 
 import (
 	"bytes"
+	"math/big"
+	"reflect"
+	"strings"
 	"testing"
 )
 
@@ -637,5 +640,964 @@ func TestMessageWireTypeAndVersion(t *testing.T) {
 	var m Message = &ptrMethodMessage{}
 	if m.WireType() != "test.ptrmethod" || m.WireVersion() != 2 {
 		t.Fatalf("Message: type=%s version=%d", m.WireType(), m.WireVersion())
+	}
+}
+
+// ---- custom field test types -------------------------------------------------
+
+// customBytes is a simple domain type with value-receiver methods.
+type customBytes struct {
+	raw []byte
+}
+
+func (c customBytes) MarshalWireValue() ([]byte, error) {
+	if c.raw == nil {
+		return nil, errSentinel
+	}
+	out := make([]byte, len(c.raw))
+	copy(out, c.raw)
+	return out, nil
+}
+
+func (c *customBytes) UnmarshalWireValue(in []byte) error {
+	if len(in) == 0 {
+		return errSentinel
+	}
+	c.raw = make([]byte, len(in))
+	copy(c.raw, in)
+	return nil
+}
+
+// customPtrBytes is a domain type with pointer-receiver methods.
+type customPtrBytes struct {
+	raw []byte
+}
+
+func (c *customPtrBytes) MarshalWireValue() ([]byte, error) {
+	if c == nil {
+		return nil, errSentinel
+	}
+	out := make([]byte, len(c.raw))
+	copy(out, c.raw)
+	return out, nil
+}
+
+func (c *customPtrBytes) UnmarshalWireValue(in []byte) error {
+	if c == nil {
+		return errSentinel
+	}
+	c.raw = make([]byte, len(in))
+	copy(c.raw, in)
+	return nil
+}
+
+// customNoUnmarshal implements MarshalWireValue but NOT UnmarshalWireValue.
+type customNoUnmarshal struct {
+	raw []byte
+}
+
+func (c customNoUnmarshal) MarshalWireValue() ([]byte, error) {
+	return c.raw, nil
+}
+
+// customNoMarshal implements UnmarshalWireValue but NOT MarshalWireValue.
+type customNoMarshal struct {
+	raw []byte
+}
+
+func (c *customNoMarshal) UnmarshalWireValue(in []byte) error {
+	c.raw = make([]byte, len(in))
+	copy(c.raw, in)
+	return nil
+}
+
+// customNilReturn returns nil from MarshalWireValue.
+type customNilReturn struct{}
+
+func (c customNilReturn) MarshalWireValue() ([]byte, error) {
+	return nil, nil
+}
+
+func (c *customNilReturn) UnmarshalWireValue(in []byte) error {
+	return nil
+}
+
+// ---- custom field test messages ----------------------------------------------
+
+type customValueReceiverMessage struct {
+	Data customBytes `wire:"1,custom"`
+}
+
+func (m customValueReceiverMessage) WireType() string    { return "test.custom.valrecv" }
+func (m customValueReceiverMessage) WireVersion() uint16 { return 1 }
+
+type customPointerReceiverMessage struct {
+	Data customPtrBytes `wire:"1,custom"`
+}
+
+func (m customPointerReceiverMessage) WireType() string    { return "test.custom.ptrrecv" }
+func (m customPointerReceiverMessage) WireVersion() uint16 { return 1 }
+
+type customPointerFieldMessage struct {
+	Data *customBytes `wire:"1,custom,len=4"`
+}
+
+func (m customPointerFieldMessage) WireType() string    { return "test.custom.ptrfield" }
+func (m customPointerFieldMessage) WireVersion() uint16 { return 1 }
+
+type customFixedLenMessage struct {
+	Data customBytes `wire:"1,custom,len=32"`
+}
+
+func (m customFixedLenMessage) WireType() string    { return "test.custom.fixedlen" }
+func (m customFixedLenMessage) WireVersion() uint16 { return 1 }
+
+type customMaxBytesMessage struct {
+	Data customBytes `wire:"1,custom,max_bytes=field"`
+}
+
+func (m customMaxBytesMessage) WireType() string    { return "test.custom.maxbytes" }
+func (m customMaxBytesMessage) WireVersion() uint16 { return 1 }
+
+type customNoUnmarshalMessage struct {
+	Data customNoUnmarshal `wire:"1,custom"`
+}
+
+func (m customNoUnmarshalMessage) WireType() string    { return "test.custom.nounmarshal" }
+func (m customNoUnmarshalMessage) WireVersion() uint16 { return 1 }
+
+type customNoMarshalMessage struct {
+	Data customNoMarshal `wire:"1,custom"`
+}
+
+func (m customNoMarshalMessage) WireType() string    { return "test.custom.nomarshal" }
+func (m customNoMarshalMessage) WireVersion() uint16 { return 1 }
+
+type customNilReturnMessage struct {
+	Data customNilReturn `wire:"1,custom"`
+}
+
+func (m customNilReturnMessage) WireType() string    { return "test.custom.nilreturn" }
+func (m customNilReturnMessage) WireVersion() uint16 { return 1 }
+
+type customMultiFieldMessage struct {
+	First  customBytes `wire:"1,custom"`
+	Second uint32      `wire:"2,u32"`
+}
+
+func (m customMultiFieldMessage) WireType() string    { return "test.custom.multifield" }
+func (m customMultiFieldMessage) WireVersion() uint16 { return 1 }
+
+// ---- custom field tests ------------------------------------------------------
+
+func TestCustomRoundTripValueReceiver(t *testing.T) {
+	orig := customValueReceiverMessage{
+		Data: customBytes{raw: []byte{1, 2, 3, 4}},
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded customValueReceiverMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.Data.raw, []byte{1, 2, 3, 4}) {
+		t.Fatalf("round-trip mismatch: got %x", decoded.Data.raw)
+	}
+}
+
+func TestCustomRoundTripPointerReceiver(t *testing.T) {
+	orig := customPointerReceiverMessage{
+		Data: customPtrBytes{raw: []byte{5, 6, 7, 8}},
+	}
+	raw, err := Marshal(&orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded customPointerReceiverMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.Data.raw, []byte{5, 6, 7, 8}) {
+		t.Fatalf("round-trip mismatch: got %x", decoded.Data.raw)
+	}
+}
+
+func TestCustomPointerFieldAutoAlloc(t *testing.T) {
+	orig := customPointerFieldMessage{
+		Data: &customBytes{raw: []byte{9, 9, 9, 9}},
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Unmarshal into a nil pointer field — codec must auto-allocate.
+	var decoded customPointerFieldMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Data == nil {
+		t.Fatal("pointer field was not auto-allocated")
+	}
+	if !bytes.Equal(decoded.Data.raw, []byte{9, 9, 9, 9}) {
+		t.Fatalf("round-trip mismatch: got %x", decoded.Data.raw)
+	}
+}
+
+func TestCustomNilPointerMarshalFails(t *testing.T) {
+	orig := customPointerFieldMessage{Data: nil}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for nil custom pointer field")
+	}
+}
+
+func TestCustomMissingMarshalWireValue(t *testing.T) {
+	// customNoMarshalMessage.Data does not implement MarshalWireValue.
+	// But we can still try to marshal it — should fail.
+	orig := customNoMarshalMessage{}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for missing MarshalWireValue")
+	}
+}
+
+func TestCustomMissingUnmarshalWireValue(t *testing.T) {
+	// customNoUnmarshalMessage.Data does not implement UnmarshalWireValue.
+	// Marshal should work, but unmarshal should fail.
+	orig := customNoUnmarshalMessage{Data: customNoUnmarshal{raw: []byte{1}}}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customNoUnmarshalMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for missing UnmarshalWireValue")
+	}
+}
+
+func TestCustomMarshalWireValueReturnsNil(t *testing.T) {
+	orig := customNilReturnMessage{}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for MarshalWireValue returning nil")
+	}
+}
+
+func TestCustomFixedLenEnforced(t *testing.T) {
+	// Marshal with correct length.
+	orig := customFixedLenMessage{Data: customBytes{raw: make([]byte, 32)}}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customFixedLenMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	// Unmarshal with wrong length should fail.
+	// Marshal a message with wrong length by bypassing object-level Marshal.
+	fields := []Field{
+		{Tag: 1, Value: make([]byte, 16)}, // len=32 expected
+	}
+	raw, err = MarshalFields(1, "test.custom.fixedlen", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for wrong fixed length on custom field")
+	}
+}
+
+func TestCustomMaxBytesEnforced(t *testing.T) {
+	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hello")}}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Decode with a limit that is too small.
+	var decoded customMaxBytesMessage
+	err = Unmarshal(raw, &decoded,
+		WithLimitSet(LimitSet{"field": 3}))
+	if err == nil {
+		t.Fatal("expected error for exceeding max_bytes on custom field")
+	}
+
+	// Should succeed with adequate limit.
+	if err := Unmarshal(raw, &decoded,
+		WithLimitSet(LimitSet{"field": 10})); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestCustomMaxBytesNamedLimitMissing(t *testing.T) {
+	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hi")}}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Tag references "field" but LimitSet does not contain it.
+	var decoded customMaxBytesMessage
+	if err := Unmarshal(raw, &decoded,
+		WithLimitSet(LimitSet{"other": 100})); err == nil {
+		t.Fatal("expected error for missing named limit on custom field")
+	}
+}
+
+func TestCustomValueWithPointerReceiver(t *testing.T) {
+	// customPtrBytes has pointer-receiver methods.
+	// A non-pointer struct field should still work via CanAddr()
+	// when the parent message is passed by pointer.
+	orig := customPointerReceiverMessage{
+		Data: customPtrBytes{raw: []byte{10, 20}},
+	}
+	raw, err := Marshal(&orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customPointerReceiverMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.Data.raw, []byte{10, 20}) {
+		t.Fatalf("round-trip mismatch: got %x", decoded.Data.raw)
+	}
+}
+
+func TestCustomErrorWrapping(t *testing.T) {
+	// Trigger an error in UnmarshalWireValue by passing empty bytes
+	// to customBytes (which rejects empty input with errSentinel).
+	fields := []Field{
+		{Tag: 1, Value: []byte{}},
+		{Tag: 2, Value: Uint32(0)},
+	}
+	raw, err := MarshalFields(1, "test.custom.multifield", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customMultiFieldMessage
+	err = Unmarshal(raw, &decoded)
+	if err == nil {
+		t.Fatal("expected unmarshal error")
+	}
+	// Error should mention field name and tag.
+	if !strings.Contains(err.Error(), "First") || !strings.Contains(err.Error(), "tag 1") {
+		t.Fatalf("error should mention field name and tag: %v", err)
+	}
+}
+
+func TestCustomFieldOrdering(t *testing.T) {
+	orig := customMultiFieldMessage{
+		First:  customBytes{raw: []byte{1, 2}},
+		Second: 42,
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customMultiFieldMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decoded.First.raw, []byte{1, 2}) || decoded.Second != 42 {
+		t.Fatalf("field ordering broken: First=%x Second=%d", decoded.First.raw, decoded.Second)
+	}
+}
+
+func TestCustomExactTagSet(t *testing.T) {
+	// Extra tag should be rejected.
+	fields := []Field{
+		{Tag: 1, Value: []byte{1}},
+		{Tag: 2, Value: Uint32(42)},
+		{Tag: 3, Value: []byte("extra")}, // not in schema
+	}
+	raw, err := MarshalFields(1, "test.custom.multifield", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded customMultiFieldMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for extra field in custom message")
+	}
+
+	// Missing tag should be rejected.
+	fields = []Field{
+		{Tag: 1, Value: []byte{1}},
+	}
+	raw, err = MarshalFields(1, "test.custom.multifield", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for missing field in custom message")
+	}
+}
+
+func FuzzCustomField(f *testing.F) {
+	f.Add([]byte{1, 2, 3, 4})
+	f.Add([]byte{})
+	f.Add(make([]byte, 256))
+
+	f.Fuzz(func(t *testing.T, in []byte) {
+		// Construct a field with arbitrary bytes.
+		fields := []Field{
+			{Tag: 1, Value: in},
+		}
+		raw, err := MarshalFields(1, "test.custom.valrecv", fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded customValueReceiverMessage
+		// Unmarshal should either succeed or return a clean error — no panic.
+		_ = Unmarshal(raw, &decoded)
+	})
+}
+
+// ---- big integer test types --------------------------------------------------
+
+type bigIntSignedMessage struct {
+	Val *big.Int `wire:"1,bigint"`
+}
+
+func (m bigIntSignedMessage) WireType() string    { return "test.bigint.signed" }
+func (m bigIntSignedMessage) WireVersion() uint16 { return 1 }
+
+type bigUintMessage struct {
+	Val *big.Int `wire:"1,biguint"`
+}
+
+func (m bigUintMessage) WireType() string    { return "test.bigint.unsigned" }
+func (m bigUintMessage) WireVersion() uint16 { return 1 }
+
+type bigPosMessage struct {
+	Val *big.Int `wire:"1,bigpos"`
+}
+
+func (m bigPosMessage) WireType() string    { return "test.bigint.positive" }
+func (m bigPosMessage) WireVersion() uint16 { return 1 }
+
+type bigIntValueMessage struct {
+	Val big.Int `wire:"1,bigint"`
+}
+
+func (m bigIntValueMessage) WireType() string    { return "test.bigint.value" }
+func (m bigIntValueMessage) WireVersion() uint16 { return 1 }
+
+type bigIntMaxBytesMessage struct {
+	Val *big.Int `wire:"1,bigint,max_bytes=limit"`
+}
+
+func (m bigIntMaxBytesMessage) WireType() string    { return "test.bigint.maxbytes" }
+func (m bigIntMaxBytesMessage) WireVersion() uint16 { return 1 }
+
+type bigIntMultiFieldMessage struct {
+	Signed *big.Int `wire:"1,bigint"`
+	Pos    *big.Int `wire:"2,bigpos"`
+}
+
+func (m bigIntMultiFieldMessage) WireType() string    { return "test.bigint.multifield" }
+func (m bigIntMultiFieldMessage) WireVersion() uint16 { return 1 }
+
+// ---- bigint tests ------------------------------------------------------------
+
+func TestBigIntRoundTripZero(t *testing.T) {
+	orig := bigIntSignedMessage{Val: big.NewInt(0)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Sign() != 0 {
+		t.Fatalf("zero round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigIntRoundTripPositive(t *testing.T) {
+	orig := bigIntSignedMessage{Val: big.NewInt(258)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Cmp(big.NewInt(258)) != 0 {
+		t.Fatalf("positive round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigIntRoundTripNegative(t *testing.T) {
+	orig := bigIntSignedMessage{Val: big.NewInt(-258)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Cmp(big.NewInt(-258)) != 0 {
+		t.Fatalf("negative round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigIntNilPointerIsZero(t *testing.T) {
+	orig := bigIntSignedMessage{Val: nil}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Should encode as 0x00.
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val == nil || decoded.Val.Sign() != 0 {
+		t.Fatalf("nil pointer round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigIntCanonicalEncoding(t *testing.T) {
+	// Zero must encode as [0x00].
+	raw0, err := encodeBigIntSigned(big.NewInt(0))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw0, []byte{0x00}) {
+		t.Fatalf("zero encoding: %x", raw0)
+	}
+	// 258 must encode as [0x00, 0x01, 0x02].
+	rawPos, err := encodeBigIntSigned(big.NewInt(258))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rawPos, []byte{0x00, 0x01, 0x02}) {
+		t.Fatalf("positive encoding: %x", rawPos)
+	}
+	// -258 must encode as [0x01, 0x01, 0x02].
+	rawNeg, err := encodeBigIntSigned(big.NewInt(-258))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(rawNeg, []byte{0x01, 0x01, 0x02}) {
+		t.Fatalf("negative encoding: %x", rawNeg)
+	}
+}
+
+func TestBigIntCanonicalRemarshal(t *testing.T) {
+	orig := bigIntSignedMessage{Val: big.NewInt(12345)}
+	raw1, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw1, raw2) {
+		t.Fatal("bigint marshal is not deterministic")
+	}
+}
+
+func TestBigIntRejectInvalidSignByte(t *testing.T) {
+	// Construct a bigint with invalid sign byte 0x02.
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x02, 0x01}},
+	}
+	raw, err := MarshalFields(1, "test.bigint.signed", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for invalid sign byte")
+	}
+}
+
+func TestBigIntRejectNegativeZero(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x01}}, // sign=negative, empty magnitude
+	}
+	raw, err := MarshalFields(1, "test.bigint.signed", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for negative zero")
+	}
+}
+
+func TestBigIntRejectLeadingZeroMagnitude(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x00, 0x00, 0x01}}, // leading zero in magnitude
+	}
+	raw, err := MarshalFields(1, "test.bigint.signed", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for leading zero in magnitude")
+	}
+}
+
+func TestBigIntRejectEmptyEncoding(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{}}, // empty signed integer
+	}
+	raw, err := MarshalFields(1, "test.bigint.signed", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for empty signed integer encoding")
+	}
+}
+
+func TestBigIntPointerAutoAlloc(t *testing.T) {
+	orig := bigIntSignedMessage{Val: big.NewInt(42)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Unmarshal into nil pointer — codec must auto-allocate.
+	var decoded bigIntSignedMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val == nil {
+		t.Fatal("pointer field was not auto-allocated")
+	}
+	if decoded.Val.Cmp(big.NewInt(42)) != 0 {
+		t.Fatalf("auto-alloc round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigIntValueField(t *testing.T) {
+	orig := bigIntValueMessage{}
+	orig.Val.SetInt64(-999)
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntValueMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Cmp(big.NewInt(-999)) != 0 {
+		t.Fatalf("value field round-trip: got %v", &decoded.Val)
+	}
+}
+
+// ---- biguint tests -----------------------------------------------------------
+
+func TestBigUintRoundTripZero(t *testing.T) {
+	// Zero must encode as empty.
+	orig := bigUintMessage{Val: big.NewInt(0)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigUintMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Sign() != 0 {
+		t.Fatalf("zero round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigUintRoundTripPositive(t *testing.T) {
+	orig := bigUintMessage{Val: big.NewInt(258)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigUintMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Cmp(big.NewInt(258)) != 0 {
+		t.Fatalf("positive round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigUintRejectNegative(t *testing.T) {
+	orig := bigUintMessage{Val: big.NewInt(-1)}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for negative unsigned integer on marshal")
+	}
+}
+
+func TestBigUintRejectLeadingZero(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x00, 0x01}},
+	}
+	raw, err := MarshalFields(1, "test.bigint.unsigned", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigUintMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for leading zero in unsigned integer")
+	}
+}
+
+func TestBigUintNilPointerIsZero(t *testing.T) {
+	orig := bigUintMessage{Val: nil}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigUintMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val == nil || decoded.Val.Sign() != 0 {
+		t.Fatalf("nil round-trip for unsigned: got %v", decoded.Val)
+	}
+}
+
+// ---- bigpos tests ------------------------------------------------------------
+
+func TestBigPosRoundTrip(t *testing.T) {
+	orig := bigPosMessage{Val: big.NewInt(258)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigPosMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val.Cmp(big.NewInt(258)) != 0 {
+		t.Fatalf("positive round-trip: got %v", decoded.Val)
+	}
+}
+
+func TestBigPosRejectNil(t *testing.T) {
+	orig := bigPosMessage{Val: nil}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for nil positive integer")
+	}
+}
+
+func TestBigPosRejectZero(t *testing.T) {
+	orig := bigPosMessage{Val: big.NewInt(0)}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for zero positive integer")
+	}
+}
+
+func TestBigPosRejectNegative(t *testing.T) {
+	orig := bigPosMessage{Val: big.NewInt(-1)}
+	if _, err := Marshal(orig); err == nil {
+		t.Fatal("expected error for negative positive integer")
+	}
+}
+
+func TestBigPosRejectEmpty(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{}},
+	}
+	raw, err := MarshalFields(1, "test.bigint.positive", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigPosMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for empty positive integer")
+	}
+}
+
+func TestBigPosRejectLeadingZero(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x00, 0x01}},
+	}
+	raw, err := MarshalFields(1, "test.bigint.positive", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigPosMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected error for leading zero in positive integer")
+	}
+}
+
+func TestBigPosPointerAutoAlloc(t *testing.T) {
+	orig := bigPosMessage{Val: big.NewInt(7)}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigPosMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val == nil {
+		t.Fatal("positive pointer was not auto-allocated")
+	}
+	if decoded.Val.Cmp(big.NewInt(7)) != 0 {
+		t.Fatalf("auto-alloc round-trip: got %v", decoded.Val)
+	}
+}
+
+// ---- general big integer tests -----------------------------------------------
+
+func TestBigIntMaxBytesEnforced(t *testing.T) {
+	// Encode 258 as bigint -> [0x00, 0x01, 0x02] = 3 bytes.
+	// max_bytes=2 should reject.
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x00, 0x01, 0x02}},
+	}
+	raw, err := MarshalFields(1, "test.bigint.maxbytes", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntMaxBytesMessage
+	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"limit": 2}))
+	if err == nil {
+		t.Fatal("expected max_bytes error for oversized bigint")
+	}
+	// With adequate limit, should succeed.
+	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"limit": 10})); err != nil {
+		t.Fatalf("unmarshal with adequate limit: %v", err)
+	}
+}
+
+func TestBigIntErrorWrapping(t *testing.T) {
+	// Trigger a decode error with negative zero for bigint.
+	fields := []Field{
+		{Tag: 1, Value: []byte{0x01}},       // negative zero — invalid
+		{Tag: 2, Value: []byte{0x01, 0x02}}, // valid bigpos
+	}
+	raw, err := MarshalFields(1, "test.bigint.multifield", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntMultiFieldMessage
+	err = Unmarshal(raw, &decoded)
+	if err == nil {
+		t.Fatal("expected unmarshal error for negative zero")
+	}
+	if !strings.Contains(err.Error(), "Signed") || !strings.Contains(err.Error(), "tag 1") {
+		t.Fatalf("error should mention field name and tag: %v", err)
+	}
+}
+
+func TestBigIntFieldOrdering(t *testing.T) {
+	orig := bigIntMultiFieldMessage{
+		Signed: big.NewInt(-5),
+		Pos:    big.NewInt(3),
+	}
+	raw, err := Marshal(&orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigIntMultiFieldMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Signed.Cmp(big.NewInt(-5)) != 0 || decoded.Pos.Cmp(big.NewInt(3)) != 0 {
+		t.Fatalf("field ordering broken: Signed=%v Pos=%v", decoded.Signed, decoded.Pos)
+	}
+}
+
+func TestBigIntWrongKindOnNonBigIntFails(t *testing.T) {
+	type badType struct {
+		Val string `wire:"1,bigint"`
+	}
+	_, err := getSchema(reflect.TypeFor[badType]())
+	if err == nil {
+		t.Fatal("expected schema error for bigint on string field")
+	}
+}
+
+func TestBigUintWrongKindOnNonBigIntFails(t *testing.T) {
+	type badType struct {
+		Val string `wire:"1,biguint"`
+	}
+	_, err := getSchema(reflect.TypeFor[badType]())
+	if err == nil {
+		t.Fatal("expected schema error for biguint on string field")
+	}
+}
+
+func TestBigPosWrongKindOnNonBigIntFails(t *testing.T) {
+	type badType struct {
+		Val string `wire:"1,bigpos"`
+	}
+	_, err := getSchema(reflect.TypeFor[badType]())
+	if err == nil {
+		t.Fatal("expected schema error for bigpos on string field")
+	}
+}
+
+func FuzzBigIntField(f *testing.F) {
+	f.Add([]byte{0x00})
+	f.Add([]byte{0x00, 0x01, 0x02})
+	f.Add([]byte{0x01, 0x01})
+	f.Add([]byte{0x02, 0x01}) // invalid sign
+	f.Add([]byte{0x01})       // negative zero
+	f.Add([]byte{0x00, 0x00}) // leading zero
+	f.Add([]byte{})           // empty
+	f.Add(make([]byte, 256))
+
+	f.Fuzz(func(t *testing.T, in []byte) {
+		fields := []Field{
+			{Tag: 1, Value: in},
+		}
+		raw, err := MarshalFields(1, "test.bigint.signed", fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded bigIntSignedMessage
+		_ = Unmarshal(raw, &decoded)
+
+		// Also fuzz unsigned.
+		raw2, err2 := MarshalFields(1, "test.bigint.unsigned", fields)
+		if err2 != nil {
+			t.Fatal(err2)
+		}
+		var decoded2 bigUintMessage
+		_ = Unmarshal(raw2, &decoded2)
+
+		// Also fuzz positive.
+		raw3, err3 := MarshalFields(1, "test.bigint.positive", fields)
+		if err3 != nil {
+			t.Fatal(err3)
+		}
+		var decoded3 bigPosMessage
+		_ = Unmarshal(raw3, &decoded3)
+	})
+}
+
+// TestLenMismatchWithArrayLength verifies that len=N is validated against
+// the array length at schema parse time for bytes fields.
+func TestLenMismatchWithArrayLength(t *testing.T) {
+	// len=10 on a [8]byte field should fail.
+	type badLenArray struct {
+		Val [8]byte `wire:"1,bytes,len=10"`
+	}
+	_, err := getSchema(reflect.TypeFor[badLenArray]())
+	if err == nil {
+		t.Fatal("expected schema error for len=10 on [8]byte")
+	}
+
+	// len=8 on a [8]byte field should succeed.
+	type goodLenArray struct {
+		Val [8]byte `wire:"1,bytes,len=8"`
+	}
+	_, err = getSchema(reflect.TypeFor[goodLenArray]())
+	if err != nil {
+		t.Fatalf("unexpected error for len=8 on [8]byte: %v", err)
 	}
 }

@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Prove generates a signprep proof binding KPoint and ChiPoint to the presign
@@ -127,9 +128,9 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 		MCommitment:  mCommit,
 		DLEQA1:       dleqA1,
 		DLEQA2:       dleqA2,
-		KResponse:    kResponse.Bytes(),
+		KResponse:    mustNewSecretScalar(kResponse.Bytes()),
 		MResponse:    mResponse,
-		DLEQResponse: dleqResponse.Bytes(),
+		DLEQResponse: mustNewSecretScalar(dleqResponse.Bytes()),
 	}, nil
 }
 
@@ -194,4 +195,12 @@ func validateWitness(wit Witness) error {
 
 func scalarFixedBytes(x *big.Int) []byte {
 	return secp.ScalarFromBigInt(x).Bytes()
+}
+
+func mustNewSecretScalar(data []byte) *secret.Scalar {
+	s, err := secret.NewScalar(data, secp.ScalarSize)
+	if err != nil {
+		panic("signprep: invalid scalar: " + err.Error())
+	}
+	return s
 }

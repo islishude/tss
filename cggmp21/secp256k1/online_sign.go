@@ -98,7 +98,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		return nil, nil, fmt.Errorf("missing local verify share for party %d — presign may be corrupted", key.Party)
 	}
 	payload := signPartialPayload{
-		S:                 scalarBytes(partial),
+		S:                 partial,
 		PresignTranscript: slices.Clone(presign.TranscriptHash),
 		PresignContext:    slices.Clone(contextHash),
 		DigestHash:        digestHash(digest32, contextHash),
@@ -264,7 +264,7 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 		hashEvidenceField("observed_presign_transcript_hash", p.PresignTranscript),
 		rawEvidenceField("presign_context_hash", s.presign.ContextHash),
 		hashEvidenceField("observed_presign_context_hash", p.PresignContext),
-		hashEvidenceField("sign_partial_hash", p.S),
+		hashEvidenceField("sign_partial_hash", scalarBytes(p.S)),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
 	)
 	// Include the sender's (blamed party's) KPoint/ChiPoint hashes.
@@ -277,7 +277,7 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 		expectedEqHash := partialEquationHash(
 			s.sessionID, from, s.presign.TranscriptHash,
 			s.presign.ContextHash, s.digest,
-			s.presign.LittleR, p.S,
+			s.presign.LittleR, scalarBytes(p.S),
 			vs.KPoint, vs.ChiPoint,
 		)
 		fields = append(fields,
@@ -430,10 +430,7 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	if !bytes.Equal(p.DigestHash, expectedDigestHash) {
 		return nil, errors.New("digest hash mismatch")
 	}
-	sVal, err := secp.ScalarFromBytes(p.S)
-	if err != nil {
-		return nil, fmt.Errorf("invalid S scalar: %w", err)
-	}
+	sVal := secp.ScalarFromBigInt(p.S)
 	vs, ok := presignVerifyShare(s.presign, from)
 	if !ok {
 		return nil, fmt.Errorf("missing verify share for party %d", from)
@@ -453,7 +450,7 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	expectedEqHash := partialEquationHash(
 		s.sessionID, from, s.presign.TranscriptHash,
 		s.presign.ContextHash, s.digest,
-		littleR.Bytes(), p.S,
+		littleR.Bytes(), scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)
 	if !bytes.Equal(p.PartialEquationHash, expectedEqHash) {

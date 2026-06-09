@@ -83,13 +83,13 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badShare := new(big.Int).SetBytes(payload.Share)
+	badShare := new(big.Int).Set(payload.Share)
 	badShare.Add(badShare, big.NewInt(1))
 	badShare.Mod(badShare, secp.Order())
 	if badShare.Sign() == 0 {
 		badShare.SetInt64(1)
 	}
-	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: scalarBytes(badShare)})
+	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: badShare})
 	if err != nil {
 		t.Fatal(err)
 	}

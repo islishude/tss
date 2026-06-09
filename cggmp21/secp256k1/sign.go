@@ -98,27 +98,15 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	kShare, err := secpSecretScalarBytes(p.kShare)
-	if err != nil {
-		return nil, fmt.Errorf("invalid k share: %w", err)
-	}
-	chiShare, err := secpSecretScalarBytes(p.chiShare)
-	if err != nil {
-		return nil, fmt.Errorf("invalid chi share: %w", err)
-	}
-	delta, err := secpSecretScalarBytes(p.delta)
-	if err != nil {
-		return nil, fmt.Errorf("invalid delta: %w", err)
-	}
 	return wire.Marshal(presignWire{
 		Party:                p.Party,
 		Threshold:            p.Threshold,
 		Signers:              p.Signers,
 		R:                    p.R,
 		LittleR:              p.LittleR,
-		KShare:               kShare,
-		ChiShare:             chiShare,
-		Delta:                delta,
+		KShare:               p.kShare,
+		ChiShare:             p.chiShare,
+		Delta:                p.delta,
 		TranscriptHash:       p.TranscriptHash,
 		Context:              encodePresignContext(p.Context),
 		ContextHash:          p.ContextHash,
@@ -373,10 +361,10 @@ func (presignRound2Payload) WireType() string { return presignRound2PayloadWireT
 func (presignRound2Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound3Payload struct {
-	Delta    []byte `json:"delta" wire:"1,bytes"`
-	KPoint   []byte `json:"k_point" wire:"2,bytes"`
-	ChiPoint []byte `json:"chi_point" wire:"3,bytes"`
-	Proof    []byte `json:"proof" wire:"4,bytes"`
+	Delta    *big.Int `json:"-" wire:"1,bigpos,max_bytes=scalar"`
+	KPoint   []byte   `json:"k_point" wire:"2,bytes"`
+	ChiPoint []byte   `json:"chi_point" wire:"3,bytes"`
+	Proof    []byte   `json:"proof" wire:"4,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.
@@ -386,11 +374,11 @@ func (presignRound3Payload) WireType() string { return presignRound3PayloadWireT
 func (presignRound3Payload) WireVersion() uint16 { return tss.Version }
 
 type signPartialPayload struct {
-	S                   []byte `json:"s" wire:"1,bytes"`
-	PresignTranscript   []byte `json:"presign_transcript" wire:"2,bytes"`
-	PresignContext      []byte `json:"presign_context" wire:"3,bytes"`
-	DigestHash          []byte `json:"digest_hash" wire:"4,bytes"`
-	PartialEquationHash []byte `json:"partial_equation_hash" wire:"5,bytes"`
+	S                   *big.Int `wire:"1,biguint,max_bytes=scalar"`
+	PresignTranscript   []byte   `json:"presign_transcript" wire:"2,bytes"`
+	PresignContext      []byte   `json:"presign_context" wire:"3,bytes"`
+	DigestHash          []byte   `json:"digest_hash" wire:"4,bytes"`
+	PartialEquationHash []byte   `json:"partial_equation_hash" wire:"5,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.

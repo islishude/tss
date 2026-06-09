@@ -75,7 +75,7 @@ func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayl
 func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type keygenSharePayload struct {
-	Share []byte `json:"share" wire:"1,bytes"`
+	Share *big.Int `wire:"1,bigpos,max_bytes=scalar"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.

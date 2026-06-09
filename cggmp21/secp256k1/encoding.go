@@ -7,6 +7,7 @@ import (
 
 	"github.com/islishude/tss"
 
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -68,7 +69,7 @@ type keyShareWire struct {
 	Parties                []tss.PartyID                     `wire:"3,u32list"`
 	PublicKey              []byte                            `wire:"4,bytes"`
 	ChainCode              []byte                            `wire:"5,bytes"`
-	Secret                 []byte                            `wire:"6,bytes"`
+	Secret                 *secret.Scalar                    `wire:"6,custom,len=32"`
 	GroupCommitments       [][]byte                          `wire:"7,byteslist"`
 	VerificationShares     []wire.PartyBytes[tss.PartyID]    `wire:"8,partybytes"`
 	PaillierPublicKey      []byte                            `wire:"9,bytes"`
@@ -94,10 +95,6 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
 func (k *KeyShare) toWire() (*keyShareWire, error) {
-	secretBytes, err := secpSecretScalarBytes(k.secret)
-	if err != nil {
-		return nil, err
-	}
 	verificationShares := make([]wire.PartyBytes[tss.PartyID], len(k.VerificationShares))
 	for i, s := range k.VerificationShares {
 		verificationShares[i] = wire.PartyBytes[tss.PartyID]{Party: s.Party, Bytes: s.PublicKey}
@@ -116,7 +113,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		Parties:                k.Parties,
 		PublicKey:              k.PublicKey,
 		ChainCode:              k.ChainCode,
-		Secret:                 secretBytes,
+		Secret:                 k.secret,
 		GroupCommitments:       k.GroupCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      k.PaillierPublicKey,
@@ -208,8 +205,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 			return nil, fmt.Errorf("keygen confirmation %d too large: %d > %d", i, len(c), limits.MaxWireFieldBytes)
 		}
 	}
-	secretScalar, err := newSecpSecretScalar(w.Secret)
-	if err != nil {
+	if _, err := secpScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	sid, err := tss.SessionIDFromBytes(w.PaillierProofSessionID)
@@ -235,7 +231,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error
 		Parties:                w.Parties,
 		PublicKey:              w.PublicKey,
 		ChainCode:              w.ChainCode,
-		secret:                 secretScalar,
+		secret:                 w.Secret,
 		GroupCommitments:       w.GroupCommitments,
 		VerificationShares:     verificationShares,
 		PaillierPublicKey:      w.PaillierPublicKey,
@@ -273,23 +269,23 @@ func UnmarshalPresign(in []byte) (*Presign, error) {
 
 // presignWire is the wire DTO for Presign.
 type presignWire struct {
-	Party                tss.PartyID   `wire:"1,u32"`
-	Threshold            int           `wire:"2,u32"`
-	Signers              []tss.PartyID `wire:"3,u32list"`
-	R                    []byte        `wire:"4,bytes"`
-	LittleR              []byte        `wire:"5,bytes"`
-	KShare               []byte        `wire:"6,bytes"`
-	ChiShare             []byte        `wire:"7,bytes"`
-	Delta                []byte        `wire:"8,bytes"`
-	TranscriptHash       []byte        `wire:"9,bytes"`
-	Context              []byte        `wire:"10,bytes"`
-	ContextHash          []byte        `wire:"11,bytes"`
-	AdditiveShift        []byte        `wire:"12,bytes"`
-	Consumed             bool          `wire:"13,bool"`
-	PublicKey            []byte        `wire:"14,bytes"`
-	KeygenTranscriptHash []byte        `wire:"15,bytes"`
-	PartiesHash          []byte        `wire:"16,bytes"`
-	VerifyShares         []byte        `wire:"17,bytes"`
+	Party                tss.PartyID    `wire:"1,u32"`
+	Threshold            int            `wire:"2,u32"`
+	Signers              []tss.PartyID  `wire:"3,u32list"`
+	R                    []byte         `wire:"4,bytes"`
+	LittleR              []byte         `wire:"5,bytes"`
+	KShare               *secret.Scalar `wire:"6,custom,len=32"`
+	ChiShare             *secret.Scalar `wire:"7,custom,len=32"`
+	Delta                *secret.Scalar `wire:"8,custom,len=32"`
+	TranscriptHash       []byte         `wire:"9,bytes"`
+	Context              []byte         `wire:"10,bytes"`
+	ContextHash          []byte         `wire:"11,bytes"`
+	AdditiveShift        []byte         `wire:"12,bytes"`
+	Consumed             bool           `wire:"13,bool"`
+	PublicKey            []byte         `wire:"14,bytes"`
+	KeygenTranscriptHash []byte         `wire:"15,bytes"`
+	PartiesHash          []byte         `wire:"16,bytes"`
+	VerifyShares         []byte         `wire:"17,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -317,16 +313,13 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if err != nil {
 		return nil, err
 	}
-	kShare, err := newSecpSecretScalar(w.KShare)
-	if err != nil {
+	if _, err := secpScalarFromSecret(w.KShare); err != nil {
 		return nil, fmt.Errorf("invalid k share: %w", err)
 	}
-	chiShare, err := newSecpSecretScalar(w.ChiShare)
-	if err != nil {
+	if _, err := secpScalarFromSecret(w.ChiShare); err != nil {
 		return nil, fmt.Errorf("invalid chi share: %w", err)
 	}
-	delta, err := newSecpSecretScalar(w.Delta)
-	if err != nil {
+	if _, err := secpScalarFromSecret(w.Delta); err != nil {
 		return nil, fmt.Errorf("invalid delta: %w", err)
 	}
 	verifyShares, err := decodeSignVerifySharesBytesWithLimit(w.VerifyShares, limits)
@@ -350,9 +343,9 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 		PartiesHash:          w.PartiesHash,
 		Consumed:             w.Consumed,
 		VerifyShares:         verifyShares,
-		kShare:               kShare,
-		chiShare:             chiShare,
-		delta:                delta,
+		kShare:               w.KShare,
+		chiShare:             w.ChiShare,
+		delta:                w.Delta,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err

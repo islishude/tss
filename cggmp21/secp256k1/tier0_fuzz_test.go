@@ -111,7 +111,7 @@ func FuzzFast_BlameEvidenceUnmarshal(f *testing.F) {
 // is constructed manually without any keygen.
 func FuzzFast_SignPartialDecode(f *testing.F) {
 	seed, err := marshalSignPartialPayload(signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   make([]byte, sha256.Size),
 		PresignContext:      bytes.Repeat([]byte{1}, sha256.Size),
 		DigestHash:          make([]byte, sha256.Size),
@@ -153,7 +153,7 @@ func FuzzFast_PresignUnmarshal(f *testing.F) {
 // FuzzFast_KeygenSharePayloadUnmarshal fuzzes keygen share payload decoding
 // using a manually constructed seed (no keygen required).
 func FuzzFast_KeygenSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: scalarBytes(big.NewInt(1))})
+	raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: big.NewInt(1)})
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -175,7 +175,7 @@ func FuzzFast_PresignRound3PayloadUnmarshal(f *testing.F) {
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
 	raw, err := marshalPresignRound3Payload(presignRound3Payload{
-		Delta:    scalarBytes(big.NewInt(1)),
+		Delta:    big.NewInt(1),
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,
@@ -200,7 +200,7 @@ func FuzzFast_ReshareSharePayloadUnmarshal(f *testing.F) {
 	raw, err := marshalReshareSharePayload(reshareSharePayload{
 		Dealer:               1,
 		Receiver:             2,
-		Share:                scalarBytes(big.NewInt(1)),
+		Share:                big.NewInt(1),
 		DealerCommitmentHash: make([]byte, sha256.Size),
 	})
 	if err != nil {
@@ -220,7 +220,7 @@ func FuzzFast_ReshareSharePayloadUnmarshal(f *testing.F) {
 // FuzzFast_RefreshSharePayloadUnmarshal fuzzes refresh share payload decoding
 // (no keygen required).
 func FuzzFast_RefreshSharePayloadUnmarshal(f *testing.F) {
-	raw, err := marshalRefreshSharePayload(refreshSharePayload{Share: scalarBytes(big.NewInt(1))})
+	raw, err := marshalRefreshSharePayload(refreshSharePayload{Share: big.NewInt(1)})
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -253,7 +253,7 @@ func FuzzFast_VerifySignPartialInputs(f *testing.F) {
 	f.Fuzz(func(t *testing.T, data []byte) {
 		// verifySignPartial should never panic on any input.
 		p := signPartialPayload{
-			S:                   data,
+			S:                   new(big.Int).SetBytes(data),
 			PresignTranscript:   presign.TranscriptHash,
 			PresignContext:      presign.ContextHash,
 			DigestHash:          bytes.Repeat([]byte{0xaa}, 32),

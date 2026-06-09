@@ -22,14 +22,14 @@ const keygenConfirmationWireType = "cggmp21.secp256k1.keygen-confirmation"
 // transcript hash, or commitments hash), the transport may have equivocated and
 // the resulting key shares must not be used.
 type KeygenConfirmation struct {
-	SessionID       tss.SessionID   `wire:"1,bytes,len=32"`
-	Sender          tss.PartyID     `wire:"2,u32"`
-	Threshold       int             `wire:"3,u32"`
-	Parties         []tss.PartyID   `wire:"4,u32list"`
-	PublicKey       []byte          `wire:"5,bytes"`
-	TranscriptHash  []byte          `wire:"6,bytes"`
-	CommitmentsHash []byte          `wire:"7,bytes"`
-	ChainCode       []byte          `wire:"8,bytes"`
+	SessionID       tss.SessionID `wire:"1,bytes,len=32"`
+	Sender          tss.PartyID   `wire:"2,u32"`
+	Threshold       int           `wire:"3,u32"`
+	Parties         []tss.PartyID `wire:"4,u32list"`
+	PublicKey       []byte        `wire:"5,bytes"`
+	TranscriptHash  []byte        `wire:"6,bytes"`
+	CommitmentsHash []byte        `wire:"7,bytes"`
+	ChainCode       []byte        `wire:"8,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for KeygenConfirmation.

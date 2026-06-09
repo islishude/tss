@@ -259,15 +259,15 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 
 // logStarProofWire is the wire DTO for LogStarProof.
 type logStarProofWire struct {
-	Version        uint16 `wire:"1,u16"`
-	S              []byte `wire:"2,bytes"`
-	A              []byte `wire:"3,bytes"`
-	Y              []byte `wire:"4,bytes"`
-	D              []byte `wire:"5,bytes"`
-	Z1             []byte `wire:"6,bytes"`
-	Z2             []byte `wire:"7,bytes"`
-	Z3             []byte `wire:"8,bytes"`
-	TranscriptHash []byte `wire:"9,bytes"`
+	Version        uint16         `wire:"1,u16"`
+	S              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	A              *big.Int       `wire:"3,bigpos,max_bytes=paillier_modulus"`
+	Y              secp.WirePoint `wire:"4,custom,max_bytes=point"`
+	D              *big.Int       `wire:"5,bigpos,max_bytes=paillier_modulus"`
+	Z1             *big.Int       `wire:"6,bigint,max_bytes=signed_response"`
+	Z2             *big.Int       `wire:"7,bigpos,max_bytes=paillier_signed"`
+	Z3             *big.Int       `wire:"8,bigint,max_bytes=signed_response"`
+	TranscriptHash []byte         `wire:"9,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for logStarProofWire.
@@ -281,19 +281,15 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil LogStarProof")
 	}
-	yBytes, err := secp.PointBytes(p.Y)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: Y: %w", err)
-	}
 	return wire.Marshal(logStarProofWire{
 		Version:        p.Version,
-		S:              p.S.Bytes(),
-		A:              p.A.Bytes(),
-		Y:              yBytes,
-		D:              p.D.Bytes(),
-		Z1:             EncodeSigned(p.Z1),
-		Z2:             p.Z2.Bytes(),
-		Z3:             EncodeSigned(p.Z3),
+		S:              p.S,
+		A:              p.A,
+		Y:              secp.WirePoint{P: p.Y},
+		D:              p.D,
+		Z1:             p.Z1,
+		Z2:             p.Z2,
+		Z3:             p.Z3,
 		TranscriptHash: p.TranscriptHash,
 	})
 }
@@ -307,43 +303,15 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 	if w.Version != logStarProofVersion {
 		return nil, fmt.Errorf("unsupported LogStarProof version %d", w.Version)
 	}
-	s, err := DecodePositive(w.S)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid S: %w", err)
-	}
-	a, err := DecodePositive(w.A)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid A: %w", err)
-	}
-	Y, err := secp.PointFromBytes(w.Y)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid Y: %w", err)
-	}
-	d, err := DecodePositive(w.D)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid D: %w", err)
-	}
-	z1, err := DecodeSigned(w.Z1)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid z1: %w", err)
-	}
-	z2, err := DecodePositive(w.Z2)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid z2: %w", err)
-	}
-	z3, err := DecodeSigned(w.Z3)
-	if err != nil {
-		return nil, fmt.Errorf("LogStarProof: invalid z3: %w", err)
-	}
 	return &LogStarProof{
 		Version:        w.Version,
-		S:              s,
-		A:              a,
-		Y:              Y,
-		D:              d,
-		Z1:             z1,
-		Z2:             z2,
-		Z3:             z3,
+		S:              w.S,
+		A:              w.A,
+		Y:              w.Y.P,
+		D:              w.D,
+		Z1:             w.Z1,
+		Z2:             w.Z2,
+		Z3:             w.Z3,
 		TranscriptHash: w.TranscriptHash,
 	}, nil
 }

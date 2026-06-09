@@ -1,7 +1,9 @@
 package wire
 
 import (
+	"errors"
 	"fmt"
+	"math/big"
 	"reflect"
 	"unicode/utf8"
 )
@@ -41,6 +43,14 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet LimitSet) ([]byte, error
 		return fs.encodePartyBytePairs(fv, limitSet)
 	case kindNested:
 		return fs.encodeNested(fv)
+	case kindCustom:
+		return fs.encodeCustom(fv, limitSet)
+	case kindBigInt:
+		return fs.encodeBigIntDispatch(fv, limitSet)
+	case kindBigUint:
+		return fs.encodeBigUintDispatch(fv, limitSet)
+	case kindBigPos:
+		return fs.encodeBigPosDispatch(fv, limitSet)
 	default:
 		return nil, fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}
@@ -73,6 +83,14 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet LimitSet) er
 		return fs.decodePartyBytePairs(fv, raw, limitSet)
 	case kindNested:
 		return fs.decodeNested(fv, raw)
+	case kindCustom:
+		return fs.decodeCustom(fv, raw, limitSet)
+	case kindBigInt:
+		return fs.decodeBigIntDispatch(fv, raw, limitSet)
+	case kindBigUint:
+		return fs.decodeBigUintDispatch(fv, raw, limitSet)
+	case kindBigPos:
+		return fs.decodeBigPosDispatch(fv, raw, limitSet)
 	default:
 		return fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}
@@ -178,17 +196,8 @@ func (fs fieldSchema) decodeBool(fv reflect.Value, raw []byte) error {
 }
 
 func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet LimitSet) error {
-	if err := fs.checkFixedLen(raw); err != nil {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
-	}
-	if fs.maxBytes != "" {
-		max, err := fs.getLimit(fs.maxBytes, limitSet)
-		if err != nil {
-			return err
-		}
-		if len(raw) > max {
-			return fmt.Errorf("bytes length %d exceeds max_bytes=%d", len(raw), max)
-		}
 	}
 	// Copy to prevent aliasing with the decode buffer.
 	out := make([]byte, len(raw))
@@ -202,6 +211,26 @@ func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte) error {
 		return fmt.Errorf("string is not valid UTF-8")
 	}
 	fv.SetString(string(raw))
+	return nil
+}
+
+// ---- byte limit checks -------------------------------------------------------
+
+// checkByteLimits validates raw bytes against len=N, max_bytes=N, and
+// max_bytes=name options. It is used by both bytes and custom field kinds.
+func (fs fieldSchema) checkByteLimits(raw []byte, limitSet LimitSet) error {
+	if err := fs.checkFixedLen(raw); err != nil {
+		return err
+	}
+	if fs.maxBytes != "" {
+		max, err := fs.getLimit(fs.maxBytes, limitSet)
+		if err != nil {
+			return err
+		}
+		if len(raw) > max {
+			return fmt.Errorf("bytes length %d exceeds max_bytes=%d", len(raw), max)
+		}
+	}
 	return nil
 }
 
@@ -574,4 +603,328 @@ func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte) error {
 		return nil
 	}
 	return Unmarshal(raw, ptr)
+}
+
+// ---- custom ------------------------------------------------------------------
+
+// encodeCustom encodes a field value that implements ValueMarshaler.
+// It handles nil pointer rejection, interface dispatch (value or pointer
+// receiver), nil return rejection, and byte-limit validation.
+func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+	if fv.Kind() == reflect.Pointer && fv.IsNil() {
+		return nil, fmt.Errorf("wire: nil custom field %s", fs.name)
+	}
+
+	m := valueMarshaler(fv)
+	if m == nil {
+		return nil, fmt.Errorf("wire: field %s does not implement MarshalWireValue", fs.name)
+	}
+
+	out, err := m.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("wire: field %s tag %d custom marshal: %w", fs.name, fs.tag, err)
+	}
+	if out == nil {
+		return nil, fmt.Errorf("wire: custom field %s returned nil", fs.name)
+	}
+
+	if err := fs.checkByteLimits(out, limitSet); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// decodeCustom decodes raw bytes into a field value that implements
+// ValueUnmarshaler. It validates byte limits first, auto-allocates nil
+// pointers, dispatches to the interface (value or pointer receiver), and
+// requires the implementation to copy the input bytes.
+func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
+
+	if fv.Kind() == reflect.Pointer && fv.IsNil() {
+		fv.Set(reflect.New(fv.Type().Elem()))
+	}
+
+	u := valueUnmarshaler(fv)
+	if u == nil {
+		return fmt.Errorf("wire: field %s does not implement UnmarshalWireValue", fs.name)
+	}
+
+	if err := u.UnmarshalWireValue(raw); err != nil {
+		return fmt.Errorf("wire: field %s tag %d custom unmarshal: %w", fs.name, fs.tag, err)
+	}
+	return nil
+}
+
+// valueMarshaler returns the ValueMarshaler implemented by v, trying the
+// value first and then the addressable pointer (for pointer-receiver methods).
+func valueMarshaler(v reflect.Value) ValueMarshaler {
+	if m, ok := v.Interface().(ValueMarshaler); ok {
+		return m
+	}
+	if v.CanAddr() {
+		if m, ok := v.Addr().Interface().(ValueMarshaler); ok {
+			return m
+		}
+	}
+	return nil
+}
+
+// valueUnmarshaler returns the ValueUnmarshaler implemented by v, trying the
+// value first and then the addressable pointer (for pointer-receiver methods).
+func valueUnmarshaler(v reflect.Value) ValueUnmarshaler {
+	if u, ok := v.Interface().(ValueUnmarshaler); ok {
+		return u
+	}
+	if v.CanAddr() {
+		if u, ok := v.Addr().Interface().(ValueUnmarshaler); ok {
+			return u
+		}
+	}
+	return nil
+}
+
+// ---- big integer -------------------------------------------------------------
+
+// bigIntFromValue extracts a *big.Int from a reflect.Value that may be
+// a value (big.Int) or pointer (*big.Int). Returns nil for nil pointers.
+func bigIntFromValue(v reflect.Value) *big.Int {
+	if v.Kind() == reflect.Pointer {
+		if v.IsNil() {
+			return nil
+		}
+		return v.Interface().(*big.Int)
+	}
+	x := v.Interface().(big.Int)
+	return new(big.Int).Set(&x)
+}
+
+// setBigIntValue sets a reflect.Value from a *big.Int. Handles both
+// value (big.Int) and pointer (*big.Int) field types.
+func setBigIntValue(v reflect.Value, x *big.Int) {
+	if v.Kind() == reflect.Pointer {
+		v.Set(reflect.ValueOf(x))
+	} else {
+		v.Set(reflect.ValueOf(*x))
+	}
+}
+
+// encodeBigIntSigned encodes x using canonical signed-magnitude format.
+// Zero is encoded as [0x00]. Nil is treated as zero.
+func encodeBigIntSigned(x *big.Int) ([]byte, error) {
+	if x == nil {
+		return []byte{0x00}, nil
+	}
+	switch x.Sign() {
+	case 0:
+		return []byte{0x00}, nil
+	case -1:
+		// big.Int.Bytes() returns the absolute value — no need for Abs() here.
+		return append([]byte{0x01}, x.Bytes()...), nil
+	default:
+		return append([]byte{0x00}, x.Bytes()...), nil
+	}
+}
+
+// decodeBigIntSigned decodes a canonical signed-magnitude encoding.
+// Rejects empty input, invalid sign bytes, negative zero, and
+// leading-zero magnitudes.
+func decodeBigIntSigned(b []byte) (*big.Int, error) {
+	if len(b) == 0 {
+		return nil, errors.New("signed integer: empty encoding")
+	}
+	sign := b[0]
+	if sign != 0x00 && sign != 0x01 {
+		return nil, fmt.Errorf("signed integer: invalid sign byte 0x%02x", sign)
+	}
+	mag := b[1:]
+	if len(mag) == 0 {
+		if sign == 0x00 {
+			return new(big.Int), nil
+		}
+		return nil, errors.New("signed integer: negative zero is invalid")
+	}
+	if mag[0] == 0 {
+		return nil, errors.New("signed integer: non-minimal magnitude (leading zero)")
+	}
+	val := new(big.Int).SetBytes(mag)
+	if sign == 0x01 {
+		val.Neg(val)
+	}
+	return val, nil
+}
+
+// encodeBigUint encodes x as minimal big-endian magnitude.
+// Zero and nil are encoded as empty.
+func encodeBigUint(x *big.Int) ([]byte, error) {
+	if x == nil {
+		return []byte{}, nil
+	}
+	if x.Sign() < 0 {
+		return nil, errors.New("unsigned integer: negative value")
+	}
+	if x.Sign() == 0 {
+		return []byte{}, nil
+	}
+	return x.Bytes(), nil
+}
+
+// decodeBigUint decodes a minimal big-endian unsigned integer.
+// Empty encoding represents zero. Rejects leading-zero encodings.
+func decodeBigUint(b []byte) (*big.Int, error) {
+	if len(b) == 0 {
+		return new(big.Int), nil
+	}
+	if b[0] == 0 {
+		return nil, errors.New("unsigned integer: non-minimal encoding")
+	}
+	return new(big.Int).SetBytes(b), nil
+}
+
+// encodeBigPos encodes x as minimal big-endian magnitude.
+// Rejects nil, zero, and negative values.
+func encodeBigPos(x *big.Int) ([]byte, error) {
+	if x == nil {
+		return nil, errors.New("positive integer: nil value")
+	}
+	if x.Sign() <= 0 {
+		return nil, errors.New("positive integer: must be > 0")
+	}
+	return x.Bytes(), nil
+}
+
+// decodeBigPos decodes a minimal big-endian positive integer.
+// Rejects empty input, zero, leading-zero encodings, and negative values.
+func decodeBigPos(b []byte) (*big.Int, error) {
+	if len(b) == 0 {
+		return nil, errors.New("positive integer: empty encoding")
+	}
+	if b[0] == 0 {
+		return nil, errors.New("positive integer: non-minimal encoding")
+	}
+	x := new(big.Int).SetBytes(b)
+	if x.Sign() <= 0 {
+		return nil, errors.New("positive integer: value must be positive")
+	}
+	return x, nil
+}
+
+// ---- exported big integer helpers ---------------------------------------------
+
+// These functions are the canonical signed/unsigned/positive integer encoders
+// used by both the wire codec (via the tag-driven dispatch) and protocol code
+// that needs deterministic byte encoding for transcript binding, hashing, and
+// evidence construction. They match the encoding rules of the corresponding
+// wire kinds: bigint / biguint / bigpos.
+
+// EncodeBigInt encodes x using canonical signed-magnitude format (bigint kind).
+// Zero is encoded as [0x00], nil as zero.
+func EncodeBigInt(x *big.Int) ([]byte, error) { return encodeBigIntSigned(x) }
+
+// DecodeBigInt decodes a canonical signed-magnitude encoding (bigint kind).
+func DecodeBigInt(in []byte) (*big.Int, error) { return decodeBigIntSigned(in) }
+
+// EncodeBigUint encodes x as minimal big-endian magnitude (biguint kind).
+// Zero and nil are encoded as empty.
+func EncodeBigUint(x *big.Int) ([]byte, error) { return encodeBigUint(x) }
+
+// DecodeBigUint decodes a minimal big-endian unsigned integer (biguint kind).
+func DecodeBigUint(in []byte) (*big.Int, error) { return decodeBigUint(in) }
+
+// EncodeBigPos encodes x as minimal big-endian magnitude (bigpos kind).
+// Rejects nil, zero, and negative values.
+func EncodeBigPos(x *big.Int) ([]byte, error) { return encodeBigPos(x) }
+
+// DecodeBigPos decodes a minimal big-endian positive integer (bigpos kind).
+func DecodeBigPos(in []byte) (*big.Int, error) { return decodeBigPos(in) }
+
+// ---- big integer dispatch ----------------------------------------------------
+
+// encodeBigIntDispatch encodes a field value as a canonical signed integer.
+func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+	x := bigIntFromValue(fv)
+	out, err := encodeBigIntSigned(x)
+	if err != nil {
+		return nil, fmt.Errorf("wire: field %s tag %d bigint marshal: %w", fs.name, fs.tag, err)
+	}
+	if err := fs.checkByteLimits(out, limitSet); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// encodeBigUintDispatch encodes a field value as a canonical unsigned integer.
+func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+	x := bigIntFromValue(fv)
+	out, err := encodeBigUint(x)
+	if err != nil {
+		return nil, fmt.Errorf("wire: field %s tag %d biguint marshal: %w", fs.name, fs.tag, err)
+	}
+	if err := fs.checkByteLimits(out, limitSet); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// encodeBigPosDispatch encodes a field value as a canonical positive integer.
+func (fs fieldSchema) encodeBigPosDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+	x := bigIntFromValue(fv)
+	out, err := encodeBigPos(x)
+	if err != nil {
+		return nil, fmt.Errorf("wire: field %s tag %d bigpos marshal: %w", fs.name, fs.tag, err)
+	}
+	if err := fs.checkByteLimits(out, limitSet); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// decodeBigIntDispatch decodes raw bytes into a signed integer field.
+func (fs fieldSchema) decodeBigIntDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
+	if fv.Kind() == reflect.Pointer && fv.IsNil() {
+		fv.Set(reflect.New(fv.Type().Elem()))
+	}
+	x, err := decodeBigIntSigned(raw)
+	if err != nil {
+		return fmt.Errorf("wire: field %s tag %d bigint unmarshal: %w", fs.name, fs.tag, err)
+	}
+	setBigIntValue(fv, x)
+	return nil
+}
+
+// decodeBigUintDispatch decodes raw bytes into an unsigned integer field.
+func (fs fieldSchema) decodeBigUintDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
+	if fv.Kind() == reflect.Pointer && fv.IsNil() {
+		fv.Set(reflect.New(fv.Type().Elem()))
+	}
+	x, err := decodeBigUint(raw)
+	if err != nil {
+		return fmt.Errorf("wire: field %s tag %d biguint unmarshal: %w", fs.name, fs.tag, err)
+	}
+	setBigIntValue(fv, x)
+	return nil
+}
+
+// decodeBigPosDispatch decodes raw bytes into a positive integer field.
+func (fs fieldSchema) decodeBigPosDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
+	if fv.Kind() == reflect.Pointer && fv.IsNil() {
+		fv.Set(reflect.New(fv.Type().Elem()))
+	}
+	x, err := decodeBigPos(raw)
+	if err != nil {
+		return fmt.Errorf("wire: field %s tag %d bigpos unmarshal: %w", fs.name, fs.tag, err)
+	}
+	setBigIntValue(fv, x)
+	return nil
 }

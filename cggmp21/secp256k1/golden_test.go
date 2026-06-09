@@ -16,7 +16,7 @@ import (
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
-	payload := keygenSharePayload{Share: scalarBytes(big.NewInt(1))}
+	payload := keygenSharePayload{Share: big.NewInt(1)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 
 func TestGoldenSignPartialPayload(t *testing.T) {
 	payload := signPartialPayload{
-		S:                   scalarBytes(big.NewInt(1)),
+		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -79,7 +79,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 	twoScalar := secp.ScalarFromBigInt(big.NewInt(2))
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
 	payload := presignRound3Payload{
-		Delta:    scalarBytes(big.NewInt(42)),
+		Delta:    big.NewInt(42),
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,

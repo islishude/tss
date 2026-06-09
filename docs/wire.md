@@ -41,19 +41,23 @@ wire:"-"   // skip field
 
 #### Supported Kinds
 
-| Kind             | Go Type                               | Wire Encoding               |
-| ---------------- | ------------------------------------- | --------------------------- |
-| `u8`             | `uint8`                               | single byte                 |
-| `u16`            | `uint16`                              | big-endian uint16           |
-| `u32`            | `uint32`, `int`, or alias             | big-endian uint32           |
-| `bool`           | `bool`                                | `wire.Bool`                 |
-| `bytes`          | `[]byte`                              | raw bytes; nil → empty      |
-| `string`         | `string`                              | UTF-8 bytes                 |
-| `u32list`        | `[]uint32` or alias slice             | `wire.EncodeUint32List`     |
-| `byteslist`      | `[][]byte`                            | `wire.EncodeBytesList`      |
-| `partybytes`     | `[]wire.PartyBytes[T]`                | `wire.EncodePartyBytes`     |
-| `partybytepairs` | `[]wire.PartyBytePair[T]`             | `wire.EncodePartyBytePairs` |
-| `nested`         | struct/pointer implementing `Message` | recursive `wire.Marshal`    |
+| Kind             | Go Type                                                 | Wire Encoding                                        |
+| ---------------- | ------------------------------------------------------- | ---------------------------------------------------- |
+| `u8`             | `uint8`                                                 | single byte                                          |
+| `u16`            | `uint16`                                                | big-endian uint16                                    |
+| `u32`            | `uint32`, `int`, or alias                               | big-endian uint32                                    |
+| `bool`           | `bool`                                                  | `wire.Bool`                                          |
+| `bytes`          | `[]byte`                                                | raw bytes; nil → empty                               |
+| `string`         | `string`                                                | UTF-8 bytes                                          |
+| `u32list`        | `[]uint32` or alias slice                               | `wire.EncodeUint32List`                              |
+| `byteslist`      | `[][]byte`                                              | `wire.EncodeBytesList`                               |
+| `partybytes`     | `[]wire.PartyBytes[T]`                                  | `wire.EncodePartyBytes`                              |
+| `partybytepairs` | `[]wire.PartyBytePair[T]`                               | `wire.EncodePartyBytePairs`                          |
+| `nested`         | struct/pointer implementing `Message`                   | recursive `wire.Marshal`                             |
+| `custom`         | type implementing `ValueMarshaler` / `ValueUnmarshaler` | caller-defined canonical bytes                       |
+| `bigint`         | `big.Int` / `*big.Int`                                  | signed-magnitude `[sign byte][minimal BE magnitude]` |
+| `biguint`        | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero = empty           |
+| `bigpos`         | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero rejected          |
 
 #### Options
 
@@ -68,6 +72,8 @@ wire:"-"   // skip field
 - **`Validator`** — optional: `Validate() error` (called on marshal and unmarshal)
 - **`BeforeMarshaler`** — optional: `BeforeMarshalWire() error`
 - **`AfterUnmarshaler`** — optional: `AfterUnmarshalWire() error`
+- **`ValueMarshaler`** — used by `custom` kind: `MarshalWireValue() ([]byte, error)`
+- **`ValueUnmarshaler`** — used by `custom` kind: `UnmarshalWireValue([]byte) error`
 
 ### Field-Level API (Tests Only)
 
@@ -80,18 +86,20 @@ The low-level `MarshalFields` / `UnmarshalFields` / `UnmarshalFieldsWithLimits` 
 
 ## DTO Pattern
 
-Types with unexported fields (`secret.Scalar`, `*big.Int`, `sync.Mutex`) or array types (`[32]byte`) use unexported wire DTOs:
+Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use unexported wire DTOs. The `custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte` conversions:
 
 ```go
 type myMessageWire struct {
-    SessionID []byte `wire:"1,bytes,len=32"`
-    Secret    []byte `wire:"2,bytes"`
+    SessionID tss.SessionID `wire:"1,bytes,len=32"`
+    Secret    *secret.Scalar `wire:"2,custom,len=32"`
+    Modulus   *big.Int       `wire:"3,bigpos,max_bytes=paillier_modulus"`
+    Response  *big.Int       `wire:"4,bigint,max_bytes=signed_response"`
 }
 func (myMessageWire) WireType() string    { return "my.type" }
 func (myMessageWire) WireVersion() uint16 { return 1 }
 ```
 
-Conversion functions (`toWire()` / `toDomain()`) handle `[32]byte` ↔ `[]byte`, `*big.Int` ↔ `[]byte`, and custom type mapping.
+Conversion functions (`toWire()` / `toDomain()`) handle structural mapping and domain validation; field-level byte encoding is handled by the wire codec.
 
 ## Canonical Rules
 
@@ -101,6 +109,10 @@ Conversion functions (`toWire()` / `toDomain()`) handle `[32]byte` ↔ `[]byte`,
 - Nil field values are rejected by the encoder (nil bytes/list → empty).
 - Decoders reject trailing bytes.
 - All tagged fields are required. Missing and extra fields are rejected.
+- Fields tagged `bigint`, `biguint`, or `bigpos` use canonical integer encodings:
+  `bigint` — signed-magnitude (zero = `0x00`, nil = zero); `biguint` — minimal
+  big-endian (zero = empty); `bigpos` — minimal big-endian (zero rejected).
+  Non-canonical encodings (negative zero, leading zeroes, empty signed) are rejected.
 - Proof scalar responses use canonical positive big-endian encoding; Paillier
   statement and commitment integers use fixed-width encodings derived from `N`
   or `N²`, with out-of-range values rejected before algebraic checks.

@@ -45,7 +45,7 @@ func TestIntegration_TamperedSPartialBlamesSenderOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Replace S with a wrong scalar.
-	payload.S = scalarBytes(big.NewInt(123456789))
+	payload.S = big.NewInt(123456789)
 	// Also replace equation hash with a wrong value so it doesn't fail on hash mismatch first.
 	payload.PartialEquationHash = bytes.Repeat([]byte{0x42}, 32)
 	mutated, err := marshalSignPartialPayload(payload)
@@ -232,20 +232,20 @@ func TestIntegration_TamperedSProducesEquationFailure(t *testing.T) {
 	}
 
 	// Change S to a wrong value but recompute equation hash so it "looks" valid.
-	sVal, err := secp.ScalarFromBytes(payload.S)
+	sVal := secp.ScalarFromBigInt(payload.S)
 	if err != nil {
 		t.Fatal(err)
 	}
 	wrongS := new(big.Int).Add(sVal.BigInt(), big.NewInt(1))
 	wrongS.Mod(wrongS, secp.Order())
-	payload.S = scalarBytes(wrongS)
+	payload.S = wrongS
 
 	// Recompute equation hash with wrong S.
 	vs, _ := presignVerifyShare(presigns[firstEnv.From], firstEnv.From)
 	payload.PartialEquationHash = partialEquationHash(
 		signID, firstEnv.From, payload.PresignTranscript,
 		payload.PresignContext, digest[:],
-		presigns[firstEnv.From].LittleR, payload.S,
+		presigns[firstEnv.From].LittleR, scalarBytes(payload.S),
 		vs.KPoint, vs.ChiPoint,
 	)
 	mutated, err := marshalSignPartialPayload(payload)
@@ -764,15 +764,15 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Replace S with a different valid scalar (not the correct s_i).
-	originalS := append([]byte(nil), p.S...)
-	p.S = scalarBytes(big.NewInt(42))
+	originalS := new(big.Int).Set(p.S)
+	p.S = big.NewInt(42)
 	// Recompute equation hash so hash mismatch doesn't fire first — we want
 	// the equation verification to catch it.
 	vs, _ := presignVerifyShare(presigns[maliciousSigner], maliciousSigner)
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, digest[:],
-		presigns[maliciousSigner].LittleR, p.S,
+		presigns[maliciousSigner].LittleR, scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)
 	mutated, err := marshalSignPartialPayload(p)
@@ -783,7 +783,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	maliciousPartial = maliciousPartial.RecomputeTranscriptHash()
 
 	// Verify S is actually different from original.
-	if bytes.Equal(p.S, originalS) {
+	if p.S.Cmp(originalS) == 0 {
 		t.Fatal("S was not changed — scalar collision")
 	}
 

@@ -119,7 +119,7 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(p)
@@ -130,7 +130,7 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 	if err := wire.Unmarshal(in, &p); err != nil {
 		return keygenSharePayload{}, err
 	}
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return keygenSharePayload{}, err
 	}
 	return p, nil
@@ -209,7 +209,7 @@ func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
 }
 
 func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
-	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
+	if err := validateScalarRange(p.Delta); err != nil {
 		return nil, err
 	}
 	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
@@ -237,7 +237,7 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 	if err := wire.Unmarshal(in, &p); err != nil {
 		return presignRound3Payload{}, err
 	}
-	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
+	if err := validateScalarRange(p.Delta); err != nil {
 		return presignRound3Payload{}, err
 	}
 	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
@@ -256,7 +256,7 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
-	if _, err := secp.ScalarFromBytes(p.S); err != nil {
+	if err := validateScalarRangeNonZero(p.S); err != nil {
 		return nil, err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
@@ -283,7 +283,7 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if err := wire.Unmarshal(in, &p); err != nil {
 		return signPartialPayload{}, err
 	}
-	if _, err := secp.ScalarFromBytes(p.S); err != nil {
+	if err := validateScalarRangeNonZero(p.S); err != nil {
 		return signPartialPayload{}, err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
@@ -345,7 +345,7 @@ func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 	if p.Receiver == 0 {
 		return nil, errors.New("reshare share receiver is zero")
 	}
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return nil, err
 	}
 	if len(p.DealerCommitmentHash) != sha256.Size {
@@ -365,7 +365,7 @@ func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
 	if p.Receiver == 0 {
 		return reshareSharePayload{}, errors.New("reshare share receiver is zero")
 	}
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return reshareSharePayload{}, err
 	}
 	if len(p.DealerCommitmentHash) != sha256.Size {
@@ -407,7 +407,7 @@ func (refreshCommitmentsPayload) WireType() string { return refreshCommitmentsPa
 func (refreshCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type refreshSharePayload struct {
-	Share []byte `wire:"1,bytes"`
+	Share *big.Int `wire:"1,bigpos,max_bytes=scalar"`
 }
 
 // WireType returns the canonical wire type identifier for refreshSharePayload.
@@ -435,7 +435,7 @@ func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, e
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return nil, err
 	}
 	return wire.Marshal(p)
@@ -446,7 +446,7 @@ func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
 	if err := wire.Unmarshal(in, &p); err != nil {
 		return refreshSharePayload{}, err
 	}
-	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
+	if err := validateScalarRange(p.Share); err != nil {
 		return refreshSharePayload{}, err
 	}
 	return p, nil

@@ -4,6 +4,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Statement is the public input for a signprep proof.
@@ -38,14 +39,14 @@ type Witness struct {
 
 // Proof is a CGGMP21 signprep proof.
 type Proof struct {
-	MPoint       []byte `wire:"1,bytes"`
-	KCommitment  []byte `wire:"2,bytes"`
-	MCommitment  []byte `wire:"3,bytes"`
-	DLEQA1       []byte `wire:"4,bytes"`
-	DLEQA2       []byte `wire:"5,bytes"`
-	KResponse    []byte `wire:"6,bytes"`
-	MResponse    []byte `wire:"7,bytes"`
-	DLEQResponse []byte `wire:"8,bytes"`
+	MPoint       []byte         `wire:"1,bytes"`
+	KCommitment  []byte         `wire:"2,bytes"`
+	MCommitment  []byte         `wire:"3,bytes"`
+	DLEQA1       []byte         `wire:"4,bytes"`
+	DLEQA2       []byte         `wire:"5,bytes"`
+	KResponse    *secret.Scalar `wire:"6,custom,len=32"`
+	MResponse    []byte         `wire:"7,bytes"`
+	DLEQResponse *secret.Scalar `wire:"8,custom,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for Proof.

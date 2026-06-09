@@ -38,7 +38,7 @@ func (p *Proof) Validate() error {
 	if _, err := secp.PointFromBytes(p.DLEQA2); err != nil {
 		return fmt.Errorf("signprep: invalid DLEQA2: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.KResponse); err != nil {
+	if _, err := secp.ScalarFromBytes(p.KResponse.FixedBytes()); err != nil {
 		return fmt.Errorf("signprep: invalid KResponse: %w", err)
 	}
 	if !mtaIsZero {
@@ -46,7 +46,7 @@ func (p *Proof) Validate() error {
 			return fmt.Errorf("signprep: invalid MResponse: %w", err)
 		}
 	}
-	if _, err := secp.ScalarFromBytes(p.DLEQResponse); err != nil {
+	if _, err := secp.ScalarFromBytes(p.DLEQResponse.FixedBytes()); err != nil {
 		return fmt.Errorf("signprep: invalid DLEQResponse: %w", err)
 	}
 	return nil

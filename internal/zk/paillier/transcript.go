@@ -42,7 +42,11 @@ func (t *Transcript) AppendBigInt(label string, x *big.Int) {
 
 // AppendSigned writes a labeled signed integer in canonical signed-magnitude form.
 func (t *Transcript) AppendSigned(label string, x *big.Int) {
-	t.AppendBytes(label, EncodeSigned(x))
+	b, err := wire.EncodeBigInt(x)
+	if err != nil {
+		panic("transcript: " + err.Error())
+	}
+	t.AppendBytes(label, b)
 }
 
 // AppendPoint writes a labeled secp256k1 curve point in compressed form.

@@ -18,6 +18,29 @@ func PointBytes(p *Point) ([]byte, error) {
 	return out, nil
 }
 
+// WirePoint wraps a *Point for use with internal/wire's custom field kind.
+// It implements MarshalWireValue / UnmarshalWireValue via Go structural typing
+// (no import of internal/wire required). The zero value has a nil Point and
+// will be rejected on marshal.
+type WirePoint struct {
+	P *Point
+}
+
+// MarshalWireValue encodes the point in canonical compressed SEC 1 form.
+func (p WirePoint) MarshalWireValue() ([]byte, error) {
+	return PointBytes(p.P)
+}
+
+// UnmarshalWireValue decodes canonical compressed SEC 1 point bytes.
+func (p *WirePoint) UnmarshalWireValue(in []byte) error {
+	q, err := PointFromBytes(in)
+	if err != nil {
+		return err
+	}
+	p.P = q
+	return nil
+}
+
 // PointFromBytes parses canonical compressed SEC 1 point bytes.
 func PointFromBytes(in []byte) (*Point, error) {
 	if len(in) != 33 || (in[0] != 0x02 && in[0] != 0x03) {

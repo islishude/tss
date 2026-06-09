@@ -153,7 +153,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalRefreshSharePayload(refreshSharePayload{Share: scalarBytes(share)})
+		payload, err := marshalRefreshSharePayload(refreshSharePayload{Share: share})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -323,7 +323,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		share, err := secp.ScalarFromBytes(p.Share)
+		share := secp.ScalarFromBigInt(p.Share)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}

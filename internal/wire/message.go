@@ -16,9 +16,12 @@
 //	wire.Unmarshal(raw, &decoded)
 //
 // Supported kinds: u8, u16, u32, bool, bytes, string, u32list, byteslist,
-// partybytes, partybytepairs, nested. All tagged fields are required; missing
-// and extra fields are rejected. Types with unexported fields (secret.Scalar,
-// *big.Int) or array types ([32]byte) should use unexported wire DTOs.
+// partybytes, partybytepairs, nested, custom. All tagged fields are required;
+// missing and extra fields are rejected.
+//
+// The "custom" kind delegates field value encoding to the field type via
+// the ValueMarshaler and ValueUnmarshaler interfaces. This lets domain types
+// define their own canonical bytes without internal/wire importing them.
 //
 // # Field-Level API (Tests Only)
 //
@@ -58,6 +61,28 @@ type BeforeMarshaler interface {
 // state or check invariants that span multiple fields.
 type AfterUnmarshaler interface {
 	AfterUnmarshalWire() error
+}
+
+// ValueMarshaler is implemented by types that can encode themselves into
+// a canonical wire field value. It is used by the "custom" wire kind to
+// let domain types define their own TLV field value encoding without
+// importing internal/wire.
+//
+// MarshalWireValue must return a non-nil byte slice. The returned bytes
+// are validated against length options (len, max_bytes) by the codec.
+type ValueMarshaler interface {
+	MarshalWireValue() ([]byte, error)
+}
+
+// ValueUnmarshaler is implemented by types that can decode themselves from
+// raw wire field value bytes. It is used by the "custom" wire kind to
+// let domain types reconstruct themselves from TLV field values.
+//
+// The implementation must copy the input bytes — it must not retain a
+// reference to the underlying decode buffer. Length options (len,
+// max_bytes) are validated by the codec before UnmarshalWireValue is called.
+type ValueUnmarshaler interface {
+	UnmarshalWireValue([]byte) error
 }
 
 // Marshal encodes a struct using its "wire" struct tags into a

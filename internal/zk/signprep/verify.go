@@ -48,11 +48,11 @@ func Verify(stmt Statement, proof *Proof) error {
 	if err != nil {
 		return err
 	}
-	kResponse, err := secp.ScalarFromBytes(proof.KResponse)
+	kResponse, err := secp.ScalarFromBytes(proof.KResponse.FixedBytes())
 	if err != nil {
 		return err
 	}
-	dleqResponse, err := secp.ScalarFromBytes(proof.DLEQResponse)
+	dleqResponse, err := secp.ScalarFromBytes(proof.DLEQResponse.FixedBytes())
 	if err != nil {
 		return err
 	}
