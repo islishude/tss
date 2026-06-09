@@ -130,6 +130,10 @@ func (e *BlameEvidence) Validate() error {
 	if e.PayloadType == "" {
 		return errors.New("missing evidence payload type")
 	}
+	limits := DefaultLimits()
+	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
+		return fmt.Errorf("evidence payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
+	}
 	if len(e.PayloadHash) != sha256.Size {
 		return errors.New("invalid evidence payload hash")
 	}
@@ -142,12 +146,40 @@ func (e *BlameEvidence) Validate() error {
 	if e.Reason == "" {
 		return errors.New("missing evidence reason")
 	}
-	limits := DefaultLimits()
 	if len(e.Reason) > limits.MaxEvidenceReasonBytes {
 		return fmt.Errorf("evidence reason too long: %d > %d", len(e.Reason), limits.MaxEvidenceReasonBytes)
 	}
-	if err := normalizeEvidenceFields(e.PublicInputs); err != nil {
-		return err
+	if fl := len(e.PublicInputs); fl > limits.MaxEvidenceFieldCount {
+		return fmt.Errorf("evidence field count too large: %d > %d", fl, limits.MaxEvidenceFieldCount)
+	}
+	// Canonical field order keeps evidence hashes stable across processes and
+	// avoids relying on caller-provided slice ordering.
+	slices.SortFunc(e.PublicInputs, func(a, b EvidenceField) int {
+		if a.Key < b.Key {
+			return -1
+		}
+		if a.Key > b.Key {
+			return 1
+		}
+		return bytes.Compare(a.Value, b.Value)
+	})
+	for i, field := range e.PublicInputs {
+		if field.Key == "" {
+			return errors.New("empty evidence field key")
+		}
+		if fl := len(field.Key); fl > limits.MaxEvidenceFieldKeyBytes {
+			return fmt.Errorf("evidence field key too long: %d > %d", fl, limits.MaxEvidenceFieldKeyBytes)
+		}
+
+		if field.Value == nil {
+			return fmt.Errorf("nil evidence field %q", field.Key)
+		}
+		if fl := len(field.Value); fl > limits.MaxEvidenceFieldValueBytes {
+			return fmt.Errorf("evidence field value too long: %d > %d", fl, limits.MaxEvidenceFieldValueBytes)
+		}
+		if i > 0 && e.PublicInputs[i-1].Key == field.Key {
+			return fmt.Errorf("duplicate evidence field %q", field.Key)
+		}
 	}
 	return nil
 }
@@ -157,32 +189,7 @@ func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
-	fields := make([]EvidenceField, len(e.PublicInputs))
-	for i, f := range e.PublicInputs {
-		fields[i] = f.Clone()
-	}
-	if err := normalizeEvidenceFields(fields); err != nil {
-		return nil, err
-	}
-	limits := DefaultLimits()
-	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
-		return nil, fmt.Errorf("evidence payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
-	}
-	if len(e.Reason) > limits.MaxEvidenceReasonBytes {
-		return nil, fmt.Errorf("evidence reason too long: %d > %d", len(e.Reason), limits.MaxEvidenceReasonBytes)
-	}
-	if len(fields) > limits.MaxEvidenceFieldCount {
-		return nil, fmt.Errorf("evidence field count too large: %d > %d", len(fields), limits.MaxEvidenceFieldCount)
-	}
-	for _, f := range fields {
-		if len(f.Key) > limits.MaxEvidenceFieldKeyBytes {
-			return nil, fmt.Errorf("evidence field key too long: %d > %d", len(f.Key), limits.MaxEvidenceFieldKeyBytes)
-		}
-		if len(f.Value) > limits.MaxEvidenceFieldValueBytes {
-			return nil, fmt.Errorf("evidence field value too long: %d > %d", len(f.Value), limits.MaxEvidenceFieldValueBytes)
-		}
-	}
-	publicInputsBytes := encodeEvidenceFields(fields)
+	publicInputsBytes := encodeEvidenceFields(e.PublicInputs)
 	return wire.Marshal(Version, blameWireType, []wire.Field{
 		{Tag: blameFieldVersion, Value: wire.Uint16(e.Version)},
 		{Tag: blameFieldProtocol, Value: []byte(e.Protocol)},
@@ -201,10 +208,10 @@ func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBlameEvidence decodes and validates public blame evidence.
 func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
-	limits := DefaultLimits()
 	if len(in) == 0 {
 		return nil, errors.New("empty blame evidence")
 	}
+	limits := DefaultLimits()
 	if len(in) > limits.MaxBlameEvidenceBytes {
 		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), limits.MaxBlameEvidenceBytes)
 	}
@@ -309,9 +316,6 @@ func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
 	if err := evidence.Validate(); err != nil {
 		return nil, err
 	}
-	if err := normalizeEvidenceFields(evidence.PublicInputs); err != nil {
-		return nil, err
-	}
 	return evidence, nil
 }
 
@@ -399,30 +403,4 @@ func cloneEvidenceFields(in []EvidenceField) []EvidenceField {
 		out[i] = field.Clone()
 	}
 	return out
-}
-
-func normalizeEvidenceFields(fields []EvidenceField) error {
-	// Canonical field order keeps evidence hashes stable across processes and
-	// avoids relying on caller-provided slice ordering.
-	slices.SortFunc(fields, func(a, b EvidenceField) int {
-		if a.Key < b.Key {
-			return -1
-		}
-		if a.Key > b.Key {
-			return 1
-		}
-		return bytes.Compare(a.Value, b.Value)
-	})
-	for i, field := range fields {
-		if field.Key == "" {
-			return errors.New("empty evidence field key")
-		}
-		if field.Value == nil {
-			return fmt.Errorf("nil evidence field %q", field.Key)
-		}
-		if i > 0 && fields[i-1].Key == field.Key {
-			return fmt.Errorf("duplicate evidence field %q", field.Key)
-		}
-	}
-	return nil
 }
