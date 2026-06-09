@@ -172,6 +172,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		rs.SetGuard(testCGGMP21Guard(party, tss.PartySet(parties), sessionID))
 		sessions[party] = rs
 		pending = append(pending, out...)
 	}
@@ -254,6 +255,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
+		ss.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), signID))
 		sessions[party] = ss
 		pending = append(pending, out...)
 	}
@@ -342,6 +344,7 @@ func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare
 		if err != nil {
 			t.Fatal(err)
 		}
+		ps.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), sessionID))
 		sessions[party] = ps
 		pending = append(pending, out...)
 	}
