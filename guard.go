@@ -3,6 +3,7 @@ package tss
 import (
 	"errors"
 	"fmt"
+	"slices"
 )
 
 // EnvelopeGuard validates incoming envelopes against protocol, transport, and session policies.
@@ -193,6 +194,18 @@ func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol Protoc
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
 	}
+	if guard.Protocol != expectedProtocol {
+		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
+	}
+	if guard.SessionID != expectedSession {
+		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	}
+	if !slices.Equal(guard.Parties, parties) {
+		return fmt.Errorf("guard parties %v do not match expected %v", guard.Parties, parties)
+	}
+	if guard.Self != self {
+		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
+	}
 	return guard.Validate(env)
 }
 
@@ -203,6 +216,15 @@ func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol Protoc
 func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
+	}
+	if guard.Protocol != expectedProtocol {
+		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
+	}
+	if guard.SessionID != expectedSession {
+		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	}
+	if guard.Self != self {
+		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
 	}
 	return guard.ValidateWithParties(env, parties)
 }

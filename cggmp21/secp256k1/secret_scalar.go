@@ -43,15 +43,15 @@ func scalarBytes(x *big.Int) []byte {
 	return secp.ScalarFromBigInt(x).Bytes()
 }
 
-// validateScalarRange checks that x is a strictly positive scalar below the
-// secp256k1 group order. Used in payload marshal/unmarshal wrappers to
-// complement wire-level bigpos validation (which cannot check the group order).
-func validateScalarRange(x *big.Int) error {
+// validateScalarRangeStrict checks that x is strictly positive and below the
+// secp256k1 group order (0 < x < q). Used in payload marshal/unmarshal wrappers
+// to complement wire-level bigpos validation (which cannot check the group order).
+func validateScalarRangeStrict(x *big.Int) error {
 	if x == nil {
 		return errors.New("nil scalar")
 	}
 	if x.Sign() <= 0 {
-		return errors.New("scalar must be positive")
+		return errors.New("scalar must be strictly positive")
 	}
 	if x.Cmp(secp.Order()) >= 0 {
 		return errors.New("scalar exceeds group order")
@@ -59,11 +59,11 @@ func validateScalarRange(x *big.Int) error {
 	return nil
 }
 
-// validateScalarRangeNonZero checks that x is non-negative and below the
-// secp256k1 group order. Zero is allowed. It complements wire-level biguint
-// validation for protocol fields where zero is a valid value (e.g. partial
-// signature s_i before aggregation).
-func validateScalarRangeNonZero(x *big.Int) error {
+// validateScalarRangeAllowZero checks that x is non-negative and below the
+// secp256k1 group order (0 <= x < q). Zero is allowed. It complements wire-level
+// biguint validation for protocol fields where zero is a valid value (e.g.
+// partial signature s_i before aggregation).
+func validateScalarRangeAllowZero(x *big.Int) error {
 	if x == nil {
 		return errors.New("nil scalar")
 	}

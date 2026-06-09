@@ -17,7 +17,9 @@ type Scalar struct {
 	buf []byte
 }
 
-// NewScalar creates a Scalar from big-endian bytes padded or truncated to fixedLen.
+// NewScalar creates a Scalar from big-endian bytes. The input must be exactly
+// fixedLen bytes or shorter (left-padded with zeros). Inputs longer than fixedLen
+// are rejected to prevent silent truncation of high bytes.
 // The input is copied so the caller retains ownership of data.
 func NewScalar(data []byte, fixedLen int) (*Scalar, error) {
 	if fixedLen <= 0 {
@@ -26,9 +28,12 @@ func NewScalar(data []byte, fixedLen int) (*Scalar, error) {
 	if len(data) == 0 {
 		return nil, errors.New("secret scalar data must not be empty")
 	}
+	if len(data) > fixedLen {
+		return nil, fmt.Errorf("secret scalar data too long: %d bytes, max %d", len(data), fixedLen)
+	}
 	buf := make([]byte, fixedLen)
-	if len(data) >= fixedLen {
-		copy(buf, data[len(data)-fixedLen:])
+	if len(data) == fixedLen {
+		copy(buf, data)
 	} else {
 		copy(buf[fixedLen-len(data):], data)
 	}

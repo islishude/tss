@@ -242,18 +242,15 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 			Code:  tss.ErrCodeVerification,
 			Round: 1,
 			Party: from,
-			Blame: &tss.Blame{
-				Reason:  "invalid reshare share",
-				Parties: []tss.PartyID{from},
-				Evidence: marshalEvidence(
-					evidenceEnv,
-					tss.EvidenceKindReshareShare,
-					"invalid reshare share",
-					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)),
-					hashEvidenceField("dealer_share_payload_hash", rawPayload),
-				),
-			},
+			Blame: newBlame(
+				evidenceEnv,
+				tss.EvidenceKindReshareShare,
+				"invalid reshare share",
+				[]tss.PartyID{from},
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)),
+				hashEvidenceField("dealer_share_payload_hash", rawPayload),
+			),
 			Err: verifyErr,
 		}
 	}

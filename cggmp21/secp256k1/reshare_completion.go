@@ -53,17 +53,14 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{
-					Reason:  "invalid reshare share",
-					Parties: []tss.PartyID{dealer},
-					Evidence: marshalEvidence(
-						evidenceEnv,
-						tss.EvidenceKindReshareShare,
-						"invalid reshare share",
-						rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, s.commits[dealer])),
-					),
-				},
+				Blame: newBlame(
+					evidenceEnv,
+					tss.EvidenceKindReshareShare,
+					"invalid reshare share",
+					[]tss.PartyID{dealer},
+					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
+					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, s.commits[dealer])),
+				),
 				Err: verifyErr,
 			}
 		}

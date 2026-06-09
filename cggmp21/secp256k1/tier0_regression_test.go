@@ -188,7 +188,7 @@ func TestFast_OriginalDefectBlameShape(t *testing.T) {
 	verificationErr := &tss.ProtocolError{
 		Code: tss.ErrCodeVerification,
 		Blame: &tss.Blame{
-			Reason:  "签名 partial 验证失败",
+			Reason:  "sign partial verification failed",
 			Parties: []tss.PartyID{3},
 		},
 	}

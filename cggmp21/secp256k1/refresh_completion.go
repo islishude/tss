@@ -40,17 +40,14 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{
-					Reason:  "invalid refresh share",
-					Parties: []tss.PartyID{dealer},
-					Evidence: marshalEvidence(
-						evidenceEnv,
-						tss.EvidenceKindRefreshShare,
-						"invalid refresh share",
-						rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
-					),
-				},
+				Blame: newBlame(
+					evidenceEnv,
+					tss.EvidenceKindRefreshShare,
+					"invalid refresh share",
+					[]tss.PartyID{dealer},
+					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
+					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
+				),
 				Err: verifyErr,
 			}
 		}

@@ -207,12 +207,20 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	z4 := new(big.Int).Mul(e, mu)
 	z4.Add(z4, delta)
 
-	// w = r * rho^e mod Nj
+	// w = r * rho^e mod Nj.
+	// math/big.Int.Exp is used here with a secret base (w.Rho, Paillier
+	// randomness) but a public exponent (e, the Fiat-Shamir challenge).
+	// This is acceptable because the prover generates the proof locally
+	// and already owns the witness; observable timing differences in base
+	// size are not exploitable by a remote verifier in the non-interactive
+	// setting. The value is further masked by multiplication with the
+	// fresh random r before being included in the proof.
 	rhoExp := new(big.Int).Exp(w.Rho, e, Nj.N)
 	wVal := new(big.Int).Mul(r, rhoExp)
 	wVal.Mod(wVal, Nj.N)
 
-	// wY = rY * rhoY^e mod Ni
+	// wY = rY * rhoY^e mod Ni.
+	// Same rationale as above: public exponent, prover-local computation.
 	rhoYExp := new(big.Int).Exp(w.RhoY, e, Ni.N)
 	wY := new(big.Int).Mul(rY, rhoYExp)
 	wY.Mod(wY, Ni.N)

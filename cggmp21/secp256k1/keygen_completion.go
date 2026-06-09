@@ -44,17 +44,14 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: &tss.Blame{
-					Reason:  "invalid DKG share",
-					Parties: []tss.PartyID{dealer},
-					Evidence: marshalEvidence(
-						evidenceEnv,
-						tss.EvidenceKindKeygenShare,
-						"invalid DKG share",
-						rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
-					),
-				},
+				Blame: newBlame(
+					evidenceEnv,
+					tss.EvidenceKindKeygenShare,
+					"invalid DKG share",
+					[]tss.PartyID{dealer},
+					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
+				),
 				Err: verifyErr,
 			}
 		}

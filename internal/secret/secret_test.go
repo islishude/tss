@@ -20,14 +20,9 @@ func TestNewScalar(t *testing.T) {
 	}
 }
 
-func TestNewScalarTruncates(t *testing.T) {
-	s, err := NewScalar([]byte{0x01, 0x02, 0x03, 0x04, 0x05}, 3)
-	if err != nil {
-		t.Fatal(err)
-	}
-	b := s.FixedBytes()
-	if !bytes.Equal(b, []byte{0x03, 0x04, 0x05}) {
-		t.Fatalf("FixedBytes = %x, want 030405", b)
+func TestNewScalarRejectsOversized(t *testing.T) {
+	if _, err := NewScalar([]byte{0x01, 0x02, 0x03, 0x04, 0x05}, 3); err == nil {
+		t.Fatal("expected error for oversized input")
 	}
 }
 

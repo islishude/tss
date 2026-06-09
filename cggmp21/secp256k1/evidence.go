@@ -108,7 +108,14 @@ func verificationErrorWithEvidence(env tss.Envelope, kind tss.EvidenceKind, reas
 }
 
 func protocolErrorWithEvidence(code string, env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
-	evidenceBytes := marshalEvidence(env, kind, reason, fields...)
+	evidenceBytes, evErr := marshalEvidence(env, kind, reason, fields...)
+	if evErr != nil {
+		// Evidence construction failed — report an invariant failure instead of
+		// returning a blame record with empty evidence. The wrapped error preserves
+		// the original cause so callers can still attribute the failure.
+		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From,
+			fmt.Errorf("blame evidence marshal failed: %w (original: %w)", evErr, err))
+	}
 	return &tss.ProtocolError{
 		Code:  code,
 		Round: env.Round,
@@ -122,16 +129,30 @@ func protocolErrorWithEvidence(code string, env tss.Envelope, kind tss.EvidenceK
 	}
 }
 
-func marshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fields ...tss.EvidenceField) []byte {
+func marshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fields ...tss.EvidenceField) ([]byte, error) {
 	evidence, err := tss.NewBlameEvidence(env, kind, reason, fields)
 	if err != nil {
-		return nil
+		return nil, err
 	}
 	encoded, err := evidence.MarshalBinary()
 	if err != nil {
+		return nil, err
+	}
+	return encoded, nil
+}
+
+// newBlame builds a tss.Blame from evidence fields. If evidence marshaling fails,
+// it returns nil — the caller should fall back to [tss.ErrCodeInvariant] without blame.
+func newBlame(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, fields ...tss.EvidenceField) *tss.Blame {
+	evidenceBytes, err := marshalEvidence(env, kind, reason, fields...)
+	if err != nil {
 		return nil
 	}
-	return encoded
+	return &tss.Blame{
+		Reason:   reason,
+		Parties:  append([]tss.PartyID(nil), blamed...),
+		Evidence: evidenceBytes,
+	}
 }
 
 func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {

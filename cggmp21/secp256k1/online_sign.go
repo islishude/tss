@@ -235,7 +235,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			tss.ErrCodeVerification,
 			env,
 			tss.EvidenceKindSignPartial,
-			"签名 partial 验证失败",
+			"sign partial verification failed",
 			[]tss.PartyID{env.From},
 			err,
 			s.signPartialEvidenceFields(env.From, p)...,
@@ -315,7 +315,7 @@ func (s *SignSession) tryCompleteSign() error {
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeInvariant,
 			Round: 1,
-			Err:   errors.New("所有 partial 已单独验证，但聚合 ECDSA 签名验证失败"),
+			Err:   errors.New("all partials individually verified but aggregate ECDSA signature verification failed"),
 		}
 	}
 	s.signature = &Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes()}
