@@ -10,6 +10,7 @@ import (
 
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // ---------------------------------------------------------------------------
@@ -299,7 +300,7 @@ func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
 	if !bytes.Equal(result.ChildChainCode, valid.ChainCode[:]) {
 		t.Error("nil path: child chain code should equal parent")
 	}
-	if !isZeroBytes(result.AdditiveShift) {
+	if !testutil.IsZeroBytes(result.AdditiveShift) {
 		t.Error("nil path: additive shift should be zero")
 	}
 	if result.RequestedPath != nil {
@@ -320,7 +321,7 @@ func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
 	if !bytes.Equal(result.ChildChainCode, valid.ChainCode[:]) {
 		t.Error("empty path: child chain code should equal parent")
 	}
-	if !isZeroBytes(result.AdditiveShift) {
+	if !testutil.IsZeroBytes(result.AdditiveShift) {
 		t.Error("empty path: additive shift should be zero")
 	}
 }
@@ -777,20 +778,7 @@ func TestExtendedPublicKey_EmptyPathDerive(t *testing.T) {
 	if !bytes.Equal(child.PublicKey, known.PublicKey) {
 		t.Error("empty path Derive should return same public key")
 	}
-	if !isZeroBytes(shift) {
+	if !testutil.IsZeroBytes(shift) {
 		t.Error("empty path shift should be zero")
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-func isZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }

@@ -5,6 +5,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
@@ -74,7 +75,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	// and verified in round 2 confirmations.
 	var chainCodeCommitAggregate []byte
 	if s.enableHD {
-		agg, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodeComms)
+		agg, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodeComms)
 		if err != nil {
 			return nil, err
 		}

@@ -11,6 +11,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestDerivePublicKey(t *testing.T) {
@@ -51,8 +52,8 @@ func TestDerivePublicKey(t *testing.T) {
 // vectors generated with the reference HMAC-SHA512 construction (single-round).
 func TestDeriveNonHardenedBIP32_Vectors(t *testing.T) {
 	// Golden parent: a 32-byte Ed25519 public key and 32-byte chain code.
-	parentPub := mustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
-	chainCode := mustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
+	parentPub := testutil.MustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+	chainCode := testutil.MustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
 
 	tests := []struct {
 		index  uint32
@@ -94,8 +95,8 @@ func TestDeriveNonHardenedBIP32_Vectors(t *testing.T) {
 // TestDeriveNonHardenedBIP32_MultiStepVector verifies multi-step derivation
 // against a golden chain code computed from independent HMAC steps.
 func TestDeriveNonHardenedBIP32_MultiStepVector(t *testing.T) {
-	parentPub := mustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
-	chainCode := mustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
+	parentPub := testutil.MustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
+	chainCode := testutil.MustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
 
 	// Derive m/0/1 in a single call.
 	result, err := DeriveNonHardenedBIP32(parentPub, chainCode, []uint32{0, 1})
@@ -139,7 +140,7 @@ func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
 		if !bytes.Equal(result.ChildChainCode, cc) {
 			t.Errorf("path=%v: child chain != parent chain", path)
 		}
-		if !isZeroBytes(result.AdditiveShift) {
+		if !testutil.IsZeroBytes(result.AdditiveShift) {
 			t.Errorf("path=%v: additive shift should be zero", path)
 		}
 		if result.Depth != 0 {
@@ -461,24 +462,6 @@ func TestDeriveNonHardenedBIP32Determinism(t *testing.T) {
 		!bytes.Equal(r1.ChildChainCode, r2.ChildChainCode) {
 		t.Fatal("DeriveNonHardenedBIP32 is not deterministic")
 	}
-}
-
-func mustDecodeHex(t *testing.T, s string) []byte {
-	t.Helper()
-	b, err := hex.DecodeString(s)
-	if err != nil {
-		t.Fatalf("decode hex: %v", err)
-	}
-	return b
-}
-
-func isZeroBytes(b []byte) bool {
-	for _, v := range b {
-		if v != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 // frostKeygenHD runs a full in-memory DKG with HD enabled and returns the key shares.

@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
@@ -317,7 +318,7 @@ func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
 	if len(presign.AdditiveShift) != 32 {
 		t.Fatal("expected 32-byte additive shift in presign")
 	}
-	if isZeroBytes(presign.AdditiveShift) {
+	if testutil.IsZeroBytes(presign.AdditiveShift) {
 		t.Fatal("additive shift should be non-zero for non-empty path")
 	}
 	// The context hash embeds the derivation path.

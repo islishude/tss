@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -409,7 +410,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	// Aggregate chain codes from all revealed confirmations.
 	var chainCode []byte
 	if s.enableHD {
-		cc, err := tss.AggregateChainCode(s.cfg.Parties, s.chainCodes)
+		cc, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodes)
 		if err != nil {
 			s.abort()
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)

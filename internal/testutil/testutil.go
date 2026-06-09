@@ -4,6 +4,7 @@
 package testutil
 
 import (
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -136,6 +137,32 @@ func TestLimits() tss.Limits {
 	l.MaxMTAResponseBytes = 512 << 10
 	l.MaxZKProofBytes = 512 << 10
 	return l
+}
+
+// MustDecodeHex decodes a hex string into a byte slice. It calls t.Fatal if
+// decoding fails, making it suitable for test fixture setup where a malformed
+// hex literal is a programmer error.
+func MustDecodeHex(tb interface{ Fatal(...any) }, s string) []byte {
+	if h, ok := tb.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	b, err := hex.DecodeString(s)
+	if err != nil {
+		tb.Fatal(fmt.Sprintf("testutil.MustDecodeHex: invalid hex %q: %v", s, err))
+		return nil
+	}
+	return b
+}
+
+// IsZeroBytes reports whether every byte in b is zero. A nil or empty slice
+// returns true.
+func IsZeroBytes(b []byte) bool {
+	for _, v := range b {
+		if v != 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // CloneByteSlices returns a deep copy of a [][]byte slice.

@@ -329,10 +329,6 @@ func TestVersionConstantsDistinct(t *testing.T) {
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
 // Test helper: verify that sha256d of a well-known xpub payload matches.
 func TestXPubChecksum(t *testing.T) {
 	// Manual checksum verification for the TV2 master xpub.
