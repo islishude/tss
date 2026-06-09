@@ -59,6 +59,7 @@ const (
 	presignFieldPublicKey
 	presignFieldKeygenTranscriptHash
 	presignFieldPartiesHash
+	presignFieldVerifyShares
 )
 
 const (
@@ -220,7 +221,7 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if version != tss.Version {
 		return nil, fmt.Errorf("unexpected presign wire version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed, presignFieldPublicKey, presignFieldKeygenTranscriptHash, presignFieldPartiesHash); err != nil {
+	if err := wire.RequireExactTags(fields, presignFieldParty, presignFieldThreshold, presignFieldSigners, presignFieldR, presignFieldLittleR, presignFieldKShare, presignFieldChiShare, presignFieldDelta, presignFieldTranscriptHash, presignFieldContext, presignFieldContextHash, presignFieldAdditiveShift, presignFieldConsumed, presignFieldPublicKey, presignFieldKeygenTranscriptHash, presignFieldPartiesHash, presignFieldVerifyShares); err != nil {
 		return nil, err
 	}
 	// Tags validated; access fields by index.
@@ -262,6 +263,10 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 	if err != nil {
 		return nil, fmt.Errorf("invalid delta: %w", err)
 	}
+	verifyShares, err := decodeSignVerifySharesBytesWithLimit(fields[16].Value, limits)
+	if err != nil {
+		return nil, fmt.Errorf("invalid verify shares: %w", err)
+	}
 	p := &Presign{
 		mu:                   &sync.Mutex{},
 		Version:              tss.Version,
@@ -278,6 +283,7 @@ func unmarshalPresignWithLimits(in []byte, limits tss.Limits) (*Presign, error) 
 		KeygenTranscriptHash: fields[14].Value,
 		PartiesHash:          fields[15].Value,
 		Consumed:             consumed,
+		VerifyShares:         verifyShares,
 		kShare:               kShare,
 		chiShare:             chiShare,
 		delta:                delta,
@@ -404,4 +410,47 @@ func decodePresignContext(in []byte) (PresignContext, error) {
 		return PresignContext{}, err
 	}
 	return ctx, nil
+}
+
+// encodeSignVerifyShares encodes a slice of SignVerifyShare into a deterministic
+// TLV structure sorted by party ID.
+func encodeSignVerifyShares(shares []SignVerifyShare) []byte {
+	if len(shares) == 0 {
+		return nil
+	}
+	records := make([]wire.PartyTriple[tss.PartyID], len(shares))
+	for i, share := range shares {
+		records[i] = wire.PartyTriple[tss.PartyID]{
+			Party:  share.Party,
+			First:  share.KPoint,
+			Second: share.ChiPoint,
+			Third:  share.Proof,
+		}
+	}
+	return wire.EncodePartyTriples(records)
+}
+
+// decodeSignVerifySharesBytesWithLimit decodes a SignVerifyShare slice with
+// per-field size caps.
+func decodeSignVerifySharesBytesWithLimit(raw []byte, limits tss.Limits) ([]SignVerifyShare, error) {
+	records, err := wire.DecodePartyTriplesWithLimit[tss.PartyID](raw,
+		limits.MaxSigners,
+		limits.MaxPointBytes,
+		limits.MaxPointBytes,
+		limits.MaxCGGMP21SignPrepProofBytes,
+		"sign verify share",
+	)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]SignVerifyShare, 0, len(records))
+	for _, record := range records {
+		out = append(out, SignVerifyShare{
+			Party:    record.Party,
+			KPoint:   record.First,
+			ChiPoint: record.Second,
+			Proof:    record.Third,
+		})
+	}
+	return out, nil
 }

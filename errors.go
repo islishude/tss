@@ -41,6 +41,10 @@ const (
 	ErrCodePayloadTooLarge = "payload_too_large"
 	// ErrCodeProofTooLarge marks a proof input that exceeds its byte cap.
 	ErrCodeProofTooLarge = "proof_too_large"
+	// ErrCodeInvariant marks an implementation-invariant failure. This is not a
+	// protocol-level blame event — it indicates a bug in the library or corrupted
+	// local state. No participants are blamed.
+	ErrCodeInvariant = "invariant"
 )
 
 // ErrUnauthenticatedTransport is returned when an envelope arrives over an unauthenticated transport.

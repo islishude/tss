@@ -12,7 +12,9 @@ import (
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/zk/signprep"
 )
 
 // testCGGMP21Guard is a helper that creates an EnvelopeGuard for CGGMP21 protocol tests.
@@ -124,6 +126,7 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 	if err != nil {
 		tb.Fatal("PointBytes: " + err.Error())
 	}
+	minimalProof := mustMinimalSignPrepProofForTest(tb)
 	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	ctx := testPresignContext()
@@ -154,10 +157,57 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 		PublicKey:            R,
 		KeygenTranscriptHash: transcript[:],
 		PartiesHash:          wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel),
-		kShare:               kShare,
-		chiShare:             chiShare,
-		delta:                delta,
+		VerifyShares: []SignVerifyShare{{
+			Party:    1,
+			KPoint:   R,
+			ChiPoint: R,
+			Proof:    minimalProof,
+		}},
+		kShare:   kShare,
+		chiShare: chiShare,
+		delta:    delta,
 	}
+}
+
+func mustMinimalSignPrepProofForTest(tb interface{ Fatal(...any) }) []byte {
+	one := big.NewInt(1)
+	two := big.NewInt(2)
+	kScalar := secp.ScalarFromBigInt(one)
+	twoScalar := secp.ScalarFromBigInt(two)
+	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(kScalar))
+	xBarPoint := kPoint
+	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
+	stmt := signprep.Statement{
+		Protocol:             protocol,
+		SessionID:            tss.SessionID{1},
+		Party:                1,
+		Signers:              []tss.PartyID{1},
+		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
+		PublicKey:            kPoint,
+		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),
+		PartiesHash:          bytes.Repeat([]byte{0xcc}, 32),
+		KPoint:               kPoint,
+		ChiPoint:             chiPoint,
+		XBarPoint:            xBarPoint,
+		EncK:                 make([]byte, 256),
+		PaillierPublicKey:    make([]byte, 256),
+		Gamma:                kPoint,
+		Delta:                scalarBytes(one),
+	}
+	wit := signprep.Witness{
+		KShare:   one,
+		MTASum:   one,
+		ChiShare: two,
+	}
+	proof, err := signprep.Prove(testutil.DeterministicReader(42), stmt, wit)
+	if err != nil {
+		tb.Fatal("signprep.Prove: " + err.Error())
+	}
+	proofBytes, err := proof.MarshalBinary()
+	if err != nil {
+		tb.Fatal("proof.MarshalBinary: " + err.Error())
+	}
+	return proofBytes
 }
 
 // checkGolden compares raw bytes against a golden file. When the environment

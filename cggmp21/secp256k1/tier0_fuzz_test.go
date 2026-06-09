@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
@@ -110,9 +111,11 @@ func FuzzFast_BlameEvidenceUnmarshal(f *testing.F) {
 // is constructed manually without any keygen.
 func FuzzFast_SignPartialDecode(f *testing.F) {
 	seed, err := marshalSignPartialPayload(signPartialPayload{
-		S:                 scalarBytes(big.NewInt(1)),
-		PresignTranscript: make([]byte, sha256.Size),
-		PresignContext:    bytes.Repeat([]byte{1}, sha256.Size),
+		S:                   scalarBytes(big.NewInt(1)),
+		PresignTranscript:   make([]byte, sha256.Size),
+		PresignContext:      bytes.Repeat([]byte{1}, sha256.Size),
+		DigestHash:          make([]byte, sha256.Size),
+		PartialEquationHash: make([]byte, sha256.Size),
 	})
 	if err != nil {
 		f.Fatal(err)
@@ -168,7 +171,15 @@ func FuzzFast_KeygenSharePayloadUnmarshal(f *testing.F) {
 // FuzzFast_PresignRound3PayloadUnmarshal fuzzes presign round 3 payload
 // decoding (no keygen required).
 func FuzzFast_PresignRound3PayloadUnmarshal(f *testing.F) {
-	raw, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(big.NewInt(1))})
+	proof := mustMinimalSignPrepProofForTest(f)
+	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
+	raw, err := marshalPresignRound3Payload(presignRound3Payload{
+		Delta:    scalarBytes(big.NewInt(1)),
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
+		Proof:    proof,
+	})
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -221,6 +232,34 @@ func FuzzFast_RefreshSharePayloadUnmarshal(f *testing.F) {
 			return
 		}
 		testutil.AssertDeterministicRoundTrip(t, p, marshalRefreshSharePayload, unmarshalRefreshSharePayload)
+	})
+}
+
+// FuzzFast_VerifySignPartialInputs fuzzes the verifySignPartial method against
+// malformed inputs. It constructs a minimal valid session and feeds random
+// payload data.
+func FuzzFast_VerifySignPartialInputs(f *testing.F) {
+	presign := minimalCGGMP21Presign(f)
+	// Create a minimal SignSession.
+	s := &SignSession{
+		key:     &KeyShare{Party: 1, Parties: []tss.PartyID{1}, Threshold: 1},
+		presign: presign,
+		digest:  bytes.Repeat([]byte{0xaa}, 32),
+		log:     tss.NopLogger(),
+	}
+	f.Add(mustMinimalSignPrepProofForTest(f))
+	f.Add([]byte{0x00})
+	f.Add([]byte("invalid"))
+	f.Fuzz(func(t *testing.T, data []byte) {
+		// verifySignPartial should never panic on any input.
+		p := signPartialPayload{
+			S:                   data,
+			PresignTranscript:   presign.TranscriptHash,
+			PresignContext:      presign.ContextHash,
+			DigestHash:          bytes.Repeat([]byte{0xaa}, 32),
+			PartialEquationHash: bytes.Repeat([]byte{0xbb}, 32),
+		}
+		_, _ = s.verifySignPartial(1, p)
 	})
 }
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
@@ -42,9 +43,11 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 
 func TestGoldenSignPartialPayload(t *testing.T) {
 	payload := signPartialPayload{
-		S:                 scalarBytes(big.NewInt(1)),
-		PresignTranscript: bytes.Repeat([]byte{0xaa}, 32),
-		PresignContext:    bytes.Repeat([]byte{0xbb}, 32),
+		S:                   scalarBytes(big.NewInt(1)),
+		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
+		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
+		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
+		PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
 	}
 	raw, err := marshalSignPartialPayload(payload)
 	if err != nil {
@@ -71,7 +74,16 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 }
 
 func TestGoldenPresignRound3Payload(t *testing.T) {
-	payload := presignRound3Payload{Delta: scalarBytes(big.NewInt(42))}
+	proof := mustMinimalSignPrepProofForTest(t)
+	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+	twoScalar := secp.ScalarFromBigInt(big.NewInt(2))
+	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
+	payload := presignRound3Payload{
+		Delta:    scalarBytes(big.NewInt(42)),
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
+		Proof:    proof,
+	}
 	raw, err := marshalPresignRound3Payload(payload)
 	if err != nil {
 		t.Fatal(err)

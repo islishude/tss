@@ -5,13 +5,16 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/zk/signprep"
 )
 
 // handlePresignRound3 validates and applies a presign round 3 delta share.
@@ -50,16 +53,83 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 		)
 	}
 
+	if err := s.verifyRemoteSignprepProof(env.From, p); err != nil {
+		return nil, protocolErrorWithEvidence(
+			tss.ErrCodeVerification,
+			env,
+			tss.EvidenceKindPresignRound3,
+			"presign 签名验证材料无效",
+			[]tss.PartyID{env.From},
+			err,
+			s.presignRound3EvidenceFields(p)...,
+		)
+	}
+
 	// ---- 4. MUTATE STATE ----
 	s.deltas[env.From] = delta.BigInt()
+	s.verifyShares[env.From] = SignVerifyShare{
+		Party:    env.From,
+		KPoint:   p.KPoint,
+		ChiPoint: p.ChiPoint,
+		Proof:    p.Proof,
+	}
 
 	// ---- 5. EMIT ----
 	return nil, s.tryComplete()
 }
 
+func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRound3Payload) error {
+	proof, err := signprep.UnmarshalProof(p.Proof)
+	if err != nil {
+		return fmt.Errorf("invalid signprep proof: %w", err)
+	}
+	order := secp.Order()
+	lambda, err := shamir.LagrangeCoefficient(from, s.signers, order)
+	if err != nil {
+		return err
+	}
+	verificationShare, ok := s.key.verificationShare(from)
+	if !ok {
+		return fmt.Errorf("missing verification share for party %d", from)
+	}
+	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return err
+	}
+	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, secp.ScalarFromBigInt(lambda)))
+	if err != nil {
+		return err
+	}
+	stmt := signprep.Statement{
+		Protocol:             protocol,
+		SessionID:            s.sessionID,
+		Party:                from,
+		Signers:              slices.Clone(s.signers),
+		ContextHash:          slices.Clone(s.contextHash),
+		AdditiveShift:        slices.Clone(s.additiveShift),
+		PublicKey:            slices.Clone(s.key.PublicKey),
+		KeygenTranscriptHash: slices.Clone(s.key.KeygenTranscriptHash),
+		PartiesHash:          wireutil.PartySetHash(s.key.Parties, partySetHashLabel),
+		KPoint:               slices.Clone(p.KPoint),
+		ChiPoint:             slices.Clone(p.ChiPoint),
+		XBarPoint:            xBarPoint,
+		Gamma:                slices.Clone(s.round1[from].Gamma),
+		EncK:                 slices.Clone(s.round1[from].EncK),
+		PaillierPublicKey:    slices.Clone(s.round1[from].PaillierPublicKey),
+		Round1Echo:           s.round1Echo(),
+		Delta:                slices.Clone(p.Delta),
+	}
+	return signprep.Verify(stmt, proof)
+}
+
 func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-	return append(fields, hashEvidenceField("delta_hash", p.Delta))
+	return append(fields,
+		hashEvidenceField("delta_hash", p.Delta),
+		hashEvidenceField(evidenceFieldSignVerifyKPointHash, p.KPoint),
+		hashEvidenceField(evidenceFieldSignVerifyChiPointHash, p.ChiPoint),
+		hashEvidenceField(evidenceFieldSignPrepProofHash, p.Proof),
+	)
 }
 
 func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
@@ -88,15 +158,15 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		if peer == s.key.Party {
 			continue
 		}
-		// delta_i = k_i*gamma_i + sum_j alpha_ij + sum_j beta_ji.
 		deltaShare.Add(deltaShare, s.alphaDelta[peer])
 		deltaShare.Add(deltaShare, s.betaDelta[peer])
-		// chi_i = k_i*x_i + sum_j alphaHat_ij + sum_j betaHat_ji.
 		chiShare.Add(chiShare, s.alphaSigma[peer])
 		chiShare.Add(chiShare, s.betaSigma[peer])
 	}
 	deltaShare.Mod(deltaShare, order)
 	chiShare.Mod(chiShare, order)
+	mtaSum := new(big.Int).Sub(chiShare, new(big.Int).Mul(kShare, xBar))
+	mtaSum.Mod(mtaSum, order)
 	if len(s.additiveShift) > 0 {
 		shift, err := secp.ScalarFromBytes(s.additiveShift)
 		if err != nil {
@@ -107,11 +177,93 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		chiShare.Mod(chiShare, order)
 	}
 	s.deltas[s.key.Party] = deltaShare
-	payload, err := marshalPresignRound3Payload(presignRound3Payload{Delta: scalarBytes(deltaShare)})
+
+	// Compute KPoint and ChiPoint.
+	kScalar, err := secp.ScalarFromBytes(scalarBytes(kShare))
+	if err != nil {
+		return nil, err
+	}
+	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(kScalar))
+	if err != nil {
+		return nil, err
+	}
+	chiScalar, err := secp.ScalarFromBytes(scalarBytes(chiShare))
+	if err != nil {
+		return nil, err
+	}
+	chiPoint, err := secp.PointBytes(secp.ScalarBaseMult(chiScalar))
+	if err != nil {
+		return nil, err
+	}
+
+	// Compute XBarPoint.
+	lambda, err := shamir.LagrangeCoefficient(s.key.Party, s.signers, order)
+	if err != nil {
+		return nil, err
+	}
+	verificationShare, ok := s.key.verificationShare(s.key.Party)
+	if !ok {
+		return nil, fmt.Errorf("missing local verification share for party %d", s.key.Party)
+	}
+	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return nil, err
+	}
+	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, secp.ScalarFromBigInt(lambda)))
+	if err != nil {
+		return nil, err
+	}
+
+	// Build signprep proof.
+	stmt := signprep.Statement{
+		Protocol:             protocol,
+		SessionID:            s.sessionID,
+		Party:                s.key.Party,
+		Signers:              slices.Clone(s.signers),
+		ContextHash:          slices.Clone(s.contextHash),
+		AdditiveShift:        slices.Clone(s.additiveShift),
+		PublicKey:            slices.Clone(s.key.PublicKey),
+		KeygenTranscriptHash: slices.Clone(s.key.KeygenTranscriptHash),
+		PartiesHash:          wireutil.PartySetHash(s.key.Parties, partySetHashLabel),
+		KPoint:               kPoint,
+		ChiPoint:             chiPoint,
+		XBarPoint:            xBarPoint,
+		Gamma:                slices.Clone(s.round1[s.key.Party].Gamma),
+		EncK:                 slices.Clone(s.round1[s.key.Party].EncK),
+		PaillierPublicKey:    slices.Clone(s.key.PaillierPublicKey),
+		Round1Echo:           s.round1Echo(),
+		Delta:                scalarBytes(deltaShare),
+	}
+	wit := signprep.Witness{
+		KShare:   new(big.Int).Set(kShare),
+		MTASum:   mtaSum,
+		ChiShare: new(big.Int).Set(chiShare),
+	}
+	proof, err := signprep.Prove(s.config.Reader(), stmt, wit)
+	if err != nil {
+		return nil, fmt.Errorf("signprep proof generation: %w", err)
+	}
+	proofBytes, err := proof.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
+
+	payload, err := marshalPresignRound3Payload(presignRound3Payload{
+		Delta:    scalarBytes(deltaShare),
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
+		Proof:    proofBytes,
+	})
 	if err != nil {
 		return nil, err
 	}
 	s.round3Sent = true
+	s.verifyShares[s.key.Party] = SignVerifyShare{
+		Party:    s.key.Party,
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
+		Proof:    proofBytes,
+	}
 	s.presign = &Presign{
 		mu:                   &sync.Mutex{},
 		Version:              tss.Version,
@@ -141,7 +293,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 }
 
 func (s *PresignSession) tryComplete() error {
-	if s.completed || len(s.deltas) != len(s.signers) {
+	if s.completed || len(s.deltas) != len(s.signers) || len(s.verifyShares) != len(s.signers) {
 		return nil
 	}
 	order := secp.Order()
@@ -177,6 +329,11 @@ func (s *PresignSession) tryComplete() error {
 		return errors.New("local presign shares not computed")
 	}
 	// R = delta^{-1} * Gamma, with Gamma=sum_i Gamma_i. LittleR is the ECDSA r.
+	// Populate VerifyShares from the session's collected verification material.
+	s.presign.VerifyShares = make([]SignVerifyShare, 0, len(s.signers))
+	for _, id := range s.signers {
+		s.presign.VerifyShares = append(s.presign.VerifyShares, s.verifyShares[id].Clone())
+	}
 	s.presign.R = R
 	s.presign.LittleR = scalarBytes(littleR)
 	s.presign.delta, err = secpSecretScalarFromBig(delta)
@@ -202,12 +359,15 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	wire.WriteHashPart(h, s.key.KeygenTranscriptHash)
 	wire.WriteHashPart(h, wireutil.PartySetHash(s.key.Parties, partySetHashLabel))
 	for _, id := range s.signers {
-		// Binding every signer id, nonce commitment, encrypted nonce, and delta
-		// share prevents replaying presign material across signer sets.
 		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 		wire.WriteHashPart(h, s.round1[id].Gamma)
 		wire.WriteHashPart(h, s.round1[id].EncK)
 		wire.WriteHashPart(h, scalarBytes(s.deltas[id]))
+		vs := s.verifyShares[id]
+		wire.WriteHashPart(h, vs.KPoint)
+		wire.WriteHashPart(h, vs.ChiPoint)
+		proofHash := sha256.Sum256(vs.Proof)
+		wire.WriteHashPart(h, proofHash[:])
 	}
 	wire.WriteHashPart(h, R)
 	wire.WriteHashPart(h, scalarBytes(littleR))

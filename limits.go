@@ -86,6 +86,15 @@ const (
 	MaxCGGMPThreshold = 16
 	// MaxCGGMPSigners is the algorithm-specific signer cap for CGGMP21 secp256k1.
 	MaxCGGMPSigners = 16
+
+	// MaxCGGMP21SignPrepProofBytes caps a CGGMP21 signprep proof size (512 KiB).
+	MaxCGGMP21SignPrepProofBytes = 512 << 10
+	// MaxCGGMP21SignVerifyShareBytes caps a single SignVerifyShare record.
+	MaxCGGMP21SignVerifyShareBytes = 65*2 + MaxCGGMP21SignPrepProofBytes + 8
+	// MaxCGGMP21SignVerifySharesBytes caps the full VerifyShares array.
+	MaxCGGMP21SignVerifySharesBytes = MaxCGGMPSigners * MaxCGGMP21SignVerifyShareBytes
+	// MaxCGGMP21SignPartialPayloadBytes caps a sign.partial payload.
+	MaxCGGMP21SignPartialPayloadBytes = 32*5 + MaxCGGMP21SignPrepProofBytes + 256
 )
 
 // Limits defines finite caps for all security-sensitive parameters.
@@ -133,6 +142,11 @@ type Limits struct {
 	MaxEvidenceFieldCount      int
 	MaxEvidenceFieldKeyBytes   int
 	MaxEvidenceFieldValueBytes int
+
+	MaxCGGMP21SignPrepProofBytes      int
+	MaxCGGMP21SignVerifyShareBytes    int
+	MaxCGGMP21SignVerifySharesBytes   int
+	MaxCGGMP21SignPartialPayloadBytes int
 }
 
 // DefaultLimits returns a conservative fail-closed Limits suitable as a fallback
@@ -181,6 +195,11 @@ func DefaultLimits() Limits {
 		MaxEvidenceFieldCount:      DefaultMaxEvidenceFieldCount,
 		MaxEvidenceFieldKeyBytes:   DefaultMaxEvidenceFieldKeyBytes,
 		MaxEvidenceFieldValueBytes: DefaultMaxEvidenceFieldValueBytes,
+
+		MaxCGGMP21SignPrepProofBytes:      MaxCGGMP21SignPrepProofBytes,
+		MaxCGGMP21SignVerifyShareBytes:    MaxCGGMP21SignVerifyShareBytes,
+		MaxCGGMP21SignVerifySharesBytes:   MaxCGGMP21SignVerifySharesBytes,
+		MaxCGGMP21SignPartialPayloadBytes: MaxCGGMP21SignPartialPayloadBytes,
 	}
 }
 

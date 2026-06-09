@@ -82,13 +82,3 @@ func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
 	wire.WriteHashPart(h, response.Proof)
 	return h.Sum(nil)
 }
-
-func aggregateEvidencePayload(digest, r, sValue, transcript []byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(aggregateSignEvidenceLabel))
-	wire.WriteHashPart(h, digest)
-	wire.WriteHashPart(h, r)
-	wire.WriteHashPart(h, sValue)
-	wire.WriteHashPart(h, transcript)
-	return h.Sum(nil)
-}

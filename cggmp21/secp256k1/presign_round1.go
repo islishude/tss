@@ -155,6 +155,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		round1Verified:       map[tss.PartyID]bool{key.Party: true},
 		round2:               make(map[tss.PartyID]presignRound2Payload),
 		deltas:               make(map[tss.PartyID]*big.Int),
+		verifyShares:         make(map[tss.PartyID]SignVerifyShare),
 		alphaDelta:           make(map[tss.PartyID]*big.Int),
 		betaDelta:            make(map[tss.PartyID]*big.Int),
 		alphaSigma:           make(map[tss.PartyID]*big.Int),

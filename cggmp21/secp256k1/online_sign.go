@@ -12,6 +12,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
@@ -42,6 +43,9 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		return nil, nil, err
 	}
 	if err := validatePresign(key, presign); err != nil {
+		return nil, nil, err
+	}
+	if err := presign.VerifySignMaterial(); err != nil {
 		return nil, nil, err
 	}
 	if len(digest32) != 32 {
@@ -89,27 +93,26 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	rs := new(big.Int).Mul(littleR.BigInt(), chiShare.BigInt())
 	partial.Add(partial, rs)
 	partial.Mod(partial, secp.Order())
-	payload, err := marshalSignPartialPayload(signPartialPayload{
+	localVS, ok := presignVerifyShare(presign, key.Party)
+	if !ok {
+		return nil, nil, fmt.Errorf("missing local verify share for party %d — presign may be corrupted", key.Party)
+	}
+	payload := signPartialPayload{
 		S:                 scalarBytes(partial),
-		PresignTranscript: append([]byte(nil), presign.TranscriptHash...),
-		PresignContext:    append([]byte(nil), contextHash...),
-	})
+		PresignTranscript: slices.Clone(presign.TranscriptHash),
+		PresignContext:    slices.Clone(contextHash),
+		DigestHash:        digestHash(digest32, contextHash),
+		PartialEquationHash: partialEquationHash(
+			sessionID, key.Party, presign.TranscriptHash,
+			contextHash, digest32,
+			littleR.Bytes(), scalarBytes(partial),
+			localVS.KPoint, localVS.ChiPoint,
+		),
+	}
+	payloadBytes, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
-		Version:     tss.Version,
-		SessionID:   sessionID,
-		Round:       1,
-		From:        key.Party,
-		PayloadType: payloadSignPartial,
-		Payload:     payload,
-	})
-	if err != nil {
-		return nil, nil, err
-	}
-	env.Security.Confidential = true
 	s := &SignSession{
 		key:       key,
 		presign:   presign,
@@ -118,8 +121,25 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		digest:    append([]byte(nil), digest32...),
 		lowS:      lowS,
 		publicKey: verifyKey,
-		partials:  map[tss.PartyID]*big.Int{key.Party: partial},
+		partials:  make(map[tss.PartyID]*big.Int),
 	}
+	if _, err := s.verifySignPartial(key.Party, payload); err != nil {
+		return nil, nil, fmt.Errorf("local sign partial self-verification failed: %w", err)
+	}
+	s.partials[key.Party] = partial
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   sessionID,
+		Round:       1,
+		From:        key.Party,
+		PayloadType: payloadSignPartial,
+		Payload:     payloadBytes,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	env.Security.Confidential = true
 	if err := s.tryCompleteSign(); err != nil {
 		return nil, nil, err
 	}
@@ -209,43 +229,21 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	if !bytes.Equal(p.PresignTranscript, s.presign.TranscriptHash) {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindSignPartial,
-			"presign transcript mismatch",
-			[]tss.PartyID{env.From},
-			errors.New("presign transcript mismatch"),
-			s.signPartialEvidenceFields(p)...,
-		)
-	}
-	if !bytes.Equal(p.PresignContext, s.presign.ContextHash) {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindSignPartial,
-			"presign context mismatch",
-			[]tss.PartyID{env.From},
-			errors.New("presign context mismatch"),
-			s.signPartialEvidenceFields(p)...,
-		)
-	}
-	partial, err := secp.ScalarFromBytes(p.S)
+	partial, err := s.verifySignPartial(env.From, p)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
+			tss.ErrCodeVerification,
 			env,
 			tss.EvidenceKindSignPartial,
-			"malformed sign partial",
+			"签名 partial 验证失败",
 			[]tss.PartyID{env.From},
 			err,
-			s.signPartialEvidenceFields(p)...,
+			s.signPartialEvidenceFields(env.From, p)...,
 		)
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.partials[env.From] = partial.BigInt()
+	s.partials[env.From] = partial
 
 	// ---- 5. EMIT ----
 	return nil, s.tryCompleteSign()
@@ -259,27 +257,33 @@ func (s *SignSession) Signature() (*Signature, bool) {
 	return &Signature{R: append([]byte(nil), s.signature.R...), S: append([]byte(nil), s.signature.S...)}, true
 }
 
-func (s *SignSession) signPartialEvidenceFields(p signPartialPayload) []tss.EvidenceField {
+func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialPayload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
-	return append(fields,
+	fields = append(fields,
 		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField("observed_presign_transcript_hash", p.PresignTranscript),
 		rawEvidenceField("presign_context_hash", s.presign.ContextHash),
 		hashEvidenceField("observed_presign_context_hash", p.PresignContext),
 		hashEvidenceField("sign_partial_hash", p.S),
-	)
-}
-
-func (s *SignSession) aggregateEvidenceFields(r, sigS *big.Int) []tss.EvidenceField {
-	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
-	fields = append(fields,
-		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
-		hashEvidenceField(evidenceFieldRHash, secp.ScalarFromBigInt(r).Bytes()),
-		hashEvidenceField(evidenceFieldSHash, secp.ScalarFromBigInt(sigS).Bytes()),
 	)
-	for _, id := range s.presign.Signers {
-		fields = append(fields, hashEvidenceField(fmt.Sprintf("sign_partial_%d_hash", id), secp.ScalarFromBigInt(s.partials[id]).Bytes()))
+	// Include the sender's (blamed party's) KPoint/ChiPoint hashes.
+	if vs, ok := presignVerifyShare(s.presign, from); ok {
+		fields = append(fields,
+			hashEvidenceField(evidenceFieldSignVerifyKPointHash, vs.KPoint),
+			hashEvidenceField(evidenceFieldSignVerifyChiPointHash, vs.ChiPoint),
+		)
+		// Compute the expected equation hash for independent auditability.
+		expectedEqHash := partialEquationHash(
+			s.sessionID, from, s.presign.TranscriptHash,
+			s.presign.ContextHash, s.digest,
+			s.presign.LittleR, p.S,
+			vs.KPoint, vs.ChiPoint,
+		)
+		fields = append(fields,
+			rawEvidenceField(evidenceFieldPartialEquationHash, expectedEqHash),
+			rawEvidenceField(evidenceFieldObservedPartialEquationHash, p.PartialEquationHash),
+		)
 	}
 	return fields
 }
@@ -308,28 +312,10 @@ func (s *SignSession) tryCompleteSign() error {
 		return err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, secp.ScalarFromBigInt(sigS)) {
-		env, _ := tss.NewEnvelope(tss.EnvelopeInput{
-			Protocol:    protocol,
-			Version:     tss.Version,
-			SessionID:   s.sessionID,
-			Round:       1,
-			PayloadType: payloadSignPartial,
-			Payload:     aggregateEvidencePayload(s.digest, r.Bytes(), secp.ScalarFromBigInt(sigS).Bytes(), s.presign.TranscriptHash),
-		})
 		return &tss.ProtocolError{
-			Code:  tss.ErrCodeAggregateSignInvalid,
+			Code:  tss.ErrCodeInvariant,
 			Round: 1,
-			Blame: &tss.Blame{
-				Reason:  "aggregated ECDSA signature failed verification (suspect set)",
-				Parties: append([]tss.PartyID(nil), s.presign.Signers...),
-				Evidence: marshalEvidence(
-					env,
-					tss.EvidenceKindAggregateSign,
-					"aggregated ECDSA signature failed verification — suspect set, individual partial not independently verifiable",
-					s.aggregateEvidenceFields(r.BigInt(), sigS)...,
-				),
-			},
-			Err: errors.New("aggregate ECDSA signature verification failed"),
+			Err:   errors.New("所有 partial 已单独验证，但聚合 ECDSA 签名验证失败"),
 		}
 	}
 	s.signature = &Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes()}
@@ -428,4 +414,96 @@ func ClaimPresign(presign *Presign) error {
 func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
 	limits := DefaultLimits()
 	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
+}
+
+func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) (*big.Int, error) {
+	if !tss.ContainsParty(s.presign.Signers, from) {
+		return nil, errors.New("sender is not in signer set")
+	}
+	if !bytes.Equal(p.PresignTranscript, s.presign.TranscriptHash) {
+		return nil, errors.New("presign transcript mismatch")
+	}
+	if !bytes.Equal(p.PresignContext, s.presign.ContextHash) {
+		return nil, errors.New("presign context mismatch")
+	}
+	expectedDigestHash := digestHash(s.digest, s.presign.ContextHash)
+	if !bytes.Equal(p.DigestHash, expectedDigestHash) {
+		return nil, errors.New("digest hash mismatch")
+	}
+	sVal, err := secp.ScalarFromBytes(p.S)
+	if err != nil {
+		return nil, fmt.Errorf("invalid S scalar: %w", err)
+	}
+	vs, ok := presignVerifyShare(s.presign, from)
+	if !ok {
+		return nil, fmt.Errorf("missing verify share for party %d", from)
+	}
+	kPoint, err := secp.PointFromBytes(vs.KPoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid KPoint for party %d: %w", from, err)
+	}
+	chiPoint, err := secp.PointFromBytes(vs.ChiPoint)
+	if err != nil {
+		return nil, fmt.Errorf("invalid ChiPoint for party %d: %w", from, err)
+	}
+	littleR, err := secp.ScalarFromBytes(s.presign.LittleR)
+	if err != nil {
+		return nil, err
+	}
+	expectedEqHash := partialEquationHash(
+		s.sessionID, from, s.presign.TranscriptHash,
+		s.presign.ContextHash, s.digest,
+		littleR.Bytes(), p.S,
+		vs.KPoint, vs.ChiPoint,
+	)
+	if !bytes.Equal(p.PartialEquationHash, expectedEqHash) {
+		return nil, errors.New("partial equation hash mismatch")
+	}
+	z := new(big.Int).SetBytes(s.digest)
+	zScalar, err := secp.ScalarFromBytes(scalarBytes(z))
+	if err != nil {
+		return nil, err
+	}
+	lhs := secp.ScalarBaseMult(sVal)
+	term1 := secp.ScalarMult(kPoint, zScalar)
+	term2 := secp.ScalarMult(chiPoint, littleR)
+	rhs := secp.Add(term1, term2)
+	if !secp.Equal(lhs, rhs) {
+		return nil, errors.New("sign partial equation verification failed")
+	}
+	return sVal.BigInt(), nil
+}
+
+func digestHash(digest32, contextHash []byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte("cggmp21-secp256k1-sign-digest-binding"))
+	wire.WriteHashPart(h, contextHash)
+	wire.WriteHashPart(h, digest32)
+	return h.Sum(nil)
+}
+
+const signPartialEquationDomain = "cggmp21-secp256k1-sign-partial-equation"
+
+func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(signPartialEquationDomain))
+	wire.WriteHashPart(h, sessionID[:])
+	wire.WriteHashPart(h, wire.Uint32(uint32(party)))
+	wire.WriteHashPart(h, presignTranscriptHash)
+	wire.WriteHashPart(h, contextHash)
+	wire.WriteHashPart(h, digestHash)
+	wire.WriteHashPart(h, littleR)
+	wire.WriteHashPart(h, s)
+	wire.WriteHashPart(h, kPoint)
+	wire.WriteHashPart(h, chiPoint)
+	return h.Sum(nil)
+}
+
+func presignVerifyShare(presign *Presign, party tss.PartyID) (SignVerifyShare, bool) {
+	for _, vs := range presign.VerifyShares {
+		if vs.Party == party {
+			return vs, true
+		}
+	}
+	return SignVerifyShare{}, false
 }

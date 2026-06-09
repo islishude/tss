@@ -18,6 +18,14 @@ type PartyBytePair[T uint32Value] struct {
 	Second []byte
 }
 
+// PartyTriple is a party-scoped triple of byte string records.
+type PartyTriple[T uint32Value] struct {
+	Party  T
+	First  []byte
+	Second []byte
+	Third  []byte
+}
+
 // EncodeUint32List encodes a list of uint32-compatible values.
 func EncodeUint32List[T uint32Value](items []T) []byte {
 	out := Uint32(uint32(len(items)))
@@ -186,6 +194,57 @@ func DecodePartyBytePairsWithLimit[T uint32Value](raw []byte, maxItems int, maxI
 		}
 		offset = next
 		out = append(out, PartyBytePair[T]{Party: T(party), First: first, Second: second})
+	}
+	if offset != len(raw) {
+		return nil, fmt.Errorf("trailing %s bytes", name)
+	}
+	return out, nil
+}
+
+// EncodePartyTriples encodes party-scoped triples of byte string records.
+func EncodePartyTriples[T uint32Value](records []PartyTriple[T]) []byte {
+	out := Uint32(uint32(len(records)))
+	for _, record := range records {
+		out = append(out, Uint32(uint32(record.Party))...)
+		out = AppendBytes(out, record.First)
+		out = AppendBytes(out, record.Second)
+		out = AppendBytes(out, record.Third)
+	}
+	return out
+}
+
+// DecodePartyTriplesWithLimit decodes party-scoped triples with explicit per-field caps.
+func DecodePartyTriplesWithLimit[T uint32Value](raw []byte, maxItems int, maxFirstBytes, maxSecondBytes, maxThirdBytes int, name string) ([]PartyTriple[T], error) {
+	count, offset, err := ReadUint32(raw, 0)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateRecordCountWithLimit(raw, offset, count, 16, maxItems, name); err != nil {
+		return nil, err
+	}
+	out := make([]PartyTriple[T], 0, count)
+	for i := 0; i < int(count); i++ {
+		party, next, err := ReadUint32(raw, offset)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		first, next, err := ReadBytesWithLimit(raw, offset, maxFirstBytes)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		second, next, err := ReadBytesWithLimit(raw, offset, maxSecondBytes)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		third, next, err := ReadBytesWithLimit(raw, offset, maxThirdBytes)
+		if err != nil {
+			return nil, err
+		}
+		offset = next
+		out = append(out, PartyTriple[T]{Party: T(party), First: first, Second: second, Third: third})
 	}
 	if offset != len(raw) {
 		return nil, fmt.Errorf("trailing %s bytes", name)

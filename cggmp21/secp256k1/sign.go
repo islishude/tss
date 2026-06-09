@@ -14,6 +14,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/zk/signprep"
 )
 
 const (
@@ -23,7 +24,6 @@ const (
 	presignRound1PublicLabel   = "cggmp21-secp256k1-presign-round1-public-v1"
 	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
-	aggregateSignEvidenceLabel = "cggmp21-secp256k1-aggregate-sign-evidence-v1"
 )
 
 // PresignContext binds a presignature to the key, chain, derivation path,
@@ -81,6 +81,7 @@ type Presign struct {
 	KeygenTranscriptHash []byte
 	PartiesHash          []byte
 	Consumed             bool
+	VerifyShares         []SignVerifyShare
 
 	kShare   *secret.Scalar
 	chiShare *secret.Scalar
@@ -126,6 +127,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		{Tag: presignFieldPublicKey, Value: wire.NonNilBytes(p.PublicKey)},
 		{Tag: presignFieldKeygenTranscriptHash, Value: wire.NonNilBytes(p.KeygenTranscriptHash)},
 		{Tag: presignFieldPartiesHash, Value: wire.NonNilBytes(p.PartiesHash)},
+		{Tag: presignFieldVerifyShares, Value: encodeSignVerifyShares(p.VerifyShares)},
 	})
 }
 
@@ -187,6 +189,30 @@ func (p *Presign) Validate() error {
 	if !bytes.Equal(presignContextHash(p.Context), p.ContextHash) {
 		return errors.New("presign context hash mismatch")
 	}
+	if err := validateSignVerifyShares(p.Signers, p.VerifyShares); err != nil {
+		return fmt.Errorf("invalid presign verify shares: %w", err)
+	}
+	return nil
+}
+
+// VerifySignMaterial performs a structural integrity check on all SignVerifyShare
+// entries in the presign record. Full cryptographic verification of each signprep
+// proof happens during presign round 3 (with session ID bound). At StartSign time
+// the presign transcript hash already binds every proof hash, so tampering would
+// be caught by transcript mismatch. This method catches malformed proofs or
+// invalid point encodings that may have resulted from storage corruption.
+func (p *Presign) VerifySignMaterial() error {
+	if p == nil {
+		return errors.New("nil presign")
+	}
+	if err := validateSignVerifyShares(p.Signers, p.VerifyShares); err != nil {
+		return err
+	}
+	for _, share := range p.VerifyShares {
+		if _, err := signprep.UnmarshalProof(share.Proof); err != nil {
+			return fmt.Errorf("verify share party %d: invalid proof: %w", share.Party, err)
+		}
+	}
 	return nil
 }
 
@@ -231,6 +257,7 @@ type PresignSession struct {
 	round1Verified       map[tss.PartyID]bool
 	round2               map[tss.PartyID]presignRound2Payload
 	deltas               map[tss.PartyID]*big.Int
+	verifyShares         map[tss.PartyID]SignVerifyShare
 	startOpening         *mta.StartOpening
 
 	alphaDelta map[tss.PartyID]*big.Int
@@ -328,13 +355,18 @@ type presignRound2Payload struct {
 }
 
 type presignRound3Payload struct {
-	Delta []byte `json:"delta"`
+	Delta    []byte `json:"delta"`
+	KPoint   []byte `json:"k_point"`
+	ChiPoint []byte `json:"chi_point"`
+	Proof    []byte `json:"proof"`
 }
 
 type signPartialPayload struct {
-	S                 []byte `json:"s"`
-	PresignTranscript []byte `json:"presign_transcript"`
-	PresignContext    []byte `json:"presign_context"`
+	S                   []byte `json:"s"`
+	PresignTranscript   []byte `json:"presign_transcript"`
+	PresignContext      []byte `json:"presign_context"`
+	DigestHash          []byte `json:"digest_hash"`
+	PartialEquationHash []byte `json:"partial_equation_hash"`
 }
 
 // Guard returns the session's envelope guard for use by transport adapters.

@@ -66,6 +66,7 @@ These rules ensure one semantic record has one binary representation. This matte
 - `internal/zk/paillier.LogStarProof` (Πlog\*)
 - `internal/zk/paillier.KeygenConfirmation`
 - `internal/zk/schnorr.Proof`
+- `internal/zk/signprep.Proof` (Schnorr + DLEQ, 8 fields: MPoint, KCommitment, MCommitment, DLEQA1, DLEQA2, KResponse, MResponse, DLEQResponse)
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
 all active Paillier ZK proof types (modulus, Ring-Pedersen parameters/proof,
@@ -75,20 +76,23 @@ JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
 
-Current presign Round 1 wire shapes are:
+Current presign wire shapes are:
 
 - `mta.start-message`: field 1 is the Paillier ciphertext only.
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
+- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (signprep proof bytes).
+- `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext` (32 bytes), `DigestHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
 Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
 
 The canonical `cggmp21.secp256k1.presign` record contains the local fixed-length
 secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
-hashes, additive HD shift, consumed flag, and key binding fields for the group
-public key, keygen transcript hash, and participant-set hash. Decoders require
-this complete field set; prior presign records without key binding fields are
-not accepted.
+hashes, additive HD shift, consumed flag, key binding fields for the group
+public key, keygen transcript hash, and participant-set hash, and per-party
+`VerifyShares` (tag 17, one `SignVerifyShare` per signer: party ID + KPoint +
+ChiPoint + signprep proof bytes). Decoders require this complete 17-field set;
+prior presign records without the VerifyShares field are rejected.
 
 ## Decoder Policy
 

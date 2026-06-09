@@ -76,6 +76,7 @@ func (p *Presign) Clone() *Presign {
 		KeygenTranscriptHash: slices.Clone(p.KeygenTranscriptHash),
 		PartiesHash:          slices.Clone(p.PartiesHash),
 		Consumed:             p.Consumed,
+		VerifyShares:         cloneSignVerifyShares(p.VerifyShares),
 		kShare:               p.kShare.Clone(),
 		chiShare:             p.chiShare.Clone(),
 		delta:                p.delta.Clone(),

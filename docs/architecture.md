@@ -7,6 +7,7 @@ This module is a transport-neutral threshold-signature library. The public API i
 - `github.com/islishude/tss/cggmp21/secp256k1`: CGGMP21-style secp256k1 threshold ECDSA keygen, presign, online signing, key refresh, resharing, BIP32 HD derivation, and evidence verification.
 - `internal/wire`: strict TLV encoding used by binary envelope, key-share, and presign records.
 - `internal/curve`, `internal/shamir`, `internal/paillier`, `internal/paillier/paillierct`, `internal/secret`, `internal/mta`, and `internal/zk`: protocol-local cryptographic helpers. `paillierct` wraps constant-time `c^λ mod n²` via `filippo.io/bigmod`. `secret.Scalar` is a fixed-length secret type that rejects JSON and variable-length encoding. Curve scalar and field wrappers use committed fiat-crypto generated arithmetic under `internal/fiat`.
+- `internal/zk/signprep`: CGGMP21 signprep proof (Πsignprep) proving that a signer's published KPoint and ChiPoint during presign round 3 are correctly derived from its private nonce and signing key contribution, bound to the presign transcript.
 
 ## Transport Model
 

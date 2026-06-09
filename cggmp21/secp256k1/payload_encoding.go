@@ -58,12 +58,19 @@ const (
 	presignRound2PayloadFieldRound1Echo
 )
 
-const presignRound3PayloadFieldDelta uint16 = 1
+const (
+	presignRound3PayloadFieldDelta uint16 = iota + 1
+	presignRound3PayloadFieldKPoint
+	presignRound3PayloadFieldChiPoint
+	presignRound3PayloadFieldProof
+)
 
 const (
 	signPartialPayloadFieldS uint16 = iota + 1
 	signPartialPayloadFieldPresignTranscript
 	signPartialPayloadFieldPresignContext
+	signPartialPayloadFieldDigestHash
+	signPartialPayloadFieldPartialEquationHash
 )
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
@@ -298,12 +305,32 @@ func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
 	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
 		return nil, err
 	}
+	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
+		return nil, err
+	}
+	if _, err := secp.PointFromBytes(p.ChiPoint); err != nil {
+		return nil, err
+	}
+	limits := DefaultLimits()
+	if len(p.Proof) == 0 {
+		return nil, errors.New("empty signprep proof")
+	}
+	if len(p.Proof) > limits.MaxCGGMP21SignPrepProofBytes {
+		return nil, fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.MaxCGGMP21SignPrepProofBytes)
+	}
 	return wire.Marshal(tss.Version, presignRound3PayloadWireType, []wire.Field{
 		{Tag: presignRound3PayloadFieldDelta, Value: wire.NonNilBytes(p.Delta)},
+		{Tag: presignRound3PayloadFieldKPoint, Value: wire.NonNilBytes(p.KPoint)},
+		{Tag: presignRound3PayloadFieldChiPoint, Value: wire.NonNilBytes(p.ChiPoint)},
+		{Tag: presignRound3PayloadFieldProof, Value: wire.NonNilBytes(p.Proof)},
 	})
 }
 
 func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
+	limits := DefaultLimits()
+	if len(in) > limits.MaxCGGMP21SignVerifyShareBytes*2 {
+		return presignRound3Payload{}, fmt.Errorf("presign round3 payload too large: %d", len(in))
+	}
 	version, fields, err := wire.Unmarshal(in, presignRound3PayloadWireType)
 	if err != nil {
 		return presignRound3Payload{}, err
@@ -311,14 +338,31 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 	if version != tss.Version {
 		return presignRound3Payload{}, fmt.Errorf("unexpected presign round3 payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, presignRound3PayloadFieldDelta); err != nil {
+	if err := wire.RequireExactTags(fields, presignRound3PayloadFieldDelta, presignRound3PayloadFieldKPoint, presignRound3PayloadFieldChiPoint, presignRound3PayloadFieldProof); err != nil {
 		return presignRound3Payload{}, err
 	}
-	delta := fields[0].Value
-	if _, err := secp.ScalarFromBytes(delta); err != nil {
+	p := presignRound3Payload{
+		Delta:    fields[0].Value,
+		KPoint:   fields[1].Value,
+		ChiPoint: fields[2].Value,
+		Proof:    fields[3].Value,
+	}
+	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
 		return presignRound3Payload{}, err
 	}
-	return presignRound3Payload{Delta: delta}, nil
+	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
+		return presignRound3Payload{}, err
+	}
+	if _, err := secp.PointFromBytes(p.ChiPoint); err != nil {
+		return presignRound3Payload{}, err
+	}
+	if len(p.Proof) == 0 {
+		return presignRound3Payload{}, errors.New("empty signprep proof")
+	}
+	if len(p.Proof) > limits.MaxCGGMP21SignPrepProofBytes {
+		return presignRound3Payload{}, fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.MaxCGGMP21SignPrepProofBytes)
+	}
+	return p, nil
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
@@ -331,14 +375,26 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 	if len(p.PresignContext) != sha256.Size {
 		return nil, errors.New("presign context must be 32 bytes")
 	}
+	if len(p.DigestHash) != sha256.Size {
+		return nil, errors.New("digest hash must be 32 bytes")
+	}
+	if len(p.PartialEquationHash) != sha256.Size {
+		return nil, errors.New("partial equation hash must be 32 bytes")
+	}
 	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
 		{Tag: signPartialPayloadFieldS, Value: wire.NonNilBytes(p.S)},
 		{Tag: signPartialPayloadFieldPresignTranscript, Value: wire.NonNilBytes(p.PresignTranscript)},
 		{Tag: signPartialPayloadFieldPresignContext, Value: wire.NonNilBytes(p.PresignContext)},
+		{Tag: signPartialPayloadFieldDigestHash, Value: wire.NonNilBytes(p.DigestHash)},
+		{Tag: signPartialPayloadFieldPartialEquationHash, Value: wire.NonNilBytes(p.PartialEquationHash)},
 	})
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
+	limits := DefaultLimits()
+	if len(in) > limits.MaxCGGMP21SignPartialPayloadBytes {
+		return signPartialPayload{}, fmt.Errorf("sign partial payload too large: %d > %d", len(in), limits.MaxCGGMP21SignPartialPayloadBytes)
+	}
 	version, fields, err := wire.Unmarshal(in, signPartialPayloadWireType)
 	if err != nil {
 		return signPartialPayload{}, err
@@ -346,13 +402,15 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if version != tss.Version {
 		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
 	}
-	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript, signPartialPayloadFieldPresignContext); err != nil {
+	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript, signPartialPayloadFieldPresignContext, signPartialPayloadFieldDigestHash, signPartialPayloadFieldPartialEquationHash); err != nil {
 		return signPartialPayload{}, err
 	}
 	p := signPartialPayload{
-		S:                 fields[0].Value,
-		PresignTranscript: fields[1].Value,
-		PresignContext:    fields[2].Value,
+		S:                   fields[0].Value,
+		PresignTranscript:   fields[1].Value,
+		PresignContext:      fields[2].Value,
+		DigestHash:          fields[3].Value,
+		PartialEquationHash: fields[4].Value,
 	}
 	if _, err := secp.ScalarFromBytes(p.S); err != nil {
 		return signPartialPayload{}, err
@@ -362,6 +420,12 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	}
 	if len(p.PresignContext) != sha256.Size {
 		return signPartialPayload{}, errors.New("presign context must be 32 bytes")
+	}
+	if len(p.DigestHash) != sha256.Size {
+		return signPartialPayload{}, errors.New("digest hash must be 32 bytes")
+	}
+	if len(p.PartialEquationHash) != sha256.Size {
+		return signPartialPayload{}, errors.New("partial equation hash must be 32 bytes")
 	}
 	return p, nil
 }

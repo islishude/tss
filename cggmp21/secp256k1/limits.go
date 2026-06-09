@@ -43,6 +43,10 @@ func TestLimits() tss.Limits {
 	l.MaxRingPedersenParamsBytes = 16384
 	l.MaxMTAResponseBytes = 512 << 10
 	l.MaxZKProofBytes = 512 << 10
+	l.MaxCGGMP21SignPrepProofBytes = 512 << 10
+	l.MaxCGGMP21SignVerifyShareBytes = tss.MaxCGGMP21SignVerifyShareBytes
+	l.MaxCGGMP21SignVerifySharesBytes = tss.MaxCGGMP21SignVerifySharesBytes
+	l.MaxCGGMP21SignPartialPayloadBytes = tss.MaxCGGMP21SignPartialPayloadBytes
 	return l
 }
 
