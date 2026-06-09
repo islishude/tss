@@ -154,7 +154,11 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	if err != nil {
 		return nil, nil, err
 	}
-	out := []tss.Envelope{envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)}
+	commitEnv, err := envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []tss.Envelope{commitEnv}
 	for _, id := range newParties {
 		if id == oldKey.Party {
 			continue
@@ -165,7 +169,11 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true))
+		shareEnv, err := envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, nil, err
@@ -275,7 +283,11 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	if err != nil {
 		return nil, nil, err
 	}
-	out := []tss.Envelope{envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)}
+	commitEnv, err := envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []tss.Envelope{commitEnv}
 	for _, id := range parties {
 		if id == oldKey.Party {
 			continue
@@ -286,7 +298,11 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true))
+		shareEnv, err := envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	if err := s.tryComplete(); err != nil {
 		return nil, nil, err

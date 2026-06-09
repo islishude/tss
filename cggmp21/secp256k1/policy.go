@@ -5,6 +5,12 @@ import "github.com/islishude/tss"
 // CGGMP21Policies defines the delivery policy matrix for the CGGMP21 secp256k1 protocol.
 // Every payload type that a handler may receive must be registered here.
 // Unregistered payload types are rejected by EnvelopeGuard.
+//
+// Confidentiality: messages containing secret shares (keygen shares, presign round2,
+// refresh shares, reshare shares) require ConfidentialityRequired. All other broadcast
+// payloads use ConfidentialityOptional — they contain public commitments, ciphertexts,
+// or public-key material that does not require transport encryption but tolerates it
+// (e.g. TLS/mTLS).
 var CGGMP21Policies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
@@ -12,7 +18,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadKeygenCommitments,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
@@ -28,7 +34,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                2,
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 
@@ -38,7 +44,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadPresignRound1,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 	tss.DeliveryPolicy{
@@ -62,7 +68,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                3,
 		PayloadType:          payloadPresignRound3,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 
@@ -82,7 +88,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadRefreshCommitments,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
@@ -101,7 +107,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadReshareDealerCommitments,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
@@ -117,7 +123,7 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadReshareReceiverMaterial,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 	// Reshare round 2 uses payloadKeygenConfirmation (already registered in keygen section)

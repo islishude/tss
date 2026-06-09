@@ -249,7 +249,11 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		if err != nil {
 			return nil, nil, err
 		}
-		out := []tss.Envelope{envelope(s.receiverConfig(), 1, s.selfID, 0, payloadReshareReceiverMaterial, payload, false)}
+		receiverEnv, err := envelope(s.receiverConfig(), 1, s.selfID, 0, payloadReshareReceiverMaterial, payload, false)
+		if err != nil {
+			return nil, nil, err
+		}
+		out := []tss.Envelope{receiverEnv}
 		dealerOut, err := s.maybeSendDealerMessages()
 		if err != nil {
 			return nil, nil, err

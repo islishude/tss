@@ -174,12 +174,16 @@ func Mul(a, b, order *big.Int) *big.Int {
 }
 
 // BytesFixed returns x as an n-byte big-endian value.
-func BytesFixed(x *big.Int, n int) []byte {
+// It returns an error when len(x.Bytes()) > n.
+func BytesFixed(x *big.Int, n int) ([]byte, error) {
 	out := make([]byte, n)
 	if x == nil {
-		return out
+		return out, nil
 	}
 	b := x.Bytes()
+	if len(b) > n {
+		return nil, fmt.Errorf("BytesFixed: value requires %d bytes, output size is %d", len(b), n)
+	}
 	copy(out[n-len(b):], b)
-	return out
+	return out, nil
 }

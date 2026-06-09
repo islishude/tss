@@ -35,7 +35,11 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
 			)
-			evidenceEnv := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
+			verifyErr := err
+			evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
+			if evErr != nil {
+				return nil, evErr
+			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
@@ -51,7 +55,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
-				Err: err,
+				Err: verifyErr,
 			}
 		}
 	}
@@ -212,9 +216,11 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
 	s.pending = &pendingKeyShare{share: share}
 	s.state = keygenConfirming
-	out := []tss.Envelope{
-		envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	if err != nil {
+		return nil, err
 	}
+	out := []tss.Envelope{confirmationEnv}
 	pubKeyHash := sha256.Sum256(groupCommitments[0])
 	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,

@@ -44,7 +44,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.selfID), secp.ScalarFromBigInt(share)); err != nil {
-			evidenceEnv := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil, true)
+			verifyErr := err
+			evidenceEnv, evErr := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil, true)
+			if evErr != nil {
+				return nil, evErr
+			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
@@ -60,7 +64,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
-				Err: err,
+				Err: verifyErr,
 			}
 		}
 	}
@@ -195,9 +199,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.confirmations[s.selfID] = append([]byte(nil), encodedConfirmation...)
-	out := []tss.Envelope{
-		envelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	confirmationEnv, err := envelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	if err != nil {
+		return nil, err
 	}
+	out := []tss.Envelope{confirmationEnv}
 	s.log.Info(s.cfg.Ctx(), "reshare local material complete",
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

@@ -190,7 +190,8 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 		t.AppendSigned("z", big.NewInt(-7))
 		t.AppendUint16("u16", 16)
 		t.AppendUint32("u32", 32)
-		t.AppendPoint("G", secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+		// AppendPoint with the generator is infallible.
+		_ = t.AppendPoint("G", secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
 		return t.Sum()
 	}
 	base := build("domain", "field", []byte("payload"))

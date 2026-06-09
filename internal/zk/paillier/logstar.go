@@ -116,7 +116,10 @@ func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w 
 	}
 
 	// Transcript and challenge.
-	transcript := buildLogStarTranscript(params, state, stmt, S, A, Y, D)
+	transcript, err := buildLogStarTranscript(params, state, stmt, S, A, Y, D)
+	if err != nil {
+		return nil, err
+	}
 	e, err := transcript.ChallengeSigned(params.ChallengeBits)
 	if err != nil {
 		return nil, err
@@ -200,7 +203,10 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	}
 
 	// Recompute challenge.
-	transcript := buildLogStarTranscript(params, state, stmt, proof.S, proof.A, proof.Y, proof.D)
+	transcript, err := buildLogStarTranscript(params, state, stmt, proof.S, proof.A, proof.Y, proof.D)
+	if err != nil {
+		return err
+	}
 	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
 		return errors.New("LogStarProof: transcript hash mismatch")
 	}
@@ -389,7 +395,7 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	return nil
 }
 
-func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarStatement, S, A *big.Int, Y *secp.Point, D *big.Int) *Transcript {
+func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarStatement, S, A *big.Int, Y *secp.Point, D *big.Int) (*Transcript, error) {
 	t := NewTranscript("cggmp-paillier-zk")
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("logstar"))
@@ -406,14 +412,20 @@ func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarSta
 	t.AppendBytes("verifier_S", fixedModNBytes(stmt.VerifierAux.S, njLen))
 	t.AppendBytes("verifier_T", fixedModNBytes(stmt.VerifierAux.T, njLen))
 	t.AppendBigInt("C", stmt.C)
-	t.AppendPoint("X", stmt.X)
-	t.AppendPoint("B", stmt.B)
+	if err := t.AppendPoint("X", stmt.X); err != nil {
+		return nil, err
+	}
+	if err := t.AppendPoint("B", stmt.B); err != nil {
+		return nil, err
+	}
 
 	// Commitments.
 	t.AppendBigInt("S", S)
 	t.AppendBigInt("A", A)
-	t.AppendPoint("Y", Y)
+	if err := t.AppendPoint("Y", Y); err != nil {
+		return nil, err
+	}
 	t.AppendBigInt("D", D)
 
-	return t
+	return t, nil
 }

@@ -130,7 +130,10 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	env := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
+	env, err := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
+	if err != nil {
+		return nil, nil, err
+	}
 	s = &PresignSession{
 		key:                  key,
 		sessionID:            sessionID,
@@ -186,7 +189,11 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, envelope(config, 1, key.Party, peer, payloadPresignRound1Proof, proofPayload, true))
+		proofEnv, err := envelope(config, 1, key.Party, peer, payloadPresignRound1Proof, proofPayload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, proofEnv)
 	}
 	// Clear startOpening after all per-verifier proofs are generated.
 	// The MtA Finish path in round 2 only uses the Paillier private key and the

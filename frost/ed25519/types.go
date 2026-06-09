@@ -33,6 +33,18 @@ type VerificationShare struct {
 }
 
 // KeyShare is one local FROST Ed25519 signing share.
+//
+// # Immutability contract
+//
+// After construction, after [KeyShare.Validate], or after receiving a KeyShare
+// from any session method, callers MUST NOT mutate the exported []byte fields
+// (PublicKey, ChainCode, GroupCommitments, VerificationShares,
+// KeygenTranscriptHash, KeygenConfirmations). Mutation breaks post-validation
+// invariants and can cause signature failures or verification errors.
+//
+// Use the copy-returning getters ([KeyShare.PublicKeyBytes],
+// [KeyShare.ChainCodeBytes]) when only read access is needed.
+//
 // Fields are exported for binary encoding via [KeyShare.MarshalBinary]; JSON
 // encoding is intentionally rejected by [KeyShare.MarshalJSON] to prevent
 // accidental exposure of secret material.
@@ -70,6 +82,22 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 		return nil
 	}
 	return slices.Clone(k.PublicKey)
+}
+
+// ChainCodeBytes returns a copy of the HD chain code. The chain code is
+// cleared by [KeyShare.Destroy]; callers that need the value after Destroy
+// must capture it first.
+func (k *KeyShare) ChainCodeBytes() []byte {
+	if k == nil {
+		return nil
+	}
+	return slices.Clone(k.ChainCode)
+}
+
+// Clone returns a deep copy of the key share. The returned copy owns
+// its own slice and secret storage — mutations do not affect the original.
+func (k *KeyShare) Clone() *KeyShare {
+	return cloneKeyShareValue(k)
 }
 
 // MarshalBinary encodes the share using canonical TLV wire format.
@@ -259,7 +287,16 @@ func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	return nil
 }
 
-// Destroy zeros the local scalar share bytes in place.
+// Destroy zeros the local secret scalar and chain code in place. After Destroy,
+// the KeyShare is permanently unusable for MPC operations.
+//
+// # Go zeroization boundaries
+//
+// Destroy zeroes the fields that this package controls: secret (fixed-length
+// [fed.Scalar]) and ChainCode. It does not zero GroupCommitments,
+// VerificationShares, or other public material — those fields contain no secret
+// data. Callers that copied the chain code via [KeyShare.ChainCodeBytes] before
+// Destroy own independent copies that must be zeroed separately.
 func (k *KeyShare) Destroy() {
 	if k == nil {
 		return

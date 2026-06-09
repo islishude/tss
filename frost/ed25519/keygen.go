@@ -95,7 +95,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	if err != nil {
 		return nil, nil, err
 	}
-	out = append(out, envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false))
+	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	out = append(out, commitEnv)
 	for _, id := range parties {
 		if id == config.Self {
 			continue
@@ -107,7 +111,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 			return nil, nil, err
 		}
 		// Shamir shares are secret-bearing and must be delivered over a confidential transport.
-		out = append(out, envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true))
+		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	s.ownMessages = append([]tss.Envelope(nil), out...)
 	completionOut, err := s.tryComplete()
@@ -249,7 +257,7 @@ func (s *KeygenSession) abort() {
 	s.pending = nil
 }
 
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) tss.Envelope {
+func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) (tss.Envelope, error) {
 	e, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
@@ -261,12 +269,12 @@ func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, pay
 		Payload:     payload,
 	})
 	if err != nil {
-		panic(err)
+		return tss.Envelope{}, err
 	}
 	if confidential {
 		e.Security.Confidential = true
 	}
-	return e
+	return e, nil
 }
 
 const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"

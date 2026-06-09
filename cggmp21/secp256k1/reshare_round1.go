@@ -72,7 +72,11 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	dealerConfig := s.dealerConfig()
-	out := []tss.Envelope{envelope(dealerConfig, 1, s.selfID, 0, payloadReshareDealerCommitments, payload, false)}
+	dealerEnv, err := envelope(dealerConfig, 1, s.selfID, 0, payloadReshareDealerCommitments, payload, false)
+	if err != nil {
+		return nil, err
+	}
+	out := []tss.Envelope{dealerEnv}
 	commitmentsHash := wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)
 	for _, id := range s.newParties {
 		if id == s.selfID {
@@ -88,7 +92,11 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, envelope(dealerConfig, 1, s.selfID, id, payloadReshareShare, sharePayload, true))
+		shareEnv, err := envelope(dealerConfig, 1, s.selfID, id, payloadReshareShare, sharePayload, true)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	return out, nil
 }
@@ -228,7 +236,11 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
 	}
 	if err := secp.VerifyShare(commitments, uint32(s.selfID), share); err != nil {
-		evidenceEnv := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload, true)
+		verifyErr := err
+		evidenceEnv, evErr := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload, true)
+		if evErr != nil {
+			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, evErr)
+		}
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: 1,
@@ -245,7 +257,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 					hashEvidenceField("dealer_share_payload_hash", rawPayload),
 				),
 			},
-			Err: err,
+			Err: verifyErr,
 		}
 	}
 	s.shares[from] = share.BigInt()

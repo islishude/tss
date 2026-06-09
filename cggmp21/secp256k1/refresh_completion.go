@@ -31,7 +31,11 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	order := secp.Order()
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.Party), secp.ScalarFromBigInt(share)); err != nil {
-			evidenceEnv := envelope(s.cfg, 1, dealer, s.oldKey.Party, payloadRefreshShare, nil, true)
+			verifyErr := err
+			evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.oldKey.Party, payloadRefreshShare, nil, true)
+			if evErr != nil {
+				return nil, evErr
+			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
@@ -47,7 +51,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 						rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, s.commits[dealer])),
 					),
 				},
-				Err: err,
+				Err: verifyErr,
 			}
 		}
 	}
@@ -216,9 +220,11 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.confirmations[s.oldKey.Party] = append([]byte(nil), encodedConfirmation...)
-	out := []tss.Envelope{
-		envelope(s.cfg, keygenConfirmationRound, s.oldKey.Party, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.oldKey.Party, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	if err != nil {
+		return nil, err
 	}
+	out := []tss.Envelope{confirmationEnv}
 	s.log.Info(s.cfg.Ctx(), "refresh local material complete",
 		"party_id", s.oldKey.Party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

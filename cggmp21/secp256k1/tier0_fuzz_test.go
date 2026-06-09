@@ -15,7 +15,7 @@ import (
 // corpus is constructed manually without any keygen or crypto.
 func FuzzFast_EnvelopeValidateBasic(f *testing.F) {
 	sessionID := fuzzSessionID()
-	seed := envelope(
+	seed, err := envelope(
 		tss.ThresholdConfig{Threshold: 2, Parties: []tss.PartyID{1, 2}, Self: 1, SessionID: sessionID},
 		1,
 		1,
@@ -24,6 +24,9 @@ func FuzzFast_EnvelopeValidateBasic(f *testing.F) {
 		[]byte(`{"s":"AQ==","presign_transcript":"Ag=="}`),
 		false,
 	)
+	if err != nil {
+		f.Fatal(err)
+	}
 	encoded, err := seed.MarshalBinary()
 	if err != nil {
 		f.Fatal(err)
@@ -61,7 +64,7 @@ func FuzzFast_EnvelopeValidateBasic(f *testing.F) {
 // uses a manually constructed envelope and evidence without keygen.
 func FuzzFast_BlameEvidenceUnmarshal(f *testing.F) {
 	sessionID := fuzzSessionID()
-	env := envelope(
+	env, err := envelope(
 		tss.ThresholdConfig{Threshold: 2, Parties: []tss.PartyID{1, 2}, Self: 1, SessionID: sessionID},
 		1,
 		1,
@@ -70,6 +73,9 @@ func FuzzFast_BlameEvidenceUnmarshal(f *testing.F) {
 		[]byte(`{"gamma":"AQ=="}`),
 		false,
 	)
+	if err != nil {
+		f.Fatal(err)
+	}
 	evidence, err := tss.NewBlameEvidence(env, tss.EvidenceKindPresignRound1, "fuzz seed", []tss.EvidenceField{
 		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash([]tss.PartyID{1, 2}, partySetHashLabel)),
 	})

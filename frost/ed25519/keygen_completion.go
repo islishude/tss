@@ -112,9 +112,11 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
 	s.pending = share
-	out := []tss.Envelope{
-		envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false),
+	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	if err != nil {
+		return nil, err
 	}
+	out := []tss.Envelope{confirmationEnv}
 	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

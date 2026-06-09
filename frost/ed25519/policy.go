@@ -5,6 +5,11 @@ import "github.com/islishude/tss"
 // FROSTPolicies defines the delivery policy matrix for the FROST Ed25519 protocol.
 // Every payload type that a handler may receive must be registered here.
 // Unregistered payload types are rejected by EnvelopeGuard.
+//
+// Confidentiality: messages containing secret shares (keygen shares, reshare shares)
+// require ConfidentialityRequired. All other broadcast payloads use
+// ConfidentialityOptional — they contain public commitments or partial signatures
+// that do not require transport encryption but tolerate it (e.g. TLS/mTLS).
 var FROSTPolicies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
@@ -12,7 +17,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadKeygenCommitments,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{
@@ -28,7 +33,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		Round:                2,
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 
@@ -38,7 +43,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadSignCommitment,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 	tss.DeliveryPolicy{
@@ -46,7 +51,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		Round:                2,
 		PayloadType:          payloadSignPartial,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
 
@@ -56,7 +61,7 @@ var FROSTPolicies = tss.MustNewPolicySet(
 		Round:                1,
 		PayloadType:          payloadReshareCommitments,
 		Mode:                 tss.DeliveryBroadcast,
-		Confidentiality:      tss.ConfidentialityForbidden,
+		Confidentiality:      tss.ConfidentialityOptional,
 		BroadcastConsistency: tss.BroadcastConsistencyRequired,
 	},
 	tss.DeliveryPolicy{

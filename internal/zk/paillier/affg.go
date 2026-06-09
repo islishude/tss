@@ -185,7 +185,10 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	}
 
 	// Transcript and challenge.
-	transcript := buildAffGTranscript(params, state, stmt, stmt.Y, A, Bx, By, E, S, F, T)
+	transcript, err := buildAffGTranscript(params, state, stmt, stmt.Y, A, Bx, By, E, S, F, T)
+	if err != nil {
+		return nil, err
+	}
 	e, err := transcript.ChallengeSigned(params.ChallengeBits)
 	if err != nil {
 		return nil, err
@@ -330,7 +333,10 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	}
 
 	// Recompute challenge.
-	transcript := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
+	transcript, err := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
+	if err != nil {
+		return err
+	}
 	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
 		return errors.New("AffGProof: transcript hash mismatch")
 	}
@@ -639,7 +645,7 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	return nil
 }
 
-func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, yVal *big.Int, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int) *Transcript {
+func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, yVal *big.Int, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int) (*Transcript, error) {
 	t := NewTranscript("cggmp-paillier-zk")
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("aff-g"))
@@ -660,16 +666,20 @@ func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement
 	t.AppendBigInt("C", stmt.C)
 	t.AppendBigInt("D", stmt.D)
 	t.AppendBigInt("Y", yVal)
-	t.AppendPoint("X", stmt.X)
+	if err := t.AppendPoint("X", stmt.X); err != nil {
+		return nil, err
+	}
 
 	// Commitments.
 	t.AppendBigInt("A", A)
-	t.AppendPoint("Bx", Bx)
+	if err := t.AppendPoint("Bx", Bx); err != nil {
+		return nil, err
+	}
 	t.AppendBigInt("By", By)
 	t.AppendBigInt("E", E)
 	t.AppendBigInt("S", S)
 	t.AppendBigInt("F", F)
 	t.AppendBigInt("T", T)
 
-	return t
+	return t, nil
 }

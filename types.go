@@ -71,10 +71,18 @@ type ConfidentialityPolicy uint8
 
 const (
 	// ConfidentialityForbidden means the message must NOT be sent over a confidential channel.
+	// Prefer ConfidentialityOptional for most non-secret payloads; use Forbidden only when
+	// confidential transport would actively break the protocol (e.g. audit logging that
+	// requires visibility into plaintext).
 	ConfidentialityForbidden ConfidentialityPolicy = iota
 	// ConfidentialityOptional means either plaintext or confidential transport is acceptable.
+	// This is the safe default for payloads that contain no secret material (commitments,
+	// public keys, ciphertexts). TLS/mTLS deployments can safely mark transport as
+	// Confidential=true without triggering policy rejection.
 	ConfidentialityOptional
 	// ConfidentialityRequired means the message MUST be sent over a confidential channel.
+	// Use for payloads that contain secret shares, nonces, or other material that must
+	// never appear in plaintext.
 	ConfidentialityRequired
 )
 

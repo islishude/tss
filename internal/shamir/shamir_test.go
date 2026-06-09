@@ -506,7 +506,10 @@ func TestMulZero(t *testing.T) {
 // --- BytesFixed ---
 
 func TestBytesFixedNil(t *testing.T) {
-	out := BytesFixed(nil, 4)
+	out, err := BytesFixed(nil, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 4 {
 		t.Fatalf("len = %d, want 4", len(out))
 	}
@@ -520,7 +523,10 @@ func TestBytesFixedNil(t *testing.T) {
 func TestBytesFixedExactFit(t *testing.T) {
 	// 0x1234 = 4660, needs 2 bytes
 	x := big.NewInt(0x1234)
-	out := BytesFixed(x, 2)
+	out, err := BytesFixed(x, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 2 {
 		t.Fatalf("len = %d, want 2", len(out))
 	}
@@ -532,7 +538,10 @@ func TestBytesFixedExactFit(t *testing.T) {
 func TestBytesFixedLeftPadding(t *testing.T) {
 	// 0x42 fits in 1 byte, but we request 4.
 	x := big.NewInt(0x42)
-	out := BytesFixed(x, 4)
+	out, err := BytesFixed(x, 4)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 4 {
 		t.Fatalf("len = %d, want 4", len(out))
 	}
@@ -542,7 +551,10 @@ func TestBytesFixedLeftPadding(t *testing.T) {
 }
 
 func TestBytesFixedZero(t *testing.T) {
-	out := BytesFixed(big.NewInt(0), 5)
+	out, err := BytesFixed(big.NewInt(0), 5)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 5 {
 		t.Fatalf("len = %d, want 5", len(out))
 	}
@@ -559,13 +571,25 @@ func TestBytesFixedRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out := BytesFixed(x, 32)
+	out, err := BytesFixed(x, 32)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if len(out) != 32 {
 		t.Fatalf("len = %d, want 32", len(out))
 	}
 	reconstructed := new(big.Int).SetBytes(out)
 	if reconstructed.Cmp(x) != 0 {
 		t.Fatalf("roundtrip failed: %s vs %s", x, reconstructed)
+	}
+}
+
+func TestBytesFixedOversizedInput(t *testing.T) {
+	// Value needs 4 bytes but output buffer is only 3.
+	x := big.NewInt(0x12345678)
+	out, err := BytesFixed(x, 3)
+	if err == nil {
+		t.Fatalf("expected error for oversized input, got %x", out)
 	}
 }
 

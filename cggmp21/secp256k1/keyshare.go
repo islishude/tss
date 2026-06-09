@@ -37,6 +37,40 @@ func (k *KeyShare) PublicKeyBytes() []byte {
 	return slices.Clone(k.PublicKey)
 }
 
+// ChainCodeBytes returns a copy of the HD chain code. The chain code is
+// cleared by [KeyShare.Destroy]; callers that need the value after Destroy
+// must capture it first.
+func (k *KeyShare) ChainCodeBytes() []byte {
+	if k == nil {
+		return nil
+	}
+	return slices.Clone(k.ChainCode)
+}
+
+// GroupCommitmentsCopy returns a deep copy of the per-degree group commitments.
+func (k *KeyShare) GroupCommitmentsCopy() [][]byte {
+	if k == nil {
+		return nil
+	}
+	return cloneKeyShareByteSlices(k.GroupCommitments)
+}
+
+// ShareProofBytes returns a copy of the Schnorr share-proof encoding.
+func (k *KeyShare) ShareProofBytes() []byte {
+	if k == nil {
+		return nil
+	}
+	return slices.Clone(k.ShareProof)
+}
+
+// KeygenTranscriptHashBytes returns a copy of the keygen transcript hash.
+func (k *KeyShare) KeygenTranscriptHashBytes() []byte {
+	if k == nil {
+		return nil
+	}
+	return slices.Clone(k.KeygenTranscriptHash)
+}
+
 // MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
@@ -357,7 +391,22 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	}
 }
 
-// Destroy zeros local secret scalar and Paillier private-key bytes in place.
+// Destroy zeros the local secret scalar, Paillier private-key bytes, and chain
+// code in place. After Destroy, the KeyShare is permanently unusable for MPC
+// operations.
+//
+// # Go zeroization boundaries
+//
+// Destroy zeroes the fields that this package controls: secret (fixed-length
+// [secret.Scalar]), paillierPrivateKey (Paillier λ/μ), and ChainCode. It does
+// not zero GroupCommitments, VerificationShares, or other public material —
+// those fields contain no secret data. The Paillier private key that has been
+// serialized to paillierPrivateKey may still have intermediate *big.Int values
+// reachable via the GC; the paillier package's own Destroy function handles
+// its in-memory representations. Callers that copied secret material via
+// [KeyShare.Clone], or that extracted values via getters (e.g.
+// [KeyShare.ChainCodeBytes]) before Destroy, own independent copies that must
+// be zeroed separately.
 func (k *KeyShare) Destroy() {
 	if k == nil {
 		return

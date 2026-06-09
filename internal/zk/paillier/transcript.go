@@ -46,14 +46,14 @@ func (t *Transcript) AppendSigned(label string, x *big.Int) {
 }
 
 // AppendPoint writes a labeled secp256k1 curve point in compressed form.
-func (t *Transcript) AppendPoint(label string, p *secp.Point) {
+// It returns an error if p is nil or not on the curve.
+func (t *Transcript) AppendPoint(label string, p *secp.Point) error {
 	b, err := secp.PointBytes(p)
 	if err != nil {
-		// secp.PointBytes only fails on nil/invalid point; transcript
-		// callers must ensure point validity before calling this method.
-		panic(fmt.Sprintf("transcript: invalid point for label %s: %v", label, err))
+		return fmt.Errorf("transcript AppendPoint %s: %w", label, err)
 	}
 	t.AppendBytes(label, b)
+	return nil
 }
 
 // AppendPointBytes writes a labeled curve point from its compressed encoding.

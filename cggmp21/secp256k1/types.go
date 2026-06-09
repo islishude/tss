@@ -68,6 +68,22 @@ func (r RingPedersenPublicShare) Clone() RingPedersenPublicShare {
 }
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
+//
+// # Immutability contract
+//
+// After construction, after [KeyShare.Validate], or after receiving a KeyShare
+// from any session method, callers MUST NOT mutate the exported []byte fields
+// (PublicKey, ChainCode, GroupCommitments, PaillierPublicKey, PaillierProof,
+// RingPedersenParams, RingPedersenProof, ShareProof, KeygenTranscriptHash,
+// LogCiphertext, LogProof, KeygenConfirmations). Mutation breaks post-validation
+// invariants and can cause signature failures, proof verification errors, or
+// incorrect blame attribution.
+//
+// Use [KeyShare.Clone] to obtain a mutable deep copy. Use the copy-returning
+// getters ([KeyShare.PublicKeyBytes], [KeyShare.ChainCodeBytes],
+// [KeyShare.GroupCommitmentsCopy], [KeyShare.ShareProofBytes]) when only
+// read access is needed.
+//
 // Fields are exported for binary encoding via [KeyShare.MarshalBinary]; JSON
 // encoding is intentionally rejected by [KeyShare.MarshalJSON] to prevent
 // accidental exposure of secret material.

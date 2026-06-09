@@ -140,7 +140,11 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 	if err != nil {
 		return nil, nil, err
 	}
-	out := []tss.Envelope{envelope(config, 1, oldKey.Party, 0, payloadRefreshCommitments, commitPayload, false)}
+	commitEnv, err := envelope(config, 1, oldKey.Party, 0, payloadRefreshCommitments, commitPayload, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	out := []tss.Envelope{commitEnv}
 	for _, id := range oldKey.Parties {
 		if id == oldKey.Party {
 			continue
@@ -150,7 +154,11 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, envelope(config, 1, oldKey.Party, id, payloadRefreshShare, payload, true))
+		shareEnv, err := envelope(config, 1, oldKey.Party, id, payloadRefreshShare, payload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	completionOut, err := s.tryComplete()
 	if err != nil {

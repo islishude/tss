@@ -134,7 +134,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	if err != nil {
 		return nil, nil, err
 	}
-	out = append(out, envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false))
+	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	out = append(out, commitEnv)
 	for _, id := range config.Parties {
 		if id == config.Self {
 			continue
@@ -144,7 +148,11 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		if err != nil {
 			return nil, nil, err
 		}
-		out = append(out, envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true))
+		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true)
+		if err != nil {
+			return nil, nil, err
+		}
+		out = append(out, shareEnv)
 	}
 	completionOut, err := s.tryComplete()
 	if err != nil {

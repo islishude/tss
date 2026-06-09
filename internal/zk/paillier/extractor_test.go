@@ -434,11 +434,17 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		t.Fatal("commitments differ — RNG replay failed")
 	}
 
-	transcript1 := buildAffGTranscript(params, []byte("extract-1"), stmt, proof1.Y,
+	transcript1, err := buildAffGTranscript(params, []byte("extract-1"), stmt, proof1.Y,
 		proof1.A, proof1.Bx, proof1.By, proof1.E, proof1.S, proof1.F, proof1.T)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e1, _ := transcript1.ChallengeSigned(params.ChallengeBits)
-	transcript2 := buildAffGTranscript(params, []byte("extract-2"), stmt, proof2.Y,
+	transcript2, err := buildAffGTranscript(params, []byte("extract-2"), stmt, proof2.Y,
 		proof2.A, proof2.Bx, proof2.By, proof2.E, proof2.S, proof2.F, proof2.T)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e2, _ := transcript2.ChallengeSigned(params.ChallengeBits)
 
 	if e1.Cmp(e2) == 0 {
@@ -517,9 +523,15 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 		t.Fatal("commitments differ — RNG replay failed")
 	}
 
-	transcript1 := buildLogStarTranscript(params, []byte("extract-1"), stmt, proof1.S, proof1.A, proof1.Y, proof1.D)
+	transcript1, err := buildLogStarTranscript(params, []byte("extract-1"), stmt, proof1.S, proof1.A, proof1.Y, proof1.D)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e1, _ := transcript1.ChallengeSigned(params.ChallengeBits)
-	transcript2 := buildLogStarTranscript(params, []byte("extract-2"), stmt, proof2.S, proof2.A, proof2.Y, proof2.D)
+	transcript2, err := buildLogStarTranscript(params, []byte("extract-2"), stmt, proof2.S, proof2.A, proof2.Y, proof2.D)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e2, _ := transcript2.ChallengeSigned(params.ChallengeBits)
 
 	if e1.Cmp(e2) == 0 {
