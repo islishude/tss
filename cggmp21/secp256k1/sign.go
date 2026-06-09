@@ -243,6 +243,41 @@ type PresignSession struct {
 	presign    *Presign
 }
 
+// abort marks the presign session aborted and clears all secret-bearing
+// accumulated state (nonce scalars, Paillier key, MtA shares, delta shares,
+// round payloads, start opening, and any completed presign record).
+func (s *PresignSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	s.kShare.Destroy()
+	s.gamma.Destroy()
+	s.xBar.Destroy()
+	s.kShare = nil
+	s.gamma = nil
+	s.xBar = nil
+	if s.paillier != nil {
+		s.paillier.Destroy()
+		s.paillier = nil
+	}
+	clearBigIntMap(s.deltas)
+	clearBigIntMap(s.alphaDelta)
+	clearBigIntMap(s.betaDelta)
+	clearBigIntMap(s.alphaSigma)
+	clearBigIntMap(s.betaSigma)
+	clearPresignRound1Map(s.round1)
+	clearPresignRound2Map(s.round2)
+	if s.startOpening != nil {
+		s.startOpening.Destroy()
+		s.startOpening = nil
+	}
+	if s.presign != nil {
+		s.presign.Destroy()
+		s.presign = nil
+	}
+}
+
 // SignSession tracks the online threshold ECDSA signing exchange.
 type SignSession struct {
 	key       *KeyShare
@@ -257,6 +292,18 @@ type SignSession struct {
 	completed bool
 	aborted   bool
 	signature *Signature
+}
+
+// abort marks the signing session aborted and clears secret-bearing
+// accumulated state (signing partials and message digest).
+func (s *SignSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	clearBigIntMap(s.partials)
+	clear(s.digest)
+	s.digest = nil
 }
 
 type presignRound1Payload struct {
@@ -336,7 +383,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {

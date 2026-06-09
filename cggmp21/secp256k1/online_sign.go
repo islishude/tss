@@ -176,7 +176,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
+			s.abort()
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {

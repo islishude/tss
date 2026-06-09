@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -330,20 +331,35 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 
 // Destroy clears sensitive session state. Use only on material that will
 // never be needed for processing further messages.
+// It delegates to abort for common secret-bearing state, then clears
+// newPaillier material that abort intentionally preserves for potential
+// evidence construction.
 func (s *RefreshSession) Destroy() {
 	if s == nil {
 		return
 	}
 	s.abort()
 	clear(s.newPaillierPriv)
+	if s.newPaillier != nil {
+		s.newPaillier.Destroy()
+	}
 	s.newPaillier = nil
 }
 
+// abort marks the session aborted and clears secret-bearing accumulated
+// state: received polynomial shares, own polynomial coefficients, and
+// unconfirmed new share. It preserves newPaillier so evidence can still
+// reference the attempted Paillier key after an abort.
 func (s *RefreshSession) abort() {
 	if s == nil {
 		return
 	}
 	s.aborted = true
+	clearBigIntMap(s.shares)
+	for _, coeff := range s.ownPoly {
+		secret.ClearBigInt(coeff)
+	}
+	s.ownPoly = nil
 	if s.newShare != nil && !s.completed {
 		s.newShare.Destroy()
 	}

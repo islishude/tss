@@ -1,6 +1,7 @@
 // Package testutil provides shared test helpers used across TSS protocol tests.
 // It contains deterministic randomness sources, wire-format mutation helpers,
-// protocol-error assertions, fixture caches, and security-parameter overrides.
+// protocol-error assertions, fixture caches, secret-cleanup assertions, and
+// security-parameter overrides.
 package testutil
 
 import (
@@ -8,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 	"math/rand/v2"
 	"slices"
 
@@ -177,4 +179,45 @@ func CloneByteSlices(in [][]byte) [][]byte {
 		out[i] = slices.Clone(in[i])
 	}
 	return out
+}
+
+// AssertBigIntCleared fails if x is non-nil and has not been cleared (non-zero
+// sign or non-empty backing words). A cleared big.Int has Sign() == 0 and
+// zero-length Bits().
+func AssertBigIntCleared(tb interface{ Fatal(...any) }, x *big.Int) {
+	if h, ok := tb.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	if x == nil {
+		return
+	}
+	if x.Sign() != 0 {
+		tb.Fatal(fmt.Sprintf("big.Int not cleared: sign=%d", x.Sign()))
+	}
+	if len(x.Bits()) != 0 {
+		tb.Fatal(fmt.Sprintf("big.Int not cleared: bits len=%d", len(x.Bits())))
+	}
+}
+
+// AssertBytesCleared fails if b is non-nil and any byte is non-zero.
+func AssertBytesCleared(tb interface{ Fatal(...any) }, b []byte) {
+	if h, ok := tb.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	for i, v := range b {
+		if v != 0 {
+			tb.Fatal(fmt.Sprintf("byte at offset %d not cleared: 0x%02x", i, v))
+		}
+	}
+}
+
+// AssertMapCleared fails if m has any entries. This helper uses reflection-free
+// iteration and is intended for maps that should be empty after Destroy/abort.
+func AssertMapCleared[M ~map[K]V, K comparable, V any](tb interface{ Fatal(...any) }, m M) {
+	if h, ok := tb.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	if len(m) != 0 {
+		tb.Fatal(fmt.Sprintf("map not cleared: %d entries remain", len(m)))
+	}
 }

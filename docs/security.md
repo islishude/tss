@@ -111,6 +111,46 @@ copies can leave historical secret material elsewhere in process memory. Use
 short process lifetimes, encrypted persistence, locked-down crash reporting, and
 process isolation when stronger memory-erasure guarantees are required.
 
+## Destroy and Abort Lifecycle
+
+Every session type (`KeygenSession`, `PresignSession`, `SignSession`,
+`RefreshSession`, `ReshareSession`) implements a `Destroy()` method that
+clears all secret-bearing fields: nonce scalars, Shamir shares, Paillier
+private keys, MtA witnesses, polynomial coefficients, ciphertext maps, and
+assembled key shares. `Destroy()` is idempotent and safe to call on a nil
+receiver.
+
+Protocol abort paths call an internal `abort()` method that marks the session
+aborted and immediately clears accumulated secret state. A verification failure
+or blame-attributed protocol error triggers `abort()` automatically through the
+handler's deferred recovery. This prevents secret material from persisting in
+memory after a failed run when the caller may not explicitly call `Destroy()`.
+
+Callers must still call `Destroy()` on sessions, `KeyShare`, and `Presign`
+values once they are no longer needed. The library does not hook into
+finalizers or runtime cleanup — only explicit `Destroy()` calls guarantee
+that owned byte slices and `big.Int` backing arrays are overwritten.
+
+Key shares and presign records held by a session as **references** (e.g.,
+`SignSession.key` and `SignSession.presign`) are NOT destroyed by the
+session's `Destroy()` — they are caller-owned and must be destroyed
+separately.
+
+### Deployment Recommendations
+
+For high-assurance deployments where process-memory zeroization matters:
+
+- **Disable core dumps** (`ulimit -c 0`, or set `kernel.core_pattern` to
+  `|/bin/false` on Linux).
+- **Restrict crash reporting** — do not upload full process dumps to crash
+  analytics services.
+- **Use short-lived signer processes** — spawn a process per signing
+  operation or batch, so the OS reclaims memory on exit.
+- **Encrypt persisted key material** with a KMS or HSM rather than relying
+  on in-process passphrase encryption.
+- **Disable Go's heap profiling and memory profiling** in production builds
+  to prevent secret material from appearing in pprof output.
+
 ## Constant-Time Paillier Private-Key Operations
 
 Paillier private-key modular exponentiation (`c^λ mod n²`) is implemented via

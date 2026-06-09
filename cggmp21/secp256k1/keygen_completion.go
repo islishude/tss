@@ -229,12 +229,25 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	return out, nil
 }
 
+// abort marks the session aborted and clears all secret-bearing accumulated
+// state so that secret material from an incomplete keygen is not retained in
+// process memory longer than necessary. Callers that also want to release
+// non-secret storage (commits, confirmations) should call Destroy.
 func (s *KeygenSession) abort() {
 	if s == nil {
 		return
 	}
 	s.aborted = true
 	s.state = keygenAborted
+	clearBigIntMap(s.shares)
+	for id, chainCode := range s.chainCodes {
+		clear(chainCode)
+		delete(s.chainCodes, id)
+	}
+	if s.paillier != nil {
+		s.paillier.Destroy()
+		s.paillier = nil
+	}
 	if s.pending != nil && s.pending.share != nil {
 		s.pending.share.Destroy()
 	}

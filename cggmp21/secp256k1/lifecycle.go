@@ -8,67 +8,61 @@ import (
 )
 
 // Destroy clears local secret material retained by the keygen session.
+// It delegates to abort for secret-bearing state, then releases non-secret storage.
+// Destroy is safe to call on a nil receiver; it is idempotent because all
+// sub-operations (clearBigIntMap, PrivateKey.Destroy, KeyShare.Destroy) are
+// themselves nil-safe.
 func (s *KeygenSession) Destroy() {
 	if s == nil {
 		return
 	}
-	clearBigIntMap(s.shares)
-	for id, chainCode := range s.chainCodes {
-		clear(chainCode)
-		delete(s.chainCodes, id)
+	s.abort()
+	for id := range s.commits {
+		delete(s.commits, id)
 	}
-	if s.paillier != nil {
-		s.paillier.Destroy()
-		s.paillier = nil
+	for id := range s.confirmations {
+		delete(s.confirmations, id)
 	}
 	if s.keyShare != nil {
 		s.keyShare.Destroy()
+		s.keyShare = nil
 	}
 }
 
 // Destroy clears local secret material retained by the presign session.
+// It delegates to abort for secret-bearing state, then releases non-secret storage.
+// Destroy is safe to call on a nil receiver; it is idempotent because all
+// sub-operations are themselves nil-safe.
 func (s *PresignSession) Destroy() {
 	if s == nil {
 		return
 	}
-	s.kShare.Destroy()
-	s.gamma.Destroy()
-	s.xBar.Destroy()
-	s.kShare = nil
-	s.gamma = nil
-	s.xBar = nil
-	if s.paillier != nil {
-		s.paillier.Destroy()
-		s.paillier = nil
-	}
-	clearBigIntMap(s.deltas)
-	clearBigIntMap(s.alphaDelta)
-	clearBigIntMap(s.betaDelta)
-	clearBigIntMap(s.alphaSigma)
-	clearBigIntMap(s.betaSigma)
-	clearPresignRound1Map(s.round1)
+	s.abort()
 	clearPresignRound1ProofMap(s.round1Proofs)
 	for id := range s.round1ProofEnvelopes {
 		delete(s.round1ProofEnvelopes, id)
 	}
-	clearPresignRound2Map(s.round2)
-	if s.startOpening != nil {
-		s.startOpening.Destroy()
-		s.startOpening = nil
-	}
-	if s.presign != nil {
-		s.presign.Destroy()
-	}
 }
 
 // Destroy clears local online signing partials retained by the signing session.
+// It delegates to abort for secret-bearing state, then releases non-secret storage
+// including the public key and assembled signature bytes.
+// Destroy is safe to call on a nil receiver; it is idempotent because all
+// sub-operations are themselves nil-safe.
+// The session's key and presign references are caller-owned and are NOT
+// destroyed — callers must destroy those separately.
 func (s *SignSession) Destroy() {
 	if s == nil {
 		return
 	}
-	clearBigIntMap(s.partials)
-	clear(s.digest)
-	s.digest = nil
+	s.abort()
+	clear(s.publicKey)
+	s.publicKey = nil
+	if s.signature != nil {
+		clear(s.signature.R)
+		clear(s.signature.S)
+	}
+	s.signature = nil
 }
 
 func clearBigIntMap(xs map[tss.PartyID]*big.Int) {
