@@ -112,6 +112,9 @@ func SignBroadcastAck(env Envelope, party PartyID, signer BroadcastAckSigner) (B
 
 // VerifyBroadcastAck checks that an ack is valid for the given envelope and party.
 func VerifyBroadcastAck(env Envelope, ack BroadcastAck, verifier BroadcastAckVerifier) error {
+	if verifier == nil {
+		return errors.New("nil BroadcastAckVerifier")
+	}
 	payloadHash := sha256.Sum256(env.Payload)
 	if ack.PayloadHash != payloadHash {
 		return errors.New("ack payload hash mismatch")
@@ -160,8 +163,12 @@ type BroadcastConsistency struct {
 }
 
 // NewBroadcastConsistency starts tracking a new broadcast consistency session.
-// The verifier is used to check each ack signature as it arrives.
-func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, recipients PartySet, verifier BroadcastAckVerifier) *BroadcastConsistency {
+// The verifier is used to check each ack signature as it arrives. It must not
+// be nil — a nil verifier causes a panic in AddAck.
+func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, recipients PartySet, verifier BroadcastAckVerifier) (*BroadcastConsistency, error) {
+	if verifier == nil {
+		return nil, errors.New("nil BroadcastAckVerifier")
+	}
 	return &BroadcastConsistency{
 		protocol:    protocol,
 		sessionID:   sessionID,
@@ -171,7 +178,7 @@ func NewBroadcastConsistency(protocol ProtocolID, sessionID SessionID, round uin
 		recipients:  recipients.Clone(),
 		acks:        make(map[PartyID]BroadcastAck, len(recipients)),
 		verifier:    verifier,
-	}
+	}, nil
 }
 
 // Commit records the canonical broadcast digest for this consistency session.

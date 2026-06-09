@@ -161,7 +161,10 @@ func TestBroadcastConsistencyFullFlow(t *testing.T) {
 	parties := PartySet{1, 2, 3}
 	signers, verifier := setupAckKeys(t, parties)
 
-	bc := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Commit the broadcast digest
 	if ok, err := bc.Commit(env); err != nil || !ok {
@@ -202,7 +205,10 @@ func TestBroadcastConsistencyDetectsEquivocation(t *testing.T) {
 	parties := PartySet{1, 2}
 	_, verifier := setupAckKeys(t, parties)
 
-	bc := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Commit first digest
 	if ok, err := bc.Commit(env1); err != nil || !ok {
@@ -221,7 +227,10 @@ func TestBroadcastConsistencyRejectsInvalidSignature(t *testing.T) {
 	parties := PartySet{1, 2}
 	signers, verifier := setupAckKeys(t, parties)
 
-	bc := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ok, err := bc.Commit(env); err != nil || !ok {
 		t.Fatalf("commit: ok=%v err=%v", ok, err)
 	}
@@ -253,7 +262,10 @@ func TestBroadcastConsistencyRejectsEquivocatingAck(t *testing.T) {
 	parties := PartySet{1, 2}
 	signers, verifier := setupAckKeys(t, parties)
 
-	bc := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	bc, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ok, err := bc.Commit(env); err != nil || !ok {
 		t.Fatalf("commit: ok=%v err=%v", ok, err)
 	}
