@@ -45,9 +45,6 @@ func TestIsZeroBytes(t *testing.T) {
 
 func TestTestLimits(t *testing.T) {
 	tl := TestLimits()
-	if tl.MinPaillierModulusBits != 512 {
-		t.Errorf("MinPaillierModulusBits: got %d, want 512", tl.MinPaillierModulusBits)
-	}
 	if !tl.AllowOneOfOne {
 		t.Error("AllowOneOfOne should be true")
 	}

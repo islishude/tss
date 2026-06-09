@@ -14,32 +14,56 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
-// MinimumModulusBits is the minimum Paillier modulus size GenerateKey accepts.
-const MinimumModulusBits = 512
+// MinProductionModulusBits is the production Paillier modulus security floor
+// (3072 bits ≈ 128-bit classical security, matching secp256k1). This is the
+// minimum accepted by GenerateKey. Tests must use GenerateKeyForTest for
+// smaller sizes.
+const MinProductionModulusBits = 3072
+
+// minKeyBits is the absolute minimum Paillier modulus size — a structural
+// floor, not a security recommendation.
+const minKeyBits = 512
 
 // GenerateKey creates a Paillier key using safe primes (Sophie Germain primes)
 // where p = 2p' + 1, q = 2q' + 1 with p', q' also prime, and the g=n+1 variant.
 // Safe primes ensure the Blum condition p ≡ q ≡ 3 (mod 4) automatically.
 // The context is checked in each prime-search iteration to support cancellation.
 //
+// GenerateKey enforces a production minimum of MinProductionModulusBits (3072).
+// Protocol callers that need smaller keys for testing must use GenerateKeyForTest.
+//
 // crypto/rand.Reader is documented as safe for concurrent use and is used
 // directly. Any other reader is wrapped with an internal mutex so that Read
 // calls are serialized safely across prime-search goroutines; the mutex
 // overhead is negligible compared to primality testing.
 func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
-	if bits < MinimumModulusBits {
-		return nil, fmt.Errorf("paillier modulus must be at least %d bits", MinimumModulusBits)
+	if bits < MinProductionModulusBits {
+		return nil, fmt.Errorf("paillier modulus must be at least %d bits", MinProductionModulusBits)
 	}
+	return generateKeyInner(ctx, reader, bits)
+}
 
-	// crypto/rand.Reader is documented as concurrent-safe; serialise all
-	// other readers so the parallel prime search is safe regardless of
-	// the reader implementation.
+// GenerateKeyForTest creates a Paillier key with a reduced modulus size suitable
+// for testing. The minimum is 512 bits. This function must not be used in
+// production code.
+func GenerateKeyForTest(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
+	if bits < minKeyBits {
+		return nil, fmt.Errorf("paillier modulus must be at least %d bits", minKeyBits)
+	}
+	return generateKeyInner(ctx, reader, bits)
+}
+
+// generateKeyInner contains the shared key-generation logic. It normalizes
+// the reader (nil → crypto/rand.Reader, non-crypto/rand → lockedReader) before
+// the prime-search loop.
+func generateKeyInner(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
+	// normalizeReader defaults nil to crypto/rand.Reader and wraps non-crypto/rand
+	// readers with a mutex for concurrent-safe use across prime-search goroutines.
 	if reader == nil {
 		reader = rand.Reader
 	} else if !sameReader(reader, rand.Reader) {
 		reader = &lockedReader{r: reader}
 	}
-
 	for {
 		if err := ctx.Err(); err != nil {
 			return nil, err

@@ -55,7 +55,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		}
 		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	}
-	paillierKey, err := pai.GenerateKey(config.Ctx(), config.Reader(), opts.PaillierBits)
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), opts.PaillierBits)
 	if err != nil {
 		return nil, nil, err
 	}

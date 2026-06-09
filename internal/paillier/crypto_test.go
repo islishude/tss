@@ -7,7 +7,7 @@ import (
 )
 
 func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -45,7 +45,7 @@ func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 }
 
 func TestValidateCiphertextGroup(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -61,7 +61,7 @@ func TestValidateCiphertextGroup(t *testing.T) {
 }
 
 func TestDecryptRejectsNonUnitCiphertext(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -93,7 +93,7 @@ func TestDecryptRejectsNonUnitCiphertext(t *testing.T) {
 }
 
 func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,7 +138,7 @@ func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
 }
 
 func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
 }
 
 func TestUncheckedHelpersAcceptValidCiphertexts(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}

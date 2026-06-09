@@ -10,7 +10,7 @@ import (
 )
 
 func TestMarshalRoundTrip(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -53,7 +53,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 }
 
 func TestRejectsNonCanonicalPublicKey(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +99,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 }
 
 func FuzzPublicKeyUnmarshal(f *testing.F) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)
 	}
@@ -119,7 +119,7 @@ func FuzzPublicKeyUnmarshal(f *testing.F) {
 }
 
 func FuzzPrivateKeyUnmarshal(f *testing.F) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		f.Fatal(err)
 	}

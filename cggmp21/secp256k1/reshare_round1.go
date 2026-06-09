@@ -102,7 +102,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) initReceiverMaterial() error {
-	newPaillierKey, err := pai.GenerateKey(s.cfg.Ctx(), s.cfg.Reader(), defaultPaillierBits())
+	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), defaultPaillierBits())
 	if err != nil {
 		return err
 	}

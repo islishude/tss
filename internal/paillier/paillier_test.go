@@ -9,7 +9,7 @@ import (
 )
 
 func TestPrivateKeyJSONAndDestroy(t *testing.T) {
-	sk, err := GenerateKey(context.Background(), nil, 512)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}

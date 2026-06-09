@@ -21,11 +21,11 @@ func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.Ring
 	})
 	tb.Cleanup(restoreSP)
 	var err error
-	skA, err = pai.GenerateKey(context.Background(), nil, 1024)
+	skA, err = pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	skB, err = pai.GenerateKey(context.Background(), nil, 1024)
+	skB, err = pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {
 		tb.Fatal(err)
 	}

@@ -173,12 +173,11 @@ func TestLimitsValidateSelfConsistency(t *testing.T) {
 		t.Fatal("expected error when MaxThreshold > MaxParties")
 	}
 
-	// MinPaillierModulusBits > MaxPaillierModulusBits.
+	// MaxPaillierModulusBits <= 0.
 	l = DefaultLimits()
-	l.MinPaillierModulusBits = 8192
-	l.MaxPaillierModulusBits = 4096
+	l.MaxPaillierModulusBits = 0
 	if err := l.Validate(); err == nil {
-		t.Fatal("expected error when Min > Max Paillier bits")
+		t.Fatal("expected error when MaxPaillierModulusBits <= 0")
 	}
 }
 
@@ -192,9 +191,6 @@ func TestDefaultLimitsIsFailClosed(t *testing.T) {
 	}
 	if l.AllowOversizedSignerSet {
 		t.Error("AllowOversizedSignerSet should be false")
-	}
-	if l.MinPaillierModulusBits != DefaultMinPaillierModulusBits {
-		t.Errorf("MinPaillierModulusBits: got %d, want %d", l.MinPaillierModulusBits, DefaultMinPaillierModulusBits)
 	}
 }
 

@@ -2,7 +2,6 @@ package tss
 
 import (
 	"errors"
-	"fmt"
 )
 
 const (
@@ -46,8 +45,6 @@ const (
 	// DefaultMaxShamirShares caps the number of shares in interpolation.
 	DefaultMaxShamirShares = 64
 
-	// DefaultMinPaillierModulusBits is the minimum Paillier modulus size in production (3072 bits).
-	DefaultMinPaillierModulusBits = 3072
 	// DefaultMaxPaillierModulusBits caps the Paillier modulus size (8192 bits).
 	DefaultMaxPaillierModulusBits = 8192
 	// DefaultMaxPaillierPublicKeyBytes caps marshaled Paillier public key size.
@@ -123,7 +120,6 @@ type Limits struct {
 	MaxShamirShares int
 
 	MaxPaillierModulusBits     int
-	MinPaillierModulusBits     int
 	MaxPaillierPublicKeyBytes  int
 	MaxPaillierPrivateKeyBytes int
 	MaxPaillierCiphertextBytes int
@@ -172,7 +168,6 @@ func DefaultLimits() Limits {
 		MaxShamirShares: DefaultMaxShamirShares,
 
 		MaxPaillierModulusBits:     DefaultMaxPaillierModulusBits,
-		MinPaillierModulusBits:     DefaultMinPaillierModulusBits,
 		MaxPaillierPublicKeyBytes:  DefaultMaxPaillierPublicKeyBytes,
 		MaxPaillierPrivateKeyBytes: DefaultMaxPaillierPrivateKeyBytes,
 		MaxPaillierCiphertextBytes: DefaultMaxPaillierCiphertextBytes,
@@ -209,12 +204,8 @@ func (l Limits) Validate() error {
 	if l.MinProductionThreshold < 0 {
 		return errors.New("MinProductionThreshold must be non-negative")
 	}
-	if l.MinPaillierModulusBits <= 0 {
-		return errors.New("MinPaillierModulusBits must be positive")
-	}
-	if l.MaxPaillierModulusBits < l.MinPaillierModulusBits {
-		return fmt.Errorf("MaxPaillierModulusBits (%d) must be >= MinPaillierModulusBits (%d)",
-			l.MaxPaillierModulusBits, l.MinPaillierModulusBits)
+	if l.MaxPaillierModulusBits <= 0 {
+		return errors.New("MaxPaillierModulusBits must be positive")
 	}
 	if l.MaxEnvelopeBytes <= 0 {
 		return errors.New("MaxEnvelopeBytes must be positive")

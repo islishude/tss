@@ -8,21 +8,17 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
-// Validate checks the public key against the package minimum modulus size.
+// Validate checks public key structural invariants: modulus is odd, composite,
+// safe-prime pattern (≡ 1 mod 4, not divisible by 3), NSquared is N², and
+// generator is n+1. Validate does NOT enforce a minimum modulus size — callers
+// that need a security-parameter bit-length check should use ValidateBits or
+// SecurityParams.CheckPaillierModulus.
 func (pk PublicKey) Validate() error {
-	return pk.ValidateBits(MinimumModulusBits)
-}
-
-// ValidateBits checks public key structure against an explicit minimum size.
-func (pk PublicKey) ValidateBits(minBits int) error {
 	if pk.N == nil || pk.N.Sign() <= 0 {
 		return errors.New("invalid modulus")
 	}
 	if pk.N.Bit(0) == 0 {
 		return errors.New("paillier modulus must be odd")
-	}
-	if minBits > 0 && pk.N.BitLen() < minBits {
-		return fmt.Errorf("paillier modulus has %d bits, need at least %d", pk.N.BitLen(), minBits)
 	}
 	if pk.N.ProbablyPrime(64) {
 		return errors.New("paillier modulus must be composite")
@@ -46,6 +42,17 @@ func (pk PublicKey) ValidateBits(minBits int) error {
 	}
 	if pk.G.Cmp(new(big.Int).Add(pk.N, big.NewInt(1))) != 0 {
 		return errors.New("paillier generator must be n+1")
+	}
+	return nil
+}
+
+// ValidateBits checks public key structure against an explicit minimum size.
+func (pk PublicKey) ValidateBits(minBits int) error {
+	if err := pk.Validate(); err != nil {
+		return err
+	}
+	if minBits > 0 && pk.N.BitLen() < minBits {
+		return fmt.Errorf("paillier modulus has %d bits, need at least %d", pk.N.BitLen(), minBits)
 	}
 	return nil
 }

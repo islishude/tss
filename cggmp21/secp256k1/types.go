@@ -1,9 +1,12 @@
 package secp256k1
 
 import (
+	"context"
+	"io"
 	"slices"
 
 	"github.com/islishude/tss"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -27,6 +30,16 @@ const (
 // generation, derived from the active CGGMP security parameters.
 func defaultPaillierBits() int {
 	return zkpai.ActiveSecurityParams().MinPaillierBits
+}
+
+// generatePaillierKey creates a Paillier key using the production GenerateKey
+// when bits meet the production floor, or GenerateKeyForTest when running with
+// reduced security parameters (e.g. integration tests).
+func generatePaillierKey(ctx context.Context, reader io.Reader, bits int) (*pai.PrivateKey, error) {
+	if bits >= pai.MinProductionModulusBits {
+		return pai.GenerateKey(ctx, reader, bits)
+	}
+	return pai.GenerateKeyForTest(ctx, reader, bits)
 }
 
 // VerificationShare is one participant public ECDSA verification share.

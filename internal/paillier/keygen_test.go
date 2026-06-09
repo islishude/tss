@@ -15,7 +15,7 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping 1024-bit safe-prime factor keygen in short mode")
 	}
-	sk, err := GenerateKey(context.Background(), nil, 2048)
+	sk, err := GenerateKeyForTest(context.Background(), nil, 2048)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -32,7 +32,7 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 // never sees overlapping calls.
 func TestGenerateKeyCustomReaderSafety(t *testing.T) {
 	reader := new(concurrencyDetectingReader)
-	sk, err := GenerateKey(context.Background(), reader, 512)
+	sk, err := GenerateKeyForTest(context.Background(), reader, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
 
 	reader := &cancelAfterFirstReadReader{cancel: cancel}
 
-	_, err := GenerateKey(ctx, reader, 512)
+	_, err := GenerateKeyForTest(ctx, reader, 512)
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("GenerateKey error = %v, want context.Canceled", err)
 	}
@@ -113,7 +113,7 @@ func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
 
 func BenchmarkGenerateKey2048(b *testing.B) {
 	for b.Loop() {
-		_, err := GenerateKey(context.Background(), nil, 2048)
+		_, err := GenerateKeyForTest(context.Background(), nil, 2048)
 		if err != nil {
 			b.Fatal(err)
 		}

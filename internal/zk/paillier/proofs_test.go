@@ -322,7 +322,7 @@ func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
 	if sk, ok := testPaillierKeyCache.Load(bits); ok {
 		return sk.(*pai.PrivateKey)
 	}
-	sk, err := pai.GenerateKey(context.Background(), nil, bits)
+	sk, err := pai.GenerateKeyForTest(context.Background(), nil, bits)
 	if err != nil {
 		t.Fatal(err)
 	}

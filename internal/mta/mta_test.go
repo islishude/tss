@@ -16,11 +16,11 @@ func TestMTAProductShares(t *testing.T) {
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
 	})
 	defer restoreSP()
-	skA, err := pai.GenerateKey(context.Background(), nil, 1024)
+	skA, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}
-	skB, err := pai.GenerateKey(context.Background(), nil, 1024)
+	skB, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {
 		t.Fatal(err)
 	}

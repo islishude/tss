@@ -129,7 +129,6 @@ func TestLimits() tss.Limits {
 	l.AllowOneOfOne = true
 	l.MinProductionThreshold = 1
 	l.AllowOversizedSignerSet = true
-	l.MinPaillierModulusBits = 512
 	l.MaxPaillierModulusBits = 8192
 	l.MaxPaillierPublicKeyBytes = 4096
 	l.MaxPaillierPrivateKeyBytes = 8192
