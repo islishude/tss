@@ -1,8 +1,6 @@
 package tss
 
 import (
-	"crypto/aes"
-	"crypto/cipher"
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
@@ -11,6 +9,7 @@ import (
 	"math"
 
 	"golang.org/x/crypto/argon2"
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 const (
@@ -27,7 +26,7 @@ const (
 
 	saltLen  = 32
 	nonceLen = 12
-	keyLen   = 32 // AES-256
+	keyLen   = 32 // ChaCha20-Poly1305
 
 	// minHeaderLen is the fixed header size before the variable key_id field:
 	// version(1) + algo(1) + time(4) + mem(4) + threads(1) + record_type(1) +
@@ -75,7 +74,7 @@ func DefaultPassphraseParams() *PassphraseParams {
 }
 
 // EncryptKeyShareWithPassphrase encrypts a key-share with a passphrase using
-// Argon2id key derivation and AES-256-GCM. keyID is an optional caller-assigned
+// Argon2id key derivation and ChaCha20-Poly1305. keyID is an optional caller-assigned
 // identifier that is authenticated as AAD (empty string is allowed).
 //
 // This is a reference/demo implementation. Production deployments should use
@@ -85,14 +84,14 @@ func EncryptKeyShareWithPassphrase(plaintext, passphrase []byte, keyID string, p
 }
 
 // DecryptKeyShareWithPassphrase decrypts an encoding produced by
-// [EncryptKeyShareWithPassphrase]. A wrong passphrase causes GCM
+// [EncryptKeyShareWithPassphrase]. A wrong passphrase causes AEAD
 // authentication failure.
 func DecryptKeyShareWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
 	return decrypt(encoded, passphrase, recordTypeKeyShare)
 }
 
 // EncryptPresignWithPassphrase encrypts a presign record with a passphrase using
-// Argon2id key derivation and AES-256-GCM. keyID is an optional caller-assigned
+// Argon2id key derivation and ChaCha20-Poly1305. keyID is an optional caller-assigned
 // identifier that is authenticated as AAD (empty string is allowed).
 //
 // This is a reference/demo implementation. Production deployments should use
@@ -102,7 +101,7 @@ func EncryptPresignWithPassphrase(plaintext, passphrase []byte, keyID string, pa
 }
 
 // DecryptPresignWithPassphrase decrypts an encoding produced by
-// [EncryptPresignWithPassphrase]. A wrong passphrase causes GCM
+// [EncryptPresignWithPassphrase]. A wrong passphrase causes AEAD
 // authentication failure.
 func DecryptPresignWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
 	return decrypt(encoded, passphrase, recordTypePresign)
@@ -129,11 +128,7 @@ func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, param
 		return nil, fmt.Errorf("tss encrypt: %w", err)
 	}
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("tss encrypt: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
+	aead, err := chacha20poly1305.New(key)
 	if err != nil {
 		return nil, fmt.Errorf("tss encrypt: %w", err)
 	}
@@ -148,15 +143,15 @@ func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, param
 	aad := buildAAD(recordType, keyID, salt, params)
 
 	// Encode: aad || nonce || ciphertext
-	out := make([]byte, 0, len(aad)+nonceLen+len(plaintext)+gcm.Overhead())
+	out := make([]byte, 0, len(aad)+nonceLen+len(plaintext)+aead.Overhead())
 	out = append(out, aad...)
 	out = append(out, nonce...)
-	return gcm.Seal(out, nonce, plaintext, aad), nil
+	return aead.Seal(out, nonce, plaintext, aad), nil
 }
 
 func decrypt(encoded, passphrase []byte, expectedRecordType uint8) ([]byte, error) {
 	// Loose lower bound: the minimum valid encoding (no key_id, empty plaintext)
-	// is minHeaderLen + nonceLen + GCM tag (16 bytes). A non-empty key_id makes
+	// is minHeaderLen + nonceLen + AEAD tag (16 bytes). A non-empty key_id makes
 	// the actual minimum larger; the real validation happens in parseHeader.
 	if len(encoded) < minHeaderLen+nonceLen+16 {
 		return nil, errors.New("tss decrypt: encoded data too short")
@@ -189,16 +184,12 @@ func decrypt(encoded, passphrase []byte, expectedRecordType uint8) ([]byte, erro
 		return nil, fmt.Errorf("tss decrypt: %w", err)
 	}
 
-	block, err := aes.NewCipher(key)
-	if err != nil {
-		return nil, fmt.Errorf("tss decrypt: %w", err)
-	}
-	gcm, err := cipher.NewGCM(block)
+	aead, err := chacha20poly1305.New(key)
 	if err != nil {
 		return nil, fmt.Errorf("tss decrypt: %w", err)
 	}
 
-	plaintext, err := gcm.Open(nil, nonce, ciphertext, aad)
+	plaintext, err := aead.Open(nil, nonce, ciphertext, aad)
 	if err != nil {
 		return nil, fmt.Errorf("tss decrypt: %w", err)
 	}
@@ -267,7 +258,7 @@ func parseHeader(encoded []byte) (*header, error) {
 	return h, nil
 }
 
-// buildAAD constructs the authenticated additional data for GCM.
+// buildAAD constructs the authenticated additional data for AEAD.
 // Layout: version || algo || time || memory || threads || record_type ||
 //
 //	key_id_len || key_id || salt_len || salt
@@ -317,7 +308,7 @@ func validateParams(params *PassphraseParams) error {
 	return nil
 }
 
-// deriveKeyArgon2id derives an AES-256 key from a passphrase and salt using Argon2id.
+// deriveKeyArgon2id derives a 32-byte key from a passphrase and salt using Argon2id.
 // It rejects zero parameters and values exceeding generous upper bounds
 // to prevent resource-exhaustion attacks when decrypting untrusted input.
 func deriveKeyArgon2id(passphrase, salt []byte, time, memory uint32, threads uint8) ([]byte, error) {

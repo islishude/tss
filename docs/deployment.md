@@ -52,7 +52,7 @@ raw, _ := presign.MarshalBinary()
 encrypted, _ := tss.EncryptPresignWithPassphrase(raw, passphrase, "presign-1", nil)
 ```
 
-The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` helpers use AES-256-GCM with Argon2id key derivation from a passphrase. These are **reference/demo implementations**. Production deployments should prefer a KMS or HSM.
+The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` helpers use ChaCha20-Poly1305 with Argon2id key derivation from a passphrase. These are **reference/demo implementations**. Production deployments should prefer a KMS or HSM.
 
 ### 3. Loading
 
@@ -192,15 +192,14 @@ func routeMessages(session Session, transport Transport) error {
 
 ## Persistence Encryption
 
-### Recommended Pattern (AES-256-GCM)
+### Recommended Pattern (ChaCha20-Poly1305)
 
 ```go
 func encrypt(plaintext, key []byte) ([]byte, error) {
-    block, _ := aes.NewCipher(key)
-    gcm, _ := cipher.NewGCM(block)
-    nonce := make([]byte, gcm.NonceSize())
+    aead, _ := chacha20poly1305.New(key)
+    nonce := make([]byte, aead.NonceSize())
     io.ReadFull(rand.Reader, nonce)
-    return gcm.Seal(nonce, nonce, plaintext, nil), nil
+    return aead.Seal(nonce, nonce, plaintext, nil), nil
 }
 ```
 
@@ -257,7 +256,7 @@ Before first production deployment, verify:
 
 1. **Transport authentication:** Every `Envelope.From` matches the authenticated transport identity.
 2. **Session ID freshness:** New session IDs are generated for every protocol run using `tss.NewSessionID`.
-3. **Storage encryption:** Key shares and presign records are encrypted at rest using AES-256-GCM or a KMS.
+3. **Storage encryption:** Key shares and presign records are encrypted at rest using ChaCha20-Poly1305 or a KMS.
 4. **Secret material logging:** Verify no log output contains `secret.Scalar`, Paillier private keys, nonce values, or share values.
 5. **Presign lifecycle:** Presign consumed flags are persisted and checked on restart.
 6. **Blame evidence handling:** Protocol errors with `Blame != nil` are surfaced to operators.

@@ -237,7 +237,7 @@ func TestDecryptWithPassphraseTamperedAAD(t *testing.T) {
 
 	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
 	if err == nil {
-		t.Fatal("expected GCM authentication failure for tampered AAD (salt)")
+		t.Fatal("expected AEAD authentication failure for tampered AAD (salt)")
 	}
 }
 
@@ -258,7 +258,7 @@ func TestDecryptWithPassphraseTamperedKeyID(t *testing.T) {
 
 	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
 	if err == nil {
-		t.Fatal("expected GCM authentication failure for tampered AAD (keyID)")
+		t.Fatal("expected AEAD authentication failure for tampered AAD (keyID)")
 	}
 }
 
@@ -379,6 +379,6 @@ func TestDecryptWithPassphraseRejectsExcessiveParams(t *testing.T) {
 	// Corrupt kdf_threads (offset 10) to exceed maxKDFThreads (255).
 	tampered[10] = 255 // uint8 max is already the limit — use 255+1 overflow: wraps to 0
 	// Since maxKDFThreads == 255 (uint8 max), we can't exceed it via uint8 wire field.
-	// But any tampering of the header causes GCM auth failure. So this sub-case
+	// But any tampering of the header causes AEAD auth failure. So this sub-case
 	// is covered by the general AAD tampering tests.
 }

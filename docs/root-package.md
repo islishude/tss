@@ -289,7 +289,7 @@ Both `frost/ed25519.KeyShare` and `cggmp21/secp256k1.KeyShare` implement this in
 
 ## Persistence Helpers
 
-`EncryptKeyShareWithPassphrase` / `DecryptKeyShareWithPassphrase` and `EncryptPresignWithPassphrase` / `DecryptPresignWithPassphrase` provide AES-256-GCM encryption with Argon2id key derivation from a passphrase. KDF parameters, version, algorithm, record type, and key ID are stored as authenticated metadata in the envelope:
+`EncryptKeyShareWithPassphrase` / `DecryptKeyShareWithPassphrase` and `EncryptPresignWithPassphrase` / `DecryptPresignWithPassphrase` provide ChaCha20-Poly1305 encryption with Argon2id key derivation from a passphrase. KDF parameters, version, algorithm, record type, and key ID are stored as authenticated metadata in the envelope:
 
 ```go
 raw, _ := share.MarshalBinary()
