@@ -127,6 +127,7 @@ func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, param
 	if err != nil {
 		return nil, fmt.Errorf("tss encrypt: %w", err)
 	}
+	defer clear(key)
 
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
@@ -183,6 +184,7 @@ func decrypt(encoded, passphrase []byte, expectedRecordType uint8) ([]byte, erro
 	if err != nil {
 		return nil, fmt.Errorf("tss decrypt: %w", err)
 	}
+	defer clear(key)
 
 	aead, err := chacha20poly1305.New(key)
 	if err != nil {
