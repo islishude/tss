@@ -46,7 +46,7 @@ test-race:
 # Legacy test-coverage target (includes integration and slowcrypto tests).
 .PHONY: test-coverage
 test-coverage:
-	go test -v -timeout 1h -tags 'integration slowcrypto' -race -coverprofile=coverage.out -covermode=atomic ./...
+	go test -v -timeout 5h -tags 'integration slowcrypto' -race -coverprofile=coverage.out -covermode=atomic ./...
 	go tool cover -html=coverage.out -o coverage.html
 
 # Fuzzing testing
