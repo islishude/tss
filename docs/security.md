@@ -16,10 +16,12 @@ Callers must provide:
 
 - authenticated peer identity for every envelope, set via `Envelope.Security.AuthenticatedParty` and `Authenticated`;
 - encryption for secret-bearing envelopes, signalled by `Envelope.Security.Confidential`. Confidentiality requirements are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`;
-- **equivocation-resistant broadcast** for CGGMP21 keygen round 1: every
-  participant must receive identical commitment, Paillier, and
-  Ring-Pedersen payloads, verified by `BroadcastCertificate`. After keygen completes, compare
-  `KeygenTranscriptHash` across parties as an additional defense-in-depth check;
+- **equivocation-resistant broadcast** for all broadcast-mode protocol messages:
+  every participant must receive identical payloads, verified by
+  `BroadcastCertificate` with `VerifyFull`. The guard detects equivocation via
+  `ReplayCache.CheckAndStore` when the same message slot carries different
+  transcript hashes. After keygen completes, compare `KeygenTranscriptHash`
+  across parties as an additional defense-in-depth check;
 - replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
@@ -33,10 +35,12 @@ same authorization checks used for key-share metadata.
 ## Production Integration Checklist
 
 `EnvelopeGuard` is the mandatory first fail-closed boundary for every inbound
-envelope. Construct a guard via `tss.NewEnvelopeGuard` (or `GuardConfig.BuildGuard`)
-and attach it to every session with `SetGuard` **before** processing any inbound
-messages. Sessions reject authenticated transport envelopes that arrive without a
-guard.
+envelope. Construct a guard via `tss.GuardConfig.BuildGuard` (production) or
+`tss.NewTestEnvelopeGuard` (tests only) and attach it to every session with
+`SetGuard` **before** processing any inbound messages. Sessions return
+`ErrMissingEnvelopeGuard` when an envelope arrives without a configured guard.
+Production `GuardConfig.BuildGuard` requires a non-nil `AckVerifier`
+(`BroadcastAckVerifier`) for broadcast ack signature verification.
 
 Before passing an inbound envelope to any state machine, the caller must verify
 that the authenticated transport identity for the peer exactly matches
@@ -226,7 +230,7 @@ Transport responsibilities:
 - never let a payload field override the transport-authenticated sender;
 - fan out broadcast envelopes to every party;
 - protect confidential share envelopes with point-to-point encryption or equivalent controls, set `Envelope.Security.Confidential`;
-- supply `BroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (CGGMP21 keygen round 1, refresh/reshare round 1);
+- supply `BroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (all broadcast-mode messages in CGGMP21 and FROST policy sets);
 - treat `SecurityContext` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;
 - treat two different confirmations from one sender in one session as equivocation;
 - never persist or use keygen material before the completion accessor returns a confirmed `KeyShare`.

@@ -606,7 +606,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
 		payload, err := unmarshalSignPartialPayload(out2[0].Payload)
 		if err != nil {
 			t.Fatal(err)
@@ -627,7 +627,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
 		mutated, err := testutil.RewriteWireField(out2[0].Payload, signPartialPayloadWireType, signPartialPayloadFieldS, []byte{0})
 		if err != nil {
 			t.Fatal(err)
@@ -643,7 +643,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
 		env := deliverCGGMPEnv(out2[0])
 		env.Round = 2
 		env = env.RecomputeTranscriptHash()
@@ -655,7 +655,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
 		if _, err := session.HandleSignMessage(deliverCGGMPEnv(out2[0])); err != nil {
 			t.Fatal(err)
 		}

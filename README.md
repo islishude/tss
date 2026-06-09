@@ -19,7 +19,7 @@ Go threshold-signature building blocks.
 
 ```go
 import (
-    "crypto/ed25519"
+    stded "crypto/ed25519"
     "github.com/islishude/tss"
     ed25519 "github.com/islishude/tss/frost/ed25519"
 )
@@ -29,8 +29,7 @@ import (
 sessionID, _ := tss.NewSessionID(nil)
 parties := []tss.PartyID{1, 2, 3}
 ps := tss.PartySet(parties)
-guard := tss.TestGuardConfig(1, ps, tss.ProtocolFROSTEd25519, sessionID, ed25519.FROSTPolicies)
-g, _ := guard.BuildGuard()
+g := tss.NewTestEnvelopeGuard(1, ps, tss.ProtocolFROSTEd25519, sessionID, ed25519.FROSTPolicies)
 
 sessions := make(map[tss.PartyID]*ed25519.KeygenSession)
 var messages []tss.Envelope
@@ -46,8 +45,8 @@ for _, env := range messages { /* deliver authenticated+confidential to recipien
 share, _ := sessions[1].KeyShare()
 
 // Sign
-sig, _ := ed25519.Sign(message, map[tss.PartyID]*ed25519.KeyShare{1: share, 2: share2})
-ed25519.Verify(share.PublicKey, message, sig) // true
+sig, _ := stded.Sign(message, map[tss.PartyID]*ed25519.KeyShare{1: share, 2: share2})
+stded.Verify(share.PublicKey, message, sig) // true
 ```
 
 Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go).
@@ -58,8 +57,7 @@ Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.
 // DKG → Presign (offline) → Sign (online, one round)
 sessionID, _ := tss.NewSessionID(nil)
 parties := tss.PartySet{1, 2, 3}
-guard := tss.TestGuardConfig(1, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, secp256k1.CGGMP21Policies)
-g, _ := guard.BuildGuard()
+g := tss.NewTestEnvelopeGuard(1, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, secp256k1.CGGMP21Policies)
 
 kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...})
 kg.SetGuard(g) // mandatory for authenticated transport

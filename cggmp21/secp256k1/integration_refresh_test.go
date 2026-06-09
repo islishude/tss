@@ -25,7 +25,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
+	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	for _, env := range out {
 		if _, err := session.HandleRefreshMessage(deliverCGGMPEnv(env)); err != nil {
 			if !strings.Contains(err.Error(), "already completed") {
@@ -70,7 +70,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
+	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
@@ -120,7 +120,7 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
+	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -160,7 +160,7 @@ func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -219,7 +219,7 @@ func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}

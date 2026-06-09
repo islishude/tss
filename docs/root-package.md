@@ -135,26 +135,27 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 
 ### EnvelopeGuard
 
-`EnvelopeGuard` performs centralized security validation before any protocol handler processes an envelope. It enforces 12 checks in order:
+`EnvelopeGuard` performs centralized security validation before any protocol handler processes an envelope. It enforces 13 checks in order:
 
 1. Protocol match
 2. Version check
 3. Transcript hash integrity
 4. Sender membership in party set
 5. Transport authentication (`Security.Authenticated`)
-6. Identity binding (`AuthenticatedParty == From`)
-7. Recipient correctness
-8. Policy lookup (fail-closed for unknown payloads)
-9. Delivery mode enforcement (direct vs broadcast)
-10. Confidentiality enforcement against policy
-11. Broadcast consistency certificate verification (when required)
-12. Replay detection via `ReplayCache`
+6. AuthenticatedParty is non-zero (transport identity must be set)
+7. Identity binding (`AuthenticatedParty == From`)
+8. Recipient correctness
+9. Policy lookup (fail-closed for unknown payloads)
+10. Delivery mode enforcement (direct vs broadcast)
+11. Confidentiality enforcement against policy
+12. Broadcast consistency certificate verification with `VerifyFull` (when required)
+13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
-Each protocol session should hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler.
+Each protocol session must hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`.
 
 ### BroadcastCertificate
 
-When a policy requires `BroadcastConsistencyRequired`, the transport must supply a `BroadcastCertificate` proving all parties received the same payload:
+When a policy requires `BroadcastConsistencyRequired`, the transport must supply a `BroadcastCertificate` proving all parties received the same payload. Use `BroadcastCertificate.VerifyFull` for production validation — it requires a `BroadcastAckVerifier` to verify individual ack signatures. `VerifyStructure` performs structural checks only and is intended for test code and low-level parsing.
 
 ```go
 type BroadcastCertificate struct {
@@ -170,17 +171,27 @@ type BroadcastCertificate struct {
 }
 ```
 
-CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates.
+CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates. All broadcast-mode policies in FROST and CGGMP21 policy sets now require `BroadcastConsistencyRequired`. In-memory test helpers relax this with `inProcessPolicies()` / `simulationCGGMP21Policies()`.
 
 ### ReplayCache
 
 ```go
 type ReplayCache interface {
-    MarkIfNew(key ReplayKey) bool
+    CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error
 }
 ```
 
-`MarkIfNew` returns true on first use and false on replay. Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache` is provided for single-process use.
+`CheckAndStore` atomically checks whether a message slot has been seen and returns:
+
+- `nil` when the slot is new (first use).
+- `ErrDuplicateMessage` when the slot exists with the same transcript hash (harmless duplicate, silently dropped by the guard).
+- `ErrEquivocation` when the slot exists with a different transcript hash (malicious or faulty sender).
+
+`MessageSlotKey` identifies a unique protocol message slot by `(protocol, sessionID, round, from, to, payloadType)`. Unlike the old `ReplayKey`, it does not include the transcript hash — two different payloads in the same slot with different transcript hashes constitute equivocation.
+
+`SlotKeyFromEnvelope` and `PayloadHashFromEnvelope` construct the arguments for `CheckAndStore` from an envelope.
+
+Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache` is provided for single-process use.
 
 ## ProtocolError
 
@@ -198,18 +209,19 @@ type ProtocolError struct {
 
 Error code constants:
 
-| Constant              | Meaning                                           |
-| --------------------- | ------------------------------------------------- |
-| `invalid_config`      | Invalid local configuration.                      |
-| `invalid_message`     | Malformed or cross-session message.               |
-| `duplicate_message`   | Repeated or replayed message within a round.      |
-| `wrong_round`         | Message delivered to the wrong protocol round.    |
-| `verification_failed` | Cryptographic or transcript check failed.         |
-| `not_ready`           | Not enough messages collected yet.                |
-| `consumed`            | One-use material already consumed (presign).      |
-| `completed`           | Session already completed.                        |
-| `aborted`             | Session previously aborted with attributed blame. |
-| `not_implemented`     | Intentionally unsupported feature.                |
+| Constant                 | Meaning                                                                        |
+| ------------------------ | ------------------------------------------------------------------------------ |
+| `invalid_config`         | Invalid local configuration.                                                   |
+| `invalid_message`        | Malformed or cross-session message.                                            |
+| `duplicate_message`      | Repeated or replayed message within a round.                                   |
+| `wrong_round`            | Message delivered to the wrong protocol round.                                 |
+| `verification_failed`    | Cryptographic or transcript check failed.                                      |
+| `aggregate_sign_invalid` | Aggregate ECDSA signature failed verification (suspect set, not attributable). |
+| `not_ready`              | Not enough messages collected yet.                                             |
+| `consumed`               | One-use material already consumed (presign).                                   |
+| `completed`              | Session already completed.                                                     |
+| `aborted`                | Session previously aborted with attributed blame.                              |
+| `not_implemented`        | Intentionally unsupported feature.                                             |
 
 `ProtocolError` implements `Unwrap()` for `errors.Is`/`errors.As` support. `NewProtocolError(code, round, party, err)` constructs an error without blame.
 
