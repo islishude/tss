@@ -60,17 +60,29 @@ type pendingKeyShare struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments        [][]byte `json:"commitments"`
-	PaillierPublicKey  []byte   `json:"paillier_public_key"`
-	PaillierProof      []byte   `json:"paillier_proof"`
-	ChainCodeCommit    []byte   `json:"chain_code_commit,omitempty"`
-	RingPedersenParams []byte   `json:"ring_pedersen_params"`
-	RingPedersenProof  []byte   `json:"ring_pedersen_proof"`
+	Commitments        [][]byte `json:"commitments" wire:"1,byteslist"`
+	PaillierPublicKey  []byte   `json:"paillier_public_key" wire:"2,bytes"`
+	PaillierProof      []byte   `json:"paillier_proof" wire:"3,bytes"`
+	ChainCodeCommit    []byte   `json:"chain_code_commit,omitempty" wire:"4,bytes"`
+	RingPedersenParams []byte   `json:"ring_pedersen_params" wire:"5,bytes"`
+	RingPedersenProof  []byte   `json:"ring_pedersen_proof" wire:"6,bytes"`
 }
 
+// WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
+func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayloadWireType }
+
+// WireVersion returns the wire format version for keygenCommitmentsPayload.
+func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+
 type keygenSharePayload struct {
-	Share []byte `json:"share"`
+	Share []byte `json:"share" wire:"1,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for keygenSharePayload.
+func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType }
+
+// WireVersion returns the wire format version for keygenSharePayload.
+func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
 
 // Guard returns the session's envelope guard for use by transport adapters.
 func (s *KeygenSession) Guard() *tss.EnvelopeGuard {

@@ -35,13 +35,25 @@ type KeygenSession struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments     [][]byte `json:"commitments"`
-	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty"`
+	Commitments     [][]byte `json:"commitments" wire:"1,byteslist"`
+	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty" wire:"2,bytes"`
 }
 
+// WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
+func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayloadWireType }
+
+// WireVersion returns the wire format version for keygenCommitmentsPayload.
+func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+
 type keygenSharePayload struct {
-	Share []byte `json:"share"`
+	Share []byte `json:"share" wire:"1,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for keygenSharePayload.
+func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType }
+
+// WireVersion returns the wire format version for keygenSharePayload.
+func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
 
 // StartKeygen starts dealerless DKG and returns outbound round-one envelopes.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {

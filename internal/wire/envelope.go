@@ -16,8 +16,8 @@ type Field struct {
 	Value []byte
 }
 
-// Marshal encodes a typed message and rejects unsorted or duplicate tags.
-func Marshal(version uint16, typeID string, fields []Field) ([]byte, error) {
+// MarshalFields encodes a typed message and rejects unsorted or duplicate tags.
+func MarshalFields(version uint16, typeID string, fields []Field) ([]byte, error) {
 	if typeID == "" {
 		return nil, errors.New("empty wire type id")
 	}
@@ -77,16 +77,16 @@ func DefaultLimits() Limits {
 	}
 }
 
-// Unmarshal decodes a typed message and rejects trailing or non-canonical data.
+// UnmarshalFields decodes a typed message and rejects trailing or non-canonical data.
 // It uses DefaultLimits to guard against oversized inputs.
-func Unmarshal(in []byte, expectedTypeID string) (uint16, []Field, error) {
-	return UnmarshalWithLimits(in, expectedTypeID, DefaultLimits())
+func UnmarshalFields(in []byte, expectedTypeID string) (uint16, []Field, error) {
+	return UnmarshalFieldsWithLimits(in, expectedTypeID, DefaultLimits())
 }
 
-// UnmarshalWithLimits decodes a typed TLV message enforcing per-message caps.
+// UnmarshalFieldsWithLimits decodes a typed TLV message enforcing per-message caps.
 // It checks the total input size, field count, and per-field value size before
 // allocating memory, preventing oversized messages from causing OOM.
-func UnmarshalWithLimits(in []byte, expectedTypeID string, limits Limits) (uint16, []Field, error) {
+func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits Limits) (uint16, []Field, error) {
 	if expectedTypeID == "" {
 		return 0, nil, errors.New("empty expected wire type id")
 	}

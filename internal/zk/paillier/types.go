@@ -36,49 +36,6 @@ const (
 )
 
 const (
-	ringPedersenParamsFieldN uint16 = iota + 1
-	ringPedersenParamsFieldS
-	ringPedersenParamsFieldT
-)
-
-const (
-	mtaResponseProofFieldTranscriptHash uint16 = iota + 1
-	mtaResponseProofFieldBetaCommitment
-	mtaResponseProofFieldCipherCommitment
-	mtaResponseProofFieldBCommitment
-	mtaResponseProofFieldBetaNonce
-	mtaResponseProofFieldBResponse
-	mtaResponseProofFieldBetaResponse
-	mtaResponseProofFieldRandomness
-)
-
-const (
-	logProofFieldPoint uint16 = iota + 1
-	logProofFieldCipherCommitment
-	logProofFieldPointCommitment
-	logProofFieldResponse
-	logProofFieldRandomness
-	logProofFieldTranscriptHash
-)
-
-const (
-	ringPedersenProofFieldTranscriptHash uint16 = iota + 1
-	ringPedersenProofFieldCommitments
-	ringPedersenProofFieldChallenges
-	ringPedersenProofFieldResponses
-)
-
-const (
-	encryptionProofFieldScalarCommitment uint16 = iota + 1
-	encryptionProofFieldCipherCommitment
-	encryptionProofFieldPointCommitment
-	encryptionProofFieldBound
-	encryptionProofFieldResponse
-	encryptionProofFieldRandomness
-	encryptionProofFieldTranscriptHash
-)
-
-const (
 	proofTranscriptLabel       = "cggmp24-paillier-proof-transcript-v1"
 	modulusProofTag            = "mod"
 	modulusYLabel              = "cggmp24-paillier-mod-y-v1"
@@ -104,26 +61,38 @@ const (
 // the proof never carries y_i values supplied by the prover.
 type ModulusProof struct {
 	Version        uint16   `json:"version"`
-	W              []byte   `json:"w"`
-	TranscriptHash []byte   `json:"transcript_hash"`
-	X              [][]byte `json:"x"`
-	A              []byte   `json:"a"`
-	B              []byte   `json:"b"`
-	Z              [][]byte `json:"z"`
+	W              []byte   `json:"w" wire:"1,bytes"`
+	TranscriptHash []byte   `json:"transcript_hash" wire:"2,bytes"`
+	X              [][]byte `json:"x" wire:"3,byteslist"`
+	A              []byte   `json:"a" wire:"4,bytes"`
+	B              []byte   `json:"b" wire:"5,bytes"`
+	Z              [][]byte `json:"z" wire:"6,byteslist"`
 }
+
+// WireType returns the canonical wire type identifier for ModulusProof.
+func (ModulusProof) WireType() string { return modulusProofWireType }
+
+// WireVersion returns the wire format version for ModulusProof.
+func (ModulusProof) WireVersion() uint16 { return proofVersion }
 
 // MTAResponseProof binds an MtA response to ciphertexts and commitments.
 type MTAResponseProof struct {
 	Version          uint16 `json:"version"`
-	TranscriptHash   []byte `json:"transcript_hash"`
-	BetaCommitment   []byte `json:"beta_commitment"`
-	CipherCommitment []byte `json:"cipher_commitment"`
-	BCommitment      []byte `json:"b_commitment"`
-	BetaNonce        []byte `json:"beta_nonce"`
-	BResponse        []byte `json:"b_response"`
-	BetaResponse     []byte `json:"beta_response"`
-	Randomness       []byte `json:"randomness"`
+	TranscriptHash   []byte `json:"transcript_hash" wire:"1,bytes"`
+	BetaCommitment   []byte `json:"beta_commitment" wire:"2,bytes"`
+	CipherCommitment []byte `json:"cipher_commitment" wire:"3,bytes"`
+	BCommitment      []byte `json:"b_commitment" wire:"4,bytes"`
+	BetaNonce        []byte `json:"beta_nonce" wire:"5,bytes"`
+	BResponse        []byte `json:"b_response" wire:"6,bytes"`
+	BetaResponse     []byte `json:"beta_response" wire:"7,bytes"`
+	Randomness       []byte `json:"randomness" wire:"8,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for MTAResponseProof.
+func (MTAResponseProof) WireType() string { return mtaResponseProofWireType }
+
+// WireVersion returns the wire format version for MTAResponseProof.
+func (MTAResponseProof) WireVersion() uint16 { return proofVersion }
 
 // LogProof (Π^log) proves that a Paillier ciphertext c = Enc(a) and a secp256k1
 // curve point A = a·G share the same discrete logarithm a. Per CGGMP21
@@ -131,13 +100,19 @@ type MTAResponseProof struct {
 // ciphertext encrypts the same scalar as an existing verification share.
 type LogProof struct {
 	Version          uint16 `json:"version"`
-	Point            []byte `json:"point"`
-	CipherCommitment []byte `json:"cipher_commitment"`
-	PointCommitment  []byte `json:"point_commitment"`
-	Response         []byte `json:"response"`
-	Randomness       []byte `json:"randomness"`
-	TranscriptHash   []byte `json:"transcript_hash"`
+	Point            []byte `json:"point" wire:"1,bytes"`
+	CipherCommitment []byte `json:"cipher_commitment" wire:"2,bytes"`
+	PointCommitment  []byte `json:"point_commitment" wire:"3,bytes"`
+	Response         []byte `json:"response" wire:"4,bytes"`
+	Randomness       []byte `json:"randomness" wire:"5,bytes"`
+	TranscriptHash   []byte `json:"transcript_hash" wire:"6,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for LogProof.
+func (LogProof) WireType() string { return logProofWireType }
+
+// WireVersion returns the wire format version for LogProof.
+func (LogProof) WireVersion() uint16 { return proofVersion }
 
 // RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
 // the party Paillier modulus and s,t must be non-degenerate elements of Z*_N.
@@ -151,11 +126,17 @@ type RingPedersenParams struct {
 // s = t^lambda mod N for Ring-Pedersen parameters (N, s, t).
 type RingPedersenProof struct {
 	Version        uint16   `json:"version"`
-	TranscriptHash []byte   `json:"transcript_hash"`
-	Commitments    [][]byte `json:"commitments"`
-	Challenges     []byte   `json:"challenges"`
-	Responses      [][]byte `json:"responses"`
+	TranscriptHash []byte   `json:"transcript_hash" wire:"1,bytes"`
+	Commitments    [][]byte `json:"commitments" wire:"2,byteslist"`
+	Challenges     []byte   `json:"challenges" wire:"3,bytes"`
+	Responses      [][]byte `json:"responses" wire:"4,byteslist"`
 }
+
+// WireType returns the canonical wire type identifier for RingPedersenProof.
+func (RingPedersenProof) WireType() string { return ringPedersenProofWireType }
+
+// WireVersion returns the wire format version for RingPedersenProof.
+func (RingPedersenProof) WireVersion() uint16 { return proofVersion }
 
 // EncryptionProof (Π^Enc) is a unified Σ-protocol proving that a Paillier
 // ciphertext c = Enc(m, r) encrypts a scalar m < q (the secp256k1 order)
@@ -164,11 +145,17 @@ type RingPedersenProof struct {
 // into a single Fiat-Shamir challenge. Per CGGMP21 Section 4.1.
 type EncryptionProof struct {
 	Version          uint16 `json:"version"`
-	ScalarCommitment []byte `json:"scalar_commitment"`
-	CipherCommitment []byte `json:"cipher_commitment"`
-	PointCommitment  []byte `json:"point_commitment"`
-	Bound            []byte `json:"bound"`
-	Response         []byte `json:"response"`
-	Randomness       []byte `json:"randomness"`
-	TranscriptHash   []byte `json:"transcript_hash"`
+	ScalarCommitment []byte `json:"scalar_commitment" wire:"1,bytes"`
+	CipherCommitment []byte `json:"cipher_commitment" wire:"2,bytes"`
+	PointCommitment  []byte `json:"point_commitment" wire:"3,bytes"`
+	Bound            []byte `json:"bound" wire:"4,bytes"`
+	Response         []byte `json:"response" wire:"5,bytes"`
+	Randomness       []byte `json:"randomness" wire:"6,bytes"`
+	TranscriptHash   []byte `json:"transcript_hash" wire:"7,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for EncryptionProof.
+func (EncryptionProof) WireType() string { return encryptionProofWireType }
+
+// WireVersion returns the wire format version for EncryptionProof.
+func (EncryptionProof) WireVersion() uint16 { return proofVersion }

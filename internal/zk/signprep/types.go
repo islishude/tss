@@ -38,12 +38,18 @@ type Witness struct {
 
 // Proof is a CGGMP21 signprep proof.
 type Proof struct {
-	MPoint       []byte
-	KCommitment  []byte
-	MCommitment  []byte
-	DLEQA1       []byte
-	DLEQA2       []byte
-	KResponse    []byte
-	MResponse    []byte
-	DLEQResponse []byte
+	MPoint       []byte `wire:"1,bytes"`
+	KCommitment  []byte `wire:"2,bytes"`
+	MCommitment  []byte `wire:"3,bytes"`
+	DLEQA1       []byte `wire:"4,bytes"`
+	DLEQA2       []byte `wire:"5,bytes"`
+	KResponse    []byte `wire:"6,bytes"`
+	MResponse    []byte `wire:"7,bytes"`
+	DLEQResponse []byte `wire:"8,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for Proof.
+func (Proof) WireType() string { return proofWireType }
+
+// WireVersion returns the wire format version for Proof.
+func (Proof) WireVersion() uint16 { return proofVersion }

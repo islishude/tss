@@ -66,22 +66,40 @@ type ReshareSession struct {
 }
 
 type reshareDealerCommitmentsPayload struct {
-	Commitments [][]byte
+	Commitments [][]byte `wire:"1,byteslist"`
 }
+
+// WireType returns the canonical wire type identifier for reshareDealerCommitmentsPayload.
+func (reshareDealerCommitmentsPayload) WireType() string { return reshareDealerCommitmentsWireType }
+
+// WireVersion returns the wire format version for reshareDealerCommitmentsPayload.
+func (reshareDealerCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type reshareReceiverMaterialPayload struct {
-	PaillierPublicKey  []byte
-	PaillierProof      []byte
-	RingPedersenParams []byte
-	RingPedersenProof  []byte
+	PaillierPublicKey  []byte `wire:"1,bytes"`
+	PaillierProof      []byte `wire:"2,bytes"`
+	RingPedersenParams []byte `wire:"3,bytes"`
+	RingPedersenProof  []byte `wire:"4,bytes"`
 }
 
+// WireType returns the canonical wire type identifier for reshareReceiverMaterialPayload.
+func (reshareReceiverMaterialPayload) WireType() string { return reshareReceiverMaterialWireType }
+
+// WireVersion returns the wire format version for reshareReceiverMaterialPayload.
+func (reshareReceiverMaterialPayload) WireVersion() uint16 { return tss.Version }
+
 type reshareSharePayload struct {
-	Dealer               tss.PartyID
-	Receiver             tss.PartyID
-	Share                []byte
-	DealerCommitmentHash []byte
+	Dealer               tss.PartyID `wire:"1,u32"`
+	Receiver             tss.PartyID `wire:"2,u32"`
+	Share                []byte      `wire:"3,bytes"`
+	DealerCommitmentHash []byte      `wire:"4,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for reshareSharePayload.
+func (reshareSharePayload) WireType() string { return reshareSharePayloadWireType }
+
+// WireVersion returns the wire format version for reshareSharePayload.
+func (reshareSharePayload) WireVersion() uint16 { return tss.Version }
 
 type pendingReshareShare struct {
 	payload reshareSharePayload

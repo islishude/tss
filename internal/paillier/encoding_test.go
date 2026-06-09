@@ -89,7 +89,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if _, err := UnmarshalPrivateKey(badPrivate); err == nil {
 		t.Fatal("expected non-minimal private factor rejection")
 	}
-	wrongType, err := wire.Marshal(paillierWireVersion, "wrong.paillier.public-key", nil)
+	wrongType, err := wire.MarshalFields(paillierWireVersion, "wrong.paillier.public-key", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -158,7 +158,7 @@ func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, 
 }
 
 func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, typeID)
+	version, fields, err := wire.UnmarshalFields(raw, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -166,7 +166,7 @@ func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) (
 		if fields[i].Tag == tag {
 			fields[i].Value = make([]byte, len(value))
 			copy(fields[i].Value, value)
-			return wire.Marshal(version, typeID, fields)
+			return wire.MarshalFields(version, typeID, fields)
 		}
 	}
 	return nil, fmt.Errorf("missing Paillier field %d", tag)

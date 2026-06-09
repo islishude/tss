@@ -12,14 +12,14 @@ import (
 // UnmarshalPresign reject messages with mismatched wire type identifiers.
 // This test does not require any key generation or crypto.
 func TestFast_RejectsWrongWireTypes(t *testing.T) {
-	wrongKeyShare, err := wire.Marshal(tss.Version, "wrong.secp256k1.keyshare", nil)
+	wrongKeyShare, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.keyshare", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UnmarshalKeyShare(wrongKeyShare); err == nil {
 		t.Fatal("wrong key share wire type accepted")
 	}
-	wrongPresign, err := wire.Marshal(tss.Version, "wrong.secp256k1.presign", nil)
+	wrongPresign, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.presign", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

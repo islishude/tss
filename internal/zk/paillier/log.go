@@ -155,41 +155,20 @@ func marshalLogProof(p *LogProof) ([]byte, error) {
 	if err := validateLogProof(p); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(proofVersion, logProofWireType, []wire.Field{
-		{Tag: logProofFieldPoint, Value: wire.NonNilBytes(p.Point)},
-		{Tag: logProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
-		{Tag: logProofFieldPointCommitment, Value: wire.NonNilBytes(p.PointCommitment)},
-		{Tag: logProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
-		{Tag: logProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
-		{Tag: logProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
-	})
+	return wire.Marshal(p)
 }
 
 // UnmarshalLogProof decodes and validates a Π^log proof.
 func UnmarshalLogProof(in []byte) (*LogProof, error) {
-	version, fields, err := wire.Unmarshal(in, logProofWireType)
-	if err != nil {
+	var p LogProof
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if version != proofVersion {
-		return nil, fmt.Errorf("unexpected log proof version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, logProofFieldPoint, logProofFieldCipherCommitment, logProofFieldPointCommitment, logProofFieldResponse, logProofFieldRandomness, logProofFieldTranscriptHash); err != nil {
+	p.Version = proofVersion
+	if err := validateLogProof(&p); err != nil {
 		return nil, err
 	}
-	p := &LogProof{
-		Version:          proofVersion,
-		Point:            fields[0].Value,
-		CipherCommitment: fields[1].Value,
-		PointCommitment:  fields[2].Value,
-		Response:         fields[3].Value,
-		Randomness:       fields[4].Value,
-		TranscriptHash:   fields[5].Value,
-	}
-	if err := validateLogProof(p); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return &p, nil
 }
 
 func logTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, pointBytes []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

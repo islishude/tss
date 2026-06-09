@@ -364,7 +364,7 @@ func prependZero(in []byte) []byte {
 
 func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 	t.Helper()
-	raw, err := wire.Marshal(proofVersion, typeID, fields)
+	raw, err := wire.MarshalFields(proofVersion, typeID, fields)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -372,7 +372,7 @@ func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 }
 
 func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, typeID)
+	version, fields, err := wire.UnmarshalFields(raw, typeID)
 	if err != nil {
 		return nil, err
 	}
@@ -382,7 +382,7 @@ func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, erro
 			value = append(value, 0)
 			value = append(value, fields[i].Value...)
 			fields[i].Value = value
-			return wire.Marshal(version, typeID, fields)
+			return wire.MarshalFields(version, typeID, fields)
 		}
 	}
 	return nil, fmt.Errorf("missing wire field %d", tag)

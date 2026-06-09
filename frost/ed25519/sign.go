@@ -34,13 +34,25 @@ type SignSession struct {
 }
 
 type nonceCommitment struct {
-	D []byte `json:"d"` // hiding nonce commitment
-	E []byte `json:"e"` // binding nonce commitment
+	D []byte `json:"d" wire:"1,bytes"` // hiding nonce commitment
+	E []byte `json:"e" wire:"2,bytes"` // binding nonce commitment
 }
 
+// WireType returns the canonical wire type identifier for nonceCommitment.
+func (nonceCommitment) WireType() string { return nonceCommitmentPayloadWireType }
+
+// WireVersion returns the wire format version for nonceCommitment.
+func (nonceCommitment) WireVersion() uint16 { return tss.Version }
+
 type signPartialPayload struct {
-	Z []byte `json:"z"`
+	Z []byte `json:"z" wire:"1,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for signPartialPayload.
+func (signPartialPayload) WireType() string { return signPartialPayloadWireType }
+
+// WireVersion returns the wire format version for signPartialPayload.
+func (signPartialPayload) WireVersion() uint16 { return tss.Version }
 
 // StartSign starts a FROST signing session over the raw message.
 func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte) (*SignSession, []tss.Envelope, error) {

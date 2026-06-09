@@ -25,41 +25,28 @@ const (
 
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
 type ResponseMessage struct {
-	Ciphertext []byte `json:"ciphertext"`
-	Proof      []byte `json:"proof"`
+	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`
+	Proof      []byte `json:"proof" wire:"2,bytes"`
 }
 
-// MarshalBinary encodes the MtA response message as an exact-field TLV record.
+// WireType returns the canonical wire type identifier for ResponseMessage.
+func (ResponseMessage) WireType() string { return responseMessageWireType }
+
+// WireVersion returns the wire format version for ResponseMessage.
+func (ResponseMessage) WireVersion() uint16 { return messageVersion }
+
+// MarshalBinary encodes the MtA response message using the object-level wire codec.
 func (m ResponseMessage) MarshalBinary() ([]byte, error) {
-	if err := m.Validate(); err != nil {
-		return nil, err
-	}
-	return wire.Marshal(messageVersion, responseMessageWireType, []wire.Field{
-		{Tag: responseMessageFieldCiphertext, Value: m.Ciphertext},
-		{Tag: responseMessageFieldProof, Value: m.Proof},
-	})
+	return wire.Marshal(m)
 }
 
-// UnmarshalResponseMessage decodes an exact-field TLV MtA response message.
+// UnmarshalResponseMessage decodes a TLV MtA response message using the object-level wire codec.
 func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
-	version, fields, err := wire.Unmarshal(in, responseMessageWireType)
-	if err != nil {
+	var msg ResponseMessage
+	if err := wire.Unmarshal(in, &msg); err != nil {
 		return nil, err
 	}
-	if version != messageVersion {
-		return nil, fmt.Errorf("unexpected MtA response message version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, responseMessageFieldCiphertext, responseMessageFieldProof); err != nil {
-		return nil, err
-	}
-	msg := &ResponseMessage{
-		Ciphertext: fields[0].Value,
-		Proof:      fields[1].Value,
-	}
-	if err := msg.Validate(); err != nil {
-		return nil, err
-	}
-	return msg, nil
+	return &msg, nil
 }
 
 // Validate checks the canonical proof record and ciphertext integer.

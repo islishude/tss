@@ -252,45 +252,20 @@ func marshalMTAResponseProof(p *MTAResponseProof) ([]byte, error) {
 	if err := validateMTAResponseProof(p); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(proofVersion, mtaResponseProofWireType, []wire.Field{
-		{Tag: mtaResponseProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
-		{Tag: mtaResponseProofFieldBetaCommitment, Value: wire.NonNilBytes(p.BetaCommitment)},
-		{Tag: mtaResponseProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
-		{Tag: mtaResponseProofFieldBCommitment, Value: wire.NonNilBytes(p.BCommitment)},
-		{Tag: mtaResponseProofFieldBetaNonce, Value: wire.NonNilBytes(p.BetaNonce)},
-		{Tag: mtaResponseProofFieldBResponse, Value: wire.NonNilBytes(p.BResponse)},
-		{Tag: mtaResponseProofFieldBetaResponse, Value: wire.NonNilBytes(p.BetaResponse)},
-		{Tag: mtaResponseProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
-	})
+	return wire.Marshal(p)
 }
 
 // UnmarshalMTAResponseProof decodes and validates an MtA response proof shell.
 func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
-	version, fields, err := wire.Unmarshal(in, mtaResponseProofWireType)
-	if err != nil {
+	var p MTAResponseProof
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if version != proofVersion {
-		return nil, fmt.Errorf("unexpected MtA response proof version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, mtaResponseProofFieldTranscriptHash, mtaResponseProofFieldBetaCommitment, mtaResponseProofFieldCipherCommitment, mtaResponseProofFieldBCommitment, mtaResponseProofFieldBetaNonce, mtaResponseProofFieldBResponse, mtaResponseProofFieldBetaResponse, mtaResponseProofFieldRandomness); err != nil {
+	p.Version = proofVersion
+	if err := validateMTAResponseProof(&p); err != nil {
 		return nil, err
 	}
-	p := &MTAResponseProof{
-		Version:          proofVersion,
-		TranscriptHash:   fields[0].Value,
-		BetaCommitment:   fields[1].Value,
-		CipherCommitment: fields[2].Value,
-		BCommitment:      fields[3].Value,
-		BetaNonce:        fields[4].Value,
-		BResponse:        fields[5].Value,
-		BetaResponse:     fields[6].Value,
-		Randomness:       fields[7].Value,
-	}
-	if err := validateMTAResponseProof(p); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return &p, nil
 }
 
 func mtaTranscript(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) []byte {

@@ -5,6 +5,10 @@ import (
 )
 
 // RequireExactTags requires fields to contain exactly the provided tag sequence.
+//
+// Deprecated for production use: the object-level Marshal/Unmarshal API
+// enforces exact field sets automatically. This function remains available
+// for test infrastructure, mutation tests, and fuzz tests.
 func RequireExactTags(fields []Field, tags ...uint16) error {
 	if len(fields) != len(tags) {
 		return fmt.Errorf("got %d fields, want %d", len(fields), len(tags))

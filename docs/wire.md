@@ -11,14 +11,96 @@ field_count = uint16
 field      = tag:uint16 || value_len:uint32 || value
 ```
 
+## Object-Level API (Preferred)
+
+All production message types use the object-level `wire.Marshal` / `wire.Unmarshal` API driven by struct tags:
+
+```go
+type MyMessage struct {
+    Field []byte `wire:"1,bytes"`
+    Count uint32 `wire:"2,u32"`
+}
+
+func (MyMessage) WireType() string    { return "my.type" }
+func (MyMessage) WireVersion() uint16 { return 1 }
+
+// Marshal
+raw, err := wire.Marshal(msg)
+
+// Unmarshal
+var decoded MyMessage
+err := wire.Unmarshal(raw, &decoded)
+```
+
+### Struct Tag Grammar
+
+```
+wire:"<tag>,<kind>[,<option>...]"
+wire:"-"   // skip field
+```
+
+#### Supported Kinds
+
+| Kind             | Go Type                               | Wire Encoding               |
+| ---------------- | ------------------------------------- | --------------------------- |
+| `u8`             | `uint8`                               | single byte                 |
+| `u16`            | `uint16`                              | big-endian uint16           |
+| `u32`            | `uint32`, `int`, or alias             | big-endian uint32           |
+| `bool`           | `bool`                                | `wire.Bool`                 |
+| `bytes`          | `[]byte`                              | raw bytes; nil → empty      |
+| `string`         | `string`                              | UTF-8 bytes                 |
+| `u32list`        | `[]uint32` or alias slice             | `wire.EncodeUint32List`     |
+| `byteslist`      | `[][]byte`                            | `wire.EncodeBytesList`      |
+| `partybytes`     | `[]wire.PartyBytes[T]`                | `wire.EncodePartyBytes`     |
+| `partybytepairs` | `[]wire.PartyBytePair[T]`             | `wire.EncodePartyBytePairs` |
+| `nested`         | struct/pointer implementing `Message` | recursive `wire.Marshal`    |
+
+#### Options
+
+- `len=N` — fixed byte length (validated on decode)
+- `max_bytes=name` — semantic byte limit (from `wire.WithLimitSet`)
+- `max_items=name` — semantic item count limit
+- `allow_empty` — documents that empty is permitted (no-op)
+
+### Interfaces
+
+- **`Message`** — required: `WireType() string`, `WireVersion() uint16`
+- **`Validator`** — optional: `Validate() error` (called on marshal and unmarshal)
+- **`BeforeMarshaler`** — optional: `BeforeMarshalWire() error`
+- **`AfterUnmarshaler`** — optional: `AfterUnmarshalWire() error`
+
+### Field-Level API (Tests Only)
+
+The low-level `MarshalFields` / `UnmarshalFields` / `UnmarshalFieldsWithLimits` and `RequireExactTags` are restricted to test infrastructure (`internal/testutil`, mutation tests, fuzz tests) and the `internal/wire` package itself. Production code must use the object-level API.
+
+### Limits
+
+- **TLV-level** (`wire.Limits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during envelope decode via `wire.WithLimits`
+- **Semantic-level** (`wire.LimitSet`): per-field max bytes/items checked against named limits via `wire.WithLimitSet`
+
+## DTO Pattern
+
+Types with unexported fields (`secret.Scalar`, `*big.Int`, `sync.Mutex`) or array types (`[32]byte`) use unexported wire DTOs:
+
+```go
+type myMessageWire struct {
+    SessionID []byte `wire:"1,bytes,len=32"`
+    Secret    []byte `wire:"2,bytes"`
+}
+func (myMessageWire) WireType() string    { return "my.type" }
+func (myMessageWire) WireVersion() uint16 { return 1 }
+```
+
+Conversion functions (`toWire()` / `toDomain()`) handle `[32]byte` ↔ `[]byte`, `*big.Int` ↔ `[]byte`, and custom type mapping.
+
 ## Canonical Rules
 
 - `type_id` must be non-empty and match the expected decoder type.
 - Fields must be sorted by strictly increasing tag.
 - Duplicate tags are rejected.
-- Nil field values are rejected by the encoder.
+- Nil field values are rejected by the encoder (nil bytes/list → empty).
 - Decoders reject trailing bytes.
-- Higher-level decoders require exact field sets for fixed records.
+- All tagged fields are required. Missing and extra fields are rejected.
 - Proof scalar responses use canonical positive big-endian encoding; Paillier
   statement and commitment integers use fixed-width encodings derived from `N`
   or `N²`, with out-of-range values rejected before algebraic checks.

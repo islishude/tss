@@ -239,7 +239,25 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	return nil
 }
 
-// MarshalBinary encodes the EncProof in canonical TLV format.
+// encProofWire is the wire DTO for EncProof.
+type encProofWire struct {
+	Version        uint16 `wire:"1,u16"`
+	S              []byte `wire:"2,bytes"`
+	A              []byte `wire:"3,bytes"`
+	C              []byte `wire:"4,bytes"`
+	Z1             []byte `wire:"5,bytes"`
+	Z2             []byte `wire:"6,bytes"`
+	Z3             []byte `wire:"7,bytes"`
+	TranscriptHash []byte `wire:"8,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for encProofWire.
+func (encProofWire) WireType() string { return encProofWireType }
+
+// WireVersion returns the wire format version for encProofWire.
+func (encProofWire) WireVersion() uint16 { return encProofVersion }
+
+// MarshalBinary encodes the EncProof using the object-level wire codec.
 func (p *EncProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil EncProof")
@@ -247,77 +265,60 @@ func (p *EncProof) MarshalBinary() ([]byte, error) {
 	if p.S == nil || p.A == nil || p.C == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
 		return nil, errors.New("incomplete EncProof")
 	}
-	return wire.Marshal(encProofVersion, encProofWireType, []wire.Field{
-		{Tag: encProofFieldVersion, Value: wire.Uint16(p.Version)},
-		{Tag: encProofFieldS, Value: p.S.Bytes()},
-		{Tag: encProofFieldA, Value: p.A.Bytes()},
-		{Tag: encProofFieldC, Value: p.C.Bytes()},
-		{Tag: encProofFieldZ1, Value: EncodeSigned(p.Z1)},
-		{Tag: encProofFieldZ2, Value: p.Z2.Bytes()},
-		{Tag: encProofFieldZ3, Value: EncodeSigned(p.Z3)},
-		{Tag: encProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+	return wire.Marshal(encProofWire{
+		Version:        p.Version,
+		S:              p.S.Bytes(),
+		A:              p.A.Bytes(),
+		C:              p.C.Bytes(),
+		Z1:             EncodeSigned(p.Z1),
+		Z2:             p.Z2.Bytes(),
+		Z3:             EncodeSigned(p.Z3),
+		TranscriptHash: p.TranscriptHash,
 	})
 }
 
 // UnmarshalEncProof decodes a canonical TLV EncProof.
 func UnmarshalEncProof(in []byte) (*EncProof, error) {
-	version, fields, err := wire.Unmarshal(in, encProofWireType)
-	if err != nil {
+	var w encProofWire
+	if err := wire.Unmarshal(in, &w); err != nil {
 		return nil, err
 	}
-	if version != encProofVersion {
-		return nil, fmt.Errorf("unexpected EncProof wire version %d", version)
+	if w.Version != encProofVersion {
+		return nil, fmt.Errorf("unsupported EncProof version %d", w.Version)
 	}
-	if err := wire.RequireExactTags(fields,
-		encProofFieldVersion, encProofFieldS, encProofFieldA, encProofFieldC,
-		encProofFieldZ1, encProofFieldZ2, encProofFieldZ3, encProofFieldTranscriptHash,
-	); err != nil {
-		return nil, err
-	}
-
-	// Tags validated; access fields by index.
-	pVersion, err := wire.DecodeUint16(fields[0].Value)
-	if err != nil {
-		return nil, err
-	}
-	if pVersion != encProofVersion {
-		return nil, fmt.Errorf("unsupported EncProof version %d", pVersion)
-	}
-
-	s, err := DecodePositive(fields[1].Value)
+	s, err := DecodePositive(w.S)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid S: %w", err)
 	}
-	a, err := DecodePositive(fields[2].Value)
+	a, err := DecodePositive(w.A)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid A: %w", err)
 	}
-	c, err := DecodePositive(fields[3].Value)
+	c, err := DecodePositive(w.C)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid C: %w", err)
 	}
-	z1, err := DecodeSigned(fields[4].Value)
+	z1, err := DecodeSigned(w.Z1)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z1: %w", err)
 	}
-	z2, err := DecodePositive(fields[5].Value)
+	z2, err := DecodePositive(w.Z2)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(fields[6].Value)
+	z3, err := DecodeSigned(w.Z3)
 	if err != nil {
 		return nil, fmt.Errorf("EncProof: invalid z3: %w", err)
 	}
-
 	return &EncProof{
-		Version:        pVersion,
+		Version:        w.Version,
 		S:              s,
 		A:              a,
 		C:              c,
 		Z1:             z1,
 		Z2:             z2,
 		Z3:             z3,
-		TranscriptHash: fields[7].Value,
+		TranscriptHash: w.TranscriptHash,
 	}, nil
 }
 

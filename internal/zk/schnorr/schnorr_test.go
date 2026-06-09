@@ -185,7 +185,7 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			raw, err := wire.Marshal(tc.version, proofWireType, tc.fields)
+			raw, err := wire.MarshalFields(tc.version, proofWireType, tc.fields)
 			if err != nil {
 				t.Fatal(err)
 			}

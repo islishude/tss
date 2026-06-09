@@ -9,7 +9,6 @@ import (
 	"github.com/islishude/tss"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -38,8 +37,6 @@ const (
 	keygenCommitmentsPayloadFieldRingPedersenParams
 	keygenCommitmentsPayloadFieldRingPedersenProof
 )
-
-const keygenSharePayloadFieldShare uint16 = 1
 
 const (
 	presignRound1PayloadFieldGamma uint16 = iota + 1
@@ -92,42 +89,16 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
 		return nil, errors.New("chain code must be 32 bytes")
 	}
-	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
-		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCodeCommit)},
-		{Tag: keygenCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
-		{Tag: keygenCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, keygenCommitmentsPayloadWireType)
-	if err != nil {
+	var p keygenCommitmentsPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if version != tss.Version {
-		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldPaillierPublicKey, keygenCommitmentsPayloadFieldPaillierProof, keygenCommitmentsPayloadFieldChainCode, keygenCommitmentsPayloadFieldRingPedersenParams, keygenCommitmentsPayloadFieldRingPedersenProof); err != nil {
+	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return keygenCommitmentsPayload{}, err
-	}
-	// Tags validated; access fields by index to avoid redundant linear scans.
-	commitments, err := wire.DecodeBytesList(fields[0].Value)
-	if err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	if err := validateCommitmentPoints(commitments); err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	p := keygenCommitmentsPayload{
-		Commitments:        commitments,
-		PaillierPublicKey:  fields[1].Value,
-		PaillierProof:      fields[2].Value,
-		ChainCodeCommit:    fields[3].Value,
-		RingPedersenParams: fields[4].Value,
-		RingPedersenProof:  fields[5].Value,
 	}
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return keygenCommitmentsPayload{}, err
@@ -151,27 +122,18 @@ func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, keygenSharePayloadWireType, []wire.Field{
-		{Tag: keygenSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
-	version, fields, err := wire.Unmarshal(in, keygenSharePayloadWireType)
-	if err != nil {
+	var p keygenSharePayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return keygenSharePayload{}, err
 	}
-	if version != tss.Version {
-		return keygenSharePayload{}, fmt.Errorf("unexpected keygen share payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := fields[0].Value
-	if _, err := secp.ScalarFromBytes(share); err != nil {
-		return keygenSharePayload{}, err
-	}
-	return keygenSharePayload{Share: share}, nil
+	return p, nil
 }
 
 func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
@@ -184,28 +146,13 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, presignRound1PayloadWireType, []wire.Field{
-		{Tag: presignRound1PayloadFieldGamma, Value: wire.NonNilBytes(p.Gamma)},
-		{Tag: presignRound1PayloadFieldEncK, Value: wire.NonNilBytes(p.EncK)},
-		{Tag: presignRound1PayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
-	version, fields, err := wire.Unmarshal(in, presignRound1PayloadWireType)
-	if err != nil {
+	var p presignRound1Payload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return presignRound1Payload{}, err
-	}
-	if version != tss.Version {
-		return presignRound1Payload{}, fmt.Errorf("unexpected presign round1 payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, presignRound1PayloadFieldGamma, presignRound1PayloadFieldEncK, presignRound1PayloadFieldPaillierPublicKey); err != nil {
-		return presignRound1Payload{}, err
-	}
-	p := presignRound1Payload{
-		Gamma:             fields[0].Value,
-		EncK:              fields[1].Value,
-		PaillierPublicKey: fields[2].Value,
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return presignRound1Payload{}, err
@@ -226,26 +173,13 @@ func marshalPresignRound1ProofPayload(p presignRound1ProofPayload) ([]byte, erro
 	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, presignRound1ProofPayloadWireType, []wire.Field{
-		{Tag: presignRound1ProofPayloadFieldPublicHash, Value: wire.NonNilBytes(p.PublicRound1Hash)},
-		{Tag: presignRound1ProofPayloadFieldEncKProof, Value: wire.NonNilBytes(p.EncKProof)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalPresignRound1ProofPayload(in []byte) (presignRound1ProofPayload, error) {
-	version, fields, err := wire.Unmarshal(in, presignRound1ProofPayloadWireType)
-	if err != nil {
+	var p presignRound1ProofPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return presignRound1ProofPayload{}, err
-	}
-	if version != tss.Version {
-		return presignRound1ProofPayload{}, fmt.Errorf("unexpected presign round1 proof payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, presignRound1ProofPayloadFieldPublicHash, presignRound1ProofPayloadFieldEncKProof); err != nil {
-		return presignRound1ProofPayload{}, err
-	}
-	p := presignRound1ProofPayload{
-		PublicRound1Hash: fields[0].Value,
-		EncKProof:        fields[1].Value,
 	}
 	if len(p.PublicRound1Hash) != sha256.Size {
 		return presignRound1ProofPayload{}, errors.New("round1 public hash must be 32 bytes")
@@ -257,48 +191,21 @@ func unmarshalPresignRound1ProofPayload(in []byte) (presignRound1ProofPayload, e
 }
 
 func marshalPresignRound2Payload(p presignRound2Payload) ([]byte, error) {
-	delta, err := p.Delta.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	sigma, err := p.Sigma.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
 	if len(p.Round1Echo) != sha256.Size {
 		return nil, errors.New("round1 echo must be 32 bytes")
 	}
-	return wire.Marshal(tss.Version, presignRound2PayloadWireType, []wire.Field{
-		{Tag: presignRound2PayloadFieldDelta, Value: delta},
-		{Tag: presignRound2PayloadFieldSigma, Value: sigma},
-		{Tag: presignRound2PayloadFieldRound1Echo, Value: wire.NonNilBytes(p.Round1Echo)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
-	version, fields, err := wire.Unmarshal(in, presignRound2PayloadWireType)
-	if err != nil {
+	var p presignRound2Payload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return presignRound2Payload{}, err
 	}
-	if version != tss.Version {
-		return presignRound2Payload{}, fmt.Errorf("unexpected presign round2 payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, presignRound2PayloadFieldDelta, presignRound2PayloadFieldSigma, presignRound2PayloadFieldRound1Echo); err != nil {
-		return presignRound2Payload{}, err
-	}
-	delta, err := mta.UnmarshalResponseMessage(fields[0].Value)
-	if err != nil {
-		return presignRound2Payload{}, err
-	}
-	sigma, err := mta.UnmarshalResponseMessage(fields[1].Value)
-	if err != nil {
-		return presignRound2Payload{}, err
-	}
-	echo := fields[2].Value
-	if len(echo) != sha256.Size {
+	if len(p.Round1Echo) != sha256.Size {
 		return presignRound2Payload{}, errors.New("round1 echo must be 32 bytes")
 	}
-	return presignRound2Payload{Delta: *delta, Sigma: *sigma, Round1Echo: echo}, nil
+	return p, nil
 }
 
 func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
@@ -318,12 +225,7 @@ func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
 	if len(p.Proof) > limits.MaxCGGMP21SignPrepProofBytes {
 		return nil, fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.MaxCGGMP21SignPrepProofBytes)
 	}
-	return wire.Marshal(tss.Version, presignRound3PayloadWireType, []wire.Field{
-		{Tag: presignRound3PayloadFieldDelta, Value: wire.NonNilBytes(p.Delta)},
-		{Tag: presignRound3PayloadFieldKPoint, Value: wire.NonNilBytes(p.KPoint)},
-		{Tag: presignRound3PayloadFieldChiPoint, Value: wire.NonNilBytes(p.ChiPoint)},
-		{Tag: presignRound3PayloadFieldProof, Value: wire.NonNilBytes(p.Proof)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
@@ -331,21 +233,9 @@ func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
 	if len(in) > limits.MaxCGGMP21SignVerifyShareBytes*2 {
 		return presignRound3Payload{}, fmt.Errorf("presign round3 payload too large: %d", len(in))
 	}
-	version, fields, err := wire.Unmarshal(in, presignRound3PayloadWireType)
-	if err != nil {
+	var p presignRound3Payload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return presignRound3Payload{}, err
-	}
-	if version != tss.Version {
-		return presignRound3Payload{}, fmt.Errorf("unexpected presign round3 payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, presignRound3PayloadFieldDelta, presignRound3PayloadFieldKPoint, presignRound3PayloadFieldChiPoint, presignRound3PayloadFieldProof); err != nil {
-		return presignRound3Payload{}, err
-	}
-	p := presignRound3Payload{
-		Delta:    fields[0].Value,
-		KPoint:   fields[1].Value,
-		ChiPoint: fields[2].Value,
-		Proof:    fields[3].Value,
 	}
 	if _, err := secp.ScalarFromBytes(p.Delta); err != nil {
 		return presignRound3Payload{}, err
@@ -381,13 +271,7 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 	if len(p.PartialEquationHash) != sha256.Size {
 		return nil, errors.New("partial equation hash must be 32 bytes")
 	}
-	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
-		{Tag: signPartialPayloadFieldS, Value: wire.NonNilBytes(p.S)},
-		{Tag: signPartialPayloadFieldPresignTranscript, Value: wire.NonNilBytes(p.PresignTranscript)},
-		{Tag: signPartialPayloadFieldPresignContext, Value: wire.NonNilBytes(p.PresignContext)},
-		{Tag: signPartialPayloadFieldDigestHash, Value: wire.NonNilBytes(p.DigestHash)},
-		{Tag: signPartialPayloadFieldPartialEquationHash, Value: wire.NonNilBytes(p.PartialEquationHash)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
@@ -395,22 +279,9 @@ func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
 	if len(in) > limits.MaxCGGMP21SignPartialPayloadBytes {
 		return signPartialPayload{}, fmt.Errorf("sign partial payload too large: %d > %d", len(in), limits.MaxCGGMP21SignPartialPayloadBytes)
 	}
-	version, fields, err := wire.Unmarshal(in, signPartialPayloadWireType)
-	if err != nil {
+	var p signPartialPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return signPartialPayload{}, err
-	}
-	if version != tss.Version {
-		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, signPartialPayloadFieldS, signPartialPayloadFieldPresignTranscript, signPartialPayloadFieldPresignContext, signPartialPayloadFieldDigestHash, signPartialPayloadFieldPartialEquationHash); err != nil {
-		return signPartialPayload{}, err
-	}
-	p := signPartialPayload{
-		S:                   fields[0].Value,
-		PresignTranscript:   fields[1].Value,
-		PresignContext:      fields[2].Value,
-		DigestHash:          fields[3].Value,
-		PartialEquationHash: fields[4].Value,
 	}
 	if _, err := secp.ScalarFromBytes(p.S); err != nil {
 		return signPartialPayload{}, err
@@ -455,44 +326,16 @@ func validatePositiveIntegerBytes(in []byte) error {
 	return nil
 }
 
-const reshareDealerCommitmentsFieldCommitments uint16 = 1
-
-const (
-	reshareSharePayloadFieldDealer uint16 = iota + 1
-	reshareSharePayloadFieldReceiver
-	reshareSharePayloadFieldShare
-	reshareSharePayloadFieldDealerCommitmentHash
-)
-
-const (
-	reshareReceiverMaterialFieldPaillierPublicKey uint16 = iota + 1
-	reshareReceiverMaterialFieldPaillierProof
-	reshareReceiverMaterialFieldRingPedersenParams
-	reshareReceiverMaterialFieldRingPedersenProof
-)
-
 func marshalReshareDealerCommitmentsPayload(p reshareDealerCommitmentsPayload) ([]byte, error) {
-	return wire.Marshal(tss.Version, reshareDealerCommitmentsWireType, []wire.Field{
-		{Tag: reshareDealerCommitmentsFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalReshareDealerCommitmentsPayload(in []byte) (reshareDealerCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareDealerCommitmentsWireType)
-	if err != nil {
+	var p reshareDealerCommitmentsPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return reshareDealerCommitmentsPayload{}, err
 	}
-	if version != tss.Version {
-		return reshareDealerCommitmentsPayload{}, fmt.Errorf("unexpected reshare dealer commitments payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, reshareDealerCommitmentsFieldCommitments); err != nil {
-		return reshareDealerCommitmentsPayload{}, err
-	}
-	commitments, err := wire.DecodeBytesList(fields[0].Value)
-	if err != nil {
-		return reshareDealerCommitmentsPayload{}, err
-	}
-	return reshareDealerCommitmentsPayload{Commitments: commitments}, nil
+	return p, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -508,172 +351,105 @@ func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 	if len(p.DealerCommitmentHash) != sha256.Size {
 		return nil, errors.New("reshare share commitment hash must be 32 bytes")
 	}
-	return wire.Marshal(tss.Version, reshareSharePayloadWireType, []wire.Field{
-		{Tag: reshareSharePayloadFieldDealer, Value: wire.Uint32(uint32(p.Dealer))},
-		{Tag: reshareSharePayloadFieldReceiver, Value: wire.Uint32(uint32(p.Receiver))},
-		{Tag: reshareSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
-		{Tag: reshareSharePayloadFieldDealerCommitmentHash, Value: wire.NonNilBytes(p.DealerCommitmentHash)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareSharePayloadWireType)
-	if err != nil {
+	var p reshareSharePayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return reshareSharePayload{}, err
 	}
-	if version != tss.Version {
-		return reshareSharePayload{}, fmt.Errorf("unexpected reshare share payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldDealer, reshareSharePayloadFieldReceiver, reshareSharePayloadFieldShare, reshareSharePayloadFieldDealerCommitmentHash); err != nil {
-		return reshareSharePayload{}, err
-	}
-	dealer, err := wire.DecodeUint32(fields[0].Value)
-	if err != nil {
-		return reshareSharePayload{}, fmt.Errorf("reshare share dealer: %w", err)
-	}
-	receiver, err := wire.DecodeUint32(fields[1].Value)
-	if err != nil {
-		return reshareSharePayload{}, fmt.Errorf("reshare share receiver: %w", err)
-	}
-	if dealer == 0 {
+	if p.Dealer == 0 {
 		return reshareSharePayload{}, errors.New("reshare share dealer is zero")
 	}
-	if receiver == 0 {
+	if p.Receiver == 0 {
 		return reshareSharePayload{}, errors.New("reshare share receiver is zero")
 	}
-	share := fields[2].Value
-	if _, err := secp.ScalarFromBytes(share); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return reshareSharePayload{}, err
 	}
-	commitmentHash := fields[3].Value
-	if len(commitmentHash) != sha256.Size {
+	if len(p.DealerCommitmentHash) != sha256.Size {
 		return reshareSharePayload{}, errors.New("reshare share commitment hash must be 32 bytes")
 	}
-	return reshareSharePayload{
-		Dealer:               tss.PartyID(dealer),
-		Receiver:             tss.PartyID(receiver),
-		Share:                share,
-		DealerCommitmentHash: commitmentHash,
-	}, nil
+	return p, nil
 }
 
 func marshalReshareReceiverMaterialPayload(p reshareReceiverMaterialPayload) ([]byte, error) {
-	return wire.Marshal(tss.Version, reshareReceiverMaterialWireType, []wire.Field{
-		{Tag: reshareReceiverMaterialFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
-		{Tag: reshareReceiverMaterialFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: reshareReceiverMaterialFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
-		{Tag: reshareReceiverMaterialFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalReshareReceiverMaterialPayload(in []byte) (reshareReceiverMaterialPayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareReceiverMaterialWireType)
-	if err != nil {
+	var p reshareReceiverMaterialPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
-	if version != tss.Version {
-		return reshareReceiverMaterialPayload{}, fmt.Errorf("unexpected reshare receiver material payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, reshareReceiverMaterialFieldPaillierPublicKey, reshareReceiverMaterialFieldPaillierProof, reshareReceiverMaterialFieldRingPedersenParams, reshareReceiverMaterialFieldRingPedersenProof); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
-	publicKey := fields[0].Value
-	proof := fields[1].Value
-	ringPedersenParams := fields[2].Value
-	ringPedersenProof := fields[3].Value
-	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
-	return reshareReceiverMaterialPayload{PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
+	return p, nil
 }
-
-const refreshCommitmentsPayloadFieldCommitments uint16 = 1
-const refreshCommitmentsPayloadFieldPaillierPublicKey uint16 = 2
-const refreshCommitmentsPayloadFieldPaillierProof uint16 = 3
-const refreshCommitmentsPayloadFieldRingPedersenParams uint16 = 4
-const refreshCommitmentsPayloadFieldRingPedersenProof uint16 = 5
-
-const refreshSharePayloadFieldShare uint16 = 1
 
 type refreshCommitmentsPayload struct {
-	Commitments        [][]byte
-	PaillierPublicKey  []byte
-	PaillierProof      []byte
-	RingPedersenParams []byte
-	RingPedersenProof  []byte
+	Commitments        [][]byte `wire:"1,byteslist"`
+	PaillierPublicKey  []byte   `wire:"2,bytes"`
+	PaillierProof      []byte   `wire:"3,bytes"`
+	RingPedersenParams []byte   `wire:"4,bytes"`
+	RingPedersenProof  []byte   `wire:"5,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for refreshCommitmentsPayload.
+func (refreshCommitmentsPayload) WireType() string { return refreshCommitmentsPayloadWireType }
+
+// WireVersion returns the wire format version for refreshCommitmentsPayload.
+func (refreshCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type refreshSharePayload struct {
-	Share []byte
+	Share []byte `wire:"1,bytes"`
 }
 
+// WireType returns the canonical wire type identifier for refreshSharePayload.
+func (refreshSharePayload) WireType() string { return refreshSharePayloadWireType }
+
+// WireVersion returns the wire format version for refreshSharePayload.
+func (refreshSharePayload) WireVersion() uint16 { return tss.Version }
+
 func marshalRefreshCommitmentsPayload(p refreshCommitmentsPayload) ([]byte, error) {
-	return wire.Marshal(tss.Version, refreshCommitmentsPayloadWireType, []wire.Field{
-		{Tag: refreshCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: refreshCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(p.PaillierPublicKey)},
-		{Tag: refreshCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(p.PaillierProof)},
-		{Tag: refreshCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
-		{Tag: refreshCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(p.RingPedersenProof)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, refreshCommitmentsPayloadWireType)
-	if err != nil {
+	var p refreshCommitmentsPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	if version != tss.Version {
-		return refreshCommitmentsPayload{}, fmt.Errorf("unexpected refresh commitments payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, refreshCommitmentsPayloadFieldCommitments, refreshCommitmentsPayloadFieldPaillierPublicKey, refreshCommitmentsPayloadFieldPaillierProof, refreshCommitmentsPayloadFieldRingPedersenParams, refreshCommitmentsPayloadFieldRingPedersenProof); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	// Tags validated; access fields by index to avoid redundant linear scans.
-	commitments, err := wire.DecodeBytesList(fields[0].Value)
-	if err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	publicKey := fields[1].Value
-	proof := fields[2].Value
-	ringPedersenParams := fields[3].Value
-	ringPedersenProof := fields[4].Value
-	if _, err := zkpai.UnmarshalRingPedersenParams(ringPedersenParams); err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(ringPedersenProof); err != nil {
-		return refreshCommitmentsPayload{}, err
-	}
-	return refreshCommitmentsPayload{Commitments: commitments, PaillierPublicKey: publicKey, PaillierProof: proof, RingPedersenParams: ringPedersenParams, RingPedersenProof: ringPedersenProof}, nil
+	return p, nil
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
 	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, refreshSharePayloadWireType, []wire.Field{
-		{Tag: refreshSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
-	version, fields, err := wire.Unmarshal(in, refreshSharePayloadWireType)
-	if err != nil {
+	var p refreshSharePayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return refreshSharePayload{}, err
 	}
-	if version != tss.Version {
-		return refreshSharePayload{}, fmt.Errorf("unexpected refresh share payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, refreshSharePayloadFieldShare); err != nil {
+	if _, err := secp.ScalarFromBytes(p.Share); err != nil {
 		return refreshSharePayload{}, err
 	}
-	share := fields[0].Value
-	if _, err := secp.ScalarFromBytes(share); err != nil {
-		return refreshSharePayload{}, err
-	}
-	return refreshSharePayload{Share: share}, nil
+	return p, nil
 }
 
 // envelope creates a protocol envelope with the cggmp21-secp256k1 protocol id

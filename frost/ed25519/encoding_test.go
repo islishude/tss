@@ -265,7 +265,7 @@ func seedFROSTScalar(tb testing.TB) []byte {
 }
 
 func rewriteFROSTWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, wireType)
+	version, fields, err := wire.UnmarshalFields(raw, wireType)
 	if err != nil {
 		return nil, err
 	}
@@ -273,7 +273,7 @@ func rewriteFROSTWireField(raw []byte, wireType string, tag uint16, value []byte
 		if fields[i].Tag == tag {
 			fields[i].Value = make([]byte, len(value))
 			copy(fields[i].Value, value)
-			return wire.Marshal(version, wireType, fields)
+			return wire.MarshalFields(version, wireType, fields)
 		}
 	}
 	return nil, fmt.Errorf("missing wire field %d", tag)

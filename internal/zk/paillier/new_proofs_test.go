@@ -433,14 +433,14 @@ func cloneLogStarProof(in *LogStarProof) *LogStarProof {
 }
 
 func rewriteProofWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, wireType)
+	version, fields, err := wire.UnmarshalFields(raw, wireType)
 	if err != nil {
 		return nil, err
 	}
 	for i := range fields {
 		if fields[i].Tag == tag {
 			fields[i].Value = append([]byte(nil), value...)
-			return wire.Marshal(version, wireType, fields)
+			return wire.MarshalFields(version, wireType, fields)
 		}
 	}
 	return nil, fmt.Errorf("missing wire field %d", tag)

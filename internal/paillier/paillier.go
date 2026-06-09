@@ -61,3 +61,31 @@ const (
 	privateKeyFieldP
 	privateKeyFieldQ
 )
+
+// publicKeyWire is the wire DTO for PublicKey.
+type publicKeyWire struct {
+	N []byte `wire:"1,bytes"`
+	G []byte `wire:"2,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for publicKeyWire.
+func (publicKeyWire) WireType() string { return publicKeyWireType }
+
+// WireVersion returns the wire format version for publicKeyWire.
+func (publicKeyWire) WireVersion() uint16 { return paillierWireVersion }
+
+// privateKeyWire is the wire DTO for PrivateKey.
+type privateKeyWire struct {
+	N      []byte `wire:"1,bytes"`
+	G      []byte `wire:"2,bytes"`
+	Lambda []byte `wire:"3,bytes"`
+	Mu     []byte `wire:"4,bytes"`
+	P      []byte `wire:"5,bytes"`
+	Q      []byte `wire:"6,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for privateKeyWire.
+func (privateKeyWire) WireType() string { return privateKeyWireType }
+
+// WireVersion returns the wire format version for privateKeyWire.
+func (privateKeyWire) WireVersion() uint16 { return paillierWireVersion }

@@ -3,8 +3,6 @@ package ed25519
 import (
 	"fmt"
 
-	"github.com/islishude/tss"
-
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -18,82 +16,40 @@ const (
 	reshareSharePayloadWireType       = "frost.ed25519.payload.reshare.share"
 )
 
-const (
-	keygenCommitmentsPayloadFieldCommitments uint16 = 1
-	keygenCommitmentsPayloadFieldChainCode   uint16 = 2
-)
-
-const keygenSharePayloadFieldShare uint16 = 1
-
-const (
-	nonceCommitmentPayloadFieldD uint16 = iota + 1
-	nonceCommitmentPayloadFieldE
-)
-
-const signPartialPayloadFieldZ uint16 = 1
-
-const (
-	reshareCommitmentsPayloadFieldCommitments uint16 = 1
-	reshareSharePayloadFieldShare             uint16 = 1
-)
-
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
 	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
 		return nil, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
-	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
-		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCodeCommit)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, keygenCommitmentsPayloadWireType)
-	if err != nil {
+	var p keygenCommitmentsPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if version != tss.Version {
-		return keygenCommitmentsPayload{}, fmt.Errorf("unexpected keygen commitments payload version %d", version)
+	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
+		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
-	if err := wire.RequireExactTags(fields, keygenCommitmentsPayloadFieldCommitments, keygenCommitmentsPayloadFieldChainCode); err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	commitments, err := wire.DecodeBytesList(fields[0].Value)
-	if err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	chainCodeCommit := fields[1].Value
-	if len(chainCodeCommit) != 0 && len(chainCodeCommit) != 32 {
-		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(chainCodeCommit))
-	}
-	return keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit}, nil
+	return p, nil
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, keygenSharePayloadWireType, []wire.Field{
-		{Tag: keygenSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
-	version, fields, err := wire.Unmarshal(in, keygenSharePayloadWireType)
-	if err != nil {
+	var p keygenSharePayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return keygenSharePayload{}, err
 	}
-	if version != tss.Version {
-		return keygenSharePayload{}, fmt.Errorf("unexpected keygen share payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, keygenSharePayloadFieldShare); err != nil {
+	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
 		return keygenSharePayload{}, err
 	}
-	share := fields[0].Value
-	if _, err := edcurve.ScalarFromCanonical(share); err != nil {
-		return keygenSharePayload{}, err
-	}
-	return keygenSharePayload{Share: share}, nil
+	return p, nil
 }
 
 func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
@@ -103,26 +59,13 @@ func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
 	if _, err := edcurve.PointFromBytes(p.E); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, nonceCommitmentPayloadWireType, []wire.Field{
-		{Tag: nonceCommitmentPayloadFieldD, Value: wire.NonNilBytes(p.D)},
-		{Tag: nonceCommitmentPayloadFieldE, Value: wire.NonNilBytes(p.E)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
-	version, fields, err := wire.Unmarshal(in, nonceCommitmentPayloadWireType)
-	if err != nil {
+	var p nonceCommitment
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return nonceCommitment{}, err
-	}
-	if version != tss.Version {
-		return nonceCommitment{}, fmt.Errorf("unexpected nonce commitment payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, nonceCommitmentPayloadFieldD, nonceCommitmentPayloadFieldE); err != nil {
-		return nonceCommitment{}, err
-	}
-	p := nonceCommitment{
-		D: fields[0].Value,
-		E: fields[1].Value,
 	}
 	if _, err := edcurve.PointFromBytes(p.D); err != nil {
 		return nonceCommitment{}, err
@@ -137,76 +80,46 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 	if _, err := edcurve.ScalarFromCanonical(p.Z); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, signPartialPayloadWireType, []wire.Field{
-		{Tag: signPartialPayloadFieldZ, Value: wire.NonNilBytes(p.Z)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
-	version, fields, err := wire.Unmarshal(in, signPartialPayloadWireType)
-	if err != nil {
+	var p signPartialPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return signPartialPayload{}, err
 	}
-	if version != tss.Version {
-		return signPartialPayload{}, fmt.Errorf("unexpected sign partial payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, signPartialPayloadFieldZ); err != nil {
+	if _, err := edcurve.ScalarFromCanonical(p.Z); err != nil {
 		return signPartialPayload{}, err
 	}
-	z := fields[0].Value
-	if _, err := edcurve.ScalarFromCanonical(z); err != nil {
-		return signPartialPayload{}, err
-	}
-	return signPartialPayload{Z: z}, nil
+	return p, nil
 }
 
 func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
-	return wire.Marshal(tss.Version, reshareCommitmentsPayloadWireType, []wire.Field{
-		{Tag: reshareCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareCommitmentsPayloadWireType)
-	if err != nil {
+	var p reshareCommitmentsPayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return reshareCommitmentsPayload{}, err
 	}
-	if version != tss.Version {
-		return reshareCommitmentsPayload{}, fmt.Errorf("unexpected reshare commitments payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, reshareCommitmentsPayloadFieldCommitments); err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	commitments, err := wire.DecodeBytesList(fields[0].Value)
-	if err != nil {
-		return reshareCommitmentsPayload{}, err
-	}
-	return reshareCommitmentsPayload{Commitments: commitments}, nil
+	return p, nil
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, reshareSharePayloadWireType, []wire.Field{
-		{Tag: reshareSharePayloadFieldShare, Value: wire.NonNilBytes(p.Share)},
-	})
+	return wire.Marshal(p)
 }
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
-	version, fields, err := wire.Unmarshal(in, reshareSharePayloadWireType)
-	if err != nil {
+	var p reshareSharePayload
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return reshareSharePayload{}, err
 	}
-	if version != tss.Version {
-		return reshareSharePayload{}, fmt.Errorf("unexpected reshare share payload version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, reshareSharePayloadFieldShare); err != nil {
+	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
 		return reshareSharePayload{}, err
 	}
-	share := fields[0].Value
-	if _, err := edcurve.ScalarFromCanonical(share); err != nil {
-		return reshareSharePayload{}, err
-	}
-	return reshareSharePayload{Share: share}, nil
+	return p, nil
 }

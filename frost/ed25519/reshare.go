@@ -42,12 +42,24 @@ type ReshareSession struct {
 }
 
 type reshareCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments"`
+	Commitments [][]byte `json:"commitments" wire:"1,byteslist"`
 }
 
+// WireType returns the canonical wire type identifier for reshareCommitmentsPayload.
+func (reshareCommitmentsPayload) WireType() string { return reshareCommitmentsPayloadWireType }
+
+// WireVersion returns the wire format version for reshareCommitmentsPayload.
+func (reshareCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+
 type reshareSharePayload struct {
-	Share []byte `json:"share"`
+	Share []byte `json:"share" wire:"1,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for reshareSharePayload.
+func (reshareSharePayload) WireType() string { return reshareSharePayloadWireType }
+
+// WireVersion returns the wire format version for reshareSharePayload.
+func (reshareSharePayload) WireVersion() uint16 { return tss.Version }
 
 // Guard returns the session's envelope guard for use by transport adapters.
 func (s *ReshareSession) Guard() *tss.EnvelopeGuard {

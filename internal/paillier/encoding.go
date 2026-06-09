@@ -23,29 +23,20 @@ func (pk PublicKey) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wire.Marshal(paillierWireVersion, publicKeyWireType, []wire.Field{
-		{Tag: publicKeyFieldN, Value: n},
-		{Tag: publicKeyFieldG, Value: g},
-	})
+	return wire.Marshal(publicKeyWire{N: n, G: g})
 }
 
 // UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
-	version, fields, err := wire.Unmarshal(in, publicKeyWireType)
-	if err != nil {
+	var w publicKeyWire
+	if err := wire.Unmarshal(in, &w); err != nil {
 		return nil, err
 	}
-	if version != paillierWireVersion {
-		return nil, fmt.Errorf("unexpected Paillier public-key version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, publicKeyFieldN, publicKeyFieldG); err != nil {
-		return nil, err
-	}
-	n, err := decodePositiveIntBytes(fields[0].Value)
+	n, err := decodePositiveIntBytes(w.N)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := decodePositiveIntBytes(fields[1].Value)
+	g, err := decodePositiveIntBytes(w.G)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
@@ -89,50 +80,36 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wire.Marshal(paillierWireVersion, privateKeyWireType, []wire.Field{
-		{Tag: privateKeyFieldN, Value: n},
-		{Tag: privateKeyFieldG, Value: g},
-		{Tag: privateKeyFieldLambda, Value: lambda},
-		{Tag: privateKeyFieldMu, Value: mu},
-		{Tag: privateKeyFieldP, Value: p},
-		{Tag: privateKeyFieldQ, Value: q},
-	})
+	return wire.Marshal(privateKeyWire{N: n, G: g, Lambda: lambda, Mu: mu, P: p, Q: q})
 }
 
 // UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
 func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
-	version, fields, err := wire.Unmarshal(in, privateKeyWireType)
-	if err != nil {
+	var w privateKeyWire
+	if err := wire.Unmarshal(in, &w); err != nil {
 		return nil, err
 	}
-	if version != paillierWireVersion {
-		return nil, fmt.Errorf("unexpected Paillier private-key version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, privateKeyFieldN, privateKeyFieldG, privateKeyFieldLambda, privateKeyFieldMu, privateKeyFieldP, privateKeyFieldQ); err != nil {
-		return nil, err
-	}
-	// Tags validated; access fields by index.
-	n, err := decodePositiveIntBytes(fields[0].Value)
+	n, err := decodePositiveIntBytes(w.N)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := decodePositiveIntBytes(fields[1].Value)
+	g, err := decodePositiveIntBytes(w.G)
 	if err != nil {
 		return nil, fmt.Errorf("invalid public generator: %w", err)
 	}
-	lambdaBig, err := decodePositiveIntBytes(fields[2].Value)
+	lambdaBig, err := decodePositiveIntBytes(w.Lambda)
 	if err != nil {
 		return nil, fmt.Errorf("invalid lambda: %w", err)
 	}
-	muBig, err := decodePositiveIntBytes(fields[3].Value)
+	muBig, err := decodePositiveIntBytes(w.Mu)
 	if err != nil {
 		return nil, fmt.Errorf("invalid mu: %w", err)
 	}
-	p, err := decodePositiveIntBytes(fields[4].Value)
+	p, err := decodePositiveIntBytes(w.P)
 	if err != nil {
 		return nil, fmt.Errorf("invalid p: %w", err)
 	}
-	q, err := decodePositiveIntBytes(fields[5].Value)
+	q, err := decodePositiveIntBytes(w.Q)
 	if err != nil {
 		return nil, fmt.Errorf("invalid q: %w", err)
 	}

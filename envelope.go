@@ -10,21 +10,26 @@ import (
 
 // Envelope is a transport-neutral protocol message with transport-verified security context.
 type Envelope struct {
-	Protocol    ProtocolID
-	Version     uint16
-	SessionID   SessionID
-	Round       uint8
-	From        PartyID
-	To          PartyID // zero means broadcast
-	PayloadType PayloadType
-	Payload     []byte
+	Protocol    ProtocolID  `wire:"1,string"`
+	Version     uint16      `wire:"2,u16"`
+	SessionID   SessionID   `wire:"3,bytes,len=32"`
+	Round       uint8       `wire:"4,u8"`
+	From        PartyID     `wire:"5,u32"`
+	To          PartyID     `wire:"6,u32"` // zero means broadcast
+	PayloadType PayloadType `wire:"7,string"`
+	Payload     []byte      `wire:"8,bytes"`
 
-	TranscriptHash [32]byte
+	TranscriptHash [32]byte `wire:"9,bytes,len=32"`
 
-	Security SecurityContext
-
-	Broadcast *BroadcastCertificate
+	Security  SecurityContext       `wire:"-"`
+	Broadcast *BroadcastCertificate `wire:"-"`
 }
+
+// WireType returns the canonical wire type identifier for Envelope.
+func (Envelope) WireType() string { return envelopeWireType }
+
+// WireVersion returns the wire format version for Envelope.
+func (Envelope) WireVersion() uint16 { return Version }
 
 // Clone returns a deep copy of the envelope.
 func (e Envelope) Clone() Envelope {
@@ -56,8 +61,7 @@ func cloneBroadcastAcks(acks []BroadcastAck) []BroadcastAck {
 	return out
 }
 
-// MarshalBinary encodes the envelope using strict canonical TLV wire format.
-// It rejects locally-constructed payloads that exceed size limits.
+// MarshalBinary encodes the envelope using the object-level wire codec.
 func (e Envelope) MarshalBinary() ([]byte, error) {
 	limits := DefaultLimits()
 	if e.Protocol == "" {
@@ -78,112 +82,42 @@ func (e Envelope) MarshalBinary() ([]byte, error) {
 	if len(e.Payload) > limits.MaxEnvelopePayloadBytes {
 		return nil, fmt.Errorf("envelope payload too large: %d > %d", len(e.Payload), limits.MaxEnvelopePayloadBytes)
 	}
-	return wire.Marshal(Version, envelopeWireType, []wire.Field{
-		{Tag: envelopeFieldProtocol, Value: []byte(e.Protocol)},
-		{Tag: envelopeFieldVersion, Value: wire.Uint16(e.Version)},
-		{Tag: envelopeFieldSessionID, Value: e.SessionID[:]},
-		{Tag: envelopeFieldRound, Value: []byte{e.Round}},
-		{Tag: envelopeFieldFrom, Value: wire.Uint32(uint32(e.From))},
-		{Tag: envelopeFieldTo, Value: wire.Uint32(uint32(e.To))},
-		{Tag: envelopeFieldPayloadType, Value: []byte(e.PayloadType)},
-		{Tag: envelopeFieldPayload, Value: wire.NonNilBytes(e.Payload)},
-		{Tag: envelopeFieldTranscriptHash, Value: e.TranscriptHash[:]},
-	})
+	return wire.Marshal(e)
 }
 
-// UnmarshalBinary decodes a canonical TLV envelope and rejects JSON fallback.
-// It enforces total size, per-field size, and metadata length limits.
+// UnmarshalBinary decodes a canonical TLV envelope using the object-level wire codec.
 func (e *Envelope) UnmarshalBinary(in []byte) error {
 	limits := DefaultLimits()
-
 	if len(in) == 0 {
 		return errors.New("empty envelope")
 	}
 	if len(in) > limits.MaxEnvelopeBytes {
 		return fmt.Errorf("envelope too large: %d > %d", len(in), limits.MaxEnvelopeBytes)
 	}
-
-	version, fields, err := wire.UnmarshalWithLimits(in, envelopeWireType, wire.Limits{
+	if err := wire.Unmarshal(in, e, wire.WithLimits(wire.Limits{
 		MaxTotalBytes: limits.MaxEnvelopeBytes,
 		MaxFields:     limits.MaxWireFields,
 		MaxFieldBytes: limits.MaxWireFieldBytes,
-	})
-	if err != nil {
+	})); err != nil {
 		return err
 	}
-	if version != Version {
-		return fmt.Errorf("unexpected envelope wire version %d", version)
-	}
-	// Verify exact field set and order in a single pass — avoids nine
-	// individual linear scans through the field list.
-	if err := wire.RequireExactTags(fields,
-		envelopeFieldProtocol,
-		envelopeFieldVersion,
-		envelopeFieldSessionID,
-		envelopeFieldRound,
-		envelopeFieldFrom,
-		envelopeFieldTo,
-		envelopeFieldPayloadType,
-		envelopeFieldPayload,
-		envelopeFieldTranscriptHash,
-	); err != nil {
-		return err
-	}
-	protocol := fields[0].Value
-	if len(protocol) == 0 {
+	if e.Protocol == "" {
 		return errors.New("envelope protocol is empty")
 	}
-	if len(protocol) > limits.MaxProtocolNameBytes {
-		return fmt.Errorf("envelope protocol name too long: %d > %d", len(protocol), limits.MaxProtocolNameBytes)
+	if len(e.Protocol) > limits.MaxProtocolNameBytes {
+		return fmt.Errorf("envelope protocol name too long: %d > %d", len(e.Protocol), limits.MaxProtocolNameBytes)
 	}
-	envVersion, err := wire.DecodeUint16(fields[1].Value)
-	if err != nil {
-		return fmt.Errorf("invalid envelope version field: %w", err)
+	if e.Version != Version {
+		return fmt.Errorf("unexpected envelope version %d", e.Version)
 	}
-	if envVersion != Version {
-		return fmt.Errorf("unexpected envelope version %d", envVersion)
-	}
-	session, err := SessionIDFromBytes(fields[2].Value)
-	if err != nil {
-		return err
-	}
-	round := fields[3].Value
-	if len(round) != 1 {
-		return errors.New("invalid envelope round")
-	}
-	from, err := wire.DecodeUint32(fields[4].Value)
-	if err != nil {
-		return fmt.Errorf("invalid envelope sender: %w", err)
-	}
-	to, err := wire.DecodeUint32(fields[5].Value)
-	if err != nil {
-		return fmt.Errorf("invalid envelope recipient: %w", err)
-	}
-	payloadType := fields[6].Value
-	if len(payloadType) == 0 {
+	if e.PayloadType == "" {
 		return errors.New("envelope payload type is empty")
 	}
-	if len(payloadType) > limits.MaxPayloadTypeBytes {
-		return fmt.Errorf("envelope payload type too long: %d > %d", len(payloadType), limits.MaxPayloadTypeBytes)
+	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
+		return fmt.Errorf("envelope payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
 	}
-	payload := fields[7].Value
-	if len(payload) > limits.MaxEnvelopePayloadBytes {
-		return fmt.Errorf("envelope payload too large: %d > %d", len(payload), limits.MaxEnvelopePayloadBytes)
-	}
-	transcript := fields[8].Value
-	if len(transcript) != sha256.Size {
-		return errors.New("invalid envelope transcript hash")
-	}
-	*e = Envelope{
-		Protocol:       ProtocolID(protocol),
-		Version:        envVersion,
-		SessionID:      session,
-		Round:          round[0],
-		From:           PartyID(from),
-		To:             PartyID(to),
-		PayloadType:    PayloadType(payloadType),
-		Payload:        payload,
-		TranscriptHash: [32]byte(transcript),
+	if len(e.Payload) > limits.MaxEnvelopePayloadBytes {
+		return fmt.Errorf("envelope payload too large: %d > %d", len(e.Payload), limits.MaxEnvelopePayloadBytes)
 	}
 	return nil
 }

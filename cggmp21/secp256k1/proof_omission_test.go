@@ -135,7 +135,7 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
+	return wire.MarshalFields(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
 		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(pkBytes)},
 		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(modProof)},

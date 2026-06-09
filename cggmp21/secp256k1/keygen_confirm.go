@@ -16,32 +16,27 @@ const keygenConfirmationWireVersion = 1
 
 const keygenConfirmationWireType = "cggmp21.secp256k1.keygen-confirmation"
 
-const (
-	keygenConfirmationFieldSessionID uint16 = iota + 1
-	keygenConfirmationFieldSender
-	keygenConfirmationFieldThreshold
-	keygenConfirmationFieldParties
-	keygenConfirmationFieldPublicKey
-	keygenConfirmationFieldTranscriptHash
-	keygenConfirmationFieldCommitmentsHash
-	keygenConfirmationFieldChainCode
-)
-
 // KeygenConfirmation is a post-keygen consistency artifact. Each party produces
 // one after keygen completes and exchanges it with all other parties. If any
 // party's confirmation disagrees on the global transcript (public key, party set,
 // transcript hash, or commitments hash), the transport may have equivocated and
 // the resulting key shares must not be used.
 type KeygenConfirmation struct {
-	SessionID       tss.SessionID
-	Sender          tss.PartyID
-	Threshold       int
-	Parties         []tss.PartyID
-	PublicKey       []byte
-	TranscriptHash  []byte
-	CommitmentsHash []byte
-	ChainCode       []byte
+	SessionID       tss.SessionID   `wire:"1,bytes,len=32"`
+	Sender          tss.PartyID     `wire:"2,u32"`
+	Threshold       int             `wire:"3,u32"`
+	Parties         []tss.PartyID   `wire:"4,u32list"`
+	PublicKey       []byte          `wire:"5,bytes"`
+	TranscriptHash  []byte          `wire:"6,bytes"`
+	CommitmentsHash []byte          `wire:"7,bytes"`
+	ChainCode       []byte          `wire:"8,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for KeygenConfirmation.
+func (KeygenConfirmation) WireType() string { return keygenConfirmationWireType }
+
+// WireVersion returns the wire format version for KeygenConfirmation.
+func (KeygenConfirmation) WireVersion() uint16 { return keygenConfirmationWireVersion }
 
 // KeygenConfirmation constructs a confirmation message from the local key share.
 func (k *KeyShare) KeygenConfirmation() (*KeygenConfirmation, error) {
@@ -101,77 +96,24 @@ func (c KeygenConfirmation) Validate() error {
 	return nil
 }
 
-// MarshalBinary encodes the confirmation in canonical TLV format.
+// MarshalBinary encodes the confirmation using the object-level wire codec.
 func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(keygenConfirmationWireVersion, keygenConfirmationWireType, []wire.Field{
-		{Tag: keygenConfirmationFieldSessionID, Value: c.SessionID[:]},
-		{Tag: keygenConfirmationFieldSender, Value: wire.Uint32(uint32(c.Sender))},
-		{Tag: keygenConfirmationFieldThreshold, Value: wire.Uint32(uint32(c.Threshold))},
-		{Tag: keygenConfirmationFieldParties, Value: wire.EncodeUint32List(c.Parties)},
-		{Tag: keygenConfirmationFieldPublicKey, Value: wire.NonNilBytes(c.PublicKey)},
-		{Tag: keygenConfirmationFieldTranscriptHash, Value: wire.NonNilBytes(c.TranscriptHash)},
-		{Tag: keygenConfirmationFieldCommitmentsHash, Value: wire.NonNilBytes(c.CommitmentsHash)},
-		{Tag: keygenConfirmationFieldChainCode, Value: wire.NonNilBytes(c.ChainCode)},
-	})
+	return wire.Marshal(c)
 }
 
 // UnmarshalKeygenConfirmation decodes a canonical TLV keygen confirmation.
 func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
-	version, fields, err := wire.Unmarshal(in, keygenConfirmationWireType)
-	if err != nil {
+	var c KeygenConfirmation
+	if err := wire.Unmarshal(in, &c); err != nil {
 		return nil, err
-	}
-	if version != keygenConfirmationWireVersion {
-		return nil, fmt.Errorf("unexpected keygen confirmation version %d", version)
-	}
-	if err := wire.RequireExactTags(fields,
-		keygenConfirmationFieldSessionID,
-		keygenConfirmationFieldSender,
-		keygenConfirmationFieldThreshold,
-		keygenConfirmationFieldParties,
-		keygenConfirmationFieldPublicKey,
-		keygenConfirmationFieldTranscriptHash,
-		keygenConfirmationFieldCommitmentsHash,
-		keygenConfirmationFieldChainCode,
-	); err != nil {
-		return nil, err
-	}
-
-	// Tags validated; access fields by index.
-	sessionID, err := tss.SessionIDFromBytes(fields[0].Value)
-	if err != nil {
-		return nil, fmt.Errorf("keygen confirmation session id: %w", err)
-	}
-	sender, err := wire.DecodeUint32(fields[1].Value)
-	if err != nil {
-		return nil, fmt.Errorf("keygen confirmation sender: %w", err)
-	}
-	threshold, err := wire.DecodeUint32(fields[2].Value)
-	if err != nil {
-		return nil, fmt.Errorf("keygen confirmation threshold: %w", err)
-	}
-	parties, err := wire.DecodeUint32List[tss.PartyID](fields[3].Value)
-	if err != nil {
-		return nil, fmt.Errorf("keygen confirmation parties: %w", err)
-	}
-
-	c := &KeygenConfirmation{
-		SessionID:       sessionID,
-		Sender:          tss.PartyID(sender),
-		Threshold:       int(threshold),
-		Parties:         slices.Clone(parties),
-		PublicKey:       slices.Clone(fields[4].Value),
-		TranscriptHash:  slices.Clone(fields[5].Value),
-		CommitmentsHash: slices.Clone(fields[6].Value),
-		ChainCode:       slices.Clone(fields[7].Value),
 	}
 	if err := c.Validate(); err != nil {
 		return nil, err
 	}
-	return c, nil
+	return &c, nil
 }
 
 func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {

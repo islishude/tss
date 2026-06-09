@@ -80,7 +80,7 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 		{
 			name: "wrong wire type",
 			data: func() []byte {
-				b, _ := wire.Marshal(messageVersion, "mta.response-message", []wire.Field{
+				b, _ := wire.MarshalFields(messageVersion, "mta.response-message", []wire.Field{
 					{Tag: responseMessageFieldCiphertext, Value: []byte{0x01}},
 					{Tag: responseMessageFieldProof, Value: []byte{0x02}},
 				})
@@ -90,12 +90,12 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 		{
 			name:    "wrong version",
 			data:    mustMarshalStartAtVersion(t, 99, []byte{0x01}),
-			wantErr: "unexpected MtA start message version 99",
+			wantErr: "wire StartMessage: got version 99, want 1",
 		},
 		{
 			name: "extra fields",
 			data: func() []byte {
-				b, _ := wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(messageVersion, startMessageWireType, []wire.Field{
 					{Tag: startMessageFieldCiphertext, Value: []byte{0x01}},
 					{Tag: 99, Value: []byte{0x02}},
 				})
@@ -119,7 +119,7 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 // mustMarshalStartAtVersion marshals a StartMessage with an overridden version.
 func mustMarshalStartAtVersion(t *testing.T, version uint16, ciphertext []byte) []byte {
 	t.Helper()
-	b, err := wire.Marshal(version, startMessageWireType, []wire.Field{
+	b, err := wire.MarshalFields(version, startMessageWireType, []wire.Field{
 		{Tag: startMessageFieldCiphertext, Value: ciphertext},
 	})
 	if err != nil {

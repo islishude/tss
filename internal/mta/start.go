@@ -27,8 +27,14 @@ const (
 
 // StartMessage carries an encrypted multiplicand.
 type StartMessage struct {
-	Ciphertext []byte `json:"ciphertext"`
+	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for StartMessage.
+func (StartMessage) WireType() string { return startMessageWireType }
+
+// WireVersion returns the wire format version for StartMessage.
+func (StartMessage) WireVersion() uint16 { return messageVersion }
 
 // StartOpening carries the local witness for an MtA start ciphertext.
 type StartOpening struct {
@@ -37,35 +43,18 @@ type StartOpening struct {
 	rho     *big.Int
 }
 
-// MarshalBinary encodes the MtA start message as an exact-field TLV record.
+// MarshalBinary encodes the MtA start message using the object-level wire codec.
 func (m StartMessage) MarshalBinary() ([]byte, error) {
-	if err := m.Validate(); err != nil {
-		return nil, err
-	}
-	return wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
-		{Tag: startMessageFieldCiphertext, Value: m.Ciphertext},
-	})
+	return wire.Marshal(m)
 }
 
-// UnmarshalStartMessage decodes an exact-field TLV MtA start message.
+// UnmarshalStartMessage decodes a TLV MtA start message using the object-level wire codec.
 func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
-	version, fields, err := wire.Unmarshal(in, startMessageWireType)
-	if err != nil {
+	var msg StartMessage
+	if err := wire.Unmarshal(in, &msg); err != nil {
 		return nil, err
 	}
-	if version != messageVersion {
-		return nil, fmt.Errorf("unexpected MtA start message version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, startMessageFieldCiphertext); err != nil {
-		return nil, err
-	}
-	msg := &StartMessage{
-		Ciphertext: fields[0].Value,
-	}
-	if err := msg.Validate(); err != nil {
-		return nil, err
-	}
-	return msg, nil
+	return &msg, nil
 }
 
 // Validate checks the canonical ciphertext integer.

@@ -93,7 +93,7 @@ func (p Presign) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 presign contains secret material; use MarshalBinary")
 }
 
-// MarshalBinary encodes the presign record using canonical TLV wire format.
+// MarshalBinary encodes the presign record using the object-level wire codec.
 func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
@@ -110,24 +110,24 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid delta: %w", err)
 	}
-	return wire.Marshal(tss.Version, presignWireType, []wire.Field{
-		{Tag: presignFieldParty, Value: wire.Uint32(uint32(p.Party))},
-		{Tag: presignFieldThreshold, Value: wire.Uint32(uint32(p.Threshold))},
-		{Tag: presignFieldSigners, Value: wire.EncodeUint32List(p.Signers)},
-		{Tag: presignFieldR, Value: wire.NonNilBytes(p.R)},
-		{Tag: presignFieldLittleR, Value: wire.NonNilBytes(p.LittleR)},
-		{Tag: presignFieldKShare, Value: wire.NonNilBytes(kShare)},
-		{Tag: presignFieldChiShare, Value: wire.NonNilBytes(chiShare)},
-		{Tag: presignFieldDelta, Value: wire.NonNilBytes(delta)},
-		{Tag: presignFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
-		{Tag: presignFieldContext, Value: encodePresignContext(p.Context)},
-		{Tag: presignFieldContextHash, Value: wire.NonNilBytes(p.ContextHash)},
-		{Tag: presignFieldAdditiveShift, Value: wire.NonNilBytes(p.AdditiveShift)},
-		{Tag: presignFieldConsumed, Value: wire.Bool(p.Consumed)},
-		{Tag: presignFieldPublicKey, Value: wire.NonNilBytes(p.PublicKey)},
-		{Tag: presignFieldKeygenTranscriptHash, Value: wire.NonNilBytes(p.KeygenTranscriptHash)},
-		{Tag: presignFieldPartiesHash, Value: wire.NonNilBytes(p.PartiesHash)},
-		{Tag: presignFieldVerifyShares, Value: encodeSignVerifyShares(p.VerifyShares)},
+	return wire.Marshal(presignWire{
+		Party:                p.Party,
+		Threshold:            p.Threshold,
+		Signers:              p.Signers,
+		R:                    p.R,
+		LittleR:              p.LittleR,
+		KShare:               kShare,
+		ChiShare:             chiShare,
+		Delta:                delta,
+		TranscriptHash:       p.TranscriptHash,
+		Context:              encodePresignContext(p.Context),
+		ContextHash:          p.ContextHash,
+		AdditiveShift:        p.AdditiveShift,
+		Consumed:             p.Consumed,
+		PublicKey:            p.PublicKey,
+		KeygenTranscriptHash: p.KeygenTranscriptHash,
+		PartiesHash:          p.PartiesHash,
+		VerifyShares:         encodeSignVerifyShares(p.VerifyShares),
 	})
 }
 
@@ -338,36 +338,66 @@ func (s *SignSession) abort() {
 }
 
 type presignRound1Payload struct {
-	Gamma             []byte `json:"gamma"`
-	EncK              []byte `json:"enc_k"`
-	PaillierPublicKey []byte `json:"paillier_public_key"`
+	Gamma             []byte `json:"gamma" wire:"1,bytes"`
+	EncK              []byte `json:"enc_k" wire:"2,bytes"`
+	PaillierPublicKey []byte `json:"paillier_public_key" wire:"3,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for presignRound1Payload.
+func (presignRound1Payload) WireType() string { return presignRound1PayloadWireType }
+
+// WireVersion returns the wire format version for presignRound1Payload.
+func (presignRound1Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound1ProofPayload struct {
-	PublicRound1Hash []byte `json:"public_round1_hash"`
-	EncKProof        []byte `json:"enc_k_proof"`
+	PublicRound1Hash []byte `json:"public_round1_hash" wire:"1,bytes"`
+	EncKProof        []byte `json:"enc_k_proof" wire:"2,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for presignRound1ProofPayload.
+func (presignRound1ProofPayload) WireType() string { return presignRound1ProofPayloadWireType }
+
+// WireVersion returns the wire format version for presignRound1ProofPayload.
+func (presignRound1ProofPayload) WireVersion() uint16 { return tss.Version }
 
 type presignRound2Payload struct {
-	Delta      mta.ResponseMessage `json:"delta"`
-	Sigma      mta.ResponseMessage `json:"sigma"`
-	Round1Echo []byte              `json:"round1_echo"`
+	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested"`
+	Sigma      mta.ResponseMessage `json:"sigma" wire:"2,nested"`
+	Round1Echo []byte              `json:"round1_echo" wire:"3,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for presignRound2Payload.
+func (presignRound2Payload) WireType() string { return presignRound2PayloadWireType }
+
+// WireVersion returns the wire format version for presignRound2Payload.
+func (presignRound2Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound3Payload struct {
-	Delta    []byte `json:"delta"`
-	KPoint   []byte `json:"k_point"`
-	ChiPoint []byte `json:"chi_point"`
-	Proof    []byte `json:"proof"`
+	Delta    []byte `json:"delta" wire:"1,bytes"`
+	KPoint   []byte `json:"k_point" wire:"2,bytes"`
+	ChiPoint []byte `json:"chi_point" wire:"3,bytes"`
+	Proof    []byte `json:"proof" wire:"4,bytes"`
 }
 
+// WireType returns the canonical wire type identifier for presignRound3Payload.
+func (presignRound3Payload) WireType() string { return presignRound3PayloadWireType }
+
+// WireVersion returns the wire format version for presignRound3Payload.
+func (presignRound3Payload) WireVersion() uint16 { return tss.Version }
+
 type signPartialPayload struct {
-	S                   []byte `json:"s"`
-	PresignTranscript   []byte `json:"presign_transcript"`
-	PresignContext      []byte `json:"presign_context"`
-	DigestHash          []byte `json:"digest_hash"`
-	PartialEquationHash []byte `json:"partial_equation_hash"`
+	S                   []byte `json:"s" wire:"1,bytes"`
+	PresignTranscript   []byte `json:"presign_transcript" wire:"2,bytes"`
+	PresignContext      []byte `json:"presign_context" wire:"3,bytes"`
+	DigestHash          []byte `json:"digest_hash" wire:"4,bytes"`
+	PartialEquationHash []byte `json:"partial_equation_hash" wire:"5,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for signPartialPayload.
+func (signPartialPayload) WireType() string { return signPartialPayloadWireType }
+
+// WireVersion returns the wire format version for signPartialPayload.
+func (signPartialPayload) WireVersion() uint16 { return tss.Version }
 
 // Guard returns the session's envelope guard for use by transport adapters.
 func (s *PresignSession) Guard() *tss.EnvelopeGuard {

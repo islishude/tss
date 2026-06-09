@@ -86,7 +86,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name: "wrong wire type",
 			data: func() []byte {
-				b, _ := wire.Marshal(messageVersion, startMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(messageVersion, startMessageWireType, []wire.Field{
 					{Tag: startMessageFieldCiphertext, Value: []byte{0x01}},
 				})
 				return b
@@ -95,12 +95,12 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name:    "wrong version",
 			data:    mustMarshalResponseAtVersion(t, 99, validResponse.Ciphertext, validResponse.Proof),
-			wantErr: "unexpected MtA response message version 99",
+			wantErr: "wire ResponseMessage: got version 99, want 1",
 		},
 		{
 			name: "missing proof field",
 			data: func() []byte {
-				b, _ := wire.Marshal(messageVersion, responseMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
 					{Tag: responseMessageFieldCiphertext, Value: validResponse.Ciphertext},
 				})
 				return b
@@ -109,7 +109,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name: "extra field",
 			data: func() []byte {
-				b, _ := wire.Marshal(messageVersion, responseMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
 					{Tag: responseMessageFieldCiphertext, Value: validResponse.Ciphertext},
 					{Tag: responseMessageFieldProof, Value: validResponse.Proof},
 					{Tag: 99, Value: []byte{0x01}},
@@ -140,7 +140,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 // mustMarshalResponseAtVersion marshals a ResponseMessage with an overridden version.
 func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext, proof []byte) []byte {
 	t.Helper()
-	b, err := wire.Marshal(version, responseMessageWireType, []wire.Field{
+	b, err := wire.MarshalFields(version, responseMessageWireType, []wire.Field{
 		{Tag: responseMessageFieldCiphertext, Value: ciphertext},
 		{Tag: responseMessageFieldProof, Value: proof},
 	})

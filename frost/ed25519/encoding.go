@@ -2,7 +2,6 @@ package ed25519
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/islishude/tss"
 
@@ -11,133 +10,142 @@ import (
 
 const keyShareWireType = "frost.ed25519.keyshare"
 
+// Field tag constants retained for test mutation helpers.
 const (
-	keyShareFieldParty uint16 = iota + 1
-	keyShareFieldThreshold
-	keyShareFieldParties
-	keyShareFieldPublicKey
-	keyShareFieldSecret
-	keyShareFieldGroupCommitments
-	keyShareFieldVerificationShares
-	keyShareFieldKeygenTranscriptHash
-	keyShareFieldChainCode
-	keyShareFieldKeygenSessionID
-	keyShareFieldKeygenConfirmations
+	keyShareFieldParty     uint16 = 1
+	keyShareFieldThreshold uint16 = 2
 )
+
+// keyShareWire is the wire DTO for KeyShare.
+type keyShareWire struct {
+	Party                tss.PartyID                    `wire:"1,u32"`
+	Threshold            int                            `wire:"2,u32"`
+	Parties              []tss.PartyID                  `wire:"3,u32list"`
+	PublicKey            []byte                         `wire:"4,bytes"`
+	Secret               []byte                         `wire:"5,bytes"`
+	GroupCommitments     [][]byte                       `wire:"6,byteslist"`
+	VerificationShares   []wire.PartyBytes[tss.PartyID] `wire:"7,partybytes"`
+	KeygenTranscriptHash []byte                         `wire:"8,bytes"`
+	ChainCode            []byte                         `wire:"9,bytes"`
+	KeygenSessionID      []byte                         `wire:"10,bytes,len=32"`
+	KeygenConfirmations  [][]byte                       `wire:"11,byteslist"`
+}
+
+// WireType returns the canonical wire type identifier for keyShareWire.
+func (keyShareWire) WireType() string { return keyShareWireType }
+
+// WireVersion returns the wire format version for keyShareWire.
+func (keyShareWire) WireVersion() uint16 { return tss.Version }
+
+func (k *KeyShare) toWire() (*keyShareWire, error) {
+	secretBytes, err := edSecretScalarBytes(k.secret)
+	if err != nil {
+		return nil, err
+	}
+	shares := make([]wire.PartyBytes[tss.PartyID], len(k.VerificationShares))
+	for i, s := range k.VerificationShares {
+		shares[i] = wire.PartyBytes[tss.PartyID]{Party: s.Party, Bytes: s.PublicKey}
+	}
+	return &keyShareWire{
+		Party:                k.Party,
+		Threshold:            k.Threshold,
+		Parties:              k.Parties,
+		PublicKey:            k.PublicKey,
+		Secret:               secretBytes,
+		GroupCommitments:     k.GroupCommitments,
+		VerificationShares:   shares,
+		KeygenTranscriptHash: k.KeygenTranscriptHash,
+		ChainCode:            k.ChainCode,
+		KeygenSessionID:      k.KeygenSessionID[:],
+		KeygenConfirmations:  k.KeygenConfirmations,
+	}, nil
+}
+
+func (w keyShareWire) toKeyShare() (*KeyShare, error) {
+	sid, err := tss.SessionIDFromBytes(w.KeygenSessionID)
+	if err != nil {
+		return nil, fmt.Errorf("keygen session id: %w", err)
+	}
+	secretScalar, err := newEdSecretScalar(w.Secret)
+	if err != nil {
+		return nil, fmt.Errorf("invalid secret scalar: %w", err)
+	}
+	shares := make([]VerificationShare, len(w.VerificationShares))
+	for i, s := range w.VerificationShares {
+		shares[i] = VerificationShare{Party: s.Party, PublicKey: s.Bytes}
+	}
+	return &KeyShare{
+		Version:              tss.Version,
+		Party:                w.Party,
+		Threshold:            w.Threshold,
+		Parties:              w.Parties,
+		PublicKey:            w.PublicKey,
+		ChainCode:            w.ChainCode,
+		secret:               secretScalar,
+		GroupCommitments:     w.GroupCommitments,
+		VerificationShares:   shares,
+		KeygenSessionID:      sid,
+		KeygenTranscriptHash: w.KeygenTranscriptHash,
+		KeygenConfirmations:  w.KeygenConfirmations,
+	}, nil
+}
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
 	if err := k.Validate(); err != nil {
 		return nil, err
 	}
-	secretBytes, err := edSecretScalarBytes(k.secret)
+	w, err := k.toWire()
 	if err != nil {
 		return nil, err
 	}
-	return wire.Marshal(tss.Version, keyShareWireType, []wire.Field{
-		{Tag: keyShareFieldParty, Value: wire.Uint32(uint32(k.Party))},
-		{Tag: keyShareFieldThreshold, Value: wire.Uint32(uint32(k.Threshold))},
-		{Tag: keyShareFieldParties, Value: wire.EncodeUint32List(k.Parties)},
-		{Tag: keyShareFieldPublicKey, Value: wire.NonNilBytes(k.PublicKey)},
-		{Tag: keyShareFieldSecret, Value: wire.NonNilBytes(secretBytes)},
-		{Tag: keyShareFieldGroupCommitments, Value: wire.EncodeBytesList(k.GroupCommitments)},
-		{Tag: keyShareFieldVerificationShares, Value: encodeVerificationShares(k.VerificationShares)},
-		{Tag: keyShareFieldKeygenTranscriptHash, Value: wire.NonNilBytes(k.KeygenTranscriptHash)},
-		{Tag: keyShareFieldChainCode, Value: wire.NonNilBytes(k.ChainCode)},
-		{Tag: keyShareFieldKeygenSessionID, Value: k.KeygenSessionID[:]},
-		{Tag: keyShareFieldKeygenConfirmations, Value: wire.EncodeBytesList(k.KeygenConfirmations)},
-	})
+	return wire.Marshal(w)
 }
 
 func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error) {
-	version, fields, err := wire.UnmarshalWithLimits(in, keyShareWireType, wire.Limits{
+	var w keyShareWire
+	if err := wire.Unmarshal(in, &w, wire.WithLimits(wire.Limits{
 		MaxTotalBytes: limits.MaxSerializedKeyShareBytes,
 		MaxFields:     limits.MaxWireFields,
 		MaxFieldBytes: limits.MaxWireFieldBytes,
-	})
+	})); err != nil {
+		return nil, err
+	}
+	k, err := w.toKeyShare()
 	if err != nil {
 		return nil, err
 	}
-	if version != tss.Version {
-		return nil, fmt.Errorf("unexpected key share wire version %d", version)
+	if k.Threshold > limits.MaxThreshold {
+		return nil, fmt.Errorf("threshold too large: %d > %d", k.Threshold, limits.MaxThreshold)
 	}
-	if err := wire.RequireExactTags(fields, keyShareFieldParty, keyShareFieldThreshold, keyShareFieldParties, keyShareFieldPublicKey, keyShareFieldSecret, keyShareFieldGroupCommitments, keyShareFieldVerificationShares, keyShareFieldKeygenTranscriptHash, keyShareFieldChainCode, keyShareFieldKeygenSessionID, keyShareFieldKeygenConfirmations); err != nil {
-		return nil, err
+	if len(k.Parties) > limits.MaxParties {
+		return nil, fmt.Errorf("parties too large: %d > %d", len(k.Parties), limits.MaxParties)
 	}
-	// Tags validated; access fields by index.
-	party, err := wire.DecodeUint32(fields[0].Value)
-	if err != nil {
-		return nil, err
+	if len(k.GroupCommitments) > limits.MaxThreshold {
+		return nil, fmt.Errorf("group commitments too large: %d > %d", len(k.GroupCommitments), limits.MaxThreshold)
 	}
-	threshold, err := wire.DecodeUint32(fields[1].Value)
-	if err != nil {
-		return nil, err
+	for i, c := range k.GroupCommitments {
+		if len(c) > limits.MaxPointBytes {
+			return nil, fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.MaxPointBytes)
+		}
 	}
-	if threshold > math.MaxInt32 {
-		return nil, fmt.Errorf("threshold overflows platform int: %d", threshold)
+	if len(k.VerificationShares) > limits.MaxParties {
+		return nil, fmt.Errorf("verification shares too large: %d > %d", len(k.VerificationShares), limits.MaxParties)
 	}
-	if int(threshold) > limits.MaxThreshold {
-		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.MaxThreshold)
+	for i, s := range k.VerificationShares {
+		if len(s.PublicKey) > limits.MaxPointBytes {
+			return nil, fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.MaxPointBytes)
+		}
 	}
-	parties, err := wire.DecodeUint32ListWithLimit[tss.PartyID](fields[2].Value, limits.MaxParties)
-	if err != nil {
-		return nil, err
+	if len(k.KeygenConfirmations) > limits.MaxParties {
+		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(k.KeygenConfirmations), limits.MaxParties)
 	}
-	groupCommitments, err := wire.DecodeBytesListWithLimit(fields[5].Value, limits.MaxThreshold, limits.MaxPointBytes)
-	if err != nil {
-		return nil, err
-	}
-	verificationShares, err := decodeVerificationSharesBytesWithLimit(fields[6].Value, limits)
-	if err != nil {
-		return nil, err
-	}
-	keygenConfirmations, err := wire.DecodeBytesListWithLimit(fields[10].Value, limits.MaxParties, limits.MaxWireFieldBytes)
-	if err != nil {
-		return nil, fmt.Errorf("keygen confirmations: %w", err)
-	}
-	keygenSessionID, err := tss.SessionIDFromBytes(fields[9].Value)
-	if err != nil {
-		return nil, fmt.Errorf("keygen session id: %w", err)
-	}
-	secretScalar, err := newEdSecretScalar(fields[4].Value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid secret scalar: %w", err)
-	}
-	k := &KeyShare{
-		Version:              tss.Version,
-		Party:                tss.PartyID(party),
-		Threshold:            int(threshold),
-		Parties:              parties,
-		PublicKey:            fields[3].Value,
-		ChainCode:            fields[8].Value,
-		secret:               secretScalar,
-		GroupCommitments:     groupCommitments,
-		VerificationShares:   verificationShares,
-		KeygenSessionID:      keygenSessionID,
-		KeygenTranscriptHash: fields[7].Value,
-		KeygenConfirmations:  keygenConfirmations,
+	for i, c := range k.KeygenConfirmations {
+		if len(c) > limits.MaxWireFieldBytes {
+			return nil, fmt.Errorf("keygen confirmation %d too large: %d > %d", i, len(c), limits.MaxWireFieldBytes)
+		}
 	}
 	if err := k.ValidateConsistency(); err != nil {
 		return nil, err
 	}
 	return k, nil
-}
-
-func decodeVerificationSharesBytesWithLimit(raw []byte, limits tss.Limits) ([]VerificationShare, error) {
-	records, err := wire.DecodePartyBytesWithLimit[tss.PartyID](raw, limits.MaxParties, limits.MaxPointBytes, "verification share")
-	if err != nil {
-		return nil, err
-	}
-	out := make([]VerificationShare, 0, len(records))
-	for _, record := range records {
-		out = append(out, VerificationShare{Party: record.Party, PublicKey: record.Bytes})
-	}
-	return out, nil
-}
-
-func encodeVerificationShares(shares []VerificationShare) []byte {
-	records := make([]wire.PartyBytes[tss.PartyID], len(shares))
-	for i, share := range shares {
-		records[i] = wire.PartyBytes[tss.PartyID]{Party: share.Party, Bytes: share.PublicKey}
-	}
-	return wire.EncodePartyBytes(records)
 }

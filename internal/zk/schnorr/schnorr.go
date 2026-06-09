@@ -23,9 +23,15 @@ const (
 
 // Proof is a Schnorr proof of knowledge over secp256k1.
 type Proof struct {
-	Commitment []byte
-	Response   []byte
+	Commitment []byte `wire:"1,bytes"`
+	Response   []byte `wire:"2,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for Proof.
+func (Proof) WireType() string { return proofWireType }
+
+// WireVersion returns the wire format version for Proof.
+func (Proof) WireVersion() uint16 { return proofVersion }
 
 // Prove creates a Fiat-Shamir Schnorr proof for secret and returns its public key.
 func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
@@ -76,37 +82,18 @@ func Verify(domain, public []byte, proof *Proof) bool {
 	return secp.Equal(left, right)
 }
 
-// MarshalBinary encodes the proof as a deterministic TLV record.
+// MarshalBinary encodes the proof using the object-level wire codec.
 func (p *Proof) MarshalBinary() ([]byte, error) {
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	return wire.Marshal(proofVersion, proofWireType, []wire.Field{
-		{Tag: proofFieldCommitment, Value: p.Commitment},
-		{Tag: proofFieldResponse, Value: p.Response},
-	})
+	return wire.Marshal(p)
 }
 
-// UnmarshalProof decodes a deterministic TLV Schnorr proof record.
+// UnmarshalProof decodes a TLV Schnorr proof record using the object-level wire codec.
 func UnmarshalProof(in []byte) (*Proof, error) {
-	version, fields, err := wire.Unmarshal(in, proofWireType)
-	if err != nil {
+	var proof Proof
+	if err := wire.Unmarshal(in, &proof); err != nil {
 		return nil, err
 	}
-	if version != proofVersion {
-		return nil, fmt.Errorf("unexpected Schnorr proof version %d", version)
-	}
-	if len(fields) != 2 || fields[0].Tag != proofFieldCommitment || fields[1].Tag != proofFieldResponse {
-		return nil, errors.New("unexpected Schnorr proof field set")
-	}
-	proof := &Proof{
-		Commitment: fields[0].Value,
-		Response:   fields[1].Value,
-	}
-	if err := proof.Validate(); err != nil {
-		return nil, err
-	}
-	return proof, nil
+	return &proof, nil
 }
 
 // Validate checks the canonical curve point and scalar encodings in the proof.

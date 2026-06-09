@@ -427,7 +427,33 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	return nil
 }
 
-// MarshalBinary encodes the AffGProof in canonical TLV format.
+// affGProofWire is the wire DTO for AffGProof.
+type affGProofWire struct {
+	Version        uint16 `wire:"1,u16"`
+	A              []byte `wire:"2,bytes"`
+	Bx             []byte `wire:"3,bytes"`
+	By             []byte `wire:"4,bytes"`
+	E              []byte `wire:"5,bytes"`
+	S              []byte `wire:"6,bytes"`
+	F              []byte `wire:"7,bytes"`
+	T              []byte `wire:"8,bytes"`
+	Y              []byte `wire:"9,bytes"`
+	Z1             []byte `wire:"10,bytes"`
+	Z2             []byte `wire:"11,bytes"`
+	Z3             []byte `wire:"12,bytes"`
+	Z4             []byte `wire:"13,bytes"`
+	W              []byte `wire:"14,bytes"`
+	WY             []byte `wire:"15,bytes"`
+	TranscriptHash []byte `wire:"16,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for affGProofWire.
+func (affGProofWire) WireType() string { return affGProofWireType }
+
+// WireVersion returns the wire format version for affGProofWire.
+func (affGProofWire) WireVersion() uint16 { return affGProofVersion }
+
+// MarshalBinary encodes the AffGProof using the object-level wire codec.
 func (p *AffGProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil AffGProof")
@@ -436,114 +462,93 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: Bx: %w", err)
 	}
-	return wire.Marshal(affGProofVersion, affGProofWireType, []wire.Field{
-		{Tag: affGProofFieldVersion, Value: wire.Uint16(p.Version)},
-		{Tag: affGProofFieldA, Value: p.A.Bytes()},
-		{Tag: affGProofFieldBx, Value: bxBytes},
-		{Tag: affGProofFieldBy, Value: p.By.Bytes()},
-		{Tag: affGProofFieldE, Value: p.E.Bytes()},
-		{Tag: affGProofFieldS, Value: p.S.Bytes()},
-		{Tag: affGProofFieldF, Value: p.F.Bytes()},
-		{Tag: affGProofFieldT, Value: p.T.Bytes()},
-		{Tag: affGProofFieldY, Value: p.Y.Bytes()},
-		{Tag: affGProofFieldZ1, Value: EncodeSigned(p.Z1)},
-		{Tag: affGProofFieldZ2, Value: EncodeSigned(p.Z2)},
-		{Tag: affGProofFieldZ3, Value: EncodeSigned(p.Z3)},
-		{Tag: affGProofFieldZ4, Value: EncodeSigned(p.Z4)},
-		{Tag: affGProofFieldW, Value: p.W.Bytes()},
-		{Tag: affGProofFieldWY, Value: p.WY.Bytes()},
-		{Tag: affGProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+	return wire.Marshal(affGProofWire{
+		Version:        p.Version,
+		A:              p.A.Bytes(),
+		Bx:             bxBytes,
+		By:             p.By.Bytes(),
+		E:              p.E.Bytes(),
+		S:              p.S.Bytes(),
+		F:              p.F.Bytes(),
+		T:              p.T.Bytes(),
+		Y:              p.Y.Bytes(),
+		Z1:             EncodeSigned(p.Z1),
+		Z2:             EncodeSigned(p.Z2),
+		Z3:             EncodeSigned(p.Z3),
+		Z4:             EncodeSigned(p.Z4),
+		W:              p.W.Bytes(),
+		WY:             p.WY.Bytes(),
+		TranscriptHash: p.TranscriptHash,
 	})
 }
 
 // UnmarshalAffGProof decodes a canonical TLV AffGProof.
 func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
-	version, fields, err := wire.Unmarshal(in, affGProofWireType)
-	if err != nil {
+	var w affGProofWire
+	if err := wire.Unmarshal(in, &w); err != nil {
 		return nil, err
 	}
-	if version != affGProofVersion {
-		return nil, fmt.Errorf("unexpected AffGProof wire version %d", version)
+	if w.Version != affGProofVersion {
+		return nil, fmt.Errorf("unsupported AffGProof version %d", w.Version)
 	}
-	if err := wire.RequireExactTags(fields,
-		affGProofFieldVersion, affGProofFieldA, affGProofFieldBx, affGProofFieldBy,
-		affGProofFieldE, affGProofFieldS, affGProofFieldF, affGProofFieldT,
-		affGProofFieldY,
-		affGProofFieldZ1, affGProofFieldZ2, affGProofFieldZ3, affGProofFieldZ4,
-		affGProofFieldW, affGProofFieldWY, affGProofFieldTranscriptHash,
-	); err != nil {
-		return nil, err
-	}
-
-	// Tags validated; access fields by index.
-	pVersion, err := wire.DecodeUint16(fields[0].Value)
-	if err != nil {
-		return nil, err
-	}
-	if pVersion != affGProofVersion {
-		return nil, fmt.Errorf("unsupported AffGProof version %d", pVersion)
-	}
-
-	a, err := DecodePositive(fields[1].Value)
+	a, err := DecodePositive(w.A)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid A: %w", err)
 	}
-	Bx, err := secp.PointFromBytes(fields[2].Value)
+	Bx, err := secp.PointFromBytes(w.Bx)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid Bx: %w", err)
 	}
-	by, err := DecodePositive(fields[3].Value)
+	by, err := DecodePositive(w.By)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid By: %w", err)
 	}
-	eVal, err := DecodePositive(fields[4].Value)
+	eVal, err := DecodePositive(w.E)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid E: %w", err)
 	}
-	sVal, err := DecodePositive(fields[5].Value)
+	sVal, err := DecodePositive(w.S)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid S: %w", err)
 	}
-	fVal, err := DecodePositive(fields[6].Value)
+	fVal, err := DecodePositive(w.F)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid F: %w", err)
 	}
-	tVal, err := DecodePositive(fields[7].Value)
+	tVal, err := DecodePositive(w.T)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid T: %w", err)
 	}
-	y, err := DecodePositive(fields[8].Value)
+	y, err := DecodePositive(w.Y)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid Y: %w", err)
 	}
-
-	z1, err := DecodeSigned(fields[9].Value)
+	z1, err := DecodeSigned(w.Z1)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z1: %w", err)
 	}
-	z2, err := DecodeSigned(fields[10].Value)
+	z2, err := DecodeSigned(w.Z2)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(fields[11].Value)
+	z3, err := DecodeSigned(w.Z3)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z3: %w", err)
 	}
-	z4, err := DecodeSigned(fields[12].Value)
+	z4, err := DecodeSigned(w.Z4)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid z4: %w", err)
 	}
-	wVal, err := DecodePositive(fields[13].Value)
+	wVal, err := DecodePositive(w.W)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid W: %w", err)
 	}
-	wy, err := DecodePositive(fields[14].Value)
+	wy, err := DecodePositive(w.WY)
 	if err != nil {
 		return nil, fmt.Errorf("AffGProof: invalid WY: %w", err)
 	}
-
 	return &AffGProof{
-		Version:        pVersion,
+		Version:        w.Version,
 		A:              a,
 		Bx:             Bx,
 		By:             by,
@@ -558,7 +563,7 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 		Z4:             z4,
 		W:              wVal,
 		WY:             wy,
-		TranscriptHash: fields[15].Value,
+		TranscriptHash: w.TranscriptHash,
 	}, nil
 }
 

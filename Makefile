@@ -56,7 +56,27 @@ test-fuzzing:
 
 # CI: Fast build + vet + lint + format + tidy + Tier 0 + Tier 1.
 .PHONY: ci
-ci: build vet lint format tidy-check test-fast
+ci: build vet lint format tidy-check check-wire-api test-fast
+
+# Check that production code uses only the object-level wire API (Marshal/Unmarshal),
+# not the deprecated field-level API (MarshalFields/UnmarshalFields/RequireExactTags).
+.PHONY: check-wire-api
+check-wire-api:
+	@echo "Checking wire API usage..."
+	@violations=$$(find . -name '*.go' \
+		-not -path './.git/*' \
+		-not -path './internal/wire/*' \
+		-not -path './internal/testutil/*' \
+		-not -name '*_test.go' \
+		-exec grep -ln 'wire\.MarshalFields\|wire\.UnmarshalFields\|RequireExactTags' {} \;); \
+	if [ -n "$$violations" ]; then \
+		echo "ERROR: Field-level wire API found in production code:"; \
+		echo "$$violations"; \
+		echo "Use wire.Marshal/wire.Unmarshal instead."; \
+		exit 1; \
+	else \
+		echo "PASS: No field-level API in production code"; \
+	fi
 
 # Nightly: CI + integration + slowcrypto + race + stress.
 .PHONY: nightly
@@ -132,7 +152,8 @@ help:
 	@echo "  test-stress      Tier 4: stress with count=10 (3h)"
 	@echo "  test-race        run tests with race detector (1h)"
 	@echo "  test-coverage    run integration tests with coverage report"
-	@echo "  ci               PR-ready: build + vet + lint + format + tidy + test-fast"
+	@echo "  check-wire-api   verify production code uses only object-level wire API"
+	@echo "  ci               PR-ready: build + vet + lint + format + tidy + check-wire-api + test-fast"
 	@echo "  nightly          full suite: ci + integration + slowcrypto + race + stress"
 	@echo "  lint             run golangci-lint"
 	@echo "  lint-fix         run golangci-lint with auto-fix"

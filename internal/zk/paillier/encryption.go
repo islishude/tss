@@ -167,43 +167,20 @@ func marshalEncryptionProof(p *EncryptionProof) ([]byte, error) {
 	if err := validateEncryptionProof(p); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(proofVersion, encryptionProofWireType, []wire.Field{
-		{Tag: encryptionProofFieldScalarCommitment, Value: wire.NonNilBytes(p.ScalarCommitment)},
-		{Tag: encryptionProofFieldCipherCommitment, Value: wire.NonNilBytes(p.CipherCommitment)},
-		{Tag: encryptionProofFieldPointCommitment, Value: wire.NonNilBytes(p.PointCommitment)},
-		{Tag: encryptionProofFieldBound, Value: wire.NonNilBytes(p.Bound)},
-		{Tag: encryptionProofFieldResponse, Value: wire.NonNilBytes(p.Response)},
-		{Tag: encryptionProofFieldRandomness, Value: wire.NonNilBytes(p.Randomness)},
-		{Tag: encryptionProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
-	})
+	return wire.Marshal(p)
 }
 
 // UnmarshalEncryptionProof decodes and validates an encryption proof.
 func UnmarshalEncryptionProof(in []byte) (*EncryptionProof, error) {
-	version, fields, err := wire.Unmarshal(in, encryptionProofWireType)
-	if err != nil {
+	var p EncryptionProof
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if version != proofVersion {
-		return nil, fmt.Errorf("unexpected encryption proof version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, encryptionProofFieldScalarCommitment, encryptionProofFieldCipherCommitment, encryptionProofFieldPointCommitment, encryptionProofFieldBound, encryptionProofFieldResponse, encryptionProofFieldRandomness, encryptionProofFieldTranscriptHash); err != nil {
+	p.Version = proofVersion
+	if err := validateEncryptionProof(&p); err != nil {
 		return nil, err
 	}
-	p := &EncryptionProof{
-		Version:          proofVersion,
-		ScalarCommitment: fields[0].Value,
-		CipherCommitment: fields[1].Value,
-		PointCommitment:  fields[2].Value,
-		Bound:            fields[3].Value,
-		Response:         fields[4].Value,
-		Randomness:       fields[5].Value,
-		TranscriptHash:   fields[6].Value,
-	}
-	if err := validateEncryptionProof(p); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return &p, nil
 }
 
 func encryptionTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment, bound []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

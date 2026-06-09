@@ -143,49 +143,20 @@ func marshalModulusProof(p *ModulusProof) ([]byte, error) {
 	if err := validateModulusProof(p); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(proofVersion, modulusProofWireType, []wire.Field{
-		{Tag: modulusProofFieldW, Value: wire.NonNilBytes(p.W)},
-		{Tag: modulusProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
-		{Tag: modulusProofFieldX, Value: wire.EncodeBytesList(p.X)},
-		{Tag: modulusProofFieldA, Value: wire.NonNilBytes(p.A)},
-		{Tag: modulusProofFieldB, Value: wire.NonNilBytes(p.B)},
-		{Tag: modulusProofFieldZ, Value: wire.EncodeBytesList(p.Z)},
-	})
+	return wire.Marshal(p)
 }
 
 // UnmarshalModulusProof decodes and structurally validates a modulus proof.
 func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
-	version, fields, err := wire.Unmarshal(in, modulusProofWireType)
-	if err != nil {
+	var p ModulusProof
+	if err := wire.Unmarshal(in, &p); err != nil {
 		return nil, err
 	}
-	if version != proofVersion {
-		return nil, fmt.Errorf("unexpected modulus proof version %d", version)
-	}
-	if err := wire.RequireExactTags(fields, modulusProofFieldW, modulusProofFieldTranscriptHash, modulusProofFieldX, modulusProofFieldA, modulusProofFieldB, modulusProofFieldZ); err != nil {
+	p.Version = proofVersion
+	if err := validateModulusProof(&p); err != nil {
 		return nil, err
 	}
-	xs, err := wire.DecodeBytesList(fields[2].Value)
-	if err != nil {
-		return nil, err
-	}
-	zs, err := wire.DecodeBytesList(fields[5].Value)
-	if err != nil {
-		return nil, err
-	}
-	p := &ModulusProof{
-		Version:        proofVersion,
-		W:              fields[0].Value,
-		TranscriptHash: fields[1].Value,
-		X:              xs,
-		A:              fields[3].Value,
-		B:              fields[4].Value,
-		Z:              zs,
-	}
-	if err := validateModulusProof(p); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return &p, nil
 }
 
 func validateModulusProof(p *ModulusProof) error {

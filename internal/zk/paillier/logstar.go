@@ -257,7 +257,26 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	return nil
 }
 
-// MarshalBinary encodes the LogStarProof in canonical TLV format.
+// logStarProofWire is the wire DTO for LogStarProof.
+type logStarProofWire struct {
+	Version        uint16 `wire:"1,u16"`
+	S              []byte `wire:"2,bytes"`
+	A              []byte `wire:"3,bytes"`
+	Y              []byte `wire:"4,bytes"`
+	D              []byte `wire:"5,bytes"`
+	Z1             []byte `wire:"6,bytes"`
+	Z2             []byte `wire:"7,bytes"`
+	Z3             []byte `wire:"8,bytes"`
+	TranscriptHash []byte `wire:"9,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for logStarProofWire.
+func (logStarProofWire) WireType() string { return logStarProofWireType }
+
+// WireVersion returns the wire format version for logStarProofWire.
+func (logStarProofWire) WireVersion() uint16 { return logStarProofVersion }
+
+// MarshalBinary encodes the LogStarProof using the object-level wire codec.
 func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil LogStarProof")
@@ -266,77 +285,58 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: Y: %w", err)
 	}
-	return wire.Marshal(logStarProofVersion, logStarProofWireType, []wire.Field{
-		{Tag: logStarProofFieldVersion, Value: wire.Uint16(p.Version)},
-		{Tag: logStarProofFieldS, Value: p.S.Bytes()},
-		{Tag: logStarProofFieldA, Value: p.A.Bytes()},
-		{Tag: logStarProofFieldY, Value: yBytes},
-		{Tag: logStarProofFieldD, Value: p.D.Bytes()},
-		{Tag: logStarProofFieldZ1, Value: EncodeSigned(p.Z1)},
-		{Tag: logStarProofFieldZ2, Value: p.Z2.Bytes()},
-		{Tag: logStarProofFieldZ3, Value: EncodeSigned(p.Z3)},
-		{Tag: logStarProofFieldTranscriptHash, Value: wire.NonNilBytes(p.TranscriptHash)},
+	return wire.Marshal(logStarProofWire{
+		Version:        p.Version,
+		S:              p.S.Bytes(),
+		A:              p.A.Bytes(),
+		Y:              yBytes,
+		D:              p.D.Bytes(),
+		Z1:             EncodeSigned(p.Z1),
+		Z2:             p.Z2.Bytes(),
+		Z3:             EncodeSigned(p.Z3),
+		TranscriptHash: p.TranscriptHash,
 	})
 }
 
 // UnmarshalLogStarProof decodes a canonical TLV LogStarProof.
 func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
-	version, fields, err := wire.Unmarshal(in, logStarProofWireType)
-	if err != nil {
+	var w logStarProofWire
+	if err := wire.Unmarshal(in, &w); err != nil {
 		return nil, err
 	}
-	if version != logStarProofVersion {
-		return nil, fmt.Errorf("unexpected LogStarProof wire version %d", version)
+	if w.Version != logStarProofVersion {
+		return nil, fmt.Errorf("unsupported LogStarProof version %d", w.Version)
 	}
-	if err := wire.RequireExactTags(fields,
-		logStarProofFieldVersion, logStarProofFieldS, logStarProofFieldA, logStarProofFieldY,
-		logStarProofFieldD, logStarProofFieldZ1, logStarProofFieldZ2, logStarProofFieldZ3,
-		logStarProofFieldTranscriptHash,
-	); err != nil {
-		return nil, err
-	}
-
-	// Tags validated; access fields by index.
-	pVersion, err := wire.DecodeUint16(fields[0].Value)
-	if err != nil {
-		return nil, err
-	}
-	if pVersion != logStarProofVersion {
-		return nil, fmt.Errorf("unsupported LogStarProof version %d", pVersion)
-	}
-
-	s, err := DecodePositive(fields[1].Value)
+	s, err := DecodePositive(w.S)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid S: %w", err)
 	}
-	a, err := DecodePositive(fields[2].Value)
+	a, err := DecodePositive(w.A)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid A: %w", err)
 	}
-	Y, err := secp.PointFromBytes(fields[3].Value)
+	Y, err := secp.PointFromBytes(w.Y)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid Y: %w", err)
 	}
-	d, err := DecodePositive(fields[4].Value)
+	d, err := DecodePositive(w.D)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid D: %w", err)
 	}
-
-	z1, err := DecodeSigned(fields[5].Value)
+	z1, err := DecodeSigned(w.Z1)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z1: %w", err)
 	}
-	z2, err := DecodePositive(fields[6].Value)
+	z2, err := DecodePositive(w.Z2)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z2: %w", err)
 	}
-	z3, err := DecodeSigned(fields[7].Value)
+	z3, err := DecodeSigned(w.Z3)
 	if err != nil {
 		return nil, fmt.Errorf("LogStarProof: invalid z3: %w", err)
 	}
-
 	return &LogStarProof{
-		Version:        pVersion,
+		Version:        w.Version,
 		S:              s,
 		A:              a,
 		Y:              Y,
@@ -344,7 +344,7 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 		Z1:             z1,
 		Z2:             z2,
 		Z3:             z3,
-		TranscriptHash: fields[8].Value,
+		TranscriptHash: w.TranscriptHash,
 	}, nil
 }
 

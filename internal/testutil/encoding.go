@@ -10,7 +10,7 @@ import (
 // RewriteWireField returns a copy of raw with the given TLV field's value
 // replaced. The wire type string must match the top-level message type.
 func RewriteWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, wireType)
+	version, fields, err := wire.UnmarshalFields(raw, wireType)
 	if err != nil {
 		return nil, err
 	}
@@ -18,7 +18,7 @@ func RewriteWireField(raw []byte, wireType string, tag uint16, value []byte) ([]
 		if fields[i].Tag == tag {
 			fields[i].Value = make([]byte, len(value))
 			copy(fields[i].Value, value)
-			return wire.Marshal(version, wireType, fields)
+			return wire.MarshalFields(version, wireType, fields)
 		}
 	}
 	return nil, fmt.Errorf("missing wire field %d", tag)
@@ -28,7 +28,7 @@ func RewriteWireField(raw []byte, wireType string, tag uint16, value []byte) ([]
 // replaced. The field identified by outerTag is decoded as innerType, the
 // inner field innerTag is replaced, and the result is re-encoded.
 func RewriteNestedWireField(raw []byte, outerType string, outerTag uint16, innerType string, innerTag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.Unmarshal(raw, outerType)
+	version, fields, err := wire.UnmarshalFields(raw, outerType)
 	if err != nil {
 		return nil, err
 	}
@@ -41,7 +41,7 @@ func RewriteNestedWireField(raw []byte, outerType string, outerTag uint16, inner
 			return nil, err
 		}
 		fields[i].Value = inner
-		return wire.Marshal(version, outerType, fields)
+		return wire.MarshalFields(version, outerType, fields)
 	}
 	return nil, fmt.Errorf("missing outer wire field %d", outerTag)
 }

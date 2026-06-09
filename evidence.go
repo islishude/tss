@@ -47,21 +47,6 @@ const (
 // blameWireType is the TLV type identifier for blame evidence records.
 const blameWireType = "tss.blame"
 
-const (
-	blameFieldVersion        uint16 = 1
-	blameFieldProtocol       uint16 = 2
-	blameFieldSessionID      uint16 = 3
-	blameFieldRound          uint16 = 4
-	blameFieldFrom           uint16 = 5
-	blameFieldTo             uint16 = 6
-	blameFieldPayloadType    uint16 = 7
-	blameFieldPayloadHash    uint16 = 8
-	blameFieldTranscriptHash uint16 = 9
-	blameFieldKind           uint16 = 10
-	blameFieldReason         uint16 = 11
-	blameFieldPublicInputs   uint16 = 12
-)
-
 // EvidenceField carries one public input or public-input hash for blame evidence.
 type EvidenceField struct {
 	Key   string
@@ -184,25 +169,46 @@ func (e *BlameEvidence) Validate() error {
 	return nil
 }
 
-// MarshalBinary encodes BlameEvidence using strict canonical TLV wire format.
+// blameEvidenceWire is the wire DTO for BlameEvidence.
+type blameEvidenceWire struct {
+	Version        uint16       `wire:"1,u16"`
+	Protocol       ProtocolID   `wire:"2,string"`
+	SessionID      []byte       `wire:"3,bytes,len=32"`
+	Round          uint8        `wire:"4,u8"`
+	From           PartyID      `wire:"5,u32"`
+	To             PartyID      `wire:"6,u32"`
+	PayloadType    PayloadType  `wire:"7,string"`
+	PayloadHash    []byte       `wire:"8,bytes"`
+	TranscriptHash []byte       `wire:"9,bytes"`
+	Kind           EvidenceKind `wire:"10,string"`
+	Reason         string       `wire:"11,string"`
+	PublicInputs   []byte       `wire:"12,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for blameEvidenceWire.
+func (blameEvidenceWire) WireType() string { return blameWireType }
+
+// WireVersion returns the wire format version for blameEvidenceWire.
+func (blameEvidenceWire) WireVersion() uint16 { return Version }
+
+// MarshalBinary encodes BlameEvidence using the object-level wire codec.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
-	publicInputsBytes := encodeEvidenceFields(e.PublicInputs)
-	return wire.Marshal(Version, blameWireType, []wire.Field{
-		{Tag: blameFieldVersion, Value: wire.Uint16(e.Version)},
-		{Tag: blameFieldProtocol, Value: []byte(e.Protocol)},
-		{Tag: blameFieldSessionID, Value: e.SessionID[:]},
-		{Tag: blameFieldRound, Value: []byte{e.Round}},
-		{Tag: blameFieldFrom, Value: wire.Uint32(uint32(e.From))},
-		{Tag: blameFieldTo, Value: wire.Uint32(uint32(e.To))},
-		{Tag: blameFieldPayloadType, Value: []byte(e.PayloadType)},
-		{Tag: blameFieldPayloadHash, Value: wire.NonNilBytes(e.PayloadHash)},
-		{Tag: blameFieldTranscriptHash, Value: wire.NonNilBytes(e.TranscriptHash)},
-		{Tag: blameFieldKind, Value: []byte(e.Kind)},
-		{Tag: blameFieldReason, Value: []byte(e.Reason)},
-		{Tag: blameFieldPublicInputs, Value: wire.NonNilBytes(publicInputsBytes)},
+	return wire.Marshal(blameEvidenceWire{
+		Version:        e.Version,
+		Protocol:       e.Protocol,
+		SessionID:      e.SessionID[:],
+		Round:          e.Round,
+		From:           e.From,
+		To:             e.To,
+		PayloadType:    e.PayloadType,
+		PayloadHash:    e.PayloadHash,
+		TranscriptHash: e.TranscriptHash,
+		Kind:           e.Kind,
+		Reason:         e.Reason,
+		PublicInputs:   encodeEvidenceFields(e.PublicInputs),
 	})
 }
 
@@ -215,102 +221,61 @@ func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
 	if len(in) > limits.MaxBlameEvidenceBytes {
 		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), limits.MaxBlameEvidenceBytes)
 	}
-	version, fields, err := wire.UnmarshalWithLimits(in, blameWireType, wire.Limits{
+	var w blameEvidenceWire
+	if err := wire.Unmarshal(in, &w, wire.WithLimits(wire.Limits{
 		MaxTotalBytes: limits.MaxBlameEvidenceBytes,
 		MaxFields:     limits.MaxWireFields,
 		MaxFieldBytes: limits.MaxWireFieldBytes,
-	})
-	if err != nil {
+	})); err != nil {
 		return nil, err
 	}
-	if version != Version {
-		return nil, fmt.Errorf("unexpected blame evidence wire version %d", version)
+	if w.Version != Version {
+		return nil, fmt.Errorf("unexpected blame evidence version %d", w.Version)
 	}
-	if err := wire.RequireExactTags(fields,
-		blameFieldVersion,
-		blameFieldProtocol,
-		blameFieldSessionID,
-		blameFieldRound,
-		blameFieldFrom,
-		blameFieldTo,
-		blameFieldPayloadType,
-		blameFieldPayloadHash,
-		blameFieldTranscriptHash,
-		blameFieldKind,
-		blameFieldReason,
-		blameFieldPublicInputs,
-	); err != nil {
-		return nil, err
-	}
-	evVersion, err := wire.DecodeUint16(fields[0].Value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid blame evidence version: %w", err)
-	}
-	if evVersion != Version {
-		return nil, fmt.Errorf("unexpected blame evidence version %d", evVersion)
-	}
-	protocol := fields[1].Value
-	if len(protocol) == 0 {
+	if w.Protocol == "" {
 		return nil, errors.New("missing blame evidence protocol")
 	}
-	session, err := SessionIDFromBytes(fields[2].Value)
+	if w.PayloadType == "" {
+		return nil, errors.New("missing blame evidence payload type")
+	}
+	if len(w.PayloadType) > limits.MaxPayloadTypeBytes {
+		return nil, fmt.Errorf("blame evidence payload type too long: %d > %d", len(w.PayloadType), limits.MaxPayloadTypeBytes)
+	}
+	if len(w.PayloadHash) != sha256.Size {
+		return nil, errors.New("invalid blame evidence payload hash")
+	}
+	if len(w.TranscriptHash) != 0 && len(w.TranscriptHash) != sha256.Size {
+		return nil, errors.New("invalid blame evidence transcript hash")
+	}
+	if w.Kind == "" {
+		return nil, errors.New("missing blame evidence kind")
+	}
+	if w.Reason == "" {
+		return nil, errors.New("missing blame evidence reason")
+	}
+	if len(w.Reason) > limits.MaxEvidenceReasonBytes {
+		return nil, fmt.Errorf("blame evidence reason too long: %d > %d", len(w.Reason), limits.MaxEvidenceReasonBytes)
+	}
+	session, err := SessionIDFromBytes(w.SessionID)
 	if err != nil {
 		return nil, err
 	}
-	round := fields[3].Value
-	if len(round) != 1 {
-		return nil, errors.New("invalid blame evidence round")
-	}
-	from, err := wire.DecodeUint32(fields[4].Value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid blame evidence from: %w", err)
-	}
-	to, err := wire.DecodeUint32(fields[5].Value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid blame evidence to: %w", err)
-	}
-	payloadType := fields[6].Value
-	if len(payloadType) == 0 {
-		return nil, errors.New("missing blame evidence payload type")
-	}
-	if len(payloadType) > limits.MaxPayloadTypeBytes {
-		return nil, fmt.Errorf("blame evidence payload type too long: %d > %d", len(payloadType), limits.MaxPayloadTypeBytes)
-	}
-	payloadHash := fields[7].Value
-	if len(payloadHash) != sha256.Size {
-		return nil, errors.New("invalid blame evidence payload hash")
-	}
-	transcriptHash := fields[8].Value
-	if len(transcriptHash) != 0 && len(transcriptHash) != sha256.Size {
-		return nil, errors.New("invalid blame evidence transcript hash")
-	}
-	kind := fields[9].Value
-	if len(kind) == 0 {
-		return nil, errors.New("missing blame evidence kind")
-	}
-	reason := fields[10].Value
-	if len(reason) == 0 {
-		return nil, errors.New("missing blame evidence reason")
-	}
-	if len(reason) > limits.MaxEvidenceReasonBytes {
-		return nil, fmt.Errorf("blame evidence reason too long: %d > %d", len(reason), limits.MaxEvidenceReasonBytes)
-	}
-	publicInputs, err := decodeEvidenceFields(fields[11].Value, limits)
+	publicInputs, err := decodeEvidenceFields(w.PublicInputs, limits)
 	if err != nil {
 		return nil, err
 	}
 	evidence := &BlameEvidence{
-		Version:        evVersion,
-		Protocol:       ProtocolID(protocol),
+		Version:        w.Version,
+		Protocol:       w.Protocol,
 		SessionID:      session,
-		Round:          round[0],
-		From:           PartyID(from),
-		To:             PartyID(to),
-		PayloadType:    PayloadType(payloadType),
-		PayloadHash:    slices.Clone(payloadHash),
-		TranscriptHash: slices.Clone(transcriptHash),
-		Kind:           EvidenceKind(kind),
-		Reason:         string(reason),
+		Round:          w.Round,
+		From:           w.From,
+		To:             w.To,
+		PayloadType:    w.PayloadType,
+		PayloadHash:    slices.Clone(w.PayloadHash),
+		TranscriptHash: slices.Clone(w.TranscriptHash),
+		Kind:           w.Kind,
+		Reason:         w.Reason,
 		PublicInputs:   publicInputs,
 	}
 	if err := evidence.Validate(); err != nil {

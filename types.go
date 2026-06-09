@@ -7,18 +7,6 @@ const envelopeHashLabel = "github.com/islishude/tss/envelope/v1"
 
 const envelopeWireType = "tss.envelope"
 
-const (
-	envelopeFieldProtocol uint16 = iota + 1
-	envelopeFieldVersion
-	envelopeFieldSessionID
-	envelopeFieldRound
-	envelopeFieldFrom
-	envelopeFieldTo
-	envelopeFieldPayloadType
-	envelopeFieldPayload
-	envelopeFieldTranscriptHash
-)
-
 // PartyID identifies one protocol participant; zero is reserved as "unset".
 type PartyID uint32
 
