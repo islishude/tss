@@ -4,8 +4,20 @@ import (
 	"testing"
 )
 
+// defaultTestThresholdLimits returns conservative fail-closed threshold limits for testing.
+func defaultTestThresholdLimits() ThresholdLimits {
+	return ThresholdLimits{
+		MaxParties:              DefaultMaxParties,
+		MaxThreshold:            DefaultMaxThreshold,
+		MaxSigners:              DefaultMaxSigners,
+		MinProductionThreshold:  2,
+		AllowOneOfOne:           false,
+		AllowOversizedSignerSet: false,
+	}
+}
+
 func TestThresholdConfigRejectsTooManyParties(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	limits.MaxParties = 4
 
 	cfg := ThresholdConfig{
@@ -19,7 +31,7 @@ func TestThresholdConfigRejectsTooManyParties(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	limits.MaxThreshold = 3
 
 	cfg := ThresholdConfig{
@@ -33,18 +45,18 @@ func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
 }
 
 func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
-	// DefaultLimits is fail-closed: rejects 1-of-1.
+	// Default threshold limits are fail-closed: reject 1-of-1.
 	cfg := ThresholdConfig{
 		Threshold: 1,
 		Parties:   []PartyID{1},
 		Self:      1,
 	}
 	if err := cfg.Validate(); err == nil {
-		t.Fatal("DefaultLimits should reject 1-of-1")
+		t.Fatal("default limits should reject 1-of-1")
 	}
 
 	// Explicit block: AllowOneOfOne=false, MinProductionThreshold=2
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	limits.AllowOneOfOne = false
 	limits.MinProductionThreshold = 2
 	if err := cfg.ValidateWithLimits(limits); err == nil {
@@ -104,7 +116,7 @@ func TestThresholdConfigRejectsSelfNotInParties(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	limits.MaxSigners = 3
 
 	keyParties := []PartyID{1, 2, 3, 4, 5}
@@ -114,7 +126,7 @@ func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 3, []PartyID{1}, limits); err == nil {
 		t.Fatal("expected error for not enough signers")
@@ -122,7 +134,7 @@ func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 4}, limits); err == nil {
 		t.Fatal("expected error for non-participant signer")
@@ -130,7 +142,7 @@ func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 1}, limits); err == nil {
 		t.Fatal("expected error for duplicate signer")
@@ -138,7 +150,7 @@ func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsEmpty(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, nil, limits); err == nil {
 		t.Fatal("expected error for empty signers")
@@ -146,7 +158,7 @@ func TestValidateSignerSetRejectsEmpty(t *testing.T) {
 }
 
 func TestValidateSignerSetOversizedRequiresAllow(t *testing.T) {
-	limits := DefaultLimits()
+	limits := defaultTestThresholdLimits()
 	limits.AllowOversizedSignerSet = false
 	keyParties := []PartyID{1, 2, 3, 4}
 	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 3}, limits); err == nil {
@@ -159,30 +171,8 @@ func TestValidateSignerSetOversizedRequiresAllow(t *testing.T) {
 	}
 }
 
-func TestLimitsValidateSelfConsistency(t *testing.T) {
-	// Valid limits.
-	l := DefaultLimits()
-	if err := l.Validate(); err != nil {
-		t.Fatalf("DefaultLimits should be valid: %v", err)
-	}
-
-	// MaxThreshold > MaxParties.
-	l.MaxParties = 5
-	l.MaxThreshold = 10
-	if err := l.Validate(); err == nil {
-		t.Fatal("expected error when MaxThreshold > MaxParties")
-	}
-
-	// MaxPaillierModulusBits <= 0.
-	l = DefaultLimits()
-	l.MaxPaillierModulusBits = 0
-	if err := l.Validate(); err == nil {
-		t.Fatal("expected error when MaxPaillierModulusBits <= 0")
-	}
-}
-
-func TestDefaultLimitsIsFailClosed(t *testing.T) {
-	l := DefaultLimits()
+func TestDefaultThresholdLimitsIsFailClosed(t *testing.T) {
+	l := defaultTestThresholdLimits()
 	if l.MinProductionThreshold != 2 {
 		t.Errorf("MinProductionThreshold: got %d, want 2", l.MinProductionThreshold)
 	}
@@ -194,7 +184,7 @@ func TestDefaultLimitsIsFailClosed(t *testing.T) {
 	}
 }
 
-func TestDefaultLimitsRejectsBelowMinThreshold(t *testing.T) {
+func TestDefaultThresholdLimitsRejectsBelowMinThreshold(t *testing.T) {
 	cfg := ThresholdConfig{
 		Threshold: 1,
 		Parties:   []PartyID{1, 2},

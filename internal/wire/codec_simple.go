@@ -85,7 +85,7 @@ func (fs fieldSchema) decodeBool(fv reflect.Value, raw []byte) error {
 	return nil
 }
 
-func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet LimitSe
 	return nil
 }
 
-func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}

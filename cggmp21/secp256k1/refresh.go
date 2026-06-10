@@ -31,6 +31,7 @@ type RefreshSession struct {
 	oldKey          *KeyShare
 	cfg             tss.ThresholdConfig
 	log             tss.Logger
+	limits          Limits
 	commits         map[tss.PartyID][][]byte
 	shares          map[tss.PartyID]*big.Int
 	completed       bool
@@ -60,7 +61,8 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		return nil, nil, ErrUnsupportedRefreshThresholdChange
 	}
 	config.Parties = append([]tss.PartyID(nil), oldKey.Parties...)
-	if err := config.ValidateWithLimits(DefaultLimits()); err != nil {
+	limits := DefaultLimits()
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Generate a new Paillier keypair for key rotation.
@@ -120,6 +122,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		oldKey:          oldKey,
 		cfg:             config,
 		log:             config.Logger(),
+		limits:          limits,
 		commits:         map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:          map[tss.PartyID]*big.Int{oldKey.Party: shamir.Eval(poly, oldKey.Party, secp.Order())},
 		confirmations:   make(map[tss.PartyID][]byte, len(oldKey.Parties)),

@@ -1,70 +1,130 @@
 package ed25519
 
 import (
-	"sync"
-	"testing"
-
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/wire"
 )
+
+// FROST Ed25519 algorithm-specific limits.
+const (
+	maxFROSTParties   = 64
+	maxFROSTThreshold = 64
+	maxFROSTSigners   = 64
+)
+
+// StateLimits caps serialized FROST key material.
+type StateLimits struct {
+	MaxSerializedKeyShareBytes int
+}
+
+// PayloadLimits caps FROST payload sizes.
+type PayloadLimits struct {
+	MaxMessageBytes int
+}
+
+// CurveLimits caps Ed25519 curve point and scalar encoding sizes.
+type CurveLimits struct {
+	MaxPointBytes  int
+	MaxScalarBytes int
+}
+
+// Limits defines finite caps for FROST Ed25519 protocol parameters.
+type Limits struct {
+	Threshold tss.ThresholdLimits
+	State     StateLimits
+	Payload   PayloadLimits
+	Curve     CurveLimits
+	TLV       tss.TLVLimits
+}
+
+// testDefaultLimits allows TestMain to apply relaxed limits to all tests
+// without global mutable state. Set by TestMain; nil means use production defaults.
+var testDefaultLimits *Limits
 
 // DefaultLimits returns fail-closed production limits for FROST Ed25519.
 // It rejects 1-of-1, oversized signer sets, and thresholds below 2.
-// Test code must use TestLimits or SetLimitsForTesting to relax these
-// constraints.
-func DefaultLimits() tss.Limits {
-	limitsMu.Lock()
-	ov := overrideLimits
-	limitsMu.Unlock()
-	if ov != nil {
-		return *ov
+func DefaultLimits() Limits {
+	if testDefaultLimits != nil {
+		return *testDefaultLimits
 	}
-	l := tss.DefaultLimits()
-	l.MaxParties = tss.MaxFROSTParties
-	l.MaxThreshold = tss.MaxFROSTThreshold
-	l.MaxSigners = tss.MaxFROSTSigners
-	return l
+	return Limits{
+		Threshold: tss.ThresholdLimits{
+			MaxParties:              maxFROSTParties,
+			MaxThreshold:            maxFROSTThreshold,
+			MaxSigners:              maxFROSTSigners,
+			MinProductionThreshold:  2,
+			AllowOneOfOne:           false,
+			AllowOversizedSignerSet: false,
+		},
+		State: StateLimits{
+			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
+		},
+		Payload: PayloadLimits{
+			MaxMessageBytes: 65536,
+		},
+		Curve: CurveLimits{
+			MaxPointBytes:  32,
+			MaxScalarBytes: 32,
+		},
+		TLV: tss.TLVLimits{
+			MaxFields:     tss.DefaultMaxWireFields,
+			MaxFieldBytes: tss.DefaultMaxWireFieldBytes,
+		},
+	}
 }
 
 // TestLimits returns relaxed limits for FROST Ed25519 test code only.
 // 1-of-1 and oversized signer sets are allowed. NEVER use these limits in
 // production entry points.
-func TestLimits() tss.Limits {
-	l := DefaultLimits()
-	l.MaxParties = 8
-	l.MaxThreshold = 8
-	l.MaxSigners = 8
-	l.AllowOneOfOne = true
-	l.MinProductionThreshold = 1
-	l.AllowOversizedSignerSet = true
-	return l
+func TestLimits() Limits {
+	return Limits{
+		Threshold: tss.ThresholdLimits{
+			MaxParties:              8,
+			MaxThreshold:            8,
+			MaxSigners:              8,
+			MinProductionThreshold:  1,
+			AllowOneOfOne:           true,
+			AllowOversizedSignerSet: true,
+		},
+		State: StateLimits{
+			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
+		},
+		Payload: PayloadLimits{
+			MaxMessageBytes: 65536,
+		},
+		Curve: CurveLimits{
+			MaxPointBytes:  32,
+			MaxScalarBytes: 32,
+		},
+		TLV: tss.TLVLimits{
+			MaxFields:     tss.DefaultMaxWireFields,
+			MaxFieldBytes: tss.DefaultMaxWireFieldBytes,
+		},
+	}
 }
 
-// overrideLimits allows tests to replace the limits returned by DefaultLimits.
-// Nil means use the production default. Protected by limitsMu.
-var (
-	overrideLimits *tss.Limits
-	limitsMu       sync.Mutex
-)
+// ThresholdLimits returns the threshold portion of the limits for use with
+// tss.ThresholdConfig.ValidateWithLimits and tss.ValidateSignerSet.
+func (l Limits) ThresholdLimits() tss.ThresholdLimits {
+	return l.Threshold
+}
 
-// SetLimitsForTesting overrides the limits returned by DefaultLimits and
-// returns a function that restores the production defaults. DO NOT use
-// outside tests.
-//
-// The returned restore function is safe to use with t.Cleanup:
-//
-//	t.Cleanup(ed25519.SetLimitsForTesting(ed25519.TestLimits()))
-func SetLimitsForTesting(l tss.Limits) func() {
-	if !testing.Testing() {
-		panic("SetLimitsForTesting called outside of tests — production code must use DefaultLimits")
+// frameLimits converts TLV limits to wire.FrameLimits for the given total byte cap.
+func (l Limits) frameLimits(maxTotal int) wire.FrameLimits {
+	return wire.FrameLimits{
+		MaxTotalBytes: maxTotal,
+		MaxFields:     l.TLV.MaxFields,
+		MaxFieldBytes: l.TLV.MaxFieldBytes,
 	}
-	limitsMu.Lock()
-	old := overrideLimits
-	lc := l
-	overrideLimits = &lc
-	limitsMu.Unlock()
-	return func() {
-		limitsMu.Lock()
-		overrideLimits = old
-		limitsMu.Unlock()
+}
+
+// fieldLimits returns semantic field limits for FROST wire encoding tags.
+func (l Limits) fieldLimits() wire.FieldLimits {
+	return wire.FieldLimits{
+		"scalar":    l.Curve.MaxScalarBytes,
+		"point":     l.Curve.MaxPointBytes,
+		"parties":   l.Threshold.MaxParties,
+		"threshold": l.Threshold.MaxThreshold,
+		"signers":   l.Threshold.MaxSigners,
 	}
 }

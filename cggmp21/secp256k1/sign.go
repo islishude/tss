@@ -116,7 +116,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		KeygenTranscriptHash: p.KeygenTranscriptHash,
 		PartiesHash:          p.PartiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.VerifyShares),
-	})
+	}, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
 // Validate checks local presign structure and scalar/point encodings.
@@ -226,6 +226,7 @@ type PresignSession struct {
 	sessionID     tss.SessionID
 	config        tss.ThresholdConfig
 	log           tss.Logger
+	limits        Limits
 	signers       []tss.PartyID
 	context       PresignContext
 	contextHash   []byte
@@ -304,6 +305,7 @@ type SignSession struct {
 	sessionID tss.SessionID
 	guard     *tss.EnvelopeGuard
 	log       tss.Logger
+	limits    Limits
 	digest    []byte
 	lowS      bool
 	publicKey []byte

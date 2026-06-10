@@ -440,7 +440,7 @@ func TestBlameEvidenceRecordListValueExceedsLimitRejected(t *testing.T) {
 func buildEvidenceWithField12(t *testing.T, session SessionID, field12Value []byte) []byte {
 	t.Helper()
 
-	limits := DefaultLimits()
+	maxBlameEvidenceBytes := DefaultMaxBlameEvidenceBytes
 	fields := []wire.Field{
 		{Tag: 1, Value: wire.Uint16(uint16(Version))}, // Version
 		{Tag: 2, Value: []byte("test-protocol")},      // Protocol
@@ -460,9 +460,9 @@ func buildEvidenceWithField12(t *testing.T, session SessionID, field12Value []by
 		t.Fatalf("buildEvidenceWithField12: %v", err)
 	}
 	// Ensure total size respects the blame evidence limit.
-	if len(raw) > limits.MaxBlameEvidenceBytes {
+	if len(raw) > maxBlameEvidenceBytes {
 		t.Fatalf("buildEvidenceWithField12: constructed message too large: %d > %d",
-			len(raw), limits.MaxBlameEvidenceBytes)
+			len(raw), maxBlameEvidenceBytes)
 	}
 	return raw
 }

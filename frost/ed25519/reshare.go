@@ -32,6 +32,7 @@ type ReshareSession struct {
 
 	cfg     tss.ThresholdConfig
 	log     tss.Logger
+	limits  Limits
 	commits map[tss.PartyID][][]byte
 	shares  map[tss.PartyID]*fed.Scalar
 
@@ -42,7 +43,7 @@ type ReshareSession struct {
 }
 
 type reshareCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments" wire:"1,byteslist"`
+	Commitments [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
 }
 
 // WireType returns the canonical wire type identifier for reshareCommitmentsPayload.
@@ -52,7 +53,7 @@ func (reshareCommitmentsPayload) WireType() string { return reshareCommitmentsPa
 func (reshareCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type reshareSharePayload struct {
-	Share []byte `json:"share" wire:"1,bytes"`
+	Share []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
 }
 
 // WireType returns the canonical wire type identifier for reshareSharePayload.
@@ -109,15 +110,15 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		return nil, nil, err
 	}
 	limits := DefaultLimits()
-	if err := config.ValidateWithLimits(limits); err != nil {
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	newParties = tss.SortParties(newParties)
 	if newThreshold <= 0 || newThreshold > len(newParties) {
 		return nil, nil, errors.New("invalid new threshold for reshare")
 	}
-	if newThreshold > limits.MaxThreshold {
-		return nil, nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.MaxThreshold)
+	if newThreshold > limits.Threshold.MaxThreshold {
+		return nil, nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.Threshold.MaxThreshold)
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
@@ -159,6 +160,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		selfID:       oldKey.Party,
 		cfg:          config,
 		log:          config.Logger(),
+		limits:       limits,
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
 	}
@@ -206,8 +208,8 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 	}
 	oldParties = tss.SortParties(oldParties)
 	newParties = tss.SortParties(newParties)
-	if len(oldParties) > limits.MaxParties {
-		return nil, fmt.Errorf("too many old parties: %d > %d", len(oldParties), limits.MaxParties)
+	if len(oldParties) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("too many old parties: %d > %d", len(oldParties), limits.Threshold.MaxParties)
 	}
 	if err := wire.ValidateStrictSortedIDs(oldParties); err != nil {
 		return nil, fmt.Errorf("invalid old participant set: %w", err)
@@ -215,8 +217,8 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 	if newThreshold <= 0 || newThreshold > len(newParties) {
 		return nil, errors.New("invalid new threshold for reshare")
 	}
-	if newThreshold > limits.MaxThreshold {
-		return nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.MaxThreshold)
+	if newThreshold > limits.Threshold.MaxThreshold {
+		return nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.Threshold.MaxThreshold)
 	}
 	if !tss.ContainsParty(newParties, config.Self) {
 		return nil, errors.New("recipient must be in the new participant set")
@@ -227,7 +229,7 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 	validationConfig := config
 	validationConfig.Parties = append([]tss.PartyID(nil), newParties...)
 	validationConfig.Threshold = newThreshold
-	if err := validationConfig.ValidateWithLimits(limits); err != nil {
+	if err := validationConfig.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
@@ -243,6 +245,7 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 		selfID:       config.Self,
 		cfg:          config,
 		log:          config.Logger(),
+		limits:       limits,
 		commits:      make(map[tss.PartyID][][]byte),
 		shares:       make(map[tss.PartyID]*fed.Scalar),
 	}, nil
@@ -256,7 +259,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 		return nil, nil, err
 	}
 	limits := DefaultLimits()
-	if err := config.ValidateWithLimits(limits); err != nil {
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if config.Self != oldKey.Party {
@@ -288,6 +291,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 		refreshMode:  true,
 		cfg:          config,
 		log:          config.Logger(),
+		limits:       limits,
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
 	}

@@ -117,29 +117,6 @@ func AssertProtocolError(tb interface{ Fatal(...any) }, err error, code string) 
 	return pe
 }
 
-// TestLimits returns relaxed limits suitable for test code. Test limits
-// allow small Paillier moduli (512 bits), 1-of-1 configurations, and
-// oversized signer sets. These limits must not be used in production
-// entry points.
-func TestLimits() tss.Limits {
-	l := tss.DefaultLimits()
-	l.MaxParties = 8
-	l.MaxThreshold = 8
-	l.MaxSigners = 8
-	l.AllowOneOfOne = true
-	l.MinProductionThreshold = 1
-	l.AllowOversizedSignerSet = true
-	l.MaxPaillierModulusBits = 8192
-	l.MaxPaillierPublicKeyBytes = 4096
-	l.MaxPaillierPrivateKeyBytes = 8192
-	l.MaxPaillierCiphertextBytes = 4096
-	l.MaxPaillierProofBytes = 512 << 10
-	l.MaxRingPedersenParamsBytes = 8192
-	l.MaxMTAResponseBytes = 512 << 10
-	l.MaxZKProofBytes = 512 << 10
-	return l
-}
-
 // MustDecodeHex decodes a hex string into a byte slice. It calls t.Fatal if
 // decoding fails, making it suitable for test fixture setup where a malformed
 // hex literal is a programmer error.

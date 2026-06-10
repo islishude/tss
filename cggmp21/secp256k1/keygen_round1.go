@@ -36,7 +36,11 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 // equivocation. A mismatch indicates a dishonest participant or compromised
 // transport and requires aborting the key material.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
-	if err := config.ValidateWithLimits(DefaultLimits()); err != nil {
+	limits := DefaultLimits()
+	if opts.Limits != nil {
+		limits = *opts.Limits
+	}
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 
@@ -108,6 +112,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	s := &KeygenSession{
 		cfg:     config,
 		log:     config.Logger(),
+		limits:  limits,
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
 		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
 		chainCodes: map[tss.PartyID][]byte{

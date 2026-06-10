@@ -195,7 +195,7 @@ func TestClaimPresignRejectsNil(t *testing.T) {
 
 func TestValidateSignerSetRejectsEmptyKey(t *testing.T) {
 	key := &KeyShare{Party: 1, Threshold: 1, Parties: []tss.PartyID{1}}
-	err := validateSignerSet(key, []tss.PartyID{})
+	err := validateSignerSet(key, []tss.PartyID{}, DefaultLimits())
 	if err == nil {
 		t.Fatal("expected empty signer set rejection")
 	}

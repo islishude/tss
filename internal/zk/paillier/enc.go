@@ -274,13 +274,13 @@ func (p *EncProof) MarshalBinary() ([]byte, error) {
 		Z2:             p.Z2,
 		Z3:             p.Z3,
 		TranscriptHash: p.TranscriptHash,
-	})
+	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalEncProof decodes a canonical TLV EncProof.
 func UnmarshalEncProof(in []byte) (*EncProof, error) {
 	var w encProofWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return nil, err
 	}
 	if w.Version != encProofVersion {

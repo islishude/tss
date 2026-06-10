@@ -23,7 +23,7 @@ func (fs fieldSchema) encodeU32List(fv reflect.Value) ([]byte, error) {
 	return out, nil
 }
 
-func (fs fieldSchema) decodeU32List(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeU32List(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	var maxItems int
 	if fs.maxItems != "" {
 		v, err := fs.getLimit(fs.maxItems, limitSet)
@@ -68,7 +68,7 @@ func (fs fieldSchema) decodeU32List(fv reflect.Value, raw []byte, limitSet Limit
 
 // ---- bytes list -------------------------------------------------------------
 
-func (fs fieldSchema) encodeBytesList(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeBytesList(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
 	out := Uint32(uint32(n))
 	for i := range n {
@@ -97,7 +97,7 @@ func (fs fieldSchema) encodeBytesList(fv reflect.Value, limitSet LimitSet) ([]by
 	return out, nil
 }
 
-func (fs fieldSchema) decodeBytesList(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeBytesList(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	var maxItems, maxItemBytes int
 	if fs.maxItems != "" {
 		v, err := fs.getLimit(fs.maxItems, limitSet)
@@ -143,7 +143,7 @@ func (fs fieldSchema) decodeBytesList(fv reflect.Value, raw []byte, limitSet Lim
 
 // ---- party bytes ------------------------------------------------------------
 
-func (fs fieldSchema) encodePartyBytes(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodePartyBytes(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
 	out := Uint32(uint32(n))
 	for i := range n {
@@ -177,7 +177,7 @@ func (fs fieldSchema) encodePartyBytes(fv reflect.Value, limitSet LimitSet) ([]b
 	return out, nil
 }
 
-func (fs fieldSchema) decodePartyBytes(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodePartyBytes(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	var maxItems, maxItemBytes int
 	if fs.maxItems != "" {
 		v, err := fs.getLimit(fs.maxItems, limitSet)
@@ -230,7 +230,7 @@ func (fs fieldSchema) decodePartyBytes(fv reflect.Value, raw []byte, limitSet Li
 
 // ---- party byte pairs -------------------------------------------------------
 
-func (fs fieldSchema) encodePartyBytePairs(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodePartyBytePairs(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
 	out := Uint32(uint32(n))
 	for i := range n {
@@ -270,7 +270,7 @@ func (fs fieldSchema) encodePartyBytePairs(fv reflect.Value, limitSet LimitSet) 
 	return out, nil
 }
 
-func (fs fieldSchema) decodePartyBytePairs(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodePartyBytePairs(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	var maxItems, maxItemBytes int
 	if fs.maxItems != "" {
 		v, err := fs.getLimit(fs.maxItems, limitSet)
@@ -372,7 +372,7 @@ func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte) error {
 // encodeCustom encodes a field value that implements ValueMarshaler.
 // It handles nil pointer rejection, interface dispatch (value or pointer
 // receiver), nil return rejection, and byte-limit validation.
-func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	if fv.Kind() == reflect.Pointer && fv.IsNil() {
 		return nil, fmt.Errorf("wire: nil custom field %s", fs.name)
 	}
@@ -400,7 +400,7 @@ func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet LimitSet) ([]byte,
 // ValueUnmarshaler. It validates byte limits first, auto-allocates nil
 // pointers, dispatches to the interface (value or pointer receiver), and
 // requires the implementation to copy the input bytes.
-func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}

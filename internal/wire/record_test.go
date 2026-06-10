@@ -85,7 +85,7 @@ func TestRecordRoundTrip(t *testing.T) {
 			Data: []byte{1, 2, 3},
 		},
 	}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -94,7 +94,7 @@ func TestRecordRoundTrip(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	})); err != nil {
@@ -116,7 +116,7 @@ func TestRecordListRoundTrip(t *testing.T) {
 			{Key: "key2", Value: []byte{3, 4, 5}},
 		},
 	}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"key":   32,
 		"value": 1024,
 		"items": 16,
@@ -126,7 +126,7 @@ func TestRecordListRoundTrip(t *testing.T) {
 	}
 
 	var decoded recordListMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"key":   32,
 		"value": 1024,
 		"items": 16,
@@ -149,13 +149,13 @@ func TestRecordListRoundTrip(t *testing.T) {
 
 func TestRecordListNilSlice(t *testing.T) {
 	orig := recordListMessage{Items: nil}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{"items": 16}))
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"items": 16}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var decoded recordListMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"items": 16})); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"items": 16})); err != nil {
 		t.Fatal(err)
 	}
 	// Nil or empty — both are acceptable.
@@ -166,13 +166,13 @@ func TestRecordListNilSlice(t *testing.T) {
 
 func TestRecordListEmptySlice(t *testing.T) {
 	orig := recordListMessage{Items: []itemRecord{}}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{"items": 16}))
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"items": 16}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var decoded recordListMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"items": 16})); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"items": 16})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Items) != 0 {
@@ -187,7 +187,7 @@ func TestRecordPointerRoundTrip(t *testing.T) {
 			Data: []byte{9, 8, 7},
 		},
 	}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -196,7 +196,7 @@ func TestRecordPointerRoundTrip(t *testing.T) {
 	}
 
 	var decoded pointerRecordMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	})); err != nil {
@@ -218,7 +218,7 @@ func TestRecordListPointerRoundTrip(t *testing.T) {
 			{Key: "b", Value: []byte{2}},
 		},
 	}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"key":   32,
 		"value": 1024,
 		"items": 16,
@@ -228,7 +228,7 @@ func TestRecordListPointerRoundTrip(t *testing.T) {
 	}
 
 	var decoded pointerRecordListMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"key":   32,
 		"value": 1024,
 		"items": 16,
@@ -255,7 +255,7 @@ func TestRecordListMaxItemsExceededEncode(t *testing.T) {
 	orig := recordListMessage{
 		Items: make([]itemRecord, 5),
 	}
-	_, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	_, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"items": 3, // cap at 3
 	}))
 	if err == nil {
@@ -285,11 +285,11 @@ func TestRecordListMaxItemsExceededDecode(t *testing.T) {
 	}
 
 	var decoded recordListMessage
-	err = Unmarshal(raw, &decoded, WithLimits(Limits{
+	err = Unmarshal(raw, &decoded, WithFrameLimits(FrameLimits{
 		MaxTotalBytes: 1 << 20,
 		MaxFields:     256,
 		MaxFieldBytes: 1 << 20,
-	}), WithLimitSet(LimitSet{
+	}), WithFieldLimits(FieldLimits{
 		"items": 3, // cap at 3
 		"key":   32,
 		"value": 1024,
@@ -319,7 +319,7 @@ func TestRecordMissingFieldRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -348,7 +348,7 @@ func TestRecordExtraFieldRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -376,7 +376,7 @@ func TestRecordUnsortedTagsRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -404,7 +404,7 @@ func TestRecordDuplicateTagRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -433,7 +433,7 @@ func TestRecordTrailingBytesRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -481,7 +481,7 @@ func TestRecordMaxBytesExceededEncode(t *testing.T) {
 			Data: []byte{1},
 		},
 	}
-	_, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	_, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"name": 5, // cap at 5 bytes
 		"data": 1024,
 	}))
@@ -508,7 +508,7 @@ func TestRecordMaxBytesExceededDecode(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 3, // cap at 3 bytes
 		"data": 1024,
 	}))
@@ -538,7 +538,7 @@ func TestRecordNonUTF8StringRejected(t *testing.T) {
 	}
 
 	var decoded recordMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))
@@ -551,7 +551,7 @@ func TestRecordNonUTF8StringRejected(t *testing.T) {
 
 func TestNilRecordPointerEncodeRejected(t *testing.T) {
 	orig := pointerRecordMessage{Inner: nil}
-	_, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{
+	_, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"name": 32,
 		"data": 1024,
 	}))

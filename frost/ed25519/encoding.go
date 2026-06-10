@@ -22,10 +22,10 @@ type keyShareWire struct {
 	Party                tss.PartyID                    `wire:"1,u32"`
 	Threshold            int                            `wire:"2,u32"`
 	Parties              []tss.PartyID                  `wire:"3,u32list"`
-	PublicKey            []byte                         `wire:"4,bytes"`
+	PublicKey            []byte                         `wire:"4,bytes,max_bytes=point"`
 	Secret               *secret.Scalar                 `wire:"5,custom,len=32"`
-	GroupCommitments     [][]byte                       `wire:"6,byteslist"`
-	VerificationShares   []wire.PartyBytes[tss.PartyID] `wire:"7,partybytes"`
+	GroupCommitments     [][]byte                       `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
+	VerificationShares   []wire.PartyBytes[tss.PartyID] `wire:"7,partybytes,max_bytes=point"`
 	KeygenTranscriptHash []byte                         `wire:"8,bytes"`
 	ChainCode            []byte                         `wire:"9,bytes"`
 	KeygenSessionID      []byte                         `wire:"10,bytes,len=32"`
@@ -94,50 +94,49 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return wire.Marshal(w)
+	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
-func unmarshalKeyShareWithLimits(in []byte, limits tss.Limits) (*KeyShare, error) {
+func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	var w keyShareWire
-	if err := wire.Unmarshal(in, &w, wire.WithLimits(wire.Limits{
-		MaxTotalBytes: limits.MaxSerializedKeyShareBytes,
-		MaxFields:     limits.MaxWireFields,
-		MaxFieldBytes: limits.MaxWireFieldBytes,
-	})); err != nil {
+	if err := wire.Unmarshal(in, &w,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return nil, err
 	}
 	k, err := w.toKeyShare()
 	if err != nil {
 		return nil, err
 	}
-	if k.Threshold > limits.MaxThreshold {
-		return nil, fmt.Errorf("threshold too large: %d > %d", k.Threshold, limits.MaxThreshold)
+	if k.Threshold > limits.Threshold.MaxThreshold {
+		return nil, fmt.Errorf("threshold too large: %d > %d", k.Threshold, limits.Threshold.MaxThreshold)
 	}
-	if len(k.Parties) > limits.MaxParties {
-		return nil, fmt.Errorf("parties too large: %d > %d", len(k.Parties), limits.MaxParties)
+	if len(k.Parties) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("parties too large: %d > %d", len(k.Parties), limits.Threshold.MaxParties)
 	}
-	if len(k.GroupCommitments) > limits.MaxThreshold {
-		return nil, fmt.Errorf("group commitments too large: %d > %d", len(k.GroupCommitments), limits.MaxThreshold)
+	if len(k.GroupCommitments) > limits.Threshold.MaxThreshold {
+		return nil, fmt.Errorf("group commitments too large: %d > %d", len(k.GroupCommitments), limits.Threshold.MaxThreshold)
 	}
 	for i, c := range k.GroupCommitments {
-		if len(c) > limits.MaxPointBytes {
-			return nil, fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.MaxPointBytes)
+		if len(c) > limits.Curve.MaxPointBytes {
+			return nil, fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.VerificationShares) > limits.MaxParties {
-		return nil, fmt.Errorf("verification shares too large: %d > %d", len(k.VerificationShares), limits.MaxParties)
+	if len(k.VerificationShares) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("verification shares too large: %d > %d", len(k.VerificationShares), limits.Threshold.MaxParties)
 	}
 	for i, s := range k.VerificationShares {
-		if len(s.PublicKey) > limits.MaxPointBytes {
-			return nil, fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.MaxPointBytes)
+		if len(s.PublicKey) > limits.Curve.MaxPointBytes {
+			return nil, fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.KeygenConfirmations) > limits.MaxParties {
-		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(k.KeygenConfirmations), limits.MaxParties)
+	if len(k.KeygenConfirmations) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(k.KeygenConfirmations), limits.Threshold.MaxParties)
 	}
 	for i, c := range k.KeygenConfirmations {
-		if len(c) > limits.MaxWireFieldBytes {
-			return nil, fmt.Errorf("keygen confirmation %d too large: %d > %d", i, len(c), limits.MaxWireFieldBytes)
+		if len(c) > limits.TLV.MaxFieldBytes {
+			return nil, fmt.Errorf("keygen confirmation %d too large: %d > %d", i, len(c), limits.TLV.MaxFieldBytes)
 		}
 	}
 	if err := k.ValidateConsistency(); err != nil {

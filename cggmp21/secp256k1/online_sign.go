@@ -118,6 +118,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		presign:   presign,
 		sessionID: sessionID,
 		log:       tss.NopLogger(),
+		limits:    DefaultLimits(),
 		digest:    append([]byte(nil), digest32...),
 		lowS:      lowS,
 		publicKey: verifyKey,
@@ -414,9 +415,8 @@ func ClaimPresign(presign *Presign) error {
 	return nil
 }
 
-func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
-	limits := DefaultLimits()
-	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
+func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
+	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits.ThresholdLimits())
 }
 
 func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) (*big.Int, error) {

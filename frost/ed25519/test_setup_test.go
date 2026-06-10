@@ -5,12 +5,15 @@ import (
 	"testing"
 )
 
-// TestMain applies relaxed test limits to all tests and examples in this
-// package. Production entry points are fail-closed; tests must explicitly
-// opt into permissive limits via SetLimitsForTesting.
+// TestMain applies relaxed test limits so that all tests and examples in this
+// package can exercise 1-of-1 and other non-production configurations without
+// setting limits explicitly on every Options struct.
+// Production entry points remain fail-closed because testDefaultLimits is only
+// set by TestMain and never touches production code.
 func TestMain(m *testing.M) {
-	restore := SetLimitsForTesting(TestLimits())
+	tl := TestLimits()
+	testDefaultLimits = &tl
 	code := m.Run()
-	restore()
+	testDefaultLimits = nil
 	os.Exit(code)
 }

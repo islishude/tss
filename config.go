@@ -170,20 +170,24 @@ func (c ThresholdConfig) Ctx() context.Context {
 	return context.Background()
 }
 
-// Validate checks threshold, party-set, and local-party invariants.
-// It uses DefaultLimits as a conservative fallback; callers that know the
-// algorithm should prefer ValidateWithLimits with algorithm-specific limits.
+// Validate checks threshold, party-set, and local-party invariants using
+// conservative default limits. Callers that know the algorithm should prefer
+// ValidateWithLimits with algorithm-specific limits.
 func (c ThresholdConfig) Validate() error {
-	return c.ValidateWithLimits(DefaultLimits())
+	return c.ValidateWithLimits(ThresholdLimits{
+		MaxParties:              DefaultMaxParties,
+		MaxThreshold:            DefaultMaxThreshold,
+		MaxSigners:              DefaultMaxSigners,
+		MinProductionThreshold:  2,
+		AllowOneOfOne:           false,
+		AllowOversizedSignerSet: false,
+	})
 }
 
 // ValidateWithLimits checks threshold, party-set, and local-party invariants
-// against the provided Limits. It enforces hard caps on party count and
+// against the provided ThresholdLimits. It enforces hard caps on party count and
 // threshold to prevent unbounded resource consumption.
-func (c ThresholdConfig) ValidateWithLimits(l Limits) error {
-	if err := l.Validate(); err != nil {
-		return fmt.Errorf("invalid limits: %w", err)
-	}
+func (c ThresholdConfig) ValidateWithLimits(l ThresholdLimits) error {
 	if c.Threshold <= 0 {
 		return errors.New("threshold must be positive")
 	}

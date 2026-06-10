@@ -28,7 +28,8 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if !tss.ContainsParty(signers, key.Party) {
 		return nil, nil, errors.New("local party is not in signer set")
 	}
-	if err := validateSignerSet(key, signers); err != nil {
+	limits := DefaultLimits()
+	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, nil, err
 	}
 	ctx, contextHash, additiveShift, err := preparePresignContext(key, ctx)
@@ -139,6 +140,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		sessionID:            sessionID,
 		config:               config,
 		log:                  config.Logger(),
+		limits:               limits,
 		signers:              signers,
 		context:              ctx,
 		contextHash:          contextHash,

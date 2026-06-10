@@ -158,7 +158,7 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 	for i := range s.fields {
 		fs := &s.fields[i]
 		fv := v.FieldByIndex(fs.index)
-		value, err := fs.encode(fv, cfg.limitSet)
+		value, err := fs.encode(fv, cfg.fieldLimits)
 		if err != nil {
 			return nil, fmt.Errorf("wire %s field %s tag %d: %w", v.Type().Name(), fs.name, fs.tag, err)
 		}
@@ -195,9 +195,9 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		opt.applyUnmarshal(&cfg)
 	}
 
-	limits := cfg.limits
+	limits := cfg.frameLimits
 	if limits.MaxTotalBytes == 0 && limits.MaxFields == 0 && limits.MaxFieldBytes == 0 {
-		limits = DefaultLimits()
+		limits = DefaultFrameLimits()
 	}
 
 	version, fields, err := UnmarshalFieldsWithLimits(in, m.WireType(), limits)
@@ -228,7 +228,7 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 	for i := range s.fields {
 		fs := &s.fields[i]
 		fv := v.FieldByIndex(fs.index)
-		if err := fs.decode(fv, fields[i].Value, cfg.limitSet); err != nil {
+		if err := fs.decode(fv, fields[i].Value, cfg.fieldLimits); err != nil {
 			return fmt.Errorf("wire %s field %s tag %d: %w", v.Type().Name(), fs.name, fs.tag, err)
 		}
 	}

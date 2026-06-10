@@ -483,13 +483,13 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 		W:              p.W,
 		WY:             p.WY,
 		TranscriptHash: p.TranscriptHash,
-	})
+	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalAffGProof decodes a canonical TLV AffGProof.
 func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 	var w affGProofWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return nil, err
 	}
 	if w.Version != affGProofVersion {

@@ -40,7 +40,7 @@ func SortParties(parties []PartyID) []PartyID {
 // It verifies: non-empty, minimum size (threshold), maximum size, membership,
 // and no duplicates. For algorithms where AllowOversizedSignerSet is false,
 // signer count must exactly equal threshold.
-func ValidateSignerSet(keyParties []PartyID, threshold int, signers []PartyID, limits Limits) error {
+func ValidateSignerSet(keyParties []PartyID, threshold int, signers []PartyID, limits ThresholdLimits) error {
 	if len(signers) == 0 {
 		return errors.New("signers must not be empty")
 	}

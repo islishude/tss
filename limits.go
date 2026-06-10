@@ -1,9 +1,5 @@
 package tss
 
-import (
-	"errors"
-)
-
 const (
 	// DefaultMaxParties is the maximum number of participants across algorithms.
 	DefaultMaxParties = 64
@@ -11,7 +7,16 @@ const (
 	DefaultMaxThreshold = 64
 	// DefaultMaxSigners is the maximum number of concurrent signers.
 	DefaultMaxSigners = 64
+)
 
+const (
+	// DefaultMaxWireFields caps the field count inside a TLV message.
+	DefaultMaxWireFields = 256
+	// DefaultMaxWireFieldBytes caps a single TLV field value.
+	DefaultMaxWireFieldBytes = 1 << 20
+)
+
+const (
 	// DefaultMaxEnvelopeBytes is the maximum wire-encoded envelope size (1 MiB).
 	DefaultMaxEnvelopeBytes = 1 << 20
 	// DefaultMaxEnvelopePayloadBytes is the maximum payload inside an envelope (1 MiB).
@@ -20,31 +25,36 @@ const (
 	DefaultMaxPayloadTypeBytes = 128
 	// DefaultMaxProtocolNameBytes caps the protocol name length inside envelopes.
 	DefaultMaxProtocolNameBytes = 64
+)
 
-	// DefaultMaxWireFields caps the field count inside a TLV message.
-	DefaultMaxWireFields = 256
-	// DefaultMaxWireFieldBytes caps a single TLV field value.
-	DefaultMaxWireFieldBytes = 1 << 20
-	// DefaultMaxWireRepeatedItems caps repeated items inside a wire field.
-	DefaultMaxWireRepeatedItems = 128
+const (
+	// DefaultMaxBlameEvidenceBytes caps the total encoded blame evidence size (1 MiB).
+	DefaultMaxBlameEvidenceBytes = 1 << 20
+	// DefaultMaxEvidenceReasonBytes caps the reason string length in blame evidence.
+	DefaultMaxEvidenceReasonBytes = 256
+	// DefaultMaxEvidenceFieldCount caps the number of public input fields in blame evidence.
+	DefaultMaxEvidenceFieldCount = 64
+	// DefaultMaxEvidenceFieldKeyBytes caps a single evidence field key length.
+	DefaultMaxEvidenceFieldKeyBytes = 128
+	// DefaultMaxEvidenceFieldValueBytes caps a single evidence field value length.
+	DefaultMaxEvidenceFieldValueBytes = 1 << 20
+)
 
+const (
 	// DefaultMaxSerializedKeyShareBytes caps serialized KeyShare size (2 MiB).
 	DefaultMaxSerializedKeyShareBytes = 2 << 20
 	// DefaultMaxSerializedPresignBytes caps serialized Presign size (2 MiB).
 	DefaultMaxSerializedPresignBytes = 2 << 20
-	// DefaultMaxSerializedSignatureBytes caps serialized Signature size (64 KiB).
-	DefaultMaxSerializedSignatureBytes = 64 << 10
+)
 
+const (
 	// DefaultMaxPointBytes caps curve point encoding size.
 	DefaultMaxPointBytes = 65
 	// DefaultMaxScalarBytes caps curve scalar encoding size.
 	DefaultMaxScalarBytes = 32
+)
 
-	// DefaultMaxShamirDegree caps the polynomial degree in Shamir sharing.
-	DefaultMaxShamirDegree = 64
-	// DefaultMaxShamirShares caps the number of shares in interpolation.
-	DefaultMaxShamirShares = 64
-
+const (
 	// DefaultMaxPaillierModulusBits caps the Paillier modulus size (8192 bits).
 	DefaultMaxPaillierModulusBits = 8192
 	// DefaultMaxPaillierPublicKeyBytes caps marshaled Paillier public key size.
@@ -61,194 +71,40 @@ const (
 	DefaultMaxMTAResponseBytes = 512 << 10
 	// DefaultMaxZKProofBytes caps any ZK proof input (512 KiB).
 	DefaultMaxZKProofBytes = 512 << 10
-
-	// DefaultMaxBlameEvidenceBytes caps the total encoded blame evidence size (1 MiB).
-	DefaultMaxBlameEvidenceBytes = 1 << 20
-	// DefaultMaxEvidenceReasonBytes caps the reason string length in blame evidence.
-	DefaultMaxEvidenceReasonBytes = 256
-	// DefaultMaxEvidenceFieldCount caps the number of public input fields in blame evidence.
-	DefaultMaxEvidenceFieldCount = 64
-	// DefaultMaxEvidenceFieldKeyBytes caps a single evidence field key length.
-	DefaultMaxEvidenceFieldKeyBytes = 128
-	// DefaultMaxEvidenceFieldValueBytes caps a single evidence field value length.
-	DefaultMaxEvidenceFieldValueBytes = 1 << 20
-
-	// MaxFROSTParties is the algorithm-specific party cap for FROST Ed25519.
-	MaxFROSTParties = 64
-	// MaxFROSTThreshold is the algorithm-specific threshold cap for FROST Ed25519.
-	MaxFROSTThreshold = 64
-	// MaxFROSTSigners is the algorithm-specific signer cap for FROST Ed25519.
-	MaxFROSTSigners = 64
-
-	// MaxCGGMPParties is the algorithm-specific party cap for CGGMP21 secp256k1.
-	MaxCGGMPParties = 16
-	// MaxCGGMPThreshold is the algorithm-specific threshold cap for CGGMP21 secp256k1.
-	MaxCGGMPThreshold = 16
-	// MaxCGGMPSigners is the algorithm-specific signer cap for CGGMP21 secp256k1.
-	MaxCGGMPSigners = 16
-
-	// MaxCGGMP21SignPrepProofBytes caps a CGGMP21 signprep proof size (512 KiB).
-	MaxCGGMP21SignPrepProofBytes = 512 << 10
-	// MaxCGGMP21SignVerifyShareBytes caps a single SignVerifyShare record.
-	MaxCGGMP21SignVerifyShareBytes = 65*2 + MaxCGGMP21SignPrepProofBytes + 8
-	// MaxCGGMP21SignVerifySharesBytes caps the full VerifyShares array.
-	MaxCGGMP21SignVerifySharesBytes = MaxCGGMPSigners * MaxCGGMP21SignVerifyShareBytes
-	// MaxCGGMP21SignPartialPayloadBytes caps a sign.partial payload.
-	MaxCGGMP21SignPartialPayloadBytes = 32*5 + MaxCGGMP21SignPrepProofBytes + 256
 )
 
-// Limits defines finite caps for all security-sensitive parameters.
-// Each algorithm package provides its own DefaultLimits() returning fail-closed
-// production settings. Test code should use each package's TestLimits() or
-// internal/testutil.TestLimits.
-type Limits struct {
+// ThresholdLimits defines finite caps for threshold protocol parameters.
+type ThresholdLimits struct {
 	MaxParties              int
 	MaxThreshold            int
 	MaxSigners              int
 	MinProductionThreshold  int
 	AllowOneOfOne           bool
 	AllowOversizedSignerSet bool
-
-	MaxEnvelopeBytes        int
-	MaxEnvelopePayloadBytes int
-	MaxPayloadTypeBytes     int
-	MaxProtocolNameBytes    int
-
-	MaxWireFields        int
-	MaxWireFieldBytes    int
-	MaxWireRepeatedItems int
-
-	MaxSerializedKeyShareBytes  int
-	MaxSerializedPresignBytes   int
-	MaxSerializedSignatureBytes int
-
-	MaxPointBytes  int
-	MaxScalarBytes int
-
-	MaxShamirDegree int
-	MaxShamirShares int
-
-	MaxPaillierModulusBits     int
-	MaxPaillierPublicKeyBytes  int
-	MaxPaillierPrivateKeyBytes int
-	MaxPaillierCiphertextBytes int
-	MaxPaillierProofBytes      int
-	MaxRingPedersenParamsBytes int
-	MaxMTAResponseBytes        int
-	MaxZKProofBytes            int
-
-	MaxBlameEvidenceBytes      int
-	MaxEvidenceReasonBytes     int
-	MaxEvidenceFieldCount      int
-	MaxEvidenceFieldKeyBytes   int
-	MaxEvidenceFieldValueBytes int
-
-	MaxCGGMP21SignPrepProofBytes      int
-	MaxCGGMP21SignVerifyShareBytes    int
-	MaxCGGMP21SignVerifySharesBytes   int
-	MaxCGGMP21SignPartialPayloadBytes int
 }
 
-// DefaultLimits returns a conservative fail-closed Limits suitable as a fallback
-// for callers that do not specify an algorithm. It rejects 1-of-1, oversized
-// signer sets, and thresholds below 2. Callers that need relaxed limits for
-// testing must use algorithm-specific TestLimits or internal/testutil.TestLimits.
-func DefaultLimits() Limits {
-	return Limits{
-		MaxParties:              DefaultMaxParties,
-		MaxThreshold:            DefaultMaxThreshold,
-		MaxSigners:              DefaultMaxSigners,
-		MinProductionThreshold:  2,
-		AllowOneOfOne:           false,
-		AllowOversizedSignerSet: false,
-
-		MaxEnvelopeBytes:        DefaultMaxEnvelopeBytes,
-		MaxEnvelopePayloadBytes: DefaultMaxEnvelopePayloadBytes,
-		MaxPayloadTypeBytes:     DefaultMaxPayloadTypeBytes,
-		MaxProtocolNameBytes:    DefaultMaxProtocolNameBytes,
-
-		MaxWireFields:        DefaultMaxWireFields,
-		MaxWireFieldBytes:    DefaultMaxWireFieldBytes,
-		MaxWireRepeatedItems: DefaultMaxWireRepeatedItems,
-
-		MaxSerializedKeyShareBytes:  DefaultMaxSerializedKeyShareBytes,
-		MaxSerializedPresignBytes:   DefaultMaxSerializedPresignBytes,
-		MaxSerializedSignatureBytes: DefaultMaxSerializedSignatureBytes,
-
-		MaxPointBytes:  DefaultMaxPointBytes,
-		MaxScalarBytes: DefaultMaxScalarBytes,
-
-		MaxShamirDegree: DefaultMaxShamirDegree,
-		MaxShamirShares: DefaultMaxShamirShares,
-
-		MaxPaillierModulusBits:     DefaultMaxPaillierModulusBits,
-		MaxPaillierPublicKeyBytes:  DefaultMaxPaillierPublicKeyBytes,
-		MaxPaillierPrivateKeyBytes: DefaultMaxPaillierPrivateKeyBytes,
-		MaxPaillierCiphertextBytes: DefaultMaxPaillierCiphertextBytes,
-		MaxPaillierProofBytes:      DefaultMaxPaillierProofBytes,
-		MaxRingPedersenParamsBytes: DefaultMaxRingPedersenParamsBytes,
-		MaxMTAResponseBytes:        DefaultMaxMTAResponseBytes,
-		MaxZKProofBytes:            DefaultMaxZKProofBytes,
-
-		MaxBlameEvidenceBytes:      DefaultMaxBlameEvidenceBytes,
-		MaxEvidenceReasonBytes:     DefaultMaxEvidenceReasonBytes,
-		MaxEvidenceFieldCount:      DefaultMaxEvidenceFieldCount,
-		MaxEvidenceFieldKeyBytes:   DefaultMaxEvidenceFieldKeyBytes,
-		MaxEvidenceFieldValueBytes: DefaultMaxEvidenceFieldValueBytes,
-
-		MaxCGGMP21SignPrepProofBytes:      MaxCGGMP21SignPrepProofBytes,
-		MaxCGGMP21SignVerifyShareBytes:    MaxCGGMP21SignVerifyShareBytes,
-		MaxCGGMP21SignVerifySharesBytes:   MaxCGGMP21SignVerifySharesBytes,
-		MaxCGGMP21SignPartialPayloadBytes: MaxCGGMP21SignPartialPayloadBytes,
-	}
+// TLVLimits caps wire-level TLV field counts and per-field sizes.
+type TLVLimits struct {
+	MaxFields     int
+	MaxFieldBytes int
 }
 
-// Validate checks that the Limits values are self-consistent.
-func (l Limits) Validate() error {
-	if l.MaxParties <= 0 {
-		return errors.New("MaxParties must be positive")
-	}
-	if l.MaxThreshold <= 0 {
-		return errors.New("MaxThreshold must be positive")
-	}
-	if l.MaxThreshold > l.MaxParties {
-		return errors.New("MaxThreshold cannot exceed MaxParties")
-	}
-	if l.MaxSigners <= 0 {
-		return errors.New("MaxSigners must be positive")
-	}
-	if l.MaxSigners > l.MaxParties {
-		return errors.New("MaxSigners cannot exceed MaxParties")
-	}
-	if l.MinProductionThreshold < 0 {
-		return errors.New("MinProductionThreshold must be non-negative")
-	}
-	if l.MaxPaillierModulusBits <= 0 {
-		return errors.New("MaxPaillierModulusBits must be positive")
-	}
-	if l.MaxEnvelopeBytes <= 0 {
-		return errors.New("MaxEnvelopeBytes must be positive")
-	}
-	if l.MaxWireFields <= 0 {
-		return errors.New("MaxWireFields must be positive")
-	}
-	if l.MaxWireFieldBytes <= 0 {
-		return errors.New("MaxWireFieldBytes must be positive")
-	}
-	if l.MaxBlameEvidenceBytes <= 0 {
-		return errors.New("MaxBlameEvidenceBytes must be positive")
-	}
-	if l.MaxEvidenceReasonBytes <= 0 {
-		return errors.New("MaxEvidenceReasonBytes must be positive")
-	}
-	if l.MaxEvidenceFieldCount <= 0 {
-		return errors.New("MaxEvidenceFieldCount must be positive")
-	}
-	if l.MaxEvidenceFieldKeyBytes <= 0 {
-		return errors.New("MaxEvidenceFieldKeyBytes must be positive")
-	}
-	if l.MaxEvidenceFieldValueBytes <= 0 {
-		return errors.New("MaxEvidenceFieldValueBytes must be positive")
-	}
-	return nil
+// EnvelopeLimits caps envelope encoding and metadata sizes.
+type EnvelopeLimits struct {
+	MaxBytes             int
+	MaxPayloadBytes      int
+	MaxPayloadTypeBytes  int
+	MaxProtocolNameBytes int
+	TLV                  TLVLimits
+}
+
+// EvidenceLimits caps blame evidence encoding and field sizes.
+type EvidenceLimits struct {
+	MaxBytes            int
+	MaxReasonBytes      int
+	MaxFieldCount       int
+	MaxFieldKeyBytes    int
+	MaxFieldValueBytes  int
+	MaxPayloadTypeBytes int
+	TLV                 TLVLimits
 }

@@ -134,8 +134,8 @@ func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty key share")
 	}
-	if len(in) > limits.MaxSerializedKeyShareBytes {
-		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.MaxSerializedKeyShareBytes)
+	if len(in) > limits.State.MaxSerializedKeyShareBytes {
+		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
 	return unmarshalKeyShareWithLimits(in, limits)
 }

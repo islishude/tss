@@ -291,13 +291,13 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 		Z2:             p.Z2,
 		Z3:             p.Z3,
 		TranscriptHash: p.TranscriptHash,
-	})
+	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalLogStarProof decodes a canonical TLV LogStarProof.
 func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 	var w logStarProofWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return nil, err
 	}
 	if w.Version != logStarProofVersion {

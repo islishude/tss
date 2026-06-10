@@ -8,6 +8,19 @@ import (
 	"testing"
 )
 
+// testFieldLimits returns generous field limits for all semantic names used by
+// test message types. Fail-closed wire enforcement requires FieldLimits whenever
+// a struct tag references max_bytes=name or max_items=name.
+func testFieldLimits() FieldLimits {
+	return FieldLimits{
+		"field": 1000,
+		"name":  1000,
+		"items": 100,
+		"ids":   100,
+		"data":  1000,
+	}
+}
+
 // ---- test message types -----------------------------------------------------
 
 type simpleMessage struct {
@@ -412,7 +425,7 @@ func TestMaxBytesEnforcedDecode(t *testing.T) {
 	// Decode with a limit that is too small.
 	var decoded maxBytesMessage
 	err = Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 3}))
+		WithFieldLimits(FieldLimits{"field": 3}))
 	if err == nil {
 		t.Fatal("expected error for exceeding max_bytes")
 	}
@@ -426,7 +439,7 @@ func TestMaxBytesOkWhenUnderLimit(t *testing.T) {
 	}
 	var decoded maxBytesMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 10})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 10})); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -439,7 +452,7 @@ func TestCodecU32List(t *testing.T) {
 	}
 	var decoded u32ListMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"ids": 10})); err != nil {
+		WithFieldLimits(FieldLimits{"ids": 10})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.IDs) != 3 || decoded.IDs[0] != 1 || decoded.IDs[2] != 3 {
@@ -455,7 +468,7 @@ func TestU32ListMaxItems(t *testing.T) {
 	}
 	var decoded u32ListMessage
 	err = Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"ids": 3}))
+		WithFieldLimits(FieldLimits{"ids": 3}))
 	if err == nil {
 		t.Fatal("expected error for too many items")
 	}
@@ -463,13 +476,13 @@ func TestU32ListMaxItems(t *testing.T) {
 
 func TestCodecBytesList(t *testing.T) {
 	orig := bytesListMessage{Items: [][]byte{{1, 2}, {3, 4, 5}}}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded bytesListMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 100, "items": 10})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 100, "items": 10})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Items) != 2 || !bytes.Equal(decoded.Items[1], []byte{3, 4, 5}) {
@@ -484,13 +497,13 @@ func TestPartyBytesEncodeDecode(t *testing.T) {
 			{Party: 3, Bytes: []byte("bbb")},
 		},
 	}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded partyBytesMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 100})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 100})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Records) != 2 {
@@ -508,13 +521,13 @@ func TestPartyBytePairsEncodeDecode(t *testing.T) {
 			{Party: 2, First: []byte{3}, Second: []byte{4}},
 		},
 	}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded partyBytePairsMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 100})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 100})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Pairs) != 2 {
@@ -616,7 +629,7 @@ func TestMissingLimitNameError(t *testing.T) {
 	// Tag references "field" but the LimitSet does not contain it.
 	var decoded maxBytesMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"other": 100})); err == nil {
+		WithFieldLimits(FieldLimits{"other": 100})); err == nil {
 		t.Fatal("expected error for missing limit name")
 	}
 }
@@ -638,13 +651,13 @@ func TestMalformedU8(t *testing.T) {
 
 func TestNilBytesListRoundTrip(t *testing.T) {
 	orig := bytesListMessage{Items: nil}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded bytesListMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 100, "items": 10})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 100, "items": 10})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Items) != 0 {
@@ -654,13 +667,13 @@ func TestNilBytesListRoundTrip(t *testing.T) {
 
 func TestEmptyPartyBytesRoundTrip(t *testing.T) {
 	orig := partyBytesMessage{}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded partyBytesMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 100})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 100})); err != nil {
 		t.Fatal(err)
 	}
 	if len(decoded.Records) != 0 {
@@ -963,35 +976,35 @@ func TestCustomFixedLenEnforced(t *testing.T) {
 
 func TestCustomMaxBytesEnforced(t *testing.T) {
 	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hello")}}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Decode with a limit that is too small.
 	var decoded customMaxBytesMessage
 	err = Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 3}))
+		WithFieldLimits(FieldLimits{"field": 3}))
 	if err == nil {
 		t.Fatal("expected error for exceeding max_bytes on custom field")
 	}
 
 	// Should succeed with adequate limit.
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"field": 10})); err != nil {
+		WithFieldLimits(FieldLimits{"field": 10})); err != nil {
 		t.Fatal(err)
 	}
 }
 
 func TestCustomMaxBytesNamedLimitMissing(t *testing.T) {
 	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hi")}}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 	// Tag references "field" but LimitSet does not contain it.
 	var decoded customMaxBytesMessage
 	if err := Unmarshal(raw, &decoded,
-		WithLimitSet(LimitSet{"other": 100})); err == nil {
+		WithFieldLimits(FieldLimits{"other": 100})); err == nil {
 		t.Fatal("expected error for missing named limit on custom field")
 	}
 }
@@ -1513,12 +1526,12 @@ func TestBigIntMaxBytesEnforced(t *testing.T) {
 		t.Fatal(err)
 	}
 	var decoded bigIntMaxBytesMessage
-	err = Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"limit": 2}))
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 2}))
 	if err == nil {
 		t.Fatal("expected max_bytes error for oversized bigint")
 	}
 	// With adequate limit, should succeed.
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"limit": 10})); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 10})); err != nil {
 		t.Fatalf("unmarshal with adequate limit: %v", err)
 	}
 }
@@ -1700,13 +1713,13 @@ func TestInferredWithOptionsRoundTrip(t *testing.T) {
 	}
 	orig.Hash[0] = 0xff
 	orig.Hash[31] = 0x01
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var decoded inferredWithOptionsMessage
-	if err := Unmarshal(raw, &decoded); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(testFieldLimits())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1733,13 +1746,13 @@ func TestStringMaxBytesRoundTrip(t *testing.T) {
 		Name: "short",
 		Code: "ABCD",
 	}
-	raw, err := Marshal(orig)
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var decoded stringLimitMessage
-	if err := Unmarshal(raw, &decoded); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(testFieldLimits())); err != nil {
 		t.Fatal(err)
 	}
 
@@ -1749,12 +1762,12 @@ func TestStringMaxBytesRoundTrip(t *testing.T) {
 }
 
 func TestStringMaxBytesExceededEncode(t *testing.T) {
-	ls := LimitSet{"name": 5}
+	ls := FieldLimits{"name": 5}
 	orig := stringLimitMessage{
 		Name: "too-long-name",
 		Code: "ABCD",
 	}
-	_, err := Marshal(orig, WithLimitSetForMarshal(ls))
+	_, err := Marshal(orig, WithFieldLimitsForMarshal(ls))
 	if err == nil {
 		t.Fatal("expected error for string exceeding max_bytes during encode")
 	}
@@ -1771,13 +1784,13 @@ func TestStringMaxBytesExceededDecode(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ls := LimitSet{"name": 5}
+	ls := FieldLimits{"name": 5}
 	var decoded stringLimitMessage
-	err = Unmarshal(raw, &decoded, WithLimits(Limits{
+	err = Unmarshal(raw, &decoded, WithFrameLimits(FrameLimits{
 		MaxTotalBytes: 1 << 20,
 		MaxFields:     256,
 		MaxFieldBytes: 1 << 20,
-	}), WithLimitSet(ls))
+	}), WithFieldLimits(ls))
 	if err == nil {
 		t.Fatal("expected error for string exceeding max_bytes during decode")
 	}
@@ -1805,7 +1818,7 @@ func TestStringLenDecode(t *testing.T) {
 	}
 
 	var decoded stringLimitMessage
-	err = Unmarshal(raw, &decoded, WithLimits(Limits{
+	err = Unmarshal(raw, &decoded, WithFrameLimits(FrameLimits{
 		MaxTotalBytes: 1 << 20,
 		MaxFields:     256,
 		MaxFieldBytes: 1 << 20,
@@ -1819,13 +1832,13 @@ func TestStringLimitInferredRoundTrip(t *testing.T) {
 	orig := stringLimitInferredMessage{
 		Name: "test",
 	}
-	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{"name": 10}))
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"name": 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	var decoded stringLimitInferredMessage
-	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"name": 10})); err != nil {
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"name": 10})); err != nil {
 		t.Fatal(err)
 	}
 

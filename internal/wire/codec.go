@@ -9,7 +9,7 @@ import (
 // ---- encode dispatch ---------------------------------------------------------
 
 // encode serialises the field value fv into its canonical wire bytes.
-func (fs fieldSchema) encode(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	switch fs.kind {
 	case kindU8:
 		return []byte{byte(fv.Uint())}, nil
@@ -65,7 +65,7 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet LimitSet) ([]byte, error
 // ---- decode dispatch ---------------------------------------------------------
 
 // decode deserialises raw into the settable field value fv.
-func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	switch fs.kind {
 	case kindU8:
 		return fs.decodeU8(fv, raw)
@@ -110,18 +110,17 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet LimitSet) er
 
 const maxUint32 = (1 << 32) - 1
 
-const maxNoLimit = 1<<31 - 1 // sentinel returned when no LimitSet is provided
-
-// getLimit returns the limit value for name.
-// When limitSet is nil, no limit is enforced and maxNoLimit is returned.
-// When limitSet is non-nil but name is missing, an error is returned.
-func (fs fieldSchema) getLimit(name string, limitSet LimitSet) (int, error) {
+// getLimit returns the limit value for name from the provided FieldLimits.
+// Fail-closed: when limitSet is nil or name is missing, an error is returned.
+// Every wire tag that declares max_bytes=name or max_items=name requires the
+// caller to provide a FieldLimits containing that name.
+func (fs fieldSchema) getLimit(name string, limitSet FieldLimits) (int, error) {
 	if limitSet == nil {
-		return maxNoLimit, nil
+		return 0, fmt.Errorf("wire: missing field limit %q for field %q", name, fs.name)
 	}
 	v, ok := limitSet[name]
 	if !ok {
-		return 0, fmt.Errorf("limit %q is required but not provided", name)
+		return 0, fmt.Errorf("wire: missing field limit %q for field %q", name, fs.name)
 	}
 	return v, nil
 }
@@ -130,7 +129,7 @@ func (fs fieldSchema) getLimit(name string, limitSet LimitSet) (int, error) {
 
 // checkByteLimits validates raw bytes against len=N, max_bytes=N, and
 // max_bytes=name options. It is used by both bytes and custom field kinds.
-func (fs fieldSchema) checkByteLimits(raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) checkByteLimits(raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkFixedLen(raw); err != nil {
 		return err
 	}

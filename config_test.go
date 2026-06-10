@@ -61,15 +61,20 @@ func TestThresholdConfigValidate(t *testing.T) {
 	})
 
 	t.Run("1-of-1 requires explicit AllowOneOfOne", func(t *testing.T) {
-		// Production DefaultLimits rejects 1-of-1.
+		// Production defaults reject 1-of-1.
 		cfg1 := ThresholdConfig{Threshold: 1, Parties: []PartyID{5}, Self: 5}
 		if err := cfg1.Validate(); err == nil {
 			t.Error("expected error for 1-of-1 without explicit AllowOneOfOne")
 		}
 		// Explicitly enabling AllowOneOfOne with MinProductionThreshold=1 allows it.
-		limits := DefaultLimits()
-		limits.AllowOneOfOne = true
-		limits.MinProductionThreshold = 1
+		limits := ThresholdLimits{
+			MaxParties:              DefaultMaxParties,
+			MaxThreshold:            DefaultMaxThreshold,
+			MaxSigners:              DefaultMaxSigners,
+			AllowOneOfOne:           true,
+			MinProductionThreshold:  1,
+			AllowOversizedSignerSet: false,
+		}
 		if err := cfg1.ValidateWithLimits(limits); err != nil {
 			t.Errorf("1-of-1 with explicit AllowOneOfOne should pass: %v", err)
 		}

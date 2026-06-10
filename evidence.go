@@ -84,6 +84,35 @@ func (BlameEvidence) WireType() string { return blameWireType }
 // WireVersion returns the wire format version for BlameEvidence.
 func (BlameEvidence) WireVersion() uint16 { return Version }
 
+// defaultEvidenceLimits returns conservative evidence limits suitable for
+// production use.
+func defaultEvidenceLimits() EvidenceLimits {
+	return EvidenceLimits{
+		MaxBytes:            DefaultMaxBlameEvidenceBytes,
+		MaxReasonBytes:      DefaultMaxEvidenceReasonBytes,
+		MaxFieldCount:       DefaultMaxEvidenceFieldCount,
+		MaxFieldKeyBytes:    DefaultMaxEvidenceFieldKeyBytes,
+		MaxFieldValueBytes:  DefaultMaxEvidenceFieldValueBytes,
+		MaxPayloadTypeBytes: DefaultMaxPayloadTypeBytes,
+		TLV: TLVLimits{
+			MaxFields:     DefaultMaxWireFields,
+			MaxFieldBytes: DefaultMaxWireFieldBytes,
+		},
+	}
+}
+
+// evidenceFieldLimits converts EvidenceLimits into wire.FieldLimits for
+// use with wire.Marshal / wire.Unmarshal.
+func evidenceFieldLimits(l EvidenceLimits) wire.FieldLimits {
+	return wire.FieldLimits{
+		"payload_type":         l.MaxPayloadTypeBytes,
+		"evidence_reason":      l.MaxReasonBytes,
+		"evidence_fields":      l.MaxFieldCount,
+		"evidence_field_key":   l.MaxFieldKeyBytes,
+		"evidence_field_value": l.MaxFieldValueBytes,
+	}
+}
+
 // NewBlameEvidence builds a public evidence record bound to an envelope hash.
 // PublicInputs are stored in canonical order so that logically equivalent
 // evidence records produce identical hashes regardless of caller-provided
@@ -104,16 +133,24 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		Reason:         reason,
 		PublicInputs:   canonicalEvidenceFields(inputs),
 	}
-	if err := evidence.Validate(); err != nil {
+	if err := evidence.ValidateWithLimits(defaultEvidenceLimits()); err != nil {
 		return nil, err
 	}
 	return evidence, nil
 }
 
-// Validate checks structural invariants for a public blame evidence record.
-// Canonical ordering of PublicInputs is handled by [BlameEvidence.BeforeMarshalWire],
-// which is called automatically by wire.Marshal before encoding.
+// Validate checks structural invariants for a public blame evidence record
+// using conservative default limits. Use [BlameEvidence.ValidateWithLimits]
+// for explicit control.
 func (e *BlameEvidence) Validate() error {
+	return e.ValidateWithLimits(defaultEvidenceLimits())
+}
+
+// ValidateWithLimits checks structural invariants for a public blame evidence
+// record against the provided limits. Canonical ordering of PublicInputs is
+// handled by [BlameEvidence.BeforeMarshalWire], which is called automatically
+// by wire.Marshal before encoding.
+func (e *BlameEvidence) ValidateWithLimits(l EvidenceLimits) error {
 	if e == nil {
 		return errors.New("nil blame evidence")
 	}
@@ -126,9 +163,8 @@ func (e *BlameEvidence) Validate() error {
 	if e.PayloadType == "" {
 		return errors.New("missing evidence payload type")
 	}
-	limits := DefaultLimits()
-	if len(e.PayloadType) > limits.MaxPayloadTypeBytes {
-		return fmt.Errorf("evidence payload type too long: %d > %d", len(e.PayloadType), limits.MaxPayloadTypeBytes)
+	if len(e.PayloadType) > l.MaxPayloadTypeBytes {
+		return fmt.Errorf("evidence payload type too long: %d > %d", len(e.PayloadType), l.MaxPayloadTypeBytes)
 	}
 	if len(e.PayloadHash) != sha256.Size {
 		return errors.New("invalid evidence payload hash")
@@ -142,19 +178,19 @@ func (e *BlameEvidence) Validate() error {
 	if e.Reason == "" {
 		return errors.New("missing evidence reason")
 	}
-	if len(e.Reason) > limits.MaxEvidenceReasonBytes {
-		return fmt.Errorf("evidence reason too long: %d > %d", len(e.Reason), limits.MaxEvidenceReasonBytes)
+	if len(e.Reason) > l.MaxReasonBytes {
+		return fmt.Errorf("evidence reason too long: %d > %d", len(e.Reason), l.MaxReasonBytes)
 	}
-	if fl := len(e.PublicInputs); fl > limits.MaxEvidenceFieldCount {
-		return fmt.Errorf("evidence field count too large: %d > %d", fl, limits.MaxEvidenceFieldCount)
+	if fl := len(e.PublicInputs); fl > l.MaxFieldCount {
+		return fmt.Errorf("evidence field count too large: %d > %d", fl, l.MaxFieldCount)
 	}
 	seen := make(map[string]struct{}, len(e.PublicInputs))
 	for _, field := range e.PublicInputs {
 		if field.Key == "" {
 			return errors.New("empty evidence field key")
 		}
-		if fl := len(field.Key); fl > limits.MaxEvidenceFieldKeyBytes {
-			return fmt.Errorf("evidence field key too long: %d > %d", fl, limits.MaxEvidenceFieldKeyBytes)
+		if fl := len(field.Key); fl > l.MaxFieldKeyBytes {
+			return fmt.Errorf("evidence field key too long: %d > %d", fl, l.MaxFieldKeyBytes)
 		}
 		if _, ok := seen[field.Key]; ok {
 			return fmt.Errorf("duplicate evidence field %q", field.Key)
@@ -163,8 +199,8 @@ func (e *BlameEvidence) Validate() error {
 		if field.Value == nil {
 			return fmt.Errorf("nil evidence field %q", field.Key)
 		}
-		if fl := len(field.Value); fl > limits.MaxEvidenceFieldValueBytes {
-			return fmt.Errorf("evidence field value too long: %d > %d", fl, limits.MaxEvidenceFieldValueBytes)
+		if fl := len(field.Value); fl > l.MaxFieldValueBytes {
+			return fmt.Errorf("evidence field value too long: %d > %d", fl, l.MaxFieldValueBytes)
 		}
 	}
 	return nil
@@ -178,46 +214,47 @@ func (e *BlameEvidence) BeforeMarshalWire() error {
 	return nil
 }
 
-// evidenceWireLimitSet returns the semantic limit names used by BlameEvidence wire tags.
-func evidenceWireLimitSet() wire.LimitSet {
-	limits := DefaultLimits()
-	return wire.LimitSet{
-		"payload_type":         limits.MaxPayloadTypeBytes,
-		"evidence_reason":      limits.MaxEvidenceReasonBytes,
-		"evidence_fields":      limits.MaxEvidenceFieldCount,
-		"evidence_field_key":   limits.MaxEvidenceFieldKeyBytes,
-		"evidence_field_value": limits.MaxEvidenceFieldValueBytes,
-	}
-}
-
-// MarshalBinary encodes BlameEvidence using the object-level wire codec.
-// Fields are sorted into canonical order so that logically equivalent evidence
-// records produce identical hashes regardless of caller-provided slice ordering.
+// MarshalBinary encodes BlameEvidence using the object-level wire codec with
+// conservative default limits. Use [MarshalEvidenceWithLimits] for explicit control.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(e, wire.WithLimitSetForMarshal(evidenceWireLimitSet()))
+	return MarshalEvidenceWithLimits(e, defaultEvidenceLimits())
 }
 
-// UnmarshalBlameEvidence decodes and validates public blame evidence.
+// MarshalEvidenceWithLimits encodes BlameEvidence using the object-level wire
+// codec with explicit limits. Fields are sorted into canonical order so that
+// logically equivalent evidence records produce identical hashes.
+func MarshalEvidenceWithLimits(e *BlameEvidence, l EvidenceLimits) ([]byte, error) {
+	return wire.Marshal(e, wire.WithFieldLimitsForMarshal(evidenceFieldLimits(l)))
+}
+
+// UnmarshalBlameEvidence decodes and validates public blame evidence using
+// conservative default limits. Use [UnmarshalBlameEvidenceWithLimits] for
+// explicit control.
 func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
+	return UnmarshalBlameEvidenceWithLimits(in, defaultEvidenceLimits())
+}
+
+// UnmarshalBlameEvidenceWithLimits decodes and validates public blame evidence
+// with explicit size limits.
+func UnmarshalBlameEvidenceWithLimits(in []byte, l EvidenceLimits) (*BlameEvidence, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty blame evidence")
 	}
 
-	limits := DefaultLimits()
-	if len(in) > limits.MaxBlameEvidenceBytes {
-		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), limits.MaxBlameEvidenceBytes)
+	if len(in) > l.MaxBytes {
+		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), l.MaxBytes)
 	}
 
 	var evidence BlameEvidence
 	if err := wire.Unmarshal(
 		in,
 		&evidence,
-		wire.WithLimits(wire.Limits{
-			MaxTotalBytes: limits.MaxBlameEvidenceBytes,
-			MaxFields:     limits.MaxWireFields,
-			MaxFieldBytes: limits.MaxWireFieldBytes,
+		wire.WithFrameLimits(wire.FrameLimits{
+			MaxTotalBytes: l.MaxBytes,
+			MaxFields:     l.TLV.MaxFields,
+			MaxFieldBytes: l.TLV.MaxFieldBytes,
 		}),
-		wire.WithLimitSet(evidenceWireLimitSet()),
+		wire.WithFieldLimits(evidenceFieldLimits(l)),
 	); err != nil {
 		return nil, err
 	}
@@ -256,7 +293,11 @@ func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
 	if len(fields) == 0 {
 		return nil
 	}
-	sorted := cloneEvidenceFields(fields)
+	// make a copy
+	sorted := make([]EvidenceField, len(fields))
+	for i, field := range fields {
+		sorted[i] = field.Clone()
+	}
 	slices.SortFunc(sorted, func(a, b EvidenceField) int {
 		if a.Key < b.Key {
 			return -1
@@ -267,15 +308,4 @@ func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
 		return bytes.Compare(a.Value, b.Value)
 	})
 	return sorted
-}
-
-func cloneEvidenceFields(in []EvidenceField) []EvidenceField {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]EvidenceField, len(in))
-	for i, field := range in {
-		out[i] = field.Clone()
-	}
-	return out
 }

@@ -83,16 +83,16 @@ func marshalFieldBody(fields []Field) ([]byte, error) {
 	return out, nil
 }
 
-// Limits defines per-message caps used during TLV decoding.
-type Limits struct {
+// FrameLimits defines per-message caps used during TLV decoding.
+type FrameLimits struct {
 	MaxTotalBytes int // maximum input byte length
 	MaxFields     int // maximum TLV field count
 	MaxFieldBytes int // maximum per-field value size
 }
 
-// DefaultLimits returns conservative wire-level caps suitable as a fallback.
-func DefaultLimits() Limits {
-	return Limits{
+// DefaultFrameLimits returns conservative wire-level caps suitable as a fallback.
+func DefaultFrameLimits() FrameLimits {
+	return FrameLimits{
 		MaxTotalBytes: 1 << 20, // 1 MiB
 		MaxFields:     256,
 		MaxFieldBytes: 1 << 20, // 1 MiB
@@ -100,15 +100,15 @@ func DefaultLimits() Limits {
 }
 
 // UnmarshalFields decodes a typed message and rejects trailing or non-canonical data.
-// It uses DefaultLimits to guard against oversized inputs.
+// It uses DefaultFrameLimits to guard against oversized inputs.
 func UnmarshalFields(in []byte, expectedTypeID string) (uint16, []Field, error) {
-	return UnmarshalFieldsWithLimits(in, expectedTypeID, DefaultLimits())
+	return UnmarshalFieldsWithLimits(in, expectedTypeID, DefaultFrameLimits())
 }
 
 // UnmarshalFieldsWithLimits decodes a typed TLV message enforcing per-message caps.
 // It checks the total input size, field count, and per-field value size before
 // allocating memory, preventing oversized messages from causing OOM.
-func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits Limits) (uint16, []Field, error) {
+func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLimits) (uint16, []Field, error) {
 	if expectedTypeID == "" {
 		return 0, nil, errors.New("empty expected wire type id")
 	}
@@ -160,7 +160,7 @@ func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits Limits) 
 // It validates field count, tag ordering, value sizes, and trailing bytes.
 // The returned fields each own their value bytes (copied from raw).
 // It returns the new offset after the field body.
-func unmarshalFieldBody(raw []byte, offset int, limits Limits, name string) ([]Field, int, error) {
+func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string) ([]Field, int, error) {
 	if len(raw)-offset < 2 {
 		return nil, 0, fmt.Errorf("truncated %s field body", name)
 	}

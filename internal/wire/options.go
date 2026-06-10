@@ -1,7 +1,7 @@
 package wire
 
-// LimitSet maps semantic limit names to maximum values for field-level
-// checks.  A tag that references a name not present in the LimitSet is
+// FieldLimits maps semantic limit names to maximum values for field-level
+// checks.  A tag that references a name not present in the FieldLimits is
 // treated as an error, preventing accidental omission of security caps.
 //
 // Common names used across the codebase:
@@ -13,7 +13,7 @@ package wire
 //	threshold       - threshold value
 //	signers         - signer set size
 //	paillier_proof  - Paillier proof payload
-type LimitSet map[string]int
+type FieldLimits map[string]int
 
 // MarshalOption configures Marshal behavior.
 type MarshalOption interface {
@@ -26,42 +26,42 @@ type UnmarshalOption interface {
 }
 
 type marshalConfig struct {
-	limitSet LimitSet
+	fieldLimits FieldLimits
 }
 
 type unmarshalConfig struct {
-	limits   Limits
-	limitSet LimitSet
+	frameLimits FrameLimits
+	fieldLimits FieldLimits
 }
 
-// WithLimitSetForMarshal provides field-level semantic caps checked
+// WithFieldLimitsForMarshal provides field-level semantic caps checked
 // during marshaling.  Tags that reference limit names not in the set
 // will cause a marshal error.
-func WithLimitSetForMarshal(ls LimitSet) MarshalOption {
-	return withLimitSetForMarshal{ls}
+func WithFieldLimitsForMarshal(fl FieldLimits) MarshalOption {
+	return withFieldLimitsForMarshal{fl}
 }
 
-type withLimitSetForMarshal struct{ ls LimitSet }
+type withFieldLimitsForMarshal struct{ fl FieldLimits }
 
-func (o withLimitSetForMarshal) applyMarshal(cfg *marshalConfig) { cfg.limitSet = o.ls }
+func (o withFieldLimitsForMarshal) applyMarshal(cfg *marshalConfig) { cfg.fieldLimits = o.fl }
 
-// WithLimits overrides the TLV-level decode limits.  When omitted,
-// DefaultLimits is used.
-func WithLimits(l Limits) UnmarshalOption {
-	return withLimitsOpt{l}
+// WithFrameLimits overrides the TLV-level decode limits.  When omitted,
+// DefaultFrameLimits is used.
+func WithFrameLimits(l FrameLimits) UnmarshalOption {
+	return withFrameLimitsOpt{l}
 }
 
-type withLimitsOpt struct{ l Limits }
+type withFrameLimitsOpt struct{ l FrameLimits }
 
-func (o withLimitsOpt) applyUnmarshal(cfg *unmarshalConfig) { cfg.limits = o.l }
+func (o withFrameLimitsOpt) applyUnmarshal(cfg *unmarshalConfig) { cfg.frameLimits = o.l }
 
-// WithLimitSet provides field-level semantic caps checked during
+// WithFieldLimits provides field-level semantic caps checked during
 // unmarshaling.  Tags that reference limit names not in the set will
 // cause an unmarshal error.
-func WithLimitSet(ls LimitSet) UnmarshalOption {
-	return withLimitSetOpt{ls}
+func WithFieldLimits(fl FieldLimits) UnmarshalOption {
+	return withFieldLimitsOpt{fl}
 }
 
-type withLimitSetOpt struct{ ls LimitSet }
+type withFieldLimitsOpt struct{ fl FieldLimits }
 
-func (o withLimitSetOpt) applyUnmarshal(cfg *unmarshalConfig) { cfg.limitSet = o.ls }
+func (o withFieldLimitsOpt) applyUnmarshal(cfg *unmarshalConfig) { cfg.fieldLimits = o.fl }

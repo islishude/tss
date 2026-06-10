@@ -30,6 +30,9 @@ const (
 type KeygenOptions struct {
 	PaillierBits int
 	EnableHD     bool
+
+	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
+	Limits *Limits
 }
 
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
@@ -38,6 +41,7 @@ type KeygenSession struct {
 
 	cfg            tss.ThresholdConfig
 	log            tss.Logger
+	limits         Limits
 	commits        map[tss.PartyID][][]byte
 	shares         map[tss.PartyID]*big.Int
 	chainCodes     map[tss.PartyID][]byte
@@ -60,12 +64,12 @@ type pendingKeyShare struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments        [][]byte `json:"commitments" wire:"1,byteslist"`
-	PaillierPublicKey  []byte   `json:"paillier_public_key" wire:"2,bytes"`
-	PaillierProof      []byte   `json:"paillier_proof" wire:"3,bytes"`
+	Commitments        [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PaillierPublicKey  []byte   `json:"paillier_public_key" wire:"2,bytes,max_bytes=paillier_public_key"`
+	PaillierProof      []byte   `json:"paillier_proof" wire:"3,bytes,max_bytes=zk_proof"`
 	ChainCodeCommit    []byte   `json:"chain_code_commit,omitempty" wire:"4,bytes"`
-	RingPedersenParams []byte   `json:"ring_pedersen_params" wire:"5,bytes"`
-	RingPedersenProof  []byte   `json:"ring_pedersen_proof" wire:"6,bytes"`
+	RingPedersenParams []byte   `json:"ring_pedersen_params" wire:"5,bytes,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  []byte   `json:"ring_pedersen_proof" wire:"6,bytes,max_bytes=paillier_proof"`
 }
 
 // WireType returns the canonical wire type identifier for keygenCommitmentsPayload.

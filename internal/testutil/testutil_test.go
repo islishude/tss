@@ -42,19 +42,3 @@ func TestIsZeroBytes(t *testing.T) {
 		t.Error("fully non-zero slice should not be zero")
 	}
 }
-
-func TestTestLimits(t *testing.T) {
-	tl := TestLimits()
-	if !tl.AllowOneOfOne {
-		t.Error("AllowOneOfOne should be true")
-	}
-	if tl.MinProductionThreshold != 1 {
-		t.Errorf("MinProductionThreshold: got %d, want 1", tl.MinProductionThreshold)
-	}
-	if tl.AllowOversizedSignerSet != true {
-		t.Error("AllowOversizedSignerSet should be true")
-	}
-	if tl.MaxParties != 8 || tl.MaxThreshold != 8 || tl.MaxSigners != 8 {
-		t.Error("MaxParties/MaxThreshold/MaxSigners should be 8")
-	}
-}

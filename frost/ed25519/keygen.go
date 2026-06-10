@@ -19,6 +19,7 @@ type KeygenSession struct {
 	mu             sync.Mutex
 	cfg            tss.ThresholdConfig
 	log            tss.Logger
+	limits         Limits
 	commits        map[tss.PartyID][][]byte
 	shares         map[tss.PartyID]*fed.Scalar
 	chainCodes     map[tss.PartyID][]byte
@@ -35,7 +36,7 @@ type KeygenSession struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments     [][]byte `json:"commitments" wire:"1,byteslist"`
+	Commitments     [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
 	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty" wire:"2,bytes"`
 }
 
@@ -46,7 +47,7 @@ func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayl
 func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type keygenSharePayload struct {
-	Share []byte `json:"share" wire:"1,bytes"`
+	Share []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.
@@ -62,7 +63,11 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 
 // StartKeygenWithOptions starts dealerless DKG with optional HD chain code generation.
 func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
-	if err := config.ValidateWithLimits(DefaultLimits()); err != nil {
+	limits := DefaultLimits()
+	if opts.Limits != nil {
+		limits = *opts.Limits
+	}
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := config.SortedParties()
@@ -89,6 +94,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 	s := &KeygenSession{
 		cfg:     config,
 		log:     config.Logger(),
+		limits:  limits,
 		commits: map[tss.PartyID][][]byte{config.Self: commitments},
 		shares:  map[tss.PartyID]*fed.Scalar{config.Self: evalScalarPolynomial(poly, config.Self)},
 		chainCodes: map[tss.PartyID][]byte{

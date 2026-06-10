@@ -164,7 +164,7 @@ func DecodeBigPos(in []byte) (*big.Int, error) { return decodeBigPos(in) }
 // ---- big integer dispatch ----------------------------------------------------
 
 // encodeBigIntDispatch encodes a field value as a canonical signed integer.
-func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
 	out, err := encodeBigIntSigned(x)
 	if err != nil {
@@ -177,7 +177,7 @@ func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet LimitSet) 
 }
 
 // encodeBigUintDispatch encodes a field value as a canonical unsigned integer.
-func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
 	out, err := encodeBigUint(x)
 	if err != nil {
@@ -190,7 +190,7 @@ func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet LimitSet)
 }
 
 // encodeBigPosDispatch encodes a field value as a canonical positive integer.
-func (fs fieldSchema) encodeBigPosDispatch(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeBigPosDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
 	out, err := encodeBigPos(x)
 	if err != nil {
@@ -203,7 +203,7 @@ func (fs fieldSchema) encodeBigPosDispatch(fv reflect.Value, limitSet LimitSet) 
 }
 
 // decodeBigIntDispatch decodes raw bytes into a signed integer field.
-func (fs fieldSchema) decodeBigIntDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeBigIntDispatch(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}
@@ -219,7 +219,7 @@ func (fs fieldSchema) decodeBigIntDispatch(fv reflect.Value, raw []byte, limitSe
 }
 
 // decodeBigUintDispatch decodes raw bytes into an unsigned integer field.
-func (fs fieldSchema) decodeBigUintDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeBigUintDispatch(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}
@@ -235,7 +235,7 @@ func (fs fieldSchema) decodeBigUintDispatch(fv reflect.Value, raw []byte, limitS
 }
 
 // decodeBigPosDispatch decodes raw bytes into a positive integer field.
-func (fs fieldSchema) decodeBigPosDispatch(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeBigPosDispatch(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}

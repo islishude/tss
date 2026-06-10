@@ -186,8 +186,8 @@ func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare) e
 			return fmt.Errorf("verify share party %d: empty proof", share.Party)
 		}
 		limits := DefaultLimits()
-		if len(share.Proof) > limits.MaxCGGMP21SignPrepProofBytes {
-			return fmt.Errorf("verify share party %d: proof too large: %d > %d", share.Party, len(share.Proof), limits.MaxCGGMP21SignPrepProofBytes)
+		if len(share.Proof) > limits.SignPrep.MaxProofBytes {
+			return fmt.Errorf("verify share party %d: proof too large: %d > %d", share.Party, len(share.Proof), limits.SignPrep.MaxProofBytes)
 		}
 	}
 	return nil

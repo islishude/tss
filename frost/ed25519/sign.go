@@ -17,6 +17,7 @@ type SignSession struct {
 	key           *KeyShare
 	sessionID     tss.SessionID
 	log           tss.Logger
+	limits        Limits
 	message       []byte
 	signers       []tss.PartyID
 	commitments   map[tss.PartyID]nonceCommitment
@@ -34,8 +35,8 @@ type SignSession struct {
 }
 
 type nonceCommitment struct {
-	D []byte `wire:"1,bytes"` // hiding nonce commitment
-	E []byte `wire:"2,bytes"` // binding nonce commitment
+	D []byte `wire:"1,bytes,max_bytes=point"` // hiding nonce commitment
+	E []byte `wire:"2,bytes,max_bytes=point"` // binding nonce commitment
 }
 
 // WireType returns the canonical wire type identifier for nonceCommitment.
@@ -50,7 +51,7 @@ func (nonceCommitment) MarshalJSON() ([]byte, error) {
 }
 
 type signPartialPayload struct {
-	Z []byte `wire:"1,bytes"`
+	Z []byte `wire:"1,bytes,max_bytes=scalar"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.
@@ -81,7 +82,11 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	if !tss.ContainsParty(signers, key.Party) {
 		return nil, nil, errors.New("local party is not in signer set")
 	}
-	if err := validateSignerSet(key, signers); err != nil {
+	limits := DefaultLimits()
+	if opts.Limits != nil {
+		limits = *opts.Limits
+	}
+	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, nil, err
 	}
 	verifyKey := key.PublicKeyBytes()
@@ -152,6 +157,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		key:           key,
 		sessionID:     sessionID,
 		log:           tss.NopLogger(),
+		limits:        limits,
 		message:       append([]byte(nil), message...),
 		signers:       signers,
 		commitments:   map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
@@ -312,9 +318,8 @@ func (s *SignSession) clearNonceBytes() {
 	s.eNonce = nil
 }
 
-func validateSignerSet(key *KeyShare, signers []tss.PartyID) error {
-	limits := DefaultLimits()
-	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits)
+func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
+	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits.ThresholdLimits())
 }
 
 // Sign runs an in-memory FROST signing exchange for tests and simple integrations.

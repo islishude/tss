@@ -116,7 +116,7 @@ func TestFast_PresignRejectsEmptyProof(t *testing.T) {
 func TestFast_PresignRejectsOversizeProof(t *testing.T) {
 	presign := minimalCGGMP21Presign(t)
 	limits := TestLimits()
-	presign.VerifyShares[0].Proof = make([]byte, limits.MaxCGGMP21SignPrepProofBytes+1)
+	presign.VerifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
 	if err := presign.Validate(); err == nil {
 		t.Fatal("expected Validate to reject oversize proof")
 	}

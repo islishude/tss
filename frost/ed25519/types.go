@@ -152,8 +152,8 @@ func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty key share")
 	}
-	if len(in) > limits.MaxSerializedKeyShareBytes {
-		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.MaxSerializedKeyShareBytes)
+	if len(in) > limits.State.MaxSerializedKeyShareBytes {
+		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
 	return unmarshalKeyShareWithLimits(in, limits)
 }
@@ -369,6 +369,9 @@ func scalarBytes(x *big.Int) ([]byte, error) {
 type KeygenOptions struct {
 	// EnableHD generates a random 32-byte chain code during keygen for BIP32 derivation.
 	EnableHD bool
+
+	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
+	Limits *Limits
 }
 
 // SignOptions controls optional signing behavior.
@@ -381,6 +384,9 @@ type SignOptions struct {
 	// NonceReader supplies fresh randomness for FROST signing nonces. If nil,
 	// crypto/rand.Reader is used.
 	NonceReader io.Reader
+
+	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
+	Limits *Limits
 }
 
 // DerivePublicKey returns the child Ed25519 public key produced by adding

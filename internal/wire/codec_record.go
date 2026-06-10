@@ -8,12 +8,12 @@ import (
 // ---- record ------------------------------------------------------------------
 
 // encodeRecord encodes a struct field value as a record body (field count + fields).
-func (fs fieldSchema) encodeRecord(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeRecord(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	return marshalRecordValue(fv, limitSet)
 }
 
 // decodeRecord decodes a record body into a struct field value.
-func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	return unmarshalRecordValue(raw, fv, limitSet)
 }
 
@@ -27,7 +27,7 @@ func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet LimitS
 //	repeat count:
 //	    uint32 record_len
 //	    record bytes
-func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet LimitSet) ([]byte, error) {
+func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
 
 	if fs.maxItems != "" {
@@ -55,7 +55,7 @@ func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet LimitSet) ([]b
 }
 
 // decodeRecordList decodes a length-prefixed record list into a slice field value.
-func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if len(raw) < 4 {
 		return fmt.Errorf("truncated recordlist count")
 	}
@@ -119,7 +119,7 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Li
 // The value may be a struct or pointer-to-struct. Nil pointers are rejected.
 // When v is not addressable (e.g., a slice element from []T), an addressable copy
 // is created so that pointer-receiver hooks (BeforeMarshalWire, Validate) are visible.
-func marshalRecordValue(v reflect.Value, limitSet LimitSet) ([]byte, error) {
+func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	if v.Kind() == reflect.Pointer {
 		if v.IsNil() {
 			return nil, fmt.Errorf("nil record pointer")
@@ -185,7 +185,7 @@ func marshalRecordValue(v reflect.Value, limitSet LimitSet) ([]byte, error) {
 
 // unmarshalRecordValue decodes a record body into a settable struct value.
 // The value must be a struct or pointer-to-struct. Nil pointers are auto-allocated.
-func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet LimitSet) error {
+func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits) error {
 	if dst.Kind() == reflect.Pointer {
 		if dst.IsNil() {
 			dst.Set(reflect.New(dst.Type().Elem()))
@@ -201,7 +201,7 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet LimitSet) erro
 		return fmt.Errorf("record %s: %w", dst.Type().Name(), err)
 	}
 
-	limits := DefaultLimits()
+	limits := DefaultFrameLimits()
 	fields, offset, err := unmarshalFieldBody(raw, 0, limits, dst.Type().Name())
 	if err != nil {
 		return err

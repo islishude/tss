@@ -16,7 +16,7 @@ func TestUnmarshalRejectsOversizedInput(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	limits := wire.Limits{
+	limits := wire.FrameLimits{
 		MaxTotalBytes: len(msg) - 1, // deliberately too small
 		MaxFields:     256,
 		MaxFieldBytes: 1 << 20,
@@ -38,7 +38,7 @@ func TestUnmarshalRejectsTooManyFields(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	limits := wire.Limits{
+	limits := wire.FrameLimits{
 		MaxTotalBytes: 1 << 20,
 		MaxFields:     3, // cap at 3 fields
 		MaxFieldBytes: 1 << 20,
@@ -59,7 +59,7 @@ func TestUnmarshalRejectsOversizedField(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	limits := wire.Limits{
+	limits := wire.FrameLimits{
 		MaxTotalBytes: 1 << 20,
 		MaxFields:     256,
 		MaxFieldBytes: 50, // cap at 50 bytes per field
@@ -79,7 +79,7 @@ func TestUnmarshalWithLimitsRejectsWrongType(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	limits := wire.DefaultLimits()
+	limits := wire.DefaultFrameLimits()
 	_, _, err = wire.UnmarshalFieldsWithLimits(msg, "test.xyz", limits)
 	if err == nil {
 		t.Fatal("expected error for wrong wire type")
@@ -96,7 +96,7 @@ func TestUnmarshalWithLimitsValidMessage(t *testing.T) {
 		t.Fatalf("marshal: %v", err)
 	}
 
-	limits := wire.DefaultLimits()
+	limits := wire.DefaultFrameLimits()
 	version, parsed, err := wire.UnmarshalFieldsWithLimits(msg, "test.valid", limits)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
