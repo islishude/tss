@@ -152,10 +152,12 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	return tss.NewEnvelopeGuard(s.selfID, union, protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
 }
 
-// validateInbound runs envelope validation through the shared ValidateInboundWithParties helper.
+// validateInbound runs envelope validation through the shared ValidateInbound helper.
+// The allowedParties parameter selects which participants are accepted as senders
+// for this round (e.g. old parties for dealer messages, new parties for receiver messages).
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
-	return tss.ValidateInboundWithParties(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
 }
 
 // StartReshare starts CGGMP21 resharing as an old-party dealer.

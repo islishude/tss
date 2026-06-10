@@ -91,10 +91,10 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	return tss.NewEnvelopeGuard(s.selfID, tss.PartySet(s.oldParties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
 }
 
-// validateInbound runs envelope validation through the shared ValidateInboundWithParties helper.
+// validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInboundWithParties(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
 }
 
 // StartReshare starts a FROST key resharing as an old-party dealer.

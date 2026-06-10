@@ -3,7 +3,6 @@ package tss
 import (
 	"errors"
 	"fmt"
-	"slices"
 	"testing"
 )
 
@@ -197,12 +196,13 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 // This ensures transport authentication, confidentiality enforcement, broadcast
 // consistency, and replay detection are applied uniformly in all code paths.
 //
-// The parties parameter must match guard.Parties exactly. Sessions that accept
-// messages from different participant subsets depending on payload type (e.g.
-// reshare, where old and new parties differ) must use
-// [ValidateInboundWithParties] instead, which validates sender membership and
-// broadcast certificates against the provided party set rather than the
-// guard's configured set.
+// The parties parameter specifies which participants are accepted as senders
+// for this message. The guard's configured [EnvelopeGuard.Parties] field is NOT
+// used to restrict the sender set — callers must supply the appropriate party
+// set per round or per payload type. For sessions where the trusted party
+// universe changes between rounds (e.g. reshare with old and new party
+// subsets), this design avoids coupling the guard's construction-time party set
+// to per-message validation.
 func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
@@ -213,28 +213,8 @@ func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol Protoc
 	if guard.SessionID != expectedSession {
 		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
 	}
-	if !slices.Equal(guard.Parties, parties) {
-		return fmt.Errorf("guard parties %v do not match expected %v", guard.Parties, parties)
-	}
-	if guard.Self != self {
-		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
-	}
-	return guard.Validate(env)
-}
-
-// ValidateInboundWithParties is like [ValidateInbound] but validates sender
-// membership and broadcast certificates against the provided party set instead
-// of the guard's configured set. This is used by sessions (e.g. reshare) that
-// accept messages from different participant subsets depending on payload type.
-func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
-	if guard == nil {
-		return ErrMissingEnvelopeGuard
-	}
-	if guard.Protocol != expectedProtocol {
-		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
-	}
-	if guard.SessionID != expectedSession {
-		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	if len(parties) == 0 {
+		return errors.New("parties must not be empty")
 	}
 	if guard.Self != self {
 		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
