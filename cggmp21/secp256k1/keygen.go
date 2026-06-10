@@ -110,12 +110,12 @@ func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, err
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies, cache)
+	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self, CGGMP21Policies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
@@ -139,6 +139,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 

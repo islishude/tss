@@ -19,7 +19,7 @@ func testFROSTGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.Sessio
 
 // testFROSTPolicies returns the FROST policy set with broadcast consistency relaxed.
 func testFROSTPolicies() tss.PolicySet {
-	entries := FROSTPolicies.Entries()
+	entries := FROSTPolicies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
 		relaxed[i] = p
@@ -100,8 +100,10 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 	if _, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil || len(out) != 0 {
+	if out, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate commitment should be ignored, out=%d err=%v", len(out), err)
+		} else if len(out) != 0 {
+			t.Fatalf("duplicate commitment produced unexpected output, out=%d", len(out))
 	}
 }
 
@@ -151,8 +153,10 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 	if _, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil || len(out) != 0 {
+	if out, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate partial should be ignored, out=%d err=%v", len(out), err)
+		} else if len(out) != 0 {
+			t.Fatalf("duplicate partial produced unexpected output, out=%d", len(out))
 	}
 }
 
@@ -209,7 +213,7 @@ func TestFROSTConcurrentMessageHandling(t *testing.T) {
 	wg.Wait()
 	close(errs)
 	for err := range errs {
-		if err != nil {
+		if err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 			t.Fatalf("concurrent duplicate delivery failed: %v", err)
 		}
 	}

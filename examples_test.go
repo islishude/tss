@@ -110,7 +110,7 @@ func ExampleEnvelope_roundtrip() {
 		panic(err)
 	}
 	copy(decoded.TranscriptHash[:], decoded.DomainSeparatedHash())
-	if err := ValidateEnvelope(decoded, "example", sessionID, []PartyID{1}); err != nil {
+	if err := ValidateEnvelopeBasic(decoded, "example", sessionID, []PartyID{1}); err != nil {
 		panic(err)
 	}
 

@@ -98,7 +98,7 @@ func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, part
 	delivered.Security.Authenticated = true
 	delivered.Security.AuthenticatedParty = env.From
 	// Set confidentiality based on policy.
-	for _, p := range CGGMP21Policies.Entries() {
+	for _, p := range CGGMP21Policies().Entries() {
 		if p.Protocol == protocol && p.Round == env.Round && p.PayloadType == env.PayloadType {
 			if p.Confidentiality == tss.ConfidentialityRequired {
 				delivered.Security.Confidential = true
@@ -112,7 +112,7 @@ func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, part
 	}
 	if env.To == 0 {
 		// Broadcast: attach certificate for consistency-required payloads.
-		for _, p := range CGGMP21Policies.Entries() {
+		for _, p := range CGGMP21Policies().Entries() {
 			if p.Protocol == protocol && p.Round == env.Round && p.PayloadType == env.PayloadType {
 				if p.BroadcastConsistency == tss.BroadcastConsistencyRequired {
 					delivered.Broadcast = buildBroadcastCertificate(t, env, parties, km)

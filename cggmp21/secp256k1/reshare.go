@@ -149,13 +149,13 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 			union = append(union, id)
 		}
 	}
-	return tss.NewEnvelopeGuard(s.selfID, union, protocol, s.cfg.SessionID, CGGMP21Policies, cache)
+	return tss.NewEnvelopeGuard(s.selfID, union, protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInboundWithParties helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
-	return tss.ValidateInboundWithParties(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID, CGGMP21Policies)
+	return tss.ValidateInboundWithParties(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
 }
 
 // StartReshare starts CGGMP21 resharing as an old-party dealer.
@@ -322,6 +322,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 
 	if env.PayloadType == payloadKeygenConfirmation {
 		if err := s.validateInbound(env, s.newParties); err != nil {
+			if errors.Is(err, tss.ErrDuplicateMessage) {
+				return nil, tss.ErrDuplicateMessage
+			}
 			return nil, err
 		}
 		return s.handleReshareConfirmation(env)
@@ -333,6 +336,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		allowedParties = s.newParties
 	}
 	if err := s.validateInbound(env, allowedParties); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 

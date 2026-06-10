@@ -172,12 +172,12 @@ func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies, cache)
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party, CGGMP21Policies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
@@ -201,6 +201,9 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 	if !tss.ContainsParty(s.presign.Signers, env.From) {

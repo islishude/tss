@@ -132,7 +132,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 // in-memory simulation helpers ([Sign], [SignDigestInteractive]) that route
 // messages directly without broadcast certificate coordination.
 func simulationCGGMP21Policies() tss.PolicySet {
-	entries := CGGMP21Policies.Entries()
+	entries := CGGMP21Policies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
 		relaxed[i] = p

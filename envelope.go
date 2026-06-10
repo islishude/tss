@@ -119,6 +119,12 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 	if len(e.Payload) > limits.MaxEnvelopePayloadBytes {
 		return fmt.Errorf("envelope payload too large: %d > %d", len(e.Payload), limits.MaxEnvelopePayloadBytes)
 	}
+	if !e.SessionID.Valid() {
+		return errors.New("invalid session id")
+	}
+	if e.From == 0 {
+		return errors.New("envelope sender is zero (unset)")
+	}
 	return nil
 }
 
@@ -144,6 +150,12 @@ func NewEnvelope(input EnvelopeInput) (Envelope, error) {
 	if len(input.Payload) > limits.MaxEnvelopePayloadBytes {
 		return Envelope{}, fmt.Errorf("envelope payload too large: %d > %d", len(input.Payload), limits.MaxEnvelopePayloadBytes)
 	}
+	if !input.SessionID.Valid() {
+		return Envelope{}, ErrInvalidSessionID
+	}
+	if input.From == 0 {
+		return Envelope{}, errors.New("envelope sender is zero (unset)")
+	}
 	e := Envelope{
 		Protocol:    input.Protocol,
 		Version:     input.Version,
@@ -152,7 +164,7 @@ func NewEnvelope(input EnvelopeInput) (Envelope, error) {
 		From:        input.From,
 		To:          input.To,
 		PayloadType: input.PayloadType,
-		Payload:     input.Payload,
+		Payload:     append([]byte(nil), input.Payload...),
 	}
 	e.TranscriptHash = e.domainSeparatedHash()
 	return e, nil
@@ -214,10 +226,12 @@ func (e Envelope) RecomputeTranscriptHash() Envelope {
 	return e
 }
 
-// ValidateEnvelope performs common envelope validation without a guard.
-// This is a transitional helper for handlers that have not yet adopted EnvelopeGuard.
-// New code should use EnvelopeGuard.Validate instead.
-func ValidateEnvelope(env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties []PartyID) error {
+// ValidateEnvelopeBasic performs basic envelope validation without a guard.
+// It checks protocol, version, session, transcript hash integrity, and
+// sender membership (when parties is non-empty). It does NOT enforce
+// transport authentication, confidentiality, broadcast consistency, or
+// replay detection. New code should use [EnvelopeGuard.Validate] instead.
+func ValidateEnvelopeBasic(env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties []PartyID) error {
 	if env.Protocol != expectedProtocol {
 		return fmt.Errorf("unexpected protocol %q", env.Protocol)
 	}
@@ -237,7 +251,7 @@ func ValidateEnvelope(env Envelope, expectedProtocol ProtocolID, expectedSession
 }
 
 // ValidateEnvelopePolicy checks delivery mode and confidentiality against a PolicySet.
-// It is a lightweight complement to ValidateEnvelope for the test fallback path
+// It is a lightweight complement to [ValidateEnvelopeBasic] for the test fallback path
 // (when no EnvelopeGuard is set and the transport is unauthenticated).
 // It does NOT check broadcast consistency or replay — those require guard infrastructure.
 func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) error {

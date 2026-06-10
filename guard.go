@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"testing"
 )
 
 // EnvelopeGuard validates incoming envelopes against protocol, transport, and session policies.
@@ -52,7 +53,12 @@ func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessi
 // NewTestEnvelopeGuard constructs a guard suitable for tests. It uses an in-memory
 // replay cache and a no-op ack verifier. This function MUST NOT be used in production
 // code — production callers must use [GuardConfig.BuildGuard] with a real verifier.
+//
+// It panics when not running under "go test" to prevent accidental production use.
 func NewTestEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet) *EnvelopeGuard {
+	if !testing.Testing() {
+		panic("NewTestEnvelopeGuard must only be called from tests")
+	}
 	g, err := NewEnvelopeGuard(self, parties, protocol, sessionID, policies, NewInMemoryReplayCache())
 	if err != nil {
 		panic(fmt.Sprintf("NewTestEnvelopeGuard: %v", err))
@@ -169,16 +175,16 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 	}
 
 	// 14. Replay and equivocation detection.
-	// Duplicate messages (same slot, same transcript) are silently dropped;
-	// handlers have their own per-round duplicate detection and may ignore
-	// harmless duplicates (e.g., commitment re-delivery).
-	// Equivocation (same slot, different transcript) is always an error
-	// because it indicates a malicious or faulty sender.
+	// Duplicate messages (same slot, same payload hash) return
+	// [ErrDuplicateMessage] so handlers can drop them before parsing
+	// payloads. Equivocation (same slot, different payload hash) is
+	// always a verification error because it indicates a malicious or
+	// faulty sender.
 	slot := SlotKeyFromEnvelope(env)
 	payloadHash := PayloadHashFromEnvelope(env)
 	if err := g.ReplayCache.CheckAndStore(slot, payloadHash); err != nil {
 		if errors.Is(err, ErrDuplicateMessage) {
-			return nil // silently drop duplicate
+			return ErrDuplicateMessage
 		}
 		return NewProtocolError(ErrCodeVerification, env.Round, env.From, err)
 	}
@@ -197,7 +203,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 // [ValidateInboundWithParties] instead, which validates sender membership and
 // broadcast certificates against the provided party set rather than the
 // guard's configured set.
-func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
+func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
 	}
@@ -220,7 +226,7 @@ func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol Protoc
 // membership and broadcast certificates against the provided party set instead
 // of the guard's configured set. This is used by sessions (e.g. reshare) that
 // accept messages from different participant subsets depending on payload type.
-func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
+func ValidateInboundWithParties(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard
 	}

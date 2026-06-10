@@ -58,7 +58,7 @@ func TestMTAProductShares(t *testing.T) {
 	if err := VerifyStart(startDomain, start.Message, &skA.PublicKey, *rpA, startProof); err == nil {
 		t.Fatal("start proof verified for wrong verifier aux")
 	}
-	legacyProof, err := zkpai.ProveEncryption(nil, startDomain, &skA.PublicKey, new(big.Int).SetBytes(start.Message.Ciphertext), start.k, start.rho)
+	legacyProof, err := zkpai.ProveEncryption(nil, startDomain, &skA.PublicKey, new(big.Int).SetBytes(start.Message.Ciphertext), start.k, start.rho) //nolint:all // testing usage
 	if err != nil {
 		t.Fatal(err)
 	}

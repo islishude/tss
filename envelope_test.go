@@ -33,17 +33,17 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 	}
 	// Recompute transcript hash from wire-decoded fields
 	decoded.TranscriptHash = decoded.domainSeparatedHash()
-	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err != nil {
+	if err := ValidateEnvelopeBasic(decoded, "test", session, []PartyID{1, 2}); err != nil {
 		t.Fatal(err)
 	}
 	// Zero out transcript hash and check failure
 	decoded.TranscriptHash = [32]byte{}
-	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err == nil {
+	if err := ValidateEnvelopeBasic(decoded, "test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected missing transcript hash rejection")
 	}
 	decoded.TranscriptHash = env.TranscriptHash
 	decoded.Payload[0] ^= 1
-	if err := ValidateEnvelope(decoded, "test", session, []PartyID{1, 2}); err == nil {
+	if err := ValidateEnvelopeBasic(decoded, "test", session, []PartyID{1, 2}); err == nil {
 		t.Fatal("expected transcript mismatch")
 	}
 }
@@ -106,7 +106,7 @@ func FuzzEnvelopeUnmarshalBinary(f *testing.F) {
 			return
 		}
 		decoded.TranscriptHash = decoded.domainSeparatedHash()
-		_ = ValidateEnvelope(decoded, "test", session, []PartyID{1, 2})
+		_ = ValidateEnvelopeBasic(decoded, "test", session, []PartyID{1, 2})
 		again, err := decoded.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)

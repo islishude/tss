@@ -223,9 +223,10 @@ func TestGuardDropsDuplicate(t *testing.T) {
 	if err := env.guard.Validate(e); err != nil {
 		t.Fatalf("first validation should pass, got %v", err)
 	}
-	// Second delivery of the same message is silently dropped (nil return).
-	if err := env.guard.Validate(e); err != nil {
-		t.Fatalf("duplicate should be silently dropped, got %v", err)
+	// Second delivery of the same message returns ErrDuplicateMessage so
+	// callers can drop it immediately without further processing.
+	if err := env.guard.Validate(e); !errors.Is(err, ErrDuplicateMessage) {
+		t.Fatalf("duplicate should return ErrDuplicateMessage, got %v", err)
 	}
 }
 

@@ -413,13 +413,13 @@ func (s *PresignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies, cache)
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *PresignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party, CGGMP21Policies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
@@ -443,6 +443,9 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, env.From) {

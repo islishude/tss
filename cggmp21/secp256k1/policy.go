@@ -2,7 +2,7 @@ package secp256k1
 
 import "github.com/islishude/tss"
 
-// CGGMP21Policies defines the delivery policy matrix for the CGGMP21 secp256k1 protocol.
+// cggmp21Policies defines the delivery policy matrix for the CGGMP21 secp256k1 protocol.
 // Every payload type that a handler may receive must be registered here.
 // Unregistered payload types are rejected by EnvelopeGuard.
 //
@@ -11,7 +11,7 @@ import "github.com/islishude/tss"
 // payloads use ConfidentialityOptional — they contain public commitments, ciphertexts,
 // or public-key material that does not require transport encryption but tolerates it
 // (e.g. TLS/mTLS).
-var CGGMP21Policies = tss.MustNewPolicySet(
+var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
@@ -128,3 +128,10 @@ var CGGMP21Policies = tss.MustNewPolicySet(
 	},
 	// Reshare round 2 uses payloadKeygenConfirmation (already registered in keygen section)
 )
+
+// CGGMP21Policies returns the read-only delivery policy set for the CGGMP21
+// secp256k1 protocol. The returned value is safe to pass to guard constructors
+// and [tss.PolicySet.Entries] returns a copy — callers cannot mutate the original.
+func CGGMP21Policies() tss.PolicySet {
+	return cggmp21Policies
+}

@@ -38,17 +38,19 @@ type PolicySet struct {
 }
 
 // NewPolicySet builds a PolicySet from a list of delivery policies.
-// Duplicate keys are rejected.
+// It clones the input slice so callers cannot mutate the policy entries
+// after construction. Duplicate keys are rejected.
 func NewPolicySet(policies ...DeliveryPolicy) (PolicySet, error) {
-	idx := make(map[policyKey]int, len(policies))
-	for i, p := range policies {
+	cloned := append([]DeliveryPolicy(nil), policies...)
+	idx := make(map[policyKey]int, len(cloned))
+	for i, p := range cloned {
 		k := policyKey{protocol: p.Protocol, round: p.Round, payloadType: p.PayloadType}
 		if _, exists := idx[k]; exists {
 			return PolicySet{}, fmt.Errorf("duplicate delivery policy for protocol=%q round=%d payloadType=%q", p.Protocol, p.Round, p.PayloadType)
 		}
 		idx[k] = i
 	}
-	return PolicySet{entries: policies, index: idx}, nil
+	return PolicySet{entries: cloned, index: idx}, nil
 }
 
 // ValidateBroadcastConsistency checks that every broadcast-mode DeliveryPolicy requires
@@ -78,9 +80,9 @@ func MustNewPolicySet(policies ...DeliveryPolicy) PolicySet {
 	return ps
 }
 
-// Entries returns the policy entries in registration order.
+// Entries returns a copy of the policy entries in registration order.
 func (ps PolicySet) Entries() []DeliveryPolicy {
-	return ps.entries
+	return append([]DeliveryPolicy(nil), ps.entries...)
 }
 
 // Match returns the policy for a given message kind or ErrUnknownPayloadPolicy.

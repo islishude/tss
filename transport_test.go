@@ -222,8 +222,8 @@ func TestTransportSecurityIntegration(t *testing.T) {
 		if err := guard.Validate(env); err != nil {
 			t.Fatalf("first pass: %v", err)
 		}
-		if err := guard.Validate(env); err != nil {
-			t.Fatalf("duplicate should be silently dropped, got %v", err)
+		if err := guard.Validate(env); !errors.Is(err, ErrDuplicateMessage) {
+			t.Fatalf("duplicate should return ErrDuplicateMessage, got %v", err)
 		}
 	})
 

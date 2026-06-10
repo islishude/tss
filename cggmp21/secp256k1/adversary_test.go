@@ -113,7 +113,9 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = kg.HandleKeygenMessage(commit)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		if !errors.Is(err, tss.ErrDuplicateMessage) {
+			t.Fatalf("expected ErrDuplicateMessage, got %v", err)
+		}
 	})
 }
 
@@ -209,7 +211,9 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = session.HandlePresignMessage(deliverCGGMPEnv(round1))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		if !errors.Is(err, tss.ErrDuplicateMessage) {
+			t.Fatalf("expected ErrDuplicateMessage, got %v", err)
+		}
 	})
 }
 
@@ -334,7 +338,9 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = s1.HandlePresignMessage(deliverCGGMPEnv(proof))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeDuplicate)
+		if !errors.Is(err, tss.ErrDuplicateMessage) {
+			t.Fatalf("expected ErrDuplicateMessage, got %v", err)
+		}
 	})
 
 	t.Run("wrong recipient", func(t *testing.T) {

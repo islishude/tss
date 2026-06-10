@@ -13,7 +13,7 @@ import (
 // policy set with BroadcastConsistencyRequired. Use this for tests that
 // specifically exercise broadcast certificate enforcement.
 func testCGGMP21GuardFull(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, CGGMP21Policies, tss.NewInMemoryReplayCache())
+	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 	if err != nil {
 		panic(err)
 	}

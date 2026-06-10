@@ -188,13 +188,13 @@ func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, FROSTPolicies, cache)
+	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, FROSTPolicies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party, FROSTPolicies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
@@ -217,6 +217,9 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 	if !tss.ContainsParty(s.signers, env.From) {
@@ -328,9 +331,9 @@ func (noopSignVerifier) VerifyAck(party tss.PartyID, digest [32]byte, signature 
 	return nil
 }
 
-// inProcessPolicies returns FROSTPolicies with broadcast consistency relaxed.
+// inProcessPolicies returns FROSTPolicies() with broadcast consistency relaxed.
 func inProcessPolicies() tss.PolicySet {
-	entries := FROSTPolicies.Entries()
+	entries := FROSTPolicies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
 		relaxed[i] = p

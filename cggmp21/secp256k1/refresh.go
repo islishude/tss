@@ -197,13 +197,13 @@ func (s *RefreshSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies, cache)
+	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *RefreshSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self, CGGMP21Policies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleRefreshMessage validates and applies one refresh envelope.
@@ -225,6 +225,9 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 	if env.PayloadType == payloadKeygenConfirmation {

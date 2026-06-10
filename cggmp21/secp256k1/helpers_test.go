@@ -28,7 +28,7 @@ func testCGGMP21Guard(self tss.PartyID, parties tss.PartySet, sessionID tss.Sess
 // consistency relaxed to None for all payload types. Tests that specifically
 // exercise broadcast consistency should use CGGMP21Policies directly.
 func testCGGMP21Policies() tss.PolicySet {
-	entries := CGGMP21Policies.Entries()
+	entries := CGGMP21Policies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
 		relaxed[i] = p

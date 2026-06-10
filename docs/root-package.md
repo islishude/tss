@@ -95,9 +95,9 @@ See [docs/wire.md](wire.md) for the full canonical encoding specification.
 
 ### Transcript Binding
 
-`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `ValidateEnvelope()` and `EnvelopeGuard.Validate()`.
+`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `ValidateEnvelopeBasic()` and `EnvelopeGuard.Validate()`.
 
-`ValidateEnvelope(env, protocol, session, parties)` checks protocol name, version, session ID, transcript integrity, and sender membership. **Prefer `EnvelopeGuard`** for production code; `ValidateEnvelope` is a transitional helper.
+`ValidateEnvelopeBasic(env, protocol, session, parties)` checks protocol name, version, session ID, transcript integrity, and sender membership. **Prefer `EnvelopeGuard`** for production code; `ValidateEnvelopeBasic` does not enforce transport authentication, confidentiality, broadcast consistency, or replay detection.
 
 ### Transport Semantics (SecurityContext)
 
@@ -151,7 +151,7 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 12. Broadcast consistency certificate verification with `VerifyFull` (when required)
 13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
-Each protocol session must hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`.
+Each protocol session must hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when not running under `go test` to prevent accidental production use.
 
 ### BroadcastCertificate
 

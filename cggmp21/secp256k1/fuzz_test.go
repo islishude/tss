@@ -38,7 +38,7 @@ func FuzzCGGMP21EnvelopeValidateBasic(f *testing.F) {
 		if err := env.UnmarshalBinary(data); err != nil {
 			return
 		}
-		_ = tss.ValidateEnvelope(env, protocol, sessionID, []tss.PartyID{1, 2})
+		_ = tss.ValidateEnvelopeBasic(env, protocol, sessionID, []tss.PartyID{1, 2})
 		// Use semantic round-trip: re-marshal → re-unmarshal → re-marshal
 		// and compare canonical outputs. Raw fuzz input may carry extra
 		// TLV fields or non-canonical encodings that MarshalBinary normalizes.

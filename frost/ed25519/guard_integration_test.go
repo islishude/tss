@@ -88,7 +88,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies))
+	session.SetGuard(tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies()))
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,

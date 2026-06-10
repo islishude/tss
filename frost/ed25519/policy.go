@@ -2,7 +2,7 @@ package ed25519
 
 import "github.com/islishude/tss"
 
-// FROSTPolicies defines the delivery policy matrix for the FROST Ed25519 protocol.
+// frostPolicies defines the delivery policy matrix for the FROST Ed25519 protocol.
 // Every payload type that a handler may receive must be registered here.
 // Unregistered payload types are rejected by EnvelopeGuard.
 //
@@ -10,7 +10,7 @@ import "github.com/islishude/tss"
 // require ConfidentialityRequired. All other broadcast payloads use
 // ConfidentialityOptional — they contain public commitments or partial signatures
 // that do not require transport encryption but tolerate it (e.g. TLS/mTLS).
-var FROSTPolicies = tss.MustNewPolicySet(
+var frostPolicies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
@@ -74,3 +74,10 @@ var FROSTPolicies = tss.MustNewPolicySet(
 	},
 	// FROST reshare confirmations use payloadKeygenConfirmation (already registered)
 )
+
+// FROSTPolicies returns the read-only delivery policy set for the FROST Ed25519
+// protocol. The returned value is safe to pass to guard constructors and
+// [tss.PolicySet.Entries] returns a copy — callers cannot mutate the original.
+func FROSTPolicies() tss.PolicySet {
+	return frostPolicies
+}

@@ -165,13 +165,13 @@ func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, err
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, FROSTPolicies, cache)
+	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *KeygenSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self, FROSTPolicies)
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one DKG envelope.
@@ -193,6 +193,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
 		return nil, err
 	}
 	if env.PayloadType == payloadKeygenConfirmation {
