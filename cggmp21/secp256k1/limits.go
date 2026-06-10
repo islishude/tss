@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"sync"
+	"testing"
 
 	"github.com/islishude/tss"
 )
@@ -65,6 +66,9 @@ var (
 //
 //	t.Cleanup(secp256k1.SetLimitsForTesting(secp256k1.TestLimits()))
 func SetLimitsForTesting(l tss.Limits) func() {
+	if !testing.Testing() {
+		panic("SetLimitsForTesting called outside of tests — production code must use DefaultLimits")
+	}
 	limitsMu.Lock()
 	old := overrideLimits
 	lc := l

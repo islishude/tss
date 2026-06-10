@@ -233,9 +233,6 @@ func TestIntegration_TamperedSProducesEquationFailure(t *testing.T) {
 
 	// Change S to a wrong value but recompute equation hash so it "looks" valid.
 	sVal := secp.ScalarFromBigInt(payload.S)
-	if err != nil {
-		t.Fatal(err)
-	}
 	wrongS := new(big.Int).Add(sVal.BigInt(), big.NewInt(1))
 	wrongS.Mod(wrongS, secp.Order())
 	payload.S = wrongS
@@ -371,7 +368,7 @@ func TestIntegration_PresignRound3TamperedKPointBlamesSender(t *testing.T) {
 
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(signers)
+	ps := tss.PartySet(shares[signers[0]].Parties)
 	for _, id := range signers {
 		session, out, err := StartPresign(shares[id], sessionID, signers)
 		if err != nil {
@@ -450,7 +447,7 @@ func TestIntegration_PresignRound3TamperedKPointProofRejection(t *testing.T) {
 
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(signers)
+	ps := tss.PartySet(shares[signers[0]].Parties)
 	for _, id := range signers {
 		session, out, err := StartPresign(shares[id], sessionID, signers)
 		if err != nil {
@@ -528,7 +525,7 @@ func TestIntegration_PresignRound3TamperedChiPointBlamesSender(t *testing.T) {
 
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(signers)
+	ps := tss.PartySet(shares[signers[0]].Parties)
 	for _, id := range signers {
 		session, out, err := StartPresign(shares[id], sessionID, signers)
 		if err != nil {
@@ -603,7 +600,7 @@ func TestIntegration_PresignRound3TamperedProofBlamesSender(t *testing.T) {
 
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(signers)
+	ps := tss.PartySet(shares[signers[0]].Parties)
 	for _, id := range signers {
 		session, out, err := StartPresign(shares[id], sessionID, signers)
 		if err != nil {

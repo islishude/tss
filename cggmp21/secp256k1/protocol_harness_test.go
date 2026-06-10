@@ -138,6 +138,7 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 		if err != nil {
 			t.Fatal(err)
 		}
+		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -165,13 +166,12 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 	}
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(signers)
 	for _, id := range signers {
 		session, out, err := StartPresignWithContext(shares[id], sessionID, signers, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, ps, sessionID))
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 		presignSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true

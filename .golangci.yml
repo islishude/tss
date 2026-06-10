@@ -13,16 +13,22 @@ run:
 linters:
   default: standard
   enable:
+    - govet
     - errorlint
     - gosec
     - misspell
     - nilerr
     - nilnil
+    - nilnesserr
     - nolintlint
     - unconvert
     - wastedassign
     - whitespace
   settings:
+    govet:
+      enable:
+        - nilness
+        - unusedwrite
     gosec:
       excludes:
         - G115

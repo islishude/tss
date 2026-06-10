@@ -9,11 +9,13 @@ import (
 // and single-process deployments. Production multi-process deployments should
 // use a durable shared cache (e.g. Redis) keyed by session ID + slot key.
 //
-// MaxEntries limits the number of cached slots (0 = unlimited). When the
-// limit is exceeded, an arbitrary entry is evicted to bound memory usage.
+// MaxEntries limits the number of cached slots (0 = use default of 100000).
+// Eviction is FIFO: when the limit is exceeded, the oldest entry is removed
+// to bound memory usage while preserving recent entries for replay detection.
 type InMemoryReplayCache struct {
 	mu         sync.Mutex
 	seen       map[messageSlotKey][32]byte
+	order      []messageSlotKey // FIFO insertion order for deterministic eviction
 	maxEntries int
 }
 
@@ -26,22 +28,30 @@ type messageSlotKey struct {
 	payloadType PayloadType
 }
 
+const defaultReplayCacheMaxEntries = 100000
+
 // NewInMemoryReplayCache returns an initialized in-memory replay cache with a
 // default bound of 100000 entries to prevent unbounded memory growth in
 // long-running processes. For an explicit bound, use [NewBoundedReplayCache].
 func NewInMemoryReplayCache() *InMemoryReplayCache {
-	return NewBoundedReplayCache(100000)
+	return NewBoundedReplayCache(defaultReplayCacheMaxEntries)
 }
 
-// NewBoundedReplayCache returns an in-memory replay cache that evicts an
-// arbitrary entry when the number of cached keys exceeds maxEntries.
-// maxEntries must be positive.
+// NewBoundedReplayCache returns an in-memory replay cache with a FIFO eviction
+// policy: when the number of cached keys exceeds maxEntries, the oldest entry
+// (by insertion order) is evicted.
+//
+// maxEntries must be positive. Values <= 0 are replaced with the default of
+// [defaultReplayCacheMaxEntries]. The default is intentionally large enough to
+// accommodate normal protocol message volumes; callers operating in constrained
+// environments should pick an explicit value based on expected throughput.
 func NewBoundedReplayCache(maxEntries int) *InMemoryReplayCache {
 	if maxEntries <= 0 {
-		maxEntries = 10000
+		maxEntries = defaultReplayCacheMaxEntries
 	}
 	return &InMemoryReplayCache{
-		seen:       make(map[messageSlotKey][32]byte),
+		seen:       make(map[messageSlotKey][32]byte, maxEntries),
+		order:      make([]messageSlotKey, 0, maxEntries),
 		maxEntries: maxEntries,
 	}
 }
@@ -69,13 +79,17 @@ func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, transcriptHash 
 	}
 	existing, ok := c.seen[sk]
 	if !ok {
-		if c.maxEntries > 0 && len(c.seen) >= c.maxEntries {
-			for old := range c.seen {
-				delete(c.seen, old)
-				break
-			}
+		// FIFO eviction: remove the oldest entry before inserting a new one
+		// when at capacity. This guarantees deterministic eviction order and
+		// prevents an attacker from selectively evicting arbitrary entries
+		// through map iteration randomization.
+		if len(c.order) >= c.maxEntries {
+			oldest := c.order[0]
+			delete(c.seen, oldest)
+			c.order = c.order[1:]
 		}
 		c.seen[sk] = transcriptHash
+		c.order = append(c.order, sk)
 		return nil
 	}
 	if existing == transcriptHash {

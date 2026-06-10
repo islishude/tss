@@ -139,6 +139,9 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	return sk, nil
 }
 
+// encodePositiveInt returns the minimal big-endian encoding of a positive integer.
+// It uses [big.Int.Bytes] which omits the leading zero byte — the output is
+// always minimal.
 func encodePositiveInt(x *big.Int) ([]byte, error) {
 	if x == nil || x.Sign() <= 0 {
 		return nil, errors.New("integer must be positive")
@@ -146,7 +149,12 @@ func encodePositiveInt(x *big.Int) ([]byte, error) {
 	return x.Bytes(), nil
 }
 
-// decodePositiveIntBytes decodes a non-minimal, positive big.Int from raw bytes.
+// decodePositiveIntBytes decodes a minimal big-endian encoding of a positive
+// integer. It rejects leading zero bytes to enforce canonical encoding —
+// callers must pair this with [encodePositiveInt] (which produces minimal
+// output) or ensure their source produces minimal encodings. Non-minimal
+// encodings (e.g. from legacy formats) must be normalized before calling
+// this function.
 func decodePositiveIntBytes(raw []byte) (*big.Int, error) {
 	if len(raw) == 0 {
 		return nil, errors.New("empty integer")

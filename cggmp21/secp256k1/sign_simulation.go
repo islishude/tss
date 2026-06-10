@@ -44,13 +44,12 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	presignSessions := make(map[tss.PartyID]*PresignSession, len(ids))
 	presignQueue := make([]tss.Envelope, 0)
 	simPolicies := simulationCGGMP21Policies()
-	ps := tss.PartySet(ids)
 	for _, id := range ids {
 		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		session.SetGuard(tss.NewTestEnvelopeGuard(id, ps, protocol, presignID, simPolicies))
+		session.SetGuard(tss.NewTestEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, presignID, simPolicies))
 		presignSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true
@@ -102,7 +101,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err != nil {
 			return nil, nil, err
 		}
-		session.SetGuard(tss.NewTestEnvelopeGuard(id, ps, protocol, signID, simPolicies))
+		session.SetGuard(tss.NewTestEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies))
 		signSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true

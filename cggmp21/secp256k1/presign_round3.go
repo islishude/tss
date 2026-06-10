@@ -41,17 +41,6 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	delta := secp.ScalarFromBigInt(p.Delta)
-	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindPresignRound3,
-			"malformed presign delta",
-			[]tss.PartyID{env.From},
-			err,
-			s.presignRound3EvidenceFields(p)...,
-		)
-	}
 
 	if err := s.verifyRemoteSignprepProof(env.From, p); err != nil {
 		return nil, protocolErrorWithEvidence(

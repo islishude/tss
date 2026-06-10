@@ -140,3 +140,34 @@ func (e *ProtocolError) Unwrap() error {
 func NewProtocolError(code string, round uint8, party PartyID, err error) *ProtocolError {
 	return &ProtocolError{Code: code, Round: round, Party: party, Err: err}
 }
+
+// IsSessionCompleted reports whether err is a [ProtocolError] with code
+// [ErrCodeCompleted], indicating the protocol session has already finished.
+func IsSessionCompleted(err error) bool {
+	var p *ProtocolError
+	return errors.As(err, &p) && p.Code == ErrCodeCompleted
+}
+
+// IsSessionAborted reports whether err is a [ProtocolError] with code
+// [ErrCodeAborted], indicating the protocol session was aborted due to an
+// attributable verification failure.
+func IsSessionAborted(err error) bool {
+	var p *ProtocolError
+	return errors.As(err, &p) && p.Code == ErrCodeAborted
+}
+
+// IsAttributableError reports whether err carries blame evidence and
+// should cause the session to abort. Verification failures with blame
+// are attributable; duplicate messages are not.
+//
+// This matches the [shouldAbortSession] logic used by protocol handlers.
+func IsAttributableError(err error) bool {
+	var p *ProtocolError
+	if !errors.As(err, &p) {
+		return false
+	}
+	if p.Code == ErrCodeDuplicate {
+		return false
+	}
+	return p.Code == ErrCodeVerification || p.Blame != nil
+}

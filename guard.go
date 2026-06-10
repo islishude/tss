@@ -190,6 +190,13 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 // The guard must be non-nil — a nil guard returns [ErrMissingEnvelopeGuard].
 // This ensures transport authentication, confidentiality enforcement, broadcast
 // consistency, and replay detection are applied uniformly in all code paths.
+//
+// The parties parameter must match guard.Parties exactly. Sessions that accept
+// messages from different participant subsets depending on payload type (e.g.
+// reshare, where old and new parties differ) must use
+// [ValidateInboundWithParties] instead, which validates sender membership and
+// broadcast certificates against the provided party set rather than the
+// guard's configured set.
 func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID, policies PolicySet) error {
 	if guard == nil {
 		return ErrMissingEnvelopeGuard

@@ -39,6 +39,14 @@ func secpSecretBig(s *secret.Scalar) (*big.Int, error) {
 
 // scalarBytes encodes x as a fixed-length secp256k1 scalar in canonical
 // big-endian form. x is reduced modulo the subgroup order before encoding.
+//
+// Precondition: x MUST be in [0, q) where q is the secp256k1 group order.
+// All callers validate this through [validateScalarRangeAllowZero] or
+// [validateScalarRangeStrict] during unmarshaling, or produce x through
+// modular reduction (x.Mod(x, order)). A value outside this range is
+// silently reduced by [secp.ScalarFromBigInt]; the validation at the
+// unmarshal layer is the authoritative defense against out-of-range
+// wire values.
 func scalarBytes(x *big.Int) []byte {
 	return secp.ScalarFromBigInt(x).Bytes()
 }

@@ -1,6 +1,9 @@
 package ed25519
 
 import (
+	"sync"
+	"testing"
+
 	"github.com/islishude/tss"
 )
 
@@ -9,8 +12,11 @@ import (
 // Test code must use TestLimits or SetLimitsForTesting to relax these
 // constraints.
 func DefaultLimits() tss.Limits {
-	if overrideLimits != nil {
-		return *overrideLimits
+	limitsMu.Lock()
+	ov := overrideLimits
+	limitsMu.Unlock()
+	if ov != nil {
+		return *ov
 	}
 	l := tss.DefaultLimits()
 	l.MaxParties = tss.MaxFROSTParties
@@ -34,15 +40,31 @@ func TestLimits() tss.Limits {
 }
 
 // overrideLimits allows tests to replace the limits returned by DefaultLimits.
-// Nil means use the production default.
-var overrideLimits *tss.Limits
+// Nil means use the production default. Protected by limitsMu.
+var (
+	overrideLimits *tss.Limits
+	limitsMu       sync.Mutex
+)
 
 // SetLimitsForTesting overrides the limits returned by DefaultLimits and
 // returns a function that restores the production defaults. DO NOT use
 // outside tests.
+//
+// The returned restore function is safe to use with t.Cleanup:
+//
+//	t.Cleanup(ed25519.SetLimitsForTesting(ed25519.TestLimits()))
 func SetLimitsForTesting(l tss.Limits) func() {
+	if !testing.Testing() {
+		panic("SetLimitsForTesting called outside of tests — production code must use DefaultLimits")
+	}
+	limitsMu.Lock()
 	old := overrideLimits
 	lc := l
 	overrideLimits = &lc
-	return func() { overrideLimits = old }
+	limitsMu.Unlock()
+	return func() {
+		limitsMu.Lock()
+		overrideLimits = old
+		limitsMu.Unlock()
+	}
 }

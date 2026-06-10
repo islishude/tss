@@ -9,6 +9,7 @@ import (
 	"reflect"
 	"runtime"
 	"sync"
+	"testing"
 
 	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/secret"
@@ -46,7 +47,14 @@ func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, 
 // GenerateKeyForTest creates a Paillier key with a reduced modulus size suitable
 // for testing. The minimum is 512 bits. This function must not be used in
 // production code.
+//
+// GenerateKeyForTest panics if called outside of tests (i.e. when
+// [testing.Testing] returns false). Production code must use [GenerateKey]
+// which enforces the 3072-bit production floor.
 func GenerateKeyForTest(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
+	if !testing.Testing() {
+		panic("GenerateKeyForTest called outside of tests — production code must use GenerateKey")
+	}
 	if bits < minKeyBits {
 		return nil, fmt.Errorf("paillier modulus must be at least %d bits", minKeyBits)
 	}

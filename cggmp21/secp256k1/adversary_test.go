@@ -153,7 +153,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(signers), sessionID))
+	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(h.shares[2], sessionID, signers)
 	if err != nil {
 		t.Fatal(err)
@@ -204,7 +204,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(signers), sessionID))
+		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		if _, err := session.HandlePresignMessage(deliverCGGMPEnv(round1)); err != nil {
 			t.Fatal(err)
 		}

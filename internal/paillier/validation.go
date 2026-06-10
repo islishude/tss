@@ -97,8 +97,15 @@ func (sk PrivateKey) Validate() error {
 }
 
 // scalarToBig converts a fixed-length secret.Scalar to a *big.Int.
-// This is unexported; callers outside the paillier package must use
-// the constant-time paths provided by paillierct.
+//
+// This crosses the secret.Scalar abstraction boundary: the returned *big.Int
+// uses variable-length encoding and is not constant-time for comparison.
+// Callers MUST use the result only for non-secret-exponent operations such as
+// structural validation (checking λ = lcm(p-1, q-1)) and encoding. Never use
+// the result in exponentiation or any operation where timing leaks matter.
+//
+// This is unexported; callers outside the paillier package must use the
+// constant-time paths provided by paillierct.
 func scalarToBig(s *secret.Scalar) *big.Int {
 	if s == nil {
 		return nil

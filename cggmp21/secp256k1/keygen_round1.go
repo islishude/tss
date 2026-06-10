@@ -322,9 +322,6 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	share := secp.ScalarFromBigInt(p.Share)
-	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
 
 	// ---- 4. MUTATE STATE ----
 	s.shares[env.From] = share.BigInt()

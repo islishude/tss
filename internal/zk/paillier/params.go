@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"testing"
 
 	pai "github.com/islishude/tss/internal/paillier"
 )
@@ -122,6 +123,9 @@ var (
 //
 //	t.Cleanup(zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams()))
 func SetSecurityParamsForTesting(sp SecurityParams) func() {
+	if !testing.Testing() {
+		panic("SetSecurityParamsForTesting called outside of tests — production code must use DefaultSecurityParams")
+	}
 	paramsMu.Lock()
 	old := overrideSecurityParams
 	spCopy := sp

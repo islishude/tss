@@ -133,6 +133,9 @@ func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
 	}
 	// Invariant error must not carry blame.
 	err := &tss.ProtocolError{Code: tss.ErrCodeInvariant, Round: 1, Err: errors.New("test")}
+	if err.Code != tss.ErrCodeInvariant || err.Round != 1 || err.Err == nil {
+		t.Fatal("invariant error fields not set correctly")
+	}
 	if err.Blame != nil {
 		t.Fatal("invariant error must not carry blame")
 	}
@@ -192,6 +195,9 @@ func TestFast_OriginalDefectBlameShape(t *testing.T) {
 			Parties: []tss.PartyID{3},
 		},
 	}
+	if verificationErr.Code != tss.ErrCodeVerification {
+		t.Fatal("verification error code mismatch")
+	}
 	if len(verificationErr.Blame.Parties) != 1 {
 		t.Fatal("per-party blame must have exactly 1 party")
 	}
@@ -203,6 +209,9 @@ func TestFast_OriginalDefectBlameShape(t *testing.T) {
 	invariantErr := &tss.ProtocolError{
 		Code: tss.ErrCodeInvariant,
 		Err:  errors.New("test invariant"),
+	}
+	if invariantErr.Code != tss.ErrCodeInvariant || invariantErr.Err == nil {
+		t.Fatal("invariant error fields not set correctly")
 	}
 	if invariantErr.Blame != nil {
 		t.Fatal("invariant errors must not blame any party")
