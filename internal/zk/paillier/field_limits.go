@@ -8,7 +8,6 @@ func zkFieldLimits() wire.FieldLimits {
 	return wire.FieldLimits{
 		"paillier_modulus": 2048, // up to 8192-bit modulus (N^2 → 2048 bytes)
 		"point":            65,   // secp256k1 uncompressed point
-		"challenge":        256,  // Fiat-Shamir challenge (up to 2048-bit)
 		"signed_response":  2048, // signed value in [-N, N^2] range
 		"paillier_signed":  2048, // same as above
 	}
