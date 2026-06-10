@@ -19,6 +19,10 @@ import (
 // directly rather than requiring a separate scalar commitment, matching the
 // CGGMP21 Section 6.2 Π^log structure.
 //
+// Deprecated: ProveLog is superseded by [ProveLogStar]. New code must use
+// [ProveLogStar] which adds Ring-Pedersen hiding for the integer witness. ProveLog
+// is retained only for backward compatibility and test vector generation.
+//
 // Statistical zero-knowledge: α is sampled from [0, 2^{l+ε}) with l=256, ε=128,
 // and the challenge e is the full 256-bit hash output, providing ~128 bits of
 // statistical hiding for the scalar a.

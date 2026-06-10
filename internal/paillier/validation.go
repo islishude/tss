@@ -65,13 +65,11 @@ func (sk PrivateKey) Validate() error {
 	if sk.Lambda == nil || sk.Mu == nil {
 		return errors.New("invalid secret scalar")
 	}
-	for name, value := range map[string]*big.Int{
-		"p": sk.P,
-		"q": sk.Q,
-	} {
-		if value == nil || value.Sign() <= 0 {
-			return fmt.Errorf("invalid %s", name)
-		}
+	if sk.P == nil || sk.P.Sign() <= 0 {
+		return errors.New("invalid p")
+	}
+	if sk.Q == nil || sk.Q.Sign() <= 0 {
+		return errors.New("invalid q")
 	}
 	if sk.P.Cmp(sk.Q) == 0 {
 		return errors.New("paillier factors must differ")

@@ -111,17 +111,42 @@ func (sp SecurityParams) AffGRange() uint {
 
 // overrideSecurityParams allows tests to replace the global security parameters.
 // Nil means use DefaultSecurityParams. Protected by paramsMu.
+//
+// Callers must use [SetSecurityParamsForTesting] to set this and call the
+// returned restore function to undo the override. Do NOT set this field directly.
 var (
 	overrideSecurityParams *SecurityParams
 	paramsMu               sync.Mutex
 )
 
 // SetSecurityParamsForTesting overrides the global security parameters and
-// returns a function that restores the previous value. DO NOT use outside tests.
+// returns a function that restores the previous value.
 //
-// The returned restore function is safe to use with t.Cleanup:
+// IMPORTANT: SetSecurityParamsForTesting must only be called from TestMain
+// or from sequential (non-parallel) test functions. Calling it from tests that
+// use t.Parallel() may cause data races with other packages that also override
+// security parameters. The returned restore function must be called before the
+// test returns (use t.Cleanup or defer).
 //
-//	t.Cleanup(zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams()))
+// SetSecurityParamsForTesting panics if called outside of tests. Production
+// code always uses [DefaultSecurityParams].
+//
+// Example (TestMain):
+//
+//	func TestMain(m *testing.M) {
+//	    restore := zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams())
+//	    code := m.Run()
+//	    restore()
+//	    os.Exit(code)
+//	}
+//
+// Example (sequential test):
+//
+//	func TestFoo(t *testing.T) {
+//	    restore := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{...})
+//	    defer restore()
+//	    // ... test body ...
+//	}
 func SetSecurityParamsForTesting(sp SecurityParams) func() {
 	if !testing.Testing() {
 		panic("SetSecurityParamsForTesting called outside of tests — production code must use DefaultSecurityParams")
@@ -139,6 +164,8 @@ func SetSecurityParamsForTesting(sp SecurityParams) func() {
 }
 
 // ActiveSecurityParams returns the currently active security parameters.
+// In production this is [DefaultSecurityParams]; in tests it reflects the most
+// recent call to [SetSecurityParamsForTesting].
 func ActiveSecurityParams() SecurityParams {
 	paramsMu.Lock()
 	defer paramsMu.Unlock()

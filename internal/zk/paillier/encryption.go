@@ -18,6 +18,11 @@ import (
 // encrypts a scalar less than the secp256k1 order, and the public curve
 // commitment opens to the same scalar. Per CGGMP21 Section 4.1.
 //
+// Deprecated: ProveEncryption is superseded by [ProveEnc]. New code must use
+// [ProveEnc] which adds Ring-Pedersen hiding and per-verifier proof domains.
+// ProveEncryption is retained only for the MtA Start broadcast Round 1 flow
+// where per-verifier commitments are impractical.
+//
 // Statistical zero-knowledge: α is sampled from [0, 2^{l+ε}) with l=256, ε=128,
 // providing ~128 bits of statistical hiding against witness recovery from the
 // response z = α + e·m. The challenge e is derived from the full 256-bit hash

@@ -17,6 +17,11 @@ import (
 
 // ProveMTAResponse proves response encrypts a*b+beta for committed b.
 //
+// Deprecated: ProveMTAResponse is superseded by [ProveAffG]. New code must use
+// [ProveAffG] which binds both prover and verifier Paillier keys with
+// Ring-Pedersen hiding via Πaff-g. ProveMTAResponse is retained only for
+// backward compatibility with keygen/refresh flows.
+//
 // Statistical zero-knowledge: μ and ν are sampled from [0, 2^{l+ε}) with
 // l=256, ε=128, and the challenge e is the full 256-bit hash output. This
 // provides ~128 bits of statistical hiding for both b (via zB = e·b + μ)

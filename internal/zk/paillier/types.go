@@ -76,6 +76,10 @@ func (ModulusProof) WireType() string { return modulusProofWireType }
 func (ModulusProof) WireVersion() uint16 { return proofVersion }
 
 // MTAResponseProof binds an MtA response to ciphertexts and commitments.
+//
+// Deprecated: MTAResponseProof is superseded by [AffGProof] for CGGMP-compatible
+// MtA response verification. It is only accepted by legacy verifiers in the
+// keygen/refresh flows. New code must use [ProveAffG]/[VerifyAffG] instead.
 type MTAResponseProof struct {
 	Version          uint16 `json:"version"`
 	TranscriptHash   []byte `json:"transcript_hash" wire:"1,bytes"`
@@ -98,6 +102,11 @@ func (MTAResponseProof) WireVersion() uint16 { return proofVersion }
 // curve point A = a·G share the same discrete logarithm a. Per CGGMP21
 // Section 6.2, this is used during key refresh to prove that a new Paillier
 // ciphertext encrypts the same scalar as an existing verification share.
+//
+// Deprecated: LogProof is superseded by [LogStarProof] for CGGMP-compatible
+// discrete-log equality proofs with Ring-Pedersen hiding. It is only accepted
+// by legacy verifiers in the keygen/refresh flows. New code must use
+// [ProveLogStar]/[VerifyLogStar] instead.
 type LogProof struct {
 	Version          uint16 `json:"version"`
 	Point            []byte `json:"point" wire:"1,bytes"`
@@ -143,6 +152,11 @@ func (RingPedersenProof) WireVersion() uint16 { return proofVersion }
 // and that the public curve commitment A = m·G opens to the same scalar.
 // It combines Π^Eq (scalar knowledge) and the range constraint |m| < q
 // into a single Fiat-Shamir challenge. Per CGGMP21 Section 4.1.
+//
+// Deprecated: EncryptionProof is superseded by [EncProof] for CGGMP-compatible
+// encryption-in-range proofs with Ring-Pedersen hiding. It is only used by the
+// MtA Start broadcast Round 1 flow where per-verifier Ring-Pedersen commitments
+// are impractical. New code must use [ProveEnc]/[VerifyEnc] instead.
 type EncryptionProof struct {
 	Version          uint16 `json:"version"`
 	ScalarCommitment []byte `json:"scalar_commitment" wire:"1,bytes"`
