@@ -35,9 +35,13 @@ err := wire.Unmarshal(raw, &decoded)
 ### Struct Tag Grammar
 
 ```
+wire:"<tag>"                     // infer kind from Go type
 wire:"<tag>,<kind>[,<option>...]"
-wire:"-"   // skip field
+wire:"<tag>,<option>..."         // infer kind, apply options
+wire:"-"                         // skip field
 ```
+
+When the kind is omitted or the second segment is not a recognised kind name, the wire codec infers the kind from the Go field type (see table below). Named primitive types (`type Foo string`) are handled correctly.
 
 #### Supported Kinds
 
@@ -47,17 +51,48 @@ wire:"-"   // skip field
 | `u16`            | `uint16`                                                | big-endian uint16                                    |
 | `u32`            | `uint32`, `int`, or alias                               | big-endian uint32                                    |
 | `bool`           | `bool`                                                  | `wire.Bool`                                          |
-| `bytes`          | `[]byte`                                                | raw bytes; nil → empty                               |
+| `bytes`          | `[]byte` / `[N]byte`                                    | raw bytes; nil → empty                               |
 | `string`         | `string`                                                | UTF-8 bytes                                          |
 | `u32list`        | `[]uint32` or alias slice                               | `wire.EncodeUint32List`                              |
 | `byteslist`      | `[][]byte`                                              | `wire.EncodeBytesList`                               |
 | `partybytes`     | `[]wire.PartyBytes[T]`                                  | `wire.EncodePartyBytes`                              |
 | `partybytepairs` | `[]wire.PartyBytePair[T]`                               | `wire.EncodePartyBytePairs`                          |
 | `nested`         | struct/pointer implementing `Message`                   | recursive `wire.Marshal`                             |
+| `record`         | struct / pointer to struct                              | record body (field count + fields), no envelope      |
+| `recordlist`     | `[]struct` / `[]*struct`                                | `uint32 count` + length-prefixed record bodies       |
 | `custom`         | type implementing `ValueMarshaler` / `ValueUnmarshaler` | caller-defined canonical bytes                       |
 | `bigint`         | `big.Int` / `*big.Int`                                  | signed-magnitude `[sign byte][minimal BE magnitude]` |
 | `biguint`        | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero = empty           |
 | `bigpos`         | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero rejected          |
+
+`record` and `recordlist` are typically inferred rather than declared
+explicitly. A struct field typed as `SomeStruct` infers to `record`; a field
+typed as `[]SomeStruct` or `[]*SomeStruct` infers to `recordlist`. Both
+enforce the same strict canonical rules as top-level messages: exact field
+set, ascending tags, no duplicates, no trailing bytes.
+
+`big.Int` is **not** auto-inferred — callers must declare `bigint`,
+`biguint`, or `bigpos` explicitly.
+
+#### Kind Inference Rules
+
+When the kind is omitted, the wire codec selects:
+
+| Go Type              | Inferred Kind |
+| -------------------- | ------------- |
+| `uint8`              | `u8`          |
+| `uint16`             | `u16`         |
+| `uint32` / `int`     | `u32`         |
+| `bool`               | `bool`        |
+| `string`             | `string`      |
+| `[]byte` / `[N]byte` | `bytes`       |
+| `[]uint32` / `[]int` | `u32list`     |
+| `[][]byte`           | `byteslist`   |
+| struct               | `record`      |
+| pointer to struct    | `record`      |
+| `[]struct`           | `recordlist`  |
+| `[]*struct`          | `recordlist`  |
+| `ValueMarshaler`     | `custom`      |
 
 #### Options
 
@@ -126,6 +161,7 @@ These rules ensure one semantic record has one binary representation. This matte
 
 ## Current Records
 
+- `tss.BlameEvidence` (direct struct encoding; `PublicInputs` as `[]EvidenceField` record list)
 - `tss.Envelope`
 - `cggmp21/secp256k1.KeyShare`
 - `cggmp21/secp256k1.Presign`

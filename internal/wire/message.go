@@ -16,8 +16,12 @@
 //	wire.Unmarshal(raw, &decoded)
 //
 // Supported kinds: u8, u16, u32, bool, bytes, string, u32list, byteslist,
-// partybytes, partybytepairs, nested, custom. All tagged fields are required;
-// missing and extra fields are rejected.
+// partybytes, partybytepairs, nested, custom, bigint, biguint, bigpos,
+// record, recordlist.
+//
+// The kind may be omitted from the struct tag, in which case it is inferred
+// from the Go field type. Named primitive types (e.g. type PartyID uint32)
+// are handled correctly. big.Int must always be declared explicitly.
 //
 // The "custom" kind delegates field value encoding to the field type via
 // the ValueMarshaler and ValueUnmarshaler interfaces. This lets domain types

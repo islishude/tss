@@ -96,7 +96,10 @@ func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet LimitSe
 	return nil
 }
 
-func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte) error {
+func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte, limitSet LimitSet) error {
+	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
 	if !utf8.Valid(raw) {
 		return fmt.Errorf("string is not valid UTF-8")
 	}

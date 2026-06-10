@@ -237,7 +237,7 @@ type Blame struct {
 }
 ```
 
-`BlameEvidence` is a deterministic binary record (canonical TLV) binding:
+`BlameEvidence` is a canonical TLV binary record binding:
 
 - Protocol, version, session ID.
 - Round, sender, payload type.

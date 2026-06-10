@@ -49,8 +49,8 @@ const blameWireType = "tss.blame"
 
 // EvidenceField carries one public input or public-input hash for blame evidence.
 type EvidenceField struct {
-	Key   string
-	Value []byte
+	Key   string `wire:"1,max_bytes=evidence_field_key"`
+	Value []byte `wire:"2,max_bytes=evidence_field_value"`
 }
 
 // Clone returns a deep copy of an evidence field.
@@ -64,19 +64,25 @@ func (f EvidenceField) Clone() EvidenceField {
 // BlameEvidence is intentionally public-only. Confidential protocol messages
 // should be represented by hashes or other public inputs, not by plaintext.
 type BlameEvidence struct {
-	Version        uint16
-	Protocol       ProtocolID
-	SessionID      SessionID
-	Round          uint8
-	From           PartyID
-	To             PartyID
-	PayloadType    PayloadType
-	PayloadHash    []byte
-	TranscriptHash []byte
-	Kind           EvidenceKind
-	Reason         string
-	PublicInputs   []EvidenceField
+	Version        uint16          `wire:"1"`
+	Protocol       ProtocolID      `wire:"2"`
+	SessionID      SessionID       `wire:"3,len=32"`
+	Round          uint8           `wire:"4"`
+	From           PartyID         `wire:"5"`
+	To             PartyID         `wire:"6"`
+	PayloadType    PayloadType     `wire:"7,max_bytes=payload_type"`
+	PayloadHash    []byte          `wire:"8,len=32"`
+	TranscriptHash []byte          `wire:"9"`
+	Kind           EvidenceKind    `wire:"10"`
+	Reason         string          `wire:"11,max_bytes=evidence_reason"`
+	PublicInputs   []EvidenceField `wire:"12,max_items=evidence_fields"`
 }
+
+// WireType returns the canonical wire type identifier for BlameEvidence.
+func (BlameEvidence) WireType() string { return blameWireType }
+
+// WireVersion returns the wire format version for BlameEvidence.
+func (BlameEvidence) WireVersion() uint16 { return Version }
 
 // NewBlameEvidence builds a public evidence record bound to an envelope hash.
 // PublicInputs are stored in canonical order so that logically equivalent
@@ -105,9 +111,8 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 }
 
 // Validate checks structural invariants for a public blame evidence record.
-// It does not mutate the receiver — callers that need canonical field ordering
-// for stable hashing must use [BlameEvidence.MarshalBinary], which sorts a copy
-// before encoding.
+// Canonical ordering of PublicInputs is handled by [BlameEvidence.BeforeMarshalWire],
+// which is called automatically by wire.Marshal before encoding.
 func (e *BlameEvidence) Validate() error {
 	if e == nil {
 		return errors.New("nil blame evidence")
@@ -165,50 +170,31 @@ func (e *BlameEvidence) Validate() error {
 	return nil
 }
 
-// blameEvidenceWire is the wire DTO for BlameEvidence.
-type blameEvidenceWire struct {
-	Version        uint16       `wire:"1,u16"`
-	Protocol       ProtocolID   `wire:"2,string"`
-	SessionID      []byte       `wire:"3,bytes,len=32"`
-	Round          uint8        `wire:"4,u8"`
-	From           PartyID      `wire:"5,u32"`
-	To             PartyID      `wire:"6,u32"`
-	PayloadType    PayloadType  `wire:"7,string"`
-	PayloadHash    []byte       `wire:"8,bytes"`
-	TranscriptHash []byte       `wire:"9,bytes"`
-	Kind           EvidenceKind `wire:"10,string"`
-	Reason         string       `wire:"11,string"`
-	PublicInputs   []byte       `wire:"12,bytes"`
+// BeforeMarshalWire canonicalizes the PublicInputs field ordering before
+// encoding, so that logically equivalent evidence records produce identical
+// wire representations regardless of caller-provided slice ordering.
+func (e *BlameEvidence) BeforeMarshalWire() error {
+	e.PublicInputs = canonicalEvidenceFields(e.PublicInputs)
+	return nil
 }
 
-// WireType returns the canonical wire type identifier for blameEvidenceWire.
-func (blameEvidenceWire) WireType() string { return blameWireType }
-
-// WireVersion returns the wire format version for blameEvidenceWire.
-func (blameEvidenceWire) WireVersion() uint16 { return Version }
+// evidenceWireLimitSet returns the semantic limit names used by BlameEvidence wire tags.
+func evidenceWireLimitSet() wire.LimitSet {
+	limits := DefaultLimits()
+	return wire.LimitSet{
+		"payload_type":         limits.MaxPayloadTypeBytes,
+		"evidence_reason":      limits.MaxEvidenceReasonBytes,
+		"evidence_fields":      limits.MaxEvidenceFieldCount,
+		"evidence_field_key":   limits.MaxEvidenceFieldKeyBytes,
+		"evidence_field_value": limits.MaxEvidenceFieldValueBytes,
+	}
+}
 
 // MarshalBinary encodes BlameEvidence using the object-level wire codec.
 // Fields are sorted into canonical order so that logically equivalent evidence
 // records produce identical hashes regardless of caller-provided slice ordering.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
-	if err := e.Validate(); err != nil {
-		return nil, err
-	}
-	fields := canonicalEvidenceFields(e.PublicInputs)
-	return wire.Marshal(blameEvidenceWire{
-		Version:        e.Version,
-		Protocol:       e.Protocol,
-		SessionID:      e.SessionID[:],
-		Round:          e.Round,
-		From:           e.From,
-		To:             e.To,
-		PayloadType:    e.PayloadType,
-		PayloadHash:    e.PayloadHash,
-		TranscriptHash: e.TranscriptHash,
-		Kind:           e.Kind,
-		Reason:         e.Reason,
-		PublicInputs:   encodeEvidenceFields(fields),
-	})
+	return wire.Marshal(e, wire.WithLimitSetForMarshal(evidenceWireLimitSet()))
 }
 
 // UnmarshalBlameEvidence decodes and validates public blame evidence.
@@ -216,71 +202,27 @@ func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty blame evidence")
 	}
+
 	limits := DefaultLimits()
 	if len(in) > limits.MaxBlameEvidenceBytes {
 		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), limits.MaxBlameEvidenceBytes)
 	}
-	var w blameEvidenceWire
-	if err := wire.Unmarshal(in, &w, wire.WithLimits(wire.Limits{
-		MaxTotalBytes: limits.MaxBlameEvidenceBytes,
-		MaxFields:     limits.MaxWireFields,
-		MaxFieldBytes: limits.MaxWireFieldBytes,
-	})); err != nil {
+
+	var evidence BlameEvidence
+	if err := wire.Unmarshal(
+		in,
+		&evidence,
+		wire.WithLimits(wire.Limits{
+			MaxTotalBytes: limits.MaxBlameEvidenceBytes,
+			MaxFields:     limits.MaxWireFields,
+			MaxFieldBytes: limits.MaxWireFieldBytes,
+		}),
+		wire.WithLimitSet(evidenceWireLimitSet()),
+	); err != nil {
 		return nil, err
 	}
-	if w.Version != Version {
-		return nil, fmt.Errorf("unexpected blame evidence version %d", w.Version)
-	}
-	if w.Protocol == "" {
-		return nil, errors.New("missing blame evidence protocol")
-	}
-	if w.PayloadType == "" {
-		return nil, errors.New("missing blame evidence payload type")
-	}
-	if len(w.PayloadType) > limits.MaxPayloadTypeBytes {
-		return nil, fmt.Errorf("blame evidence payload type too long: %d > %d", len(w.PayloadType), limits.MaxPayloadTypeBytes)
-	}
-	if len(w.PayloadHash) != sha256.Size {
-		return nil, errors.New("invalid blame evidence payload hash")
-	}
-	if len(w.TranscriptHash) != 0 && len(w.TranscriptHash) != sha256.Size {
-		return nil, errors.New("invalid blame evidence transcript hash")
-	}
-	if w.Kind == "" {
-		return nil, errors.New("missing blame evidence kind")
-	}
-	if w.Reason == "" {
-		return nil, errors.New("missing blame evidence reason")
-	}
-	if len(w.Reason) > limits.MaxEvidenceReasonBytes {
-		return nil, fmt.Errorf("blame evidence reason too long: %d > %d", len(w.Reason), limits.MaxEvidenceReasonBytes)
-	}
-	session, err := SessionIDFromBytes(w.SessionID)
-	if err != nil {
-		return nil, err
-	}
-	publicInputs, err := decodeEvidenceFields(w.PublicInputs, limits)
-	if err != nil {
-		return nil, err
-	}
-	evidence := &BlameEvidence{
-		Version:        w.Version,
-		Protocol:       w.Protocol,
-		SessionID:      session,
-		Round:          w.Round,
-		From:           w.From,
-		To:             w.To,
-		PayloadType:    w.PayloadType,
-		PayloadHash:    slices.Clone(w.PayloadHash),
-		TranscriptHash: slices.Clone(w.TranscriptHash),
-		Kind:           w.Kind,
-		Reason:         w.Reason,
-		PublicInputs:   publicInputs,
-	}
-	if err := evidence.Validate(); err != nil {
-		return nil, err
-	}
-	return evidence, nil
+
+	return &evidence, nil
 }
 
 // Hash returns the SHA-256 digest of the deterministic evidence encoding.
@@ -304,58 +246,6 @@ func (e *BlameEvidence) Field(key string) ([]byte, bool) {
 		}
 	}
 	return nil, false
-}
-
-// encodeEvidenceFields encodes a list of evidence fields into a single byte slice.
-// Format: uint32 count, then for each field: uint32 key-len + key + uint32 value-len + value.
-// Callers must validate fields via normalizeEvidenceFields before calling.
-func encodeEvidenceFields(fields []EvidenceField) []byte {
-	if len(fields) == 0 {
-		return nil
-	}
-	size := 4 // count
-	for _, f := range fields {
-		size += 4 + len(f.Key) + 4 + len(f.Value)
-	}
-	out := make([]byte, 0, size)
-	out = append(out, wire.Uint32(uint32(len(fields)))...)
-	for _, f := range fields {
-		out = wire.AppendBytes(out, []byte(f.Key))
-		out = wire.AppendBytes(out, f.Value)
-	}
-	return out
-}
-
-// decodeEvidenceFields decodes a list of evidence fields produced by encodeEvidenceFields.
-func decodeEvidenceFields(raw []byte, limits Limits) ([]EvidenceField, error) {
-	if len(raw) == 0 {
-		return nil, nil
-	}
-	count, offset, err := wire.ReadUint32(raw, 0)
-	if err != nil {
-		return nil, err
-	}
-	if int(count) > limits.MaxEvidenceFieldCount {
-		return nil, fmt.Errorf("evidence field count too large: %d > %d", count, limits.MaxEvidenceFieldCount)
-	}
-	out := make([]EvidenceField, 0, count)
-	for i := 0; i < int(count); i++ {
-		keyBytes, next, err := wire.ReadBytesWithLimit(raw, offset, limits.MaxEvidenceFieldKeyBytes)
-		if err != nil {
-			return nil, fmt.Errorf("evidence field %d key: %w", i, err)
-		}
-		offset = next
-		value, next, err := wire.ReadBytesWithLimit(raw, offset, limits.MaxEvidenceFieldValueBytes)
-		if err != nil {
-			return nil, fmt.Errorf("evidence field %d value: %w", i, err)
-		}
-		offset = next
-		out = append(out, EvidenceField{Key: string(keyBytes), Value: value})
-	}
-	if offset != len(raw) {
-		return nil, errors.New("trailing evidence fields data")
-	}
-	return out, nil
 }
 
 // canonicalEvidenceFields returns a sorted copy of the evidence fields.

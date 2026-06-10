@@ -121,6 +121,56 @@ type emptyBytesMessage struct {
 func (m emptyBytesMessage) WireType() string    { return "test.emptybytes" }
 func (m emptyBytesMessage) WireVersion() uint16 { return 1 }
 
+// ---- kind inference test types -----------------------------------------------
+
+// inferredMessage uses tag-only form (no explicit kind).
+type inferredMessage struct {
+	Name  string `wire:"1"`
+	Count uint32 `wire:"2"`
+	Data  []byte `wire:"3"`
+}
+
+func (m inferredMessage) WireType() string    { return "test.inferred" }
+func (m inferredMessage) WireVersion() uint16 { return 1 }
+
+type namedString string
+type namedU32 uint32
+
+// namedInferredMessage tests named primitive type inference.
+type namedInferredMessage struct {
+	S namedString `wire:"1"`
+	N namedU32    `wire:"2"`
+}
+
+func (m namedInferredMessage) WireType() string    { return "test.namedinferred" }
+func (m namedInferredMessage) WireVersion() uint16 { return 1 }
+
+// inferredWithOptionsMessage tests tag-only form with options.
+type inferredWithOptionsMessage struct {
+	Hash []byte `wire:"1,len=32"`
+	Name string `wire:"2,max_bytes=name"`
+}
+
+func (m inferredWithOptionsMessage) WireType() string    { return "test.inferredopts" }
+func (m inferredWithOptionsMessage) WireVersion() uint16 { return 1 }
+
+// stringLimitMessage tests max_bytes and len on string fields.
+type stringLimitMessage struct {
+	Name string `wire:"1,string,max_bytes=name"`
+	Code string `wire:"2,string,len=4"`
+}
+
+func (m stringLimitMessage) WireType() string    { return "test.stringlimit" }
+func (m stringLimitMessage) WireVersion() uint16 { return 1 }
+
+// stringLimitInferredMessage tests max_bytes on inferred string fields.
+type stringLimitInferredMessage struct {
+	Name string `wire:"1,max_bytes=name"`
+}
+
+func (m stringLimitInferredMessage) WireType() string    { return "test.stringlimitinf" }
+func (m stringLimitInferredMessage) WireVersion() uint16 { return 1 }
+
 // ---- sentinel error for validation tests ------------------------------------
 
 var errSentinel = &testError{"sentinel"}
@@ -1599,5 +1649,187 @@ func TestLenMismatchWithArrayLength(t *testing.T) {
 	_, err = getSchema(reflect.TypeFor[goodLenArray]())
 	if err != nil {
 		t.Fatalf("unexpected error for len=8 on [8]byte: %v", err)
+	}
+}
+
+func TestInferredKindRoundTrip(t *testing.T) {
+	orig := inferredMessage{
+		Name:  "test",
+		Count: 42,
+		Data:  []byte{1, 2, 3},
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded inferredMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.Name != orig.Name || decoded.Count != orig.Count || !bytes.Equal(decoded.Data, orig.Data) {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, orig)
+	}
+}
+
+func TestNamedTypeInferenceRoundTrip(t *testing.T) {
+	orig := namedInferredMessage{
+		S: "hello",
+		N: 7,
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded namedInferredMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.S != orig.S || decoded.N != orig.N {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, orig)
+	}
+}
+
+func TestInferredWithOptionsRoundTrip(t *testing.T) {
+	orig := inferredWithOptionsMessage{
+		Hash: make([]byte, 32),
+		Name: "test-name",
+	}
+	orig.Hash[0] = 0xff
+	orig.Hash[31] = 0x01
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded inferredWithOptionsMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(decoded.Hash, orig.Hash) || decoded.Name != orig.Name {
+		t.Fatalf("round-trip mismatch")
+	}
+}
+
+func TestInferredKindRejectsWrongType(t *testing.T) {
+	// Tag-only form for types that cannot be inferred should fail at schema parse time.
+	// big.Int is not auto-inferred — must use explicit kind.
+	// int64 is not in the inference table.
+	type badInferred struct {
+		X int64 `wire:"1"`
+	}
+	_, err := getSchema(reflect.TypeFor[badInferred]())
+	if err == nil {
+		t.Fatal("expected error for uninferrable type int64")
+	}
+}
+
+func TestStringMaxBytesRoundTrip(t *testing.T) {
+	orig := stringLimitMessage{
+		Name: "short",
+		Code: "ABCD",
+	}
+	raw, err := Marshal(orig)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded stringLimitMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.Name != orig.Name || decoded.Code != orig.Code {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, orig)
+	}
+}
+
+func TestStringMaxBytesExceededEncode(t *testing.T) {
+	ls := LimitSet{"name": 5}
+	orig := stringLimitMessage{
+		Name: "too-long-name",
+		Code: "ABCD",
+	}
+	_, err := Marshal(orig, WithLimitSetForMarshal(ls))
+	if err == nil {
+		t.Fatal("expected error for string exceeding max_bytes during encode")
+	}
+}
+
+func TestStringMaxBytesExceededDecode(t *testing.T) {
+	// Build a wire message with an over-long string value by using a field-level API.
+	fields := []Field{
+		{Tag: 1, Value: []byte("too-long-name")},
+		{Tag: 2, Value: []byte("ABCD")},
+	}
+	raw, err := MarshalFields(1, "test.stringlimit", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	ls := LimitSet{"name": 5}
+	var decoded stringLimitMessage
+	err = Unmarshal(raw, &decoded, WithLimits(Limits{
+		MaxTotalBytes: 1 << 20,
+		MaxFields:     256,
+		MaxFieldBytes: 1 << 20,
+	}), WithLimitSet(ls))
+	if err == nil {
+		t.Fatal("expected error for string exceeding max_bytes during decode")
+	}
+}
+
+func TestStringLenEncode(t *testing.T) {
+	orig := stringLimitMessage{
+		Name: "ok",
+		Code: "ABC", // too short for len=4
+	}
+	_, err := Marshal(orig)
+	if err == nil {
+		t.Fatal("expected error for string not matching len=4 during encode")
+	}
+}
+
+func TestStringLenDecode(t *testing.T) {
+	fields := []Field{
+		{Tag: 1, Value: []byte("ok")},
+		{Tag: 2, Value: []byte("AB")}, // too short for len=4
+	}
+	raw, err := MarshalFields(1, "test.stringlimit", fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded stringLimitMessage
+	err = Unmarshal(raw, &decoded, WithLimits(Limits{
+		MaxTotalBytes: 1 << 20,
+		MaxFields:     256,
+		MaxFieldBytes: 1 << 20,
+	}))
+	if err == nil {
+		t.Fatal("expected error for string not matching len=4 during decode")
+	}
+}
+
+func TestStringLimitInferredRoundTrip(t *testing.T) {
+	orig := stringLimitInferredMessage{
+		Name: "test",
+	}
+	raw, err := Marshal(orig, WithLimitSetForMarshal(LimitSet{"name": 10}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded stringLimitInferredMessage
+	if err := Unmarshal(raw, &decoded, WithLimitSet(LimitSet{"name": 10})); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.Name != orig.Name {
+		t.Fatalf("round-trip mismatch: got %q, want %q", decoded.Name, orig.Name)
 	}
 }

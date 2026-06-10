@@ -30,7 +30,11 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet LimitSet) ([]byte, error
 		if !utf8.ValidString(s) {
 			return nil, fmt.Errorf("string is not valid UTF-8")
 		}
-		return []byte(s), nil
+		raw := []byte(s)
+		if err := fs.checkByteLimits(raw, limitSet); err != nil {
+			return nil, err
+		}
+		return raw, nil
 	case kindU32List:
 		return fs.encodeU32List(fv)
 	case kindBytesList:
@@ -49,6 +53,10 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet LimitSet) ([]byte, error
 		return fs.encodeBigUintDispatch(fv, limitSet)
 	case kindBigPos:
 		return fs.encodeBigPosDispatch(fv, limitSet)
+	case kindRecord:
+		return fs.encodeRecord(fv, limitSet)
+	case kindRecordList:
+		return fs.encodeRecordList(fv, limitSet)
 	default:
 		return nil, fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}
@@ -70,7 +78,7 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet LimitSet) er
 	case kindBytes:
 		return fs.decodeBytes(fv, raw, limitSet)
 	case kindString:
-		return fs.decodeString(fv, raw)
+		return fs.decodeString(fv, raw, limitSet)
 	case kindU32List:
 		return fs.decodeU32List(fv, raw, limitSet)
 	case kindBytesList:
@@ -89,6 +97,10 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet LimitSet) er
 		return fs.decodeBigUintDispatch(fv, raw, limitSet)
 	case kindBigPos:
 		return fs.decodeBigPosDispatch(fv, raw, limitSet)
+	case kindRecord:
+		return fs.decodeRecord(fv, raw, limitSet)
+	case kindRecordList:
+		return fs.decodeRecordList(fv, raw, limitSet)
 	default:
 		return fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}

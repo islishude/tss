@@ -27,6 +27,32 @@ func MarshalFields(version uint16, typeID string, fields []Field) ([]byte, error
 	if len(typeID) > math.MaxUint16 {
 		return nil, errors.New("wire type id too long")
 	}
+
+	body, err := marshalFieldBody(fields)
+	if err != nil {
+		return nil, err
+	}
+
+	size := len(magic) + 2 + len(typeID) + 2 + len(body)
+	out := make([]byte, 0, size)
+	out = append(out, magic...)
+	out = AppendUint16(out, uint16(len(typeID)))
+	out = append(out, typeID...)
+	out = AppendUint16(out, version)
+	out = append(out, body...)
+	return out, nil
+}
+
+// marshalFieldBody encodes a list of fields into the canonical field body format:
+//
+//	uint16 field_count
+//	repeat field_count:
+//	    uint16 tag
+//	    uint32 value_len
+//	    value bytes
+//
+// It validates field ordering, nil rejection, and size limits.
+func marshalFieldBody(fields []Field) ([]byte, error) {
 	if len(fields) > math.MaxUint16 {
 		return nil, errors.New("too many wire fields")
 	}
@@ -43,15 +69,11 @@ func MarshalFields(version uint16, typeID string, fields []Field) ([]byte, error
 		}
 		last = field.Tag
 	}
-	size := len(magic) + 2 + len(typeID) + 2 + 2
+	size := 2 // field count
 	for _, field := range fields {
 		size += 2 + 4 + len(field.Value)
 	}
 	out := make([]byte, 0, size)
-	out = append(out, magic...)
-	out = AppendUint16(out, uint16(len(typeID)))
-	out = append(out, typeID...)
-	out = AppendUint16(out, version)
 	out = AppendUint16(out, uint16(len(fields)))
 	for _, field := range fields {
 		out = AppendUint16(out, field.Tag)
@@ -122,43 +144,61 @@ func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits Limits) 
 	if err != nil {
 		return 0, nil, err
 	}
-	fieldCount, offset, err := ReadUint16(in, offset)
+
+	fields, newOffset, err := unmarshalFieldBody(in, offset, limits, typeID)
 	if err != nil {
 		return 0, nil, err
 	}
+
+	if newOffset != len(in) {
+		return 0, nil, errors.New("trailing bytes after wire message")
+	}
+	return version, fields, nil
+}
+
+// unmarshalFieldBody decodes a field body starting at offset in raw.
+// It validates field count, tag ordering, value sizes, and trailing bytes.
+// The returned fields each own their value bytes (copied from raw).
+// It returns the new offset after the field body.
+func unmarshalFieldBody(raw []byte, offset int, limits Limits, name string) ([]Field, int, error) {
+	if len(raw)-offset < 2 {
+		return nil, 0, fmt.Errorf("truncated %s field body", name)
+	}
+
+	fieldCount, offset, err := ReadUint16(raw, offset)
+	if err != nil {
+		return nil, 0, err
+	}
 	if int(fieldCount) > limits.MaxFields {
-		return 0, nil, fmt.Errorf("too many wire fields: %d > %d", fieldCount, limits.MaxFields)
+		return nil, 0, fmt.Errorf("too many %s fields: %d > %d", name, fieldCount, limits.MaxFields)
 	}
 	fields := make([]Field, 0, fieldCount)
 	var last uint16
 	for i := 0; i < int(fieldCount); i++ {
-		tag, next, err := ReadUint16(in, offset)
+		tag, next, err := ReadUint16(raw, offset)
 		if err != nil {
-			return 0, nil, err
+			return nil, 0, err
 		}
 		if i > 0 && tag <= last {
-			return 0, nil, errors.New("wire fields must be strictly increasing")
+			return nil, 0, errors.New("wire fields must be strictly increasing")
 		}
 		offset = next
-		length, next, err := ReadUint32(in, offset)
+		length, next, err := ReadUint32(raw, offset)
 		if err != nil {
-			return 0, nil, err
+			return nil, 0, err
 		}
 		offset = next
-		if uint64(len(in)-offset) < uint64(length) {
-			return 0, nil, fmt.Errorf("truncated wire field %d", tag)
+		if uint64(len(raw)-offset) < uint64(length) {
+			return nil, 0, fmt.Errorf("truncated wire field %d", tag)
 		}
 		if int(length) > limits.MaxFieldBytes {
-			return 0, nil, fmt.Errorf("wire field %d too large: %d > %d", tag, length, limits.MaxFieldBytes)
+			return nil, 0, fmt.Errorf("wire field %d too large: %d > %d", tag, length, limits.MaxFieldBytes)
 		}
 		value := make([]byte, length)
-		copy(value, in[offset:offset+int(length)])
+		copy(value, raw[offset:offset+int(length)])
 		fields = append(fields, Field{Tag: tag, Value: value})
 		offset += int(length)
 		last = tag
 	}
-	if offset != len(in) {
-		return 0, nil, errors.New("trailing bytes after wire message")
-	}
-	return version, fields, nil
+	return fields, offset, nil
 }

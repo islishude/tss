@@ -29,6 +29,8 @@ const (
 	kindBigInt
 	kindBigUint
 	kindBigPos
+	kindRecord
+	kindRecordList
 )
 
 // fieldSchema holds the parsed information for a single wire-tagged struct field.
@@ -110,11 +112,21 @@ func parseSchema(t reflect.Type) (*schema, error) {
 	return &schema{typ: t, fields: fields}, nil
 }
 
-// parseFieldTag parses a wire struct tag like `"1,bytes,max_bytes=field"`.
+// parseFieldTag parses a wire struct tag.
+//
+// Supported forms:
+//
+//	wire:"<tag>"
+//	wire:"<tag>,<kind>"
+//	wire:"<tag>,<option>"
+//	wire:"<tag>,<kind>,<option>"
+//
+// When the kind is omitted or the second segment is not a known kind name,
+// the kind is inferred from the Go field type.
 func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 	parts := strings.Split(tagStr, ",")
-	if len(parts) < 2 {
-		return fieldSchema{}, fmt.Errorf("invalid wire tag %q (need <tag>,<kind>)", tagStr)
+	if len(parts) == 0 {
+		return fieldSchema{}, fmt.Errorf("empty wire tag")
 	}
 
 	tag, err := strconv.ParseUint(strings.TrimSpace(parts[0]), 10, 16)
@@ -125,10 +137,30 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		return fieldSchema{}, fmt.Errorf("tag must be in [1, 65535]: %d", tag)
 	}
 
-	kindStr := strings.TrimSpace(parts[1])
-	kind, err := parseKind(kindStr, f.Type)
-	if err != nil {
-		return fieldSchema{}, err
+	var kind wireKind
+	optStart := 1 // first option index after tag
+
+	if len(parts) > 1 {
+		kindStr := strings.TrimSpace(parts[1])
+		if isKnownKind(kindStr) {
+			kind, err = parseKind(kindStr, f.Type)
+			if err != nil {
+				return fieldSchema{}, err
+			}
+			optStart = 2
+		} else {
+			// Second segment is not a known kind — infer from Go type.
+			kind, err = inferKind(f.Type)
+			if err != nil {
+				return fieldSchema{}, err
+			}
+			optStart = 1
+		}
+	} else {
+		kind, err = inferKind(f.Type)
+		if err != nil {
+			return fieldSchema{}, err
+		}
 	}
 
 	fs := fieldSchema{
@@ -140,7 +172,7 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 	}
 
 	// Parse options.
-	for _, opt := range parts[2:] {
+	for _, opt := range parts[optStart:] {
 		opt = strings.TrimSpace(opt)
 		if opt == "" {
 			continue
@@ -281,4 +313,109 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 	default:
 		return 0, fmt.Errorf("unknown wire kind %q", kindStr)
 	}
+}
+
+// knownKindNames is the set of wire kind names that must be explicitly declared.
+var knownKindNames = map[string]bool{
+	"u8": true, "u16": true, "u32": true, "bool": true,
+	"bytes": true, "string": true, "u32list": true, "byteslist": true,
+	"partybytes": true, "partybytepairs": true, "nested": true, "custom": true,
+	"bigint": true, "biguint": true, "bigpos": true,
+}
+
+// isKnownKind reports whether s is a recognized wire kind name.
+func isKnownKind(s string) bool {
+	return knownKindNames[s]
+}
+
+// inferKind returns the wire kind for a Go type when the tag omits an explicit kind.
+//
+// Mapping:
+//
+//	uint8                -> u8
+//	uint16               -> u16
+//	uint32 / int         -> u32 (int must be >= 0 and <= MaxUint32 at encode time)
+//	bool                 -> bool
+//	string / named string -> string
+//	[]byte / [N]byte     -> bytes
+//	[]uint32 / []int     -> u32list
+//	[][]byte             -> byteslist
+//	struct               -> record
+//	*struct              -> record
+//	[]struct / []*struct -> recordlist
+//	ValueMarshaler       -> custom
+//
+// big.Int is NOT auto-inferred (three possible signedness variants).
+func inferKind(t reflect.Type) (wireKind, error) {
+	t = indirectType(t)
+
+	// Check for ValueMarshaler first — domain types like SessionID, PartyID,
+	// and other named primitives may implement it for custom encoding.
+	vmType := reflect.TypeFor[ValueMarshaler]()
+	if t.Implements(vmType) || reflect.PointerTo(t).Implements(vmType) {
+		return kindCustom, nil
+	}
+
+	switch t.Kind() {
+	case reflect.Uint8:
+		return kindU8, nil
+	case reflect.Uint16:
+		return kindU16, nil
+	case reflect.Uint32, reflect.Int:
+		return kindU32, nil
+	case reflect.Bool:
+		return kindBool, nil
+	case reflect.String:
+		return kindString, nil
+	case reflect.Slice:
+		return inferSliceKind(t)
+	case reflect.Array:
+		if t.Elem().Kind() == reflect.Uint8 {
+			return kindBytes, nil
+		}
+		return 0, fmt.Errorf("cannot infer wire kind for array of %s", t.Elem().Kind())
+	case reflect.Struct:
+		return kindRecord, nil
+	case reflect.Pointer:
+		elem := t.Elem()
+		if elem.Kind() == reflect.Struct {
+			return kindRecord, nil
+		}
+		return 0, fmt.Errorf("cannot infer wire kind for pointer to %s", elem.Kind())
+	default:
+		return 0, fmt.Errorf("cannot infer wire kind for %s", t.Kind())
+	}
+}
+
+// inferSliceKind returns the wire kind for a slice type.
+func inferSliceKind(t reflect.Type) (wireKind, error) {
+	elem := indirectType(t.Elem())
+	switch elem.Kind() {
+	case reflect.Uint8:
+		return kindBytes, nil
+	case reflect.Uint32, reflect.Int:
+		return kindU32List, nil
+	case reflect.Slice:
+		if elem.Elem().Kind() == reflect.Uint8 {
+			return kindBytesList, nil
+		}
+		return 0, fmt.Errorf("cannot infer wire kind for [][]%s", elem.Elem().Kind())
+	case reflect.Struct:
+		return kindRecordList, nil
+	case reflect.Pointer:
+		if elem.Elem().Kind() == reflect.Struct {
+			return kindRecordList, nil
+		}
+		return 0, fmt.Errorf("cannot infer wire kind for []*%s", elem.Elem().Kind())
+	default:
+		return 0, fmt.Errorf("cannot infer wire kind for []%s", elem.Kind())
+	}
+}
+
+// indirectType returns the type T for a named type defined as T.
+func indirectType(t reflect.Type) reflect.Type {
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
+	return t
 }
