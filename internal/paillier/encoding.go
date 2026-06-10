@@ -11,44 +11,19 @@ import (
 )
 
 // MarshalBinary returns a deterministic TLV public-key record.
+// wire.Marshal calls Validate via the Validator interface.
 func (pk PublicKey) MarshalBinary() ([]byte, error) {
-	if err := pk.Validate(); err != nil {
-		return nil, err
-	}
-	n, err := encodePositiveInt(pk.N)
-	if err != nil {
-		return nil, err
-	}
-	g, err := encodePositiveInt(pk.G)
-	if err != nil {
-		return nil, err
-	}
-	return wire.Marshal(publicKeyWire{N: n, G: g})
+	return wire.Marshal(pk)
 }
 
 // UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
+// wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
-	var w publicKeyWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	var pk PublicKey
+	if err := wire.Unmarshal(in, &pk); err != nil {
 		return nil, err
 	}
-	n, err := decodePositiveIntBytes(w.N)
-	if err != nil {
-		return nil, fmt.Errorf("invalid public modulus: %w", err)
-	}
-	g, err := decodePositiveIntBytes(w.G)
-	if err != nil {
-		return nil, fmt.Errorf("invalid public generator: %w", err)
-	}
-	pk := &PublicKey{
-		N:        n,
-		NSquared: new(big.Int).Mul(n, n),
-		G:        g,
-	}
-	if err := pk.Validate(); err != nil {
-		return nil, err
-	}
-	return pk, nil
+	return &pk, nil
 }
 
 // MarshalBinary returns a deterministic TLV private-key record.

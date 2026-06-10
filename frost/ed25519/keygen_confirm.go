@@ -100,20 +100,16 @@ func (c KeygenConfirmation) Validate() error {
 }
 
 // MarshalBinary encodes the confirmation using the object-level wire codec.
+// wire.Marshal calls Validate via the Validator interface.
 func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
-	if err := c.Validate(); err != nil {
-		return nil, err
-	}
 	return wire.Marshal(c)
 }
 
 // UnmarshalKeygenConfirmation decodes a canonical TLV keygen confirmation.
+// wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 	var c KeygenConfirmation
 	if err := wire.Unmarshal(in, &c); err != nil {
-		return nil, err
-	}
-	if err := c.Validate(); err != nil {
 		return nil, err
 	}
 	return &c, nil

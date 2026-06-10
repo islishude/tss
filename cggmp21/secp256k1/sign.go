@@ -30,12 +30,18 @@ const (
 // policy, and message domain where it may be consumed. An empty DerivationPath
 // is the canonical master-key path; non-empty paths are non-hardened BIP32.
 type PresignContext struct {
-	KeyID          string   `json:"key_id"`
-	ChainID        string   `json:"chain_id"`
-	DerivationPath []uint32 `json:"derivation_path"`
-	PolicyDomain   string   `json:"policy_domain"`
-	MessageDomain  string   `json:"message_domain"`
+	KeyID          string   `json:"key_id" wire:"1,string"`
+	ChainID        string   `json:"chain_id" wire:"2,string"`
+	DerivationPath []uint32 `json:"derivation_path" wire:"3,u32list"`
+	PolicyDomain   string   `json:"policy_domain" wire:"4,string"`
+	MessageDomain  string   `json:"message_domain" wire:"5,string"`
 }
+
+// WireType returns the canonical wire type identifier for PresignContext.
+func (PresignContext) WireType() string { return presignContextWireType }
+
+// WireVersion returns the wire format version for PresignContext.
+func (PresignContext) WireVersion() uint16 { return tss.Version }
 
 // PresignStore is an optional durable claim interface. When provided to StartSign,
 // the library calls MarkConsumed with the presign's unique transcript hash before
@@ -108,7 +114,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		ChiShare:             p.chiShare,
 		Delta:                p.delta,
 		TranscriptHash:       p.TranscriptHash,
-		Context:              encodePresignContext(p.Context),
+		Context:              p.Context,
 		ContextHash:          p.ContextHash,
 		AdditiveShift:        p.AdditiveShift,
 		Consumed:             p.Consumed,

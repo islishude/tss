@@ -277,7 +277,7 @@ type presignWire struct {
 	ChiShare             *secret.Scalar `wire:"7,custom,len=32"`
 	Delta                *secret.Scalar `wire:"8,custom,len=32"`
 	TranscriptHash       []byte         `wire:"9,bytes"`
-	Context              []byte         `wire:"10,bytes"`
+	Context              PresignContext `wire:"10,nested"`
 	ContextHash          []byte         `wire:"11,bytes"`
 	AdditiveShift        []byte         `wire:"12,bytes"`
 	Consumed             bool           `wire:"13,bool"`
@@ -307,10 +307,6 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	if len(w.Signers) > limits.Threshold.MaxSigners {
 		return nil, fmt.Errorf("signers too large: %d > %d", len(w.Signers), limits.Threshold.MaxSigners)
 	}
-	ctx, err := decodePresignContext(w.Context)
-	if err != nil {
-		return nil, err
-	}
 	if _, err := secpScalarFromSecret(w.KShare); err != nil {
 		return nil, fmt.Errorf("invalid k share: %w", err)
 	}
@@ -333,7 +329,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		R:                    w.R,
 		LittleR:              w.LittleR,
 		TranscriptHash:       w.TranscriptHash,
-		Context:              ctx,
+		Context:              w.Context,
 		ContextHash:          w.ContextHash,
 		AdditiveShift:        w.AdditiveShift,
 		PublicKey:            w.PublicKey,
@@ -349,38 +345,6 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		return nil, err
 	}
 	return p, nil
-}
-
-// presignContextWire is the wire DTO for PresignContext.
-type presignContextWire struct {
-	KeyID          string   `wire:"1,string"`
-	ChainID        string   `wire:"2,string"`
-	DerivationPath []uint32 `wire:"3,u32list"`
-	PolicyDomain   string   `wire:"4,string"`
-	MessageDomain  string   `wire:"5,string"`
-}
-
-// WireType returns the canonical wire type identifier for presignContextWire.
-func (presignContextWire) WireType() string { return presignContextWireType }
-
-// WireVersion returns the wire format version for presignContextWire.
-func (presignContextWire) WireVersion() uint16 { return tss.Version }
-
-func encodePresignContext(ctx PresignContext) []byte {
-	raw, _ := wire.Marshal(presignContextWire(ctx))
-	return raw
-}
-
-func decodePresignContext(in []byte) (PresignContext, error) {
-	var w presignContextWire
-	if err := wire.Unmarshal(in, &w); err != nil {
-		return PresignContext{}, err
-	}
-	ctx := PresignContext(w)
-	if err := validatePresignContext(ctx); err != nil {
-		return PresignContext{}, err
-	}
-	return ctx, nil
 }
 
 // encodeSignVerifyShares encodes a slice of SignVerifyShare into a deterministic

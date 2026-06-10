@@ -9,9 +9,23 @@ import (
 
 // PublicKey contains Paillier public parameters and cached n^2.
 type PublicKey struct {
-	N        *big.Int
-	NSquared *big.Int
-	G        *big.Int
+	N        *big.Int `wire:"1,bigpos"`
+	G        *big.Int `wire:"2,bigpos"`
+	NSquared *big.Int `wire:"-"`
+}
+
+// WireType returns the canonical wire type identifier for PublicKey.
+func (PublicKey) WireType() string { return publicKeyWireType }
+
+// WireVersion returns the wire format version for PublicKey.
+func (PublicKey) WireVersion() uint16 { return paillierWireVersion }
+
+// AfterUnmarshalWire reconstructs the cached NSquared value after wire decoding.
+func (pk *PublicKey) AfterUnmarshalWire() error {
+	if pk.N != nil {
+		pk.NSquared = new(big.Int).Mul(pk.N, pk.N)
+	}
+	return nil
 }
 
 // PrivateKey contains Paillier secret factors and decryption exponents.
@@ -61,18 +75,6 @@ const (
 	privateKeyFieldP
 	privateKeyFieldQ
 )
-
-// publicKeyWire is the wire DTO for PublicKey.
-type publicKeyWire struct {
-	N []byte `wire:"1,bytes"`
-	G []byte `wire:"2,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for publicKeyWire.
-func (publicKeyWire) WireType() string { return publicKeyWireType }
-
-// WireVersion returns the wire format version for publicKeyWire.
-func (publicKeyWire) WireVersion() uint16 { return paillierWireVersion }
 
 // privateKeyWire is the wire DTO for PrivateKey.
 type privateKeyWire struct {

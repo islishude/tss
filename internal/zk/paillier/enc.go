@@ -47,16 +47,33 @@ type EncWitness struct {
 // encrypts a plaintext in the range ±2^Ell. It uses Ring-Pedersen commitments
 // and large integer masks for statistical zero-knowledge.
 type EncProof struct {
-	Version uint16
+	Version uint16 `wire:"1,u16"`
 
-	S  *big.Int // RP commitment: s_j^k * t_j^mu mod N_j
-	A  *big.Int // Paillier encryption: Enc_Ni(alpha; r)
-	C  *big.Int // RP commitment: s_j^alpha * t_j^gamma mod N_j
-	Z1 *big.Int // alpha + e*k (signed integer)
-	Z2 *big.Int // r * rho^e mod N_i
-	Z3 *big.Int // gamma + e*mu (signed integer)
+	S  *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^k * t_j^mu mod N_j
+	A  *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"` // Paillier encryption: Enc_Ni(alpha; r)
+	C  *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^alpha * t_j^gamma mod N_j
+	Z1 *big.Int `wire:"5,bigint,max_bytes=signed_response"`  // alpha + e*k (signed integer)
+	Z2 *big.Int `wire:"6,bigpos,max_bytes=paillier_signed"`  // r * rho^e mod N_i
+	Z3 *big.Int `wire:"7,bigint,max_bytes=signed_response"`  // gamma + e*mu (signed integer)
 
-	TranscriptHash []byte
+	TranscriptHash []byte `wire:"8,bytes"`
+}
+
+// WireType returns the canonical wire type identifier for EncProof.
+func (EncProof) WireType() string { return encProofWireType }
+
+// WireVersion returns the wire format version for EncProof.
+func (EncProof) WireVersion() uint16 { return encProofVersion }
+
+// Validate checks that the EncProof is structurally complete.
+func (p *EncProof) Validate() error {
+	if p.Version != encProofVersion {
+		return fmt.Errorf("unsupported EncProof version %d", p.Version)
+	}
+	if p.S == nil || p.A == nil || p.C == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
+		return errors.New("incomplete EncProof")
+	}
+	return nil
 }
 
 // ProveEnc creates a Πenc proof that K = Enc_Ni(k; rho) encrypts a plaintext
@@ -239,63 +256,21 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	return nil
 }
 
-// encProofWire is the wire DTO for EncProof.
-type encProofWire struct {
-	Version        uint16   `wire:"1,u16"`
-	S              *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"`
-	A              *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"`
-	C              *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"`
-	Z1             *big.Int `wire:"5,bigint,max_bytes=signed_response"`
-	Z2             *big.Int `wire:"6,bigpos,max_bytes=paillier_signed"`
-	Z3             *big.Int `wire:"7,bigint,max_bytes=signed_response"`
-	TranscriptHash []byte   `wire:"8,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for encProofWire.
-func (encProofWire) WireType() string { return encProofWireType }
-
-// WireVersion returns the wire format version for encProofWire.
-func (encProofWire) WireVersion() uint16 { return encProofVersion }
-
 // MarshalBinary encodes the EncProof using the object-level wire codec.
 func (p *EncProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil EncProof")
 	}
-	if p.S == nil || p.A == nil || p.C == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
-		return nil, errors.New("incomplete EncProof")
-	}
-	return wire.Marshal(encProofWire{
-		Version:        p.Version,
-		S:              p.S,
-		A:              p.A,
-		C:              p.C,
-		Z1:             p.Z1,
-		Z2:             p.Z2,
-		Z3:             p.Z3,
-		TranscriptHash: p.TranscriptHash,
-	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalEncProof decodes a canonical TLV EncProof.
 func UnmarshalEncProof(in []byte) (*EncProof, error) {
-	var w encProofWire
-	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	var p EncProof
+	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return nil, err
 	}
-	if w.Version != encProofVersion {
-		return nil, fmt.Errorf("unsupported EncProof version %d", w.Version)
-	}
-	return &EncProof{
-		Version:        w.Version,
-		S:              w.S,
-		A:              w.A,
-		C:              w.C,
-		Z1:             w.Z1,
-		Z2:             w.Z2,
-		Z3:             w.Z3,
-		TranscriptHash: w.TranscriptHash,
-	}, nil
+	return &p, nil
 }
 
 func validateEncStatement(params SecurityParams, stmt EncStatement, w EncWitness) error {
