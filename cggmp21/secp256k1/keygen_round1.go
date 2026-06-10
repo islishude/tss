@@ -323,6 +323,24 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	share := secp.ScalarFromBigInt(p.Share)
 
+	// Eagerly verify the share against the sender's polynomial commitments
+	// when they are already available. If the commitments have not arrived
+	// yet, defer verification to tryComplete (which re-checks all shares
+	// once every party's commitments are in).
+	if commits, ok := s.commits[env.From]; ok {
+		if err := secp.VerifyShare(commits, uint32(s.cfg.Self), share); err != nil {
+			s.log.Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
+				"party_id", s.cfg.Self,
+				"dealer", env.From,
+			)
+			protoErr, evErr := s.buildShareVerificationBlame(env.From, commits, err)
+			if evErr != nil {
+				return nil, evErr
+			}
+			return nil, protoErr
+		}
+	}
+
 	// ---- 4. MUTATE STATE ----
 	s.shares[env.From] = share.BigInt()
 

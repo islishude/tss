@@ -191,7 +191,7 @@ const (
 type MaliciousTransport struct {
 	inner  *InMemoryTransport
 	mode   AttackMode
-	replay *Envelope // stored envelope for AttackReplay
+	replay *Envelope // stored envelope for AttackReplay; shared by Send and Broadcast
 	mu     sync.Mutex
 }
 
@@ -237,6 +237,21 @@ func (m *MaliciousTransport) Broadcast(ctx context.Context, env Envelope) error 
 		// version (with a different payload) to all other parties.
 		// This simulates a sender equivocating on broadcast content.
 		return m.broadcastEquivocation(env)
+	case AttackReplay:
+		modified := env.Clone()
+		m.mu.Lock()
+		if m.replay != nil {
+			replay := *m.replay
+			m.mu.Unlock()
+			return m.inner.Broadcast(ctx, replay)
+		}
+		m.replay = &modified
+		m.mu.Unlock()
+		if err := m.inner.Broadcast(ctx, modified); err != nil {
+			return err
+		}
+		// Broadcast the same envelope again to simulate replay.
+		return m.inner.Broadcast(ctx, modified)
 	default:
 	}
 	return m.inner.Broadcast(ctx, env.Clone())

@@ -35,25 +35,11 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
 			)
-			verifyErr := err
-			evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
+			protoErr, evErr := s.buildShareVerificationBlame(dealer, s.commits[dealer], err)
 			if evErr != nil {
 				return nil, evErr
 			}
-			return nil, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: 1,
-				Party: dealer,
-				Blame: newBlame(
-					evidenceEnv,
-					tss.EvidenceKindKeygenShare,
-					"invalid DKG share",
-					[]tss.PartyID{dealer},
-					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, s.commits[dealer])),
-				),
-				Err: verifyErr,
-			}
+			return nil, protoErr
 		}
 	}
 	secret := new(big.Int)
@@ -230,6 +216,31 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		}
 	}
 	return out, nil
+}
+
+// buildShareVerificationBlame constructs a ProtocolError with blame evidence
+// for a DKG share that fails verification against the sender's polynomial
+// commitments. Callers are responsible for logging the failure with the
+// appropriate path-specific context (eager or deferred).
+func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
+	evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
+	if evErr != nil {
+		return nil, evErr
+	}
+	return &tss.ProtocolError{
+		Code:  tss.ErrCodeVerification,
+		Round: 1,
+		Party: dealer,
+		Blame: newBlame(
+			evidenceEnv,
+			tss.EvidenceKindKeygenShare,
+			"invalid DKG share",
+			[]tss.PartyID{dealer},
+			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, commits)),
+		),
+		Err: verifyErr,
+	}, nil
 }
 
 // abort marks the session aborted and clears all secret-bearing accumulated
