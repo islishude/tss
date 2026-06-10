@@ -116,8 +116,12 @@ The low-level `MarshalFields` / `UnmarshalFields` / `UnmarshalFieldsWithLimits` 
 
 ### Limits
 
-- **TLV-level** (`wire.Limits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during envelope decode via `wire.WithLimits`
-- **Semantic-level** (`wire.LimitSet`): per-field max bytes/items checked against named limits via `wire.WithLimitSet`
+Frame and semantic limits are **fail-closed**: any struct tag that declares `max_bytes=name` or `max_items=name` requires the caller to provide a `wire.FieldLimits` containing that name. Missing limits or missing keys produce an error — there is no silent fallback to unlimited.
+
+- **Frame-level** (`wire.FrameLimits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during decode via `wire.WithFrameLimits`
+- **Semantic-level** (`wire.FieldLimits`): per-field max bytes/items checked against named limits via `wire.WithFieldLimits` (decode) or `wire.WithFieldLimitsForMarshal` (encode)
+
+Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) provide `frameLimits(maxTotal int) wire.FrameLimits` and `fieldLimits() wire.FieldLimits` adapter methods to convert their structured limits into wire-layer options.
 
 ## DTO Pattern
 
