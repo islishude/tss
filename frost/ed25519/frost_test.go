@@ -102,8 +102,8 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 	}
 	if out, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate commitment should be ignored, out=%d err=%v", len(out), err)
-		} else if len(out) != 0 {
-			t.Fatalf("duplicate commitment produced unexpected output, out=%d", len(out))
+	} else if len(out) != 0 {
+		t.Fatalf("duplicate commitment produced unexpected output, out=%d", len(out))
 	}
 }
 
@@ -155,8 +155,8 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 	}
 	if out, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate partial should be ignored, out=%d err=%v", len(out), err)
-		} else if len(out) != 0 {
-			t.Fatalf("duplicate partial produced unexpected output, out=%d", len(out))
+	} else if len(out) != 0 {
+		t.Fatalf("duplicate partial produced unexpected output, out=%d", len(out))
 	}
 }
 

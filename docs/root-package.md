@@ -233,11 +233,11 @@ When a verification failure can be attributed to a specific party, state machine
 type Blame struct {
     Reason   string    // human-readable failure description
     Parties  []PartyID // attributed parties
-    Evidence []byte    // deterministic BlameEvidence JSON, nil if not attributable
+    Evidence []byte    // deterministic BlameEvidence binary encoding, nil if not attributable
 }
 ```
 
-`BlameEvidence` is a deterministic JSON record binding:
+`BlameEvidence` is a deterministic binary record (canonical TLV) binding:
 
 - Protocol, version, session ID.
 - Round, sender, payload type.

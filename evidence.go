@@ -79,6 +79,9 @@ type BlameEvidence struct {
 }
 
 // NewBlameEvidence builds a public evidence record bound to an envelope hash.
+// PublicInputs are stored in canonical order so that logically equivalent
+// evidence records produce identical hashes regardless of caller-provided
+// slice ordering.
 func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []EvidenceField) (*BlameEvidence, error) {
 	payloadHash := sha256.Sum256(env.Payload)
 	evidence := &BlameEvidence{
@@ -93,7 +96,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		TranscriptHash: slices.Clone(env.TranscriptHash[:]),
 		Kind:           kind,
 		Reason:         reason,
-		PublicInputs:   cloneEvidenceFields(inputs),
+		PublicInputs:   canonicalEvidenceFields(inputs),
 	}
 	if err := evidence.Validate(); err != nil {
 		return nil, err
@@ -102,6 +105,9 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 }
 
 // Validate checks structural invariants for a public blame evidence record.
+// It does not mutate the receiver — callers that need canonical field ordering
+// for stable hashing must use [BlameEvidence.MarshalBinary], which sorts a copy
+// before encoding.
 func (e *BlameEvidence) Validate() error {
 	if e == nil {
 		return errors.New("nil blame evidence")
@@ -137,33 +143,23 @@ func (e *BlameEvidence) Validate() error {
 	if fl := len(e.PublicInputs); fl > limits.MaxEvidenceFieldCount {
 		return fmt.Errorf("evidence field count too large: %d > %d", fl, limits.MaxEvidenceFieldCount)
 	}
-	// Canonical field order keeps evidence hashes stable across processes and
-	// avoids relying on caller-provided slice ordering.
-	slices.SortFunc(e.PublicInputs, func(a, b EvidenceField) int {
-		if a.Key < b.Key {
-			return -1
-		}
-		if a.Key > b.Key {
-			return 1
-		}
-		return bytes.Compare(a.Value, b.Value)
-	})
-	for i, field := range e.PublicInputs {
+	seen := make(map[string]struct{}, len(e.PublicInputs))
+	for _, field := range e.PublicInputs {
 		if field.Key == "" {
 			return errors.New("empty evidence field key")
 		}
 		if fl := len(field.Key); fl > limits.MaxEvidenceFieldKeyBytes {
 			return fmt.Errorf("evidence field key too long: %d > %d", fl, limits.MaxEvidenceFieldKeyBytes)
 		}
-
+		if _, ok := seen[field.Key]; ok {
+			return fmt.Errorf("duplicate evidence field %q", field.Key)
+		}
+		seen[field.Key] = struct{}{}
 		if field.Value == nil {
 			return fmt.Errorf("nil evidence field %q", field.Key)
 		}
 		if fl := len(field.Value); fl > limits.MaxEvidenceFieldValueBytes {
 			return fmt.Errorf("evidence field value too long: %d > %d", fl, limits.MaxEvidenceFieldValueBytes)
-		}
-		if i > 0 && e.PublicInputs[i-1].Key == field.Key {
-			return fmt.Errorf("duplicate evidence field %q", field.Key)
 		}
 	}
 	return nil
@@ -192,10 +188,13 @@ func (blameEvidenceWire) WireType() string { return blameWireType }
 func (blameEvidenceWire) WireVersion() uint16 { return Version }
 
 // MarshalBinary encodes BlameEvidence using the object-level wire codec.
+// Fields are sorted into canonical order so that logically equivalent evidence
+// records produce identical hashes regardless of caller-provided slice ordering.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 	if err := e.Validate(); err != nil {
 		return nil, err
 	}
+	fields := canonicalEvidenceFields(e.PublicInputs)
 	return wire.Marshal(blameEvidenceWire{
 		Version:        e.Version,
 		Protocol:       e.Protocol,
@@ -208,7 +207,7 @@ func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
 		TranscriptHash: e.TranscriptHash,
 		Kind:           e.Kind,
 		Reason:         e.Reason,
-		PublicInputs:   encodeEvidenceFields(e.PublicInputs),
+		PublicInputs:   encodeEvidenceFields(fields),
 	})
 }
 
@@ -357,6 +356,27 @@ func decodeEvidenceFields(raw []byte, limits Limits) ([]EvidenceField, error) {
 		return nil, errors.New("trailing evidence fields data")
 	}
 	return out, nil
+}
+
+// canonicalEvidenceFields returns a sorted copy of the evidence fields.
+// Canonical order (by key, then value) keeps evidence hashes stable across
+// processes — two callers that provide the same logical fields in different
+// orders produce the same encoding and therefore the same hash.
+func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
+	if len(fields) == 0 {
+		return nil
+	}
+	sorted := cloneEvidenceFields(fields)
+	slices.SortFunc(sorted, func(a, b EvidenceField) int {
+		if a.Key < b.Key {
+			return -1
+		}
+		if a.Key > b.Key {
+			return 1
+		}
+		return bytes.Compare(a.Value, b.Value)
+	})
+	return sorted
 }
 
 func cloneEvidenceFields(in []EvidenceField) []EvidenceField {

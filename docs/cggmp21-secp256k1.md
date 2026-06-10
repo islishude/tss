@@ -375,7 +375,7 @@ CGGMP21 evidence covers every attributable failure point:
 | Refresh         | `refresh_share`       | Refresh share fails commitment verification.                    |
 | Reshare         | `reshare_share`       | Reshare share fails commitment verification.                    |
 
-Evidence records are deterministic JSON binding protocol context, payload hash, transcript hash, and public input hashes. They **never** contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence` validates evidence against trusted session context (parties, signer set, public key, Paillier public keys, transcript hashes).
+Evidence records are deterministic binary (canonical TLV) binding protocol context, payload hash, transcript hash, and public input hashes. They **never** contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence` validates evidence against trusted session context (parties, signer set, public key, Paillier public keys, transcript hashes).
 
 Per-party signpartial evidence includes:
 

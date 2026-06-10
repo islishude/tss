@@ -44,9 +44,10 @@ func (s *PresignSession) Destroy() {
 	}
 }
 
-// Destroy clears local online signing partials retained by the signing session.
-// It delegates to abort for secret-bearing state, then releases non-secret storage
-// including the public key and assembled signature bytes.
+// Destroy clears local online signing state retained by the signing session.
+// It delegates to abort for secret-bearing state (which includes clearing
+// collected partial signatures via clearBigIntMap), then releases non-secret
+// storage including the public key and assembled signature bytes.
 // Destroy is safe to call on a nil receiver; it is idempotent because all
 // sub-operations are themselves nil-safe.
 // The session's key and presign references are caller-owned and are NOT
