@@ -20,13 +20,13 @@ A successful refactor should leave the repository with fewer ad hoc tests, more 
 
 The refactor must follow these requirements.
 
-### 2.1 Table-Driven Tests by Default
+### 2.1 Prefer Table-Driven Tests
 
-Tests must be table-driven unless there is a strong reason not to use a table.
+Tests should be table-driven where it improves clarity and maintainability. Table-driven grouping makes related cases visible together and reduces duplication in setup and assertions.
 
-For a given production function, method, state transition, or invariant, test cases should not be scattered across many small test functions. Prefer one focused table-driven test function with named cases.
+For a given production function, method, state transition, or invariant, related test cases are usually clearer when grouped into one table-driven test function with named cases.
 
-For example, prefer this:
+For example:
 
 ```go
 func TestEnvelopeGuard_Accept(t *testing.T) {
@@ -52,15 +52,13 @@ func TestEnvelopeGuard_Accept(t *testing.T) {
 }
 ```
 
-Avoid this pattern when the cases belong to the same function or invariant:
+Separate test functions are a reasonable choice when they test different behavior families, have different setup costs, belong to different tiers, use different build tags, or guard materially different safety invariants:
 
 ```go
 func TestEnvelopeGuardRejectsWrongSession(t *testing.T) {}
 func TestEnvelopeGuardRejectsWrongProtocol(t *testing.T) {}
 func TestEnvelopeGuardRejectsSenderSpoof(t *testing.T) {}
 ```
-
-Separate test functions are acceptable only when they test different behavior families, different setup costs, different tiers, different build tags, or materially different safety invariants.
 
 ### 2.2 Tests May Drive Production-Code Changes
 
@@ -190,13 +188,13 @@ Follow `docs/testing-rules.md` for the authoritative tier definitions. This refa
 
 Short local feedback must remain fast. Expensive protocol flows must be behind build tags or explicit targets.
 
-## 6. Table-Driven Testing Standard
+## 6. Table-Driven Testing Guidance
 
 ### 6.1 Case Table Shape
 
-Each table should name the security condition and expected side effects.
+When using table-driven tests, each table should name the security condition and expected side effects.
 
-Recommended shape:
+Suggested shape:
 
 ```go
 tests := []struct {
@@ -408,7 +406,7 @@ The refactor must preserve or add coverage for these invariants.
 
 ### 9.1 Wire and Encoding
 
-Table-driven tests must cover:
+Tests must cover (using table-driven grouping where practical):
 
 - Repeated marshal stability.
 - Marshal/unmarshal round trip.
@@ -425,7 +423,7 @@ Table-driven tests must cover:
 
 ### 9.2 Envelope Guard and Transport Boundary
 
-Table-driven tests must cover:
+Tests must cover (using table-driven grouping where practical):
 
 - Wrong protocol.
 - Wrong version.
@@ -702,7 +700,7 @@ Acceptance:
 Deliverables:
 
 - Add `t.Parallel()` to low-risk pure unit tests.
-- Convert scattered test functions into table-driven tests for root, wire, secret, Shamir, BIP32, and curve packages.
+- Group related test cases into table-driven tests for root, wire, secret, Shamir, BIP32, and curve packages where it improves clarity.
 - Update Makefile test concurrency knobs.
 
 Acceptance:
@@ -716,7 +714,7 @@ Acceptance:
 Deliverables:
 
 - Rewrite `internal/wire` tests around canonical, limits, mutation, golden, and fuzz categories.
-- Rewrite root guard/envelope/replay/broadcast/evidence tests around table-driven invariant matrices.
+- Rewrite root guard/envelope/replay/broadcast/evidence tests with table-driven grouping around invariants.
 - Add reject-path side-effect assertions.
 
 Acceptance:
@@ -731,12 +729,12 @@ Deliverables:
 
 - Rewrite FROST encoding, HD, lifecycle, guard, keygen, sign, refresh, reshare, and vector tests.
 - Apply `t.Parallel()` where safe.
-- Use table-driven tests for invalid parameters, wrong rounds, wrong senders, and domain errors.
+- Group invalid-parameter, wrong-round, wrong-sender, and domain-error cases where the setup is shared.
 
 Acceptance:
 
 - FROST happy paths are covered by a small number of lifecycle integration tests.
-- FROST reject paths are table-driven and assert no unsafe state advancement.
+- FROST reject paths assert no unsafe state advancement, with related cases grouped where practical.
 - Redaction and copy-safety tests exist for public accessors and key-share formatting.
 
 ### Phase 5: CGGMP21 Presign and Sign Rewrite
@@ -746,7 +744,7 @@ Deliverables:
 - Rewrite presign lifecycle tests around exactly-once safety.
 - Add concurrent consume tests.
 - Add serialization, encryption, shallow-copy, restart-style reload, BIP32 path, signer-set, and digest reuse tests.
-- Rewrite sign tests around table-driven invalid inputs and side-effect assertions.
+- Rewrite sign tests with grouped invalid-input cases and side-effect assertions.
 
 Acceptance:
 
@@ -792,7 +790,7 @@ Deliverables:
 - Split coverage targets by cost.
 - Seed fuzz corpus with golden and regression cases.
 - Add fuzz smoke target for wire and proof parsers.
-- Remove obsolete, duplicate, non-table-driven, and low-value tests.
+- Remove obsolete, duplicate, and low-value tests.
 - Update `docs/testing-rules.md` if final conventions differ from this plan.
 
 Acceptance:
@@ -800,7 +798,7 @@ Acceptance:
 - Short and fast test runtime improves versus baseline.
 - Security-critical coverage improves in root, wire, FROST, CGGMP21, Paillier, MtA, and ZK packages.
 - CI uses fast tests by default and expensive tests intentionally.
-- Test suite structure matches the table-driven and invariant-driven rules.
+- Test suite structure follows the invariant-driven rules and uses table-driven grouping where beneficial.
 
 ## 13. Verification Strategy
 
@@ -848,7 +846,7 @@ Before considering the refactor complete, run the repository’s standard CI tar
 
 Each PR in the refactor should answer these questions:
 
-- Are tests table-driven where appropriate?
+- Do tests use table-driven grouping where it improves clarity?
 - Are related cases grouped instead of scattered?
 - Are subtest loop variables captured before parallel subtests?
 - Is `t.Parallel()` used only where state isolation is clear?
@@ -866,7 +864,7 @@ Each PR in the refactor should answer these questions:
 
 The test refactor is complete when:
 
-1. The main test suite is table-driven and invariant-driven.
+1. The main test suite uses table-driven grouping where beneficial and is invariant-driven.
 2. Related cases for the same production function or invariant are grouped in the same test function or clearly justified behavior-family split.
 3. Low-risk unit tests use safe intra-package parallelism.
 4. Heavy integration tests use bounded concurrency and cached immutable fixtures where safe.
