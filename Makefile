@@ -222,7 +222,7 @@ check: build vet lint fmt-check tidy-check verify check-wire-api test-unit ## Fa
 	go fix -diff ./...
 
 .PHONY: ci
-ci: build vet lint fmt-check tidy-check verify check-wire-api test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.
+ci: check test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.
 
 .PHONY: nightly
 nightly: ci test-integration test-slowcrypto test-race fuzz-ci ## Scheduled broad suite.
