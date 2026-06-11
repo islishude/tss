@@ -11,6 +11,7 @@ func TestLegacyLogProofTamper(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("legacy log proof")
 	scalar := big.NewInt(99)
@@ -58,6 +59,7 @@ func TestLegacyLogProofTamper(t *testing.T) {
 }
 
 func TestLegacyProofWireTypesAreSeparated(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		raw       []byte

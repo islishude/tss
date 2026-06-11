@@ -9,6 +9,7 @@ import (
 // DefaultSecurityParams match their documented values. Any drift here
 // changes the security model of all CGGMP proofs.
 func TestDefaultSecurityParamsValues(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 
 	if sp.Ell != 256 {
@@ -43,6 +44,7 @@ func TestDefaultSecurityParamsValues(t *testing.T) {
 // This is below the 2^128 claimed in the code comments but still infeasible
 // to enumerate (2^102 > 2^80 security target for statistical hiding).
 func TestEncRangeFormula(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 
 	encRange := sp.EncRange()
@@ -74,6 +76,7 @@ func TestEncRangeFormula(t *testing.T) {
 // The statistical hiding is the logarithm of the minimum candidate set size:
 // log2(2^486 / 2^128) = 358 bits. This is well above the 128-bit target.
 func TestEncRangeStatisticalHiding(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	maskBits := sp.EncRange() // 486
 
@@ -94,6 +97,7 @@ func TestEncRangeStatisticalHiding(t *testing.T) {
 // since the challenge is derived from SHA-256. Using more bits than the hash
 // output would create a biased challenge distribution.
 func TestChallengeBitsDoNotExceedHashOutput(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	if sp.ChallengeBits > 256 {
 		t.Fatalf("ChallengeBits = %d exceeds SHA-256 output (256 bits)", sp.ChallengeBits)
@@ -110,6 +114,7 @@ func TestChallengeBitsDoNotExceedHashOutput(t *testing.T) {
 // not bound, a malicious prover could use weaker parameters without the
 // verifier detecting it.
 func TestTranscriptBindsAllSecurityParams(t *testing.T) {
+	t.Parallel()
 	// Verify that buildEncTranscript, buildAffGTranscript, and
 	// buildLogStarTranscript all call t.AppendUint32 for each param.
 	// We indirectly verify by checking that Verify rejects a proof when
@@ -172,6 +177,7 @@ func TestTranscriptBindsAllSecurityParams(t *testing.T) {
 // TestFastSecurityParamsSanity verifies FastSecurityParams uses reduced
 // parameters that are suitable for tests but NOT for production.
 func TestFastSecurityParamsSanity(t *testing.T) {
+	t.Parallel()
 	fast := FastSecurityParams()
 	def := DefaultSecurityParams()
 
@@ -203,6 +209,7 @@ func TestFastSecurityParamsSanity(t *testing.T) {
 // TestSecurityParamsValidate verifies that Validate rejects invalid
 // parameter combinations.
 func TestSecurityParamsValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		params SecurityParams
@@ -259,6 +266,7 @@ func TestCheckPaillierModulus(t *testing.T) {
 // TestEncRangeDoesNotOverflow verifies that EncRange() can be represented
 // as a uint without overflow on 64-bit platforms.
 func TestEncRangeDoesNotOverflow(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	r := sp.EncRange()
 	// r = 486, stored as uint. Verify operations on it don't overflow.
@@ -271,6 +279,7 @@ func TestEncRangeDoesNotOverflow(t *testing.T) {
 // TestEllPrimeExceedsEll verifies that EllPrime > Ell, which is required for
 // the affine proof range to be strictly larger than the scalar range.
 func TestEllPrimeExceedsEll(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	if sp.EllPrime <= sp.Ell {
 		t.Errorf("EllPrime (%d) must be strictly greater than Ell (%d)", sp.EllPrime, sp.Ell)

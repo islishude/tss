@@ -10,6 +10,7 @@ func TestEncryptionProofTamper(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("encryption proof")
 	scalar := big.NewInt(42)

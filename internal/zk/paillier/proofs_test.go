@@ -19,6 +19,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("canonical proof domain")
 
@@ -94,6 +95,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("negative proof inputs")
 	a := big.NewInt(23)
@@ -178,6 +180,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	params := SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,

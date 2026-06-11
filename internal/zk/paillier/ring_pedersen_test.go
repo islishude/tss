@@ -12,6 +12,7 @@ func TestRingPedersenProofChecks(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {

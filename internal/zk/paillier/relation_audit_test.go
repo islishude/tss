@@ -15,6 +15,7 @@ func TestEncProofRelationCompleteness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	params, stmt, witness, proof := encProofFixture(t)
 	state := []byte("enc matrix")
 	if err := VerifyEnc(params, state, stmt, proof); err != nil {
@@ -81,6 +82,7 @@ func TestAffGProofRelationCompleteness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	params, stmt, witness, proof := affGProofFixture(t)
 	state := []byte("affg matrix")
 	if err := VerifyAffG(params, state, stmt, proof); err != nil {
