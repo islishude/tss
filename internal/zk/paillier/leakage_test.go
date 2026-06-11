@@ -186,63 +186,12 @@ func TestLogProofLeakageResistance(t *testing.T) {
 	t.Logf("log proof: candidate interval size ≈ 2^%d bits", candidateRange.BitLen())
 }
 
-// TestProofsUseV1Version verifies all proof types carry version 1.
-func TestProofsUseV1Version(t *testing.T) {
-	skipProofLeakageInShort(t)
-	sk := testPaillierKey(t, 1024)
-	domain := []byte("version check")
-
-	scalar := big.NewInt(3)
-	c, r, _ := sk.Encrypt(nil, scalar)
-	encProof, _ := ProveEncryption(nil, domain, &sk.PublicKey, c, scalar, r)
-	if encProof.Version != 1 {
-		t.Fatalf("encryption proof version %d, want 1", encProof.Version)
-	}
-
-	pt, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
-	logProof, _ := ProveLog(nil, domain, &sk.PublicKey, c, scalar, r, pt)
-	if logProof.Version != 1 {
-		t.Fatalf("log proof version %d, want 1", logProof.Version)
-	}
-
-	b := big.NewInt(5)
-	beta := big.NewInt(11)
-	bCom, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	resp, betaR := mtaResponseForTest(t, sk, c, b, beta)
-	mtaProof, _ := ProveMTAResponse(nil, domain, &sk.PublicKey, c, resp, bCom, b, beta, betaR)
-	if mtaProof.Version != 1 {
-		t.Fatalf("MtA proof version %d, want 1", mtaProof.Version)
-	}
-
-	modProof, _ := ProveModulus(nil, domain, sk, 1)
-	if modProof.Version != 1 {
-		t.Fatalf("modulus proof version %d, want 1", modProof.Version)
-	}
-
-	params, lambda, _ := GenerateRingPedersenParams(nil, sk)
-	rpProof, _ := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
-	if rpProof.Version != 1 {
-		t.Fatalf("Ring-Pedersen proof version %d, want 1", rpProof.Version)
-	}
-}
+// TestProofsUseV1Version moved to new_proofs_test.go.
+// TestChallengeLabelsV1 moved to unit_test.go.
 
 func skipProofLeakageInShort(t *testing.T) {
 	t.Helper()
 	if testing.Short() {
 		t.Skip("skipping 1024-bit Paillier proof leakage test in short mode")
-	}
-}
-
-// TestChallengeLabelsV1 verifies challenge labels use v1 (no backward-compat
-// version bumps before production-readiness).
-func TestChallengeLabelsV1(t *testing.T) {
-	if mtaChallengeLabel != "paillier-mta-response-challenge-v1" {
-		t.Fatalf("mtaChallengeLabel = %q, want v1", mtaChallengeLabel)
-	}
-	if logChallengeLabel != "paillier-log-challenge-v1" {
-		t.Fatalf("logChallengeLabel = %q, want v1", logChallengeLabel)
-	}
-	if encryptionChallengeLabel != "paillier-encryption-challenge-v1" {
-		t.Fatalf("encryptionChallengeLabel = %q, want v1", encryptionChallengeLabel)
 	}
 }

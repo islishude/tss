@@ -91,7 +91,7 @@ func FuzzFROSTKeyShareUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
+		testutil.AssertDeterministicRoundTrip(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
 	})
 }
 
@@ -109,7 +109,7 @@ func FuzzFROSTKeygenCommitmentsPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
 	})
 }
 
@@ -125,7 +125,7 @@ func FuzzFROSTKeygenSharePayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalKeygenSharePayload, unmarshalKeygenSharePayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalKeygenSharePayload, unmarshalKeygenSharePayload)
 	})
 }
 
@@ -144,7 +144,7 @@ func FuzzFROSTNonceCommitmentPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalNonceCommitmentPayload, unmarshalNonceCommitmentPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalNonceCommitmentPayload, unmarshalNonceCommitmentPayload)
 	})
 }
 
@@ -160,7 +160,7 @@ func FuzzFROSTSignPartialPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalSignPartialPayload, unmarshalSignPartialPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalSignPartialPayload, unmarshalSignPartialPayload)
 	})
 }
 
@@ -178,7 +178,7 @@ func FuzzFROSTReshareCommitmentsPayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalReshareCommitmentsPayload, unmarshalReshareCommitmentsPayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareCommitmentsPayload, unmarshalReshareCommitmentsPayload)
 	})
 }
 
@@ -194,7 +194,7 @@ func FuzzFROSTReshareSharePayloadUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, marshalReshareSharePayload, unmarshalReshareSharePayload)
+		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareSharePayload, unmarshalReshareSharePayload)
 	})
 }
 
@@ -281,25 +281,6 @@ func rewriteFROSTWireField(raw []byte, wireType string, tag uint16, value []byte
 		}
 	}
 	return nil, fmt.Errorf("missing wire field %d", tag)
-}
-
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
-	}
 }
 
 // minimalFROSTKeyShare returns a FROST KeyShare with only public metadata populated.

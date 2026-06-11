@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -78,7 +79,7 @@ func FuzzProofUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, p, (*Proof).MarshalBinary, UnmarshalProof)
+		testutil.AssertDeterministicRoundTrip(t, p, (*Proof).MarshalBinary, UnmarshalProof)
 	})
 }
 
@@ -230,24 +231,5 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 				t.Fatal("malformed proof field set decoded")
 			}
 		})
-	}
-}
-
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
 	}
 }

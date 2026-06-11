@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
@@ -22,7 +23,7 @@ func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
 	}
 	publicKey := append([]byte(nil), share.PublicKey...)
 	share.Destroy()
-	if !allZeroBytes(share.secret.FixedBytes()) {
+	if !testutil.IsZeroBytes(share.secret.FixedBytes()) {
 		t.Fatal("key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
@@ -105,7 +106,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.ownPoly != nil {
 		t.Fatal("keygen polynomial was not released")
 	}
-	if keygen.keyShare == nil || !allZeroBytes(keygen.keyShare.secret.FixedBytes()) {
+	if keygen.keyShare == nil || !testutil.IsZeroBytes(keygen.keyShare.secret.FixedBytes()) {
 		t.Fatal("completed key share secret was not cleared")
 	}
 	if !bytes.Equal(share.PublicKey, publicKey) {
@@ -154,15 +155,6 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if len(sign.signers) != 2 || sign.signers[0] != 1 || sign.signers[1] != 2 {
 		t.Fatal("signer metadata changed")
 	}
-}
-
-func allZeroBytes(in []byte) bool {
-	for _, b := range in {
-		if b != 0 {
-			return false
-		}
-	}
-	return true
 }
 
 func TestFROSTTestLimitsAllowsOneOfOne(t *testing.T) {

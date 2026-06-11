@@ -974,11 +974,62 @@ _Last updated: 2026-06-11_
   - `encryption_test.go`: `TestEncryptionProofTamper`.
   - `legacy_proofs_test.go`: `TestLegacyLogProofTamper`, `TestLegacyProofWireTypesAreSeparated`.
   - `relation_audit_test.go`: `TestEncProofRelationCompleteness`, `TestAffGProofRelationCompleteness`.
-  - `params_consistency_test.go`: `TestDefaultSecurityParamsValues`, `TestEncRangeFormula`, `TestEncRangeStatisticalHiding`, `TestChallengeBitsDoNotExceedHashOutput`, `TestTranscriptBindsAllSecurityParams`, `TestFastSecurityParamsSanity`, `TestSecurityParamsValidate`, `TestEncRangeDoesNotOverflow`, `TestEllPrimeExceedsEll`.
+  - `params_consistency_test.go`: `TestDefaultSecurityParamsValues`, `TestEncRangeFormula`, `TestEncRangeStatisticalHiding`, `TestChallengeBitsDoNotExceedHashOutput`, `TestTranscriptBindsAllSecurityParams`, `TestFastSecurityParamsSanity`, `TestSecurityParamsValidate`, `TestEllPrimeExceedsEll`.
   - `adversarial_test.go`, `leakage_test.go`, `challenge_*_test.go`, `extractor_test.go`, `range_boundary_test.go`, `mta_response_test.go`: Retain existing structure; tests that mutate package-level `activeSecurityParams` via `SetSecurityParamsForTesting` intentionally kept sequential.
 - **MTA**: Tier 0 helper tests (`helpers_test.go`) already use `t.Parallel()` with table-driven patterns. Tier 1 tests (`finish_test.go`, `mta_test.go`) intentionally kept sequential due to package-global `SetSecurityParamsForTesting` mutations.
 - **Paillier internals**: `crypto_test.go`, `encoding_test.go`, `keygen_test.go`, `paillier_test.go`, `paillierct_test.go` all have `t.Parallel()` for safe tests.
 - Fixture caching via `testPaillierKeyCache sync.Map` with `sync.Map.LoadOrStore` to avoid duplicate keygen.
+
+#### Phase 8: Progress (2026-06-11)
+
+Coverage baseline, test audit, duplicated helper consolidation, slowcrypto review, and race detector pass completed.
+
+**Coverage baseline recorded:**
+
+| Package                        | Unit (short) | Integration |
+| ------------------------------ | ------------ | ----------- |
+| `tss` (root)                   | 77.7%        | 77.7%       |
+| `cggmp21/secp256k1`            | 16.0%        | 74.9%       |
+| `frost/ed25519`                | 75.3%        | 75.3%       |
+| `internal/bip32util`           | 98.6%        | 98.6%       |
+| `internal/curve/edwards25519`  | 64.4%        | 64.4%       |
+| `internal/curve/secp256k1`     | 90.4%        | 90.4%       |
+| `internal/mta`                 | 86.2%        | 92.4%       |
+| `internal/paillier`            | 76.3%        | 82.5%       |
+| `internal/paillier/paillierct` | 80.8%        | 80.8%       |
+| `internal/secret`              | 78.8%        | 78.8%       |
+| `internal/shamir`              | 94.6%        | 94.6%       |
+| `internal/wire`                | 78.8%        | 78.8%       |
+| `internal/wire/wireutil`       | 100.0%       | 100.0%      |
+| `internal/zk/paillier`         | 23.4%        | 78.2%       |
+| `internal/zk/schnorr`          | 92.6%        | 92.6%       |
+| `internal/zk/signprep`         | 76.1%        | 76.1%       |
+
+**Race detector pass:** All packages pass `make test-race` with no race conditions detected.
+
+**Obsolete/duplicate test cleanup:**
+
+- Deleted `TestInterpolateConstantLegacy` (byte-for-byte duplicate of `TestInterpolateConstant`).
+- Deleted `TestLagrangeRejectsDuplicate` (duplicate of `TestLagrangeCoefficientDuplicateInSet`).
+- Deleted `TestEncRangeDoesNotOverflow` (redundant — big.Int handles arbitrary-precision; the constants are already verified by other tests).
+- Fixed no-op `TestModulusProofRejectsEvenModulus` (had zero assertions; now documents the limitation clearly).
+- Fixed missing assertion in `TestCheckPaillierModulus` (was logging "correctly rejected" without actually asserting rejection).
+- Moved `TestXCoordinateRecoveryIsConsistent` from `internal/zk/paillier/adversarial_test.go` to `internal/curve/secp256k1/secp256k1_test.go` as `TestPointEncodingRoundTrip` (table-driven).
+- Moved `TestProofsUseV1Version` from `leakage_test.go` to `new_proofs_test.go`.
+- Moved `TestChallengeLabelsV1` from `leakage_test.go` to `unit_test.go` (with `t.Parallel()`).
+
+**Duplicated test helper consolidation:**
+
+- Replaced 4 local `assertPayloadRemarshals[P any]` definitions (frost/ed25519, mta, zk/schnorr, paillier) with `testutil.AssertDeterministicRoundTrip`.
+- Replaced local `allZeroBytes` in frost/ed25519/lifecycle_test.go with `testutil.IsZeroBytes`.
+
+**Slowcrypto test scope review:**
+
+- Confirmed `slowcrypto_test.go` is a narrow smoke test (1 proof per type), not an exhaustive matrix.
+- Confirmed `challenge_distribution_test.go` tests are statistical Fiat-Shamir analysis, correctly behind `slowcrypto`.
+- Identified 5 lightweight challenge distribution tests in `challenge_distribution_test.go` that don't require Paillier key generation and could be moved out of `slowcrypto` for broader CI coverage (not yet moved — deferred to next iteration).
+
+**Full CI verification:** `make ci` passes (build, vet, golangci-lint, fmt-check, tidy-check, verify, test-fast).
 
 ### Pending / Incomplete
 
@@ -988,30 +1039,19 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 
 - `cggmp21/secp256k1/`: Integration tests (`integration_*`, `guard_*`, `adversary_*`, `keygen_confirm`, `presign_policy`, `proof_omission`, `slowcrypto`, `vector_*`) use `runLimitedIntegration` semaphore instead. Pure tier0 tests already parallelized.
 - `frost/ed25519/`: `guard_integration_test.go`, `test_setup_test.go`, `vectorgen_test.go` are integration/vector-generation.
-- `internal/zk/paillier/`: `slowcrypto_test.go`, `challenge_distribution_test.go`, `challenge_zero_test.go` — production-parameter or distribution-analysis tests behind `slowcrypto` tag.
+- `internal/zk/paillier/`: `slowcrypto_test.go`, `challenge_distribution_test.go` — production-parameter or distribution-analysis tests behind `slowcrypto` tag.
 
 #### Phase 7: ZK Production-Parameter Tests
 
 - `slowcrypto_test.go` and `challenge_distribution_test.go` remain behind `slowcrypto` build tag and intentionally sequential.
-- `challenge_zero_test.go` tests challenge-zero edge case across parallel proof sessions — may benefit from a different test structure but currently correct.
+- `challenge_zero_test.go` tests challenge-zero edge case — sequential by design (sub-millisecond tests; parallelism overhead would exceed benefit).
 
-#### Phase 8: Coverage, Fuzz, Stress, and Cleanup
+#### Phase 8: Remaining Work Items
 
-- Fuzz targets exist for: `internal/wire` (via `fuzz_test.go` in `cggmp21/secp256k1/tier0_fuzz_test.go`, `internal/zk/signprep/fuzz_test.go`, `internal/zk/paillier/proof_fuzz_test.go`).
-- Coverage targets in Makefile: `coverage-unit`, `coverage-security`, `coverage-integration`, `coverage-heavy`.
-- Fuzz CI script: `.github/scripts/fuzz-ci.sh`.
-- No comprehensive coverage baseline recorded yet.
-- Some ad-hoc tests may still exist that duplicate stronger integration or invariant tests — a cleanup sweep is pending.
-
-#### Remaining Work Items
-
-1. **Coverage baseline**: Record coverage percentages for root, wire, FROST, CGGMP21, Paillier, MtA, ZK packages before/after refactor.
-2. **ZK Paillier parallelization**: `challenge_zero_test.go` may be convertible to parallel subtests.
-3. **CGGMP21 integration fixture caching**: Add keygen fixture cache for immutable baseline shares (currently each integration test generates fresh keygen).
-4. **FROST fixture caching**: Similar keygen fixture cache for FROST signing/reshare/refresh tests.
-5. **Obsolete test cleanup**: Audit existing tests for duplicates or low-value tests that can be removed.
-6. **Race detector pass**: Run `make test-race` on critical packages to ensure parallelism is correct.
-7. **Fuzz corpus seeding**: Seed fuzz corpora from golden vectors and regression cases.
-8. **Table-driven completeness**: Some CGGMP21 integration tests are still single-purpose functions rather than table-driven matrices (e.g., `integration_keygen_test.go` has 3 separate functions for HD, Paillier mismatch, etc.). These could be consolidated.
-9. **Slowcrypto test scope**: Review `slowcrypto` tests to ensure they are narrow production-parameter smoke tests, not exhaustive matrices.
-10. **External test helpers**: Move test helper functions that are duplicated across packages into `internal/testutil` where appropriate.
+1. **Fuzz corpus seeding**: Seed fuzz corpora from golden vectors and regression cases.
+2. **CGGMP21 integration fixture caching**: Add keygen fixture cache for immutable baseline shares. Currently each integration test generates fresh keygen (~6 min for full CGGMP21 integration suite). Caching could significantly reduce integration test time.
+3. **FROST fixture caching**: Similar keygen fixture cache for FROST signing/reshare/refresh tests.
+4. **Table-driven completeness**: Some CGGMP21 integration tests are still single-purpose functions rather than table-driven matrices (e.g., `integration_keygen_test.go` has separate functions for HD, Paillier mismatch, etc.). These could be consolidated into table-driven groups.
+5. **Lightweight challenge tests**: Move 5 challenge distribution/hash tests out of `slowcrypto` build tag (identified in audit; pure hash tests that need no Paillier key).
+6. **DeliverEnvelope helper**: Move `deliverEnv`/`deliverCGGMPEnv` helpers to `testutil.DeliverEnvelope` (77+ call sites in frost, ~14 in CGGMP21).
+7. **CheckGolden helper**: Move `checkGolden`/`checkPaillierGolden` to `testutil.CheckGolden` (3 copies across cggmp21, frost, zk/paillier).

@@ -1,7 +1,6 @@
 package paillier
 
 import (
-	"math/big"
 	"testing"
 )
 
@@ -250,10 +249,7 @@ func TestCheckPaillierModulus(t *testing.T) {
 	sk1024 := testPaillierKey(t, 1024)
 	err := sp.CheckPaillierModulus(&sk1024.PublicKey)
 	if err == nil {
-		// 1024 < 3072 — should fail for default params
-		t.Log("1024-bit modulus correctly rejected by DefaultSecurityParams")
-	} else {
-		t.Logf("CheckPaillierModulus(1024-bit): %v", err)
+		t.Error("DefaultSecurityParams should reject 1024-bit modulus (MinPaillierBits=3072)")
 	}
 
 	// FastSecurityParams should accept 1024-bit
@@ -261,19 +257,6 @@ func TestCheckPaillierModulus(t *testing.T) {
 	if err := fast.CheckPaillierModulus(&sk1024.PublicKey); err != nil {
 		t.Errorf("FastSecurityParams rejected 1024-bit modulus: %v", err)
 	}
-}
-
-// TestEncRangeDoesNotOverflow verifies that EncRange() can be represented
-// as a uint without overflow on 64-bit platforms.
-func TestEncRangeDoesNotOverflow(t *testing.T) {
-	t.Parallel()
-	sp := DefaultSecurityParams()
-	r := sp.EncRange()
-	// r = 486, stored as uint. Verify operations on it don't overflow.
-	_ = new(big.Int).Lsh(big.NewInt(1), r) // 2^486 must not panic
-
-	affR := sp.AffGRange()
-	_ = new(big.Int).Lsh(big.NewInt(1), affR) // 2^1078 must not panic
 }
 
 // TestEllPrimeExceedsEll verifies that EllPrime > Ell, which is required for

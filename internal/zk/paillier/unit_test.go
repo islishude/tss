@@ -262,3 +262,19 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 		}
 	}
 }
+
+// TestChallengeLabelsV1 verifies challenge labels use v1 (no backward-compat
+// version bumps before production-readiness).
+func TestChallengeLabelsV1(t *testing.T) {
+	t.Parallel()
+
+	if mtaChallengeLabel != "paillier-mta-response-challenge-v1" {
+		t.Fatalf("mtaChallengeLabel = %q, want v1", mtaChallengeLabel)
+	}
+	if logChallengeLabel != "paillier-log-challenge-v1" {
+		t.Fatalf("logChallengeLabel = %q, want v1", logChallengeLabel)
+	}
+	if encryptionChallengeLabel != "paillier-encryption-challenge-v1" {
+		t.Fatalf("encryptionChallengeLabel = %q, want v1", encryptionChallengeLabel)
+	}
+}

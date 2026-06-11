@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -119,7 +120,7 @@ func FuzzPublicKeyUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, pk, (*PublicKey).MarshalBinary, UnmarshalPublicKey)
+		testutil.AssertDeterministicRoundTrip(t, pk, (*PublicKey).MarshalBinary, UnmarshalPublicKey)
 	})
 }
 
@@ -139,27 +140,8 @@ func FuzzPrivateKeyUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, sk, (*PrivateKey).MarshalBinary, UnmarshalPrivateKey)
+		testutil.AssertDeterministicRoundTrip(t, sk, (*PrivateKey).MarshalBinary, UnmarshalPrivateKey)
 	})
-}
-
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
-	}
 }
 
 func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) ([]byte, error) {

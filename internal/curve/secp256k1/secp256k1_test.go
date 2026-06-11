@@ -39,6 +39,43 @@ func TestECDSASignVerify(t *testing.T) {
 	}
 }
 
+// TestPointEncodingRoundTrip verifies that PointBytes/PointFromBytes round-trip
+// correctly for multiple scalar points. This underpins all proof tests that use
+// curve point commitments.
+func TestPointEncodingRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name   string
+		scalar int64
+	}{
+		{name: "scalar=1", scalar: 1},
+		{name: "scalar=42", scalar: 42},
+		{name: "scalar=73", scalar: 73},
+		{name: "scalar=99", scalar: 99},
+		{name: "scalar=255", scalar: 255},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			pt := ScalarBaseMult(ScalarFromBigInt(big.NewInt(tc.scalar)))
+			enc, err := PointBytes(pt)
+			if err != nil {
+				t.Fatal(err)
+			}
+			decoded, err := PointFromBytes(enc)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !Equal(pt, decoded) {
+				t.Fatalf("point round-trip failed for scalar %d", tc.scalar)
+			}
+		})
+	}
+}
+
 func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
 	t.Parallel()
 

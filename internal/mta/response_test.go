@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -22,7 +23,7 @@ func FuzzResponseMessageUnmarshal(f *testing.F) {
 		if err != nil {
 			return
 		}
-		assertPayloadRemarshals(t, m, (*ResponseMessage).MarshalBinary, UnmarshalResponseMessage)
+		testutil.AssertDeterministicRoundTrip(t, m, (*ResponseMessage).MarshalBinary, UnmarshalResponseMessage)
 	})
 }
 

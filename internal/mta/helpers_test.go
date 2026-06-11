@@ -1,7 +1,6 @@
 package mta
 
 import (
-	"bytes"
 	"context"
 	"math/big"
 	"testing"
@@ -62,25 +61,6 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 		tb.Fatal(err)
 	}
 	return &start.Message, response
-}
-
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
-	}
 }
 
 // Tier 0: helper validation tests (no crypto keygen).

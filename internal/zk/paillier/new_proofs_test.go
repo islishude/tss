@@ -449,3 +449,45 @@ func rewriteProofWireField(raw []byte, wireType string, tag uint16, value []byte
 func wireFieldName(tag uint16) string {
 	return fmt.Sprintf("field %d", tag)
 }
+
+// TestProofsUseV1Version verifies all proof types carry version 1.
+func TestProofsUseV1Version(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping 1024-bit Paillier proof version check in short mode")
+	}
+	sk := testPaillierKey(t, 1024)
+	domain := []byte("version check")
+
+	scalar := big.NewInt(3)
+	c, r, _ := sk.Encrypt(nil, scalar)
+	encProof, _ := ProveEncryption(nil, domain, &sk.PublicKey, c, scalar, r)
+	if encProof.Version != 1 {
+		t.Fatalf("encryption proof version %d, want 1", encProof.Version)
+	}
+
+	pt, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
+	logProof, _ := ProveLog(nil, domain, &sk.PublicKey, c, scalar, r, pt)
+	if logProof.Version != 1 {
+		t.Fatalf("log proof version %d, want 1", logProof.Version)
+	}
+
+	b := big.NewInt(5)
+	beta := big.NewInt(11)
+	bCom, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
+	resp, betaR := mtaResponseForTest(t, sk, c, b, beta)
+	mtaProof, _ := ProveMTAResponse(nil, domain, &sk.PublicKey, c, resp, bCom, b, beta, betaR)
+	if mtaProof.Version != 1 {
+		t.Fatalf("MtA proof version %d, want 1", mtaProof.Version)
+	}
+
+	modProof, _ := ProveModulus(nil, domain, sk, 1)
+	if modProof.Version != 1 {
+		t.Fatalf("modulus proof version %d, want 1", modProof.Version)
+	}
+
+	params, lambda, _ := GenerateRingPedersenParams(nil, sk)
+	rpProof, _ := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
+	if rpProof.Version != 1 {
+		t.Fatalf("Ring-Pedersen proof version %d, want 1", rpProof.Version)
+	}
+}
