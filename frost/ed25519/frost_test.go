@@ -473,7 +473,61 @@ func assertFROSTProtocolCode(t testing.TB, err error, code string) *tss.Protocol
 	return protocolErr
 }
 
+// --- FROST keygen fixture cache ---
+
+type frostFixtureKey struct {
+	threshold int
+	n         int
+	hd        bool
+}
+
+type frostFixtureEntry struct {
+	once   sync.Once
+	shares map[tss.PartyID]*KeyShare
+}
+
+var frostKeygenFixtureCache sync.Map // map[frostFixtureKey]*frostFixtureEntry
+
+// cachedFrostKeygen returns deep-cloned key shares from the fixture cache,
+// generating a fresh DKG on first use per (threshold, n, hd) tuple.
+func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	key := frostFixtureKey{threshold: threshold, n: n, hd: hd}
+	actual, _ := frostKeygenFixtureCache.LoadOrStore(key, &frostFixtureEntry{})
+	entry := actual.(*frostFixtureEntry)
+	entry.once.Do(func() {
+		defer func() {
+			if entry.shares == nil {
+				frostKeygenFixtureCache.Delete(key)
+			}
+		}()
+		if hd {
+			entry.shares = cloneFrostKeyShareMap(frostKeygenHDInner(t, threshold, n))
+		} else {
+			entry.shares = cloneFrostKeyShareMap(frostKeygenInner(t, threshold, n))
+		}
+	})
+	if entry.shares == nil {
+		t.Fatal("cached FROST keygen fixture was not initialized")
+	}
+	return cloneFrostKeyShareMap(entry.shares)
+}
+
+func cloneFrostKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
+	out := make(map[tss.PartyID]*KeyShare, len(shares))
+	for id, ks := range shares {
+		out[id] = ks.Clone()
+	}
+	return out
+}
+
 func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	return cachedFrostKeygen(t, threshold, n, false)
+}
+
+// frostKeygenInner performs the actual DKG without caching.
+func frostKeygenInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	session, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -509,6 +563,67 @@ func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 		out[id] = share
 	}
 	return out
+}
+
+// frostKeygenHDInner performs the actual HD-enabled DKG without caching.
+func frostKeygenHDInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	parties := make([]tss.PartyID, n)
+	for i := range n {
+		parties[i] = tss.PartyID(i + 1)
+	}
+	parties = tss.SortParties(parties)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sessionState struct {
+		session   *KeygenSession
+		envelopes []tss.Envelope
+	}
+	sessions := make(map[tss.PartyID]*sessionState, n)
+	for _, id := range parties {
+		cfg := tss.ThresholdConfig{
+			Threshold: threshold,
+			Parties:   parties,
+			Self:      id,
+			SessionID: sessionID,
+		}
+		session, out, err := StartKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
+		sessions[id] = &sessionState{session: session, envelopes: out}
+	}
+	queue := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		queue = append(queue, sessions[id].envelopes...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, receiver := range parties {
+			if receiver == env.From || (env.To != 0 && env.To != receiver) {
+				continue
+			}
+			delivered := testutil.DeliverEnvelope(env)
+			out, err := sessions[receiver].session.HandleKeygenMessage(delivered)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	shares := make(map[tss.PartyID]*KeyShare, n)
+	for _, id := range parties {
+		share, ok := sessions[id].session.KeyShare()
+		if !ok {
+			t.Fatalf("party %d did not complete keygen", id)
+		}
+		shares[id] = share
+	}
+	return shares
 }
 
 func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions map[tss.PartyID]*KeygenSession, messages []tss.Envelope) {

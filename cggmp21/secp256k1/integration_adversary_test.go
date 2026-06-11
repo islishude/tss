@@ -17,7 +17,7 @@ import (
 // TestIntegration_TamperedSPartialBlamesSenderOnly verifies that a tampered
 // S in an online signing partial results in precise blame of only the sender.
 func TestIntegration_TamperedSPartialBlamesSenderOnly(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("adversarial tampered S"))
@@ -86,7 +86,7 @@ func TestIntegration_TamperedSPartialBlamesSenderOnly(t *testing.T) {
 // TestIntegration_TamperedDigestHashBlamesSender verifies that a tampered
 // DigestHash in an online partial results in precise blame.
 func TestIntegration_TamperedDigestHashBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("adversarial tampered digest hash"))
@@ -129,7 +129,7 @@ func TestIntegration_TamperedDigestHashBlamesSender(t *testing.T) {
 // TestIntegration_TamperedPresignTranscriptBlamesSender verifies that a
 // wrong PresignTranscript hash results in precise blame.
 func TestIntegration_TamperedPresignTranscriptBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("adversarial tampered transcript"))
@@ -172,7 +172,7 @@ func TestIntegration_TamperedPresignTranscriptBlamesSender(t *testing.T) {
 // TestIntegration_ValidPartialsProduceValidSignature verifies the full
 // happy path: all valid partials result in a valid ECDSA signature.
 func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("happy path"))
@@ -217,7 +217,7 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 // S to an incorrect value with a matching equation hash causes the
 // equation S*G == z*K + r*Chi to fail.
 func TestIntegration_TamperedSProducesEquationFailure(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("equation failure test"))
@@ -277,7 +277,7 @@ func TestIntegration_TamperedSProducesEquationFailure(t *testing.T) {
 // TestIntegration_PresignRejectsTamperedKPoint verifies that a presign
 // record with a tampered KPoint fails VerifySignMaterial.
 func TestIntegration_PresignRejectsTamperedKPoint(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	presigns := secpPresign(t, shares, signers)
 
@@ -311,7 +311,7 @@ func TestIntegration_PresignRejectsTamperedKPoint(t *testing.T) {
 // record with a tampered ChiPoint fails structural validation or is caught
 // during online signing.
 func TestIntegration_PresignRejectsTamperedChiPoint(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	presigns := secpPresign(t, shares, signers)
 
@@ -360,7 +360,7 @@ func startSignAndCapture(t *testing.T, shares map[tss.PartyID]*KeyShare, presign
 // message during presign delivery, tampers KPoint, and verifies the presign
 // phase immediately blames only the sender.
 func TestIntegration_PresignRound3TamperedKPointBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -439,7 +439,7 @@ func TestIntegration_PresignRound3TamperedKPointBlamesSender(t *testing.T) {
 // round3 message, replaces KPoint with a different but valid curve point,
 // and verifies the signprep proof verification fails with precise blame.
 func TestIntegration_PresignRound3TamperedKPointProofRejection(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -517,7 +517,7 @@ func TestIntegration_PresignRound3TamperedKPointProofRejection(t *testing.T) {
 // TestIntegration_PresignRound3TamperedChiPointBlamesSender intercepts a
 // round3 message, tampers ChiPoint, and verifies presign-phase blame.
 func TestIntegration_PresignRound3TamperedChiPointBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -592,7 +592,7 @@ func TestIntegration_PresignRound3TamperedChiPointBlamesSender(t *testing.T) {
 // TestIntegration_PresignRound3TamperedProofBlamesSender intercepts a round3
 // message, corrupts the signprep proof, and verifies presign-phase blame.
 func TestIntegration_PresignRound3TamperedProofBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2, 3}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -670,7 +670,7 @@ func TestIntegration_PresignRound3TamperedProofBlamesSender(t *testing.T) {
 // only the PartialEquationHash is tampered (S is left correct) and the
 // receiver blames only the sender.
 func TestIntegration_TamperedPartialEquationHashAloneBlamesSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("tampered equation hash only"))
@@ -727,7 +727,7 @@ func TestIntegration_TamperedPartialEquationHashAloneBlamesSender(t *testing.T) 
 //  7. Expect session not to enter aggregation (not completed).
 //  8. Expect no blame-all-signers path.
 func TestIntegration_OriginalDefectRegression(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("original defect regression"))

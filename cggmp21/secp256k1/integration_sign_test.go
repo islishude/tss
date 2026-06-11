@@ -44,7 +44,7 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 func TestThresholdECDSASignerSubsets(t *testing.T) {
 	runLimitedIntegration(t)
 
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	for _, signers := range [][]tss.PartyID{{1, 2}, {1, 3}, {2, 3}} {
 		selected := make([]*KeyShare, 0, len(signers))
 		for _, id := range signers {
@@ -64,7 +64,7 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 	runLimitedIntegration(t)
 
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("online tamper"))

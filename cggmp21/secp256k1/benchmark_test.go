@@ -10,7 +10,7 @@ import (
 )
 
 func BenchmarkThresholdECDSAPresign2of3(b *testing.B) {
-	shares := secpKeygen(b, 2, 3)
+	shares := CachedKeygenShares(b, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 
 	for b.Loop() {
@@ -19,7 +19,7 @@ func BenchmarkThresholdECDSAPresign2of3(b *testing.B) {
 }
 
 func BenchmarkThresholdECDSAPresign3of5(b *testing.B) {
-	shares := secpKeygen(b, 3, 5)
+	shares := CachedKeygenShares(b, 3, 5, false)
 	signers := []tss.PartyID{1, 3, 5}
 
 	for b.Loop() {
@@ -28,7 +28,7 @@ func BenchmarkThresholdECDSAPresign3of5(b *testing.B) {
 }
 
 func BenchmarkThresholdECDSAOnlineSign2of3(b *testing.B) {
-	shares := secpKeygen(b, 2, 3)
+	shares := CachedKeygenShares(b, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	digest := sha256.Sum256([]byte("benchmark"))
 

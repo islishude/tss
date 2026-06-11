@@ -11,7 +11,7 @@ import (
 )
 
 func TestKeygenConfirmationRoundTrip(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	share := shares[1]
 	c, err := share.KeygenConfirmation()
 	if err != nil {
@@ -38,7 +38,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 }
 
 func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
 		c, err := shares[id].KeygenConfirmation()
@@ -59,7 +59,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
 		c, err := shares[id].KeygenConfirmation()
@@ -77,7 +77,7 @@ func TestKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
 		c, err := shares[id].KeygenConfirmation()
@@ -94,7 +94,7 @@ func TestKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsMismatchedCommitmentsHash(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
 		c, err := shares[id].KeygenConfirmation()
@@ -111,7 +111,7 @@ func TestKeygenConfirmationRejectsMismatchedCommitmentsHash(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsDuplicateSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	c1, _ := shares[1].KeygenConfirmation()
 	c2, _ := shares[2].KeygenConfirmation()
 	// Replace party 3's confirmation with a duplicate of party 2's.
@@ -123,7 +123,7 @@ func TestKeygenConfirmationRejectsDuplicateSender(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsMissingSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	c1, _ := shares[1].KeygenConfirmation()
 	c2, _ := shares[2].KeygenConfirmation()
 	// Only 2 confirmations for 3 parties.
@@ -134,7 +134,7 @@ func TestKeygenConfirmationRejectsMissingSender(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsUnknownSender(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	c1, _ := shares[1].KeygenConfirmation()
 	c2, _ := shares[2].KeygenConfirmation()
 	c3, _ := shares[3].KeygenConfirmation()
@@ -147,7 +147,7 @@ func TestKeygenConfirmationRejectsUnknownSender(t *testing.T) {
 }
 
 func TestKeygenConfirmationRejectsWrongCount(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	c1, _ := shares[1].KeygenConfirmation()
 	confirmations := []*KeygenConfirmation{c1}
 	if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
@@ -174,7 +174,7 @@ func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
 }
 
 func TestConfirmedKeyShareAcceptedByRequireMPC(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	if err := shares[1].requireMPCMaterial(); err != nil {
 		t.Fatalf("requireMPCMaterial rejected confirmed share: %v", err)
 	}

@@ -101,7 +101,7 @@ func FuzzCGGMP21BlameEvidenceUnmarshal(f *testing.F) {
 }
 
 func FuzzCGGMP21PresignRound1Decode(f *testing.F) {
-	share := secpKeygen(f, 1, 1)[1]
+	share := CachedKeygenShares(f, 1, 1, false)[1]
 	sessionID := fuzzSessionID()
 	_, out, err := StartPresign(share, sessionID, []tss.PartyID{1})
 	if err != nil {

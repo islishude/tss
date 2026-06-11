@@ -14,6 +14,7 @@ import (
 type fixtureKey struct {
 	threshold int
 	n         int
+	enableHD  bool
 }
 
 type keygenFixtureEntry struct {
@@ -22,15 +23,16 @@ type keygenFixtureEntry struct {
 }
 
 // keygenFixtureCache avoids repeated full-DKG executions for identical
-// (threshold, n) tuples across integration tests. Each call returns
+// (threshold, n, enableHD) tuples across integration tests. Each call returns
 // independent clones, so callers may mutate their copy freely.
 var keygenFixtureCache sync.Map // map[fixtureKey]*keygenFixtureEntry
 
-// cachedKeygenFixture returns a clone of a previously-generated keygen fixture
+// CachedKeygenShares returns a clone of a previously-generated keygen fixture
 // for (threshold, n), or generates a fresh one and caches clones on first use.
-func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+// When enableHD is true, HD-enabled keygen is used.
+func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	key := fixtureKey{threshold: threshold, n: n}
+	key := fixtureKey{threshold: threshold, n: n, enableHD: enableHD}
 	actual, _ := keygenFixtureCache.LoadOrStore(key, &keygenFixtureEntry{})
 	entry := actual.(*keygenFixtureEntry)
 	entry.once.Do(func() {
@@ -39,12 +41,23 @@ func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeySha
 				keygenFixtureCache.Delete(key)
 			}
 		}()
-		entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
+		if enableHD {
+			entry.shares = cloneKeyShareMap(secpKeygenWithOptions(t, threshold, n, KeygenOptions{EnableHD: true}))
+		} else {
+			entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
+		}
 	})
 	if entry.shares == nil {
 		t.Fatal("cached keygen fixture was not initialized")
 	}
 	return cloneKeyShareMap(entry.shares)
+}
+
+// cachedKeygenFixture is a convenience wrapper around CachedKeygenShares for
+// non-HD keygen. Kept for backward compatibility with existing callers.
+func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	return CachedKeygenShares(t, threshold, n, false)
 }
 
 func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {

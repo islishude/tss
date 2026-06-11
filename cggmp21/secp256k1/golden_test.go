@@ -186,7 +186,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 func TestGoldenCGGMP21Presign(t *testing.T) {
 	golden := filepath.Join("testdata", "Presign.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		shares := secpKeygen(t, 1, 1)
+		shares := CachedKeygenShares(t, 1, 1, false)
 		presigns := secpPresign(t, shares, []tss.PartyID{1})
 		raw, err := presigns[1].MarshalBinary()
 		if err != nil {

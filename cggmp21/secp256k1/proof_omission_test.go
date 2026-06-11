@@ -229,7 +229,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 // an unrelated ciphertext that decrypts to a different scalar, recovering
 // the full private key share-by-share.
 func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
 	// Marshal/unmarshal to get a clean copy.
@@ -253,7 +253,7 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 // TestKeyShareValidateRejectsInvalidLogStarProof verifies that a KeyShare
 // with a tampered LogProof is rejected.
 func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -279,7 +279,7 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 // with an empty Schnorr share proof is rejected. Without the Schnorr proof,
 // the verification share cannot be authenticated.
 func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -302,7 +302,7 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 // without a PaillierProof cannot be marshaled (and thus cannot be persisted).
 // The PaillierProof (Πmod) proves knowledge of the Paillier key factorization.
 func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -324,7 +324,7 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 // TestKeyShareValidateRejectsMissingRingPedersenProof verifies that
 // a KeyShare without a RingPedersenProof is rejected.
 func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()

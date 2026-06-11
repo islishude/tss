@@ -15,7 +15,7 @@ import (
 func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	runLimitedIntegration(t)
 
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +71,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	runLimitedIntegration(t)
 
-	shares := secpKeygen(t, 2, 2)
+	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 func TestThresholdECDSAReshareAddsParty(t *testing.T) {
 	runLimitedIntegration(t)
 
-	oldShares := secpKeygen(t, 2, 3)
+	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 2, 3, 4}
 	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 2)
@@ -163,7 +163,7 @@ func TestThresholdECDSAReshareAddsParty(t *testing.T) {
 func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
 	runLimitedIntegration(t)
 
-	oldShares := secpKeygen(t, 2, 3)
+	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 3}
 	newShares, sessions := runCGGMP21Reshare(t, oldShares, newParties, 2)
@@ -189,7 +189,7 @@ func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
 func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
 	runLimitedIntegration(t)
 
-	oldShares := secpKeygen(t, 2, 3)
+	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 2, 3, 4, 5}
 	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 3)
@@ -209,7 +209,7 @@ func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
 func TestThresholdECDSAReshareDisjointDealerSubset(t *testing.T) {
 	runLimitedIntegration(t)
 
-	oldShares := secpKeygen(t, 2, 3)
+	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
 	dealerParties := []tss.PartyID{1, 3}
 	newParties := []tss.PartyID{4, 5, 6}
