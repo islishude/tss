@@ -33,7 +33,7 @@ make ci
 # Formatting and module hygiene.
 gofmt -w <changed-go-files>
 
-# FOrmatting go and markdowns.
+# Formatting all of go and markdowns files
 make fmt
 ```
 
