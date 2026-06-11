@@ -60,6 +60,7 @@ func (r *replayReader) reset() {
 // commitment, they must know the witness. A failure here means the proof
 // system does not actually extract the claimed knowledge.
 func TestEncryptionProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -136,6 +137,7 @@ func TestEncryptionProofSpecialSoundness(t *testing.T) {
 
 // TestLogProofSpecialSoundness demonstrates witness extraction for Π^log.
 func TestLogProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -205,6 +207,7 @@ func TestLogProofSpecialSoundness(t *testing.T) {
 // the legacy MTAResponseProof. Two transcripts with the same commitments
 // but different challenges allow extraction of both b and beta.
 func TestMTAResponseProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -295,6 +298,7 @@ func TestMTAResponseProofSpecialSoundness(t *testing.T) {
 // TestEncProofSpecialSoundness demonstrates witness extraction for the new
 // CGGMP Πenc proof. Extracts k = (z1 - z1')/(e - e').
 func TestEncProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -367,6 +371,7 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 // TestAffGProofSpecialSoundness demonstrates witness extraction for Πaff-g.
 // Extracts x = (z1 - z1')/(e - e') and y = (z2 - z2')/(e - e').
 func TestAffGProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -477,6 +482,7 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 
 // TestLogStarProofSpecialSoundness demonstrates witness extraction for Πlog*.
 func TestLogStarProofSpecialSoundness(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -556,6 +562,7 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 // (as expected) when challenges are the same — two transcripts with identical
 // commitments and identical challenges do NOT allow witness extraction.
 func TestExtractorRequiresDifferentChallenges(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}

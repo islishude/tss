@@ -900,7 +900,7 @@ The test refactor is complete when:
 
 ## 16. Implementation Status
 
-_Last updated: 2026-06-11_
+_Last updated: 2026-06-11 (evening update)_
 
 ### Completed
 
@@ -955,6 +955,10 @@ _Last updated: 2026-06-11_
 
 - Tier 0 tests: `tier0_encoding_test.go`, `tier0_golden_test.go`, `tier0_fuzz_test.go`, `tier0_regression_test.go` with `t.Parallel()`.
 - Integration tests behind `integration` build tag: `integration_keygen_test.go`, `integration_presign_test.go`, `integration_sign_test.go`, `integration_refresh_test.go`, `integration_reshare_test.go`, `integration_hd_test.go`, `integration_adversary_test.go`.
+- **2026-06-11 table-driven consolidation**:
+  - `integration_reshare_test.go`: 4 membership-change tests consolidated into `TestThresholdECDSAReshareMembershipChange` (table-driven with "add party", "remove party", "threshold increase", "disjoint dealer subset" cases).
+  - `integration_adversary_test.go`: 5 online-signing tamper tests consolidated into `TestIntegration_SignPartialTamperingBlamesSender` (table-driven with 5 mutation cases) + extracted `assertSignPartialBlamesOnlySender` helper. 4 presign round3 tamper tests consolidated into `TestIntegration_PresignRound3TamperingBlamesSender` (table-driven with 4 cases) + extracted `runPresignRound3TamperTest` helper. Removed 2 redundant standalone tests (`TestIntegration_TamperedSProducesEquationFailure`, `TestIntegration_TamperedPartialEquationHashAloneBlamesSender`).
+  - `integration_refresh_test.go`: 2 multi-party refresh flow tests consolidated into `TestThresholdECDSAProactiveRefreshScenarios` (table-driven with "2-of-3 non-HD" and "2-of-2 HD preserves chain code" cases) + extracted `runRefresh` helper.
 - Presign safety tests: `TestThresholdECDSA_PresignRejectReuse`, `TestThresholdECDSA_PresignConsumedRoundTrip`, `TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound`, `TestPresignCannotBeReusedAcrossDerivedPaths`, `TestPresignContextRejectsReuseAcrossBoundDomains`.
 - Domain separation tests: `domain_test.go`, `TestCGGMP21KeyShareProofDomainBindsContext`, `TestCGGMP21MTADomainsBindPresignContext`.
 - State transition tests: `state_transition_test.go`, `lifecycle_test.go`.
@@ -976,6 +980,7 @@ _Last updated: 2026-06-11_
   - `relation_audit_test.go`: `TestEncProofRelationCompleteness`, `TestAffGProofRelationCompleteness`.
   - `params_consistency_test.go`: `TestDefaultSecurityParamsValues`, `TestEncRangeFormula`, `TestEncRangeStatisticalHiding`, `TestChallengeBitsDoNotExceedHashOutput`, `TestTranscriptBindsAllSecurityParams`, `TestFastSecurityParamsSanity`, `TestSecurityParamsValidate`, `TestEllPrimeExceedsEll`.
   - `adversarial_test.go`, `leakage_test.go`, `challenge_*_test.go`, `extractor_test.go`, `range_boundary_test.go`, `mta_response_test.go`: Retain existing structure; tests that mutate package-level `activeSecurityParams` via `SetSecurityParamsForTesting` intentionally kept sequential.
+- **2026-06-11 additional parallelism**: `t.Parallel()` added to 8 more ZK paillier test files that were previously sequential but have no package-global mutation: `mta_response_test.go` (1), `new_proofs_test.go` (5), `adversarial_test.go` (13), `extractor_test.go` (7), `range_boundary_test.go` (8), `challenge_hash_test.go` (4), `challenge_zero_test.go` (4), `golden_test.go` (1). Total 43 additional parallel test functions.
 - **MTA**: Tier 0 helper tests (`helpers_test.go`) already use `t.Parallel()` with table-driven patterns. Tier 1 tests (`finish_test.go`, `mta_test.go`) intentionally kept sequential due to package-global `SetSecurityParamsForTesting` mutations.
 - **Paillier internals**: `crypto_test.go`, `encoding_test.go`, `keygen_test.go`, `paillier_test.go`, `paillierct_test.go` all have `t.Parallel()` for safe tests.
 - Fixture caching via `testPaillierKeyCache sync.Map` with `sync.Map.LoadOrStore` to avoid duplicate keygen.
@@ -1067,6 +1072,16 @@ Coverage baseline, test audit, duplicated helper consolidation, slowcrypto revie
 - All fuzz targets already have programmatic seeds via `f.Add()` providing good coverage.
 - Fuzz CI script lacks `-tags=integration` flag, causing 10 integration-tagged fuzz targets to be silently skipped in CI (documented as known limitation).
 
+**Table-driven consolidation (2026-06-11 evening):**
+
+- **`integration_reshare_test.go`**: 4 membership-change tests (add/remove/threshold/disjoint) → single `TestThresholdECDSAReshareMembershipChange` with 4 table cases. Added `collectShares` helper.
+- **`integration_adversary_test.go`**: 5 online-signing tamper tests → `TestIntegration_SignPartialTamperingBlamesSender` with 5 mutation cases + `assertSignPartialBlamesOnlySender` helper. 4 presign round3 tamper tests → `TestIntegration_PresignRound3TamperingBlamesSender` with 4 cases + `runPresignRound3TamperTest` helper. Removed 2 redundant standalone tests.
+- **`integration_refresh_test.go`**: 2 multi-party flow tests → `TestThresholdECDSAProactiveRefreshScenarios` with 2 cases + `runRefresh` helper.
+- **`integration_presign_test.go`**: 2 round-trip tests → `TestThresholdECDSA_PresignRoundTripScenarios` (fresh + consumed).
+- **`keygen_confirm_test.go`**: 7 standalone tests → 2 table-driven tests (`TestKeygenConfirmationRejectsTamperedFields` 3 cases, `TestKeygenConfirmationRejectsInvalidSenderSets` 4 cases).
+- **`frost/ed25519/encoding_test.go`**: Removed duplicated `cloneFROSTKeyShare` (→ `KeyShare.Clone()`) and `rewriteFROSTWireField` (→ `testutil.RewriteWireField`).
+- **ZK paillier parallelism**: Added `t.Parallel()` to 46 test functions across 9 files that were safe for parallelism (no package-global mutation).
+
 ### Pending / Incomplete
 
 #### Phase 2: Remaining Files Without Parallelism
@@ -1080,14 +1095,31 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 #### Phase 7: ZK Production-Parameter Tests
 
 - `slowcrypto_test.go` and `challenge_distribution_test.go` remain behind `slowcrypto` build tag and intentionally sequential.
-- `challenge_zero_test.go` tests challenge-zero edge case — sequential by design (sub-millisecond tests; parallelism overhead would exceed benefit).
+- `leakage_test.go` — now uses `t.Parallel()` (2026-06-11 evening); confirmed safe: no package-global mutation, creates independent Paillier keys per test. Previously misclassified as needing sequential execution.
 
 #### Phase 8: Remaining Work Items
 
 1. ~~**Fuzz corpus seeding**~~ — Completed (analysis done; golden files incompatible with payload fuzz targets; programmatic seeds sufficient).
 2. ~~**CGGMP21 integration fixture caching**~~ — Completed: `CachedKeygenShares` with `sync.Map`/`sync.Once` pattern, 46% integration time reduction.
 3. ~~**FROST fixture caching**~~ — Completed: `cachedFrostKeygen` with `frostKeygenFixtureCache sync.Map`.
-4. **Table-driven completeness**: Some CGGMP21 integration tests remain single-purpose functions (e.g., `integration_keygen_test.go` has separate functions for HD, Paillier mismatch, etc.). Lower priority — existing tests are well-structured.
+4. ~~**Table-driven completeness**~~ — Completed (2026-06-11):
+   - `integration_reshare_test.go`: 4 membership-change tests → `TestThresholdECDSAReshareMembershipChange`.
+   - `integration_adversary_test.go`: 9 tamper tests → 2 table-driven tests (`TestIntegration_SignPartialTamperingBlamesSender`, `TestIntegration_PresignRound3TamperingBlamesSender`). Common helpers extracted.
+   - `integration_refresh_test.go`: 2 multi-party refresh tests → `TestThresholdECDSAProactiveRefreshScenarios`. `runRefresh` helper extracted.
 5. ~~**Lightweight challenge tests**~~ — Completed.
 6. ~~**DeliverEnvelope helper**~~ — Completed.
 7. ~~**CheckGolden helper**~~ — Completed.
+8. ~~**ZK paillier additional parallelism**~~ — Completed (2026-06-11): `t.Parallel()` added to 43 test functions across 8 previously-sequential files (`mta_response_test.go`, `new_proofs_test.go`, `adversarial_test.go`, `extractor_test.go`, `range_boundary_test.go`, `challenge_hash_test.go`, `challenge_zero_test.go`, `golden_test.go`).
+9. ~~**Leakage test parallelism**~~ — Completed (2026-06-11 evening): `t.Parallel()` added to 3 leakage tests — confirmed safe (no `SetSecurityParamsForTesting` calls, independent Paillier keys).
+10. ~~**FROST duplicated helpers**~~ — Completed (2026-06-11 evening): Replaced `cloneFROSTKeyShare` with `KeyShare.Clone()` and `rewriteFROSTWireField` with `testutil.RewriteWireField` in `frost/ed25519/encoding_test.go`.
+11. ~~**Presign round-trip consolidation**~~ — Completed (2026-06-11 evening): `TestThresholdECDSA_PresignRoundTrip` + `TestThresholdECDSA_PresignConsumedRoundTrip` → `TestThresholdECDSA_PresignRoundTripScenarios` (2-case table: fresh + consumed).
+12. ~~**Keygen confirmation consolidation**~~ — Completed (2026-06-11 evening): 7 standalone tests → 2 table-driven tests: `TestKeygenConfirmationRejectsTamperedFields` (3 cases: transcript hash, public key, commitments hash) + `TestKeygenConfirmationRejectsInvalidSenderSets` (4 cases: duplicate, missing, unknown, wrong count).
+
+### Remaining Low-Priority Items
+
+The following items are documented as intentionally deferred:
+
+- **`integration_keygen_test.go`**: 3 standalone functions (HD chain code, Paillier mismatch, key share round-trip) testing different concerns — forcing into one table would be artificial.
+- **`integration_presign_test.go`**: 9 standalone tests — round-trip/reuse tests share structural similarity but differ in error assertions enough that consolidation is unclear.
+- **`challenge_zero_test.go`**: Sub-millisecond tests; parallelism overhead would exceed benefit (now parallelized anyway since they have no side effects).
+- **Fuzz CI integration tags**: 10 integration-tagged fuzz targets silently skipped in CI due to missing `-tags=integration` flag in CI fuzz script. Documented as known limitation.

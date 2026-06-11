@@ -13,6 +13,38 @@ import (
 	"testing"
 )
 
+// runRefresh starts refresh sessions for all parties, delivers messages, and
+// returns the completed sessions.
+func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID, sessionID tss.SessionID) map[tss.PartyID]*RefreshSession {
+	t.Helper()
+	sessions := make(map[tss.PartyID]*RefreshSession)
+	queue := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: shares[id].Threshold, Self: id, SessionID: sessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, id := range parties {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	return sessions
+}
+
 func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	runLimitedIntegration(t)
 
@@ -153,122 +185,77 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
+// TestThresholdECDSAProactiveRefreshScenarios verifies multi-party proactive
+// refresh preserves the group public key and (when HD is enabled) chain code.
+func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 	runLimitedIntegration(t)
 
-	shares := CachedKeygenShares(t, 2, 3, false)
-	oldPub := shares[1].PublicKeyBytes()
+	tests := []struct {
+		name      string
+		threshold int
+		n         int
+		hd        bool
+		signers   []tss.PartyID
+	}{
+		{name: "2-of-3 non-HD", threshold: 2, n: 3, hd: false, signers: []tss.PartyID{1, 3}},
+		{name: "2-of-2 HD preserves chain code", threshold: 2, n: 2, hd: true, signers: []tss.PartyID{1, 2}},
+	}
 
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parties := []tss.PartyID{1, 2, 3}
-	sessions := make(map[tss.PartyID]*RefreshSession)
-	queue := make([]tss.Envelope, 0)
-	for _, id := range parties {
-		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: 2, Self: id, SessionID: sessionID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
-		sessions[id] = session
-		queue = append(queue, out...)
-	}
-	for len(queue) > 0 {
-		env := queue[0]
-		queue = queue[1:]
-		for _, id := range parties {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
-			}
-			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			runLimitedIntegration(t)
+
+			shares := CachedKeygenShares(t, tc.threshold, tc.n, tc.hd)
+			oldPub := shares[1].PublicKeyBytes()
+
+			sessionID, err := tss.NewSessionID(nil)
 			if err != nil {
 				t.Fatal(err)
 			}
-			queue = append(queue, out...)
-		}
-	}
-	newShares := make(map[tss.PartyID]*KeyShare)
-	for _, id := range parties {
-		share, ok := sessions[id].KeyShare()
-		if !ok {
-			t.Fatalf("refresh not complete for %d", id)
-		}
-		newShares[id] = share
-		if !bytes.Equal(oldPub, share.PublicKey) {
-			t.Fatalf("party %d public key changed after refresh", id)
-		}
-	}
-	for _, id := range parties {
-		if err := newShares[id].Validate(); err != nil {
-			t.Fatal(err)
-		}
-	}
-	signers := []*KeyShare{newShares[1], newShares[3]}
-	digest := sha256.Sum256([]byte("refresh 2-of-3"))
-	pub, sig, err := SignDigest(digest[:], signers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after refresh did not verify")
-	}
-}
-
-func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
-	runLimitedIntegration(t)
-
-	shares := CachedKeygenShares(t, 2, 2, true)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parties := []tss.PartyID{1, 2}
-	sessions := make(map[tss.PartyID]*RefreshSession)
-	queue := make([]tss.Envelope, 0)
-	for _, id := range parties {
-		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: 2, Self: id, SessionID: sessionID})
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
-		sessions[id] = session
-		queue = append(queue, out...)
-	}
-	for len(queue) > 0 {
-		env := queue[0]
-		queue = queue[1:]
-		for _, id := range parties {
-			if id == env.From || (env.To != 0 && env.To != id) {
-				continue
+			parties := make([]tss.PartyID, tc.n)
+			for i := range parties {
+				parties[i] = tss.PartyID(i + 1)
 			}
-			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
+
+			sessions := runRefresh(t, shares, parties, sessionID)
+
+			newShares := make(map[tss.PartyID]*KeyShare)
+			for _, id := range parties {
+				share, ok := sessions[id].KeyShare()
+				if !ok {
+					t.Fatalf("refresh not complete for %d", id)
+				}
+				newShares[id] = share
+				if !bytes.Equal(oldPub, share.PublicKey) {
+					t.Fatalf("party %d public key changed after refresh", id)
+				}
+				if tc.hd {
+					if len(share.ChainCode) != 32 {
+						t.Fatalf("party %d missing chain code after refresh", id)
+					}
+					if !bytes.Equal(shares[id].ChainCode, share.ChainCode) {
+						t.Fatalf("party %d chain code changed after refresh", id)
+					}
+				}
+			}
+			for _, id := range parties {
+				if err := newShares[id].Validate(); err != nil {
+					t.Fatal(err)
+				}
+			}
+			signerShares := make([]*KeyShare, 0, len(tc.signers))
+			for _, id := range tc.signers {
+				signerShares = append(signerShares, newShares[id])
+			}
+			digest := sha256.Sum256([]byte("refresh " + tc.name))
+			pub, sig, err := SignDigest(digest[:], signerShares)
 			if err != nil {
 				t.Fatal(err)
 			}
-			queue = append(queue, out...)
-		}
-	}
-	for _, id := range parties {
-		newShare, ok := sessions[id].KeyShare()
-		if !ok {
-			t.Fatalf("refresh not complete for %d", id)
-		}
-		if len(newShare.ChainCode) != 32 {
-			t.Fatalf("party %d missing chain code after refresh", id)
-		}
-		if !bytes.Equal(shares[id].ChainCode, newShare.ChainCode) {
-			t.Fatalf("party %d chain code changed after refresh", id)
-		}
-	}
-	signers := []*KeyShare{sessions[1].newShare, sessions[2].newShare}
-	digest := sha256.Sum256([]byte("hd refresh"))
-	pub, sig, err := SignDigest(digest[:], signers)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after HD refresh did not verify")
+			if !VerifyDigest(pub, digest[:], sig) {
+				t.Fatal("signature after refresh did not verify")
+			}
+		})
 	}
 }

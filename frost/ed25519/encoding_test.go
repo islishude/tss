@@ -47,12 +47,12 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	unsorted := cloneFROSTKeyShare(shares[1])
+	unsorted := shares[1].Clone()
 	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted party set encoded")
 	}
-	malformed := cloneFROSTKeyShare(shares[1])
+	malformed := shares[1].Clone()
 	malformed.PublicKey = []byte{0x01}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
@@ -68,7 +68,7 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 	}
 	// Rewrite the threshold field to uint32 values that overflow int on 32-bit platforms.
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := rewriteFROSTWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -230,26 +230,6 @@ func frostKeygenForFuzz(f *testing.F, threshold, n int) map[tss.PartyID]*KeyShar
 	return out
 }
 
-func cloneFROSTKeyShare(in *KeyShare) *KeyShare {
-	if in == nil {
-		return nil
-	}
-	out := *in
-	out.Parties = append([]tss.PartyID(nil), in.Parties...)
-	out.PublicKey = append([]byte(nil), in.PublicKey...)
-	out.ChainCode = append([]byte(nil), in.ChainCode...)
-	out.secret = in.secret.Clone()
-	out.GroupCommitments = testutil.CloneByteSlices(in.GroupCommitments)
-	out.VerificationShares = append([]VerificationShare(nil), in.VerificationShares...)
-	for i := range out.VerificationShares {
-		out.VerificationShares[i].PublicKey = append([]byte(nil), in.VerificationShares[i].PublicKey...)
-	}
-	out.KeygenSessionID = in.KeygenSessionID
-	out.KeygenTranscriptHash = append([]byte(nil), in.KeygenTranscriptHash...)
-	out.KeygenConfirmations = testutil.CloneByteSlices(in.KeygenConfirmations)
-	return &out
-}
-
 func seedFROSTPoint(tb testing.TB) []byte {
 	tb.Helper()
 	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
@@ -266,21 +246,6 @@ func seedFROSTScalar(tb testing.TB) []byte {
 		tb.Fatal(err)
 	}
 	return out
-}
-
-func rewriteFROSTWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.UnmarshalFields(raw, wireType)
-	if err != nil {
-		return nil, err
-	}
-	for i := range fields {
-		if fields[i].Tag == tag {
-			fields[i].Value = make([]byte, len(value))
-			copy(fields[i].Value, value)
-			return wire.MarshalFields(version, wireType, fields)
-		}
-	}
-	return nil, fmt.Errorf("missing wire field %d", tag)
 }
 
 // minimalFROSTKeyShare returns a FROST KeyShare with only public metadata populated.

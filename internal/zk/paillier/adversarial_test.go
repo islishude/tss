@@ -11,6 +11,7 @@ import (
 // S commitment is computed without the t_j^m factor is rejected. This ensures
 // the Ring-Pedersen commitment properly binds both witness components.
 func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -43,6 +44,7 @@ func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
 // from one AffGProof cannot be substituted into another AffGProof. The
 // algebraic equations are coupled, so a cross-proof substitution should fail.
 func TestAffGProofRejectsCrossProofFieldSubstitution(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -82,6 +84,7 @@ func TestAffGProofRejectsCrossProofFieldSubstitution(t *testing.T) {
 // cannot be replayed with a different statement. The transcript binds
 // the statement, so changing any statement field causes rejection.
 func TestProofReplayAcrossDifferentStatements(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -144,6 +147,7 @@ func TestProofReplayAcrossDifferentStatements(t *testing.T) {
 // zero-witness edge cases correctly. A zero plaintext is a valid input;
 // the proof should still be sound.
 func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -222,6 +226,7 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 // (a,b) ≠ (a',b'), one could factor N (assuming s,t generate a large subgroup).
 // This test verifies that distinct witness pairs produce distinct commitments.
 func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
+	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, _, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -252,6 +257,7 @@ func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
 // TestAffGProofRejectsBxOffCurve verifies that a proof with Bx set to a
 // non-curve-point is rejected during structural validation.
 func TestAffGProofRejectsBxOffCurve(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -269,6 +275,7 @@ func TestAffGProofRejectsBxOffCurve(t *testing.T) {
 // EncryptionProof with a zero (or empty) response is rejected.
 // The validatePositiveIntBytes check requires non-empty and no leading zero.
 func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -295,6 +302,7 @@ func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
 // TestLogStarProofRejectsYOffCurve verifies that a LogStarProof with Y set
 // to nil is rejected.
 func TestLogStarProofRejectsYOffCurve(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -313,6 +321,7 @@ func TestLogStarProofRejectsYOffCurve(t *testing.T) {
 // This catches cases where a prover sets a commitment to 0 or N to bypass
 // the algebraic equations.
 func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -358,6 +367,7 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 // TestLegacyEncryptionProofNonUnitCommitment verifies that legacy proofs
 // also reject non-unit commitment values.
 func TestLegacyEncryptionProofNonUnitCommitment(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -386,6 +396,7 @@ func TestLegacyEncryptionProofNonUnitCommitment(t *testing.T) {
 // moduli with Bit(0)==0 (even numbers). The check at proofs.go ensures
 // the modulus is odd.
 func TestModulusProofRejectsEvenModulus(t *testing.T) {
+	t.Parallel()
 	// Even modulus is rejected by paillier.Validate because primes must be odd.
 	evenN := big.NewInt(2 * 3 * 5 * 7 * 11) // even, not a valid Paillier modulus
 	// Attempt to construct a paillier.PublicKey — validate must reject.
@@ -398,6 +409,7 @@ func TestModulusProofRejectsEvenModulus(t *testing.T) {
 // TestProofRejectsInvalidRingPedersenParams verifies that proofs reject
 // Ring-Pedersen parameters where S=1 or T=1 (degenerate elements).
 func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -441,6 +453,7 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 // fast (insecure) parameters are rejected when verified with production
 // parameters. This prevents parameter downgrade attacks.
 func TestProofSecurityParamMinimums(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}

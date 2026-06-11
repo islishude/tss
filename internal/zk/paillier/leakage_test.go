@@ -13,6 +13,7 @@ import (
 // that satisfy both the range constraint and the curve equation must be
 // computationally infeasible to enumerate.
 func TestEncryptionProofLeakageResistance(t *testing.T) {
+	t.Parallel()
 	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test enc")
@@ -77,6 +78,7 @@ func TestEncryptionProofLeakageResistance(t *testing.T) {
 // TestMTAResponseProofLeakageResistance verifies that the MtA response proof
 // does not leak the responder scalar b through BResponse = e·b + μ.
 func TestMTAResponseProofLeakageResistance(t *testing.T) {
+	t.Parallel()
 	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test mta")
@@ -142,6 +144,7 @@ func TestMTAResponseProofLeakageResistance(t *testing.T) {
 // TestLogProofLeakageResistance verifies that the Π^log proof does not leak
 // the discrete logarithm through Response = e·a + α.
 func TestLogProofLeakageResistance(t *testing.T) {
+	t.Parallel()
 	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test log")

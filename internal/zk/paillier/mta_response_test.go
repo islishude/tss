@@ -9,6 +9,7 @@ import (
 )
 
 func TestMTAResponseProofFieldTamper(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}

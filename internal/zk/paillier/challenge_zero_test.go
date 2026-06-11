@@ -16,6 +16,7 @@ import (
 // theoretical edge case and verifies that the new Transcript.ChallengeSigned()
 // correctly guards against it, unlike legacy challenge().
 func TestLegacyChallengeCanBeZero(t *testing.T) {
+	t.Parallel()
 	// The legacy challenge function returns the hash as a big.Int without
 	// any zero check. Verify this by calling it on a known input.
 	result := challenge([]byte("test legacy challenge zero"), []byte{0x00})
@@ -42,6 +43,7 @@ func TestLegacyChallengeCanBeZero(t *testing.T) {
 // the new CGGMP proofs (EncProof, AffGProof, LogStarProof) cannot produce a
 // zero challenge regardless of transcript content.
 func TestNewProofChallengeSignedRejectsZero(t *testing.T) {
+	t.Parallel()
 	// We can't force ChallengeSigned to return zero through normal transcript
 	// operations (it would require SHA-256 output where all ChallengeBits LSBs
 	// are zero, probability 2^-ChallengeBits). Instead, we verify the guard
@@ -69,6 +71,7 @@ func TestNewProofChallengeSignedRejectsZero(t *testing.T) {
 // reject ~1/2^bits of iterations. We only require zero-free runs for bits ≥ 64
 // where the probability of a zero is negligible (≤ 2^-64).
 func TestChallengeBitsMatchClaim(t *testing.T) {
+	t.Parallel()
 	// For bits ≥ 64, probability of zero is ≤ 2^-64 — negligible.
 	for _, bits := range []uint{64, 128} {
 		bound := new(big.Int).Lsh(big.NewInt(1), bits)
@@ -118,6 +121,7 @@ func TestChallengeBitsMatchClaim(t *testing.T) {
 // uses distinct labels for each proof type, preventing cross-proof challenge
 // reuse.
 func TestLegacyChallengeDomainSeparation(t *testing.T) {
+	t.Parallel()
 	c1 := challenge([]byte(mtaChallengeLabel), []byte("test"))
 	c2 := challenge([]byte(logChallengeLabel), []byte("test"))
 	c3 := challenge([]byte(encryptionChallengeLabel), []byte("test"))

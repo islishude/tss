@@ -132,100 +132,114 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSAReshareAddsParty(t *testing.T) {
+// TestThresholdECDSAReshareMembershipChange verifies that reshare preserves the
+// group public key across add-party, remove-party, threshold-change, and
+// disjoint-dealer-subset scenarios.
+func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 	runLimitedIntegration(t)
 
 	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
-	newParties := []tss.PartyID{1, 2, 3, 4}
-	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 2)
-	if len(newShares) != len(newParties) {
-		t.Fatalf("got %d new shares, want %d", len(newShares), len(newParties))
+
+	tests := []struct {
+		name          string
+		newParties    []tss.PartyID
+		newThreshold  int
+		dealerParties []tss.PartyID // nil means all old parties
+		signers       []tss.PartyID
+		removedParty  tss.PartyID // party expected to be removed (0 = none)
+		assert        func(t *testing.T, newShares map[tss.PartyID]*KeyShare, sessions map[tss.PartyID]*ReshareSession)
+	}{
+		{
+			name:         "add party 2-of-3 to 2-of-4",
+			newParties:   []tss.PartyID{1, 2, 3, 4},
+			newThreshold: 2,
+			signers:      []tss.PartyID{2, 4},
+		},
+		{
+			name:         "remove party 2-of-3 to 2-of-2",
+			newParties:   []tss.PartyID{1, 3},
+			newThreshold: 2,
+			signers:      []tss.PartyID{1, 3},
+			removedParty: 2,
+		},
+		{
+			name:         "threshold increase 2-of-3 to 3-of-5",
+			newParties:   []tss.PartyID{1, 2, 3, 4, 5},
+			newThreshold: 3,
+			signers:      []tss.PartyID{1, 4, 5},
+		},
+		{
+			name:          "disjoint dealer subset 2-of-3 to 2-of-3",
+			newParties:    []tss.PartyID{4, 5, 6},
+			newThreshold:  2,
+			dealerParties: []tss.PartyID{1, 3},
+			signers:       []tss.PartyID{4, 6},
+		},
 	}
-	for _, id := range newParties {
-		if !bytes.Equal(newShares[id].PublicKey, oldPub) {
-			t.Fatalf("party %d public key changed after reshare", id)
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			runLimitedIntegration(t)
+
+			var newShares map[tss.PartyID]*KeyShare
+			var sessions map[tss.PartyID]*ReshareSession
+
+			if tc.dealerParties != nil {
+				newShares, sessions = runCGGMP21ReshareWithDealers(t, oldShares, tc.dealerParties, tc.newParties, tc.newThreshold)
+			} else {
+				newShares, sessions = runCGGMP21Reshare(t, oldShares, tc.newParties, tc.newThreshold)
+			}
+
+			// Verify new share count matches new party count.
+			if len(newShares) != len(tc.newParties) {
+				t.Fatalf("got %d new shares, want %d", len(newShares), len(tc.newParties))
+			}
+
+			// Verify public key preserved for all new parties.
+			for _, id := range tc.newParties {
+				if !bytes.Equal(newShares[id].PublicKey, oldPub) {
+					t.Fatalf("party %d public key changed after reshare", id)
+				}
+			}
+
+			// Verify removed party is excluded.
+			if tc.removedParty != 0 {
+				if _, ok := newShares[tc.removedParty]; ok {
+					t.Fatalf("removed party %d received a new key share", tc.removedParty)
+				}
+				if share, ok := sessions[tc.removedParty].KeyShare(); ok || share != nil {
+					t.Fatalf("removed party %d session produced a key share", tc.removedParty)
+				}
+			}
+
+			// Sign and verify with the selected signer subset.
+			digest := sha256.Sum256([]byte("reshare " + tc.name))
+			pub, sig, err := SignDigest(digest[:], collectShares(t, newShares, tc.signers))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !VerifyDigest(pub, digest[:], sig) {
+				t.Fatal("signature after reshare did not verify")
+			}
+			if !bytes.Equal(pub, oldPub) {
+				t.Fatal("reshare changed group public key")
+			}
+		})
+	}
+}
+
+// collectShares returns key shares for the given party IDs.
+func collectShares(t *testing.T, shares map[tss.PartyID]*KeyShare, ids []tss.PartyID) []*KeyShare {
+	t.Helper()
+	out := make([]*KeyShare, 0, len(ids))
+	for _, id := range ids {
+		share, ok := shares[id]
+		if !ok {
+			t.Fatalf("party %d missing from new shares", id)
 		}
+		out = append(out, share)
 	}
-	digest := sha256.Sum256([]byte("reshare add party"))
-	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[2], newShares[4]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after add-party reshare did not verify")
-	}
-	if !bytes.Equal(pub, oldPub) {
-		t.Fatal("reshare changed group public key")
-	}
-}
-
-func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
-	runLimitedIntegration(t)
-
-	oldShares := CachedKeygenShares(t, 2, 3, false)
-	oldPub := oldShares[1].PublicKeyBytes()
-	newParties := []tss.PartyID{1, 3}
-	newShares, sessions := runCGGMP21Reshare(t, oldShares, newParties, 2)
-	if _, ok := newShares[2]; ok {
-		t.Fatal("removed party received a new key share")
-	}
-	if share, ok := sessions[2].KeyShare(); ok || share != nil {
-		t.Fatal("removed party session produced a key share")
-	}
-	digest := sha256.Sum256([]byte("reshare remove party"))
-	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[1], newShares[3]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after remove-party reshare did not verify")
-	}
-	if !bytes.Equal(pub, oldPub) {
-		t.Fatal("reshare changed group public key")
-	}
-}
-
-func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
-	runLimitedIntegration(t)
-
-	oldShares := CachedKeygenShares(t, 2, 3, false)
-	oldPub := oldShares[1].PublicKeyBytes()
-	newParties := []tss.PartyID{1, 2, 3, 4, 5}
-	newShares, _ := runCGGMP21Reshare(t, oldShares, newParties, 3)
-	digest := sha256.Sum256([]byte("reshare threshold change"))
-	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[1], newShares[4], newShares[5]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after threshold-changing reshare did not verify")
-	}
-	if !bytes.Equal(pub, oldPub) {
-		t.Fatal("reshare changed group public key")
-	}
-}
-
-func TestThresholdECDSAReshareDisjointDealerSubset(t *testing.T) {
-	runLimitedIntegration(t)
-
-	oldShares := CachedKeygenShares(t, 2, 3, false)
-	oldPub := oldShares[1].PublicKeyBytes()
-	dealerParties := []tss.PartyID{1, 3}
-	newParties := []tss.PartyID{4, 5, 6}
-	newShares, _ := runCGGMP21ReshareWithDealers(t, oldShares, dealerParties, newParties, 2)
-	if len(newShares) != len(newParties) {
-		t.Fatalf("got %d new shares, want %d", len(newShares), len(newParties))
-	}
-	digest := sha256.Sum256([]byte("reshare disjoint dealer subset"))
-	pub, sig, err := SignDigest(digest[:], []*KeyShare{newShares[4], newShares[6]})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyDigest(pub, digest[:], sig) {
-		t.Fatal("signature after disjoint reshare did not verify")
-	}
-	if !bytes.Equal(pub, oldPub) {
-		t.Fatal("reshare changed group public key")
-	}
+	return out
 }

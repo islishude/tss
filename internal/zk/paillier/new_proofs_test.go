@@ -26,6 +26,7 @@ func primeRingPedersenFixture() RingPedersenParams {
 }
 
 func TestEncProofVerificationMatrix(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -84,6 +85,7 @@ func TestEncProofVerificationMatrix(t *testing.T) {
 }
 
 func TestAffGProofVerificationMatrix(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -160,6 +162,7 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 }
 
 func TestLogStarProofVerificationMatrix(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -219,6 +222,7 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 }
 
 func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		raw       []byte
@@ -452,6 +456,7 @@ func wireFieldName(tag uint16) string {
 
 // TestProofsUseV1Version verifies all proof types carry version 1.
 func TestProofsUseV1Version(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping 1024-bit Paillier proof version check in short mode")
 	}

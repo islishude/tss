@@ -12,6 +12,7 @@ import (
 // TestNewProofChallengeDistribution verifies that the 128-bit challenges
 // produced by Transcript.ChallengeSigned are uniformly distributed.
 func TestNewProofChallengeDistribution(t *testing.T) {
+	t.Parallel()
 	const nChallenges = 5000
 
 	// Count bit frequencies across many challenges.
@@ -68,6 +69,7 @@ func TestNewProofChallengeDistribution(t *testing.T) {
 // A challenge uniformly distributed in [0, 2^128) has exactly 64 expected 1-bits
 // and 64 expected 0-bits, with no modular bias toward smaller values.
 func TestChallengeSignedNoModularBias(t *testing.T) {
+	t.Parallel()
 	const nChallenges = 5000
 
 	// If modular reduction were used (mod q), the most significant bits would
@@ -106,6 +108,7 @@ func TestChallengeSignedNoModularBias(t *testing.T) {
 // The legacy challenge is the full 256-bit SHA-256 output reduced mod q,
 // so there IS a small bias (2^256 mod q). This test quantifies that bias.
 func TestLegacyProofChallengeDistribution(t *testing.T) {
+	t.Parallel()
 	const nChallenges = 5000
 
 	// Generate challenges with different inputs.
@@ -148,6 +151,7 @@ func TestLegacyProofChallengeDistribution(t *testing.T) {
 // TestChallengeDistributionAcrossSessions verifies that challenges from
 // different sessions (domains) produce independent challenge streams.
 func TestChallengeDistributionAcrossSessions(t *testing.T) {
+	t.Parallel()
 	seen := make(map[string]bool)
 	const nSessions = 1000
 

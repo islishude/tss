@@ -12,6 +12,7 @@ import (
 // would allow a prover to use out-of-range witnesses, breaking the range proof
 // soundness.
 func TestSignedPowerOfTwoBoundary(t *testing.T) {
+	t.Parallel()
 	for _, bits := range []uint{1, 8, 64, 128, 256, 384, 486} {
 		bound := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
 		negBound := new(big.Int).Neg(bound)
@@ -40,6 +41,7 @@ func TestSignedPowerOfTwoBoundary(t *testing.T) {
 // TestUnsignedPowerOfTwoBoundary verifies InUnsignedPowerOfTwo accepts [0, 2^bits)
 // and rejects at 2^bits.
 func TestUnsignedPowerOfTwoBoundary(t *testing.T) {
+	t.Parallel()
 	for _, bits := range []uint{1, 8, 64, 128, 256} {
 		bound := new(big.Int).Lsh(big.NewInt(1), bits)
 		below := new(big.Int).Sub(bound, big.NewInt(1))
@@ -64,6 +66,7 @@ func TestUnsignedPowerOfTwoBoundary(t *testing.T) {
 // nonces in Πenc, Πaff-g, and Πlog*. An off-by-one would allow a malicious
 // prover to submit nonces outside the range that still pass verification.
 func TestMultRangeBoundary(t *testing.T) {
+	t.Parallel()
 	n := big.NewInt(100003) // small prime for testing
 
 	for _, bits := range []uint{1, 8, 64, 128, 256} {
@@ -97,6 +100,7 @@ func TestMultRangeBoundary(t *testing.T) {
 // TestZKRangeBound verifies that zkRangeBound(e) computes the correct bound
 // 2^{l+ε} + e·q, matching the statistical ZK formula used by all legacy proofs.
 func TestZKRangeBound(t *testing.T) {
+	t.Parallel()
 	q := secp.Order()
 
 	// Test e=0: bound = 2^{l+ε} = 2^384
@@ -142,6 +146,7 @@ func TestZKRangeBound(t *testing.T) {
 // arbitrary in-range value breaks the algebraic consistency (z = α + e·w),
 // and the range check is not the only rejection path.
 func TestProofResponseRangeBoundaryPrecision(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -254,6 +259,7 @@ func TestProofResponseRangeBoundaryPrecision(t *testing.T) {
 // (EncryptionProof, LogProof). These proofs use zkRangeBound(e) = 2^{l+ε} + e·q
 // as the response range guard.
 func TestLegacyProofZKRangeBound(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
@@ -325,6 +331,7 @@ func TestLegacyProofZKRangeBound(t *testing.T) {
 // TestSampleSignedPowerOfTwoDistribution verifies SampleSignedPowerOfTwo
 // produces values in the correct range [−2^bits, 2^bits].
 func TestSampleSignedPowerOfTwoDistribution(t *testing.T) {
+	t.Parallel()
 	for _, bits := range []uint{1, 8, 64} {
 		bound := new(big.Int).Lsh(big.NewInt(1), bits)
 		for range 500 {
@@ -342,6 +349,7 @@ func TestSampleSignedPowerOfTwoDistribution(t *testing.T) {
 // TestSampleMultRangeDistribution verifies SampleMultRange produces values in
 // ±(N·2^bits).
 func TestSampleMultRangeDistribution(t *testing.T) {
+	t.Parallel()
 	n := big.NewInt(100003)
 	for _, bits := range []uint{1, 8, 64} {
 		bound := new(big.Int).Lsh(big.NewInt(1), bits)
