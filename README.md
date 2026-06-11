@@ -95,6 +95,7 @@ Full examples in [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp2
 | [docs/audit-guide.md](docs/audit-guide.md)                               | Complete proof-to-paper mapping for cryptographic review.                                     |
 | [docs/deployment.md](docs/deployment.md)                                 | Production guide: key lifecycle, transport, backups, monitoring.                              |
 | [docs/cggmp21-protocol-checklist.md](docs/cggmp21-protocol-checklist.md) | Implementation tracking against the CGGMP21 specification.                                    |
+| [docs/testing-rules.md](docs/testing-rules.md)                           | Test tiers, required invariants, fuzzing, golden vectors, crash/restart expectations.         |
 
 ## Internal Packages
 

@@ -4,3 +4,4 @@
 /coverage.integration.out
 /.agents
 /.claude
+/test.short.json
