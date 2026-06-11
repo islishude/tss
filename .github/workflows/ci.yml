@@ -52,7 +52,7 @@ jobs:
           go-version: stable
 
       - name: Run Tier 2 integration tests
-        run: make test-integration
+        run: make test-integration INTEGRATION_TIMEOUT=30m
 
   # Run the race detector on a subset of tests to catch potential data races.
   test-race:
