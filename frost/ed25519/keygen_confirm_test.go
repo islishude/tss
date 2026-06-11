@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
@@ -82,7 +83,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(deliverEnv(env))
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -104,7 +105,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if fromParty2.PayloadType == "" {
 		t.Fatal("missing confirmation from party 2")
 	}
-	if _, err := sessions[1].HandleKeygenMessage(deliverEnv(fromParty2)); err != nil {
+	if _, err := sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(fromParty2)); err != nil {
 		t.Fatal(err)
 	}
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
@@ -123,7 +124,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 		t.Fatal(err)
 	}
 	conflicting = conflicting.RecomputeTranscriptHash()
-	_, err = sessions[1].HandleKeygenMessage(deliverEnv(conflicting))
+	_, err = sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(conflicting))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting confirmation, got %v", err)
 	}

@@ -1027,7 +1027,20 @@ Coverage baseline, test audit, duplicated helper consolidation, slowcrypto revie
 
 - Confirmed `slowcrypto_test.go` is a narrow smoke test (1 proof per type), not an exhaustive matrix.
 - Confirmed `challenge_distribution_test.go` tests are statistical Fiat-Shamir analysis, correctly behind `slowcrypto`.
-- Identified 5 lightweight challenge distribution tests in `challenge_distribution_test.go` that don't require Paillier key generation and could be moved out of `slowcrypto` for broader CI coverage (not yet moved — deferred to next iteration).
+- Identified 4 lightweight challenge distribution tests that were moved out of `slowcrypto` build tag into new `challenge_hash_test.go` (no build constraint), giving normal CI builds coverage of challenge entropy, modular bias, legacy distribution, and cross-session uniqueness.
+- Confirmed the remaining 5 tests in `challenge_distribution_test.go` correctly stay behind `slowcrypto` (require 3072-bit Paillier key generation).
+
+**DeliverEnvelope helper consolidation:**
+
+- Added `testutil.DeliverEnvelope` to centralize the envelope transport-authentication pattern.
+- Replaced 77+ call sites across 20 files (frost/ed25519 and cggmp21/secp256k1).
+- Removed local `deliverEnv`/`deliverCGGMPEnv` definitions.
+
+**CheckGolden helper consolidation:**
+
+- Added `testutil.CheckGolden` with `UPDATE_GOLDEN=1` environment support and parent-directory creation.
+- Replaced 3 local definitions: `checkGolden` (frost, cggmp21) and `checkPaillierGolden` (zk/paillier).
+- Replaced 11+ call sites across golden test files.
 
 **Full CI verification:** `make ci` passes (build, vet, golangci-lint, fmt-check, tidy-check, verify, test-fast).
 
@@ -1052,6 +1065,6 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 2. **CGGMP21 integration fixture caching**: Add keygen fixture cache for immutable baseline shares. Currently each integration test generates fresh keygen (~6 min for full CGGMP21 integration suite). Caching could significantly reduce integration test time.
 3. **FROST fixture caching**: Similar keygen fixture cache for FROST signing/reshare/refresh tests.
 4. **Table-driven completeness**: Some CGGMP21 integration tests are still single-purpose functions rather than table-driven matrices (e.g., `integration_keygen_test.go` has separate functions for HD, Paillier mismatch, etc.). These could be consolidated into table-driven groups.
-5. **Lightweight challenge tests**: Move 5 challenge distribution/hash tests out of `slowcrypto` build tag (identified in audit; pure hash tests that need no Paillier key).
-6. **DeliverEnvelope helper**: Move `deliverEnv`/`deliverCGGMPEnv` helpers to `testutil.DeliverEnvelope` (77+ call sites in frost, ~14 in CGGMP21).
-7. **CheckGolden helper**: Move `checkGolden`/`checkPaillierGolden` to `testutil.CheckGolden` (3 copies across cggmp21, frost, zk/paillier).
+5. ~~**Lightweight challenge tests**~~ — Completed: 4 tests moved to `challenge_hash_test.go`.
+6. ~~**DeliverEnvelope helper**~~ — Completed: `testutil.DeliverEnvelope` replaces all local copies.
+7. ~~**CheckGolden helper**~~ — Completed: `testutil.CheckGolden` replaces all local copies.

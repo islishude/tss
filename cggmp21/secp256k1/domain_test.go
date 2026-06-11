@@ -9,6 +9,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/testutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -102,16 +103,16 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err != nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[1])); err != nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[1])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s2.HandlePresignMessage(deliverCGGMPEnv(out1[0])); err != nil {
+	if _, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[0])); err != nil {
 		t.Fatal(err)
 	}
-	round2, err := s2.HandlePresignMessage(deliverCGGMPEnv(out1[1]))
+	round2, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[1]))
 	if err != nil {
 		t.Fatal(err)
 	}

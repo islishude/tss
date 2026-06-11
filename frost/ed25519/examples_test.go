@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // ExampleSign demonstrates the simplest FROST Ed25519 flow: single-party
@@ -106,7 +107,7 @@ func ExampleSign_multiParty() {
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(deliverEnv(env))
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -234,7 +235,7 @@ func ExampleStartRefresh() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleReshareMessage(deliverEnv(env))
+			out, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -335,7 +336,7 @@ func ExampleStartReshare() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleReshareMessage(deliverEnv(env))
+			out, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -454,7 +455,7 @@ func runFrostKeygen(parties []tss.PartyID, threshold int, sessionID tss.SessionI
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(deliverEnv(env))
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}

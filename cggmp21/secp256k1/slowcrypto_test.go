@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // slowCryptoKeygen runs a full keygen with production 3072-bit Paillier and
@@ -82,7 +83,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandlePresignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[party].HandlePresignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -184,7 +185,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandleRefreshMessage(deliverCGGMPEnv(env))
+			out, err := sessions[party].HandleRefreshMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -268,7 +269,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandleSignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[party].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -356,7 +357,7 @@ func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare
 			if party == env.From || (env.To != 0 && env.To != party) {
 				continue
 			}
-			out, err := sessions[party].HandlePresignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[party].HandlePresignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}

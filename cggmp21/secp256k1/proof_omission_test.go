@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -51,7 +52,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted modulus proof")
 	}
 }
@@ -91,7 +92,7 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Ring-Pedersen proof")
 	}
 }
@@ -179,7 +180,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid modulus proof")
 	}
 }
@@ -216,7 +217,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid Ring-Pedersen proof")
 	}
 }
@@ -384,7 +385,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Paillier public key")
 	}
 }

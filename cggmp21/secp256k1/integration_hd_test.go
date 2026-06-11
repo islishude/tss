@@ -44,7 +44,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env)); err != nil {
+			if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatal(err)
 			}
 		}
@@ -184,7 +184,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env)); err != nil {
+			if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatal(err)
 			}
 		}

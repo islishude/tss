@@ -8,6 +8,7 @@ import (
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
@@ -202,7 +203,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(deliverEnv(out2[0])); err != nil {
+	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +225,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	bad.Payload = badPayload
 	bad = bad.RecomputeTranscriptHash()
 
-	_, err = session.HandleReshareMessage(deliverEnv(bad))
+	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(bad))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if !session.aborted {
 		t.Fatal("verification error did not abort reshare session")
@@ -233,7 +234,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 		t.Fatal("aborted reshare session retained share references")
 	}
 
-	_, err = session.HandleReshareMessage(deliverEnv(out2[1]))
+	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
 	if err == nil || !strings.Contains(err.Error(), "reshare session is aborted") {
 		t.Fatalf("expected terminal aborted error, got %v", err)
 	}

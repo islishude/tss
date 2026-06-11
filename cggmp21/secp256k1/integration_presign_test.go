@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
@@ -50,7 +51,7 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	}
 	out2[0].Payload[0] ^= 1
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected tampered EncK rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
@@ -96,7 +97,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			}
 			round2[0].Payload = mutated
 			round2[0] = round2[0].RecomputeTranscriptHash()
-			_, err = s1.HandlePresignMessage(deliverCGGMPEnv(round2[0]))
+			_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(round2[0]))
 			if err == nil {
 				t.Fatal("expected tampered round2 proof rejection")
 			}
@@ -137,7 +138,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))

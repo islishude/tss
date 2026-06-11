@@ -5,12 +5,15 @@
 package testutil
 
 import (
+	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"math/rand/v2"
+	"os"
+	"path/filepath"
 	"slices"
 
 	"github.com/islishude/tss"
@@ -195,5 +198,42 @@ func AssertMapCleared[M ~map[K]V, K comparable, V any](tb interface{ Fatal(...an
 	}
 	if len(m) != 0 {
 		tb.Fatal(fmt.Sprintf("map not cleared: %d entries remain", len(m)))
+	}
+}
+
+// DeliverEnvelope returns a copy of env with transport authentication set for
+// guard validation. The authenticated party is set to env.From, simulating a
+// delivery where the transport layer vouches for the sender identity.
+func DeliverEnvelope(env tss.Envelope) tss.Envelope {
+	env.Security.Authenticated = true
+	env.Security.AuthenticatedParty = env.From
+	return env
+}
+
+// CheckGolden compares raw bytes against a golden file. When the environment
+// variable UPDATE_GOLDEN=1 is set, it writes the golden file (creating parent
+// directories as needed). Otherwise it reads and asserts exact match.
+func CheckGolden(tb interface{ Fatal(...any) }, golden string, raw []byte) {
+	if h, ok := tb.(interface{ Helper() }); ok {
+		h.Helper()
+	}
+	if os.Getenv("UPDATE_GOLDEN") == "1" {
+		if err := os.MkdirAll(filepath.Dir(golden), 0o700); err != nil {
+			tb.Fatal(err)
+			return
+		}
+		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0o600); err != nil {
+			tb.Fatal(err)
+		}
+		return
+	}
+	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
+	if err != nil {
+		tb.Fatal(fmt.Sprintf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err))
+		return
+	}
+	gotHex := hex.EncodeToString(raw)
+	if gotHex != string(bytes.TrimSpace(wantHex)) {
+		tb.Fatal(fmt.Sprintf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex))))
 	}
 }

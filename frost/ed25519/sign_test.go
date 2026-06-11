@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
@@ -62,7 +63,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	round2, err := session.HandleSignMessage(deliverEnv(out2[0]))
+	round2, err := session.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,7 +114,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 			if env.From == receiver {
 				continue
 			}
-			out, err := sessions[receiver].HandleSignMessage(deliverEnv(env))
+			out, err := sessions[receiver].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver commitment from %d to %d: %v", env.From, receiver, err)
 			}
@@ -124,11 +125,11 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("expected two remote partials, got %d", len(round2))
 	}
 
-	if _, err := sessions[1].HandleSignMessage(deliverEnv(round1[2])); err != nil {
+	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[2])); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range round2 {
-		if _, err := sessions[1].HandleSignMessage(deliverEnv(env)); err != nil {
+		if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatalf("early partial from %d returned fatal error: %v", env.From, err)
 		}
 	}
@@ -136,7 +137,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("signature completed before all commitments arrived: %x", sig)
 	}
 
-	out, err := sessions[1].HandleSignMessage(deliverEnv(round1[3]))
+	out, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[3]))
 	if err != nil {
 		t.Fatal(err)
 	}

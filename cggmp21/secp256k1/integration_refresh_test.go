@@ -7,6 +7,7 @@ import (
 	"crypto/sha256"
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 	"math/big"
 	"strings"
 	"testing"
@@ -29,7 +30,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	}
 	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	for _, env := range out {
-		if _, err := session.HandleRefreshMessage(deliverCGGMPEnv(env)); err != nil {
+		if _, err := session.HandleRefreshMessage(testutil.DeliverEnvelope(env)); err != nil {
 			if !strings.Contains(err.Error(), "already completed") {
 				t.Fatal(err)
 			}
@@ -80,7 +81,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleRefreshMessage(deliverCGGMPEnv(out2[0])); err != nil {
+	if _, err := session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalRefreshSharePayload(out2[1].Payload)
@@ -98,7 +99,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[1] = out2[1].RecomputeTranscriptHash()
-	_, err = session.HandleRefreshMessage(deliverCGGMPEnv(out2[1]))
+	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[1]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -146,7 +147,7 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	_, err = session.HandleRefreshMessage(deliverCGGMPEnv(out2[0]))
+	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0]))
 	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
 		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)
 	}
@@ -181,7 +182,7 @@ func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleRefreshMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -242,7 +243,7 @@ func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleRefreshMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}

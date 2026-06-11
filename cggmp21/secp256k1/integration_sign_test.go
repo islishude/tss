@@ -5,6 +5,7 @@ package secp256k1
 import (
 	"crypto/sha256"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 	"testing"
 )
 
@@ -99,7 +100,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(messages[0])); err == nil {
+		if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(messages[0])); err == nil {
 			t.Fatal("expected tampered partial rejection")
 		} else {
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))

@@ -13,6 +13,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
@@ -23,7 +24,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 	}
 
 	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
-	checkGolden(t, golden, raw)
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -55,7 +56,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 	}
 
 	golden := filepath.Join("testdata", "SignPartialPayload.golden")
-	checkGolden(t, golden, raw)
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
@@ -90,7 +91,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 	}
 
 	golden := filepath.Join("testdata", "PresignRound3Payload.golden")
-	checkGolden(t, golden, raw)
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)
 	if err != nil {

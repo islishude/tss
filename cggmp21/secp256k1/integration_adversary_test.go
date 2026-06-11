@@ -11,6 +11,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // TestIntegration_TamperedSPartialBlamesSenderOnly verifies that a tampered
@@ -59,7 +60,7 @@ func TestIntegration_TamperedSPartialBlamesSenderOnly(t *testing.T) {
 		if id == firstEnv.From {
 			continue
 		}
-		_, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(firstEnv))
+		_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(firstEnv))
 		if err == nil {
 			t.Fatal("expected rejection of tampered S partial")
 		}
@@ -111,7 +112,7 @@ func TestIntegration_TamperedDigestHashBlamesSender(t *testing.T) {
 		if id == firstEnv.From {
 			continue
 		}
-		_, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(firstEnv))
+		_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(firstEnv))
 		if err == nil {
 			t.Fatal("expected rejection of tampered DigestHash")
 		}
@@ -154,7 +155,7 @@ func TestIntegration_TamperedPresignTranscriptBlamesSender(t *testing.T) {
 		if id == firstEnv.From {
 			continue
 		}
-		_, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(firstEnv))
+		_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(firstEnv))
 		if err == nil {
 			t.Fatal("expected rejection of tampered PresignTranscript")
 		}
@@ -196,7 +197,7 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env)); err != nil {
+			if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatalf("unexpected error for valid partial from %d to %d: %v", env.From, id, err)
 			}
 		}
@@ -256,7 +257,7 @@ func TestIntegration_TamperedSProducesEquationFailure(t *testing.T) {
 		if id == firstEnv.From {
 			continue
 		}
-		_, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(firstEnv))
+		_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(firstEnv))
 		if err == nil {
 			t.Fatal("expected rejection — equation verification should fail")
 		}
@@ -696,7 +697,7 @@ func TestIntegration_TamperedPartialEquationHashAloneBlamesSender(t *testing.T) 
 		if id == firstEnv.From {
 			continue
 		}
-		_, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(firstEnv))
+		_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(firstEnv))
 		if err == nil {
 			t.Fatal("expected rejection of tampered PartialEquationHash")
 		}
@@ -785,7 +786,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	}
 
 	// Step 4: Deliver tampered partial to honest signer.
-	_, err = honestSession.HandleSignMessage(deliverCGGMPEnv(maliciousPartial))
+	_, err = honestSession.HandleSignMessage(testutil.DeliverEnvelope(maliciousPartial))
 
 	// Step 5: Expect immediate ErrCodeVerification.
 	if err == nil {
