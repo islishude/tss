@@ -11,6 +11,7 @@ import (
 )
 
 func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
+	t.Parallel()
 	oldShares := frostKeygenHD(t, 2, 3)
 	oldParties := []tss.PartyID{1, 2, 3}
 	newParties := []tss.PartyID{2, 3, 4}
@@ -92,6 +93,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 }
 
 func TestStartRefreshRequiresMatchingSelf(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -109,6 +111,7 @@ func TestStartRefreshRequiresMatchingSelf(t *testing.T) {
 }
 
 func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
+	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
 	oldParties := []tss.PartyID{1, 2, 3}
 	newParties := []tss.PartyID{2, 3, 4}
@@ -173,6 +176,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 }
 
 func TestReshareVerificationErrorAbortsSession(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

@@ -99,6 +99,7 @@ func sha256Sum(data []byte) [32]byte {
 }
 
 func TestNewEnvelopeGuardRejectsNilReplayCache(t *testing.T) {
+	t.Parallel()
 	_, err := NewEnvelopeGuard(1, PartySet{1, 2}, "test-proto", testSessionID(t), testPolicySet(), nil)
 	if !errors.Is(err, ErrMissingReplayCache) {
 		t.Fatalf("expected ErrMissingReplayCache, got %v", err)
@@ -106,6 +107,7 @@ func TestNewEnvelopeGuardRejectsNilReplayCache(t *testing.T) {
 }
 
 func TestNewEnvelopeGuardRejectsInvalidSessionID(t *testing.T) {
+	t.Parallel()
 	_, err := NewEnvelopeGuard(1, PartySet{1, 2}, "test-proto", SessionID{}, testPolicySet(), NewInMemoryReplayCache())
 	if !errors.Is(err, ErrInvalidSessionID) {
 		t.Fatalf("expected ErrInvalidSessionID, got %v", err)
@@ -113,6 +115,7 @@ func TestNewEnvelopeGuardRejectsInvalidSessionID(t *testing.T) {
 }
 
 func TestNewEnvelopeGuardRejectsSelfNotInParties(t *testing.T) {
+	t.Parallel()
 	_, err := NewEnvelopeGuard(99, PartySet{1, 2}, "test-proto", testSessionID(t), testPolicySet(), NewInMemoryReplayCache())
 	if err == nil {
 		t.Fatal("expected error for self not in parties")
@@ -120,6 +123,7 @@ func TestNewEnvelopeGuardRejectsSelfNotInParties(t *testing.T) {
 }
 
 func TestGuardRejectsWrongProtocol(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.Protocol = "wrong-proto"
@@ -130,6 +134,7 @@ func TestGuardRejectsWrongProtocol(t *testing.T) {
 }
 
 func TestGuardRejectsWrongSession(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.SessionID = testSessionID(t) // different session
@@ -140,6 +145,7 @@ func TestGuardRejectsWrongSession(t *testing.T) {
 }
 
 func TestGuardRejectsUnauthenticatedTransport(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.Security.Authenticated = false
@@ -150,6 +156,7 @@ func TestGuardRejectsUnauthenticatedTransport(t *testing.T) {
 }
 
 func TestGuardRejectsSenderSpoofing(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.Security.AuthenticatedParty = 3 // transport says it's party 3, but env.From is 2
@@ -160,6 +167,7 @@ func TestGuardRejectsSenderSpoofing(t *testing.T) {
 }
 
 func TestGuardRejectsUnknownSender(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.From = 99 // not in party set
@@ -171,6 +179,7 @@ func TestGuardRejectsUnknownSender(t *testing.T) {
 }
 
 func TestGuardRejectsWrongRecipient(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 3) // directed to party 3, but self is 1
 	err := env.guard.Validate(e)
@@ -180,6 +189,7 @@ func TestGuardRejectsWrongRecipient(t *testing.T) {
 }
 
 func TestGuardRejectsBroadcastAsDirect(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 0) // To==0 but policy says DeliveryDirect
 	err := env.guard.Validate(e)
@@ -189,6 +199,7 @@ func TestGuardRejectsBroadcastAsDirect(t *testing.T) {
 }
 
 func TestGuardRejectsDirectAsBroadcast(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.plain", 1) // To!=0 but policy says DeliveryBroadcast
 	err := env.guard.Validate(e)
@@ -198,6 +209,7 @@ func TestGuardRejectsDirectAsBroadcast(t *testing.T) {
 }
 
 func TestGuardRejectsPlaintextConfidentialMessage(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.confidential", 1)
 	e.Security.Confidential = false // policy requires confidential
@@ -208,6 +220,7 @@ func TestGuardRejectsPlaintextConfidentialMessage(t *testing.T) {
 }
 
 func TestGuardRejectsUnexpectedConfidentiality(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.Security.Confidential = true // policy forbids confidential
@@ -218,6 +231,7 @@ func TestGuardRejectsUnexpectedConfidentiality(t *testing.T) {
 }
 
 func TestGuardDropsDuplicate(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	if err := env.guard.Validate(e); err != nil {
@@ -231,6 +245,7 @@ func TestGuardDropsDuplicate(t *testing.T) {
 }
 
 func TestGuardRejectsTamperedTranscript(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	e.Payload = []byte("tampered-payload") // change payload but keep old hash
@@ -241,6 +256,7 @@ func TestGuardRejectsTamperedTranscript(t *testing.T) {
 }
 
 func TestGuardRejectsUnknownPayloadPolicy(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.unknown.type", 1)
 	e = e.RecomputeTranscriptHash()
@@ -251,6 +267,7 @@ func TestGuardRejectsUnknownPayloadPolicy(t *testing.T) {
 }
 
 func TestGuardRejectsMissingBroadcastCertificate(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.cert", 0)
 	e.Broadcast = nil // policy requires certificate
@@ -261,6 +278,7 @@ func TestGuardRejectsMissingBroadcastCertificate(t *testing.T) {
 }
 
 func TestGuardAcceptsValidDirectMessage(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.plain", 1)
 	if err := env.guard.Validate(e); err != nil {
@@ -269,6 +287,7 @@ func TestGuardAcceptsValidDirectMessage(t *testing.T) {
 }
 
 func TestGuardAcceptsValidBroadcastMessage(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.plain", 0)
 	if err := env.guard.Validate(e); err != nil {
@@ -277,6 +296,7 @@ func TestGuardAcceptsValidBroadcastMessage(t *testing.T) {
 }
 
 func TestGuardAcceptsValidConfidentialMessage(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.direct.confidential", 1)
 	e.Security.Confidential = true
@@ -286,6 +306,7 @@ func TestGuardAcceptsValidConfidentialMessage(t *testing.T) {
 }
 
 func TestGuardAcceptsBroadcastWithValidCertificate(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.cert", 0)
 	payloadHash := sha256Sum(e.Payload)
@@ -311,6 +332,7 @@ func TestGuardAcceptsBroadcastWithValidCertificate(t *testing.T) {
 }
 
 func TestBroadcastRejectsIncompleteAckSet(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.cert", 0)
 	payloadHash := sha256Sum(e.Payload)
@@ -336,6 +358,7 @@ func TestBroadcastRejectsIncompleteAckSet(t *testing.T) {
 }
 
 func TestBroadcastRejectsWrongDigestAck(t *testing.T) {
+	t.Parallel()
 	env := newGuardTestEnv(t)
 	e := env.envelope(t, "test.broadcast.cert", 0)
 	payloadHash := sha256Sum(e.Payload)
@@ -365,6 +388,7 @@ func TestBroadcastRejectsWrongDigestAck(t *testing.T) {
 // --- ValidateEnvelopePolicy tests ---
 
 func TestValidateEnvelopePolicyRejectsUnknownPayloadType(t *testing.T) {
+	t.Parallel()
 	env := testEnvelope("test-proto", 1, "test.unknown.payload", 2, 0)
 	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
 	if !errors.Is(err, ErrUnknownPayloadPolicy) {
@@ -373,6 +397,7 @@ func TestValidateEnvelopePolicyRejectsUnknownPayloadType(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyRejectsDirectAsBroadcast(t *testing.T) {
+	t.Parallel()
 	// Direct-only payload sent with To=0 (broadcast) should fail.
 	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 0)
 	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
@@ -382,6 +407,7 @@ func TestValidateEnvelopePolicyRejectsDirectAsBroadcast(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyRejectsBroadcastAsDirect(t *testing.T) {
+	t.Parallel()
 	// Broadcast-only payload sent with To!=0 should fail.
 	env := testEnvelope("test-proto", 1, "test.broadcast.plain", 2, 1)
 	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
@@ -391,6 +417,7 @@ func TestValidateEnvelopePolicyRejectsBroadcastAsDirect(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyRejectsWrongRecipient(t *testing.T) {
+	t.Parallel()
 	// Direct message addressed to wrong party.
 	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 3)
 	err := ValidateEnvelopePolicy(env, 1, testPolicySet())
@@ -400,6 +427,7 @@ func TestValidateEnvelopePolicyRejectsWrongRecipient(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyRejectsMissingConfidentiality(t *testing.T) {
+	t.Parallel()
 	// Confidential-required payload with Confidential=false.
 	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 1)
 	env.Security.Authenticated = true
@@ -411,6 +439,7 @@ func TestValidateEnvelopePolicyRejectsMissingConfidentiality(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyRejectsUnexpectedConfidentiality(t *testing.T) {
+	t.Parallel()
 	// Confidential-forbidden payload with Confidential=true.
 	env := testEnvelope("test-proto", 1, "test.direct.plain", 2, 1)
 	env.Security.Authenticated = true
@@ -422,6 +451,7 @@ func TestValidateEnvelopePolicyRejectsUnexpectedConfidentiality(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyAllowsDirectConfidential(t *testing.T) {
+	t.Parallel()
 	// Correct direct+confidential should pass.
 	env := testEnvelope("test-proto", 1, "test.direct.confidential", 2, 1)
 	env.Security.Authenticated = true
@@ -432,6 +462,7 @@ func TestValidateEnvelopePolicyAllowsDirectConfidential(t *testing.T) {
 }
 
 func TestValidateEnvelopePolicyAllowsBroadcast(t *testing.T) {
+	t.Parallel()
 	env := testEnvelope("test-proto", 1, "test.broadcast.plain", 2, 0)
 	if err := ValidateEnvelopePolicy(env, 1, testPolicySet()); err != nil {
 		t.Fatalf("expected nil, got %v", err)
@@ -449,5 +480,247 @@ func testEnvelope(protocol ProtocolID, round uint8, payloadType PayloadType, fro
 		To:          to,
 		PayloadType: payloadType,
 		Payload:     []byte("test"),
+	}
+}
+
+func TestMustNewPolicySetPanicsOnDuplicate(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("MustNewPolicySet should panic on duplicate")
+		}
+	}()
+	MustNewPolicySet(
+		DeliveryPolicy{Protocol: "p", Round: 1, PayloadType: "a", Mode: DeliveryDirect},
+		DeliveryPolicy{Protocol: "p", Round: 1, PayloadType: "a", Mode: DeliveryDirect},
+	)
+}
+
+func TestMustNewPolicySetPanicsOnBroadcastWithoutConsistency(t *testing.T) {
+	t.Parallel()
+	defer func() {
+		if r := recover(); r == nil {
+			t.Fatal("MustNewPolicySet should panic when broadcast lacks consistency")
+		}
+	}()
+	MustNewPolicySet(
+		DeliveryPolicy{Protocol: "p", Round: 1, PayloadType: "b", Mode: DeliveryBroadcast, BroadcastConsistency: BroadcastConsistencyNone},
+	)
+}
+
+func TestPolicySetEntriesReturnsCopy(t *testing.T) {
+	t.Parallel()
+	ps := testPolicySet()
+	entries := ps.Entries()
+	// Mutating the returned slice must not affect the policy set.
+	entries[0] = DeliveryPolicy{}
+	entries2 := ps.Entries()
+	if entries2[0].Protocol == "" {
+		t.Fatal("Entries() returned a shared mutable slice")
+	}
+}
+
+func TestPolicySetMatchRejectsNilIndex(t *testing.T) {
+	t.Parallel()
+	ps := PolicySet{}
+	_, err := ps.Match("test", 1, "payload")
+	if !errors.Is(err, ErrUnknownPayloadPolicy) {
+		t.Fatalf("expected ErrUnknownPayloadPolicy for uninitialized PolicySet, got %v", err)
+	}
+}
+
+func TestValidateBroadcastConsistency(t *testing.T) {
+	t.Parallel()
+	// testPolicySet has a broadcast policy without consistency → ValidateBroadcastConsistency should fail.
+	ps := testPolicySet()
+	if err := ps.ValidateBroadcastConsistency(); err == nil {
+		t.Fatal("testPolicySet has a broadcast policy without BroadcastConsistencyRequired — should fail validation")
+	}
+	// Create a valid policy set with all broadcasts requiring consistency.
+	valid, err := NewPolicySet(
+		DeliveryPolicy{Protocol: "p", Round: 1, PayloadType: "direct", Mode: DeliveryDirect},
+		DeliveryPolicy{Protocol: "p", Round: 1, PayloadType: "bc", Mode: DeliveryBroadcast, BroadcastConsistency: BroadcastConsistencyRequired},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := valid.ValidateBroadcastConsistency(); err != nil {
+		t.Fatalf("all broadcasts require consistency — should pass: %v", err)
+	}
+}
+
+func TestTestGuardConfig(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	cfg := TestGuardConfig(1, PartySet{1, 2}, "test-proto", sid, testPolicySet())
+	if cfg.Self != 1 {
+		t.Fatal("Self mismatch")
+	}
+	if cfg.Cache == nil {
+		t.Fatal("Cache must be non-nil")
+	}
+	if cfg.Parties[0] != 1 {
+		t.Fatal("Parties mismatch")
+	}
+}
+
+func TestBuildGuardRejectsNilAckVerifier(t *testing.T) {
+	t.Parallel()
+	cfg := GuardConfig{
+		Self:      1,
+		Parties:   PartySet{1, 2, 3},
+		Protocol:  "test-proto",
+		SessionID: testSessionID(t),
+		Policies:  testPolicySet(),
+		Cache:     NewInMemoryReplayCache(),
+		// AckVerifier intentionally nil
+	}
+	_, err := cfg.BuildGuard()
+	if !errors.Is(err, ErrMissingAckVerifier) {
+		t.Fatalf("expected ErrMissingAckVerifier, got %v", err)
+	}
+}
+
+func TestBuildGuardSucceedsWithValidConfig(t *testing.T) {
+	t.Parallel()
+	cfg := GuardConfig{
+		Self:        1,
+		Parties:     PartySet{1, 2, 3},
+		Protocol:    "test-proto",
+		SessionID:   testSessionID(t),
+		Policies:    testPolicySet(),
+		Cache:       NewInMemoryReplayCache(),
+		AckVerifier: NewInMemoryAckVerifier(nil),
+	}
+	g, err := cfg.BuildGuard()
+	if err != nil {
+		t.Fatalf("BuildGuard failed: %v", err)
+	}
+	if g == nil {
+		t.Fatal("BuildGuard returned nil guard")
+	}
+	if g.AckVerifier == nil {
+		t.Fatal("BuildGuard did not wire AckVerifier")
+	}
+}
+
+func TestValidateInboundNilGuard(t *testing.T) {
+	t.Parallel()
+	env := testEnvelope("test-proto", 1, "test.direct.plain", 2, 1)
+	err := ValidateInbound(nil, env, "test-proto", SessionID{1}, PartySet{1, 2, 3}, 1)
+	if !errors.Is(err, ErrMissingEnvelopeGuard) {
+		t.Fatalf("expected ErrMissingEnvelopeGuard, got %v", err)
+	}
+}
+
+func TestValidateInboundWrongProtocol(t *testing.T) {
+	t.Parallel()
+	env := newGuardTestEnv(t)
+	e := env.envelope(t, "test.direct.plain", 1)
+	err := ValidateInbound(env.guard, e, "wrong-proto", env.sessionID, PartySet{1, 2, 3}, 1)
+	if err == nil {
+		t.Fatal("expected error for wrong protocol")
+	}
+}
+
+func TestValidateInboundWrongSession(t *testing.T) {
+	t.Parallel()
+	env := newGuardTestEnv(t)
+	e := env.envelope(t, "test.direct.plain", 1)
+	wrongSID := testSessionID(t)
+	err := ValidateInbound(env.guard, e, "test-proto", wrongSID, PartySet{1, 2, 3}, 1)
+	if err == nil {
+		t.Fatal("expected error for wrong session")
+	}
+}
+
+func TestOpenEnvelopeRoundTrip(t *testing.T) {
+	t.Parallel()
+	session, _ := NewSessionID(nil)
+	env, err := NewEnvelope(EnvelopeInput{
+		Protocol:    "test",
+		Version:     Version,
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		PayloadType: "payload",
+		Payload:     []byte("hello"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	opened, err := OpenEnvelope(raw, SecurityContext{Authenticated: true, AuthenticatedParty: 1}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if opened.Protocol != env.Protocol || opened.SessionID != env.SessionID {
+		t.Fatal("OpenEnvelope field mismatch")
+	}
+}
+
+func TestOpenEnvelopeRejectsMalformed(t *testing.T) {
+	t.Parallel()
+	if _, err := OpenEnvelope([]byte("not-valid"), SecurityContext{}, nil); err == nil {
+		t.Fatal("OpenEnvelope accepted malformed input")
+	}
+}
+
+func TestMarshalEnvelopeWithLimits(t *testing.T) {
+	t.Parallel()
+	session, _ := NewSessionID(nil)
+	env, err := NewEnvelope(EnvelopeInput{
+		Protocol:    "test",
+		Version:     Version,
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		PayloadType: "payload",
+		Payload:     []byte("hello"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := EnvelopeLimits{
+		MaxBytes:             65536,
+		MaxProtocolNameBytes: 32,
+		MaxPayloadTypeBytes:  64,
+		MaxPayloadBytes:      65536,
+	}
+	raw, err := MarshalEnvelopeWithLimits(env, limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(raw) == 0 {
+		t.Fatal("MarshalEnvelopeWithLimits returned empty")
+	}
+}
+
+func TestMarshalEnvelopeWithLimitsExceeded(t *testing.T) {
+	t.Parallel()
+	session, _ := NewSessionID(nil)
+	env, err := NewEnvelope(EnvelopeInput{
+		Protocol:    "test",
+		Version:     Version,
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		PayloadType: "payload",
+		Payload:     make([]byte, 100),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := EnvelopeLimits{
+		MaxBytes:             10,
+		MaxProtocolNameBytes: 32,
+		MaxPayloadTypeBytes:  64,
+		MaxPayloadBytes:      10,
+	}
+	if _, err := MarshalEnvelopeWithLimits(env, limits); err == nil {
+		t.Fatal("MarshalEnvelopeWithLimits should reject oversized envelope")
 	}
 }

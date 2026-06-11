@@ -195,6 +195,7 @@ func (e *testError) Error() string { return e.msg }
 // ---- tests ------------------------------------------------------------------
 
 func TestCodecMarshalRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := simpleMessage{
 		Name:  "hello",
 		Count: 42,
@@ -216,6 +217,7 @@ func TestCodecMarshalRoundTrip(t *testing.T) {
 }
 
 func TestMarshalRoundTripPointer(t *testing.T) {
+	t.Parallel()
 	orig := &simpleMessage{
 		Name:  "world",
 		Count: 99,
@@ -237,6 +239,7 @@ func TestMarshalRoundTripPointer(t *testing.T) {
 }
 
 func TestMarshalPointerReceiverMethods(t *testing.T) {
+	t.Parallel()
 	// Message implemented on *ptrMethodMessage — must work with Marshal(&m)
 	orig := &ptrMethodMessage{Value: 7}
 	raw, err := Marshal(orig)
@@ -255,6 +258,7 @@ func TestMarshalPointerReceiverMethods(t *testing.T) {
 }
 
 func TestMarshalCanonicalRemarshal(t *testing.T) {
+	t.Parallel()
 	orig := simpleMessage{Name: "x", Count: 1, Data: []byte{0xff}}
 	raw1, err := Marshal(orig)
 	if err != nil {
@@ -270,6 +274,7 @@ func TestMarshalCanonicalRemarshal(t *testing.T) {
 }
 
 func TestMarshalNilBytesEncodesEmpty(t *testing.T) {
+	t.Parallel()
 	orig := emptyBytesMessage{Data: nil}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -285,6 +290,7 @@ func TestMarshalNilBytesEncodesEmpty(t *testing.T) {
 }
 
 func TestUnmarshalWrongTypeID(t *testing.T) {
+	t.Parallel()
 	orig := simpleMessage{Name: "x", Count: 1}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -298,6 +304,7 @@ func TestUnmarshalWrongTypeID(t *testing.T) {
 }
 
 func TestUnmarshalWrongVersion(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: Uint16(99)},
 	}
@@ -312,6 +319,7 @@ func TestUnmarshalWrongVersion(t *testing.T) {
 }
 
 func TestUnmarshalMissingField(t *testing.T) {
+	t.Parallel()
 	// Construct a message with only tag 1, missing tag 2 and 3.
 	fields := []Field{
 		{Tag: 1, Value: []byte("x")},
@@ -327,6 +335,7 @@ func TestUnmarshalMissingField(t *testing.T) {
 }
 
 func TestUnmarshalExtraField(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte("x")},
 		{Tag: 2, Value: Uint32(1)},
@@ -344,6 +353,7 @@ func TestUnmarshalExtraField(t *testing.T) {
 }
 
 func TestUnmarshalRejectsNilDst(t *testing.T) {
+	t.Parallel()
 	var dst *simpleMessage
 	if err := Unmarshal([]byte("junk"), dst); err == nil {
 		t.Fatal("expected error for nil dst")
@@ -351,6 +361,7 @@ func TestUnmarshalRejectsNilDst(t *testing.T) {
 }
 
 func TestMarshalRejectsNilPointer(t *testing.T) {
+	t.Parallel()
 	var m *simpleMessage
 	if _, err := Marshal(m); err == nil {
 		t.Fatal("expected error for nil pointer")
@@ -358,12 +369,14 @@ func TestMarshalRejectsNilPointer(t *testing.T) {
 }
 
 func TestMarshalRejectsNonStruct(t *testing.T) {
+	t.Parallel()
 	if _, err := Marshal(42); err == nil {
 		t.Fatal("expected error for int")
 	}
 }
 
 func TestUnmarshalRejectsNonPointer(t *testing.T) {
+	t.Parallel()
 	var dst simpleMessage
 	if err := Unmarshal(nil, dst); err == nil {
 		t.Fatal("expected error for non-pointer dst")
@@ -371,6 +384,7 @@ func TestUnmarshalRejectsNonPointer(t *testing.T) {
 }
 
 func TestFixedLenEnforced(t *testing.T) {
+	t.Parallel()
 	orig := fixedLenMessage{Hash: make([]byte, 32)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -383,6 +397,7 @@ func TestFixedLenEnforced(t *testing.T) {
 }
 
 func TestFixedLenRejected(t *testing.T) {
+	t.Parallel()
 	orig := fixedLenMessage{Hash: make([]byte, 31)}
 	if _, err := Marshal(orig); err != nil {
 		t.Fatal("marshal should not reject wrong length (only unmarshal)")
@@ -400,6 +415,7 @@ func TestFixedLenRejected(t *testing.T) {
 }
 
 func TestBoolEncodeDecode(t *testing.T) {
+	t.Parallel()
 	for _, v := range []bool{true, false} {
 		orig := boolMessage{Flag: v}
 		raw, err := Marshal(orig)
@@ -417,6 +433,7 @@ func TestBoolEncodeDecode(t *testing.T) {
 }
 
 func TestMaxBytesEnforcedDecode(t *testing.T) {
+	t.Parallel()
 	orig := maxBytesMessage{Payload: []byte("hello")}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -432,6 +449,7 @@ func TestMaxBytesEnforcedDecode(t *testing.T) {
 }
 
 func TestMaxBytesOkWhenUnderLimit(t *testing.T) {
+	t.Parallel()
 	orig := maxBytesMessage{Payload: []byte("hi")}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -445,6 +463,7 @@ func TestMaxBytesOkWhenUnderLimit(t *testing.T) {
 }
 
 func TestCodecU32List(t *testing.T) {
+	t.Parallel()
 	orig := u32ListMessage{IDs: []uint32{1, 2, 3}}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -461,6 +480,7 @@ func TestCodecU32List(t *testing.T) {
 }
 
 func TestU32ListMaxItems(t *testing.T) {
+	t.Parallel()
 	orig := u32ListMessage{IDs: []uint32{1, 2, 3, 4, 5}}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -475,6 +495,7 @@ func TestU32ListMaxItems(t *testing.T) {
 }
 
 func TestCodecBytesList(t *testing.T) {
+	t.Parallel()
 	orig := bytesListMessage{Items: [][]byte{{1, 2}, {3, 4, 5}}}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
@@ -491,6 +512,7 @@ func TestCodecBytesList(t *testing.T) {
 }
 
 func TestPartyBytesEncodeDecode(t *testing.T) {
+	t.Parallel()
 	orig := partyBytesMessage{
 		Records: []PartyBytes[uint32]{
 			{Party: 1, Bytes: []byte("aaa")},
@@ -515,6 +537,7 @@ func TestPartyBytesEncodeDecode(t *testing.T) {
 }
 
 func TestPartyBytePairsEncodeDecode(t *testing.T) {
+	t.Parallel()
 	orig := partyBytePairsMessage{
 		Pairs: []PartyBytePair[uint32]{
 			{Party: 1, First: []byte{1}, Second: []byte{2}},
@@ -539,6 +562,7 @@ func TestPartyBytePairsEncodeDecode(t *testing.T) {
 }
 
 func TestNestedEncodeDecode(t *testing.T) {
+	t.Parallel()
 	orig := nestedMessage{
 		Inner: simpleMessage{Name: "nested", Count: 7, Data: []byte{9}},
 		Tag:   42,
@@ -557,6 +581,7 @@ func TestNestedEncodeDecode(t *testing.T) {
 }
 
 func TestValidateCalledOnMarshal(t *testing.T) {
+	t.Parallel()
 	m := validatedMessage{Value: []byte{1}, ok: false} // invalid
 	if _, err := Marshal(&m); err == nil {
 		t.Fatal("expected validation error on marshal")
@@ -568,6 +593,7 @@ func TestValidateCalledOnMarshal(t *testing.T) {
 }
 
 func TestValidateCalledOnUnmarshal(t *testing.T) {
+	t.Parallel()
 	// Marshal a valid message.
 	m := validatedMessage{Value: []byte{1}, ok: true}
 	raw, err := Marshal(&m)
@@ -582,6 +608,7 @@ func TestValidateCalledOnUnmarshal(t *testing.T) {
 }
 
 func TestHooksCalled(t *testing.T) {
+	t.Parallel()
 	m := hookMessage{Value: 5}
 	raw, err := Marshal(&m)
 	if err != nil {
@@ -604,6 +631,7 @@ func TestHooksCalled(t *testing.T) {
 }
 
 func TestInvalidUTF8StringRejected(t *testing.T) {
+	t.Parallel()
 	// Build raw bytes with invalid UTF-8 for a string field.
 	fields := []Field{
 		{Tag: 1, Value: []byte{0xff, 0xfe, 0xfd}}, // invalid UTF-8
@@ -621,6 +649,7 @@ func TestInvalidUTF8StringRejected(t *testing.T) {
 }
 
 func TestMissingLimitNameError(t *testing.T) {
+	t.Parallel()
 	orig := maxBytesMessage{Payload: []byte("hi")}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -635,6 +664,7 @@ func TestMissingLimitNameError(t *testing.T) {
 }
 
 func TestMalformedU8(t *testing.T) {
+	t.Parallel()
 	raw := []byte{0xff, 0xff} // 2 bytes for u8
 	fields := []Field{
 		{Tag: 1, Value: raw},
@@ -650,6 +680,7 @@ func TestMalformedU8(t *testing.T) {
 }
 
 func TestNilBytesListRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := bytesListMessage{Items: nil}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
@@ -666,6 +697,7 @@ func TestNilBytesListRoundTrip(t *testing.T) {
 }
 
 func TestEmptyPartyBytesRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := partyBytesMessage{}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
@@ -682,6 +714,7 @@ func TestEmptyPartyBytesRoundTrip(t *testing.T) {
 }
 
 func TestUnmarshalInvalidUTF8String(t *testing.T) {
+	t.Parallel()
 	// Directly inject raw bytes that are not UTF-8.
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x80}}, // continuation byte alone
@@ -699,6 +732,7 @@ func TestUnmarshalInvalidUTF8String(t *testing.T) {
 }
 
 func TestMessageWireTypeAndVersion(t *testing.T) {
+	t.Parallel()
 	// Ensure interface assertions work.
 	var m Message = &ptrMethodMessage{}
 	if m.WireType() != "test.ptrmethod" || m.WireVersion() != 2 {
@@ -854,6 +888,7 @@ func (m customMultiFieldMessage) WireVersion() uint16 { return 1 }
 // ---- custom field tests ------------------------------------------------------
 
 func TestCustomRoundTripValueReceiver(t *testing.T) {
+	t.Parallel()
 	orig := customValueReceiverMessage{
 		Data: customBytes{raw: []byte{1, 2, 3, 4}},
 	}
@@ -872,6 +907,7 @@ func TestCustomRoundTripValueReceiver(t *testing.T) {
 }
 
 func TestCustomRoundTripPointerReceiver(t *testing.T) {
+	t.Parallel()
 	orig := customPointerReceiverMessage{
 		Data: customPtrBytes{raw: []byte{5, 6, 7, 8}},
 	}
@@ -890,6 +926,7 @@ func TestCustomRoundTripPointerReceiver(t *testing.T) {
 }
 
 func TestCustomPointerFieldAutoAlloc(t *testing.T) {
+	t.Parallel()
 	orig := customPointerFieldMessage{
 		Data: &customBytes{raw: []byte{9, 9, 9, 9}},
 	}
@@ -912,6 +949,7 @@ func TestCustomPointerFieldAutoAlloc(t *testing.T) {
 }
 
 func TestCustomNilPointerMarshalFails(t *testing.T) {
+	t.Parallel()
 	orig := customPointerFieldMessage{Data: nil}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for nil custom pointer field")
@@ -919,6 +957,7 @@ func TestCustomNilPointerMarshalFails(t *testing.T) {
 }
 
 func TestCustomMissingMarshalWireValue(t *testing.T) {
+	t.Parallel()
 	// customNoMarshalMessage.Data does not implement MarshalWireValue.
 	// But we can still try to marshal it — should fail.
 	orig := customNoMarshalMessage{}
@@ -928,6 +967,7 @@ func TestCustomMissingMarshalWireValue(t *testing.T) {
 }
 
 func TestCustomMissingUnmarshalWireValue(t *testing.T) {
+	t.Parallel()
 	// customNoUnmarshalMessage.Data does not implement UnmarshalWireValue.
 	// Marshal should work, but unmarshal should fail.
 	orig := customNoUnmarshalMessage{Data: customNoUnmarshal{raw: []byte{1}}}
@@ -942,6 +982,7 @@ func TestCustomMissingUnmarshalWireValue(t *testing.T) {
 }
 
 func TestCustomMarshalWireValueReturnsNil(t *testing.T) {
+	t.Parallel()
 	orig := customNilReturnMessage{}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for MarshalWireValue returning nil")
@@ -949,6 +990,7 @@ func TestCustomMarshalWireValueReturnsNil(t *testing.T) {
 }
 
 func TestCustomFixedLenEnforced(t *testing.T) {
+	t.Parallel()
 	// Marshal with correct length.
 	orig := customFixedLenMessage{Data: customBytes{raw: make([]byte, 32)}}
 	raw, err := Marshal(orig)
@@ -975,6 +1017,7 @@ func TestCustomFixedLenEnforced(t *testing.T) {
 }
 
 func TestCustomMaxBytesEnforced(t *testing.T) {
+	t.Parallel()
 	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hello")}}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
@@ -996,6 +1039,7 @@ func TestCustomMaxBytesEnforced(t *testing.T) {
 }
 
 func TestCustomMaxBytesNamedLimitMissing(t *testing.T) {
+	t.Parallel()
 	orig := customMaxBytesMessage{Data: customBytes{raw: []byte("hi")}}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(testFieldLimits()))
 	if err != nil {
@@ -1010,6 +1054,7 @@ func TestCustomMaxBytesNamedLimitMissing(t *testing.T) {
 }
 
 func TestCustomValueWithPointerReceiver(t *testing.T) {
+	t.Parallel()
 	// customPtrBytes has pointer-receiver methods.
 	// A non-pointer struct field should still work via CanAddr()
 	// when the parent message is passed by pointer.
@@ -1030,6 +1075,7 @@ func TestCustomValueWithPointerReceiver(t *testing.T) {
 }
 
 func TestCustomErrorWrapping(t *testing.T) {
+	t.Parallel()
 	// Trigger an error in UnmarshalWireValue by passing empty bytes
 	// to customBytes (which rejects empty input with errSentinel).
 	fields := []Field{
@@ -1052,6 +1098,7 @@ func TestCustomErrorWrapping(t *testing.T) {
 }
 
 func TestCustomFieldOrdering(t *testing.T) {
+	t.Parallel()
 	orig := customMultiFieldMessage{
 		First:  customBytes{raw: []byte{1, 2}},
 		Second: 42,
@@ -1070,6 +1117,7 @@ func TestCustomFieldOrdering(t *testing.T) {
 }
 
 func TestCustomExactTagSet(t *testing.T) {
+	t.Parallel()
 	// Extra tag should be rejected.
 	fields := []Field{
 		{Tag: 1, Value: []byte{1}},
@@ -1166,6 +1214,7 @@ func (m bigIntMultiFieldMessage) WireVersion() uint16 { return 1 }
 // ---- bigint tests ------------------------------------------------------------
 
 func TestBigIntRoundTripZero(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: big.NewInt(0)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1181,6 +1230,7 @@ func TestBigIntRoundTripZero(t *testing.T) {
 }
 
 func TestBigIntRoundTripPositive(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: big.NewInt(258)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1196,6 +1246,7 @@ func TestBigIntRoundTripPositive(t *testing.T) {
 }
 
 func TestBigIntRoundTripNegative(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: big.NewInt(-258)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1211,6 +1262,7 @@ func TestBigIntRoundTripNegative(t *testing.T) {
 }
 
 func TestBigIntNilPointerIsZero(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: nil}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1227,6 +1279,7 @@ func TestBigIntNilPointerIsZero(t *testing.T) {
 }
 
 func TestBigIntCanonicalEncoding(t *testing.T) {
+	t.Parallel()
 	// Zero must encode as [0x00].
 	raw0, err := encodeBigIntSigned(big.NewInt(0))
 	if err != nil {
@@ -1254,6 +1307,7 @@ func TestBigIntCanonicalEncoding(t *testing.T) {
 }
 
 func TestBigIntCanonicalRemarshal(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: big.NewInt(12345)}
 	raw1, err := Marshal(orig)
 	if err != nil {
@@ -1269,6 +1323,7 @@ func TestBigIntCanonicalRemarshal(t *testing.T) {
 }
 
 func TestBigIntRejectInvalidSignByte(t *testing.T) {
+	t.Parallel()
 	// Construct a bigint with invalid sign byte 0x02.
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x02, 0x01}},
@@ -1284,6 +1339,7 @@ func TestBigIntRejectInvalidSignByte(t *testing.T) {
 }
 
 func TestBigIntRejectNegativeZero(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x01}}, // sign=negative, empty magnitude
 	}
@@ -1298,6 +1354,7 @@ func TestBigIntRejectNegativeZero(t *testing.T) {
 }
 
 func TestBigIntRejectLeadingZeroMagnitude(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x00, 0x00, 0x01}}, // leading zero in magnitude
 	}
@@ -1312,6 +1369,7 @@ func TestBigIntRejectLeadingZeroMagnitude(t *testing.T) {
 }
 
 func TestBigIntRejectEmptyEncoding(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{}}, // empty signed integer
 	}
@@ -1326,6 +1384,7 @@ func TestBigIntRejectEmptyEncoding(t *testing.T) {
 }
 
 func TestBigIntPointerAutoAlloc(t *testing.T) {
+	t.Parallel()
 	orig := bigIntSignedMessage{Val: big.NewInt(42)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1345,6 +1404,7 @@ func TestBigIntPointerAutoAlloc(t *testing.T) {
 }
 
 func TestBigIntValueField(t *testing.T) {
+	t.Parallel()
 	orig := bigIntValueMessage{}
 	orig.Val.SetInt64(-999)
 	raw, err := Marshal(orig)
@@ -1363,6 +1423,7 @@ func TestBigIntValueField(t *testing.T) {
 // ---- biguint tests -----------------------------------------------------------
 
 func TestBigUintRoundTripZero(t *testing.T) {
+	t.Parallel()
 	// Zero must encode as empty.
 	orig := bigUintMessage{Val: big.NewInt(0)}
 	raw, err := Marshal(orig)
@@ -1379,6 +1440,7 @@ func TestBigUintRoundTripZero(t *testing.T) {
 }
 
 func TestBigUintRoundTripPositive(t *testing.T) {
+	t.Parallel()
 	orig := bigUintMessage{Val: big.NewInt(258)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1394,6 +1456,7 @@ func TestBigUintRoundTripPositive(t *testing.T) {
 }
 
 func TestBigUintRejectNegative(t *testing.T) {
+	t.Parallel()
 	orig := bigUintMessage{Val: big.NewInt(-1)}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for negative unsigned integer on marshal")
@@ -1401,6 +1464,7 @@ func TestBigUintRejectNegative(t *testing.T) {
 }
 
 func TestBigUintRejectLeadingZero(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x00, 0x01}},
 	}
@@ -1415,6 +1479,7 @@ func TestBigUintRejectLeadingZero(t *testing.T) {
 }
 
 func TestBigUintNilPointerIsZero(t *testing.T) {
+	t.Parallel()
 	orig := bigUintMessage{Val: nil}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1432,6 +1497,7 @@ func TestBigUintNilPointerIsZero(t *testing.T) {
 // ---- bigpos tests ------------------------------------------------------------
 
 func TestBigPosRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := bigPosMessage{Val: big.NewInt(258)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1447,6 +1513,7 @@ func TestBigPosRoundTrip(t *testing.T) {
 }
 
 func TestBigPosRejectNil(t *testing.T) {
+	t.Parallel()
 	orig := bigPosMessage{Val: nil}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for nil positive integer")
@@ -1454,6 +1521,7 @@ func TestBigPosRejectNil(t *testing.T) {
 }
 
 func TestBigPosRejectZero(t *testing.T) {
+	t.Parallel()
 	orig := bigPosMessage{Val: big.NewInt(0)}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for zero positive integer")
@@ -1461,6 +1529,7 @@ func TestBigPosRejectZero(t *testing.T) {
 }
 
 func TestBigPosRejectNegative(t *testing.T) {
+	t.Parallel()
 	orig := bigPosMessage{Val: big.NewInt(-1)}
 	if _, err := Marshal(orig); err == nil {
 		t.Fatal("expected error for negative positive integer")
@@ -1468,6 +1537,7 @@ func TestBigPosRejectNegative(t *testing.T) {
 }
 
 func TestBigPosRejectEmpty(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{}},
 	}
@@ -1482,6 +1552,7 @@ func TestBigPosRejectEmpty(t *testing.T) {
 }
 
 func TestBigPosRejectLeadingZero(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x00, 0x01}},
 	}
@@ -1496,6 +1567,7 @@ func TestBigPosRejectLeadingZero(t *testing.T) {
 }
 
 func TestBigPosPointerAutoAlloc(t *testing.T) {
+	t.Parallel()
 	orig := bigPosMessage{Val: big.NewInt(7)}
 	raw, err := Marshal(orig)
 	if err != nil {
@@ -1516,6 +1588,7 @@ func TestBigPosPointerAutoAlloc(t *testing.T) {
 // ---- general big integer tests -----------------------------------------------
 
 func TestBigIntMaxBytesEnforced(t *testing.T) {
+	t.Parallel()
 	// Encode 258 as bigint -> [0x00, 0x01, 0x02] = 3 bytes.
 	// max_bytes=2 should reject.
 	fields := []Field{
@@ -1537,6 +1610,7 @@ func TestBigIntMaxBytesEnforced(t *testing.T) {
 }
 
 func TestBigIntErrorWrapping(t *testing.T) {
+	t.Parallel()
 	// Trigger a decode error with negative zero for bigint.
 	fields := []Field{
 		{Tag: 1, Value: []byte{0x01}},       // negative zero — invalid
@@ -1557,6 +1631,7 @@ func TestBigIntErrorWrapping(t *testing.T) {
 }
 
 func TestBigIntFieldOrdering(t *testing.T) {
+	t.Parallel()
 	orig := bigIntMultiFieldMessage{
 		Signed: big.NewInt(-5),
 		Pos:    big.NewInt(3),
@@ -1575,6 +1650,7 @@ func TestBigIntFieldOrdering(t *testing.T) {
 }
 
 func TestBigIntWrongKindOnNonBigIntFails(t *testing.T) {
+	t.Parallel()
 	type badType struct {
 		Val string `wire:"1,bigint"`
 	}
@@ -1585,6 +1661,7 @@ func TestBigIntWrongKindOnNonBigIntFails(t *testing.T) {
 }
 
 func TestBigUintWrongKindOnNonBigIntFails(t *testing.T) {
+	t.Parallel()
 	type badType struct {
 		Val string `wire:"1,biguint"`
 	}
@@ -1595,6 +1672,7 @@ func TestBigUintWrongKindOnNonBigIntFails(t *testing.T) {
 }
 
 func TestBigPosWrongKindOnNonBigIntFails(t *testing.T) {
+	t.Parallel()
 	type badType struct {
 		Val string `wire:"1,bigpos"`
 	}
@@ -1646,6 +1724,7 @@ func FuzzBigIntField(f *testing.F) {
 // TestLenMismatchWithArrayLength verifies that len=N is validated against
 // the array length at schema parse time for bytes fields.
 func TestLenMismatchWithArrayLength(t *testing.T) {
+	t.Parallel()
 	// len=10 on a [8]byte field should fail.
 	type badLenArray struct {
 		Val [8]byte `wire:"1,bytes,len=10"`
@@ -1666,6 +1745,7 @@ func TestLenMismatchWithArrayLength(t *testing.T) {
 }
 
 func TestInferredKindRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := inferredMessage{
 		Name:  "test",
 		Count: 42,
@@ -1687,6 +1767,7 @@ func TestInferredKindRoundTrip(t *testing.T) {
 }
 
 func TestNamedTypeInferenceRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := namedInferredMessage{
 		S: "hello",
 		N: 7,
@@ -1707,6 +1788,7 @@ func TestNamedTypeInferenceRoundTrip(t *testing.T) {
 }
 
 func TestInferredWithOptionsRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := inferredWithOptionsMessage{
 		Hash: make([]byte, 32),
 		Name: "test-name",
@@ -1729,6 +1811,7 @@ func TestInferredWithOptionsRoundTrip(t *testing.T) {
 }
 
 func TestInferredKindRejectsWrongType(t *testing.T) {
+	t.Parallel()
 	// Tag-only form for types that cannot be inferred should fail at schema parse time.
 	// big.Int is not auto-inferred — must use explicit kind.
 	// int64 is not in the inference table.
@@ -1742,6 +1825,7 @@ func TestInferredKindRejectsWrongType(t *testing.T) {
 }
 
 func TestStringMaxBytesRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := stringLimitMessage{
 		Name: "short",
 		Code: "ABCD",
@@ -1762,6 +1846,7 @@ func TestStringMaxBytesRoundTrip(t *testing.T) {
 }
 
 func TestStringMaxBytesExceededEncode(t *testing.T) {
+	t.Parallel()
 	ls := FieldLimits{"name": 5}
 	orig := stringLimitMessage{
 		Name: "too-long-name",
@@ -1774,6 +1859,7 @@ func TestStringMaxBytesExceededEncode(t *testing.T) {
 }
 
 func TestStringMaxBytesExceededDecode(t *testing.T) {
+	t.Parallel()
 	// Build a wire message with an over-long string value by using a field-level API.
 	fields := []Field{
 		{Tag: 1, Value: []byte("too-long-name")},
@@ -1797,6 +1883,7 @@ func TestStringMaxBytesExceededDecode(t *testing.T) {
 }
 
 func TestStringLenEncode(t *testing.T) {
+	t.Parallel()
 	orig := stringLimitMessage{
 		Name: "ok",
 		Code: "ABC", // too short for len=4
@@ -1808,6 +1895,7 @@ func TestStringLenEncode(t *testing.T) {
 }
 
 func TestStringLenDecode(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: []byte("ok")},
 		{Tag: 2, Value: []byte("AB")}, // too short for len=4
@@ -1829,6 +1917,7 @@ func TestStringLenDecode(t *testing.T) {
 }
 
 func TestStringLimitInferredRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := stringLimitInferredMessage{
 		Name: "test",
 	}

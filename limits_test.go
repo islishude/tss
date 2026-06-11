@@ -17,6 +17,7 @@ func defaultTestThresholdLimits() ThresholdLimits {
 }
 
 func TestThresholdConfigRejectsTooManyParties(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	limits.MaxParties = 4
 
@@ -31,6 +32,7 @@ func TestThresholdConfigRejectsTooManyParties(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	limits.MaxThreshold = 3
 
@@ -45,6 +47,7 @@ func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
 }
 
 func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
+	t.Parallel()
 	// Default threshold limits are fail-closed: reject 1-of-1.
 	cfg := ThresholdConfig{
 		Threshold: 1,
@@ -72,6 +75,7 @@ func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsThresholdExceedsParties(t *testing.T) {
+	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 4,
 		Parties:   []PartyID{1, 2, 3},
@@ -83,6 +87,7 @@ func TestThresholdConfigRejectsThresholdExceedsParties(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsZeroPartyID(t *testing.T) {
+	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 1,
 		Parties:   []PartyID{0},
@@ -94,6 +99,7 @@ func TestThresholdConfigRejectsZeroPartyID(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsDuplicatePartyIDs(t *testing.T) {
+	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 2,
 		Parties:   []PartyID{1, 2, 1},
@@ -105,6 +111,7 @@ func TestThresholdConfigRejectsDuplicatePartyIDs(t *testing.T) {
 }
 
 func TestThresholdConfigRejectsSelfNotInParties(t *testing.T) {
+	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 2,
 		Parties:   []PartyID{1, 2},
@@ -116,6 +123,7 @@ func TestThresholdConfigRejectsSelfNotInParties(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	limits.MaxSigners = 3
 
@@ -126,6 +134,7 @@ func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 3, []PartyID{1}, limits); err == nil {
@@ -134,6 +143,7 @@ func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 4}, limits); err == nil {
@@ -142,6 +152,7 @@ func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 1}, limits); err == nil {
@@ -150,6 +161,7 @@ func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsEmpty(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	keyParties := []PartyID{1, 2, 3}
 	if err := ValidateSignerSet(keyParties, 2, nil, limits); err == nil {
@@ -158,6 +170,7 @@ func TestValidateSignerSetRejectsEmpty(t *testing.T) {
 }
 
 func TestValidateSignerSetOversizedRequiresAllow(t *testing.T) {
+	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	limits.AllowOversizedSignerSet = false
 	keyParties := []PartyID{1, 2, 3, 4}
@@ -172,6 +185,7 @@ func TestValidateSignerSetOversizedRequiresAllow(t *testing.T) {
 }
 
 func TestDefaultThresholdLimitsIsFailClosed(t *testing.T) {
+	t.Parallel()
 	l := defaultTestThresholdLimits()
 	if l.MinProductionThreshold != 2 {
 		t.Errorf("MinProductionThreshold: got %d, want 2", l.MinProductionThreshold)
@@ -185,6 +199,7 @@ func TestDefaultThresholdLimitsIsFailClosed(t *testing.T) {
 }
 
 func TestDefaultThresholdLimitsRejectsBelowMinThreshold(t *testing.T) {
+	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 1,
 		Parties:   []PartyID{1, 2},

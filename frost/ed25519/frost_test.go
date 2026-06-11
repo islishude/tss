@@ -40,6 +40,7 @@ func deliverEnv(env tss.Envelope) tss.Envelope {
 }
 
 func TestFROSTSignScenarios(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		threshold int
@@ -68,6 +69,7 @@ func TestFROSTSignScenarios(t *testing.T) {
 }
 
 func TestFROSTKeyShareRoundTrip(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -83,6 +85,7 @@ func TestFROSTKeyShareRoundTrip(t *testing.T) {
 }
 
 func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -108,6 +111,7 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 }
 
 func TestFROSTRejectsConflictingCommitment(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -139,6 +143,7 @@ func TestFROSTRejectsConflictingCommitment(t *testing.T) {
 }
 
 func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
+	t.Parallel()
 	sessions, round2 := frostSigningRound2(t, 2, 3, []tss.PartyID{1, 2, 3}, []byte("msg"))
 	var partialFrom2 tss.Envelope
 	for _, env := range round2 {
@@ -161,6 +166,7 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 }
 
 func TestFROSTRejectsConflictingPartial(t *testing.T) {
+	t.Parallel()
 	sessions, round2 := frostSigningRound2(t, 2, 3, []tss.PartyID{1, 2, 3}, []byte("msg"))
 	var partialFrom2, partialFrom3 tss.Envelope
 	for _, env := range round2 {
@@ -187,6 +193,7 @@ func TestFROSTRejectsConflictingPartial(t *testing.T) {
 }
 
 func TestFROSTConcurrentMessageHandling(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -220,6 +227,7 @@ func TestFROSTConcurrentMessageHandling(t *testing.T) {
 }
 
 func TestFROSTBlamesBadPartial(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -281,6 +289,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 }
 
 func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -314,6 +323,7 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 }
 
 func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -362,6 +372,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestFROSTSessionStateIsMonotonic(t *testing.T) {
+	t.Parallel()
 	t.Run("completed keygen rejects messages", func(t *testing.T) {
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
@@ -584,6 +595,7 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, m
 }
 
 func TestFROSTReshareMembershipChange(t *testing.T) {
+	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
 
 	t.Run("add party", func(t *testing.T) {
@@ -839,6 +851,7 @@ func collectReshareShares(t *testing.T, parties []tss.PartyID, sessions map[tss.
 }
 
 func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		threshold int
@@ -945,6 +958,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 }
 
 func TestFROSTStartRefreshConvenience(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -987,6 +1001,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 }
 
 func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	share := shares[1]
 
@@ -1041,6 +1056,7 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 }
 
 func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
+	t.Parallel()
 	// Identity point: canonical Ed25519 encoding of y=1.
 	identity := make([]byte, 32)
 	identity[0] = 1
@@ -1114,6 +1130,7 @@ func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
 }
 
 func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
+	t.Parallel()
 	// A round 2 partial from a party whose round 1 commitment hasn't arrived yet
 	// is stored but aggregation does not complete until all commitments arrive.
 	shares := frostKeygen(t, 2, 2)
@@ -1154,6 +1171,7 @@ func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
 }
 
 func TestFROSTSignRejectsNonSigner(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -1176,6 +1194,7 @@ func TestFROSTSignRejectsNonSigner(t *testing.T) {
 }
 
 func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -1205,6 +1224,7 @@ func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
 }
 
 func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

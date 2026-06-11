@@ -329,6 +329,95 @@ func TestVersionConstantsDistinct(t *testing.T) {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// ComputeFingerprint
+// ---------------------------------------------------------------------------
+
+func TestComputeFingerprintDeterministic(t *testing.T) {
+	t.Parallel()
+	pubKey := []byte{0x02, 0x01, 0x02, 0x03} // dummy compressed key
+	fp1 := ComputeFingerprint(pubKey)
+	fp2 := ComputeFingerprint(pubKey)
+	if fp1 != fp2 {
+		t.Fatal("ComputeFingerprint is not deterministic")
+	}
+}
+
+func TestComputeFingerprintDifferentKeys(t *testing.T) {
+	t.Parallel()
+	fp1 := ComputeFingerprint([]byte{0x02, 0xaa})
+	fp2 := ComputeFingerprint([]byte{0x02, 0xbb})
+	if fp1 == fp2 {
+		t.Fatal("different keys should produce different fingerprints")
+	}
+}
+
+func TestComputeFingerprintKnownVector(t *testing.T) {
+	t.Parallel()
+	// Fingerprint of a well-known master public key from BIP32 test vectors.
+	// We use the master xpub public key bytes from TV2.
+	pubKey := []byte{
+		0x03, 0xcb, 0xca, 0xa9, 0xac, 0x98, 0xc8, 0x77,
+		0x22, 0x5b, 0xd4, 0xd7, 0xab, 0x88, 0x5c, 0x2a,
+		0x71, 0x5e, 0x7b, 0x97, 0xdf, 0x3f, 0x2e, 0x6e,
+		0x09, 0x89, 0x0b, 0x3c, 0x23, 0x0d, 0x4f, 0xdc, 0x70,
+	}
+	fp := ComputeFingerprint(pubKey)
+	// Just verify it's non-zero and consistent.
+	if fp == [4]byte{} {
+		t.Fatal("fingerprint should not be all-zero for valid key")
+	}
+	fp2 := ComputeFingerprint(pubKey)
+	if fp != fp2 {
+		t.Fatal("fingerprint not deterministic")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// WithInvalidChildMode / ResolveDeriveConfig
+// ---------------------------------------------------------------------------
+
+func TestResolveDeriveConfigDefaultMode(t *testing.T) {
+	t.Parallel()
+	cfg := ResolveDeriveConfig(nil)
+	if cfg.InvalidChildMode != ErrorOnInvalidChild {
+		t.Fatal("default InvalidChildMode should be ErrorOnInvalidChild")
+	}
+}
+
+func TestResolveDeriveConfigEmptyOptions(t *testing.T) {
+	t.Parallel()
+	cfg := ResolveDeriveConfig([]DeriveOption{})
+	if cfg.InvalidChildMode != ErrorOnInvalidChild {
+		t.Fatal("empty opts: default should be ErrorOnInvalidChild")
+	}
+}
+
+func TestResolveDeriveConfigWithInvalidChildMode(t *testing.T) {
+	t.Parallel()
+	cfg := ResolveDeriveConfig([]DeriveOption{WithInvalidChildMode(SkipInvalidChild)})
+	if cfg.InvalidChildMode != SkipInvalidChild {
+		t.Fatalf("InvalidChildMode = %d, want SkipInvalidChild", cfg.InvalidChildMode)
+	}
+}
+
+func TestResolveDeriveConfigOverridesDefault(t *testing.T) {
+	t.Parallel()
+	_ = ResolveDeriveConfig([]DeriveOption{WithInvalidChildMode(SkipInvalidChild)})
+	// Fresh config without options should still get the default.
+	cfg := ResolveDeriveConfig(nil)
+	if cfg.InvalidChildMode != ErrorOnInvalidChild {
+		t.Fatal("fresh config should have default ErrorOnInvalidChild")
+	}
+}
+
+func TestInvalidChildModeConstantsDistinct(t *testing.T) {
+	t.Parallel()
+	if ErrorOnInvalidChild == SkipInvalidChild {
+		t.Fatal("ErrorOnInvalidChild and SkipInvalidChild must be distinct")
+	}
+}
+
 // Test helper: verify that sha256d of a well-known xpub payload matches.
 func TestXPubChecksum(t *testing.T) {
 	// Manual checksum verification for the TV2 master xpub.

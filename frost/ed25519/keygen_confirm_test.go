@@ -9,6 +9,7 @@ import (
 )
 
 func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	confirmation, err := shares[1].KeygenConfirmation()
 	if err != nil {
@@ -35,6 +36,7 @@ func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
 }
 
 func TestFROSTKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	confirmations := frostKeygenConfirmations(t, shares, []tss.PartyID{1, 2, 3})
 	confirmations[1].TranscriptHash = bytes.Clone(confirmations[1].TranscriptHash)
@@ -45,6 +47,7 @@ func TestFROSTKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
 }
 
 func TestFROSTKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	confirmations := frostKeygenConfirmations(t, shares, []tss.PartyID{1, 2, 3})
 	confirmations[1].PublicKey = bytes.Clone(confirmations[1].PublicKey)
@@ -55,6 +58,7 @@ func TestFROSTKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
 }
 
 func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

@@ -3,6 +3,7 @@ package wire
 import "testing"
 
 func TestValidateStrictSortedIDs(t *testing.T) {
+	t.Parallel()
 	if err := ValidateStrictSortedIDs([]testID{1, 3, 5}); err != nil {
 		t.Fatal(err)
 	}

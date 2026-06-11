@@ -9,6 +9,7 @@ import (
 )
 
 func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	message := []byte("nonce regression")
@@ -39,6 +40,7 @@ func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
 }
 
 func TestSignClearsNonceAfterPartial(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -84,6 +86,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 }
 
 func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -168,3 +171,34 @@ func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, s
 }
 
 // Helper to add test guards is already in frost_test.go (same package)
+
+func TestNonceCommitmentMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	nc := nonceCommitment{D: []byte{0x01}, E: []byte{0x02}}
+	if _, err := nc.MarshalJSON(); err == nil {
+		t.Fatal("nonceCommitment.MarshalJSON should reject JSON encoding")
+	}
+}
+
+func TestSignPartialPayloadMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	sp := signPartialPayload{Z: []byte{0x03}}
+	if _, err := sp.MarshalJSON(); err == nil {
+		t.Fatal("signPartialPayload.MarshalJSON should reject JSON encoding")
+	}
+}
+
+func TestNoopSignVerifierVerifyAckAcceptsAny(t *testing.T) {
+	t.Parallel()
+	var v noopSignVerifier
+	// VerifyAck should accept any signature without error.
+	if err := v.VerifyAck(1, [32]byte{}, []byte("anything")); err != nil {
+		t.Fatalf("noopSignVerifier should accept any signature: %v", err)
+	}
+	if err := v.VerifyAck(99, [32]byte{0xff}, nil); err != nil {
+		t.Fatalf("noopSignVerifier should accept nil signature: %v", err)
+	}
+	if err := v.VerifyAck(0, [32]byte{}, []byte{}); err != nil {
+		t.Fatalf("noopSignVerifier should accept empty signature: %v", err)
+	}
+}

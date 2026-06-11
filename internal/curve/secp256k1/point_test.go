@@ -6,6 +6,7 @@ import (
 )
 
 func TestGPrecomputed(t *testing.T) {
+	t.Parallel()
 	// G must be a finite point.
 	if G.Inf != 0 {
 		t.Fatal("G has Inf != 0, expected finite generator point")

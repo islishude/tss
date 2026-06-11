@@ -6,6 +6,7 @@ import (
 )
 
 func TestWriteHashPart(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		part []byte
@@ -44,6 +45,7 @@ func TestWriteHashPart(t *testing.T) {
 }
 
 func TestWritePartyID(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name string
 		id   uint32
@@ -82,6 +84,7 @@ func TestWritePartyID(t *testing.T) {
 }
 
 func TestWritePartySet(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		parties []uint32
@@ -125,6 +128,7 @@ func TestWritePartySet(t *testing.T) {
 }
 
 func TestWriteHashPartRoundTrip(t *testing.T) {
+	t.Parallel()
 	// Verify that writing then reading the expected frame reconstructs the original.
 	original := []byte("test round-trip data")
 	var buf bytes.Buffer

@@ -79,6 +79,7 @@ func (m hookRecordMessage) WireVersion() uint16 { return 1 }
 // ---- record round trip tests -------------------------------------------------
 
 func TestRecordRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := recordMessage{
 		Inner: innerRecord{
 			Name: "test-name",
@@ -110,6 +111,7 @@ func TestRecordRoundTrip(t *testing.T) {
 }
 
 func TestRecordListRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := recordListMessage{
 		Items: []itemRecord{
 			{Key: "key1", Value: []byte{1, 2}},
@@ -148,6 +150,7 @@ func TestRecordListRoundTrip(t *testing.T) {
 }
 
 func TestRecordListNilSlice(t *testing.T) {
+	t.Parallel()
 	orig := recordListMessage{Items: nil}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"items": 16}))
 	if err != nil {
@@ -165,6 +168,7 @@ func TestRecordListNilSlice(t *testing.T) {
 }
 
 func TestRecordListEmptySlice(t *testing.T) {
+	t.Parallel()
 	orig := recordListMessage{Items: []itemRecord{}}
 	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"items": 16}))
 	if err != nil {
@@ -181,6 +185,7 @@ func TestRecordListEmptySlice(t *testing.T) {
 }
 
 func TestRecordPointerRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := pointerRecordMessage{
 		Inner: &innerRecord{
 			Name: "ptr-test",
@@ -212,6 +217,7 @@ func TestRecordPointerRoundTrip(t *testing.T) {
 }
 
 func TestRecordListPointerRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig := pointerRecordListMessage{
 		Items: []*itemRecord{
 			{Key: "a", Value: []byte{1}},
@@ -252,6 +258,7 @@ func TestRecordListPointerRoundTrip(t *testing.T) {
 // ---- record max_items tests --------------------------------------------------
 
 func TestRecordListMaxItemsExceededEncode(t *testing.T) {
+	t.Parallel()
 	orig := recordListMessage{
 		Items: make([]itemRecord, 5),
 	}
@@ -264,6 +271,7 @@ func TestRecordListMaxItemsExceededEncode(t *testing.T) {
 }
 
 func TestRecordListMaxItemsExceededDecode(t *testing.T) {
+	t.Parallel()
 	// Build a recordlist with 4 items bypassing the encoder's max_items check.
 	var records []byte
 	records = append(records, Uint32(4)...) // count=4
@@ -302,6 +310,7 @@ func TestRecordListMaxItemsExceededDecode(t *testing.T) {
 // ---- record strict field set tests --------------------------------------------
 
 func TestRecordMissingFieldRejected(t *testing.T) {
+	t.Parallel()
 	// Build a field body with only tag 1, missing tag 2.
 	body, err := marshalFieldBody([]Field{
 		{Tag: 1, Value: []byte("only-one-field")},
@@ -329,6 +338,7 @@ func TestRecordMissingFieldRejected(t *testing.T) {
 }
 
 func TestRecordExtraFieldRejected(t *testing.T) {
+	t.Parallel()
 	// Build a field body with an extra tag.
 	body, err := marshalFieldBody([]Field{
 		{Tag: 1, Value: []byte("name")},
@@ -358,6 +368,7 @@ func TestRecordExtraFieldRejected(t *testing.T) {
 }
 
 func TestRecordUnsortedTagsRejected(t *testing.T) {
+	t.Parallel()
 	// Manually encode fields in wrong tag order (tag 2 before tag 1).
 	value := make([]byte, 0)
 	value = AppendUint16(value, 2)                   // field count
@@ -386,6 +397,7 @@ func TestRecordUnsortedTagsRejected(t *testing.T) {
 }
 
 func TestRecordDuplicateTagRejected(t *testing.T) {
+	t.Parallel()
 	// Manually encode duplicate tag.
 	value := make([]byte, 0)
 	value = AppendUint16(value, 2) // field count
@@ -414,6 +426,7 @@ func TestRecordDuplicateTagRejected(t *testing.T) {
 }
 
 func TestRecordTrailingBytesRejected(t *testing.T) {
+	t.Parallel()
 	// Build a valid field body, then append extra bytes.
 	body, err := marshalFieldBody([]Field{
 		{Tag: 1, Value: []byte("name")},
@@ -446,6 +459,7 @@ func TestRecordTrailingBytesRejected(t *testing.T) {
 // ---- record hooks tests -------------------------------------------------------
 
 func TestRecordHooksCalled(t *testing.T) {
+	t.Parallel()
 	orig := hookRecordMessage{
 		Rec: recordWithHook{Value: 42},
 	}
@@ -475,6 +489,7 @@ func TestRecordHooksCalled(t *testing.T) {
 // ---- record max_bytes tests ---------------------------------------------------
 
 func TestRecordMaxBytesExceededEncode(t *testing.T) {
+	t.Parallel()
 	orig := recordMessage{
 		Inner: innerRecord{
 			Name: "this-name-is-way-too-long-for-the-limit",
@@ -491,6 +506,7 @@ func TestRecordMaxBytesExceededEncode(t *testing.T) {
 }
 
 func TestRecordMaxBytesExceededDecode(t *testing.T) {
+	t.Parallel()
 	body, err := marshalFieldBody([]Field{
 		{Tag: 1, Value: []byte("too-long")},
 		{Tag: 2, Value: []byte{}},
@@ -520,6 +536,7 @@ func TestRecordMaxBytesExceededDecode(t *testing.T) {
 // ---- non-UTF-8 string in record test ------------------------------------------
 
 func TestRecordNonUTF8StringRejected(t *testing.T) {
+	t.Parallel()
 	nonUTF8 := []byte{0xff, 0xfe, 0xfd}
 	body, err := marshalFieldBody([]Field{
 		{Tag: 1, Value: nonUTF8}, // Name as invalid UTF-8
@@ -550,6 +567,7 @@ func TestRecordNonUTF8StringRejected(t *testing.T) {
 // ---- nil pointer record encode test -------------------------------------------
 
 func TestNilRecordPointerEncodeRejected(t *testing.T) {
+	t.Parallel()
 	orig := pointerRecordMessage{Inner: nil}
 	_, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
 		"name": 32,
@@ -563,6 +581,7 @@ func TestNilRecordPointerEncodeRejected(t *testing.T) {
 // ---- schema parse test --------------------------------------------------------
 
 func TestRecordSchemaParse(t *testing.T) {
+	t.Parallel()
 	// Verify that the schema parser correctly infers record and recordlist kinds.
 	s, err := getSchema(reflect.TypeFor[recordMessage]())
 	if err != nil {

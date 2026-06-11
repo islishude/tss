@@ -3,9 +3,7 @@
     "description": "CGGMP21 secp256k1 1-of-1 keygen",
     "threshold": 1,
     "n": 1,
-    "parties": [
-      1
-    ],
+    "parties": [1],
     "seed": "0000000000000000000000000000000000000000000000000000000000000003",
     "group_public_key": "039bb5c808ff1a37f29d6e52bfd1b1fb6500bb4d35372438702c1bc0b693be95b1",
     "keygen_shares": [
@@ -24,11 +22,7 @@
     "description": "CGGMP21 secp256k1 2-of-3 keygen",
     "threshold": 2,
     "n": 3,
-    "parties": [
-      1,
-      2,
-      3
-    ],
+    "parties": [1, 2, 3],
     "seed": "0000000000000000000000000000000000000000000000000000000000000004",
     "group_public_key": "0341313f7853984d5568c8bfefdf60081e1ce7dcf11d24de3485849da8513e6855",
     "keygen_shares": [

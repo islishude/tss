@@ -15,6 +15,7 @@ import (
 )
 
 func TestDerivePublicKey(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 1, 1)
 	pub := shares[1].PublicKey
 
@@ -51,6 +52,7 @@ func TestDerivePublicKey(t *testing.T) {
 // TestDeriveNonHardenedBIP32_Vectors verifies derivation against golden test
 // vectors generated with the reference HMAC-SHA512 construction (single-round).
 func TestDeriveNonHardenedBIP32_Vectors(t *testing.T) {
+	t.Parallel()
 	// Golden parent: a 32-byte Ed25519 public key and 32-byte chain code.
 	parentPub := testutil.MustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
 	chainCode := testutil.MustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
@@ -95,6 +97,7 @@ func TestDeriveNonHardenedBIP32_Vectors(t *testing.T) {
 // TestDeriveNonHardenedBIP32_MultiStepVector verifies multi-step derivation
 // against a golden chain code computed from independent HMAC steps.
 func TestDeriveNonHardenedBIP32_MultiStepVector(t *testing.T) {
+	t.Parallel()
 	parentPub := testutil.MustDecodeHex(t, "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a")
 	chainCode := testutil.MustDecodeHex(t, "2810999a530b5e7f455a3a97c36e0e23b3de096b69343ddfe87730990506b268")
 
@@ -125,6 +128,7 @@ func TestDeriveNonHardenedBIP32_MultiStepVector(t *testing.T) {
 // TestDeriveNonHardenedBIP32_EmptyPathReturnsParent is a dedicated test for
 // empty/nil path behavior (mirrors the reference's test pattern).
 func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	pub := shares[1].PublicKey
 	cc := shares[1].ChainCode
@@ -152,6 +156,7 @@ func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
 // TestDeriveNonHardenedBIP32_DepthExceedsMaxUint8 is patterned after the
 // reference's MaxDepth overflow test.
 func TestDeriveNonHardenedBIP32_DepthExceedsMaxUint8(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	longPath := make([]uint32, 256)
 	for i := range longPath {
@@ -164,6 +169,7 @@ func TestDeriveNonHardenedBIP32_DepthExceedsMaxUint8(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32SingleLevel(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	pub := shares[1].PublicKey
 	cc := shares[1].ChainCode
@@ -195,6 +201,7 @@ func TestDeriveNonHardenedBIP32SingleLevel(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32MultiLevel(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	pub := shares[1].PublicKey
 	cc := shares[1].ChainCode
@@ -223,6 +230,7 @@ func TestDeriveNonHardenedBIP32MultiLevel(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32RejectsHardened(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	pub := shares[1].PublicKey
 	cc := shares[1].ChainCode
@@ -242,6 +250,7 @@ func TestDeriveNonHardenedBIP32RejectsHardened(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32RejectsEmptyChainCode(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 1, 1)
 	pub := shares[1].PublicKey
 
@@ -256,6 +265,7 @@ func TestDeriveNonHardenedBIP32RejectsEmptyChainCode(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32RejectsInvalidPubKey(t *testing.T) {
+	t.Parallel()
 	cc := make([]byte, 32)
 	for i := range cc {
 		cc[i] = byte(i)
@@ -267,6 +277,7 @@ func TestDeriveNonHardenedBIP32RejectsInvalidPubKey(t *testing.T) {
 }
 
 func TestHDKeygenProducesChainCode(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	for id, share := range shares {
 		if len(share.ChainCode) != 32 {
@@ -276,6 +287,7 @@ func TestHDKeygenProducesChainCode(t *testing.T) {
 }
 
 func TestHDKeygenAllPartiesAgree(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	var first []byte
 	var firstPub []byte
@@ -295,6 +307,7 @@ func TestHDKeygenAllPartiesAgree(t *testing.T) {
 }
 
 func TestKeygenWithoutHDOption(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 1, 1)
 	for _, share := range shares {
 		if len(share.ChainCode) != 0 {
@@ -304,6 +317,7 @@ func TestKeygenWithoutHDOption(t *testing.T) {
 }
 
 func TestHDSignSingleSigner(t *testing.T) {
+	t.Parallel()
 	sharesMap := frostKeygenHD(t, 1, 1)
 	share := sharesMap[1]
 	msg := []byte("hello HD world")
@@ -330,6 +344,7 @@ func TestHDSignSingleSigner(t *testing.T) {
 }
 
 func TestHDSign2Of3(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	msg := []byte("threshold HD signing")
 
@@ -355,6 +370,7 @@ func TestHDSign2Of3(t *testing.T) {
 }
 
 func TestHDSignZeroShift(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	share := shares[1]
 	msg := []byte("zero shift test")
@@ -379,6 +395,7 @@ func TestHDSignZeroShift(t *testing.T) {
 }
 
 func TestHDKeyShareWireFormat(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -400,6 +417,7 @@ func TestHDKeyShareWireFormat(t *testing.T) {
 }
 
 func TestNonHDKeyShareWireFormat(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 1, 1)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -415,6 +433,7 @@ func TestNonHDKeyShareWireFormat(t *testing.T) {
 }
 
 func TestHDKeyShareCanonicalEncoding(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	raw1, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -430,6 +449,7 @@ func TestHDKeyShareCanonicalEncoding(t *testing.T) {
 }
 
 func TestHDSessionDestroyClearsChainCode(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	share := shares[1]
 	if len(share.ChainCode) != 32 {
@@ -444,6 +464,7 @@ func TestHDSessionDestroyClearsChainCode(t *testing.T) {
 }
 
 func TestDeriveNonHardenedBIP32Determinism(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygenHD(t, 1, 1)
 	pub := shares[1].PublicKey
 	cc := shares[1].ChainCode

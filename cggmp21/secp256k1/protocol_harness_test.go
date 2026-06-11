@@ -4,10 +4,44 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
 )
+
+// fixtureKey identifies a cached keygen fixture by its essential parameters.
+type fixtureKey struct {
+	threshold int
+	n         int
+}
+
+// keygenFixtureCache avoids repeated full-DKG executions for identical
+// (threshold, n, hd) tuples across integration tests. Each call returns
+// independent clones — callers may mutate their copy freely.
+var keygenFixtureCache sync.Map
+
+// cachedKeygenFixture returns a clone of a previously-generated keygen fixture
+// for (threshold, n), or generates a fresh one and caches clones on first use.
+func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	key := fixtureKey{threshold: threshold, n: n}
+	if v, ok := keygenFixtureCache.Load(key); ok {
+		shares := v.(map[tss.PartyID]*KeyShare)
+		out := make(map[tss.PartyID]*KeyShare, len(shares))
+		for id, ks := range shares {
+			out[id] = ks.Clone()
+		}
+		return out
+	}
+	shares := secpKeygen(t, threshold, n)
+	cached := make(map[tss.PartyID]*KeyShare, len(shares))
+	for id, ks := range shares {
+		cached[id] = ks.Clone()
+	}
+	keygenFixtureCache.Store(key, cached)
+	return shares
+}
 
 type protocolHarness struct {
 	threshold int
@@ -24,7 +58,7 @@ func newHarness(t testing.TB, threshold, n int) *protocolHarness {
 	return &protocolHarness{
 		threshold: threshold,
 		parties:   parties,
-		shares:    secpKeygen(t, threshold, n),
+		shares:    cachedKeygenFixture(t, threshold, n),
 	}
 }
 

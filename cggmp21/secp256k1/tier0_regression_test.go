@@ -16,6 +16,7 @@ import (
 // regression markers that would indicate secret material leaking into
 // the public API surface. No cryptographic operations are performed.
 func TestFast_StaticNoSecretShareRegression(t *testing.T) {
+	t.Parallel()
 	body, err := os.ReadFile("sign.go")
 	if err != nil {
 		t.Fatal(err)
@@ -29,6 +30,7 @@ func TestFast_StaticNoSecretShareRegression(t *testing.T) {
 }
 
 func TestFast_RefreshCommitmentsRejectNonzeroConstant(t *testing.T) {
+	t.Parallel()
 	const threshold = 2
 	commitments := make([][]byte, threshold)
 	var err error
@@ -44,6 +46,7 @@ func TestFast_RefreshCommitmentsRejectNonzeroConstant(t *testing.T) {
 // --- Presign VerifyShares validation regression tests ---
 
 func TestFast_PresignRejectsMissingVerifyShares(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	// nil VerifyShares slices
 	presign.VerifyShares = nil
@@ -53,6 +56,7 @@ func TestFast_PresignRejectsMissingVerifyShares(t *testing.T) {
 }
 
 func TestFast_PresignRejectsEmptyVerifyShares(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	presign.VerifyShares = []SignVerifyShare{}
 	if err := presign.Validate(); err == nil {
@@ -61,6 +65,7 @@ func TestFast_PresignRejectsEmptyVerifyShares(t *testing.T) {
 }
 
 func TestFast_PresignRejectsWrongVerifyShareCount(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	// Signers has 1 but we add extra without a share
 	presign.Signers = []tss.PartyID{1, 2}
@@ -70,6 +75,7 @@ func TestFast_PresignRejectsWrongVerifyShareCount(t *testing.T) {
 }
 
 func TestFast_PresignRejectsDuplicateVerifyShare(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	vs := presign.VerifyShares[0]
 	presign.Signers = []tss.PartyID{1, 1}
@@ -80,6 +86,7 @@ func TestFast_PresignRejectsDuplicateVerifyShare(t *testing.T) {
 }
 
 func TestFast_PresignRejectsNonSignerParty(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	vs := presign.VerifyShares[0]
 	vs.Party = 999 // not in signer set
@@ -90,6 +97,7 @@ func TestFast_PresignRejectsNonSignerParty(t *testing.T) {
 }
 
 func TestFast_PresignRejectsNonCanonicalKPoint(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	presign.VerifyShares[0].KPoint = []byte{0xFF}
 	if err := presign.Validate(); err == nil {
@@ -98,6 +106,7 @@ func TestFast_PresignRejectsNonCanonicalKPoint(t *testing.T) {
 }
 
 func TestFast_PresignRejectsNonCanonicalChiPoint(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	presign.VerifyShares[0].ChiPoint = []byte{0xFF}
 	if err := presign.Validate(); err == nil {
@@ -106,6 +115,7 @@ func TestFast_PresignRejectsNonCanonicalChiPoint(t *testing.T) {
 }
 
 func TestFast_PresignRejectsEmptyProof(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	presign.VerifyShares[0].Proof = nil
 	if err := presign.Validate(); err == nil {
@@ -114,6 +124,7 @@ func TestFast_PresignRejectsEmptyProof(t *testing.T) {
 }
 
 func TestFast_PresignRejectsOversizeProof(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	limits := TestLimits()
 	presign.VerifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
@@ -125,6 +136,7 @@ func TestFast_PresignRejectsOversizeProof(t *testing.T) {
 // --- Aggregate failure semantics ---
 
 func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
+	t.Parallel()
 	if tss.ErrCodeInvariant != "invariant" {
 		t.Fatal("ErrCodeInvariant not defined")
 	}
@@ -144,6 +156,7 @@ func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
 // --- SignPartialPayload encoding validation ---
 
 func TestFast_SignPartialPayloadRejectsMissingDigestHash(t *testing.T) {
+	t.Parallel()
 	p := signPartialPayload{
 		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
@@ -157,6 +170,7 @@ func TestFast_SignPartialPayloadRejectsMissingDigestHash(t *testing.T) {
 }
 
 func TestFast_SignPartialPayloadRejectsMissingPartialEquationHash(t *testing.T) {
+	t.Parallel()
 	p := signPartialPayload{
 		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
@@ -175,6 +189,7 @@ func TestFast_SignPartialPayloadRejectsMissingPartialEquationHash(t *testing.T) 
 // defect fix must produce: ErrCodeVerification, single-party blame, no
 // blame-all-signers, no ErrCodeAggregateSignInvalid for per-party failures.
 func TestFast_OriginalDefectBlameShape(t *testing.T) {
+	t.Parallel()
 	// Verify the error code hierarchy is correct.
 	if tss.ErrCodeVerification != "verification_failed" {
 		t.Fatal("ErrCodeVerification value mismatch")
@@ -221,6 +236,7 @@ func TestFast_OriginalDefectBlameShape(t *testing.T) {
 // TestFast_OriginalDefectCodeSeparation verifies that the original defect's
 // aggregate failure code is distinct from per-party verification codes.
 func TestFast_OriginalDefectCodeSeparation(t *testing.T) {
+	t.Parallel()
 	codes := []string{
 		tss.ErrCodeVerification,
 		tss.ErrCodeAggregateSignInvalid,
@@ -239,6 +255,7 @@ func TestFast_OriginalDefectCodeSeparation(t *testing.T) {
 // --- PresignRound3Payload validation ---
 
 func TestFast_PresignRound3PayloadRejectsEmptyProof(t *testing.T) {
+	t.Parallel()
 	one := big.NewInt(1)
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 	chiPoint := kPoint
@@ -249,6 +266,7 @@ func TestFast_PresignRound3PayloadRejectsEmptyProof(t *testing.T) {
 }
 
 func TestFast_PresignRound3PayloadRejectsNonCanonicalKPoint(t *testing.T) {
+	t.Parallel()
 	one := big.NewInt(1)
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 	proof := mustMinimalSignPrepProofForTest(t)

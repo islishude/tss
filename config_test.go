@@ -9,6 +9,7 @@ import (
 )
 
 func TestThresholdConfigCtx(t *testing.T) {
+	t.Parallel()
 	t.Run("nil context returns background", func(t *testing.T) {
 		cfg := ThresholdConfig{}
 		ctx := cfg.Ctx()
@@ -35,6 +36,7 @@ func TestThresholdConfigCtx(t *testing.T) {
 }
 
 func TestThresholdConfigValidate(t *testing.T) {
+	t.Parallel()
 	valid := func() ThresholdConfig {
 		return ThresholdConfig{
 			Threshold: 2,
@@ -150,6 +152,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 }
 
 func TestThresholdConfigSortedParties(t *testing.T) {
+	t.Parallel()
 	t.Run("already sorted", func(t *testing.T) {
 		cfg := ThresholdConfig{Parties: []PartyID{1, 2, 3, 4, 5}}
 		got := cfg.SortedParties()
@@ -192,6 +195,7 @@ func TestThresholdConfigSortedParties(t *testing.T) {
 }
 
 func TestThresholdConfigReader(t *testing.T) {
+	t.Parallel()
 	t.Run("nil rand returns crypto/rand", func(t *testing.T) {
 		cfg := ThresholdConfig{}
 		r := cfg.Reader()
@@ -214,6 +218,7 @@ func TestThresholdConfigReader(t *testing.T) {
 }
 
 func TestThresholdConfigLogger(t *testing.T) {
+	t.Parallel()
 	t.Run("nil log returns noop", func(t *testing.T) {
 		cfg := ThresholdConfig{}
 		l := cfg.Logger()
@@ -238,6 +243,7 @@ func TestThresholdConfigLogger(t *testing.T) {
 }
 
 func TestThresholdConfigZeroValue(t *testing.T) {
+	t.Parallel()
 	// All methods must be safe to call on the zero value of ThresholdConfig.
 	var zero ThresholdConfig
 	_ = zero.Ctx()
@@ -251,6 +257,7 @@ func TestThresholdConfigZeroValue(t *testing.T) {
 }
 
 func TestThresholdConfigLogAndTimeoutFields(t *testing.T) {
+	t.Parallel()
 	// Log and RoundTimeout are stored as-is with no getter transformation.
 	logger := &testLogger{}
 	timeout := 5 * time.Second
@@ -277,6 +284,84 @@ func partySlicesEqual(a, b []PartyID) bool {
 		}
 	}
 	return true
+}
+
+func TestSortParties(t *testing.T) {
+	t.Parallel()
+	got := SortParties([]PartyID{3, 1, 2})
+	want := []PartyID{1, 2, 3}
+	if !partySlicesEqual(got, want) {
+		t.Fatalf("SortParties = %v, want %v", got, want)
+	}
+	// Original slice is not mutated.
+	orig := []PartyID{3, 1, 2}
+	SortParties(orig)
+	if orig[0] != 3 {
+		t.Fatal("SortParties mutated the original slice")
+	}
+	// Nil input.
+	if SortParties(nil) != nil {
+		t.Fatal("SortParties(nil) should return nil")
+	}
+	// Single element.
+	if got := SortParties([]PartyID{42}); len(got) != 1 || got[0] != 42 {
+		t.Fatal("SortParties single element")
+	}
+}
+
+func TestContainsParty(t *testing.T) {
+	t.Parallel()
+	parties := []PartyID{1, 2, 3}
+	if !ContainsParty(parties, 1) {
+		t.Fatal("ContainsParty(1) should be true")
+	}
+	if ContainsParty(parties, 99) {
+		t.Fatal("ContainsParty(99) should be false")
+	}
+	if ContainsParty(nil, 1) {
+		t.Fatal("ContainsParty(nil) should be false")
+	}
+	if ContainsParty([]PartyID{}, 1) {
+		t.Fatal("ContainsParty(empty) should be false")
+	}
+}
+
+func TestPartySetContains(t *testing.T) {
+	t.Parallel()
+	ps := PartySet{1, 2, 3}
+	if !ps.Contains(1) {
+		t.Fatal("PartySet.Contains(1) should be true")
+	}
+	if ps.Contains(99) {
+		t.Fatal("PartySet.Contains(99) should be false")
+	}
+}
+
+func TestPartySetSorted(t *testing.T) {
+	t.Parallel()
+	ps := PartySet{3, 1, 2}
+	sorted := ps.Sorted()
+	want := PartySet{1, 2, 3}
+	if !partySlicesEqual(sorted, want) {
+		t.Fatalf("PartySet.Sorted = %v, want %v", sorted, want)
+	}
+	// Original unchanged.
+	if ps[0] != 3 {
+		t.Fatal("PartySet.Sorted mutated original")
+	}
+}
+
+func TestPartySetClone(t *testing.T) {
+	t.Parallel()
+	ps := PartySet{1, 2, 3}
+	clone := ps.Clone()
+	if !partySlicesEqual(clone, ps) {
+		t.Fatal("PartySet.Clone not equal")
+	}
+	clone[0] = 99
+	if ps[0] != 1 {
+		t.Fatal("PartySet.Clone shares backing array")
+	}
 }
 
 // testLogger implements Logger for testing.

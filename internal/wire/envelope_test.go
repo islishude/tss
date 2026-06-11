@@ -6,6 +6,7 @@ import (
 )
 
 func TestMarshalRoundTrip(t *testing.T) {
+	t.Parallel()
 	raw, err := MarshalFields(1, "test.type", []Field{
 		{Tag: 1, Value: []byte("a")},
 		{Tag: 2, Value: []byte("bb")},
@@ -33,6 +34,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 }
 
 func TestMarshalRejectsDuplicateOrUnsortedTags(t *testing.T) {
+	t.Parallel()
 	if _, err := MarshalFields(1, "test.type", []Field{{Tag: 2, Value: []byte{1}}, {Tag: 1, Value: []byte{2}}}); err == nil {
 		t.Fatal("unsorted tags accepted")
 	}
@@ -42,6 +44,7 @@ func TestMarshalRejectsDuplicateOrUnsortedTags(t *testing.T) {
 }
 
 func TestUnmarshalRejectsTrailingBytes(t *testing.T) {
+	t.Parallel()
 	raw, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte{1}}})
 	if err != nil {
 		t.Fatal(err)
@@ -53,6 +56,7 @@ func TestUnmarshalRejectsTrailingBytes(t *testing.T) {
 }
 
 func TestUnmarshalRejectsWrongTypeID(t *testing.T) {
+	t.Parallel()
 	raw, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte{1}}})
 	if err != nil {
 		t.Fatal(err)

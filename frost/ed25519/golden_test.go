@@ -14,6 +14,7 @@ import (
 )
 
 func TestGoldenKeyShare(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(700)) //nolint:gosec // deterministic for golden test
 	session, err := tss.NewSessionID(rng)
 	if err != nil {
@@ -62,6 +63,7 @@ func TestGoldenKeyShare(t *testing.T) {
 }
 
 func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
+	t.Parallel()
 	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -92,6 +94,7 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 }
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
+	t.Parallel()
 	scalar, err := scalarBytes(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -122,6 +125,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 }
 
 func TestGoldenNonceCommitmentPayload(t *testing.T) {
+	t.Parallel()
 	dPoint, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -156,6 +160,7 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 }
 
 func TestGoldenSignPartialPayload(t *testing.T) {
+	t.Parallel()
 	scalar, err := scalarBytes(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)

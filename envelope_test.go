@@ -6,6 +6,7 @@ import (
 )
 
 func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -49,6 +50,7 @@ func TestEnvelopeBinaryRoundTripAndTranscript(t *testing.T) {
 }
 
 func TestEnvelopeUnmarshalRejectsNonCanonicalEncoding(t *testing.T) {
+	t.Parallel()
 	var decoded Envelope
 	if err := decoded.UnmarshalBinary([]byte(`{"protocol":"test","version":1}`)); err == nil {
 		t.Fatal("JSON envelope encoding accepted")

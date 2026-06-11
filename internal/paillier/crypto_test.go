@@ -179,6 +179,124 @@ func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
 	}
 }
 
+func TestEncryptWithRandomnessDeterministic(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := sk.PublicKey
+	m := big.NewInt(42)
+	r := big.NewInt(13)
+
+	c1, err := pk.EncryptWithRandomness(m, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := pk.EncryptWithRandomness(m, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c1.Cmp(c2) != 0 {
+		t.Fatal("EncryptWithRandomness is not deterministic: same (m,r) produced different ciphetexts")
+	}
+
+	// Verify decryption round-trips.
+	got, err := sk.Decrypt(c1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cmp(m) != 0 {
+		t.Fatalf("EncryptWithRandomness/Decrypt round-trip: got %s, want %s", got, m)
+	}
+
+	// Different randomness → different ciphertext.
+	c3, err := pk.EncryptWithRandomness(m, big.NewInt(17))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c1.Cmp(c3) == 0 {
+		t.Fatal("different randomness produced identical ciphertexts")
+	}
+	got, err = sk.Decrypt(c3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cmp(m) != 0 {
+		t.Fatalf("c3 decrypt: got %s, want %s", got, m)
+	}
+}
+
+func TestEncryptWithRandomnessRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := sk.PublicKey
+
+	// Nil message.
+	if _, err := pk.EncryptWithRandomness(nil, big.NewInt(1)); err == nil {
+		t.Fatal("nil message accepted")
+	}
+	// Nil randomness.
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), nil); err == nil {
+		t.Fatal("nil randomness accepted")
+	}
+	// r not coprime to N.
+	badR := new(big.Int).Mul(sk.P, big.NewInt(2)) // multiple of P, not coprime to N
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), badR); err == nil {
+		t.Fatal("non-coprime randomness accepted")
+	}
+	// r = N (divisible by N, not coprime).
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), new(big.Int).Set(sk.N)); err == nil {
+		t.Fatal("r=N accepted")
+	}
+}
+
+func TestLFunction(t *testing.T) {
+	t.Parallel()
+	// For n=15: L(16) = (16-1)/15 = 1
+	n := big.NewInt(15)
+	if got := L(big.NewInt(16), n); got.Cmp(big.NewInt(1)) != 0 {
+		t.Fatalf("L(16,15) = %s, want 1", got)
+	}
+	// L(31) = (31-1)/15 = 2
+	if got := L(big.NewInt(31), n); got.Cmp(big.NewInt(2)) != 0 {
+		t.Fatalf("L(31,15) = %s, want 2", got)
+	}
+	// L(46) = (46-1)/15 = 3
+	if got := L(big.NewInt(46), n); got.Cmp(big.NewInt(3)) != 0 {
+		t.Fatalf("L(46,15) = %s, want 3", got)
+	}
+	// L(1) = (1-1)/15 = 0
+	if got := L(big.NewInt(1), n); got.Sign() != 0 {
+		t.Fatalf("L(1,15) = %s, want 0", got)
+	}
+}
+
+func TestEncryptRejectsNegativeMessage(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Negative values should be rejected or normalized modulo N.
+	c, _, err := sk.Encrypt(nil, big.NewInt(-5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sk.Decrypt(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// -5 mod N should decrypt correctly (Encrypt normalizes).
+	expected := new(big.Int).Mod(big.NewInt(-5), sk.N)
+	if got.Cmp(expected) != 0 {
+		t.Fatalf("negative message: got %s, want %s", got, expected)
+	}
+}
+
 func TestUncheckedHelpersAcceptValidCiphertexts(t *testing.T) {
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {

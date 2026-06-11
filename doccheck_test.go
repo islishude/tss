@@ -11,6 +11,7 @@ import (
 )
 
 func TestExportedIdentifiersHaveDocComments(t *testing.T) {
+	t.Parallel()
 	root := "."
 	fset := token.NewFileSet()
 	if err := filepath.WalkDir(root, func(path string, entry fs.DirEntry, err error) error {

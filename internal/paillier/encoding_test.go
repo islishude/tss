@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss/internal/wire"
@@ -170,4 +171,96 @@ func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) (
 		}
 	}
 	return nil, fmt.Errorf("missing Paillier field %d", tag)
+}
+
+func TestValidateBitsPassesAtOrAboveMin(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sk.ValidateBits(512); err != nil {
+		t.Fatalf("512-bit modulus failed at min=512: %v", err)
+	}
+	if err := sk.ValidateBits(256); err != nil {
+		t.Fatalf("512-bit modulus failed at min=256: %v", err)
+	}
+	if err := sk.ValidateBits(0); err != nil {
+		t.Fatalf("512-bit modulus failed at min=0: %v", err)
+	}
+}
+
+func TestValidateBitsRejectsBelowMin(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := sk.ValidateBits(1024); err == nil {
+		t.Fatal("512-bit modulus accepted with min=1024")
+	}
+	if err := sk.ValidateBits(768); err == nil {
+		t.Fatal("512-bit modulus accepted with min=768")
+	}
+}
+
+func TestValidateBitsRejectsInvalidPublicKey(t *testing.T) {
+	t.Parallel()
+	// Zero-valued N.
+	pk := PublicKey{N: big.NewInt(0)}
+	if err := pk.ValidateBits(0); err == nil {
+		t.Fatal("zero-modulus public key accepted by ValidateBits")
+	}
+	// Even N.
+	pk = PublicKey{N: big.NewInt(100)}
+	if err := pk.ValidateBits(0); err == nil {
+		t.Fatal("even-modulus accepted by ValidateBits")
+	}
+}
+
+func TestAfterUnmarshalWireReconstructsNSquared(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := sk.PublicKey
+	if pk.NSquared == nil {
+		t.Fatal("NSquared not populated after keygen")
+	}
+	expected := new(big.Int).Mul(pk.N, pk.N)
+	if pk.NSquared.Cmp(expected) != 0 {
+		t.Fatal("NSquared != N^2 after keygen")
+	}
+
+	// Simulate AfterUnmarshalWire: nil out NSquared, call AfterUnmarshalWire, verify.
+	pk2 := PublicKey{N: pk.N, G: pk.G}
+	if pk2.NSquared != nil {
+		t.Fatal("NSquared should be nil before AfterUnmarshalWire")
+	}
+	if err := pk2.AfterUnmarshalWire(); err != nil {
+		t.Fatal(err)
+	}
+	if pk2.NSquared.Cmp(expected) != 0 {
+		t.Fatal("AfterUnmarshalWire did not reconstruct NSquared correctly")
+	}
+}
+
+func TestAfterUnmarshalWireNilN(t *testing.T) {
+	t.Parallel()
+	pk := PublicKey{}
+	if err := pk.AfterUnmarshalWire(); err != nil {
+		t.Fatal("AfterUnmarshalWire with nil N should succeed (no-op)")
+	}
+}
+
+func TestPaillierMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sk.MarshalJSON(); err == nil {
+		t.Fatal("MarshalJSON should reject private key")
+	}
 }

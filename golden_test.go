@@ -9,6 +9,7 @@ import (
 )
 
 func TestGoldenEnvelope(t *testing.T) {
+	t.Parallel()
 	sessionID, err := SessionIDFromBytes(bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatal(err)

@@ -16,6 +16,7 @@ import (
 // secret-bearing fields and clears maps on a manually populated keygen session.
 // This is a Tier 0 test: it constructs a session directly without Paillier keygen.
 func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	secretScalar, err := secpSecretScalarFromBig(big.NewInt(42))
 	if err != nil {
 		t.Fatal(err)
@@ -118,6 +119,7 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 // secret-bearing scalars, big.Int maps, and round payload data on a manually
 // populated presign session.
 func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	s := newTestPresignSession(t)
 
 	s.Destroy()
@@ -157,6 +159,7 @@ func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
 // TestSignSession_Destroy_ClearsSecrets verifies that Destroy zeros all
 // secret-bearing partials and digest on a manually populated signing session.
 func TestSignSession_Destroy_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	s := &SignSession{
 		partials: map[tss.PartyID]*big.Int{
 			2: new(big.Int).SetInt64(888),
@@ -190,6 +193,7 @@ func TestSignSession_Destroy_ClearsSecrets(t *testing.T) {
 }
 
 func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	s := newTestPresignSession(t)
 
 	s.abort()
@@ -218,6 +222,7 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 // TestKeygenSession_Abort_ClearsSecrets verifies that abort clears all
 // secret-bearing accumulated state on a keygen session.
 func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
 	s := &KeygenSession{
 		shares: map[tss.PartyID]*big.Int{
@@ -249,6 +254,7 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 // TestRefreshSession_Abort_ClearsSecrets verifies that abort clears shares
 // and polynomial coefficients on a refresh session.
 func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	s := &RefreshSession{
 		shares: map[tss.PartyID]*big.Int{
 			2: new(big.Int).SetInt64(42),
@@ -274,6 +280,7 @@ func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 // TestKeyShare_Destroy_ClearsSecrets verifies that KeyShare.Destroy zeros the
 // secret scalar, chain code, and Paillier private-key bytes.
 func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	secretScalar := fillSecretScalar(t, 0x42)
 	k := &KeyShare{
 		ChainCode:          []byte{0x01, 0x02, 0x03, 0x04},
@@ -296,6 +303,7 @@ func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
 // TestPresign_Destroy_ClearsSecrets verifies that Presign.Destroy zeros secret
 // shares and marks the presign consumed.
 func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
+	t.Parallel()
 	kShare := fillSecretScalar(t, 0x11)
 	chiShare := fillSecretScalar(t, 0x22)
 	delta := fillSecretScalar(t, 0x33)
@@ -328,6 +336,7 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 
 // TestDestroy_Idempotent verifies that calling Destroy twice does not panic.
 func TestDestroy_Idempotent(t *testing.T) {
+	t.Parallel()
 	// KeygenSession double-Destroy.
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
 	kg := &KeygenSession{

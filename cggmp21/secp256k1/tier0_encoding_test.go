@@ -12,6 +12,7 @@ import (
 // UnmarshalPresign reject messages with mismatched wire type identifiers.
 // This test does not require any key generation or crypto.
 func TestFast_RejectsWrongWireTypes(t *testing.T) {
+	t.Parallel()
 	wrongKeyShare, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.keyshare", nil)
 	if err != nil {
 		t.Fatal(err)
@@ -32,6 +33,7 @@ func TestFast_RejectsWrongWireTypes(t *testing.T) {
 // rejects threshold values that overflow int32. It uses a manually constructed
 // minimal Presign, so no keygen is required.
 func TestFast_Presign_RejectsOverflowThreshold(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	raw, err := presign.MarshalBinary()
 	if err != nil {
@@ -51,6 +53,7 @@ func TestFast_Presign_RejectsOverflowThreshold(t *testing.T) {
 // TestFast_KeyShare_RejectsJSONFallback verifies UnmarshalKeyShare rejects
 // JSON input instead of silently falling back to a legacy decoder.
 func TestFast_KeyShare_RejectsJSONFallback(t *testing.T) {
+	t.Parallel()
 	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON key share encoding accepted")
 	}
@@ -58,6 +61,7 @@ func TestFast_KeyShare_RejectsJSONFallback(t *testing.T) {
 
 // TestFast_Presign_RejectsJSONFallback verifies UnmarshalPresign rejects JSON.
 func TestFast_Presign_RejectsJSONFallback(t *testing.T) {
+	t.Parallel()
 	if _, err := UnmarshalPresign([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON presign encoding accepted")
 	}

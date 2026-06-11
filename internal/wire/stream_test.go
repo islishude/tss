@@ -6,6 +6,7 @@ import (
 )
 
 func TestNonNilBytes(t *testing.T) {
+	t.Parallel()
 	if got := NonNilBytes(nil); got == nil || len(got) != 0 {
 		t.Fatalf("nil converted to %#v", got)
 	}
@@ -16,6 +17,7 @@ func TestNonNilBytes(t *testing.T) {
 }
 
 func TestReadAppendBytes(t *testing.T) {
+	t.Parallel()
 	raw := AppendBytes([]byte{9}, []byte{1, 2, 3})
 	if !bytes.Equal(raw, []byte{9, 0, 0, 0, 3, 1, 2, 3}) {
 		t.Fatalf("AppendBytes encoded %x", raw)
@@ -33,6 +35,7 @@ func TestReadAppendBytes(t *testing.T) {
 }
 
 func TestReadUint16(t *testing.T) {
+	t.Parallel()
 	got, offset, err := ReadUint16([]byte{2, 1, 2}, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -46,6 +49,7 @@ func TestReadUint16(t *testing.T) {
 }
 
 func TestReadUint32(t *testing.T) {
+	t.Parallel()
 	got, offset, err := ReadUint32([]byte{9, 1, 2, 3, 4}, 1)
 	if err != nil {
 		t.Fatal(err)
