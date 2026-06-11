@@ -13,12 +13,11 @@ import (
 
 // setupTestEnv creates fresh Paillier keys and Ring-Pedersen parameters with
 // reduced security parameters for Tier 1 tests.
+//
+// Security parameters are set once in TestMain; do not call
+// SetSecurityParamsForTesting from this helper.
 func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.RingPedersenParams) {
 	tb.Helper()
-	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
-		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
-	})
-	tb.Cleanup(restoreSP)
 	var err error
 	skA, err = pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {

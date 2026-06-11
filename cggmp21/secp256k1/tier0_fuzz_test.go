@@ -33,29 +33,17 @@ func FuzzFast_EnvelopeValidateBasic(f *testing.F) {
 		f.Fatal(err)
 	}
 	f.Add(encoded)
-	f.Add([]byte(`{"protocol":"cggmp21-secp256k1","version":1,"round":1}`))
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var env tss.Envelope
 		if err := env.UnmarshalBinary(data); err != nil {
 			return
 		}
 		_ = tss.ValidateEnvelopeBasic(env, protocol, sessionID, []tss.PartyID{1, 2})
-		// Use semantic round-trip: re-marshal → re-unmarshal → re-marshal
-		// and compare canonical outputs. Raw fuzz input may carry extra
-		// TLV fields or non-canonical encodings that MarshalBinary normalizes.
 		again, err := env.MarshalBinary()
 		if err != nil {
 			t.Fatal(err)
 		}
-		var roundTripped tss.Envelope
-		if err := roundTripped.UnmarshalBinary(again); err != nil {
-			t.Fatalf("failed to unmarshal remarshaled envelope: %v", err)
-		}
-		again2, err := roundTripped.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(again, again2) {
+		if !bytes.Equal(again, data) {
 			t.Fatal("envelope did not remarshal deterministically")
 		}
 	})
