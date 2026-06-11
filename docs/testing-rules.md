@@ -113,34 +113,6 @@ go test -tags=integration -coverprofile=coverage.integration.out -covermode=atom
 
 A combined all-tier coverage target is useful as an explicit heavyweight job, but it should not be the default local feedback loop.
 
-## Integration Cost Control
-
-Full CGGMP21 integration tests are expensive and should be parallelized with a package-local semaphore rather than unconstrained `t.Parallel()`.
-
-Recommended helper:
-
-```go
-var integrationParallel = make(chan struct{}, 2)
-
-func runLimitedParallel(t *testing.T) {
-    t.Helper()
-    t.Parallel()
-
-    integrationParallel <- struct{}{}
-    t.Cleanup(func() { <-integrationParallel })
-}
-```
-
-Use this helper at the top of heavy integration tests for keygen, presign, sign, refresh, reshare, HD derivation, adversarial delivery, and full guard flows.
-
-Rules:
-
-- Acquire the semaphore after `t.Parallel()` resumes, as shown above.
-- Keep the default limit small, usually `2`.
-- Combine the semaphore with `go test -p 2` or similar so cross-package integration concurrency is also bounded.
-- Do not use this helper for tests requiring exclusive package-level state. Keep those tests sequential and document why.
-- Do not hide flakiness by reducing concurrency. If a test fails only under parallel execution, treat it as a shared-state or isolation bug until proven otherwise.
-
 ## Test Structure
 
 Organize tests by invariant, not by incidental helper function.
