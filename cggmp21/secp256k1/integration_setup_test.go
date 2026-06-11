@@ -9,15 +9,15 @@ import (
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
-var integrationParallel = make(chan struct{}, 2)
+// var integrationParallel = make(chan struct{}, 2)
 
-func runLimitedIntegration(t *testing.T) {
-	t.Helper()
-	t.Parallel()
+// func runLimitedIntegration(t *testing.T) {
+// 	t.Helper()
+// 	t.Parallel()
 
-	integrationParallel <- struct{}{}
-	t.Cleanup(func() { <-integrationParallel })
-}
+// 	integrationParallel <- struct{}{}
+// 	t.Cleanup(func() { <-integrationParallel })
+// }
 
 func TestMain(m *testing.M) {
 	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.FastSecurityParams())

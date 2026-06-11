@@ -3,14 +3,13 @@
 package secp256k1
 
 import (
+	"testing"
+
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
-	"testing"
 )
 
 func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
-	runLimitedIntegration(t)
-
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -39,8 +38,6 @@ func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
 }
 
 func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
-	runLimitedIntegration(t)
-
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -77,8 +74,6 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 }
 
 func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {

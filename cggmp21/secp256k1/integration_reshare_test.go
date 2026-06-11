@@ -5,16 +5,15 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
+	"math/big"
+	"testing"
+
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
-	"math/big"
-	"testing"
 )
 
 func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -69,8 +68,6 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -136,8 +133,6 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 // group public key across add-party, remove-party, threshold-change, and
 // disjoint-dealer-subset scenarios.
 func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
-	runLimitedIntegration(t)
-
 	oldShares := CachedKeygenShares(t, 2, 3, false)
 	oldPub := oldShares[1].PublicKeyBytes()
 
@@ -179,10 +174,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runLimitedIntegration(t)
-
 			var newShares map[tss.PartyID]*KeyShare
 			var sessions map[tss.PartyID]*ReshareSession
 

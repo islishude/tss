@@ -4,9 +4,10 @@ package secp256k1
 
 import (
 	"crypto/sha256"
+	"testing"
+
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
-	"testing"
 )
 
 func TestThresholdECDSASignScenarios(t *testing.T) {
@@ -20,10 +21,7 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 		{name: "2-of-3", threshold: 2, parties: 3, signers: []tss.PartyID{1, 3}},
 		{name: "3-of-5", threshold: 3, parties: 5, signers: []tss.PartyID{1, 3, 5}},
 	} {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runLimitedIntegration(t)
-
 			shares := secpKeygen(t, tc.threshold, tc.parties)
 			selected := make([]*KeyShare, 0, len(tc.signers))
 			for _, id := range tc.signers {
@@ -42,8 +40,6 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 }
 
 func TestThresholdECDSASignerSubsets(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 3, false)
 	for _, signers := range [][]tss.PartyID{{1, 2}, {1, 3}, {2, 3}} {
 		selected := make([]*KeyShare, 0, len(signers))
@@ -62,8 +58,6 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 }
 
 func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)

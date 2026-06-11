@@ -94,7 +94,6 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			confirmations := make([]*KeygenConfirmation, len(baseConfirmations))
 			for i, c := range baseConfirmations {
@@ -158,7 +157,6 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			confirmations := tc.confirmations(t)
 			if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {

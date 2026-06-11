@@ -69,10 +69,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runLimitedIntegration(t)
-
 			presigns := secpPresign(t, shares, signers)
 			digest := sha256.Sum256([]byte("adversarial " + tc.name))
 			signID, err := tss.NewSessionID(nil)
@@ -405,9 +402,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runLimitedIntegration(t)
 			runPresignRound3TamperTest(t, shares, signers, tc.tamper)
 		})
 	}

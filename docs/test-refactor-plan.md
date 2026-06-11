@@ -44,7 +44,6 @@ func TestEnvelopeGuard_Accept(t *testing.T) {
     }
 
     for _, tc := range tests {
-        tc := tc
         t.Run(tc.name, func(t *testing.T) {
             t.Parallel()
             // test body
@@ -559,7 +558,6 @@ func TestKeyShare_AccessorsReturnCopies(t *testing.T) {
     share := makeTestKeyShare(t)
 
     for _, tc := range tests {
-        tc := tc
         t.Run(tc.name, func(t *testing.T) {
             t.Parallel()
 
@@ -721,7 +719,6 @@ Deliverables:
 
 - Add `t.Parallel()` to low-risk pure unit tests.
 - Convert scattered test functions into table-driven tests for root, wire, secret, Shamir, BIP32, and curve packages.
-- Add required `tc := tc` captures for parallel subtests.
 - Update Makefile test concurrency knobs.
 
 Acceptance:
@@ -1133,10 +1130,10 @@ The following items are documented as intentionally deferred:
 
 These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
 
-| File | Tests | Notes |
-|------|-------|-------|
-| `internal/wire/message_test.go` | 89 | Largest single file; most tests share encode/decode/validate patterns |
-| `internal/shamir/shamir_test.go` | 43 | Pure function tests ideal for table-driven grouping |
-| `cggmp21/secp256k1/tier0_regression_test.go` | 18 | Many tests share presign/sign session construction + single-field validation pattern |
-| `cggmp21/secp256k1/hd_test.go` | 11 | BIP32 + sign-with-derivation tests with structural similarity |
-| `frost/ed25519/hd_test.go` | 21 | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already |
+| File                                         | Tests | Notes                                                                                |
+| -------------------------------------------- | ----- | ------------------------------------------------------------------------------------ |
+| `internal/wire/message_test.go`              | 89    | Largest single file; most tests share encode/decode/validate patterns                |
+| `internal/shamir/shamir_test.go`             | 43    | Pure function tests ideal for table-driven grouping                                  |
+| `cggmp21/secp256k1/tier0_regression_test.go` | 18    | Many tests share presign/sign session construction + single-field validation pattern |
+| `cggmp21/secp256k1/hd_test.go`               | 11    | BIP32 + sign-with-derivation tests with structural similarity                        |
+| `frost/ed25519/hd_test.go`                   | 21    | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already           |

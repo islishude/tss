@@ -5,12 +5,13 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
-	"github.com/islishude/tss"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
 	"math/big"
 	"strings"
 	"testing"
+
+	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // runRefresh starts refresh sessions for all parties, delivers messages, and
@@ -46,8 +47,6 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.Pa
 }
 
 func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 1, 1, false)
 	oldPub := shares[1].PublicKeyBytes()
 
@@ -95,8 +94,6 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -136,8 +133,6 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -150,8 +145,6 @@ func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
-	runLimitedIntegration(t)
-
 	shares := CachedKeygenShares(t, 2, 2, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -188,8 +181,6 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 // TestThresholdECDSAProactiveRefreshScenarios verifies multi-party proactive
 // refresh preserves the group public key and (when HD is enabled) chain code.
 func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
-	runLimitedIntegration(t)
-
 	tests := []struct {
 		name      string
 		threshold int
@@ -202,10 +193,7 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
-			runLimitedIntegration(t)
-
 			shares := CachedKeygenShares(t, tc.threshold, tc.n, tc.hd)
 			oldPub := shares[1].PublicKeyBytes()
 
