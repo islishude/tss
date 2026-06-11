@@ -33,8 +33,8 @@ make ci
 # Formatting and module hygiene.
 gofmt -w <changed-go-files>
 
-# Formatting all of go and markdowns files
-make fmt
+# Formatting markdowns and json files
+make prettier
 ```
 
 Use heavier checks only when the changed area justifies them or the task explicitly asks for them:
