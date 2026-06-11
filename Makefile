@@ -177,11 +177,11 @@ fmt-go-check: ## Check Go formatting without modifying files.
 
 .PHONY: prettier
 prettier: ## Format Markdown, JSON, YAML, and other Prettier-supported files.
-	npx -y prettier -w .
+	@npx -y prettier -w . > /dev/null
 
 .PHONY: prettier-check
 prettier-check: ## Check Markdown, JSON, YAML, and other Prettier-supported files.
-	npx -y prettier -l .
+	@npx -y prettier -l .
 
 .PHONY: tidy
 tidy: ## Run go mod tidy.
