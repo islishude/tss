@@ -211,21 +211,26 @@ func TestEvalKnownPolynomial(t *testing.T) {
 	coeffs := []*big.Int{big.NewInt(42), big.NewInt(9), big.NewInt(3)}
 
 	tests := []struct {
+		name string
 		id   tss.PartyID
 		want int64
 	}{
-		{1, 54},  // 42 + 9 + 3 = 54
-		{2, 72},  // 42 + 18 + 12 = 72
-		{3, 96},  // 42 + 27 + 27 = 96
-		{5, 61},  // 42 + 45 + 75 = 162 ≡ 61 mod 101
-		{10, 28}, // 42 + 90 + 300 = 432 ≡ 28 mod 101
+		{name: "party 1", id: 1, want: 54},   // 42 + 9 + 3 = 54
+		{name: "party 2", id: 2, want: 72},   // 42 + 18 + 12 = 72
+		{name: "party 3", id: 3, want: 96},   // 42 + 27 + 27 = 96
+		{name: "party 5", id: 5, want: 61},   // 42 + 45 + 75 = 162 ≡ 61 mod 101
+		{name: "party 10", id: 10, want: 28}, // 42 + 90 + 300 = 432 ≡ 28 mod 101
 	}
 	for _, tt := range tests {
-		got := Eval(coeffs, tt.id, order)
-		want := big.NewInt(tt.want)
-		if got.Cmp(want) != 0 {
-			t.Fatalf("Eval(coeffs, %d) = %s, want %s", tt.id, got, want)
-		}
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			got := Eval(coeffs, tt.id, order)
+			want := big.NewInt(tt.want)
+			if got.Cmp(want) != 0 {
+				t.Fatalf("Eval(coeffs, %d) = %s, want %s", tt.id, got, want)
+			}
+		})
 	}
 }
 
@@ -304,26 +309,34 @@ func TestLagrangeCoefficientReconstructs(t *testing.T) {
 		{ID: 3, Value: Eval(coeffs, 3, order)},
 	}
 
-	pairs := [][]tss.PartyID{
-		{1, 2}, {2, 3}, {1, 3},
+	pairs := []struct {
+		name string
+		ids  []tss.PartyID
+	}{
+		{name: "{1,2}", ids: []tss.PartyID{1, 2}},
+		{name: "{2,3}", ids: []tss.PartyID{2, 3}},
+		{name: "{1,3}", ids: []tss.PartyID{1, 3}},
 	}
-	for _, pair := range pairs {
-		lambda1, err := LagrangeCoefficient(pair[0], pair, order)
-		if err != nil {
-			t.Fatal(err)
-		}
-		lambda2, err := LagrangeCoefficient(pair[1], pair, order)
-		if err != nil {
-			t.Fatal(err)
-		}
-		reconstructed := new(big.Int).Mul(shares[pair[0]-1].Value, lambda1)
-		reconstructed.Add(reconstructed, new(big.Int).Mul(shares[pair[1]-1].Value, lambda2))
-		reconstructed.Mod(reconstructed, order)
+	for _, tc := range pairs {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-		if reconstructed.Cmp(big.NewInt(42)) != 0 {
-			t.Fatalf("reconstruction with {%d,%d} failed: got %s, want 42",
-				pair[0], pair[1], reconstructed)
-		}
+			lambda1, err := LagrangeCoefficient(tc.ids[0], tc.ids, order)
+			if err != nil {
+				t.Fatal(err)
+			}
+			lambda2, err := LagrangeCoefficient(tc.ids[1], tc.ids, order)
+			if err != nil {
+				t.Fatal(err)
+			}
+			reconstructed := new(big.Int).Mul(shares[tc.ids[0]-1].Value, lambda1)
+			reconstructed.Add(reconstructed, new(big.Int).Mul(shares[tc.ids[1]-1].Value, lambda2))
+			reconstructed.Mod(reconstructed, order)
+
+			if reconstructed.Cmp(big.NewInt(42)) != 0 {
+				t.Fatalf("reconstruction failed: got %s, want 42", reconstructed)
+			}
+		})
 	}
 }
 

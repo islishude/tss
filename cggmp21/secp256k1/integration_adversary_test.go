@@ -172,64 +172,58 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 	}
 }
 
-// TestIntegration_PresignRejectsTamperedKPoint verifies that a presign
-// record with a tampered KPoint fails VerifySignMaterial.
-func TestIntegration_PresignRejectsTamperedKPoint(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2, 3}
-	presigns := secpPresign(t, shares, signers)
-
-	// Tamper with KPoint in one presign record's VerifyShares.
-	for _, r := range presigns {
-		if len(r.VerifyShares) == 0 {
-			continue
-		}
-		// Clone and tamper the KPoint.
-		vs := r.VerifyShares
-		tampered := make([]byte, len(vs[0].KPoint))
-		copy(tampered, vs[0].KPoint)
-		tampered[len(tampered)-1] ^= 0x01
-		r.VerifyShares[0].KPoint = tampered
-
-		// verifySignPartial would catch this, but let's verify the record is corrupt.
-		err := r.VerifySignMaterial()
-		if err == nil {
-			// The point might still be a valid compressed point.
-			// VerifySignMaterial only checks structural validity (valid points/proofs).
-			// The actual cross-check happens during verifySignPartial.
-			continue
-		}
-		t.Logf("KPoint tampering correctly detected: %v", err)
-		return
+// TestIntegration_PresignRejectsTamperedVerifySharePoints verifies that
+// presign records with tampered KPoint or ChiPoint in VerifyShares are
+// detected during structural validation or caught during online signing.
+func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
+	tests := []struct {
+		name  string
+		field string // "KPoint" or "ChiPoint"
+	}{
+		{name: "tampered KPoint", field: "KPoint"},
+		{name: "tampered ChiPoint", field: "ChiPoint"},
 	}
-	t.Log("KPoint tampering produced a structurally valid but semantically wrong record — caught during online signing")
-}
 
-// TestIntegration_PresignRejectsTamperedChiPoint verifies that a presign
-// record with a tampered ChiPoint fails structural validation or is caught
-// during online signing.
-func TestIntegration_PresignRejectsTamperedChiPoint(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2, 3}
-	presigns := secpPresign(t, shares, signers)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shares := CachedKeygenShares(t, 2, 3, false)
+			signers := []tss.PartyID{1, 2, 3}
+			presigns := secpPresign(t, shares, signers)
 
-	for _, r := range presigns {
-		if len(r.VerifyShares) == 0 {
-			continue
-		}
-		tampered := make([]byte, len(r.VerifyShares[0].ChiPoint))
-		copy(tampered, r.VerifyShares[0].ChiPoint)
-		tampered[len(tampered)-1] ^= 0x01
-		r.VerifyShares[0].ChiPoint = tampered
+			for _, r := range presigns {
+				if len(r.VerifyShares) == 0 {
+					continue
+				}
+				var original []byte
+				switch tc.field {
+				case "KPoint":
+					original = r.VerifyShares[0].KPoint
+				case "ChiPoint":
+					original = r.VerifyShares[0].ChiPoint
+				}
+				tampered := make([]byte, len(original))
+				copy(tampered, original)
+				tampered[len(tampered)-1] ^= 0x01
 
-		err := r.VerifySignMaterial()
-		if err == nil {
-			continue
-		}
-		t.Logf("ChiPoint tampering correctly detected: %v", err)
-		return
+				switch tc.field {
+				case "KPoint":
+					r.VerifyShares[0].KPoint = tampered
+				case "ChiPoint":
+					r.VerifyShares[0].ChiPoint = tampered
+				}
+
+				err := r.VerifySignMaterial()
+				if err == nil {
+					// The point might still be a valid compressed point.
+					// VerifySignMaterial only checks structural validity.
+					continue
+				}
+				t.Logf("%s tampering correctly detected: %v", tc.field, err)
+				return
+			}
+			t.Logf("%s tampering produced a structurally valid but semantically wrong record — caught during online signing", tc.field)
+		})
 	}
-	t.Log("ChiPoint tampering produced structurally valid but semantically wrong record — caught during online signing")
 }
 
 // startSignAndCapture is a helper that starts sign sessions and returns the

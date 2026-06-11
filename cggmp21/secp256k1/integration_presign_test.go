@@ -12,21 +12,70 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-func TestThresholdECDSAPresignReuseRejected(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
-	presigns := secpPresign(t, shares, signers)
-	presign := presigns[1]
-	digest := sha256.Sum256([]byte("reuse"))
-	signID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
+// TestThresholdECDSA_PresignReuseRejected verifies that a presign cannot be
+// reused: same session re-sign attempt, cross-session reuse, and cross-digest
+// reuse all fail.
+func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
+	tests := []struct {
+		name       string
+		newSession bool // create a new session ID for the reuse attempt
+		newDigest  bool // use a different digest for the reuse attempt
+		wantCode   string
+	}{
+		{
+			name:       "same session same digest",
+			newSession: false,
+			newDigest:  false,
+			wantCode:   tss.ErrCodeConsumed,
+		},
+		{
+			name:       "different session same digest",
+			newSession: true,
+			newDigest:  false,
+			wantCode:   tss.ErrCodeConsumed,
+		},
+		{
+			name:       "same session different digest",
+			newSession: false,
+			newDigest:  true,
+			wantCode:   tss.ErrCodeConsumed,
+		},
 	}
-	if _, _, err := StartSignDigest(shares[1], presign, signID, digest[:]); err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := StartSignDigest(shares[1], presign, signID, digest[:]); err == nil {
-		t.Fatal("expected presign reuse rejection")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			shares := CachedKeygenShares(t, 2, 3, false)
+			signers := []tss.PartyID{1, 2}
+			presigns := secpPresign(t, shares, signers)
+			presign := presigns[1]
+
+			digest := sha256.Sum256([]byte("reuse"))
+			signID, err := tss.NewSessionID(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+
+			if _, _, err := StartSignDigest(shares[1], presign, signID, digest[:]); err != nil {
+				t.Fatalf("first StartSignDigest: %v", err)
+			}
+
+			reuseSessionID := signID
+			if tc.newSession {
+				var err error
+				reuseSessionID, err = tss.NewSessionID(nil)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			reuseDigest := digest[:]
+			if tc.newDigest {
+				d := sha256.Sum256([]byte("reuse different digest"))
+				reuseDigest = d[:]
+			}
+
+			_, _, err = StartSignDigest(shares[1], presign, reuseSessionID, reuseDigest)
+			_ = assertProtocolErrorCode(t, err, tc.wantCode)
+		})
 	}
 }
 
@@ -226,29 +275,6 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 			}
 		})
 	}
-}
-
-func TestThresholdECDSA_PresignRejectReuse(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
-	presign := presigns[1]
-	digest := sha256.Sum256([]byte("reuse test"))
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// First sign succeeds.
-	_, _, err = StartSignDigest(shares[1], presign, sessionID, digest[:])
-	if err != nil {
-		t.Fatalf("first StartSignDigest: %v", err)
-	}
-	// Reusing the same presign must fail with ErrCodeConsumed.
-	sessionID2, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, _, err = StartSignDigest(shares[1], presign, sessionID2, digest[:])
-	_ = assertProtocolErrorCode(t, err, tss.ErrCodeConsumed)
 }
 
 func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing.T) {

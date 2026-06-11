@@ -216,6 +216,7 @@ check-wire-api: ## Ensure production code uses only the object-level wire API.
 
 .PHONY: fix-all
 fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
+	go fix ./...
 
 .PHONY: check
 check: build vet lint fmt-check tidy-check verify check-wire-api ## Fast local pre-commit check.

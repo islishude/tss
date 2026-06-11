@@ -75,6 +75,7 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 		}
 	}
 }
+
 // minimalFROSTKeyShare returns a FROST KeyShare with only public metadata populated.
 func minimalFROSTKeyShare() *KeyShare {
 	return &KeyShare{
