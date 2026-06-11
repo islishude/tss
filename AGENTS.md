@@ -34,7 +34,7 @@ make ci
 gofmt -w <changed-go-files>
 
 # Formatting markdowns and json files
-make prettier
+npx -y prettier -w <changed-markdown-json-files>
 ```
 
 Use heavier checks only when the changed area justifies them or the task explicitly asks for them:
