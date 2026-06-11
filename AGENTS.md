@@ -4,7 +4,7 @@ This repository is a Go threshold-signature library under module `github.com/isl
 
 The codebase is security-sensitive. Treat protocol logic, wire formats, transcript construction, proof domains, key-share handling, and presign handling as consensus/security boundaries, not ordinary application code.
 
-For testing rules, required invariants, test tiers, fuzzing, golden vectors, and crash/restart expectations, read [`docs/testing-rule.md`](docs/testing-rule.md) before adding or changing tests.
+For testing rules, required invariants, test tiers, fuzzing, golden vectors, and crash/restart expectations, read [`docs/testing-rules.md`](docs/testing-rules.md) before adding or changing tests.
 
 ## Non-Negotiable Rules
 
@@ -81,6 +81,6 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 ## Documentation Rules
 
 - Update `docs/*.md` when behavior, API, wire format, security assumptions, lifecycle requirements, or storage expectations change.
-- Update [`docs/testing-rule.md`](docs/testing-rule.md) when adding a new test tier, invariant class, protocol phase, or shared test harness pattern.
+- Update [`docs/testing-rules.md`](docs/testing-rules.md) when adding a new test tier, invariant class, protocol phase, or shared test harness pattern.
 - Add or update executable examples when the public API changes.
 - Keep security notes precise. Do not claim production audit, constant-time behavior, zeroization guarantees, or crash safety unless the code and tests support the claim.
