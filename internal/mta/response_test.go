@@ -60,6 +60,8 @@ func TestResponseMessageValidate(t *testing.T) {
 }
 
 func TestResponseMessageMarshalBinaryInvalid(t *testing.T) {
+	t.Parallel()
+
 	m := ResponseMessage{Ciphertext: nil, Proof: nil}
 	_, err := m.MarshalBinary()
 	if err == nil {

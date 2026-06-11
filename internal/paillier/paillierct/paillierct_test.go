@@ -2,9 +2,12 @@ package paillierct
 
 import (
 	"bytes"
-	"crypto/rand"
+	crand "crypto/rand"
+	"io"
 	"math/big"
 	"testing"
+
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func testKey(t *testing.T) (n, nSquared *big.Int) {
@@ -17,10 +20,17 @@ func testKey(t *testing.T) (n, nSquared *big.Int) {
 
 func testPrimes(t *testing.T) (p, q *big.Int) {
 	t.Helper()
-	p, _ = rand.Prime(rand.Reader, 256)
-	q, _ = rand.Prime(rand.Reader, 256)
-	for p.Cmp(q) == 0 {
-		q, _ = rand.Prime(rand.Reader, 256)
+	var err error
+	p, err = crand.Prime(testutil.DeterministicReader(101), 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q, err = crand.Prime(testutil.DeterministicReader(202), 256)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Cmp(q) == 0 {
+		t.Fatal("test primes must be distinct")
 	}
 	return p, q
 }
@@ -41,6 +51,8 @@ func testLambda(t *testing.T) (n, nSquared *big.Int, lambda []byte, nLen int) {
 }
 
 func TestNewPrivateModExp(t *testing.T) {
+	t.Parallel()
+
 	_, nSquared := testKey(t)
 	nsBytes := nSquared.Bytes()
 	nsFixed := FixedEncode(nSquared, 128) // 1024-bit n²
@@ -68,6 +80,8 @@ func TestNewPrivateModExp(t *testing.T) {
 }
 
 func TestExpSecretMatchesBigInt(t *testing.T) {
+	t.Parallel()
+
 	_, nSquared, lambda, nLen := testLambda(t)
 	nsFixed := FixedEncode(nSquared, 2*nLen)
 
@@ -77,7 +91,10 @@ func TestExpSecretMatchesBigInt(t *testing.T) {
 	}
 
 	// Generate a random ciphertext < n².
-	ctBig, _ := rand.Int(rand.Reader, nSquared)
+	ctBig, err := crand.Int(testutil.DeterministicReader(303), nSquared)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ctBig.Sign() == 0 {
 		ctBig.SetInt64(1)
 	}
@@ -99,6 +116,8 @@ func TestExpSecretMatchesBigInt(t *testing.T) {
 }
 
 func TestExpSecretBlindedMatchesExpSecret(t *testing.T) {
+	t.Parallel()
+
 	n, nSquared, lambda, nLen := testLambda(t)
 	nBytes := FixedEncode(n, nLen)
 	nsFixed := FixedEncode(nSquared, 2*nLen)
@@ -109,7 +128,10 @@ func TestExpSecretBlindedMatchesExpSecret(t *testing.T) {
 	}
 
 	// Generate a random ciphertext < n².
-	ctBig, _ := rand.Int(rand.Reader, nSquared)
+	ctBig, err := crand.Int(testutil.DeterministicReader(404), nSquared)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ctBig.Sign() == 0 {
 		ctBig.SetInt64(1)
 	}
@@ -120,7 +142,7 @@ func TestExpSecretBlindedMatchesExpSecret(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	gotBlinded, err := pm.ExpSecretBlinded(rand.Reader, ctFixed, lambda, nBytes)
+	gotBlinded, err := pm.ExpSecretBlinded(testutil.DeterministicReader(405), ctFixed, lambda, nBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -132,11 +154,13 @@ func TestExpSecretBlindedMatchesExpSecret(t *testing.T) {
 }
 
 func TestExpCT(t *testing.T) {
+	t.Parallel()
+
 	_, nSquared := testKey(t)
 	modulus := FixedEncode(nSquared, 128) // 1024-bit
 
 	base := make([]byte, 128)
-	if _, err := rand.Read(base); err != nil {
+	if _, err := io.ReadFull(testutil.DeterministicReader(505), base); err != nil {
 		t.Fatal(err)
 	}
 	baseBig := new(big.Int).SetBytes(base)
@@ -147,7 +171,7 @@ func TestExpCT(t *testing.T) {
 	baseFixed := FixedEncode(baseBig, 128)
 
 	exp := make([]byte, 32) // 256-bit exponent like secp256k1 scalar
-	if _, err := rand.Read(exp); err != nil {
+	if _, err := io.ReadFull(testutil.DeterministicReader(506), exp); err != nil {
 		t.Fatal(err)
 	}
 	exp[0] |= 1
@@ -168,6 +192,8 @@ func TestExpCT(t *testing.T) {
 }
 
 func TestExpCTRejectsMismatchedInputs(t *testing.T) {
+	t.Parallel()
+
 	if _, err := ExpCT(nil, []byte{1}, []byte{1}); err == nil {
 		t.Fatal("expected error for nil modulus")
 	}
@@ -177,6 +203,8 @@ func TestExpCTRejectsMismatchedInputs(t *testing.T) {
 }
 
 func TestFixedEncode(t *testing.T) {
+	t.Parallel()
+
 	x := big.NewInt(0x1234)
 	got := FixedEncode(x, 4)
 	if !bytes.Equal(got, []byte{0x00, 0x00, 0x12, 0x34}) {
@@ -193,6 +221,8 @@ func TestFixedEncode(t *testing.T) {
 
 // TestExpSecretConstantTimeInputValidation verifies strict length checks.
 func TestExpSecretConstantTimeInputValidation(t *testing.T) {
+	t.Parallel()
+
 	_, nSquared, _, nLen := testLambda(t)
 	nsFixed := FixedEncode(nSquared, 2*nLen)
 	lambda := make([]byte, nLen)
@@ -226,6 +256,8 @@ func TestExpSecretConstantTimeInputValidation(t *testing.T) {
 // produce different results (due to premature bit-skipping) or show dramatically
 // different timings. This is a correctness check, not a statistical timing test.
 func TestTimingConstantTime(t *testing.T) {
+	t.Parallel()
+
 	_, nSquared, lambda, nLen := testLambda(t)
 	nsFixed := FixedEncode(nSquared, 2*nLen)
 
@@ -234,7 +266,10 @@ func TestTimingConstantTime(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctBig, _ := rand.Int(rand.Reader, nSquared)
+	ctBig, err := crand.Int(testutil.DeterministicReader(606), nSquared)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if ctBig.Sign() == 0 {
 		ctBig.SetInt64(1)
 	}

@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -29,6 +30,8 @@ func FuzzStartMessageUnmarshal(f *testing.F) {
 // Tier 0: StartMessage validation and wire error paths (no crypto keygen).
 
 func TestStartMessageValidate(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name       string
 		ciphertext []byte
@@ -40,14 +43,17 @@ func TestStartMessageValidate(t *testing.T) {
 		{name: "leading zero", ciphertext: []byte{0x00, 0x05}, wantErr: true},
 		{name: "all zeros", ciphertext: []byte{0x00}, wantErr: true},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			m := StartMessage{Ciphertext: tt.ciphertext}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			m := StartMessage{Ciphertext: tc.ciphertext}
 			err := m.Validate()
-			if tt.wantErr && err == nil {
+			if tc.wantErr && err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if !tt.wantErr && err != nil {
+			if !tc.wantErr && err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}
 		})
@@ -55,6 +61,8 @@ func TestStartMessageValidate(t *testing.T) {
 }
 
 func TestStartMessageMarshalBinaryInvalid(t *testing.T) {
+	t.Parallel()
+
 	// MarshalBinary calls Validate first — an invalid message should not marshal.
 	m := StartMessage{Ciphertext: nil}
 	_, err := m.MarshalBinary()
@@ -64,6 +72,8 @@ func TestStartMessageMarshalBinaryInvalid(t *testing.T) {
 }
 
 func TestUnmarshalStartMessageErrors(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		data    []byte
@@ -103,14 +113,17 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 			}(),
 		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			_, err := UnmarshalStartMessage(tt.data)
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := UnmarshalStartMessage(tc.data)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
-			if tt.wantErr != "" && err.Error() != tt.wantErr {
-				t.Fatalf("got error %q, want %q", err.Error(), tt.wantErr)
+			if tc.wantErr != "" && err.Error() != tc.wantErr {
+				t.Fatalf("got error %q, want %q", err.Error(), tc.wantErr)
 			}
 		})
 	}
@@ -129,6 +142,8 @@ func mustMarshalStartAtVersion(t *testing.T, version uint16, ciphertext []byte) 
 }
 
 func TestStartOpeningDestroy(t *testing.T) {
+	t.Parallel()
+
 	ciphertext := []byte{0x0a, 0x0b, 0x0c}
 	opening := &StartOpening{
 		Message: StartMessage{Ciphertext: ciphertext},
@@ -150,11 +165,15 @@ func TestStartOpeningDestroy(t *testing.T) {
 }
 
 func TestStartOpeningDestroyNil(t *testing.T) {
+	t.Parallel()
+
 	var opening *StartOpening
 	opening.Destroy() // must not panic
 }
 
 func TestStartOpeningString(t *testing.T) {
+	t.Parallel()
+
 	var nilOpening *StartOpening
 	if s := nilOpening.String(); s != "<nil>" {
 		t.Fatalf("got %q, want \"<nil>\"", s)
@@ -170,8 +189,8 @@ func TestStartOpeningString(t *testing.T) {
 	if s == "" || s == "<nil>" {
 		t.Fatalf("unexpected string: %q", s)
 	}
-	if opening.k.String() != "" {
-		t.Log("k is still readable via String()")
+	if bytes.Contains([]byte(s), []byte("42")) {
+		t.Fatalf("StartOpening string leaked witness: %q", s)
 	}
 }
 

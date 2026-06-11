@@ -90,7 +90,7 @@ Recommended test-run knobs:
 
 ```make
 TEST_PARALLEL ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
-PKG_PARALLEL ?= 4
+PKG_PARALLEL ?= 8
 INTEGRATION_PARALLEL ?= 2
 ```
 

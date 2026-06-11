@@ -10,11 +10,9 @@ import (
 )
 
 func TestProof(t *testing.T) {
-	secret, err := secp.RandomScalar(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof, public, err := Prove([]byte("test"), secret.BigInt())
+	t.Parallel()
+
+	proof, public, err := Prove([]byte("test"), big.NewInt(13))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -85,84 +83,119 @@ func FuzzProofUnmarshal(f *testing.F) {
 }
 
 func TestProofRejectsInvalidInputs(t *testing.T) {
-	if _, _, err := Prove([]byte("test"), nil); err == nil {
-		t.Fatal("Prove accepted nil secret")
-	}
-	if _, _, err := Prove([]byte("test"), big.NewInt(0)); err == nil {
-		t.Fatal("Prove accepted zero secret")
+	t.Parallel()
+
+	proof, public, err := Prove([]byte("test"), big.NewInt(13))
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	secret, err := secp.RandomScalar(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof, public, err := Prove([]byte("test"), secret.BigInt())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if Verify([]byte("test"), public, nil) {
-		t.Fatal("Verify accepted nil proof")
-	}
-	if Verify([]byte("test"), []byte{0x02}, proof) {
-		t.Fatal("Verify accepted malformed public key")
-	}
-	malformed := *proof
-	malformed.Commitment = []byte{0x02}
-	if Verify([]byte("test"), public, &malformed) {
-		t.Fatal("Verify accepted malformed commitment")
-	}
-	malformed = *proof
-	malformed.Response = append([]byte{0}, proof.Response...)
-	if Verify([]byte("test"), public, &malformed) {
-		t.Fatal("Verify accepted malformed response")
-	}
+	t.Run("prove rejects invalid secret", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name   string
+			secret *big.Int
+		}{
+			{name: "nil", secret: nil},
+			{name: "zero", secret: big.NewInt(0)},
+		}
+		for i := range tests {
+			tc := tests[i]
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				if _, _, err := Prove([]byte("test"), tc.secret); err == nil {
+					t.Fatal("Prove accepted invalid secret")
+				}
+			})
+		}
+	})
+
+	t.Run("verify rejects malformed inputs", func(t *testing.T) {
+		t.Parallel()
+
+		tests := []struct {
+			name   string
+			public []byte
+			proof  *Proof
+		}{
+			{name: "nil proof", public: public, proof: nil},
+			{name: "malformed public key", public: []byte{0x02}, proof: proof},
+			{name: "malformed commitment", public: public, proof: func() *Proof {
+				malformed := *proof
+				malformed.Commitment = []byte{0x02}
+				return &malformed
+			}()},
+			{name: "malformed response", public: public, proof: func() *Proof {
+				malformed := *proof
+				malformed.Response = append([]byte{0}, proof.Response...)
+				return &malformed
+			}()},
+		}
+		for i := range tests {
+			tc := tests[i]
+			t.Run(tc.name, func(t *testing.T) {
+				t.Parallel()
+
+				if Verify([]byte("test"), tc.public, tc.proof) {
+					t.Fatal("Verify accepted malformed input")
+				}
+			})
+		}
+	})
 }
 
 func TestProofTamper(t *testing.T) {
-	secret, err := secp.RandomScalar(nil)
+	t.Parallel()
+
+	proof, public, err := Prove([]byte("test"), big.NewInt(13))
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, public, err := Prove([]byte("test"), secret.BigInt())
+	_, otherPublic, err := Prove([]byte("test"), big.NewInt(17))
 	if err != nil {
 		t.Fatal(err)
 	}
-	otherSecret, err := secp.RandomScalar(nil)
-	if err != nil {
-		t.Fatal(err)
+
+	tests := []struct {
+		name   string
+		public []byte
+		proof  *Proof
+	}{
+		{name: "wrong public key", public: otherPublic, proof: proof},
+		{name: "tampered commitment", public: public, proof: func() *Proof {
+			tampered := proof.Clone()
+			tampered.Commitment[len(tampered.Commitment)-1] ^= 1
+			return tampered
+		}()},
+		{name: "tampered response", public: public, proof: func() *Proof {
+			tampered := proof.Clone()
+			tampered.Response[len(tampered.Response)-1] ^= 1
+			return tampered
+		}()},
 	}
-	_, otherPublic, err := Prove([]byte("test"), otherSecret.BigInt())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if Verify([]byte("test"), otherPublic, proof) {
-		t.Fatal("proof verified against wrong public key")
-	}
-	tampered := &Proof{
-		Commitment: append([]byte(nil), proof.Commitment...),
-		Response:   append([]byte(nil), proof.Response...),
-	}
-	tampered.Commitment[len(tampered.Commitment)-1] ^= 1
-	if Verify([]byte("test"), public, tampered) {
-		t.Fatal("proof verified with tampered commitment")
-	}
-	tampered = &Proof{
-		Commitment: append([]byte(nil), proof.Commitment...),
-		Response:   append([]byte(nil), proof.Response...),
-	}
-	tampered.Response[len(tampered.Response)-1] ^= 1
-	if Verify([]byte("test"), public, tampered) {
-		t.Fatal("proof verified with tampered response")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if Verify([]byte("test"), tc.public, tc.proof) {
+				t.Fatal("tampered proof verified")
+			}
+		})
 	}
 }
 
 func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
+	t.Parallel()
+
 	validCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
 	if err != nil {
 		t.Fatal(err)
 	}
 	validResponse := secp.ScalarFromBigInt(big.NewInt(2)).Bytes()
-	for _, tc := range []struct {
+	tests := []struct {
 		name    string
 		version uint16
 		fields  []wire.Field
@@ -183,8 +216,12 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 			{Tag: proofFieldCommitment, Value: validCommitment},
 			{Tag: 99, Value: validResponse},
 		}},
-	} {
+	}
+	for i := range tests {
+		tc := tests[i]
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
 			raw, err := wire.MarshalFields(tc.version, proofWireType, tc.fields)
 			if err != nil {
 				t.Fatal(err)

@@ -84,6 +84,8 @@ func TestGoldenProof(t *testing.T) {
 }
 
 func TestGoldenSchnorrMarshalBinaryRejectsInvalid(t *testing.T) {
+	t.Parallel()
+
 	if _, err := (&Proof{}).MarshalBinary(); err == nil {
 		t.Error("accepted nil fields")
 	}
