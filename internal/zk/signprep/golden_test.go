@@ -11,6 +11,8 @@ import (
 )
 
 func TestGoldenProof(t *testing.T) {
+	t.Parallel()
+
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))

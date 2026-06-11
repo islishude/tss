@@ -6,33 +6,102 @@ import (
 	"testing"
 )
 
-func TestNewBoundedReplayCacheDefaultSize(t *testing.T) {
+func TestNewReplayCacheConfiguresCapacity(t *testing.T) {
 	t.Parallel()
-	c := NewBoundedReplayCache(0)
-	if c == nil {
-		t.Fatal("expected non-nil cache")
+
+	tests := []struct {
+		name string
+		new  func() *InMemoryReplayCache
+		want int
+	}{
+		{
+			name: "bounded default",
+			new:  func() *InMemoryReplayCache { return NewBoundedReplayCache(0) },
+			want: defaultReplayCacheMaxEntries,
+		},
+		{
+			name: "bounded custom",
+			new:  func() *InMemoryReplayCache { return NewBoundedReplayCache(10) },
+			want: 10,
+		},
+		{
+			name: "in-memory default",
+			new:  NewInMemoryReplayCache,
+			want: defaultReplayCacheMaxEntries,
+		},
 	}
-	if c.maxEntries != defaultReplayCacheMaxEntries {
-		t.Fatalf("maxEntries = %d, want %d", c.maxEntries, defaultReplayCacheMaxEntries)
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := tc.new()
+			if c == nil {
+				t.Fatal("expected non-nil cache")
+			}
+			if c.maxEntries != tc.want {
+				t.Fatalf("maxEntries = %d, want %d", c.maxEntries, tc.want)
+			}
+		})
 	}
 }
 
-func TestNewBoundedReplayCacheCustomSize(t *testing.T) {
+func TestReplayCacheCheckAndStore(t *testing.T) {
 	t.Parallel()
-	c := NewBoundedReplayCache(10)
-	if c.maxEntries != 10 {
-		t.Fatalf("maxEntries = %d, want 10", c.maxEntries)
-	}
-}
 
-func TestNewInMemoryReplayCacheDefaultSize(t *testing.T) {
-	t.Parallel()
-	c := NewInMemoryReplayCache()
-	if c == nil {
-		t.Fatal("expected non-nil cache")
+	slot := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
+	hash1 := sha256.Sum256([]byte("payload1"))
+	hash2 := sha256.Sum256([]byte("payload2"))
+
+	tests := []struct {
+		name    string
+		setup   func(*InMemoryReplayCache)
+		hash    [32]byte
+		wantErr error
+	}{
+		{
+			name: "first use accepts",
+			hash: hash1,
+		},
+		{
+			name: "duplicate rejects",
+			setup: func(c *InMemoryReplayCache) {
+				_ = c.CheckAndStore(slot, hash1)
+			},
+			hash:    hash1,
+			wantErr: ErrDuplicateMessage,
+		},
+		{
+			name: "equivocation rejects",
+			setup: func(c *InMemoryReplayCache) {
+				_ = c.CheckAndStore(slot, hash1)
+			},
+			hash:    hash2,
+			wantErr: ErrEquivocation,
+		},
 	}
-	if c.maxEntries != defaultReplayCacheMaxEntries {
-		t.Fatalf("maxEntries = %d, want %d", c.maxEntries, defaultReplayCacheMaxEntries)
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			c := NewBoundedReplayCache(100)
+			if tc.setup != nil {
+				tc.setup(c)
+			}
+			err := c.CheckAndStore(slot, tc.hash)
+			if tc.wantErr != nil {
+				if !errors.Is(err, tc.wantErr) {
+					t.Fatalf("expected %v, got %v", tc.wantErr, err)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("CheckAndStore: %v", err)
+			}
+		})
 	}
 }
 
@@ -42,39 +111,6 @@ func TestReplayCacheNilCheckAndStore(t *testing.T) {
 	err := c.CheckAndStore(MessageSlotKey{}, [32]byte{})
 	if !errors.Is(err, ErrMissingReplayCache) {
 		t.Fatalf("expected ErrMissingReplayCache, got %v", err)
-	}
-}
-
-func TestReplayCacheFirstUse(t *testing.T) {
-	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	slot := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
-	hash := sha256.Sum256([]byte("payload1"))
-	if err := c.CheckAndStore(slot, hash); err != nil {
-		t.Fatalf("first use should succeed: %v", err)
-	}
-}
-
-func TestReplayCacheDuplicateRejected(t *testing.T) {
-	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	slot := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
-	hash := sha256.Sum256([]byte("payload1"))
-	_ = c.CheckAndStore(slot, hash)
-	if err := c.CheckAndStore(slot, hash); !errors.Is(err, ErrDuplicateMessage) {
-		t.Fatalf("expected ErrDuplicateMessage, got %v", err)
-	}
-}
-
-func TestReplayCacheEquivocationRejected(t *testing.T) {
-	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	slot := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
-	hash1 := sha256.Sum256([]byte("payload1"))
-	hash2 := sha256.Sum256([]byte("payload2"))
-	_ = c.CheckAndStore(slot, hash1)
-	if err := c.CheckAndStore(slot, hash2); !errors.Is(err, ErrEquivocation) {
-		t.Fatalf("expected ErrEquivocation, got %v", err)
 	}
 }
 
@@ -161,42 +197,42 @@ func TestPayloadHashFromEnvelopeDeterministic(t *testing.T) {
 	}
 }
 
-func TestReplayCacheDifferentSessionsIndependent(t *testing.T) {
+func TestReplayCacheSlotDimensionsIndependent(t *testing.T) {
 	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	slot1 := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
-	slot2 := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x02}, Round: 1, From: 1, PayloadType: "msg"}
+
+	base := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, To: 2, PayloadType: "msg"}
 	hash := sha256.Sum256([]byte("payload"))
 
-	_ = c.CheckAndStore(slot1, hash)
-	if err := c.CheckAndStore(slot2, hash); err != nil {
-		t.Fatalf("different session should be independent: %v", err)
+	tests := []struct {
+		name string
+		next MessageSlotKey
+	}{
+		{
+			name: "different sessions",
+			next: MessageSlotKey{Protocol: "test", SessionID: SessionID{0x02}, Round: 1, From: 1, To: 2, PayloadType: "msg"},
+		},
+		{
+			name: "different rounds",
+			next: MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 2, From: 1, To: 2, PayloadType: "msg"},
+		},
+		{
+			name: "p2p and broadcast",
+			next: MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, To: 0, PayloadType: "msg"},
+		},
 	}
-}
 
-func TestReplayCacheDifferentRoundsIndependent(t *testing.T) {
-	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	slot1 := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, PayloadType: "msg"}
-	slot2 := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 2, From: 1, PayloadType: "msg"}
-	hash := sha256.Sum256([]byte("payload"))
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	_ = c.CheckAndStore(slot1, hash)
-	if err := c.CheckAndStore(slot2, hash); err != nil {
-		t.Fatalf("different round should be independent: %v", err)
-	}
-}
-
-func TestReplayCacheP2PvsBroadcastIndependent(t *testing.T) {
-	t.Parallel()
-	c := NewBoundedReplayCache(100)
-	// p2p has To != 0, broadcast has To == 0.
-	slotP2P := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, To: 2, PayloadType: "msg"}
-	slotBC := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x01}, Round: 1, From: 1, To: 0, PayloadType: "msg"}
-	hash := sha256.Sum256([]byte("payload"))
-
-	_ = c.CheckAndStore(slotP2P, hash)
-	if err := c.CheckAndStore(slotBC, hash); err != nil {
-		t.Fatalf("p2p and broadcast should be independent: %v", err)
+			c := NewBoundedReplayCache(100)
+			if err := c.CheckAndStore(base, hash); err != nil {
+				t.Fatalf("store base slot: %v", err)
+			}
+			if err := c.CheckAndStore(tc.next, hash); err != nil {
+				t.Fatalf("independent slot rejected: %v", err)
+			}
+		})
 	}
 }

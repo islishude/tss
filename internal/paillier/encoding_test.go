@@ -11,6 +11,8 @@ import (
 )
 
 func TestMarshalRoundTrip(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -54,6 +56,8 @@ func TestMarshalRoundTrip(t *testing.T) {
 }
 
 func TestRejectsNonCanonicalPublicKey(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)

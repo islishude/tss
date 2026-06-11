@@ -31,6 +31,8 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 // The lockedReader wrapper serialises Read calls so the reader implementation
 // never sees overlapping calls.
 func TestGenerateKeyCustomReaderSafety(t *testing.T) {
+	t.Parallel()
+
 	reader := new(concurrencyDetectingReader)
 	sk, err := GenerateKeyForTest(context.Background(), reader, 512)
 	if err != nil {
@@ -47,6 +49,8 @@ func TestGenerateKeyCustomReaderSafety(t *testing.T) {
 }
 
 func TestSameReaderHandlesNonComparableValues(t *testing.T) {
+	t.Parallel()
+
 	if !sameReader(crand.Reader, crand.Reader) {
 		t.Fatal("identical non-comparable readers should compare equal")
 	}
@@ -63,6 +67,8 @@ func TestSameReaderHandlesNonComparableValues(t *testing.T) {
 }
 
 func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -75,6 +81,8 @@ func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
 }
 
 func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
+	t.Parallel()
+
 	var pCalls atomic.Int32
 	var qCalls atomic.Int32
 	search := func(ctx context.Context, side primeSide, bits, workers int) (*big.Int, error) {

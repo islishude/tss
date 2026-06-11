@@ -12,6 +12,8 @@ import (
 )
 
 func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -66,6 +68,8 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -128,6 +132,8 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareAddsParty(t *testing.T) {
+	runLimitedIntegration(t)
+
 	oldShares := secpKeygen(t, 2, 3)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 2, 3, 4}
@@ -154,6 +160,8 @@ func TestThresholdECDSAReshareAddsParty(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
+	runLimitedIntegration(t)
+
 	oldShares := secpKeygen(t, 2, 3)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 3}
@@ -178,6 +186,8 @@ func TestThresholdECDSAReshareRemovesParty(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
+	runLimitedIntegration(t)
+
 	oldShares := secpKeygen(t, 2, 3)
 	oldPub := oldShares[1].PublicKeyBytes()
 	newParties := []tss.PartyID{1, 2, 3, 4, 5}
@@ -196,6 +206,8 @@ func TestThresholdECDSAReshareChangesThreshold(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareDisjointDealerSubset(t *testing.T) {
+	runLimitedIntegration(t)
+
 	oldShares := secpKeygen(t, 2, 3)
 	oldPub := oldShares[1].PublicKeyBytes()
 	dealerParties := []tss.PartyID{1, 3}

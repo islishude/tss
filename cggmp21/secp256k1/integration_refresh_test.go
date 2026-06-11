@@ -13,6 +13,8 @@ import (
 )
 
 func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 1, 1)
 	oldPub := shares[1].PublicKeyBytes()
 
@@ -60,6 +62,8 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -99,6 +103,8 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -111,6 +117,8 @@ func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
 }
 
 func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -145,6 +153,8 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 }
 
 func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygen(t, 2, 3)
 	oldPub := shares[1].PublicKeyBytes()
 
@@ -206,6 +216,8 @@ func TestThresholdECDSAProactiveRefresh2of3(t *testing.T) {
 }
 
 func TestThresholdECDSAProactiveRefreshPreservesChainCode(t *testing.T) {
+	runLimitedIntegration(t)
+
 	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{EnableHD: true})
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
