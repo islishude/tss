@@ -20,7 +20,9 @@ import (
 // TestDeriveNonHardenedBIP32Vectors verifies DeriveNonHardenedBIP32 against
 // official BIP-32 test vectors (non-hardened CKDpub only).
 func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
+	t.Parallel()
 	t.Run("TV1: m/0H/1", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw"
 		wantXPub := "xpub6ASuArnXKPbfEwhqN6e3mwBcDTgzisQN1wXN9BJcM47sSikHjJf3UFHKkNAWbWMiGj7Wf5uMash7SyYq527Hqck2AxYysAA7xmALppuCkwQ"
 
@@ -56,6 +58,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	})
 
 	t.Run("TV1: m/0H/1/2H/2", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub6D4BDPcP2GT577Vvch3R8wDkScZWzQzMMUm3PWbmWvVJrZwQY4VUNgqFJPMM3No2dFDFGTsxxpG5uJh7n7epu4trkrX7x7DogT5Uv6fcLW5"
 		wantXPub := "xpub6FHa3pjLCk84BayeJxFW2SP4XRrFd1JYnxeLeU8EqN3vDfZmbqBqaGJAyiLjTAwm6ZLRQUMv1ZACTj37sR62cfN7fe5JnJ7dh8zL4fiyLHV"
 
@@ -75,6 +78,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	})
 
 	t.Run("TV1: m/0H/1/2H/2/1000000000", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub6FHa3pjLCk84BayeJxFW2SP4XRrFd1JYnxeLeU8EqN3vDfZmbqBqaGJAyiLjTAwm6ZLRQUMv1ZACTj37sR62cfN7fe5JnJ7dh8zL4fiyLHV"
 		wantXPub := "xpub6H1LXWLaKsWFhvm6RVpEL9P4KfRZSW7abD2ttkWP3SSQvnyA8FSVqNTEcYFgJS2UaFcxupHiYkro49S8yGasTvXEYBVPamhGW6cFJodrTHy"
 
@@ -94,6 +98,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	})
 
 	t.Run("TV2: m/0", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 		wantXPub := "xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9LgpeyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH"
 
@@ -113,6 +118,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	})
 
 	t.Run("TV2: m/0/2147483647H/1", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub6ASAVgeehLbnwdqV6UKMHVzgqAG8Gr6riv3Fxxpj8ksbH9ebxaEyBLZ85ySDhKiLDBrQSARLq1uNRts8RuJiHjaDMBU4Zn9h8LZNnBC5y4a"
 		wantXPub := "xpub6DF8uhdarytz3FWdA8TvFSvvAh8dP3283MY7p2V4SeE2wyWmG5mg5EwVvmdMVCQcoNJxGoWaU9DCWh89LojfZ537wTfunKau47EL2dhHKon"
 
@@ -132,6 +138,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	})
 
 	t.Run("TV2: m/0/2147483647H/1/2147483646H/2", func(t *testing.T) {
+		t.Parallel()
 		parentXPub := "xpub6ERApfZwUNrhLCkDtcHTcxd75RbzS1ed54G1LkBUHQVHQKqhMkhgbmJbZRkrgZw4koxb5JaHWkY4ALHY2grBGRjaDMzQLcgJvLJuZZvRcEL"
 		wantXPub := "xpub6FnCn6nSzZAw5Tw7cgR9bi15UV96gLZhjDstkXXxvCLsUXBGXPdSnLFbdpq8p9HmGsApME5hQTZ3emM2rnY5agb9rXpVGyy3bdW6EEgAtqt"
 
@@ -153,6 +160,7 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 
 // TestDeriveNonHardenedBIP32MultiStep verifies multi-step vs chained consistency.
 func TestDeriveNonHardenedBIP32MultiStep(t *testing.T) {
+	t.Parallel()
 	masterXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	m0XPub := "xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9LgpeyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH"
 
@@ -206,10 +214,12 @@ func TestDeriveNonHardenedBIP32MultiStep(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
 
 	t.Run("nil chain code", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(valid.PublicKey, nil, []uint32{0})
 		if !errors.Is(err, bip32util.ErrChainCodeRequired) {
 			t.Errorf("expected bip32util.ErrChainCodeRequired, got %v", err)
@@ -217,6 +227,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("empty chain code", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(valid.PublicKey, []byte{}, []uint32{0})
 		if !errors.Is(err, bip32util.ErrChainCodeRequired) {
 			t.Errorf("expected bip32util.ErrChainCodeRequired, got %v", err)
@@ -224,6 +235,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("wrong chain code length", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(valid.PublicKey, make([]byte, 31), []uint32{0})
 		if !errors.Is(err, bip32util.ErrInvalidChainCodeLength) {
 			t.Errorf("expected bip32util.ErrInvalidChainCodeLength, got %v", err)
@@ -235,6 +247,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("path too long", func(t *testing.T) {
+		t.Parallel()
 		longPath := make([]uint32, 256)
 		for i := range longPath {
 			longPath[i] = uint32(i)
@@ -246,6 +259,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("hardened index rejected", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0, bip32util.HardenedKeyStart})
 		if !errors.Is(err, bip32util.ErrHardenedDerivationUnsupported) {
 			t.Errorf("expected bip32util.ErrHardenedDerivationUnsupported, got %v", err)
@@ -257,6 +271,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("invalid public key", func(t *testing.T) {
+		t.Parallel()
 		invalidPub := make([]byte, 33)
 		copy(invalidPub, valid.PublicKey)
 		invalidPub[0] = 0x04 // uncompressed prefix
@@ -267,6 +282,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("wrong length public key", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(make([]byte, 32), valid.ChainCode[:], []uint32{0})
 		if !errors.Is(err, bip32util.ErrInvalidPublicKey) {
 			t.Errorf("expected bip32util.ErrInvalidPublicKey, got %v", err)
@@ -274,6 +290,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 	})
 
 	t.Run("all-zero public key", func(t *testing.T) {
+		t.Parallel()
 		_, err := DeriveNonHardenedBIP32(make([]byte, 33), slices.Clone(valid.ChainCode[:]), []uint32{0})
 		if !errors.Is(err, bip32util.ErrInvalidPublicKey) {
 			t.Errorf("expected bip32util.ErrInvalidPublicKey, got %v", err)
@@ -286,6 +303,7 @@ func TestDeriveNonHardenedBIP32Errors(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
 
@@ -331,6 +349,7 @@ func TestDeriveNonHardenedBIP32_EmptyPathReturnsParent(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestDeriveNonHardenedBIP32_CumulativeShiftMatchesChildPublicKey(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
 
@@ -350,6 +369,7 @@ func TestDeriveNonHardenedBIP32_CumulativeShiftMatchesChildPublicKey(t *testing.
 }
 
 func TestDeriveNonHardenedBIP32_MultiLevelUsesIntermediateParentPublicKey(t *testing.T) {
+	t.Parallel()
 	// This test verifies that each HMAC step uses the intermediate child
 	// public key, not the root. We verify by checking that multi-step
 	// derivation matches chained single-step derivations.
@@ -385,6 +405,7 @@ func TestDeriveNonHardenedBIP32_MultiLevelUsesIntermediateParentPublicKey(t *tes
 }
 
 func TestDeriveNonHardenedBIP32_DoesNotMutateInputs(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
 
@@ -425,6 +446,7 @@ func fakeHMACForInvalidChild(ilValue []byte) func(key, data []byte) ([]byte, []b
 	}
 }
 
+// This test modifies package-level hmacSHA512 and must remain sequential.
 func TestDeriveNonHardenedBIP32_InvalidChildErrorMode(t *testing.T) {
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
@@ -454,6 +476,7 @@ func TestDeriveNonHardenedBIP32_InvalidChildErrorMode(t *testing.T) {
 	}
 }
 
+// This test modifies package-level hmacSHA512 and must remain sequential.
 func TestDeriveNonHardenedBIP32_InvalidChildSkipMode(t *testing.T) {
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
@@ -494,6 +517,7 @@ func TestDeriveNonHardenedBIP32_InvalidChildSkipMode(t *testing.T) {
 	}
 }
 
+// This test modifies package-level hmacSHA512 and must remain sequential.
 func TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange(t *testing.T) {
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
@@ -518,6 +542,7 @@ func TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange(t *
 // ---------------------------------------------------------------------------
 
 func TestDeriveNonHardenedBIP32Extended_ResultMetadata(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	valid, _ := ParseExtendedPublicKey(validXPub)
 
@@ -559,6 +584,7 @@ func TestDeriveNonHardenedBIP32Extended_ResultMetadata(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestExtendedPublicKey_SerializeMainnetXPub_RoundTrip(t *testing.T) {
+	t.Parallel()
 	original := "xpub6ASuArnXKPbfEwhqN6e3mwBcDTgzisQN1wXN9BJcM47sSikHjJf3UFHKkNAWbWMiGj7Wf5uMash7SyYq527Hqck2AxYysAA7xmALppuCkwQ"
 	xpub, err := ParseExtendedPublicKey(original)
 	if err != nil {
@@ -593,6 +619,7 @@ func TestExtendedPublicKey_SerializeMainnetXPub_RoundTrip(t *testing.T) {
 }
 
 func TestExtendedPublicKey_SerializeTestnetTPub(t *testing.T) {
+	t.Parallel()
 	// Use a testnet tpub version. We take a known mainnet xpub, parse it,
 	// change version to testnet, and verify serialization.
 	mainnet := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
@@ -630,6 +657,7 @@ func TestExtendedPublicKey_SerializeTestnetTPub(t *testing.T) {
 }
 
 func TestExtendedPublicKey_ParseRejectsBadChecksum(t *testing.T) {
+	t.Parallel()
 	validXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	// Flip last character to break checksum.
 	broken := validXPub[:len(validXPub)-1] + "X"
@@ -640,6 +668,7 @@ func TestExtendedPublicKey_ParseRejectsBadChecksum(t *testing.T) {
 }
 
 func TestExtendedPublicKey_ParseRejectsInvalidVersion(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 
@@ -659,6 +688,7 @@ func TestExtendedPublicKey_ParseRejectsInvalidVersion(t *testing.T) {
 }
 
 func TestExtendedPublicKey_ParseRejectsInvalidCurvePoint(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 
@@ -680,6 +710,7 @@ func TestExtendedPublicKey_ParseRejectsInvalidCurvePoint(t *testing.T) {
 }
 
 func TestExtendedPublicKey_DeriveRejectsHardened(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 
@@ -690,6 +721,7 @@ func TestExtendedPublicKey_DeriveRejectsHardened(t *testing.T) {
 }
 
 func TestExtendedPublicKey_DeriveMatchesDeriveNonHardenedBIP32Extended(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 
@@ -719,6 +751,7 @@ func TestExtendedPublicKey_DeriveMatchesDeriveNonHardenedBIP32Extended(t *testin
 }
 
 func TestExtendedPublicKey_Fingerprint(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 
@@ -743,6 +776,7 @@ func TestExtendedPublicKey_Fingerprint(t *testing.T) {
 // TestExtendedPublicKey_BIP32VectorXPubDerive checks that an xpub derived from
 // a known BIP32 vector node matches the expected xpub.
 func TestExtendedPublicKey_BIP32VectorXPubDerive(t *testing.T) {
+	t.Parallel()
 	parentXPub := "xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw"
 	wantXPub := "xpub6ASuArnXKPbfEwhqN6e3mwBcDTgzisQN1wXN9BJcM47sSikHjJf3UFHKkNAWbWMiGj7Wf5uMash7SyYq527Hqck2AxYysAA7xmALppuCkwQ"
 
@@ -768,6 +802,7 @@ func TestExtendedPublicKey_BIP32VectorXPubDerive(t *testing.T) {
 
 // TestExtendedPublicKey_EmptyPathDerive returns self.
 func TestExtendedPublicKey_EmptyPathDerive(t *testing.T) {
+	t.Parallel()
 	knownXPub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 	known, _ := ParseExtendedPublicKey(knownXPub)
 

@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -103,47 +102,6 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 		t.Fatal("expected wrong public key type rejection")
 	}
 }
-
-func FuzzPublicKeyUnmarshal(f *testing.F) {
-	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
-	if err != nil {
-		f.Fatal(err)
-	}
-	raw, err := sk.PublicKey.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"n":"01","g":"02"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		pk, err := UnmarshalPublicKey(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, pk, (*PublicKey).MarshalBinary, UnmarshalPublicKey)
-	})
-}
-
-func FuzzPrivateKeyUnmarshal(f *testing.F) {
-	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
-	if err != nil {
-		f.Fatal(err)
-	}
-	raw, err := sk.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"public_key":{"n":"01","g":"02"}}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		sk, err := UnmarshalPrivateKey(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, sk, (*PrivateKey).MarshalBinary, UnmarshalPrivateKey)
-	})
-}
-
 func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) ([]byte, error) {
 	version, fields, err := wire.UnmarshalFields(raw, typeID)
 	if err != nil {

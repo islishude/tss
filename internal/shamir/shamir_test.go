@@ -10,27 +10,24 @@ import (
 
 // --- RandomScalar ---
 
-func TestRandomScalarNilOrder(t *testing.T) {
+func TestRandomScalarRejectsInvalidOrder(t *testing.T) {
 	t.Parallel()
-	_, err := RandomScalar(nil, nil)
-	if err == nil {
-		t.Fatal("expected error for nil order")
+	tests := []struct {
+		name  string
+		order *big.Int
+	}{
+		{"nil order", nil},
+		{"zero order", big.NewInt(0)},
+		{"negative order", big.NewInt(-7)},
 	}
-}
-
-func TestRandomScalarZeroOrder(t *testing.T) {
-	t.Parallel()
-	_, err := RandomScalar(nil, big.NewInt(0))
-	if err == nil {
-		t.Fatal("expected error for zero order")
-	}
-}
-
-func TestRandomScalarNegativeOrder(t *testing.T) {
-	t.Parallel()
-	_, err := RandomScalar(nil, big.NewInt(-7))
-	if err == nil {
-		t.Fatal("expected error for negative order")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := RandomScalar(nil, tc.order)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
@@ -81,19 +78,23 @@ func TestRandomScalarNonZero(t *testing.T) {
 
 // --- RandomPolynomial ---
 
-func TestRandomPolynomialZeroThreshold(t *testing.T) {
+func TestRandomPolynomialRejectsInvalidThreshold(t *testing.T) {
 	t.Parallel()
-	_, err := RandomPolynomial(nil, big.NewInt(101), 0, nil)
-	if err == nil {
-		t.Fatal("expected error for zero threshold")
+	tests := []struct {
+		name      string
+		threshold int
+	}{
+		{"zero threshold", 0},
+		{"negative threshold", -1},
 	}
-}
-
-func TestRandomPolynomialNegativeThreshold(t *testing.T) {
-	t.Parallel()
-	_, err := RandomPolynomial(nil, big.NewInt(101), -1, nil)
-	if err == nil {
-		t.Fatal("expected error for negative threshold")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := RandomPolynomial(nil, big.NewInt(101), tc.threshold, nil)
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
@@ -249,45 +250,28 @@ func TestEvalLargeID(t *testing.T) {
 
 // --- LagrangeCoefficient ---
 
-func TestLagrangeCoefficientZeroID(t *testing.T) {
+func TestLagrangeCoefficientRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
-	_, err := LagrangeCoefficient(0, []tss.PartyID{1, 2, 3}, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error for id=0")
+	tests := []struct {
+		name  string
+		id    tss.PartyID
+		set   []tss.PartyID
+		order int64
+	}{
+		{"id is zero", 0, []tss.PartyID{1, 2, 3}, 101},
+		{"set contains zero", 1, []tss.PartyID{1, 0, 2}, 101},
+		{"duplicate in set", 1, []tss.PartyID{1, 2, 2}, 101},
+		{"id not in set", 3, []tss.PartyID{1, 2, 4}, 101},
+		{"non-invertible denominator", 1, []tss.PartyID{1, 6}, 5},
 	}
-}
-
-func TestLagrangeCoefficientZeroInSet(t *testing.T) {
-	t.Parallel()
-	_, err := LagrangeCoefficient(1, []tss.PartyID{1, 0, 2}, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error when set contains 0")
-	}
-}
-
-func TestLagrangeCoefficientDuplicateInSet(t *testing.T) {
-	t.Parallel()
-	_, err := LagrangeCoefficient(1, []tss.PartyID{1, 2, 2}, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error for duplicate in set")
-	}
-}
-
-func TestLagrangeCoefficientIDNotInSet(t *testing.T) {
-	t.Parallel()
-	_, err := LagrangeCoefficient(3, []tss.PartyID{1, 2, 4}, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error when id not in interpolation set")
-	}
-}
-
-func TestLagrangeCoefficientNonInvertibleDenominator(t *testing.T) {
-	t.Parallel()
-	// When PartyIDs are congruent mod order, diff = 0 and ModInverse fails.
-	// Use order=5: id=1, other=6 → 6-1=5 ≡ 0 (mod 5).
-	_, err := LagrangeCoefficient(1, []tss.PartyID{1, 6}, big.NewInt(5))
-	if err == nil {
-		t.Fatal("expected error for non-invertible denominator")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := LagrangeCoefficient(tc.id, tc.set, big.NewInt(tc.order))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
@@ -345,20 +329,23 @@ func TestLagrangeCoefficientReconstructs(t *testing.T) {
 
 // --- InterpolateConstant ---
 
-func TestInterpolateConstantEmptyShares(t *testing.T) {
+func TestInterpolateConstantRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
-	_, err := InterpolateConstant(nil, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error for empty shares")
+	tests := []struct {
+		name   string
+		shares []Share
+	}{
+		{"empty shares", nil},
+		{"nil share value", []Share{{ID: 1, Value: nil}}},
 	}
-}
-
-func TestInterpolateConstantNilValue(t *testing.T) {
-	t.Parallel()
-	shares := []Share{{ID: 1, Value: nil}}
-	_, err := InterpolateConstant(shares, big.NewInt(101))
-	if err == nil {
-		t.Fatal("expected error for nil share value")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			_, err := InterpolateConstant(tc.shares, big.NewInt(101))
+			if err == nil {
+				t.Fatal("expected error")
+			}
+		})
 	}
 }
 
@@ -430,117 +417,95 @@ func TestInterpolateConstantAllShares(t *testing.T) {
 
 // --- Normalize ---
 
-func TestNormalizeInRange(t *testing.T) {
+func TestNormalize(t *testing.T) {
 	t.Parallel()
 	order := big.NewInt(101)
-	out := Normalize(big.NewInt(42), order)
-	if out.Cmp(big.NewInt(42)) != 0 {
-		t.Fatalf("Normalize(42) = %s, want 42", out)
+	tests := []struct {
+		name  string
+		input int64
+		want  int64
+	}{
+		{"in range", 42, 42},
+		{"above range", 150, 49}, // 150 mod 101 = 49
+		{"negative", -5, 96},     // -5 mod 101 = 96
+		{"zero", 0, 0},
+		{"exact multiple", 202, 0}, // 2*101 ≡ 0 mod 101
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := Normalize(big.NewInt(tc.input), order)
+			if out.Cmp(big.NewInt(tc.want)) != 0 {
+				t.Fatalf("Normalize(%d) = %s, want %d", tc.input, out, tc.want)
+			}
+		})
 	}
 }
 
-func TestNormalizeAboveRange(t *testing.T) {
+func TestAdd(t *testing.T) {
 	t.Parallel()
 	order := big.NewInt(101)
-	out := Normalize(big.NewInt(150), order)
-	if out.Cmp(big.NewInt(49)) != 0 { // 150 mod 101 = 49
-		t.Fatalf("Normalize(150) = %s, want 49", out)
+	tests := []struct {
+		name string
+		a, b int64
+		want int64
+	}{
+		{"basic", 30, 40, 70},
+		{"wrap", 60, 50, 9}, // 110 mod 101 = 9
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := Add(big.NewInt(tc.a), big.NewInt(tc.b), order)
+			if out.Cmp(big.NewInt(tc.want)) != 0 {
+				t.Fatalf("%d+%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
+			}
+		})
 	}
 }
 
-func TestNormalizeNegative(t *testing.T) {
+func TestSub(t *testing.T) {
 	t.Parallel()
 	order := big.NewInt(101)
-	out := Normalize(big.NewInt(-5), order)
-	if out.Cmp(big.NewInt(96)) != 0 { // -5 mod 101 = 96
-		t.Fatalf("Normalize(-5) = %s, want 96", out)
+	tests := []struct {
+		name string
+		a, b int64
+		want int64
+	}{
+		{"basic", 70, 30, 40},
+		{"wrap", 10, 30, 81}, // -20 mod 101 = 81
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := Sub(big.NewInt(tc.a), big.NewInt(tc.b), order)
+			if out.Cmp(big.NewInt(tc.want)) != 0 {
+				t.Fatalf("%d-%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
+			}
+		})
 	}
 }
 
-func TestNormalizeZero(t *testing.T) {
+func TestMul(t *testing.T) {
 	t.Parallel()
 	order := big.NewInt(101)
-	out := Normalize(big.NewInt(0), order)
-	if out.Sign() != 0 {
-		t.Fatalf("Normalize(0) = %s, want 0", out)
+	tests := []struct {
+		name string
+		a, b int64
+		want int64
+	}{
+		{"basic", 7, 11, 77},
+		{"wrap", 10, 20, 99}, // 200 mod 101 = 99
+		{"zero", 0, 42, 0},
 	}
-}
-
-func TestNormalizeExactMultiple(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Normalize(big.NewInt(202), order) // 2*101
-	if out.Sign() != 0 {
-		t.Fatalf("Normalize(202) = %s, want 0", out)
-	}
-}
-
-// --- Add ---
-
-func TestAddBasic(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Add(big.NewInt(30), big.NewInt(40), order)
-	if out.Cmp(big.NewInt(70)) != 0 {
-		t.Fatalf("30+40 mod 101 = %s, want 70", out)
-	}
-}
-
-func TestAddWrap(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Add(big.NewInt(60), big.NewInt(50), order)
-	if out.Cmp(big.NewInt(9)) != 0 { // 110 mod 101 = 9
-		t.Fatalf("60+50 mod 101 = %s, want 9", out)
-	}
-}
-
-// --- Sub ---
-
-func TestSubBasic(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Sub(big.NewInt(70), big.NewInt(30), order)
-	if out.Cmp(big.NewInt(40)) != 0 {
-		t.Fatalf("70-30 mod 101 = %s, want 40", out)
-	}
-}
-
-func TestSubWrap(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Sub(big.NewInt(10), big.NewInt(30), order)
-	if out.Cmp(big.NewInt(81)) != 0 { // -20 mod 101 = 81
-		t.Fatalf("10-30 mod 101 = %s, want 81", out)
-	}
-}
-
-// --- Mul ---
-
-func TestMulBasic(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Mul(big.NewInt(7), big.NewInt(11), order)
-	if out.Cmp(big.NewInt(77)) != 0 {
-		t.Fatalf("7*11 mod 101 = %s, want 77", out)
-	}
-}
-
-func TestMulWrap(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Mul(big.NewInt(10), big.NewInt(20), order)
-	if out.Cmp(big.NewInt(99)) != 0 { // 200 mod 101 = 200 - 101 = 99
-		t.Fatalf("10*20 mod 101 = %s, want 99", out)
-	}
-}
-
-func TestMulZero(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	out := Mul(big.NewInt(0), big.NewInt(42), order)
-	if out.Sign() != 0 {
-		t.Fatalf("0*42 mod 101 = %s, want 0", out)
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			out := Mul(big.NewInt(tc.a), big.NewInt(tc.b), order)
+			if out.Cmp(big.NewInt(tc.want)) != 0 {
+				t.Fatalf("%d*%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
+			}
+		})
 	}
 }
 

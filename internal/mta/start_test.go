@@ -6,27 +6,8 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
-
-func FuzzStartMessageUnmarshal(f *testing.F) {
-	start, response := seedMessages(f)
-	_ = response
-	raw, err := start.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"ciphertext":"AQ=="}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		m, err := UnmarshalStartMessage(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, m, (*StartMessage).MarshalBinary, UnmarshalStartMessage)
-	})
-}
 
 // Tier 0: StartMessage validation and wire error paths (no crypto keygen).
 

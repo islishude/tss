@@ -879,7 +879,7 @@ The test refactor is complete when:
 
 ## 16. Implementation Status
 
-_Last updated: 2026-06-11 (evening update)_
+_Last updated: 2026-06-11 (late evening update)_
 
 ### Completed
 
@@ -901,18 +901,18 @@ _Last updated: 2026-06-11 (evening update)_
 - `t.Parallel()` added to 600+ test functions across low-risk packages:
   - `internal/wire` (137 parallel tests)
   - `frost/ed25519` (86 parallel tests)
-  - `cggmp21/secp256k1` tier0 (72 parallel tests)
-  - `internal/shamir` (45 parallel tests)
+  - `cggmp21/secp256k1` tier0 (90 parallel tests — +18 from `hd_test.go` 2026-06-11 late evening; 3 tests modifying `hmacSHA512` intentionally sequential)
+  - `internal/shamir` (27 table-driven tests, consolidated from 43; all parallel)
   - `internal/paillier` (27 parallel tests)
   - `internal/bip32util` (25 parallel tests)
   - `internal/curve/secp256k1` (19 parallel tests)
   - `internal/mta` (27 parallel tests — finish, response, start; `mta_test.go` intentionally kept sequential due to `SetSecurityParamsForTesting`)
+  - `internal/zk/paillier` (20+ files updated — pure unit tests and Tier 1 proof tests; `relation_audit_test.go` 12 tests parallel 2026-06-11 late evening)
   - `internal/zk/signprep` (12 parallel tests)
   - `internal/zk/schnorr` (11 parallel tests)
   - `internal/secret` (10 parallel tests)
   - `internal/curve/edwards25519` (8 parallel tests)
   - `internal/paillier/paillierct` (8 parallel tests)
-  - `internal/zk/paillier` (20+ files updated — pure unit tests and Tier 1 proof tests)
   - Root package: `broadcast_test.go` (27), `guard_test.go` (29), `storage_test.go` (20), `limits_test.go` (15), `config_test.go` (12), `replay_test.go` (10), `errors_test.go` (7), `evidence_test.go` (8), `transport_test.go` (5), `slog_test.go` (4)
 - Makefile targets use `-parallel $(TEST_PARALLEL)` and `-p $(PKG_PARALLEL)`.
 
@@ -1069,7 +1069,7 @@ Coverage baseline, test audit, duplicated helper consolidation, slowcrypto revie
 
 The following files intentionally **do not** use `t.Parallel()` because tests mutate package globals (`SetSecurityParamsForTesting`, `activeSecurityParams`, test limits) or are behind build tags that limit concurrent execution:
 
-- `cggmp21/secp256k1/`: Integration tests (`integration_*`, `guard_*`, `adversary_*`, `keygen_confirm`, `presign_policy`, `proof_omission`, `slowcrypto`, `vector_*`) use `runLimitedIntegration` semaphore instead. Pure tier0 tests already parallelized.
+- `cggmp21/secp256k1/`: Integration tests (`integration_*`, `guard_*`, `adversary_*`, `keygen_confirm`, `presign_policy`, `proof_omission`, `slowcrypto`, `vector_*`) are behind integration/slowcrypto build tags. Pure tier0 tests (including `hd_test.go`) already parallelized. 3 tests in `hd_test.go` (`TestDeriveNonHardenedBIP32_InvalidChildErrorMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange`) intentionally sequential because they modify package-level `hmacSHA512`.
 - `frost/ed25519/`: `guard_integration_test.go`, `test_setup_test.go`, `vectorgen_test.go` are integration/vector-generation.
 - `internal/zk/paillier/`: `slowcrypto_test.go`, `challenge_distribution_test.go` — production-parameter or distribution-analysis tests behind `slowcrypto` tag.
 
@@ -1095,6 +1095,9 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 10. ~~**FROST duplicated helpers**~~ — Completed (2026-06-11 evening): Replaced `cloneFROSTKeyShare` with `KeyShare.Clone()` and `rewriteFROSTWireField` with `testutil.RewriteWireField` in `frost/ed25519/encoding_test.go`.
 11. ~~**Presign round-trip consolidation**~~ — Completed (2026-06-11 evening): `TestThresholdECDSA_PresignRoundTrip` + `TestThresholdECDSA_PresignConsumedRoundTrip` → `TestThresholdECDSA_PresignRoundTripScenarios` (2-case table: fresh + consumed).
 12. ~~**Keygen confirmation consolidation**~~ — Completed (2026-06-11 evening): 7 standalone tests → 2 table-driven tests: `TestKeygenConfirmationRejectsTamperedFields` (3 cases: transcript hash, public key, commitments hash) + `TestKeygenConfirmationRejectsInvalidSenderSets` (4 cases: duplicate, missing, unknown, wrong count).
+13. ~~**CGGMP21 hd_test.go parallelism**~~ — Completed (2026-06-11 late evening): `t.Parallel()` added to 18 of 21 test functions in `cggmp21/secp256k1/hd_test.go`. 3 tests (`TestDeriveNonHardenedBIP32_InvalidChildErrorMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange`) intentionally kept sequential — they modify package-level `hmacSHA512`. Subtests in `TestDeriveNonHardenedBIP32Vectors` (6 cases) and `TestDeriveNonHardenedBIP32Errors` (8 cases) also use `t.Parallel()`.
+14. ~~**ZK paillier relation_audit_test.go parallelism**~~ — Completed (2026-06-11 late evening): `t.Parallel()` added to 10 previously sequential test functions in `relation_audit_test.go`. Confirmed safe: no `SetSecurityParamsForTesting` calls, uses thread-safe `testPaillierKeyCache sync.Map`. All 12 test functions now parallel (including subtests in `TestLegacyProofRelationCompleteness` and `TestTranscriptBindsAllPaillierKeys`).
+15. ~~**Shamir table-driven consolidation**~~ — Completed (2026-06-11 late evening): 43 standalone test functions → 27 table-driven tests (37% reduction). Consolidations: `TestNormalize` (5→1, 5 cases), `TestAdd`/`TestSub`/`TestMul` (7→3, 2+2+3 cases), `TestLagrangeCoefficientRejectsInvalidInputs` (5→1, 5 cases), `TestInterpolateConstantRejectsInvalidInputs` (2→1, 2 cases), `TestRandomScalarRejectsInvalidOrder` (3→1, 3 cases), `TestRandomPolynomialRejectsInvalidThreshold` (2→1, 2 cases).
 
 ### Remaining Low-Priority Items
 
@@ -1104,18 +1107,20 @@ The following items are documented as intentionally deferred:
 - **`proof_omission_test.go`**: Each test documents a specific CVE-class vulnerability (missing modulus proof, Ring-Pedersen proof, signprep proof, etc.) — independent functions preferred for security audit clarity.
 - **`integration_presign_test.go`**: Remaining tamper/rejection tests have divergent setup patterns that don't justify a shared harness.
 - **`frost/ed25519/hd_test.go`**: 6 BIP32 tests share `frostKeygenHD(t, 1, 1)` skeleton — consolidation deferred due to edit complexity in large file; tests already have `t.Parallel()`.
-- **`cggmp21/secp256k1/hd_test.go`**: 11 tests with partial structural similarity — BIP32 valid-path and rejection-path pairs could be consolidated in a future PR.
+- **`cggmp21/secp256k1/hd_test.go`**: Now has `t.Parallel()` on 18 of 21 tests (2026-06-11 late evening). 3 tests modifying `hmacSHA512` intentionally sequential. BIP32 valid-path and rejection-path pairs could still be further consolidated in a future PR.
 - **`assertProtocolErrorCode` vs `testutil.AssertProtocolError`**: Both ~10-line functions, unification would require changing 36+ call sites — deferred as low-ROI.
 - **Fuzz CI integration tags**: 10 integration-tagged fuzz targets silently skipped in CI due to missing `-tags=integration` flag in CI fuzz script.
+- **Payload-level Fuzz\*Unmarshal cleanup**: ~~Completed (2026-06-11 late evening)~~: 33 payload-level fuzz targets removed across 8 files (cggmp21: 15, frost/ed25519: 7, internal/zk/paillier: 9, internal/zk/signprep: 1, internal/zk/schnorr: 1, internal/mta: 2, internal/paillier: 2, root tss: 1). Deleted files: `cggmp21/secp256k1/fuzz_test.go`, `cggmp21/secp256k1/tier0_fuzz_test.go`, `internal/zk/paillier/proof_fuzz_test.go`, `internal/zk/signprep/fuzz_test.go`. Cleaned up 7 unused imports. Moved `mustMarshalBinary`/`binaryProof` helpers to `proof_seed_test.go`. **Remaining fuzz targets:** only `internal/wire` (3 tests: `FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`) — fuzzing at the correct TLV parser layer.
+- **Payload-level fuzz analysis (2026-06-11 late evening)**: Analyzed all 30+ `Fuzz*Unmarshal` targets across the codebase. **Confirmed as JSON-era historical artifacts** — the JSON seed strings (e.g. `{"version":1}`, `{"share":"x"}`) are clear evidence. With TLV encoding, random bytes almost never parse, making these targets low-yield. The `internal/wire` fuzz targets (`FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`) already cover the TLV parser at the correct abstraction layer. Field-level mutation at the payload layer (Plan A) was considered but rejected — it would still be testing the same TLV parser that wire fuzzing already covers, plus type-specific validation that is better covered by table-driven unit tests. **Recommendation:** remove all `Fuzz*Unmarshal` targets in a future cleanup PR and focus fuzz investment on `internal/wire`.
 
 ### Large-Scale Work (future dedicated PRs)
 
 These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
 
-| File                                         | Tests | Notes                                                                                |
-| -------------------------------------------- | ----- | ------------------------------------------------------------------------------------ |
-| `internal/wire/message_test.go`              | 89    | Largest single file; most tests share encode/decode/validate patterns                |
-| `internal/shamir/shamir_test.go`             | 43    | Pure function tests ideal for table-driven grouping                                  |
-| `cggmp21/secp256k1/tier0_regression_test.go` | 18    | Many tests share presign/sign session construction + single-field validation pattern |
-| `cggmp21/secp256k1/hd_test.go`               | 11    | BIP32 + sign-with-derivation tests with structural similarity                        |
-| `frost/ed25519/hd_test.go`                   | 21    | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already           |
+| File                                         | Tests | Notes                                                                                                                            |
+| -------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `internal/wire/message_test.go`              | 89    | Largest single file; most tests share encode/decode/validate patterns                                                            |
+| `internal/shamir/shamir_test.go`             | 27    | Consolidated from 43→27 (37% reduction) 2026-06-11; normalize/add/sub/mul/lagrange/interpolate/random-reject groups table-driven |
+| `cggmp21/secp256k1/tier0_regression_test.go` | 18    | Many tests share presign/sign session construction + single-field validation pattern                                             |
+| `cggmp21/secp256k1/hd_test.go`               | 21    | 18/21 now parallel (2026-06-11); BIP32 + sign-with-derivation tests with remaining structural similarity                         |
+| `frost/ed25519/hd_test.go`                   | 21    | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already                                                       |

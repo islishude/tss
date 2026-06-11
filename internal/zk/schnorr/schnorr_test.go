@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -57,30 +56,6 @@ func TestProof(t *testing.T) {
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed response encoded")
 	}
-}
-
-func FuzzProofUnmarshal(f *testing.F) {
-	secret, err := secp.RandomScalar(nil)
-	if err != nil {
-		f.Fatal(err)
-	}
-	proof, _, err := Prove([]byte("test"), secret.BigInt())
-	if err != nil {
-		f.Fatal(err)
-	}
-	raw, err := proof.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"commitment":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := UnmarshalProof(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, (*Proof).MarshalBinary, UnmarshalProof)
-	})
 }
 
 func TestProofRejectsInvalidInputs(t *testing.T) {

@@ -157,6 +157,7 @@ func TestLogStarProofRelationCompleteness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	params, stmt, witness, proof := logStarProofFixture(t)
 	state := []byte("logstar matrix")
 	if err := VerifyLogStar(params, state, stmt, proof); err != nil {
@@ -198,11 +199,13 @@ func TestLegacyProofRelationCompleteness(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("relation completeness")
 
 	// EncryptionProof: verify wrong statement elements cause rejection.
 	t.Run("EncryptionProof", func(t *testing.T) {
+		t.Parallel()
 		scalar := big.NewInt(42)
 		ciphertext, randomness, err := sk.Encrypt(nil, scalar)
 		if err != nil {
@@ -240,6 +243,7 @@ func TestLegacyProofRelationCompleteness(t *testing.T) {
 
 	// ModulusProof: verify wrong party/index causes rejection.
 	t.Run("ModulusProof", func(t *testing.T) {
+		t.Parallel()
 		proof, err := ProveModulus(nil, domain, sk, 1)
 		if err != nil {
 			t.Fatal(err)
@@ -254,6 +258,7 @@ func TestLegacyProofRelationCompleteness(t *testing.T) {
 
 	// RingPedersenProof: verify wrong params cause rejection.
 	t.Run("RingPedersenProof", func(t *testing.T) {
+		t.Parallel()
 		params, lambda, err := GenerateRingPedersenParams(nil, sk)
 		if err != nil {
 			t.Fatal(err)
@@ -285,6 +290,7 @@ func TestEncryptionProofBoundFieldValidation(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	scalar := big.NewInt(42)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
@@ -316,12 +322,14 @@ func TestTranscriptBindsAllPaillierKeys(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 
 	sk := testPaillierKey(t, 1024)
 	sk2 := testPaillierKey(t, 1536) // different size avoids key cache collision
 	domain := []byte("key binding test")
 
 	t.Run("EncryptionProof key binding", func(t *testing.T) {
+		t.Parallel()
 		scalar := big.NewInt(7)
 		c, r, _ := sk.Encrypt(nil, scalar)
 		proof, _ := ProveEncryption(nil, domain, &sk.PublicKey, c, scalar, r)
@@ -331,6 +339,7 @@ func TestTranscriptBindsAllPaillierKeys(t *testing.T) {
 	})
 
 	t.Run("LogProof key binding", func(t *testing.T) {
+		t.Parallel()
 		scalar := big.NewInt(13)
 		c, r, _ := sk.Encrypt(nil, scalar)
 		pt, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
@@ -351,6 +360,7 @@ func TestNoUncheckedEncProofField(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 
 	// EncProof fields and their verification paths:
 	// - Version: version check in VerifyEnc
@@ -475,6 +485,7 @@ func TestEncProofStatementOpensCiphertext(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	aux, _, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -506,6 +517,7 @@ func TestAffGProofStatementOpensD(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	params, stmt, witness, _ := affGProofFixture(t)
 	badWitness := witness
 	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
@@ -521,6 +533,7 @@ func TestLogStarProofStatementOpensC(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	params, stmt, witness, _ := logStarProofFixture(t)
 	badWitness := witness
 	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
@@ -537,6 +550,7 @@ func TestRingPedersenParamsModulusMatchesPaillier(t *testing.T) {
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}
+	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -567,6 +581,7 @@ func TestRingPedersenParamsModulusMatchesPaillier(t *testing.T) {
 // TestPaillierKeyDomainSeparation verifies each protocol phase uses a distinct
 // domain tag that binds the session and party identifiers.
 func TestPaillierKeyDomainSeparation(t *testing.T) {
+	t.Parallel()
 	// Test that modProof and ringPedersenProof use different tags in their
 	// proof transcripts.
 	if modulusProofTag == ringPedersenProofTag {
