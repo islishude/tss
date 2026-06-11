@@ -31,10 +31,13 @@ make check
 make ci
 
 # Formatting and module hygiene.
-gofmt -w <changed-go-files>
+gofmt -w changed-go-files
 
 # Formatting markdowns and json files
-npx -y prettier -w <changed-markdown-json-files>
+npx -y prettier -w file/dir/glob
+
+# Apply source-modifying fixes, formatting, and module tidy
+make fix-all
 ```
 
 Use heavier checks only when the changed area justifies them or the task explicitly asks for them:
