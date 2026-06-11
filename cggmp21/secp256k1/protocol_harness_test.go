@@ -16,31 +16,43 @@ type fixtureKey struct {
 	n         int
 }
 
+type keygenFixtureEntry struct {
+	once   sync.Once
+	shares map[tss.PartyID]*KeyShare
+}
+
 // keygenFixtureCache avoids repeated full-DKG executions for identical
-// (threshold, n, hd) tuples across integration tests. Each call returns
-// independent clones — callers may mutate their copy freely.
-var keygenFixtureCache sync.Map
+// (threshold, n) tuples across integration tests. Each call returns
+// independent clones, so callers may mutate their copy freely.
+var keygenFixtureCache sync.Map // map[fixtureKey]*keygenFixtureEntry
 
 // cachedKeygenFixture returns a clone of a previously-generated keygen fixture
 // for (threshold, n), or generates a fresh one and caches clones on first use.
 func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	key := fixtureKey{threshold: threshold, n: n}
-	if v, ok := keygenFixtureCache.Load(key); ok {
-		shares := v.(map[tss.PartyID]*KeyShare)
-		out := make(map[tss.PartyID]*KeyShare, len(shares))
-		for id, ks := range shares {
-			out[id] = ks.Clone()
-		}
-		return out
+	actual, _ := keygenFixtureCache.LoadOrStore(key, &keygenFixtureEntry{})
+	entry := actual.(*keygenFixtureEntry)
+	entry.once.Do(func() {
+		defer func() {
+			if entry.shares == nil {
+				keygenFixtureCache.Delete(key)
+			}
+		}()
+		entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
+	})
+	if entry.shares == nil {
+		t.Fatal("cached keygen fixture was not initialized")
 	}
-	shares := secpKeygen(t, threshold, n)
-	cached := make(map[tss.PartyID]*KeyShare, len(shares))
+	return cloneKeyShareMap(entry.shares)
+}
+
+func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
+	out := make(map[tss.PartyID]*KeyShare, len(shares))
 	for id, ks := range shares {
-		cached[id] = ks.Clone()
+		out[id] = ks.Clone()
 	}
-	keygenFixtureCache.Store(key, cached)
-	return shares
+	return out
 }
 
 type protocolHarness struct {

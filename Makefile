@@ -2,7 +2,7 @@
 #
 # Keep ordinary targets fast and deterministic. Heavy crypto, race, stress,
 # production-parameter tests, and long fuzzing are explicit opt-in targets.
-# Testing policy lives in docs/test-rules.md.
+# Testing policy lives in docs/testing-rules.md.
 
 SHELL := bash
 .SHELLFLAGS := -euo pipefail -c

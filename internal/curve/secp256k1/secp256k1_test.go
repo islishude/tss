@@ -1,13 +1,16 @@
 package secp256k1
 
 import (
-	"crypto/rand"
 	"crypto/sha256"
 	"math/big"
 	"testing"
+
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestBasePointEncoding(t *testing.T) {
+	t.Parallel()
+
 	enc, err := PointBytes(G)
 	if err != nil {
 		t.Fatal(err)
@@ -22,13 +25,12 @@ func TestBasePointEncoding(t *testing.T) {
 }
 
 func TestECDSASignVerify(t *testing.T) {
-	secret, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+
+	secret := deterministicScalar(t, 1)
 	pub := ScalarBaseMult(secret)
 	digest := sha256.Sum256([]byte("test"))
-	r, s, err := SignECDSA(rand.Reader, digest[:], secret, true)
+	r, s, err := SignECDSA(testutil.DeterministicReader(2), digest[:], secret, true)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,6 +40,8 @@ func TestECDSASignVerify(t *testing.T) {
 }
 
 func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
+	t.Parallel()
+
 	a := ScalarFromBigInt(big.NewInt(7))
 	b := ScalarFromBigInt(big.NewInt(11))
 	got := ScalarMul(ScalarAdd(a, b), b).BigInt()
@@ -56,6 +60,8 @@ func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
 }
 
 func TestScalarMultCorrectness(t *testing.T) {
+	t.Parallel()
+
 	// 0 * G = infinity
 	if p := ScalarMult(G, ScalarZero()); p.Inf == 0 {
 		t.Fatal("0*G should be infinity")
@@ -159,10 +165,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 
 	// Group law: (k+1)*G - k*G = G for random scalars.
 	for i := range 20 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
+		k := deterministicScalar(t, int64(100+i))
 		p1 := ScalarMult(G, ScalarAdd(k, ScalarOne()))
 		p2 := ScalarMult(G, k)
 		diff := Add(p1, &Point{X: p2.X, Y: FieldNeg(p2.Y)})
@@ -173,21 +176,15 @@ func TestScalarMultCorrectness(t *testing.T) {
 
 	// Doubling consistency: 2*(k*G) = (2k)*G.
 	for i := range 20 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
+		k := deterministicScalar(t, int64(200+i))
 		if !Equal(Double(ScalarMult(G, k)), ScalarMult(G, ScalarAdd(k, k))) {
 			t.Fatalf("doubling consistency violation at iteration %d", i)
 		}
 	}
 
 	// ScalarBaseMult matches ScalarMult(G, k).
-	for range 10 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
+	for i := range 10 {
+		k := deterministicScalar(t, int64(300+i))
 		if !Equal(ScalarBaseMult(k), ScalarMult(G, k)) {
 			t.Fatal("ScalarBaseMult != ScalarMult(G, k)")
 		}
@@ -197,10 +194,7 @@ func TestScalarMultCorrectness(t *testing.T) {
 	// The homomorphic property verifies the generic double-and-add loop.
 	twoG := Add(G, G)
 	for i := range 15 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
+		k := deterministicScalar(t, int64(400+i))
 		got := ScalarMult(twoG, k)
 		want := ScalarMult(G, ScalarMul(two, k))
 		if !Equal(got, want) {
@@ -215,6 +209,8 @@ func TestScalarMultCorrectness(t *testing.T) {
 }
 
 func TestScalarFromFieldElement(t *testing.T) {
+	t.Parallel()
+
 	// Compare scalarFromFieldElement against the old big.Int-based path
 	// for randomly generated field elements and edge cases.
 	oldPath := func(x FieldElement) Scalar {
@@ -222,11 +218,8 @@ func TestScalarFromFieldElement(t *testing.T) {
 	}
 
 	// Random test points from scalar multiplications.
-	for range 100 {
-		k, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
+	for i := range 100 {
+		k := deterministicScalar(t, int64(500+i))
 		p := ScalarBaseMult(k)
 		if p.Inf != 0 {
 			continue
@@ -268,6 +261,8 @@ func TestScalarFromFieldElement(t *testing.T) {
 }
 
 func TestFiatFieldArithmeticMatchesBigInt(t *testing.T) {
+	t.Parallel()
+
 	a := FieldElementFromBigInt(big.NewInt(7))
 	b := FieldElementFromBigInt(big.NewInt(11))
 	got := FieldSquare(FieldAdd(a, b)).BigInt()
@@ -278,4 +273,13 @@ func TestFiatFieldArithmeticMatchesBigInt(t *testing.T) {
 	if got.Cmp(want) != 0 {
 		t.Fatalf("fiat field arithmetic mismatch: got %s want %s", got, want)
 	}
+}
+
+func deterministicScalar(t *testing.T, seed int64) Scalar {
+	t.Helper()
+	k, err := RandomScalar(testutil.DeterministicReader(seed))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return k
 }

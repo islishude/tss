@@ -7,11 +7,11 @@ import (
 	"testing"
 )
 
-// ---------------------------------------------------------------------------
-// Sentinel errors
-// ---------------------------------------------------------------------------
+const masterXPub = "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 
-func TestSentinelErrorsAreDistinct(t *testing.T) {
+func TestSentinelErrors(t *testing.T) {
+	t.Parallel()
+
 	errs := []error{
 		ErrChainCodeRequired,
 		ErrInvalidChainCodeLength,
@@ -31,203 +31,233 @@ func TestSentinelErrorsAreDistinct(t *testing.T) {
 			}
 		}
 	}
+
+	tests := []struct {
+		name  string
+		err   error
+		match error
+		want  bool
+	}{
+		{name: "chain code required matches itself", err: ErrChainCodeRequired, match: ErrChainCodeRequired, want: true},
+		{name: "hardened derivation matches itself", err: ErrHardenedDerivationUnsupported, match: ErrHardenedDerivationUnsupported, want: true},
+		{name: "distinct sentinels do not match", err: ErrChainCodeRequired, match: ErrInvalidChild, want: false},
+	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := errors.Is(tc.err, tc.match); got != tc.want {
+				t.Fatalf("errors.Is(%v, %v) = %v, want %v", tc.err, tc.match, got, tc.want)
+			}
+		})
+	}
 }
 
-func TestSentinelErrorsAreComparable(t *testing.T) {
-	// Verify that errors.Is works with the sentinel values.
-	if !errors.Is(ErrChainCodeRequired, ErrChainCodeRequired) {
-		t.Error("ErrChainCodeRequired should match itself via errors.Is")
-	}
-	if !errors.Is(ErrHardenedDerivationUnsupported, ErrHardenedDerivationUnsupported) {
-		t.Error("ErrHardenedDerivationUnsupported should match itself via errors.Is")
-	}
-	// Verify that distinct errors don't match.
-	if errors.Is(ErrChainCodeRequired, ErrInvalidChild) {
-		t.Error("distinct sentinel errors should not match via errors.Is")
-	}
-}
+func TestBIP32Constants(t *testing.T) {
+	t.Parallel()
 
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-func TestHardenedKeyStartValue(t *testing.T) {
 	if HardenedKeyStart != 1<<31 {
-		t.Errorf("HardenedKeyStart = %d, want %d", HardenedKeyStart, 1<<31)
+		t.Fatalf("HardenedKeyStart = %d, want %d", HardenedKeyStart, 1<<31)
 	}
-	if HardenedKeyStart != 0x80000000 {
-		t.Errorf("HardenedKeyStart = 0x%x, want 0x80000000", HardenedKeyStart)
+	if XPubVersion == TPubVersion {
+		t.Fatal("XPubVersion and TPubVersion must be distinct")
 	}
-}
 
-func TestXPubVersion(t *testing.T) {
-	// BIP32 mainnet xpub version must be 0x0488B21E.
-	if XPubVersion != [4]byte{0x04, 0x88, 0xB2, 0x1E} {
-		t.Errorf("XPubVersion = %x, want 0488b21e", XPubVersion)
+	tests := []struct {
+		name string
+		got  [4]byte
+		want [4]byte
+	}{
+		{name: "mainnet xpub version", got: XPubVersion, want: [4]byte{0x04, 0x88, 0xB2, 0x1E}},
+		{name: "testnet tpub version", got: TPubVersion, want: [4]byte{0x04, 0x35, 0x87, 0xCF}},
 	}
-}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-func TestTPubVersion(t *testing.T) {
-	// BIP32 testnet tpub version must be 0x043587CF.
-	if TPubVersion != [4]byte{0x04, 0x35, 0x87, 0xCF} {
-		t.Errorf("TPubVersion = %x, want 043587cf", TPubVersion)
+			if tc.got != tc.want {
+				t.Fatalf("%s = %x, want %x", tc.name, tc.got, tc.want)
+			}
+		})
 	}
 }
 
 func TestIsKnownVersion(t *testing.T) {
-	if !IsKnownVersion(XPubVersion) {
-		t.Error("XPubVersion should be known")
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		in   [4]byte
+		want bool
+	}{
+		{name: "mainnet xpub", in: XPubVersion, want: true},
+		{name: "testnet tpub", in: TPubVersion, want: true},
+		{name: "all zero", in: [4]byte{0x00, 0x00, 0x00, 0x00}, want: false},
+		{name: "xprv", in: [4]byte{0x04, 0x88, 0xAD, 0xE4}, want: false},
+		{name: "arbitrary", in: [4]byte{0xDE, 0xAD, 0xBE, 0xEF}, want: false},
 	}
-	if !IsKnownVersion(TPubVersion) {
-		t.Error("TPubVersion should be known")
-	}
-	if IsKnownVersion([4]byte{0x00, 0x00, 0x00, 0x00}) {
-		t.Error("all-zero version should not be known")
-	}
-	if IsKnownVersion([4]byte{0x04, 0x88, 0xAD, 0xE4}) {
-		t.Error("xprv version should not be treated as known for xpub")
-	}
-	if IsKnownVersion([4]byte{0xDE, 0xAD, 0xBE, 0xEF}) {
-		t.Error("arbitrary version should not be known")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := IsKnownVersion(tc.in); got != tc.want {
+				t.Fatalf("IsKnownVersion(%x) = %v, want %v", tc.in, got, tc.want)
+			}
+		})
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Base58CheckEncode / Base58CheckDecode
-// ---------------------------------------------------------------------------
+func TestBase58Check_RoundTrip(t *testing.T) {
+	t.Parallel()
 
-func TestBase58Check_RoundTrip_KnownXPub(t *testing.T) {
-	// Decode a well-known mainnet xpub, then re-encode and compare.
-	original := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(original)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payload) != 78 {
-		t.Fatalf("expected 78-byte payload, got %d", len(payload))
+	tests := []struct {
+		name   string
+		input  string
+		setup  func() []byte
+		assert func(t *testing.T, payload []byte, encoded string)
+	}{
+		{
+			name:  "known master xpub",
+			input: masterXPub,
+			assert: func(t *testing.T, payload []byte, encoded string) {
+				t.Helper()
+				if encoded != masterXPub {
+					t.Fatalf("round-trip = %s, want %s", encoded, masterXPub)
+				}
+				if version := [4]byte(payload[0:4]); version != XPubVersion {
+					t.Fatalf("version = %x, want %x", version, XPubVersion)
+				}
+				if depth := payload[4]; depth != 0 {
+					t.Fatalf("master depth = %d, want 0", depth)
+				}
+			},
+		},
+		{
+			name: "arbitrary payload",
+			setup: func() []byte {
+				payload := make([]byte, 78)
+				for i := range payload {
+					payload[i] = byte(i)
+				}
+				return payload
+			},
+		},
+		{
+			name: "leading zeros",
+			setup: func() []byte {
+				payload := make([]byte, 78)
+				payload[2] = 0x01
+				return payload
+			},
+			assert: func(t *testing.T, _ []byte, encoded string) {
+				t.Helper()
+				if encoded[:2] != "11" {
+					t.Fatalf("encoded leading zero prefix = %q, want %q", encoded[:2], "11")
+				}
+			},
+		},
+		{
+			name: "large payload",
+			setup: func() []byte {
+				payload := make([]byte, 78)
+				for i := range payload {
+					payload[i] = byte(i % 256)
+				}
+				return payload
+			},
+			assert: func(t *testing.T, _ []byte, encoded string) {
+				t.Helper()
+				if len(encoded) < 100 || len(encoded) > 120 {
+					t.Fatalf("encoded length = %d, want roughly 106", len(encoded))
+				}
+			},
+		},
 	}
 
-	// Verify known fields in the decoded payload.
-	version := [4]byte(payload[0:4])
-	if version != XPubVersion {
-		t.Errorf("expected xpub version %x, got %x", XPubVersion, version)
-	}
-	depth := payload[4]
-	if depth != 0 {
-		t.Errorf("master key depth should be 0, got %d", depth)
-	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	reEncoded := Base58CheckEncode(payload)
-	if reEncoded != original {
-		t.Errorf("round-trip mismatch:\n  original: %s\n  encoded:  %s", original, reEncoded)
+			var decoded []byte
+			var err error
+			var original []byte
+			var encoded string
+			if tc.input != "" {
+				decoded, err = Base58CheckDecode(tc.input)
+				if err != nil {
+					t.Fatal(err)
+				}
+				original = decoded
+				encoded = Base58CheckEncode(decoded)
+			} else {
+				original = tc.setup()
+				encoded = Base58CheckEncode(original)
+				decoded, err = Base58CheckDecode(encoded)
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			if !bytes.Equal(decoded, original) {
+				t.Fatalf("decoded payload = %x, want %x", decoded, original)
+			}
+			if tc.assert != nil {
+				tc.assert(t, decoded, encoded)
+			}
+		})
 	}
 }
 
-func TestBase58Check_RoundTrip_ArbitraryPayload(t *testing.T) {
-	payload := make([]byte, 78)
-	// Fill with bytes that produce a valid base58 string.
-	for i := range payload {
-		payload[i] = byte(i)
+func TestBase58CheckDecode_RejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	valid := masterXPub
+	tests := []struct {
+		name    string
+		input   string
+		wantErr string
+	}{
+		{name: "bad checksum", input: valid[:len(valid)-1] + "X", wantErr: "base58 checksum mismatch"},
+		{name: "invalid zero character", input: "0abc"},
+		{name: "invalid capital o character", input: "Oabc"},
+		{name: "invalid capital i character", input: "Iabc"},
+		{name: "invalid lowercase l character", input: "labc"},
+		{name: "too short for checksum", input: "A"},
+		{name: "empty string", input: ""},
 	}
-	encoded := Base58CheckEncode(payload)
-	decoded, err := Base58CheckDecode(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(decoded, payload) {
-		t.Errorf("round-trip mismatch for arbitrary 78-byte payload")
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, err := Base58CheckDecode(tc.input)
+			if err == nil {
+				t.Fatal("expected invalid Base58Check input to be rejected")
+			}
+			if tc.wantErr != "" && err.Error() != tc.wantErr {
+				t.Fatalf("error = %q, want %q", err.Error(), tc.wantErr)
+			}
+		})
 	}
 }
-
-func TestBase58Check_RoundTrip_LeadingZeros(t *testing.T) {
-	// Payload with leading zero bytes — should preserve them.
-	payload := make([]byte, 78)
-	payload[0] = 0x00
-	payload[1] = 0x00
-	payload[2] = 0x01
-	encoded := Base58CheckEncode(payload)
-	if encoded[:2] != "11" {
-		t.Errorf("expected two leading '1's for leading zeros, got: %s", encoded[:5])
-	}
-	decoded, err := Base58CheckDecode(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(decoded, payload) {
-		t.Errorf("round-trip failed for payload with leading zeros")
-	}
-}
-
-func TestBase58CheckDecode_RejectsBadChecksum(t *testing.T) {
-	// Take a valid xpub and flip the last character to corrupt checksum.
-	valid := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	broken := valid[:len(valid)-1] + "X"
-	_, err := Base58CheckDecode(broken)
-	if err == nil {
-		t.Error("expected error for bad checksum")
-	}
-	if err.Error() != "base58 checksum mismatch" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestBase58CheckDecode_RejectsInvalidCharacter(t *testing.T) {
-	// '0', 'O', 'I', 'l' are not in the base58 alphabet.
-	for _, ch := range []string{"0", "O", "I", "l"} {
-		_, err := Base58CheckDecode(ch + "abc")
-		if err == nil {
-			t.Errorf("expected error for invalid character %q", ch)
-		}
-	}
-}
-
-func TestBase58CheckDecode_TooShortForChecksum(t *testing.T) {
-	// Single base58 character decodes to less than 4 bytes (no room for checksum).
-	_, err := Base58CheckDecode("A")
-	if err == nil {
-		t.Error("expected error for too-short data")
-	}
-}
-
-func TestBase58CheckDecode_EmptyString(t *testing.T) {
-	_, err := Base58CheckDecode("")
-	if err == nil {
-		t.Error("expected error for empty string")
-	}
-}
-
-func TestBase58CheckEncode_LargePayload(t *testing.T) {
-	// 78-byte payload is the standard xpub size.
-	payload := make([]byte, 78)
-	for i := range payload {
-		payload[i] = byte(i % 256)
-	}
-	encoded := Base58CheckEncode(payload)
-	if len(encoded) == 0 {
-		t.Error("encoded string should not be empty")
-	}
-	// Length should be roughly 78 * log(256)/log(58) + checksum ≈ 106 chars.
-	// We just check it's reasonable.
-	if len(encoded) < 100 || len(encoded) > 120 {
-		t.Logf("encoded length: %d (expected ~106)", len(encoded))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Known xpub / tpub round-trip (integration-style)
-// ---------------------------------------------------------------------------
 
 func TestKnownXPub_RoundTrip(t *testing.T) {
+	t.Parallel()
+
 	testCases := []string{
-		// TV1: m/0H xpub (depth 1, child 0x80000000)
 		"xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw",
-		// TV2: m xpub (depth 0, master)
-		"xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB",
-		// TV2: m/0 xpub (depth 1)
+		masterXPub,
 		"xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9LgpeyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH",
 	}
-	for _, tc := range testCases {
+	for i := range testCases {
+		tc := testCases[i]
 		t.Run(tc[:20]+"...", func(t *testing.T) {
+			t.Parallel()
+
 			payload, err := Base58CheckDecode(tc)
 			if err != nil {
 				t.Fatal(err)
@@ -235,194 +265,160 @@ func TestKnownXPub_RoundTrip(t *testing.T) {
 			if len(payload) != 78 {
 				t.Fatalf("payload length = %d, want 78", len(payload))
 			}
-			reEncoded := Base58CheckEncode(payload)
-			if reEncoded != tc {
-				t.Errorf("round-trip failed:\n  got:  %s\n  want: %s", reEncoded, tc)
+			if reEncoded := Base58CheckEncode(payload); reEncoded != tc {
+				t.Fatalf("round-trip = %s, want %s", reEncoded, tc)
 			}
 		})
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Base58Check XPub-specific payload format checks
-// ---------------------------------------------------------------------------
-
-func TestBase58Check_XPubPayloadVersion(t *testing.T) {
-	// Verify that decoded xpub has the correct version bytes.
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, _ := Base58CheckDecode(xpub)
-	version := [4]byte(payload[0:4])
-	if version != XPubVersion {
-		t.Errorf("xpub version = %x, want %x", version, XPubVersion)
-	}
-}
-
 func TestBase58Check_XPubPayloadLayout(t *testing.T) {
-	// Verify the layout: version(4) depth(1) fp(4) child(4) chain(32) key(33)
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(xpub)
+	t.Parallel()
+
+	payload, err := Base58CheckDecode(masterXPub)
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	// Extract fields.
-	_ = [4]byte(payload[0:4]) // version
-	depth := payload[4]
-	_ = [4]byte(payload[5:9]) // parent fingerprint
-	_ = payload[9:13]         // child number
-	chainCode := payload[13:45]
+	if version := [4]byte(payload[0:4]); version != XPubVersion {
+		t.Fatalf("xpub version = %x, want %x", version, XPubVersion)
+	}
+	if depth := payload[4]; depth != 0 {
+		t.Fatalf("master depth = %d, want 0", depth)
+	}
+	if chainCode := payload[13:45]; len(chainCode) != 32 {
+		t.Fatalf("chain code length = %d, want 32", len(chainCode))
+	}
 	publicKey := payload[45:78]
-
-	if depth != 0 {
-		t.Errorf("master depth = %d, want 0", depth)
-	}
-	if len(chainCode) != 32 {
-		t.Errorf("chain code length = %d, want 32", len(chainCode))
-	}
 	if len(publicKey) != 33 {
-		t.Errorf("public key length = %d, want 33", len(publicKey))
+		t.Fatalf("public key length = %d, want 33", len(publicKey))
 	}
-	// The public key should be compressed (02 or 03 prefix).
 	if publicKey[0] != 0x02 && publicKey[0] != 0x03 {
-		t.Errorf("public key prefix = 0x%02x, want 0x02 or 0x03", publicKey[0])
+		t.Fatalf("public key prefix = 0x%02x, want 0x02 or 0x03", publicKey[0])
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Determinism
-// ---------------------------------------------------------------------------
+func TestBase58Check_Deterministic(t *testing.T) {
+	t.Parallel()
 
-func TestBase58CheckEncode_Deterministic(t *testing.T) {
 	payload := []byte("deterministic test payload for base58 check encoding")
-	first := Base58CheckEncode(payload)
-	for i := range 10 {
-		if got := Base58CheckEncode(payload); got != first {
-			t.Fatalf("Base58CheckEncode is not deterministic: iteration %d", i)
-		}
-	}
-}
-
-func TestBase58CheckDecode_Deterministic(t *testing.T) {
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	first, err := Base58CheckDecode(xpub)
+	firstEncoded := Base58CheckEncode(payload)
+	firstDecoded, err := Base58CheckDecode(masterXPub)
 	if err != nil {
 		t.Fatal(err)
 	}
 	for i := range 10 {
-		got, err := Base58CheckDecode(xpub)
+		if got := Base58CheckEncode(payload); got != firstEncoded {
+			t.Fatalf("encode iteration %d: got %s, want %s", i, got, firstEncoded)
+		}
+		got, err := Base58CheckDecode(masterXPub)
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !bytes.Equal(got, first) {
-			t.Fatalf("Base58CheckDecode is not deterministic: iteration %d", i)
+		if !bytes.Equal(got, firstDecoded) {
+			t.Fatalf("decode iteration %d: got %x, want %x", i, got, firstDecoded)
 		}
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Version constants are distinct
-// ---------------------------------------------------------------------------
-
-func TestVersionConstantsDistinct(t *testing.T) {
-	if XPubVersion == TPubVersion {
-		t.Error("XPubVersion and TPubVersion must be distinct")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// ComputeFingerprint
-// ---------------------------------------------------------------------------
-
-func TestComputeFingerprintDeterministic(t *testing.T) {
+func TestComputeFingerprint(t *testing.T) {
 	t.Parallel()
-	pubKey := []byte{0x02, 0x01, 0x02, 0x03} // dummy compressed key
-	fp1 := ComputeFingerprint(pubKey)
-	fp2 := ComputeFingerprint(pubKey)
-	if fp1 != fp2 {
-		t.Fatal("ComputeFingerprint is not deterministic")
-	}
-}
 
-func TestComputeFingerprintDifferentKeys(t *testing.T) {
-	t.Parallel()
-	fp1 := ComputeFingerprint([]byte{0x02, 0xaa})
-	fp2 := ComputeFingerprint([]byte{0x02, 0xbb})
-	if fp1 == fp2 {
-		t.Fatal("different keys should produce different fingerprints")
-	}
-}
-
-func TestComputeFingerprintKnownVector(t *testing.T) {
-	t.Parallel()
-	// Fingerprint of a well-known master public key from BIP32 test vectors.
-	// We use the master xpub public key bytes from TV2.
-	pubKey := []byte{
+	knownPubKey := []byte{
 		0x03, 0xcb, 0xca, 0xa9, 0xac, 0x98, 0xc8, 0x77,
 		0x22, 0x5b, 0xd4, 0xd7, 0xab, 0x88, 0x5c, 0x2a,
 		0x71, 0x5e, 0x7b, 0x97, 0xdf, 0x3f, 0x2e, 0x6e,
 		0x09, 0x89, 0x0b, 0x3c, 0x23, 0x0d, 0x4f, 0xdc, 0x70,
 	}
-	fp := ComputeFingerprint(pubKey)
-	// Just verify it's non-zero and consistent.
-	if fp == [4]byte{} {
-		t.Fatal("fingerprint should not be all-zero for valid key")
+
+	tests := []struct {
+		name   string
+		assert func(t *testing.T)
+	}{
+		{
+			name: "deterministic",
+			assert: func(t *testing.T) {
+				t.Helper()
+				pubKey := []byte{0x02, 0x01, 0x02, 0x03}
+				if fp1, fp2 := ComputeFingerprint(pubKey), ComputeFingerprint(pubKey); fp1 != fp2 {
+					t.Fatal("same key produced different fingerprints")
+				}
+			},
+		},
+		{
+			name: "different keys differ",
+			assert: func(t *testing.T) {
+				t.Helper()
+				fp1 := ComputeFingerprint([]byte{0x02, 0xaa})
+				fp2 := ComputeFingerprint([]byte{0x02, 0xbb})
+				if fp1 == fp2 {
+					t.Fatal("different keys produced the same fingerprint")
+				}
+			},
+		},
+		{
+			name: "known vector is nonzero and stable",
+			assert: func(t *testing.T) {
+				t.Helper()
+				fp := ComputeFingerprint(knownPubKey)
+				if fp == [4]byte{} {
+					t.Fatal("known vector fingerprint is all-zero")
+				}
+				if fp2 := ComputeFingerprint(knownPubKey); fp != fp2 {
+					t.Fatal("known vector fingerprint is not stable")
+				}
+			},
+		},
 	}
-	fp2 := ComputeFingerprint(pubKey)
-	if fp != fp2 {
-		t.Fatal("fingerprint not deterministic")
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.assert(t)
+		})
 	}
 }
 
-// ---------------------------------------------------------------------------
-// WithInvalidChildMode / ResolveDeriveConfig
-// ---------------------------------------------------------------------------
-
-func TestResolveDeriveConfigDefaultMode(t *testing.T) {
+func TestResolveDeriveConfig(t *testing.T) {
 	t.Parallel()
-	cfg := ResolveDeriveConfig(nil)
-	if cfg.InvalidChildMode != ErrorOnInvalidChild {
-		t.Fatal("default InvalidChildMode should be ErrorOnInvalidChild")
-	}
-}
 
-func TestResolveDeriveConfigEmptyOptions(t *testing.T) {
-	t.Parallel()
-	cfg := ResolveDeriveConfig([]DeriveOption{})
-	if cfg.InvalidChildMode != ErrorOnInvalidChild {
-		t.Fatal("empty opts: default should be ErrorOnInvalidChild")
-	}
-}
-
-func TestResolveDeriveConfigWithInvalidChildMode(t *testing.T) {
-	t.Parallel()
-	cfg := ResolveDeriveConfig([]DeriveOption{WithInvalidChildMode(SkipInvalidChild)})
-	if cfg.InvalidChildMode != SkipInvalidChild {
-		t.Fatalf("InvalidChildMode = %d, want SkipInvalidChild", cfg.InvalidChildMode)
-	}
-}
-
-func TestResolveDeriveConfigOverridesDefault(t *testing.T) {
-	t.Parallel()
-	_ = ResolveDeriveConfig([]DeriveOption{WithInvalidChildMode(SkipInvalidChild)})
-	// Fresh config without options should still get the default.
-	cfg := ResolveDeriveConfig(nil)
-	if cfg.InvalidChildMode != ErrorOnInvalidChild {
-		t.Fatal("fresh config should have default ErrorOnInvalidChild")
-	}
-}
-
-func TestInvalidChildModeConstantsDistinct(t *testing.T) {
-	t.Parallel()
 	if ErrorOnInvalidChild == SkipInvalidChild {
 		t.Fatal("ErrorOnInvalidChild and SkipInvalidChild must be distinct")
+	}
+
+	tests := []struct {
+		name string
+		opts []DeriveOption
+		want InvalidChildMode
+	}{
+		{name: "nil options use default", opts: nil, want: ErrorOnInvalidChild},
+		{name: "empty options use default", opts: []DeriveOption{}, want: ErrorOnInvalidChild},
+		{name: "explicit mode overrides default", opts: []DeriveOption{WithInvalidChildMode(SkipInvalidChild)}, want: SkipInvalidChild},
+	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			cfg := ResolveDeriveConfig(tc.opts)
+			if cfg.InvalidChildMode != tc.want {
+				t.Fatalf("InvalidChildMode = %d, want %d", cfg.InvalidChildMode, tc.want)
+			}
+		})
+	}
+
+	_ = ResolveDeriveConfig([]DeriveOption{WithInvalidChildMode(SkipInvalidChild)})
+	if cfg := ResolveDeriveConfig(nil); cfg.InvalidChildMode != ErrorOnInvalidChild {
+		t.Fatal("fresh config should keep default after prior override")
 	}
 }
 
 // Test helper: verify that sha256d of a well-known xpub payload matches.
 func TestXPubChecksum(t *testing.T) {
+	t.Parallel()
+
 	// Manual checksum verification for the TV2 master xpub.
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(xpub)
+	payload, err := Base58CheckDecode(masterXPub)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -437,8 +433,8 @@ func TestXPubChecksum(t *testing.T) {
 
 	// Re-encode and verify it produces the same string.
 	reEncoded := Base58CheckEncode(payload)
-	if reEncoded != xpub {
-		t.Errorf("checksum verification failed via round-trip:\n  got:  %s\n  want: %s", reEncoded, xpub)
+	if reEncoded != masterXPub {
+		t.Errorf("checksum verification failed via round-trip:\n  got:  %s\n  want: %s", reEncoded, masterXPub)
 	}
 	_ = expectedChecksum
 }

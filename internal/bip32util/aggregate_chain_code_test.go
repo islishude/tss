@@ -2,8 +2,6 @@ package bip32util
 
 import (
 	"bytes"
-	"crypto/rand"
-	"fmt"
 	"io"
 	"testing"
 
@@ -11,353 +9,339 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-// ---------------------------------------------------------------------------
-// AggregateChainCode — basic correctness
-// ---------------------------------------------------------------------------
+func TestAggregateChainCode_AggregatesInputs(t *testing.T) {
+	t.Parallel()
 
-func TestAggregateChainCode_SingleParty(t *testing.T) {
-	parties := []tss.PartyID{1}
-	chainCodes := map[tss.PartyID][]byte{
-		1: bytes.Repeat([]byte{0xAB}, 32),
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte)
+	}{
+		{
+			name: "single party equals input",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				cc := bytes.Repeat([]byte{0xAB}, 32)
+				return []tss.PartyID{1}, map[tss.PartyID][]byte{1: cc}, cc
+			},
+		},
+		{
+			name: "two parties xor bytewise",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				a := bytes.Repeat([]byte{0xAB}, 32)
+				b := bytes.Repeat([]byte{0xCD}, 32)
+				return []tss.PartyID{1, 2}, map[tss.PartyID][]byte{1: a, 2: b}, xorChainCodes(a, b)
+			},
+		},
+		{
+			name: "three parties xor bytewise",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				a := bytes.Repeat([]byte{0x11}, 32)
+				b := bytes.Repeat([]byte{0x22}, 32)
+				c := bytes.Repeat([]byte{0x33}, 32)
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: a, 2: b, 3: c}, xorChainCodes(a, b, c)
+			},
+		},
+		{
+			name: "deterministic pseudo-random chain codes",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				parties := []tss.PartyID{0, 1, 2, 3, 4}
+				chainCodes := make(map[tss.PartyID][]byte, len(parties))
+				inputs := make([][]byte, 0, len(parties))
+				for _, id := range parties {
+					cc := deterministicChainCode(t, int64(100+id))
+					chainCodes[id] = cc
+					inputs = append(inputs, cc)
+				}
+				return parties, chainCodes, xorChainCodes(inputs...)
+			},
+		},
+		{
+			name: "all zero chain codes",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				z := make([]byte, 32)
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: z, 2: z, 3: z}, z
+			},
+		},
+		{
+			name: "empty party set",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				return nil, nil, make([]byte, 32)
+			},
+		},
+		{
+			name: "large party IDs",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				parties := []tss.PartyID{1 << 20, 1<<20 + 1}
+				a := bytes.Repeat([]byte{0x0F}, 32)
+				b := bytes.Repeat([]byte{0xF0}, 32)
+				return parties, map[tss.PartyID][]byte{parties[0]: a, parties[1]: b}, xorChainCodes(a, b)
+			},
+		},
+		{
+			name: "non-overlapping byte contributors",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				p1 := make([]byte, 32)
+				p2 := make([]byte, 32)
+				p3 := make([]byte, 32)
+				for i := range 32 {
+					switch {
+					case i < 8:
+						p1[i] = byte(i + 1)
+					case i < 16:
+						p2[i] = byte(i + 1)
+					default:
+						p3[i] = byte(i + 1)
+					}
+				}
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: p1, 2: p2, 3: p3}, xorChainCodes(p1, p2, p3)
+			},
+		},
 	}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, chainCodes[1]) {
-		t.Errorf("single-party output should equal input:\n  got:  %x\n  want: %x", got, chainCodes[1])
-	}
-}
 
-func TestAggregateChainCode_TwoParties(t *testing.T) {
-	a := bytes.Repeat([]byte{0xAB}, 32)
-	b := bytes.Repeat([]byte{0xCD}, 32)
-	expected := make([]byte, 32)
-	for i := range expected {
-		expected[i] = a[i] ^ b[i]
-	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: b}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, expected) {
-		t.Errorf("unexpected result:\n  got:  %x\n  want: %x", got, expected)
-	}
-}
-
-func TestAggregateChainCode_ThreeParties(t *testing.T) {
-	a := bytes.Repeat([]byte{0x11}, 32)
-	b := bytes.Repeat([]byte{0x22}, 32)
-	c := bytes.Repeat([]byte{0x33}, 32)
-	expected := make([]byte, 32)
-	for i := range expected {
-		expected[i] = a[i] ^ b[i] ^ c[i]
-	}
-
-	parties := []tss.PartyID{1, 2, 3}
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, expected) {
-		t.Errorf("unexpected result:\n  got:  %x\n  want: %x", got, expected)
-	}
-}
-
-func TestAggregateChainCode_RandomChainCodes(t *testing.T) {
-	// Use cryptographically random chain codes to verify XOR aggregation.
-	parties := []tss.PartyID{0, 1, 2, 3, 4}
-	chainCodes := make(map[tss.PartyID][]byte, len(parties))
-	expected := make([]byte, 32)
-	for _, id := range parties {
-		chainCodes[id] = make([]byte, 32)
-		newRandomBytes(t, chainCodes[id])
-		for i := range expected {
-			expected[i] ^= chainCodes[id][i]
-		}
-	}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, expected) {
-		t.Errorf("random chain code aggregation mismatch")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// AggregateChainCode — data consistency
-// ---------------------------------------------------------------------------
-
-func TestAggregateChainCode_Commutative(t *testing.T) {
-	// XOR is commutative: the result should be the same regardless of party order.
-	a := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
-	b := testutil.MustDecodeHex(t, "1a2b3c4d5e6f708192a3b4c5d6e7f809102132435465768798a9bacbdcedfe0f")
-	c := testutil.MustDecodeHex(t, "deadbeefcafebabedecafbadc0ffeeeebabe1234abcd5678ef901234fedcba98")
-
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
-
-	// Compute result with order [1, 2, 3].
-	result1, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Compute result with order [3, 1, 2].
-	result2, err := AggregateChainCode([]tss.PartyID{3, 1, 2}, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(result1, result2) {
-		t.Errorf("AggregateChainCode should be commutative (order-independent)")
-	}
-}
-
-func TestAggregateChainCode_Associative(t *testing.T) {
-	// XOR is associative: (a ^ b) ^ c == a ^ (b ^ c).
-	a := testutil.MustDecodeHex(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	b := testutil.MustDecodeHex(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	c := testutil.MustDecodeHex(t, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
-
-	// Aggregate all three.
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
-	allThree, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Aggregate first two, then with third.
-	firstTwo, err := AggregateChainCode([]tss.PartyID{1, 2}, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	thenThird, err := AggregateChainCode(
-		[]tss.PartyID{0, 3},
-		map[tss.PartyID][]byte{0: firstTwo, 3: c},
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(allThree, thenThird) {
-		t.Errorf("AggregateChainCode should be associative")
-	}
-}
-
-func TestAggregateChainCode_DoubleXORIdentity(t *testing.T) {
-	// Double XOR with the same value returns the original: a ^ a = 0, a ^ a ^ b = b.
-	a := testutil.MustDecodeHex(t, "42f08ba1c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddee")
-	b := testutil.MustDecodeHex(t, "f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff42")
-
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: a, 3: b}
-	result, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// a ^ a ^ b = b.
-	if !bytes.Equal(result, b) {
-		t.Errorf("double-XOR identity: a ^ a ^ b should equal b")
-	}
-}
-
-func TestAggregateChainCode_AllZeroChainCodes(t *testing.T) {
-	// All-zero chain codes should XOR to all-zero.
-	z := make([]byte, 32)
-	parties := []tss.PartyID{1, 2, 3}
-	chainCodes := map[tss.PartyID][]byte{1: z, 2: z, 3: z}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, z) {
-		t.Errorf("all-zero chain codes should XOR to all-zero, got %x", got)
-	}
-}
-
-func TestAggregateChainCode_SameValueEveryParty(t *testing.T) {
-	// For an even number of parties with the same chain code, the result is zero.
-	// For an odd number, the result is the chain code itself.
-	for _, n := range []int{1, 2, 3, 4, 6, 10} {
-		t.Run(fmt.Sprintf("n=%d", n), func(t *testing.T) {
-			v := testutil.MustDecodeHex(t, "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344")
-			parties := make([]tss.PartyID, n)
-			chainCodes := make(map[tss.PartyID][]byte, n)
-			for i := range n {
-				parties[i] = tss.PartyID(i)
-				chainCodes[parties[i]] = v
-			}
+			parties, chainCodes, want := tc.setup(t)
 			got, err := AggregateChainCode(parties, chainCodes)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if n%2 == 0 {
-				zero := make([]byte, 32)
-				if !bytes.Equal(got, zero) {
-					t.Errorf("even (%d) identical chain codes should XOR to zero", n)
-				}
-			} else {
-				if !bytes.Equal(got, v) {
-					t.Errorf("odd (%d) identical chain codes should XOR to the value itself", n)
-				}
+			if !bytes.Equal(got, want) {
+				t.Fatalf("AggregateChainCode() = %x, want %x", got, want)
 			}
 		})
 	}
 }
 
-func TestAggregateChainCode_Deterministic(t *testing.T) {
-	a := testutil.MustDecodeHex(t, "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
-	b := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
-	parties := []tss.PartyID{1, 2}
-	chainCodes := map[tss.PartyID][]byte{1: a, 2: b}
+func TestAggregateChainCode_PreservesXORProperties(t *testing.T) {
+	t.Parallel()
 
-	first, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i := range 10 {
-		got, err := AggregateChainCode(parties, chainCodes)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, first) {
-			t.Fatalf("AggregateChainCode is not deterministic: iteration %d", i)
-		}
-	}
-}
-
-func TestAggregateChainCode_NonOverlappingBytes(t *testing.T) {
-	// Each party contributes to non-overlapping byte ranges, making XOR equivalent
-	// to concatenation for those ranges.
-	p1 := make([]byte, 32)
-	p2 := make([]byte, 32)
-	p3 := make([]byte, 32)
-	for i := range 32 {
-		switch {
-		case i < 8:
-			p1[i] = byte(i + 1)
-		case i < 16:
-			p2[i] = byte(i + 1)
-		default:
-			p3[i] = byte(i + 1)
-		}
-	}
-	expected := make([]byte, 32)
-	for i := range 32 {
-		expected[i] = p1[i] ^ p2[i] ^ p3[i]
-		// Verify the non-overlap assumption: only one party has non-zero at each byte.
-		active := 0
-		if p1[i] != 0 {
-			active++
-		}
-		if p2[i] != 0 {
-			active++
-		}
-		if p3[i] != 0 {
-			active++
-		}
-		if active > 1 {
-			t.Errorf("test setup violated: byte %d has %d non-zero values", i, active)
-		}
-	}
-
-	parties := []tss.PartyID{1, 2, 3}
-	chainCodes := map[tss.PartyID][]byte{1: p1, 2: p2, 3: p3}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(got, expected) {
-		t.Errorf("non-overlapping aggregation mismatch")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// AggregateChainCode — error cases
-// ---------------------------------------------------------------------------
-
-func TestAggregateChainCode_WrongLength(t *testing.T) {
 	tests := []struct {
 		name   string
-		length int
+		assert func(t *testing.T)
 	}{
-		{"zero length", 0},
-		{"one byte", 1},
-		{"31 bytes", 31},
-		{"33 bytes", 33},
-		{"64 bytes", 64},
+		{
+			name: "commutative party order",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
+				b := testutil.MustDecodeHex(t, "1a2b3c4d5e6f708192a3b4c5d6e7f809102132435465768798a9bacbdcedfe0f")
+				c := testutil.MustDecodeHex(t, "deadbeefcafebabedecafbadc0ffeeeebabe1234abcd5678ef901234fedcba98")
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
+
+				result1, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result2, err := AggregateChainCode([]tss.PartyID{3, 1, 2}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(result1, result2) {
+					t.Fatal("party order changed aggregate chain code")
+				}
+			},
+		},
+		{
+			name: "associative regrouping",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+				b := testutil.MustDecodeHex(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+				c := testutil.MustDecodeHex(t, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
+
+				allThree, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstTwo, err := AggregateChainCode([]tss.PartyID{1, 2}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				thenThird, err := AggregateChainCode([]tss.PartyID{0, 3}, map[tss.PartyID][]byte{0: firstTwo, 3: c})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(allThree, thenThird) {
+					t.Fatal("regrouping changed aggregate chain code")
+				}
+			},
+		},
+		{
+			name: "double xor cancels",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "42f08ba1c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddee")
+				b := testutil.MustDecodeHex(t, "f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff42")
+				result, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: a, 2: a, 3: b})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(result, b) {
+					t.Fatal("a ^ a ^ b did not equal b")
+				}
+			},
+		},
+		{
+			name: "same value parity",
+			assert: func(t *testing.T) {
+				t.Helper()
+				v := testutil.MustDecodeHex(t, "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344")
+				for _, n := range []int{1, 2, 3, 4, 6, 10} {
+					parties := make([]tss.PartyID, n)
+					chainCodes := make(map[tss.PartyID][]byte, n)
+					for i := range n {
+						parties[i] = tss.PartyID(i)
+						chainCodes[parties[i]] = v
+					}
+
+					got, err := AggregateChainCode(parties, chainCodes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := v
+					if n%2 == 0 {
+						want = make([]byte, 32)
+					}
+					if !bytes.Equal(got, want) {
+						t.Fatalf("n=%d: got %x, want %x", n, got, want)
+					}
+				}
+			},
+		},
+		{
+			name: "deterministic output",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+				b := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
+				parties := []tss.PartyID{1, 2}
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b}
+
+				first, err := AggregateChainCode(parties, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range 10 {
+					got, err := AggregateChainCode(parties, chainCodes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(got, first) {
+						t.Fatalf("iteration %d: got %x, want %x", i, got, first)
+					}
+				}
+			},
+		},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			parties := []tss.PartyID{1, 2}
-			chainCodes := map[tss.PartyID][]byte{
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.assert(t)
+		})
+	}
+}
+
+func TestAggregateChainCode_RejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		parties    []tss.PartyID
+		chainCodes map[tss.PartyID][]byte
+	}{
+		{
+			name:    "zero length chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
 				1: bytes.Repeat([]byte{0xAA}, 32),
-				2: make([]byte, tt.length),
-			}
-			_, err := AggregateChainCode(parties, chainCodes)
-			if err == nil {
-				t.Error("expected error for wrong chain code length")
+				2: nil,
+			},
+		},
+		{
+			name:    "one byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 1),
+			},
+		},
+		{
+			name:    "31 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 31),
+			},
+		},
+		{
+			name:    "33 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 33),
+			},
+		},
+		{
+			name:    "64 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 64),
+			},
+		},
+		{
+			name:    "missing party chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xBB}, 32),
+			},
+		},
+	}
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := AggregateChainCode(tc.parties, tc.chainCodes); err == nil {
+				t.Fatal("expected invalid aggregate chain code input to be rejected")
 			}
 		})
 	}
 }
 
-func TestAggregateChainCode_MissingParty(t *testing.T) {
-	// When a party in the parties slice has no entry in chainCodes,
-	// the zero-value []byte (nil, len 0) should cause a length error.
-	parties := []tss.PartyID{1, 2}
-	chainCodes := map[tss.PartyID][]byte{1: bytes.Repeat([]byte{0xBB}, 32)}
-	_, err := AggregateChainCode(parties, chainCodes)
-	if err == nil {
-		t.Error("expected error for missing party chain code")
+func xorChainCodes(inputs ...[]byte) []byte {
+	out := make([]byte, 32)
+	for _, in := range inputs {
+		for i := range out {
+			out[i] ^= in[i]
+		}
 	}
+	return out
 }
 
-func TestAggregateChainCode_EmptyParties(t *testing.T) {
-	// No parties means the output is all-zero (no XOR operations performed).
-	got, err := AggregateChainCode(nil, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(got) != 32 {
-		t.Fatalf("expected 32-byte output, got %d", len(got))
-	}
-	zero := make([]byte, 32)
-	if !bytes.Equal(got, zero) {
-		t.Errorf("empty parties should return all-zero, got %x", got)
-	}
-}
-
-func TestAggregateChainCode_LargePartyID(t *testing.T) {
-	// PartyID is uint32 — test with large values.
-	parties := []tss.PartyID{1 << 20, 1<<20 + 1}
-	a := bytes.Repeat([]byte{0x0F}, 32)
-	b := bytes.Repeat([]byte{0xF0}, 32)
-	chainCodes := map[tss.PartyID][]byte{1 << 20: a, 1<<20 + 1: b}
-	got, err := AggregateChainCode(parties, chainCodes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	expected := make([]byte, 32)
-	for i := range expected {
-		expected[i] = a[i] ^ b[i]
-	}
-	if !bytes.Equal(got, expected) {
-		t.Errorf("large PartyID aggregation mismatch")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// helpers
-// ---------------------------------------------------------------------------
-
-func newRandomBytes(t *testing.T, buf []byte) {
+func deterministicChainCode(t *testing.T, seed int64) []byte {
 	t.Helper()
-	n, err := io.ReadFull(rand.Reader, buf)
+	out := make([]byte, 32)
+	n, err := io.ReadFull(testutil.DeterministicReader(seed), out)
 	if err != nil {
-		t.Fatalf("failed to read random bytes: %v", err)
+		t.Fatalf("deterministic reader failed: %v", err)
 	}
-	if n != len(buf) {
-		t.Fatalf("short read: %d < %d", n, len(buf))
+	if n != len(out) {
+		t.Fatalf("short deterministic read: %d < %d", n, len(out))
 	}
+	return out
 }
