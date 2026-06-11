@@ -31,7 +31,7 @@ jobs:
           version: latest
           install-only: true
 
-      - run: make ci
+      - run: make check
 
   # Integration tests with full keygen/presign/sign flows.
   test-integration:
