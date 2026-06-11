@@ -25,28 +25,13 @@ jobs:
         with:
           go-version: stable
 
-      - name: Build
-        run: make build
-
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v9
         with:
           version: latest
+          install-only: true
 
-      - name: Run vet
-        run: make vet
-
-      - name: Verify module integrity
-        run: make verify
-
-      - name: Check go mod tidy
-        run: make tidy-check
-
-      - name: Check formatting
-        run: make format-check
-
-      - name: Run go fix diff
-        run: go fix -diff ./...
+      - run: make ci
 
   # Integration tests with full keygen/presign/sign flows.
   test-integration:

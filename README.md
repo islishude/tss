@@ -111,17 +111,6 @@ Full examples in [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp2
 | `internal/zk/paillier`         | ZK proofs: Πmod, Πprm, Πenc, Πaff-g, Πlog\*.                                   |
 | `internal/zk/schnorr`          | secp256k1 Schnorr proof-of-knowledge.                                          |
 
-## Development
-
-```sh
-make all          # build, test, vet, lint
-make test         # tests with race detector
-make test-count   # CI stress tests (10 iterations, 1h)
-make check        # CI-ready: build + vet + lint + format + tidy
-make lint-fix     # linter with auto-fix
-make help         # list all targets
-```
-
 ## Security
 
 See [docs/security.md](docs/security.md) for the threat model, caller responsibilities, secret-material lifecycle, constant-time Paillier constraints, and production checklist.

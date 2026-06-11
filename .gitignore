@@ -1,2 +1,6 @@
 **/testdata/fuzz/
 /coverage.out
+/coverage.unit.out
+/coverage.integration.out
+/.agents
+/.claude

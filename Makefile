@@ -1,68 +1,202 @@
-# TSS - Go Threshold Signature Library
+# TSS development Makefile
 #
-# Common targets for development and CI.
-# Run `make help` for a summary.
+# Keep ordinary targets fast and deterministic. Heavy crypto, race, stress,
+# production-parameter tests, and long fuzzing are explicit opt-in targets.
+# Testing policy lives in docs/test-rules.md.
 
-.DEFAULT_GOAL := all
+SHELL := bash
+.SHELLFLAGS := -euo pipefail -c
+.DEFAULT_GOAL := help
 
-# ---- Build ----------------------------------------------------------------
+GO ?= go
+GOLANGCI_LINT ?= golangci-lint
+PKGS ?= ./...
+
+# Package-level parallelism controls how many packages `go test` runs at once.
+# Test-level parallelism controls how many tests marked with t.Parallel run
+# concurrently within each package.
+PKG_PARALLEL ?= 4
+TEST_PARALLEL ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+INTEGRATION_PKG_PARALLEL ?= 2
+INTEGRATION_PARALLEL ?= 2
+FUZZ_PARALLEL ?= 4
+
+UNIT_TIMEOUT ?= 1m
+FAST_TIMEOUT ?= 5m
+INTEGRATION_TIMEOUT ?= 20m
+SECURITY_TIMEOUT ?= 30m
+SLOWCRYPTO_TIMEOUT ?= 1h
+RACE_TIMEOUT ?= 1h
+STRESS_TIMEOUT ?= 5h
+
+FUZZTIME ?= 60s
+FUZZ_SMOKE_TIME ?= 10s
+FUZZ_NIGHTLY_TIME ?= 10m
+
+COVERPROFILE ?= coverage.out
+COVERHTML ?= coverage.html
+
+# -----------------------------------------------------------------------------
+# Help
+# -----------------------------------------------------------------------------
+
+.PHONY: help
+help: ## Show available targets.
+	@awk 'BEGIN {FS = ":.*## "; print "TSS development targets:\n"} /^[a-zA-Z0-9_.-]+:.*## / {printf "  %-26s %s\n", $$1, $$2}' $(MAKEFILE_LIST)
+
+# -----------------------------------------------------------------------------
+# Build
+# -----------------------------------------------------------------------------
 
 .PHONY: build
-build:
-	go build ./...
+build: ## Compile all packages.
+	$(GO) build $(PKGS)
 
-# ---- Test -----------------------------------------------------------------
+# -----------------------------------------------------------------------------
+# Tests
+# -----------------------------------------------------------------------------
 
-# Default: Tier 0 fast unit tests only (< 30s, no crypto keygen).
 .PHONY: test
-test:
-	go test -short -timeout 1m ./...
+test: test-unit ## Alias for the default Tier 0 test suite.
 
-# Tier 0 + Tier 1: Fast unit tests + small-param crypto correctness (< 2m).
+.PHONY: test-unit
+test-unit: ## Tier 0: fast deterministic tests; no full protocol crypto flows.
+	$(GO) test -short -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout $(UNIT_TIMEOUT) $(PKGS)
+
 .PHONY: test-fast
-test-fast:
-	go test -timeout 5m ./...
+test-fast: ## Tier 0 + Tier 1: fast local suite with reduced crypto fixtures.
+	$(GO) test -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout $(FAST_TIMEOUT) $(PKGS)
 
-# Tier 2: Integration tests requiring full keygen/presign/sign (< 10m).
 .PHONY: test-integration
-test-integration:
-	go test -tags=integration -timeout 20m ./...
+test-integration: ## Tier 2: full protocol lifecycle tests with controlled concurrency.
+	$(GO) test -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) $(PKGS)
 
-# Tier 3: Production security-parameter smoke tests (1h).
+.PHONY: test-security
+test-security: ## Focused security-invariant packages for protocol boundary changes.
+	$(GO) test -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(SECURITY_TIMEOUT) \
+		. ./internal/wire ./frost/ed25519 ./cggmp21/secp256k1
+
 .PHONY: test-slowcrypto
-test-slowcrypto:
-	go test -tags 'slowcrypto' -timeout 1h ./...
+test-slowcrypto: ## Tier 3: production-parameter Paillier/ZK smoke tests.
+	$(GO) test -tags='slowcrypto' -p 1 -parallel 1 -timeout $(SLOWCRYPTO_TIMEOUT) $(PKGS)
 
-# Tier 4: Stress test with count=10 (>3h).
-.PHONY: test-stress
-test-stress:
-	go test -race -tags 'stress slowcrypto integration' -count=10 -timeout 5h ./...
-
-# Race detector over all packages (1h timeout).
 .PHONY: test-race
-test-race:
-	go test -race -tags=integration -timeout 1h ./...
+test-race: ## Race detector for integration-level protocol flows.
+	$(GO) test -race -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(RACE_TIMEOUT) $(PKGS)
 
-# Legacy test-coverage target (includes integration and slowcrypto tests).
-.PHONY: test-coverage
-test-coverage:
-	go test -v -timeout 5h -tags 'integration slowcrypto' -race -coverprofile=coverage.out -covermode=atomic ./...
-	go tool cover -html=coverage.out -o coverage.html
+.PHONY: test-stress
+test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
+	$(GO) test -race -tags='integration slowcrypto stress' -p 1 -parallel 1 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
 
-# Fuzzing testing
-.PHONY: test-fuzzing
-test-fuzzing:
-	@./.github/scripts/fuzz-ci.sh
+# -----------------------------------------------------------------------------
+# Fuzzing
+# -----------------------------------------------------------------------------
 
-# CI: Fast build + vet + lint + format + tidy + Tier 0 + Tier 1.
-.PHONY: ci
-ci: build vet lint format tidy-check check-wire-api test-fast
+.PHONY: fuzz-smoke
+fuzz-smoke: ## Short fuzz smoke for changed fuzz targets.
+	FUZZTIME=$(FUZZ_SMOKE_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./internal/... ./cggmp21/... ./frost/...
 
-# Check that production code uses only the object-level wire API (Marshal/Unmarshal),
-# not the deprecated field-level API (MarshalFields/UnmarshalFields/RequireExactTags).
+.PHONY: fuzz-ci
+fuzz-ci: ## CI-grade fuzz run; intended for dedicated fuzz jobs.
+	FUZZTIME=$(FUZZTIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
+
+.PHONY: fuzz-nightly
+fuzz-nightly: ## Long fuzz run for scheduled jobs.
+	FUZZTIME=$(FUZZ_NIGHTLY_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
+
+# -----------------------------------------------------------------------------
+# Coverage
+# -----------------------------------------------------------------------------
+
+.PHONY: coverage-unit
+coverage-unit: ## Unit coverage report for fast tests.
+	$(GO) test -short -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -coverprofile=$(COVERPROFILE) -covermode=atomic $(PKGS)
+	$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML)
+
+.PHONY: coverage-security
+coverage-security: ## Coverage report for security-critical packages.
+	$(GO) test -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(SECURITY_TIMEOUT) -coverprofile=$(COVERPROFILE) -covermode=atomic \
+		. ./internal/wire ./frost/ed25519 ./cggmp21/secp256k1
+	$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML)
+
+.PHONY: coverage-integration
+coverage-integration: ## Integration coverage report; intentionally heavier than coverage-unit.
+	$(GO) test -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) -coverprofile=$(COVERPROFILE) -covermode=atomic $(PKGS)
+	$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML)
+
+.PHONY: coverage-heavy
+coverage-heavy: ## Heavy combined coverage; slow and explicit only.
+	$(GO) test -tags='integration slowcrypto' -race -p 1 -parallel 1 -timeout $(STRESS_TIMEOUT) -coverprofile=$(COVERPROFILE) -covermode=atomic $(PKGS)
+	$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML)
+
+# -----------------------------------------------------------------------------
+# Static checks, fixes, and formatting
+# -----------------------------------------------------------------------------
+
+.PHONY: vet
+vet: ## Run go vet.
+	$(GO) vet $(PKGS)
+
+.PHONY: fix
+fix: go-fix ## Alias for go-fix.
+
+.PHONY: go-fix
+go-fix: ## Run go fix on all packages; modifies source when fixes apply.
+	$(GO) fix $(PKGS)
+
+.PHONY: lint
+lint: ## Run golangci-lint.
+	$(GOLANGCI_LINT) run
+
+.PHONY: lint-fix
+lint-fix: ## Run golangci-lint with automatic fixes.
+	$(GOLANGCI_LINT) run --fix
+
+.PHONY: fmt
+fmt: fmt-go prettier ## Format Go files and Prettier-supported files.
+
+.PHONY: fmt-check
+fmt-check: fmt-go-check prettier-check ## Check Go and Prettier-supported formatting without modifying files.
+
+.PHONY: fmt-go
+fmt-go: ## Format all Go files with gofmt.
+	@files=$$(find . -name '*.go' -not -path './.git/*' -print); \
+	if [ -n "$$files" ]; then gofmt -w $$files; fi
+
+.PHONY: fmt-go-check
+fmt-go-check: ## Check Go formatting without modifying files.
+	@files=$$(find . -name '*.go' -not -path './.git/*' -print); \
+	if [ -n "$$files" ]; then \
+		unformatted=$$(gofmt -l $$files); \
+		if [ -n "$$unformatted" ]; then \
+			echo "Go files need gofmt:"; \
+			echo "$$unformatted"; \
+			exit 1; \
+		fi; \
+	fi
+
+.PHONY: prettier
+prettier: ## Format Markdown, JSON, YAML, and other Prettier-supported files.
+	npx -y prettier -w .
+
+.PHONY: prettier-check
+prettier-check: ## Check Markdown, JSON, YAML, and other Prettier-supported files.
+	npx -y prettier -l .
+
+.PHONY: tidy
+tidy: ## Run go mod tidy.
+	$(GO) mod tidy
+
+.PHONY: tidy-check
+tidy-check: ## Check go.mod and go.sum without modifying them.
+	$(GO) mod tidy -diff
+
+.PHONY: verify
+verify: ## Verify module download checksums.
+	$(GO) mod verify
+
 .PHONY: check-wire-api
-check-wire-api:
-	@echo "Checking wire API usage..."
+check-wire-api: ## Ensure production code uses only the object-level wire API.
 	@violations=$$(find . -name '*.go' \
 		-not -path './.git/*' \
 		-not -path './internal/wire/*' \
@@ -70,97 +204,32 @@ check-wire-api:
 		-not -name '*_test.go' \
 		-exec grep -ln 'wire\.MarshalFields\|wire\.UnmarshalFields\|RequireExactTags' {} \;); \
 	if [ -n "$$violations" ]; then \
-		echo "ERROR: Field-level wire API found in production code:"; \
+		echo "ERROR: field-level wire API found in production code:"; \
 		echo "$$violations"; \
 		echo "Use wire.Marshal/wire.Unmarshal instead."; \
 		exit 1; \
-	else \
-		echo "PASS: No field-level API in production code"; \
 	fi
 
-# Nightly: CI + integration + slowcrypto + race + stress.
-.PHONY: nightly
-nightly: ci test-integration test-slowcrypto test-race test-stress
+# -----------------------------------------------------------------------------
+# Combined workflows
+# -----------------------------------------------------------------------------
 
-# ---- Lint -----------------------------------------------------------------
-
-.PHONY: lint
-lint:
-	golangci-lint run
-
-.PHONY: lint-fix
-lint-fix:
-	golangci-lint run --fix
-
-# ---- Format ---------------------------------------------------------------
-
-.PHONY: format
-format:
-	gofmt -w .
-	npx -y prettier --write '*.md' 'docs'
-
-.PHONY: format-check
-format-check:
-	gofmt -l .
-	npx -y prettier --check '*.md' 'docs'
-
-# ---- Maintenance ----------------------------------------------------------
-
-.PHONY: fix
-fix:
-	go fix ./...
-
-.PHONY: tidy
-tidy:
-	go mod tidy
-
-.PHONY: verify
-verify:
-	go mod verify
-
-.PHONY: vet
-vet:
-	go vet ./...
-
-# ---- Combined targets -----------------------------------------------------
+.PHONY: fix-all
+fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
 
 .PHONY: check
-check: build vet lint format-check tidy-check
+check: build vet lint fmt-check tidy-check verify check-wire-api test-unit ## Fast local pre-commit check.
+	go fix -diff ./...
 
-.PHONY: tidy-check
-tidy-check:
-	go mod tidy -diff
+.PHONY: ci
+ci: build vet lint fmt-check tidy-check verify check-wire-api test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.
 
-.PHONY: all
-all: build test-fast vet lint
+.PHONY: nightly
+nightly: ci test-integration test-slowcrypto test-race fuzz-ci ## Scheduled broad suite.
 
-# ---- Alias -----------------------------------------------------------------
-.PHONY: test-count
-test-count: test-stress
+.PHONY: weekly
+weekly: nightly test-stress fuzz-nightly ## Scheduled heavy suite.
 
-# ---- Help -----------------------------------------------------------------
-
-.PHONY: help
-help:
-	@echo "TSS development targets:"
-	@echo ""
-	@echo "  build            compile all packages"
-	@echo "  test             Tier 0 fast unit tests (< 30s)"
-	@echo "  test-fast        Tier 0 + Tier 1: fast + small crypto (< 2m)"
-	@echo "  test-integration Tier 2: keygen/presign/sign flows (< 10m)"
-	@echo "  test-slowcrypto  Tier 3: production security params (< 45m)"
-	@echo "  test-stress      Tier 4: stress with count=10 (3h)"
-	@echo "  test-race        run tests with race detector (1h)"
-	@echo "  test-coverage    run integration tests with coverage report"
-	@echo "  check-wire-api   verify production code uses only object-level wire API"
-	@echo "  ci               PR-ready: build + vet + lint + format + tidy + check-wire-api + test-fast"
-	@echo "  nightly          full suite: ci + integration + slowcrypto + race + stress"
-	@echo "  lint             run golangci-lint"
-	@echo "  lint-fix         run golangci-lint with auto-fix"
-	@echo "  format           format go and markdown files with gofmt and prettier"
-	@echo "  format-check     check go and markdown formatting (CI)"
-	@echo "  fix              run go fix on all packages"
-	@echo "  tidy             run go mod tidy"
-	@echo "  verify           verify module integrity (go mod verify)"
-	@echo "  vet              run go vet"
-	@echo "  all              default: build + test-fast + vet + lint"
+.PHONY: clean
+clean: ## Remove generated local reports.
+	rm -f coverage.out coverage.html coverage.*.out coverage.*.html
