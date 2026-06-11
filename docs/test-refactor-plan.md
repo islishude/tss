@@ -292,36 +292,20 @@ Do not parallelize tests that:
 - Use a shared deterministic reader without locking or cloning.
 - Require exclusive access to package-level test limits.
 
-### 7.3 Integration Throttling
+### 7.3 Integration Concurrency (revised 2026-06-11)
 
-Heavy CGGMP21 integration tests should use bounded parallelism, not unconstrained `t.Parallel()`.
+**Lesson learned:** A channel-semaphore throttling helper (`runLimitedIntegration`) was implemented and later removed. It made integration tests **slower**, not faster.
 
-Recommended helper:
+The semaphore (capacity 2) combined `t.Parallel()` with channel acquire/release. In practice this created double-gating: Go's test runner already manages parallelism via `-p` and `-parallel` flags. Adding a second gate on top caused scheduling contention (tests queuing on both the runner's internal slots and the channel), increased goroutine switching, and provided no benefit because `-p 2 -parallel 2` already limits concurrent integration tests to the intended level.
 
-```go
-var integrationParallel = make(chan struct{}, 2)
+**Current approach:** Integration tests use `go test` flags directly for concurrency control. No in-code semaphore is needed. The Makefile targets already provide the right knobs:
 
-func runLimitedParallel(t *testing.T) {
-    t.Helper()
-    t.Parallel()
-
-    integrationParallel <- struct{}{}
-    t.Cleanup(func() { <-integrationParallel })
-}
+```make
+test-integration:
+	go test -tags=integration -p 2 -parallel $(INTEGRATION_PARALLEL) -timeout 20m ./...
 ```
 
-Use this in heavy integration tests for:
-
-- Keygen.
-- Presign.
-- Sign.
-- Refresh.
-- Reshare.
-- HD derivation.
-- Adversarial delivery.
-- Full guard flows.
-
-Do not use this helper to mask shared-state bugs. If a test fails only under parallel execution, treat it as a real isolation issue until proven otherwise.
+With fixture caching (`CachedKeygenShares`) reducing keygen cost, there is even less reason to throttle test entry — tests spend most time in protocol flows that benefit from unconstrained `t.Parallel()` when tests own their own state.
 
 ### 7.4 Makefile Knobs
 
@@ -906,12 +890,12 @@ _Last updated: 2026-06-11 (evening update)_
 - All 848 test functions across ~100 test files inventoried.
 - Build tags (`integration`, `slowcrypto`, `vectorgen`, `stress`) documented per file.
 - Makefile concurrency knobs (`PKG_PARALLEL`, `TEST_PARALLEL`, `INTEGRATION_PARALLEL`) in place.
-- Integration semaphore (`runLimitedIntegration`) implemented in `cggmp21/secp256k1`.
+- ~~Integration semaphore (`runLimitedIntegration`) implemented in `cggmp21/secp256k1`.~~ **Removed**: tested and found to slow down tests; Go's `-p`/`-parallel` flags provide sufficient throttling.
 
 #### Phase 1: Harness and Conventions ✅
 
 - `internal/testutil` provides: deterministic reader (`DeterministicReader`), session IDs (`MustSessionID`), party sets (`MustPartySet`), envelope delivery (`MustDeliverAll`), byte mutation (`MutateBytes`), protocol error assertions (`AssertProtocolError`), hex decoding (`MustDecodeHex`), zero-byte checks (`IsZeroBytes`), clone helpers (`CloneByteSlices`), big.Int and byte clearing assertions (`AssertBigIntCleared`, `AssertBytesCleared`, `AssertMapCleared`), wire field rewriting (`RewriteWireField`, `RewriteNestedWireField`), and deterministic round-trip assertions (`AssertDeterministicRoundTrip`).
-- Integration semaphore helper in `cggmp21/secp256k1`: `runLimitedIntegration` with `chan struct{}{2}`.
+- ~~Integration semaphore helper in `cggmp21/secp256k1`: `runLimitedIntegration` with `chan struct{}{2}`.~~ **Removed** (2026-06-11): channel semaphore on top of `t.Parallel()` created double-gating that slowed tests down instead of speeding them up.
 - Fixture caching: ZK paillier tests have `testPaillierKeyCache sync.Map` for Paillier key reuse.
 
 #### Phase 2: Low-Risk Parallelization ✅ (substantially complete)
