@@ -10,6 +10,7 @@ import (
 // Tier 1: Finish error paths (needs crypto keygen).
 
 func TestFinishErrors(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -81,6 +82,7 @@ func TestFinishErrors(t *testing.T) {
 }
 
 func TestFinishMultipleValues(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}

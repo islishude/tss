@@ -30,6 +30,7 @@ func FuzzResponseMessageUnmarshal(f *testing.F) {
 // Tier 0: ResponseMessage validation and wire error paths (no crypto keygen).
 
 func TestResponseMessageValidate(t *testing.T) {
+	t.Parallel()
 	// A valid ResponseMessage needs a valid AffGProof. Construct a minimal one via
 	// the seedMessages helper and validate it.
 	_, validResponse := seedMessages(t)
@@ -71,6 +72,7 @@ func TestResponseMessageMarshalBinaryInvalid(t *testing.T) {
 }
 
 func TestUnmarshalResponseMessageErrors(t *testing.T) {
+	t.Parallel()
 	_, validResponse := seedMessages(t)
 	validRaw, err := validResponse.MarshalBinary()
 	if err != nil {
@@ -156,6 +158,7 @@ func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext, proo
 // Tier 1: Respond error paths (needs crypto keygen).
 
 func TestRespondErrors(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -216,6 +219,7 @@ func TestRespondErrors(t *testing.T) {
 }
 
 func TestRespondBoundaryValues(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -262,6 +266,7 @@ func TestRespondBoundaryValues(t *testing.T) {
 }
 
 func TestResponseMessageBinaryRoundTrip(t *testing.T) {
+	t.Parallel()
 	_, validResponse := seedMessages(t)
 
 	raw1, err := validResponse.MarshalBinary()

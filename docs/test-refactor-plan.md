@@ -927,7 +927,7 @@ _Last updated: 2026-06-11 (evening update)_
   - `internal/paillier` (27 parallel tests)
   - `internal/bip32util` (25 parallel tests)
   - `internal/curve/secp256k1` (19 parallel tests)
-  - `internal/mta` (16 parallel tests — helpers, start, response)
+  - `internal/mta` (27 parallel tests — finish, response, start; `mta_test.go` intentionally kept sequential due to `SetSecurityParamsForTesting`)
   - `internal/zk/signprep` (12 parallel tests)
   - `internal/zk/schnorr` (11 parallel tests)
   - `internal/secret` (10 parallel tests)
@@ -1081,6 +1081,8 @@ Coverage baseline, test audit, duplicated helper consolidation, slowcrypto revie
 - **`keygen_confirm_test.go`**: 7 standalone tests → 2 table-driven tests (`TestKeygenConfirmationRejectsTamperedFields` 3 cases, `TestKeygenConfirmationRejectsInvalidSenderSets` 4 cases).
 - **`frost/ed25519/encoding_test.go`**: Removed duplicated `cloneFROSTKeyShare` (→ `KeyShare.Clone()`) and `rewriteFROSTWireField` (→ `testutil.RewriteWireField`).
 - **ZK paillier parallelism**: Added `t.Parallel()` to 46 test functions across 9 files that were safe for parallelism (no package-global mutation).
+- **MTA parallelism (evening)**: Added `t.Parallel()` to 11 test functions in `finish_test.go` (2), `response_test.go` (5), `start_test.go` (4). Verified safe: no `SetSecurityParamsForTesting` calls, no environment dependencies. `mta_test.go` (1 test) correctly kept sequential due to global security params mutation.
+- **Helper audit (evening)**: Audited `assertProtocolErrorCode` vs `testutil.AssertProtocolError` — both are small (~10 lines), unification would require changing 36+ call sites, deferred as low-ROI. Confirmed `cloneFROSTKeyShare` and `rewriteFROSTWireField` already removed in favor of `KeyShare.Clone()` and `testutil.RewriteWireField`.
 
 ### Pending / Incomplete
 
@@ -1119,7 +1121,22 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 
 The following items are documented as intentionally deferred:
 
-- **`integration_keygen_test.go`**: 3 standalone functions (HD chain code, Paillier mismatch, key share round-trip) testing different concerns — forcing into one table would be artificial.
-- **`integration_presign_test.go`**: 9 standalone tests — round-trip/reuse tests share structural similarity but differ in error assertions enough that consolidation is unclear.
-- **`challenge_zero_test.go`**: Sub-millisecond tests; parallelism overhead would exceed benefit (now parallelized anyway since they have no side effects).
-- **Fuzz CI integration tags**: 10 integration-tagged fuzz targets silently skipped in CI due to missing `-tags=integration` flag in CI fuzz script. Documented as known limitation.
+- **`integration_keygen_test.go`**: 3 standalone functions testing different concerns — consolidation would be artificial.
+- **`proof_omission_test.go`**: Each test documents a specific CVE-class vulnerability (missing modulus proof, Ring-Pedersen proof, signprep proof, etc.) — independent functions preferred for security audit clarity.
+- **`integration_presign_test.go`**: Remaining tamper/rejection tests have divergent setup patterns that don't justify a shared harness.
+- **`frost/ed25519/hd_test.go`**: 6 BIP32 tests share `frostKeygenHD(t, 1, 1)` skeleton — consolidation deferred due to edit complexity in large file; tests already have `t.Parallel()`.
+- **`cggmp21/secp256k1/hd_test.go`**: 11 tests with partial structural similarity — BIP32 valid-path and rejection-path pairs could be consolidated in a future PR.
+- **`assertProtocolErrorCode` vs `testutil.AssertProtocolError`**: Both ~10-line functions, unification would require changing 36+ call sites — deferred as low-ROI.
+- **Fuzz CI integration tags**: 10 integration-tagged fuzz targets silently skipped in CI due to missing `-tags=integration` flag in CI fuzz script.
+
+### Large-Scale Work (future dedicated PRs)
+
+These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
+
+| File | Tests | Notes |
+|------|-------|-------|
+| `internal/wire/message_test.go` | 89 | Largest single file; most tests share encode/decode/validate patterns |
+| `internal/shamir/shamir_test.go` | 43 | Pure function tests ideal for table-driven grouping |
+| `cggmp21/secp256k1/tier0_regression_test.go` | 18 | Many tests share presign/sign session construction + single-field validation pattern |
+| `cggmp21/secp256k1/hd_test.go` | 11 | BIP32 + sign-with-derivation tests with structural similarity |
+| `frost/ed25519/hd_test.go` | 21 | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already |

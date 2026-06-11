@@ -198,6 +198,7 @@ func TestStartOpeningString(t *testing.T) {
 // Tier 1: Start phase error paths (needs crypto keygen).
 
 func TestStartErrors(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -224,6 +225,7 @@ func TestStartErrors(t *testing.T) {
 }
 
 func TestStartBoundaryValues(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -251,6 +253,7 @@ func TestStartBoundaryValues(t *testing.T) {
 }
 
 func TestProveStartForVerifierErrors(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
@@ -280,6 +283,7 @@ func TestProveStartForVerifierErrors(t *testing.T) {
 }
 
 func TestVerifyStartErrors(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping Tier 1 test in short mode")
 	}
