@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–47 completed — all 3 high-priority gap-closure tasks: FROST adversary fail-closed matrix, FROST domain separation, crash recovery tests for both protocols; all CI checks pass)_
+_Last updated: 2026-06-12 (items 20–48 completed — all 3 high-priority gap-closure tasks: FROST adversary fail-closed matrix, FROST domain separation, crash recovery tests for both protocols; last MIXED file extracted; all CI checks pass)_
 
 ### Completed
 
@@ -1284,16 +1284,40 @@ The following files intentionally **do not** use `t.Parallel()` because tests mu
 
 The following items are documented as intentionally deferred:
 
-- **`integration_keygen_test.go`**: 3 standalone functions — now all have `t.Parallel()` (2026-06-12). Consolidation would be artificial (different concerns: HD chain code, Paillier key mismatch, key share round-trip).
-- **`proof_omission_test.go`**: Each test documents a specific CVE-class vulnerability (missing modulus proof, Ring-Pedersen proof, signprep proof, etc.) — independent functions preferred for security audit clarity.
-- **`integration_presign_test.go`**: 6 tests — now all have `t.Parallel()` with subtest parallelism (2026-06-12). Tests cover distinct concerns (presign reuse, EncK tampering, round2 proof tampering, Paillier key mismatch, round-trip, key binding mismatch).
-- **`frost/ed25519/hd_test.go`**: 6 BIP32 tests share `frostKeygenHD(t, 1, 1)` skeleton — consolidation deferred due to edit complexity in large file; tests already have `t.Parallel()`.
-- **`cggmp21/secp256k1/hd_test.go`**: Now has `t.Parallel()` on 18 of 21 tests (2026-06-11 late evening). 3 tests modifying `hmacSHA512` intentionally sequential. BIP32 valid-path and rejection-path pairs could still be further consolidated in a future PR.
-- **`assertProtocolErrorCode` vs `testutil.AssertProtocolError`**: Both ~10-line functions, unification would require changing 36+ call sites — deferred as low-ROI. Additionally, `testutil.AssertDeterministicRoundTrip` and `testutil.MutateBytes` have zero callers (identified 2026-06-11 final) — created in Phase 1 but never adopted; kept as harness infrastructure for future tests.
-- ~~**Fuzz CI integration tags**~~ — Resolved 2026-06-12: `.github/scripts/fuzz-ci.sh` now passes `-tags="$BUILD_TAGS"` (default: `tier1,integration`).
-- **Payload-level Fuzz\*Unmarshal cleanup**: ~~Completed (2026-06-11 late evening)~~: 33 payload-level fuzz targets removed across 8 files. **Remaining fuzz targets:** only `internal/wire` (3 tests: `FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`) — fuzzing at the correct TLV parser layer.
-- ~~**MIXED file tier1 extraction**~~ — Completed 2026-06-12 (items 29–34): All standalone tier1 tests extracted from `new_proofs_test.go` (4 tests), `relation_audit_test.go` (11 tests), `range_boundary_test.go` (2 tests), `params_consistency_test.go` (1 test), MTA `start_test.go` (4 tests), MTA `response_test.go` (2 tests), and paillier `keygen_test.go` (1 test) into separate `//go:build tier1` files. One file remains partially mixed: `TestTranscriptBindsAllSecurityParams` in `params_consistency_test.go` has 3 subtests with `testing.Short()` that share expensive Paillier keygen setup — splitting across build tags would require restructuring the test logic.
-- ~~**Fuzz corpus seeding**~~ — Completed 2026-06-12: 204 persistent corpus files populated across 3 wire fuzz targets (`FuzzWireUnmarshalFields`: 190, `FuzzBigIntField`: 13, `FuzzCustomField`: 1) by running `go test -fuzz` and copying generated corpus from Go build cache to `internal/wire/testdata/fuzz/`. Empty leftover fuzz directories (`cggmp21/secp256k1/testdata/fuzz/`, `frost/ed25519/testdata/fuzz/`, `internal/zk/schnorr/testdata/fuzz/`, `internal/zk/paillier/testdata/fuzz/`, root `testdata/fuzz/`) removed — these were from 33 payload-level fuzz targets removed earlier.
+- **`integration_keygen_test.go`**: 3 standalone functions — all have `t.Parallel()`. Consolidation would be artificial (different concerns: HD chain code, Paillier key mismatch, key share round-trip).
+- **`proof_omission_test.go`**: Each test documents a specific CVE-class vulnerability — independent functions preferred for security audit clarity.
+- **`integration_presign_test.go`**: 6 tests — all have `t.Parallel()` with subtest parallelism. Tests cover distinct concerns.
+- **`frost/ed25519/hd*_test.go`**: Split into 4 behavior-focused files (fixtures, derivation, keygen/sign, wire/lifecycle) with 10 table-driven tests (21→10, 52% reduction). All have `t.Parallel()`.
+- **`cggmp21/secp256k1/hd*_test.go`**: Split into 4 behavior-focused files (fixtures, derivation, invalid-child, xpub) with 13 table-driven tests (21→13, 38% reduction). 3 tests modifying `hmacSHA512` intentionally sequential.
+- **`assertProtocolErrorCode` vs `testutil.AssertProtocolError`**: Both ~10-line functions, unification would require changing 36+ call sites — deferred as low-ROI. `testutil.AssertDeterministicRoundTrip` and `testutil.MutateBytes` have zero callers — kept as harness infrastructure for future tests.
+- **`internal/testharness` package**: Created with 7 files (rng, parties, mutation, network, state_snapshot, protocol_runner, crash_store) but never adopted by any protocol test. All protocol tests use `internal/testutil` directly. Adopting `testharness` would require rewriting all protocol tests to implement the `ProtocolCase` interface — a large dedicated workstream.
+- ~~**Fuzz CI integration tags**~~ — Resolved 2026-06-12.
+- ~~**Payload-level Fuzz\*Unmarshal cleanup**~~ — Completed: 33 payload-level fuzz targets removed. Remaining: only `internal/wire` (3 tests).
+- ~~**MIXED file tier1 extraction**~~ — Completed 2026-06-12 (items 29–34, 48): All `testing.Short()` calls fully migrated to `//go:build tier1` compile-time separation.
+- ~~**Fuzz corpus seeding**~~ — Completed 2026-06-12: 204 persistent corpus files populated across 3 wire fuzz targets.
+
+### Current Status Summary (2026-06-12 final)
+
+**Completed — all 48 items:**
+
+- Items 1–48 are all completed.
+- Zero `testing.Short()` calls remain in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`), where it adjusts a sampling parameter rather than skipping a test.
+- All tiering is compile-time via `//go:build` tags (`tier1`, `integration`, `slowcrypto`).
+- Tier 0 tests: all use `t.Parallel()` where safe; 600+ parallel test functions.
+- Tier 1 tests: all behind `//go:build tier1`; 26 tier1-specific test files; zero MIXED files remain.
+- Tier 2 tests: all behind `//go:build integration`; fixture caching (CGGMP21 + FROST) reduces keygen overhead by ~46%.
+- Table-driven consolidation: `internal/wire` (89→30, 66%), `internal/shamir` (43→27, 37%), `cggmp21/tier0_regression` (18→8, 56%), `frost/hd` (21→10, 52%), `cggmp21/hd` (21→13, 38%), plus adversary/reshare/refresh/keygen-confirmation consolidation.
+- Structural splits: monolithic files (`message_test.go`, `hd_test.go` × 2) split into behavior-focused files.
+- Benchmarks organized by cost category (keygen, presign, sign, wire, primitive).
+- Production-code improvements: 8 `Clone()` methods on proof types, `paillier.PrivateKey.Clone()`, `testutil.SeedFromEnv`/`TSS_TEST_SEED` support.
+- Fuzz smoke + CI targets, test budget checker, crash recovery tests for both protocols, FROST domain separation and adversary fail-closed matrices.
+- All CI checks pass: `go test -short`, `go test -tags=tier1`, `go vet`, `golangci-lint`, `make check`, `make ci`.
+
+**Intentionally deferred (low priority):**
+
+- `internal/testharness` adoption — requires rewriting all protocol tests to `ProtocolCase` interface.
+- `assertProtocolErrorCode`/`testutil.AssertProtocolError` unification — low-ROI due to 36+ call sites.
+- Further table-driven consolidation of already-parallel standalone tests with distinct concerns.
 
 ### New Work Items (from 2026-06-12 testing rules update) ✅ Completed 2026-06-12
 
@@ -1382,16 +1406,16 @@ All six new work items were completed on 2026-06-12 as part of the final impleme
 
 ### Tier1 Extraction Summary
 
-After items 29–34, the MIXED file situation is:
+After items 29–48, the MIXED file situation is:
 
-| Status                | Files                                                                                                                                                                                                                                                                                                                                                                            |
-| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Fully extracted**   | `new_proofs_test.go` (4 tier1 → new file), `relation_audit_test.go` (11 tier1 → new file), `range_boundary_test.go` (2 tier1 → new file), `params_consistency_test.go` (1 tier1 → new file), `legacy_proofs_test.go` (1 tier1 → new file, earlier), MTA `start_test.go` (4 tier1 → new file), MTA `response_test.go` (2 tier1 → new file), `keygen_test.go` (1 tier1 → new file) |
-| **Partially mixed**   | `params_consistency_test.go`: `TestTranscriptBindsAllSecurityParams` has 3 subtests with `testing.Short()` guards that cannot be split across build tags without restructuring the test logic                                                                                                                                                                                    |
-| **Already all-tier1** | `encryption_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, `proofs_test.go`, `extractor_test.go`, `mta_response_test.go`, `adversarial_test.go`, `leakage_test.go`, MTA `finish_test.go`, MTA `mta_test.go` — already behind `//go:build tier1`                                                                                                                           |
-| **All tier0**         | All other test files — no `testing.Short()` guards present                                                                                                                                                                                                                                                                                                                       |
+| Status                | Files                                                                                                                                                                                                                                                                                                                                                                                                  |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| **Fully extracted**   | `new_proofs_test.go` (4 tier1 → new file), `relation_audit_test.go` (11 tier1 → new file), `range_boundary_test.go` (2 tier1 → new file), `params_consistency_test.go` (4 tier1 → new file: 1 + 3 newly promoted), `legacy_proofs_test.go` (1 tier1 → new file, earlier), MTA `start_test.go` (4 tier1 → new file), MTA `response_test.go` (2 tier1 → new file), `keygen_test.go` (1 tier1 → new file) |
+| **Partially mixed**   | _(none — all MIXED files fully extracted as of 2026-06-12)_                                                                                                                                                                                                                                                                                                                                            |
+| **Already all-tier1** | `encryption_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, `proofs_test.go`, `extractor_test.go`, `mta_response_test.go`, `adversarial_test.go`, `leakage_test.go`, MTA `finish_test.go`, MTA `mta_test.go` — already behind `//go:build tier1`                                                                                                                                                 |
+| **All tier0**         | All other test files — no `testing.Short()` guards present                                                                                                                                                                                                                                                                                                                                             |
 
-The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with internal subtests) uses runtime `testing.Short()` as a pragmatic compromise — the shared setup cost (Paillier keygen) makes splitting across build tags impractical.
+Zero `testing.Short()` calls remain in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`, line 67), where it adjusts a sampling parameter (10000 → 1000 rounds) rather than skipping a test — this is intensity tuning within a build-tag-gated file, not a tier-skipping guard.
 
 35. ~~**Proof Clone() methods replace standalone clone helpers**~~ — Completed 2026-06-12:
     - Added `Clone()` methods to 8 proof types in production code (not test helpers):
@@ -1518,3 +1542,13 @@ These files have 10+ standalone test functions that could benefit from structura
       - `TestCGGMP21_Presign_ConsumedPostCrash` — consume presign → marshal → unmarshal → verify consumed flag preserved → `StartSignDigest` returns error.
       - `TestCGGMP21_Presign_DestroyMarshal` — `Destroy()` → `MarshalBinary` fails (secrets cleared).
       - `TestCGGMP21_KeyShare_DeterministicMarshal` — repeated marshal produces identical bytes; round-trip preserves encoding.
+
+48. ~~**Extract last remaining MIXED file (params_consistency_test.go)**~~ — Completed 2026-06-12:
+    - `TestTranscriptBindsAllSecurityParams` in `params_consistency_test.go` was the last test in an always-compiled file using `testing.Short()` guards (3 subtests).
+    - Promoted 3 subtests to standalone test functions in `params_consistency_tier1_test.go` behind `//go:build tier1`:
+      - `TestEncProofTranscriptBindsSecurityParams` — EncProof verification rejects mismatched security params.
+      - `TestAffGProofTranscriptBindsSecurityParams` — AffGProof verification rejects mismatched security params.
+      - `TestLogStarProofTranscriptBindsSecurityParams` — LogStarProof verification rejects mismatched security params.
+    - Each subtest creates its own Paillier fixture independently — no shared parent setup, so promotion to standalone functions is clean.
+    - Removed 60 lines from `params_consistency_test.go` (now purely tier0 — zero `testing.Short()` calls in any always-compiled file).
+    - This was the last remaining MIXED file. After this extraction, **zero `testing.Short()` calls exist in always-compiled test files** — all tier-skipping is now fully compile-time via `//go:build tier1`.
