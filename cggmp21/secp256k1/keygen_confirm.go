@@ -113,6 +113,17 @@ func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
 }
 
 func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {
+	return verifyKeygenConfirmationSetInternal(local, encoded, true)
+}
+
+// verifyKeygenConfirmationSetWithoutChainCode validates the confirmation set
+// without enforcing the aggregate chain code. It is used before the aggregate
+// is computed (e.g., during finalizeConfirmedKeyShare).
+func verifyKeygenConfirmationSetWithoutChainCode(local *KeyShare, encoded [][]byte) error {
+	return verifyKeygenConfirmationSetInternal(local, encoded, false)
+}
+
+func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enforceChainCode bool) error {
 	if local == nil {
 		return errors.New("nil local key share")
 	}
@@ -130,6 +141,7 @@ func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {
 	}
 
 	seen := make(map[tss.PartyID]struct{}, n)
+	chainCodes := make(map[tss.PartyID][]byte, n)
 	for i, raw := range encoded {
 		expectedSender := local.Parties[i]
 		if len(raw) == 0 {
@@ -174,11 +186,30 @@ func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {
 		if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
 			return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
 		}
+		chainCodes[c.Sender] = slices.Clone(c.ChainCode)
 	}
 
 	for _, id := range local.Parties {
 		if _, ok := seen[id]; !ok {
 			return fmt.Errorf("missing keygen confirmation from party %d", id)
+		}
+	}
+
+	if enforceChainCode {
+		if len(local.ChainCode) == 0 {
+			for _, id := range local.Parties {
+				if len(chainCodes[id]) != 0 {
+					return fmt.Errorf("keygen confirmation from party %d has unexpected chain code", id)
+				}
+			}
+		} else {
+			aggregate, err := bip32util.AggregateChainCode(local.Parties, chainCodes)
+			if err != nil {
+				return fmt.Errorf("keygen confirmation chain code set: %w", err)
+			}
+			if !bytes.Equal(aggregate, local.ChainCode) {
+				return errors.New("keygen confirmation aggregate chain code mismatch")
+			}
 		}
 	}
 
@@ -348,7 +379,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 		}
 		encoded[i] = append([]byte(nil), confirmation...)
 	}
-	if err := verifyKeygenConfirmationSet(s.pending.share, encoded); err != nil {
+	if err := verifyKeygenConfirmationSetWithoutChainCode(s.pending.share, encoded); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
