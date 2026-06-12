@@ -492,6 +492,13 @@ var frostKeygenFixtureCache sync.Map // map[frostFixtureKey]*frostFixtureEntry
 // generating a fresh DKG on first use per (threshold, n, hd) tuple.
 func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]*KeyShare {
 	t.Helper()
+
+	limits := DefaultLimits()
+	if threshold < limits.Threshold.MinProductionThreshold || (!limits.Threshold.AllowOneOfOne && threshold == 1 && n == 1) {
+		t.Skipf("threshold %d-of-%d not allowed by current limits (min=%d, allow1of1=%v)",
+			threshold, n, limits.Threshold.MinProductionThreshold, limits.Threshold.AllowOneOfOne)
+	}
+
 	key := frostFixtureKey{threshold: threshold, n: n, hd: hd}
 	actual, _ := frostKeygenFixtureCache.LoadOrStore(key, &frostFixtureEntry{})
 	entry := actual.(*frostFixtureEntry)

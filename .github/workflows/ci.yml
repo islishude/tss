@@ -94,3 +94,30 @@ jobs:
 
       - name: Run race detector
         run: make test-race
+
+  test-fuzzing:
+    name: Test Fuzzing (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run all fuzz targets
+        run: make fuzz-ci
+
+      - name: Upload failing corpus if generated
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: fuzz-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          path: |
+            **/testdata/fuzz/**

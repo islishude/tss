@@ -29,8 +29,7 @@ jobs:
         with:
           go-version: stable
 
-      - name: Run Tier 3 slowcrypto tests
-        run: go test -v -race -tags 'tier1 integration slowcrypto' -timeout 5h ./...
+      - run: make test-race
 
   test-stress-integration-cggmp21:
     name: Test Stress Integration(cggmp21 ${{ matrix.os }})
@@ -50,7 +49,7 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./cggmp21/...
+        run: make test-stress PKGS=./cggmp21/...
 
   test-stress-integration-frost:
     name: Test Stress Integration(frost ${{ matrix.os }})
@@ -70,7 +69,7 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./frost/...
+        run: make test-stress PKGS=./frost/...
 
   test-stress-integration-internal:
     name: Test Stress Integration(internal ${{ matrix.os }})
@@ -90,10 +89,10 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./internal/...
+        run: make test-stress PKGS=./internal/...
 
-  test-stress-integration:
-    name: Test Stress Integration(${{ matrix.os }})
+  test-slowcrypto-internal:
+    name: Test SlowCrypto ZK(${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -110,10 +109,10 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./...
+        run: make test-slowcrypto PKGS=./internal/...
 
-  test-slowcrypto-zk:
-    name: Test Stress ZK(${{ matrix.os }})
+  test-slowcrypto-cggmp21:
+    name: Test SlowCrypto cggmp21(${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -130,10 +129,10 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -v -tags 'slowcrypto' -timeout 1h ./internal/zk/...
+        run: make test-slowcrypto PKGS=./cggmp21/...
 
-  test-slowcrypto-secp256k1:
-    name: Test Stress Secp256k1(${{ matrix.os }})
+  test-slowcrypto-frost:
+    name: Test SlowCrypto frost(${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -150,9 +149,9 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -v -tags 'slowcrypto' -timeout 1h ./cggmp21/secp256k1/...
+        run: make test-slowcrypto PKGS=./frost/...
 
-  fuzzing-test:
+  test-fuzzing:
     name: Test Fuzzing (${{ matrix.os }})
     strategy:
       fail-fast: false
@@ -170,9 +169,7 @@ jobs:
 
       - name: Run all fuzz targets
         shell: bash
-        run: ./.github/scripts/fuzz-ci.sh ./...
-        env:
-          FUZZTIME: 3m
+        run: make fuzz-nightly
 
       - name: Upload failing corpus if generated
         if: failure()
