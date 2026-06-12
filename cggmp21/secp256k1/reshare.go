@@ -11,6 +11,7 @@ import (
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const (
@@ -469,7 +470,7 @@ func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan ResharePlan) error 
 func cloneResharePlan(in ResharePlan) ResharePlan {
 	out := in
 	out.OldGroupPublicKey = append([]byte(nil), in.OldGroupPublicKey...)
-	out.OldGroupCommitments = cloneKeyShareByteSlices(in.OldGroupCommitments)
+	out.OldGroupCommitments = wireutil.CloneByteSlices(in.OldGroupCommitments)
 	out.OldVerificationShares = make(map[tss.PartyID][]byte, len(in.OldVerificationShares))
 	for id, share := range in.OldVerificationShares {
 		out.OldVerificationShares[id] = append([]byte(nil), share...)

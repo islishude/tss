@@ -148,10 +148,13 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 		round3 = append(round3, processPresignRound(round2)...)
 		processPresignRound(round3)
 
+		presigns := make(map[tss.PartyID]*Presign, len(signers))
 		for _, id := range signers {
-			if _, ok := sess[id].Presign(); !ok {
+			p, ok := sess[id].Presign()
+			if !ok {
 				t.Fatalf("presign not complete for %d under shuffled delivery", id)
 			}
+			presigns[id] = p
 		}
 
 		// Verify signing still produces a valid signature.
@@ -164,8 +167,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 		var sigMessages []tss.Envelope
 		var refSig *Signature
 		for _, id := range signers {
-			p, _ := sess[id].Presign()
-			s, out, err := StartSignDigest(shares[id], p, signID, digest[:])
+			s, out, err := StartSignDigest(shares[id], presigns[id], signID, digest[:])
 			if err != nil {
 				t.Fatal(err)
 			}

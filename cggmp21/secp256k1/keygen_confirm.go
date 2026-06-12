@@ -10,6 +10,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const keygenConfirmationWireVersion = 1
@@ -286,7 +287,7 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := verifyKeygenConfirmationSet(local, encoded); err != nil {
 		return err
 	}
-	local.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	local.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
 	return nil
 }
 
@@ -398,7 +399,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	// Recomputation: now that we have the real chain codes, produce the final
 	// transcript hash that binds them.
 	finalShare.KeygenTranscriptHash = s.keygenTranscriptHash(finalShare.GroupCommitments)
-	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	finalShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := finalShare.Validate(); err != nil {
 		finalShare.Destroy()
 		s.abort()

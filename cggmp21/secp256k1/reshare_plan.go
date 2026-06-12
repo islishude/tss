@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const reshareCurveID = "secp256k1"
@@ -105,7 +106,7 @@ func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, ne
 		SessionID:             sessionID,
 		CurveID:               reshareCurveID,
 		OldGroupPublicKey:     append([]byte(nil), oldKey.PublicKey...),
-		OldGroupCommitments:   cloneKeyShareByteSlices(oldKey.GroupCommitments),
+		OldGroupCommitments:   wireutil.CloneByteSlices(oldKey.GroupCommitments),
 		OldVerificationShares: verificationShares,
 		OldParties:            tss.SortParties(oldKey.Parties),
 		OldThreshold:          oldKey.Threshold,

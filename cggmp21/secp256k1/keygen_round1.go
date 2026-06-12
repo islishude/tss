@@ -246,6 +246,17 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
+	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
+		return nil, verificationErrorWithEvidence(
+			env,
+			tss.EvidenceKindKeygenPaillier,
+			"Paillier modulus does not meet security requirements",
+			[]tss.PartyID{env.From},
+			err,
+			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		)
+	}
 	ringParams, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(

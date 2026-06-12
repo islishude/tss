@@ -166,6 +166,17 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
+	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
+		return verificationErrorWithEvidence(
+			env,
+			tss.EvidenceKindKeygenPaillier,
+			"reshare Paillier modulus does not meet security requirements",
+			[]tss.PartyID{env.From},
+			err,
+			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		)
+	}
 	ringParams, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams)
 	if err != nil {
 		return protocolErrorWithEvidence(

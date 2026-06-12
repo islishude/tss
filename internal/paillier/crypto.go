@@ -31,6 +31,11 @@ func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.
 }
 
 // EncryptWithRandomness encrypts message using caller-provided randomness r.
+//
+// The G^m mod N² step uses constant-time modular exponentiation because the
+// message m is a secret scalar in protocol paths (MtA, keygen, refresh,
+// reshare). The r^n mod N² step uses variable-time exponentiation because
+// the exponent n is the public Paillier modulus.
 func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error) {
 	if err := pk.Validate(); err != nil {
 		return nil, err
@@ -42,7 +47,19 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 		return nil, errors.New("paillier randomness is not invertible")
 	}
 	m := mod(message, pk.N)
-	gm := new(big.Int).Exp(pk.G, m, pk.NSquared)
+
+	// G^m mod N² via constant-time exponentiation.
+	nLen := (pk.N.BitLen() + 7) / 8
+	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
+	gBytes := paillierct.FixedEncode(pk.G, 2*nLen)
+	mBytes := paillierct.FixedEncode(m, nLen)
+	gmBytes, err := paillierct.ExpCT(nSquaredBytes, gBytes, mBytes)
+	if err != nil {
+		return nil, fmt.Errorf("paillier encrypt: %w", err)
+	}
+	gm := new(big.Int).SetBytes(gmBytes)
+
+	// r^n mod N² — exponent n is the public modulus, so variable-time is acceptable.
 	rn := new(big.Int).Exp(r, pk.N, pk.NSquared)
 	c := new(big.Int).Mul(gm, rn)
 	c.Mod(c, pk.NSquared)
@@ -165,6 +182,9 @@ func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 // without validating ciphertext membership in Z*_{n^2}. Callers must ensure
 // the ciphertext has been validated through upstream proof checks. Basic
 // range checks are still enforced to catch nil, zero, and out-of-range values.
+//
+// The G^plaintext mod N² step uses constant-time modular exponentiation because
+// the plaintext exponent may be a secret scalar in some protocol paths.
 func (pk PublicKey) AddPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.Int, error) {
 	if ciphertext == nil || plaintext == nil {
 		return nil, errors.New("nil input")
@@ -172,7 +192,15 @@ func (pk PublicKey) AddPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.
 	if ciphertext.Sign() <= 0 || ciphertext.Cmp(pk.NSquared) >= 0 {
 		return nil, errors.New("ciphertext out of range")
 	}
-	gm := new(big.Int).Exp(pk.G, mod(plaintext, pk.N), pk.NSquared)
+	nLen := (pk.N.BitLen() + 7) / 8
+	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
+	gBytes := paillierct.FixedEncode(pk.G, 2*nLen)
+	pBytes := paillierct.FixedEncode(mod(plaintext, pk.N), nLen)
+	gmBytes, err := paillierct.ExpCT(nSquaredBytes, gBytes, pBytes)
+	if err != nil {
+		return nil, fmt.Errorf("paillier add plaintext: %w", err)
+	}
+	gm := new(big.Int).SetBytes(gmBytes)
 	out := new(big.Int).Mul(ciphertext, gm)
 	out.Mod(out, pk.NSquared)
 	return out, nil

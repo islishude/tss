@@ -11,6 +11,7 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const keygenConfirmationWireVersion = 1
@@ -285,7 +286,7 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := verifyKeygenConfirmationSet(local, encoded); err != nil {
 		return err
 	}
-	local.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	local.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
 	return nil
 }
 
@@ -380,7 +381,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	}
 	finalShare := cloneKeyShareValue(s.pending)
 	finalShare.ChainCode = chainCode
-	finalShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	finalShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := finalShare.ValidateConsistency(); err != nil {
 		finalShare.Destroy()
 		s.abort()

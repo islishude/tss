@@ -11,6 +11,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
@@ -327,23 +328,12 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	out.PublicKey = slices.Clone(k.PublicKey)
 	out.ChainCode = slices.Clone(k.ChainCode)
 	out.secret = k.secret.Clone()
-	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
+	out.GroupCommitments = wireutil.CloneByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
 	out.KeygenSessionID = k.KeygenSessionID
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
-	out.KeygenConfirmations = cloneKeyShareByteSlices(k.KeygenConfirmations)
+	out.KeygenConfirmations = wireutil.CloneByteSlices(k.KeygenConfirmations)
 	return &out
-}
-
-func cloneKeyShareByteSlices(in [][]byte) [][]byte {
-	if in == nil {
-		return nil
-	}
-	out := make([][]byte, len(in))
-	for i, item := range in {
-		out[i] = slices.Clone(item)
-	}
-	return out
 }
 
 func cloneVerificationShares(in []VerificationShare) []VerificationShare {

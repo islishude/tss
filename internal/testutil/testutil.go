@@ -14,7 +14,6 @@ import (
 	"math/rand/v2"
 	"os"
 	"path/filepath"
-	"slices"
 	"strconv"
 	"strings"
 	"testing"
@@ -188,7 +187,7 @@ func MustDecodeHex(tb interface{ Fatal(...any) }, s string) []byte {
 }
 
 // IsZeroBytes reports whether every byte in b is zero. A nil or empty slice
-// returns true.
+// returns true. use [wire.IsAllZero] for constant-time usage.
 func IsZeroBytes(b []byte) bool {
 	for _, v := range b {
 		if v != 0 {
@@ -196,20 +195,6 @@ func IsZeroBytes(b []byte) bool {
 		}
 	}
 	return true
-}
-
-// CloneByteSlices returns a deep copy of a [][]byte slice.
-// Both the outer slice and each inner slice are independently copied.
-// Nil inner slices are preserved as nil.
-func CloneByteSlices(in [][]byte) [][]byte {
-	if in == nil {
-		return nil
-	}
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = slices.Clone(in[i])
-	}
-	return out
 }
 
 // AssertBigIntCleared fails if x is non-nil and has not been cleared (non-zero

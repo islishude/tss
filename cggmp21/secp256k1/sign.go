@@ -293,11 +293,12 @@ type PresignSession struct {
 	alphaSigma map[tss.PartyID]*big.Int
 	betaSigma  map[tss.PartyID]*big.Int
 
-	round2Sent bool
-	round3Sent bool
-	completed  bool
-	aborted    bool
-	presign    *Presign
+	round2Sent      bool
+	round3Sent      bool
+	completed       bool
+	aborted         bool
+	presign         *Presign
+	presignReturned bool
 }
 
 // abort marks the presign session aborted and clears all secret-bearing
@@ -539,9 +540,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 }
 
 // Presign returns a deep copy of the completed local presign record.
+//
+// Presign enforces single retrieval: after the first successful call the session
+// will not hand out another copy. Callers must store the returned presign for
+// signing and persistence. Subsequent calls return (nil, false).
 func (s *PresignSession) Presign() (*Presign, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
+	if s.presignReturned {
+		return nil, false
+	}
+	s.presignReturned = true
 	return s.presign.Clone(), true
 }

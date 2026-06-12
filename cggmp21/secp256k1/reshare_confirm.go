@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
@@ -66,7 +67,7 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
-	s.newShare.KeygenConfirmations = cloneKeyShareByteSlices(encoded)
+	s.newShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := s.newShare.Validate(); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)

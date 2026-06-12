@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/wire/wireutil"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -52,7 +53,7 @@ func (k *KeyShare) GroupCommitmentsCopy() [][]byte {
 	if k == nil {
 		return nil
 	}
-	return cloneKeyShareByteSlices(k.GroupCommitments)
+	return wireutil.CloneByteSlices(k.GroupCommitments)
 }
 
 // ShareProofBytes returns a copy of the Schnorr share-proof encoding.
@@ -250,6 +251,9 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.Party), modProof) {
 		return errors.New("invalid local paillier proof")
 	}
+	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
+		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
+	}
 	localRPParams, err := zkpai.UnmarshalRingPedersenParams(k.RingPedersenParams)
 	if err != nil {
 		return fmt.Errorf("invalid local Ring-Pedersen parameters: %w", err)
@@ -299,6 +303,9 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		}
 		if !zkpai.VerifyModulus(proofDomain, peerPK, uint32(item.Party), peerProof) {
 			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
+		}
+		if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(peerPK); err != nil {
+			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", item.Party, err)
 		}
 		peerRPParams, err := zkpai.UnmarshalRingPedersenParams(rp.Params)
 		if err != nil {
@@ -521,7 +528,7 @@ func (k *KeyShare) Clone() *KeyShare {
 	out.PublicKey = slices.Clone(k.PublicKey)
 	out.ChainCode = slices.Clone(k.ChainCode)
 	out.secret = k.secret.Clone()
-	out.GroupCommitments = cloneKeyShareByteSlices(k.GroupCommitments)
+	out.GroupCommitments = wireutil.CloneByteSlices(k.GroupCommitments)
 	out.VerificationShares = cloneVerificationShares(k.VerificationShares)
 	out.PaillierPublicKey = slices.Clone(k.PaillierPublicKey)
 	out.paillierPrivateKey = slices.Clone(k.paillierPrivateKey)
@@ -534,19 +541,8 @@ func (k *KeyShare) Clone() *KeyShare {
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
 	out.LogCiphertext = slices.Clone(k.LogCiphertext)
 	out.LogProof = slices.Clone(k.LogProof)
-	out.KeygenConfirmations = cloneKeyShareByteSlices(k.KeygenConfirmations)
+	out.KeygenConfirmations = wireutil.CloneByteSlices(k.KeygenConfirmations)
 	return &out
-}
-
-func cloneKeyShareByteSlices(in [][]byte) [][]byte {
-	if in == nil {
-		return nil
-	}
-	out := make([][]byte, len(in))
-	for i, item := range in {
-		out[i] = slices.Clone(item)
-	}
-	return out
 }
 
 func cloneVerificationShares(in []VerificationShare) []VerificationShare {
