@@ -13,7 +13,14 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-var testPaillierKeyCache sync.Map
+// testPaillierKeyEntry wraps a sync.Once to prevent duplicate key generation
+// under parallel test execution. The cached key is immutable after construction.
+type testPaillierKeyEntry struct {
+	once sync.Once
+	sk   *pai.PrivateKey
+}
+
+var testPaillierKeyCache sync.Map // map[int]*testPaillierKeyEntry
 
 func TestProofMarshalCanonicalBinary(t *testing.T) {
 	if testing.Short() {
@@ -322,18 +329,26 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 
 func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
 	t.Helper()
-	if sk, ok := testPaillierKeyCache.Load(bits); ok {
-		return sk.(*pai.PrivateKey)
+
+	entryAny, _ := testPaillierKeyCache.LoadOrStore(bits, &testPaillierKeyEntry{})
+	entry := entryAny.(*testPaillierKeyEntry)
+
+	entry.once.Do(func() {
+		sk, err := pai.GenerateKeyForTest(context.Background(), nil, bits)
+		if err != nil {
+			// Don't poison the cache; delete the entry so a later caller retries.
+			testPaillierKeyCache.Delete(bits)
+			t.Fatal(err)
+		}
+		entry.sk = sk
+	})
+
+	if entry.sk == nil {
+		t.Fatalf("paillier key cache poisoned for bits=%d", bits)
 	}
-	sk, err := pai.GenerateKeyForTest(context.Background(), nil, bits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual, _ := testPaillierKeyCache.LoadOrStore(bits, sk)
-	if actual != sk {
-		return actual.(*pai.PrivateKey)
-	}
-	return sk
+
+	// Return a deep clone so callers cannot mutate the cached original.
+	return entry.sk.Clone()
 }
 
 func mtaResponseForTest(t *testing.T, sk *pai.PrivateKey, encA, b, beta *big.Int) (*big.Int, *big.Int) {

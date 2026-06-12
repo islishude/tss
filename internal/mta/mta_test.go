@@ -12,6 +12,7 @@ import (
 )
 
 func TestMTAProductShares(t *testing.T) {
+	t.Parallel()
 	// Security parameters are set once in TestMain; do not override here.
 	skA, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {

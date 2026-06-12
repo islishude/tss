@@ -16,6 +16,7 @@ import (
 // reused: same session re-sign attempt, cross-session reuse, and cross-digest
 // reuse all fail.
 func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name       string
 		newSession bool // create a new session ID for the reuse attempt
@@ -44,6 +45,7 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			shares := CachedKeygenShares(t, 2, 3, false)
 			signers := []tss.PartyID{1, 2}
 			presigns := secpPresign(t, shares, signers)
@@ -80,6 +82,7 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 }
 
 func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -104,6 +107,7 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 }
 
 func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	for _, tc := range []struct {
 		name   string
@@ -114,6 +118,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 		{name: "echo", mutate: func(p *presignRound2Payload) { p.Round1Echo[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			sessionID, err := tss.NewSessionID(nil)
 			if err != nil {
 				t.Fatal(err)
@@ -153,6 +158,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 }
 
 func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -189,6 +195,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 // marshal/unmarshal round-trip preserves the consumed state correctly:
 // fresh presigns can still sign, consumed presigns stay consumed.
 func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name        string
 		threshold   int
@@ -217,6 +224,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			shares := CachedKeygenShares(t, tc.threshold, tc.n, false)
 			presigns := secpPresign(t, shares, tc.signers)
 			presign := presigns[tc.signers[0]]
@@ -278,6 +286,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 }
 
 func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)

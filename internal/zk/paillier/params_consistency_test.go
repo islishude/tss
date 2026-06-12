@@ -239,6 +239,7 @@ func TestSecurityParamsValidate(t *testing.T) {
 // TestCheckPaillierModulus verifies the minimum bit-length check on Paillier
 // moduli.
 func TestCheckPaillierModulus(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("skipping crypto proof test in short mode")
 	}

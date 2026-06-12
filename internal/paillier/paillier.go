@@ -44,6 +44,27 @@ func (sk PrivateKey) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("paillier private key contains secret material; use MarshalBinary")
 }
 
+// Clone returns a deep copy of the Paillier private key. The clone is
+// independent of the original — mutating the clone does not affect the
+// original. Clone is safe for use in test fixture caches where callers
+// must receive isolated copies.
+func (sk *PrivateKey) Clone() *PrivateKey {
+	if sk == nil {
+		return nil
+	}
+	return &PrivateKey{
+		PublicKey: PublicKey{
+			N:        new(big.Int).Set(sk.N),
+			G:        new(big.Int).Set(sk.G),
+			NSquared: new(big.Int).Set(sk.NSquared),
+		},
+		Lambda: sk.Lambda.Clone(),
+		Mu:     sk.Mu.Clone(),
+		P:      new(big.Int).Set(sk.P),
+		Q:      new(big.Int).Set(sk.Q),
+	}
+}
+
 // Destroy clears Paillier private exponents and factors in place.
 func (sk *PrivateKey) Destroy() {
 	if sk == nil {

@@ -105,6 +105,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 // TestSlowCrypto_Keygen3of5Production verifies 3-of-5 keygen with production
 // 3072-bit Paillier keys. This is a correctness and performance regression test.
 func TestSlowCrypto_Keygen3of5Production(t *testing.T) {
+	t.Parallel()
 	shares := slowCryptoKeygen(t, 3, 5)
 	if len(shares) != 5 {
 		t.Fatalf("expected 5 shares, got %d", len(shares))
@@ -121,6 +122,7 @@ func TestSlowCrypto_Keygen3of5Production(t *testing.T) {
 // TestSlowCrypto_Presign3of5Production verifies full 3-of-5 presign with
 // production 3072-bit Paillier keys.
 func TestSlowCrypto_Presign3of5Production(t *testing.T) {
+	t.Parallel()
 	shares := slowCryptoKeygen(t, 3, 5)
 	signers := []tss.PartyID{1, 3, 5}
 	presigns := slowCryptoPresign(t, shares, signers)
@@ -132,6 +134,7 @@ func TestSlowCrypto_Presign3of5Production(t *testing.T) {
 // TestSlowCrypto_Sign3of5Production verifies full 3-of-5 sign cycle with
 // production 3072-bit Paillier keys.
 func TestSlowCrypto_Sign3of5Production(t *testing.T) {
+	t.Parallel()
 	shares := slowCryptoKeygen(t, 3, 5)
 	signers := []tss.PartyID{1, 3, 5}
 
@@ -152,6 +155,7 @@ func TestSlowCrypto_Sign3of5Production(t *testing.T) {
 // TestSlowCrypto_Refresh2of3Production verifies a 2-of-3 refresh cycle with
 // production 3072-bit Paillier key rotation.
 func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
+	t.Parallel()
 	shares := slowCryptoKeygen(t, 2, 3)
 
 	// Run refresh to rotate Paillier keys.
@@ -228,6 +232,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 // TestSlowCrypto_BIP32DeriveAndSignProduction verifies BIP32 HD derivation
 // and signing with production 3072-bit Paillier parameters.
 func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
+	t.Parallel()
 	shares := slowCryptoKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
 	signers := []tss.PartyID{1, 2}
 	path := []uint32{0, 17}

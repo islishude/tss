@@ -11,6 +11,7 @@ import (
 )
 
 func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
+	t.Parallel()
 	params := DefaultSecurityParams()
 	sk := testPaillierKey(t, params.MinPaillierBits)
 	domain := []byte("slowcrypto paillier zk")

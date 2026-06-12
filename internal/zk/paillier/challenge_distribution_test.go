@@ -18,6 +18,7 @@ const testChiSquaredPValue = 50.0
 // derived via deriveModulusY are uniformly distributed across Z*_N.
 // Non-uniform challenges would break the soundness of Πmod.
 func TestModulusProofChallengeDistribution(t *testing.T) {
+	t.Parallel()
 	sk := testPaillierKey(t, 3072)
 	domain := []byte("distribution mod")
 	party := uint32(1)
@@ -106,6 +107,7 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 // challenges in Πprm are statistically indistinguishable from unbiased
 // coin flips. With 128 rounds, the expected number of 1s is 64.
 func TestRingPedersenChallengeDistribution(t *testing.T) {
+	t.Parallel()
 	sk := testPaillierKey(t, 3072)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -165,6 +167,7 @@ func TestRingPedersenChallengeDistribution(t *testing.T) {
 // TestRingPedersenChallengeBitIndependence verifies that consecutive challenge
 // bits are independent (no autocorrelation at lag 1).
 func TestRingPedersenChallengeBitIndependence(t *testing.T) {
+	t.Parallel()
 	sk := testPaillierKey(t, 3072)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -221,6 +224,7 @@ func TestRingPedersenChallengeBitIndependence(t *testing.T) {
 // are independent across rounds. Each round uses expandHash with a different
 // round index, so they should be independent.
 func TestModulusProofChallengeIndependence(t *testing.T) {
+	t.Parallel()
 	sk := testPaillierKey(t, 3072)
 	domain := []byte("independence mod")
 	proof, err := ProveModulus(nil, domain, sk, 1)
@@ -242,6 +246,7 @@ func TestModulusProofChallengeIndependence(t *testing.T) {
 // TestSecurityParamsAuditBitBoundary verifies the production parameter bounds
 // with a production-size Paillier key.
 func TestSecurityParamsAuditBitBoundary(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	sk := testPaillierKey(t, 3072)
 

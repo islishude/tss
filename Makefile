@@ -144,6 +144,10 @@ fix: go-fix ## Alias for go-fix.
 go-fix: ## Run go fix on all packages; modifies source when fixes apply.
 	$(GO) fix $(PKGS)
 
+.PHONY: go-fix-check
+go-fix-check: ## Run go fix on all packages and print the patch as a unified diff
+	$(GO) fix --diff $(PKGS)
+
 .PHONY: lint
 lint: ## Run golangci-lint.
 	$(GOLANGCI_LINT) run
@@ -216,11 +220,9 @@ check-wire-api: ## Ensure production code uses only the object-level wire API.
 
 .PHONY: fix-all
 fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
-	go fix ./...
 
 .PHONY: check
-check: build vet lint fmt-check tidy-check verify check-wire-api ## Fast local pre-commit check.
-	go fix -diff ./...
+check: build vet lint fmt-check tidy-check verify check-wire-api go-fix-check ## Fast local pre-commit check.
 
 .PHONY: ci
 ci: check test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.
