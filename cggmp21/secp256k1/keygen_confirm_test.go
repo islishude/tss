@@ -11,6 +11,7 @@ import (
 )
 
 func TestKeygenConfirmationRoundTrip(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	share := shares[1]
 	c, err := share.KeygenConfirmation()
@@ -38,6 +39,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 }
 
 func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
@@ -61,6 +63,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 // TestKeygenConfirmationRejectsTamperedFields verifies that a confirmation
 // with a mismatched transcript hash, public key, or commitments hash is rejected.
 func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var baseConfirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
@@ -95,6 +98,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			confirmations := make([]*KeygenConfirmation, len(baseConfirmations))
 			for i, c := range baseConfirmations {
 				clone := *c
@@ -114,6 +118,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 // TestKeygenConfirmationRejectsInvalidSenderSets verifies that confirmation
 // sets with duplicate, missing, unknown, or wrong-count senders are rejected.
 func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 
 	tests := []struct {
@@ -158,6 +163,7 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			confirmations := tc.confirmations(t)
 			if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
 				t.Fatalf("expected rejection for %s", tc.name)
@@ -167,6 +173,7 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 }
 
 func TestUnconfirmedKeyShareRejectedByRequireMPC(t *testing.T) {
+	t.Parallel()
 	shares := secpKeygenWithoutConfirmation(t, 2, 3)
 	// Shares from secpKeygenWithoutConfirmation are NOT confirmed.
 	if err := shares[1].requireMPCMaterial(); err == nil {
@@ -175,6 +182,7 @@ func TestUnconfirmedKeyShareRejectedByRequireMPC(t *testing.T) {
 }
 
 func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
+	t.Parallel()
 	shares := secpKeygenWithoutConfirmation(t, 2, 3)
 	if err := shares[1].Validate(); err == nil {
 		t.Fatal("expected Validate to reject unconfirmed share")
@@ -185,6 +193,7 @@ func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
 }
 
 func TestConfirmedKeyShareAcceptedByRequireMPC(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	if err := shares[1].requireMPCMaterial(); err != nil {
 		t.Fatalf("requireMPCMaterial rejected confirmed share: %v", err)
@@ -192,6 +201,7 @@ func TestConfirmedKeyShareAcceptedByRequireMPC(t *testing.T) {
 }
 
 func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

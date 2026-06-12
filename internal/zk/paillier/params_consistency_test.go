@@ -236,30 +236,6 @@ func TestSecurityParamsValidate(t *testing.T) {
 	}
 }
 
-// TestCheckPaillierModulus verifies the minimum bit-length check on Paillier
-// moduli.
-func TestCheckPaillierModulus(t *testing.T) {
-	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
-
-	sp := DefaultSecurityParams()
-
-	// Test with a key that meets the minimum (requires keygen)
-	sk1024 := testPaillierKey(t, 1024)
-	err := sp.CheckPaillierModulus(&sk1024.PublicKey)
-	if err == nil {
-		t.Error("DefaultSecurityParams should reject 1024-bit modulus (MinPaillierBits=3072)")
-	}
-
-	// FastSecurityParams should accept 1024-bit
-	fast := FastSecurityParams()
-	if err := fast.CheckPaillierModulus(&sk1024.PublicKey); err != nil {
-		t.Errorf("FastSecurityParams rejected 1024-bit modulus: %v", err)
-	}
-}
-
 // TestEllPrimeExceedsEll verifies that EllPrime > Ell, which is required for
 // the affine proof range to be strictly larger than the scalar range.
 func TestEllPrimeExceedsEll(t *testing.T) {

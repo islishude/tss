@@ -7,7 +7,6 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -32,14 +31,14 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 
 	nLen := modulusBytes(sk.N)
 	t.Run("jacobi w", func(t *testing.T) {
-		tampered := cloneModulusProof(proof)
+		tampered := proof.Clone()
 		tampered.W = fixedModNBytes(big.NewInt(1), nLen)
 		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
 			t.Fatal("modulus proof with Jacobi(w,N) != -1 verified")
 		}
 	})
 	t.Run("round count", func(t *testing.T) {
-		tampered := cloneModulusProof(proof)
+		tampered := proof.Clone()
 		tampered.X = tampered.X[:modulusProofRounds-1]
 		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
 			t.Fatal("modulus proof with wrong tuple count verified")
@@ -72,7 +71,7 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 			{name: "z outside", mutate: func(p *ModulusProof) { p.Z[0] = fixedModNBytes(sk.N, nLen) }},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				tampered := cloneModulusProof(proof)
+				tampered := proof.Clone()
 				tc.mutate(tampered)
 				if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
 					t.Fatal("modulus proof with invalid Z_N* element verified")
@@ -81,12 +80,12 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 		}
 	})
 	t.Run("equations", func(t *testing.T) {
-		tamperedZ := cloneModulusProof(proof)
+		tamperedZ := proof.Clone()
 		tamperedZ.Z[0][len(tamperedZ.Z[0])-1] ^= 1
 		if VerifyModulus(domain, &sk.PublicKey, party, tamperedZ) {
 			t.Fatal("modulus proof with bad z^N equation verified")
 		}
-		tamperedX := cloneModulusProof(proof)
+		tamperedX := proof.Clone()
 		tamperedX.X[0][len(tamperedX.X[0])-1] ^= 1
 		if VerifyModulus(domain, &sk.PublicKey, party, tamperedX) {
 			t.Fatal("modulus proof with bad x^4 equation verified")
@@ -117,15 +116,4 @@ func assertModulusProofRoundTrip(t *testing.T, proof *ModulusProof) {
 	if _, err := UnmarshalModulusProof(append(raw, 0)); err == nil {
 		t.Fatal("modulus proof accepted trailing bytes")
 	}
-}
-
-func cloneModulusProof(in *ModulusProof) *ModulusProof {
-	out := *in
-	out.W = append([]byte(nil), in.W...)
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.X = testutil.CloneByteSlices(in.X)
-	out.A = append([]byte(nil), in.A...)
-	out.B = append([]byte(nil), in.B...)
-	out.Z = testutil.CloneByteSlices(in.Z)
-	return &out
 }

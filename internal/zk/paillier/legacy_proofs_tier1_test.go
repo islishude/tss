@@ -48,7 +48,7 @@ func TestLegacyLogProofTamper(t *testing.T) {
 		{name: "transcript", mutate: func(p *LogProof) { p.TranscriptHash[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tampered := cloneLogProof(proof)
+			tampered := proof.Clone()
 			tc.mutate(tampered)
 			if VerifyLog(domain, &sk.PublicKey, ciphertext, tampered) {
 				t.Fatal("tampered legacy log proof verified")

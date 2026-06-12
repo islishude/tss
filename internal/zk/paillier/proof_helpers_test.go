@@ -107,29 +107,6 @@ func assertEncryptionProofRoundTrip(t *testing.T, proof *EncryptionProof) {
 	}
 }
 
-func cloneEncryptionProof(in *EncryptionProof) *EncryptionProof {
-	out := *in
-	out.ScalarCommitment = append([]byte(nil), in.ScalarCommitment...)
-	out.CipherCommitment = append([]byte(nil), in.CipherCommitment...)
-	out.PointCommitment = append([]byte(nil), in.PointCommitment...)
-	out.Bound = append([]byte(nil), in.Bound...)
-	out.Response = append([]byte(nil), in.Response...)
-	out.Randomness = append([]byte(nil), in.Randomness...)
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	return &out
-}
-
-func cloneLogProof(in *LogProof) *LogProof {
-	out := *in
-	out.Point = append([]byte(nil), in.Point...)
-	out.CipherCommitment = append([]byte(nil), in.CipherCommitment...)
-	out.PointCommitment = append([]byte(nil), in.PointCommitment...)
-	out.Response = append([]byte(nil), in.Response...)
-	out.Randomness = append([]byte(nil), in.Randomness...)
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	return &out
-}
-
 func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, error) {
 	version, fields, err := wire.UnmarshalFields(raw, typeID)
 	if err != nil {

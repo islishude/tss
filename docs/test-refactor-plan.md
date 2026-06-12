@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–25 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI)_
+_Last updated: 2026-06-12 (items 20–35 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 encoding/domain/keygen-confirm parallelism, tier1 extraction from MIXED files, proof Clone methods)_
 
 ### Completed
 
@@ -1228,7 +1228,7 @@ Coverage baseline, test audit, duplicated helper consolidation, slowcrypto revie
 
 The following files intentionally **do not** use `t.Parallel()` because tests mutate package globals (`SetSecurityParamsForTesting`, `activeSecurityParams`, test limits) or are behind build tags that limit concurrent execution:
 
-- `cggmp21/secp256k1/`: Most integration tests (`guard_*`, `adversary_*`, `keygen_confirm`, `presign_policy`, `proof_omission`, `vector_*`, `concurrency_*`, `benchmark_*`, `domain_*`, `encoding_*`, `golden_*`, `guard_full_flow_*`, `integration_adversary_*`, `integration_example_*`, `integration_hd_*`, `integration_refresh_*`, `integration_reshare_*`, `integration_sign_*`) remain sequential as full protocol flows respecting integration build tag. `integration_keygen_test.go` and `integration_presign_test.go` now use `t.Parallel()` (2026-06-12) as they use `CachedKeygenShares` (read-only). `slowcrypto_test.go` now uses `t.Parallel()` (2026-06-12). 3 tests in `hd_test.go` (`TestDeriveNonHardenedBIP32_InvalidChildErrorMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange`) intentionally sequential because they modify package-level `hmacSHA512`.
+- `cggmp21/secp256k1/`: Most integration tests (`guard_*`, `adversary_*`, `presign_policy`, `proof_omission`, `vector_*`, `concurrency_*`, `benchmark_*`, `golden_*`, `guard_full_flow_*`, `integration_adversary_*`, `integration_example_*`, `integration_hd_*`, `integration_refresh_*`, `integration_reshare_*`, `integration_sign_*`) remain sequential as full protocol flows respecting integration build tag. `integration_keygen_test.go`, `integration_presign_test.go`, `encoding_test.go` (9 tests), `domain_test.go` (2 tests), and `keygen_confirm_test.go` (8 tests) now use `t.Parallel()` (2026-06-12) as they use `CachedKeygenShares` (read-only) or create independent sessions. `slowcrypto_test.go` now uses `t.Parallel()` (2026-06-12). 3 tests in `hd_test.go` (`TestDeriveNonHardenedBIP32_InvalidChildErrorMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipMode`, `TestDeriveNonHardenedBIP32_InvalidChildSkipModeStopsBeforeHardenedRange`) intentionally sequential because they modify package-level `hmacSHA512`.
 - `frost/ed25519/`: `guard_integration_test.go`, `test_setup_test.go`, `vectorgen_test.go` are integration/vector-generation.
 - `internal/zk/paillier/`: `TestActiveSecurityParamsRespectsOverride` in `params_consistency_test.go` intentionally sequential (modifies `overrideSecurityParams`). `slowcrypto_test.go` and `challenge_distribution_test.go` now use `t.Parallel()` (2026-06-12) — each test creates independent Paillier keys and proofs.
 - `internal/mta/`: `main_test.go` (`TestMain` only) is not a test function.
@@ -1292,7 +1292,7 @@ The following items are documented as intentionally deferred:
 - **`assertProtocolErrorCode` vs `testutil.AssertProtocolError`**: Both ~10-line functions, unification would require changing 36+ call sites — deferred as low-ROI. Additionally, `testutil.AssertDeterministicRoundTrip` and `testutil.MutateBytes` have zero callers (identified 2026-06-11 final) — created in Phase 1 but never adopted; kept as harness infrastructure for future tests.
 - ~~**Fuzz CI integration tags**~~ — Resolved 2026-06-12: `.github/scripts/fuzz-ci.sh` now passes `-tags="$BUILD_TAGS"` (default: `tier1,integration`).
 - **Payload-level Fuzz\*Unmarshal cleanup**: ~~Completed (2026-06-11 late evening)~~: 33 payload-level fuzz targets removed across 8 files. **Remaining fuzz targets:** only `internal/wire` (3 tests: `FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`) — fuzzing at the correct TLV parser layer.
-- **MIXED file tier1 extraction (remaining)**: `internal/zk/paillier/new_proofs_test.go`, `relation_audit_test.go`, `range_boundary_test.go`, `params_consistency_test.go`, and `internal/mta/start_test.go`/`response_test.go`/`internal/paillier/keygen_test.go` retain `testing.Short()` guards for Tier 1 tests. Full extraction to `*_tier1_test.go` files deferred due to cross-cutting helper dependencies (extraction was completed for `legacy_proofs_test.go` as proof of concept). These files continue to use runtime `testing.Short()` for tier separation.
+- ~~**MIXED file tier1 extraction**~~ — Completed 2026-06-12 (items 29–34): All standalone tier1 tests extracted from `new_proofs_test.go` (4 tests), `relation_audit_test.go` (11 tests), `range_boundary_test.go` (2 tests), `params_consistency_test.go` (1 test), MTA `start_test.go` (4 tests), MTA `response_test.go` (2 tests), and paillier `keygen_test.go` (1 test) into separate `//go:build tier1` files. One file remains partially mixed: `TestTranscriptBindsAllSecurityParams` in `params_consistency_test.go` has 3 subtests with `testing.Short()` that share expensive Paillier keygen setup — splitting across build tags would require restructuring the test logic.
 - **Fuzz corpus seeding**: All 3 wire fuzz targets have programmatic seeds via `f.Add()`. Persistent corpus files (`testdata/fuzz/`) remain empty — golden vector files use TLV-wrapped wire format incompatible with individual payload fuzz targets. Seeding could be done by running `go test -fuzz` briefly and copying the generated corpus.
 
 ### New Work Items (from 2026-06-12 testing rules update) ✅ Completed 2026-06-12
@@ -1337,6 +1337,75 @@ All six new work items were completed on 2026-06-12 as part of the final impleme
     - `fuzz-smoke`, `fuzz-ci`, `fuzz-nightly` Makefile targets already existed
     - Updated `.github/scripts/fuzz-ci.sh` to pass `-tags="$BUILD_TAGS"` (default: `tier1,integration`) for future safety when integration-tagged fuzz targets are added
     - Fuzz corpus seeding deferred — all 3 remaining wire fuzz targets have programmatic seeds via `f.Add()`, and golden vector files use TLV-wrapped wire format incompatible with individual payload fuzz targets
+
+26. ~~**CGGMP21 encoding_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to all 9 test functions in `cggmp21/secp256k1/encoding_test.go`: `TestCGGMP21KeyShareCanonicalEncoding`, `TestCGGMP21KeyShareRejectsNonCanonicalFields`, `TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations`, `TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations`, `TestCGGMP21KeyShareRejectsIncompleteProductionMaterial` (with subtest `t.Parallel()` for 9 cases), `TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs`, `TestCGGMP21PresignCanonicalEncoding`, `TestCGGMP21PresignRejectsUnsortedSigners`, `TestCGGMP21KeyShareRejectsOverflowThreshold`.
+    - Confirmed safe: all tests use `CachedKeygenShares` (thread-safe `sync.Map`+`sync.Once`) and each test receives independent cloned fixtures. No package-global mutation, no file I/O, no environment dependencies.
+
+27. ~~**CGGMP21 domain_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to both test functions in `cggmp21/secp256k1/domain_test.go`: `TestCGGMP21KeyShareProofDomainBindsContext` (with subtest `t.Parallel()` for 6 domain-mutation cases), `TestCGGMP21MTADomainsBindPresignContext`.
+    - Confirmed safe: each test creates independent keygen/presign sessions with unique session IDs. No shared mutable state.
+
+28. ~~**CGGMP21 keygen_confirm_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to all 8 test functions: `TestKeygenConfirmationRoundTrip`, `TestKeygenConfirmationAcceptsMatching`, `TestKeygenConfirmationRejectsTamperedFields` (with subtest `t.Parallel()` for 3 cases), `TestKeygenConfirmationRejectsInvalidSenderSets` (with subtest `t.Parallel()` for 4 cases), `TestUnconfirmedKeyShareRejectedByRequireMPC`, `TestUnconfirmedKeyShareValidateAndMarshalReject`, `TestConfirmedKeyShareAcceptedByRequireMPC`, `TestKeygenSessionRejectsConflictingConfirmation`.
+    - Confirmed safe: 5 tests use `CachedKeygenShares` (thread-safe cache), 2 use `secpKeygenWithoutConfirmation` (fresh independent keygen), 1 creates a fresh keygen session. All tests own their state independently.
+
+29. ~~**MIXED file tier1 extraction: new_proofs_test.go**~~ — Completed 2026-06-12:
+    - Created `new_proofs_tier1_test.go` with `//go:build tier1` containing 4 tests: `TestEncProofVerificationMatrix`, `TestAffGProofVerificationMatrix`, `TestLogStarProofVerificationMatrix`, `TestProofsUseV1Version`.
+    - Removed `testing.Short()` guards from extracted tests (compile-time tier separation replaces runtime checks).
+    - Fixture helpers (`encProofFixture`, `affGProofFixture`, `logStarProofFixture`) and clone helpers (`cloneEncProof`, `cloneAffGProof`, `cloneLogStarProof`) remain in always-compiled `new_proofs_test.go` — accessible from both tier0 and tier1 files within the same package.
+    - Removed 235 lines from `new_proofs_test.go` (4 tier1 tests extracted).
+
+30. ~~**MIXED file tier1 extraction: relation_audit_test.go**~~ — Completed 2026-06-12:
+    - Created `relation_audit_tier1_test.go` with `//go:build tier1` containing 11 tests: `TestEncProofRelationCompleteness`, `TestAffGProofRelationCompleteness`, `TestLogStarProofRelationCompleteness`, `TestLegacyProofRelationCompleteness`, `TestEncryptionProofBoundFieldValidation`, `TestTranscriptBindsAllPaillierKeys`, `TestNoUncheckedEncProofField`, `TestEncProofStatementOpensCiphertext`, `TestAffGProofStatementOpensD`, `TestLogStarProofStatementOpensC`, `TestRingPedersenParamsModulusMatchesPaillier`.
+    - Removed 560 lines from `relation_audit_test.go`. Only `TestPaillierKeyDomainSeparation` (tier0) remains.
+    - Cleaned up imports: original file now only imports `"testing"`.
+
+31. ~~**MIXED file tier1 extraction: range_boundary_test.go**~~ — Completed 2026-06-12:
+    - Created `range_boundary_tier1_test.go` with `//go:build tier1` containing 2 tests: `TestProofResponseRangeBoundaryPrecision`, `TestLegacyProofZKRangeBound`.
+    - Removed 190 lines from `range_boundary_test.go`.
+
+32. ~~**MIXED file tier1 extraction: params_consistency_test.go**~~ — Completed 2026-06-12:
+    - Created `params_consistency_tier1_test.go` with `//go:build tier1` containing `TestCheckPaillierModulus`.
+    - `TestTranscriptBindsAllSecurityParams` retains 3 internal `testing.Short()` guards (mixed subtests within a single function — splitting across build tags is not feasible without restructuring the test logic).
+    - Removed 23 lines from `params_consistency_test.go`.
+
+33. ~~**MIXED file tier1 extraction: MTA start/response tests**~~ — Completed 2026-06-12:
+    - Created `internal/mta/start_tier1_test.go` with `//go:build tier1` containing 4 tests: `TestStartErrors`, `TestStartBoundaryValues`, `TestProveStartForVerifierErrors`, `TestVerifyStartErrors`.
+    - Created `internal/mta/response_tier1_test.go` with `//go:build tier1` containing 2 tests: `TestRespondErrors`, `TestRespondBoundaryValues`.
+    - Removed 132 lines from `start_test.go`, 106 lines from `response_test.go`.
+    - Cleaned up unused imports in both original files (`math/big`, `secp` removed where no longer needed).
+
+34. ~~**MIXED file tier1 extraction: paillier keygen_test.go**~~ — Completed 2026-06-12:
+    - Created `internal/paillier/keygen_tier1_test.go` with `//go:build tier1` containing `TestGenerateKeyUsesSafePrimeFactorsAt1024Bits`.
+    - Removed 14 lines from `keygen_test.go`. Cleaned up tier1 file imports to only `"context"` and `"testing"`.
+
+### Tier1 Extraction Summary
+
+After items 29–34, the MIXED file situation is:
+
+| Status                | Files                                                                                                                                                                                                                                                                                                                                                                            |
+| --------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Fully extracted**   | `new_proofs_test.go` (4 tier1 → new file), `relation_audit_test.go` (11 tier1 → new file), `range_boundary_test.go` (2 tier1 → new file), `params_consistency_test.go` (1 tier1 → new file), `legacy_proofs_test.go` (1 tier1 → new file, earlier), MTA `start_test.go` (4 tier1 → new file), MTA `response_test.go` (2 tier1 → new file), `keygen_test.go` (1 tier1 → new file) |
+| **Partially mixed**   | `params_consistency_test.go`: `TestTranscriptBindsAllSecurityParams` has 3 subtests with `testing.Short()` guards that cannot be split across build tags without restructuring the test logic                                                                                                                                                                                    |
+| **Already all-tier1** | `encryption_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, `proofs_test.go`, `extractor_test.go`, `mta_response_test.go`, `adversarial_test.go`, `leakage_test.go`, MTA `finish_test.go`, MTA `mta_test.go` — already behind `//go:build tier1`                                                                                                                           |
+| **All tier0**         | All other test files — no `testing.Short()` guards present                                                                                                                                                                                                                                                                                                                       |
+
+The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with internal subtests) uses runtime `testing.Short()` as a pragmatic compromise — the shared setup cost (Paillier keygen) makes splitting across build tags impractical.
+
+35. ~~**Proof Clone() methods replace standalone clone helpers**~~ — Completed 2026-06-12:
+    - Added `Clone()` methods to 8 proof types in production code (not test helpers):
+      - `EncProof.Clone()` in `enc.go` — deep-copies `*big.Int` fields (`S`, `A`, `C`, `Z1`, `Z2`, `Z3`) and `TranscriptHash`.
+      - `AffGProof.Clone()` in `affg.go` — deep-copies all 15 fields including `*secp.Point` (`Bx`) via `secp.Clone`.
+      - `LogStarProof.Clone()` in `logstar.go` — deep-copies all 8 fields including `*secp.Point` (`Y`).
+      - `ModulusProof.Clone()` in `types.go` — deep-copies `[][]byte` fields (`X`, `Z`) with per-element cloning.
+      - `RingPedersenProof.Clone()` in `types.go` — deep-copies `[][]byte` fields (`Commitments`, `Responses`).
+      - `EncryptionProof.Clone()` in `types.go` — deep-copies all `[]byte` fields.
+      - `LogProof.Clone()` in `types.go` — deep-copies all `[]byte` fields.
+      - `MTAResponseProof.Clone()` in `types.go` — deep-copies all `[]byte` fields.
+    - Replaced 47+ call sites across 10 files (`new_proofs_tier1_test.go`, `relation_audit_tier1_test.go`, `range_boundary_tier1_test.go`, `legacy_proofs_tier1_test.go`, `adversarial_test.go`, `encryption_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, `proofs_test.go`, `mta_response_test.go`).
+    - Removed 8 standalone clone helper functions (~99 lines) from `new_proofs_test.go`, `proof_helpers_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, and `mta_response_test.go`.
+    - Pattern: `cloneXxxProof(v)` → `v.Clone()` — idiomatic Go, consistent with existing `KeyShare.Clone()` and `PrivateKey.Clone()` patterns.
 
 ### Large-Scale Work (future dedicated PRs)
 

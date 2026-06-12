@@ -109,7 +109,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 	}
 
 	t.Run("non canonical scalar response", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.Response = prependZero(tampered.Response)
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("non-canonical encryption response verified")
@@ -119,14 +119,14 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("fixed width ciphertext", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.CipherCommitment = prependZero(tampered.CipherCommitment)
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("wrong-width encryption cipher commitment verified")
 		}
 	})
 	t.Run("malformed curve point", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.ScalarCommitment = []byte{0x02}
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("malformed scalar commitment verified")
@@ -136,7 +136,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("mta oversized response", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
+		tampered := mtaProof.Clone()
 		tampered.BResponse = append([]byte{1}, make([]byte, mtaResponseScalarMaxBytes)...)
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
 			t.Fatal("oversized MtA response verified")
@@ -146,7 +146,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("mta malformed point", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
+		tampered := mtaProof.Clone()
 		tampered.BCommitment = []byte{0x02}
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
 			t.Fatal("malformed MtA point verified")

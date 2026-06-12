@@ -13,6 +13,7 @@ import (
 )
 
 func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw1, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -39,6 +40,7 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	unsorted := (shares[1]).Clone()
 	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
@@ -53,6 +55,7 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -68,6 +71,7 @@ func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -83,6 +87,7 @@ func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -105,6 +110,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mutated, err := testutil.RewriteWireField(raw, keyShareWireType, tc.tag, tc.value)
 			if err != nil {
 				t.Fatal(err)
@@ -117,6 +123,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 
 	badModulusProof := (shares[1]).Clone()
@@ -133,6 +140,7 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 }
 
 func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	raw1, err := presigns[1].MarshalBinary()
@@ -160,6 +168,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 }
 
 func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	unsorted := (presigns[1]).Clone()
@@ -173,6 +182,7 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
+	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {

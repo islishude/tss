@@ -26,7 +26,7 @@ func TestEncryptionProofTamper(t *testing.T) {
 	if VerifyEncryption([]byte("other domain"), &sk.PublicKey, ciphertext, proof) {
 		t.Fatal("encryption proof verified under wrong domain")
 	}
-	tampered := cloneEncryptionProof(proof)
+	tampered := proof.Clone()
 	tampered.Response[0] ^= 1
 	if VerifyEncryption(domain, &sk.PublicKey, ciphertext, tampered) {
 		t.Fatal("tampered encryption proof verified")

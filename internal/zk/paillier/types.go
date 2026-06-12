@@ -75,6 +75,27 @@ func (ModulusProof) WireType() string { return modulusProofWireType }
 // WireVersion returns the wire format version for ModulusProof.
 func (ModulusProof) WireVersion() uint16 { return proofVersion }
 
+// Clone returns a deep copy of the ModulusProof.
+func (p *ModulusProof) Clone() *ModulusProof {
+	if p == nil {
+		return nil
+	}
+	cp := &ModulusProof{
+		Version:        p.Version,
+		W:              append([]byte(nil), p.W...),
+		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+		A:              append([]byte(nil), p.A...),
+		B:              append([]byte(nil), p.B...),
+	}
+	for _, x := range p.X {
+		cp.X = append(cp.X, append([]byte(nil), x...))
+	}
+	for _, z := range p.Z {
+		cp.Z = append(cp.Z, append([]byte(nil), z...))
+	}
+	return cp
+}
+
 // MTAResponseProof binds an MtA response to ciphertexts and commitments.
 //
 // Deprecated: MTAResponseProof is superseded by [AffGProof] for CGGMP-compatible
@@ -97,6 +118,24 @@ func (MTAResponseProof) WireType() string { return mtaResponseProofWireType }
 
 // WireVersion returns the wire format version for MTAResponseProof.
 func (MTAResponseProof) WireVersion() uint16 { return proofVersion }
+
+// Clone returns a deep copy of the MTAResponseProof.
+func (p *MTAResponseProof) Clone() *MTAResponseProof {
+	if p == nil {
+		return nil
+	}
+	return &MTAResponseProof{
+		Version:          p.Version,
+		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
+		BetaCommitment:   append([]byte(nil), p.BetaCommitment...),
+		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
+		BCommitment:      append([]byte(nil), p.BCommitment...),
+		BetaNonce:        append([]byte(nil), p.BetaNonce...),
+		BResponse:        append([]byte(nil), p.BResponse...),
+		BetaResponse:     append([]byte(nil), p.BetaResponse...),
+		Randomness:       append([]byte(nil), p.Randomness...),
+	}
+}
 
 // LogProof (Π^log) proves that a Paillier ciphertext c = Enc(a) and a secp256k1
 // curve point A = a·G share the same discrete logarithm a. Per CGGMP21
@@ -123,6 +162,22 @@ func (LogProof) WireType() string { return logProofWireType }
 // WireVersion returns the wire format version for LogProof.
 func (LogProof) WireVersion() uint16 { return proofVersion }
 
+// Clone returns a deep copy of the LogProof.
+func (p *LogProof) Clone() *LogProof {
+	if p == nil {
+		return nil
+	}
+	return &LogProof{
+		Version:          p.Version,
+		Point:            append([]byte(nil), p.Point...),
+		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
+		PointCommitment:  append([]byte(nil), p.PointCommitment...),
+		Response:         append([]byte(nil), p.Response...),
+		Randomness:       append([]byte(nil), p.Randomness...),
+		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
+	}
+}
+
 // RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
 // the party Paillier modulus and s,t must be non-degenerate elements of Z*_N.
 type RingPedersenParams struct {
@@ -146,6 +201,25 @@ func (RingPedersenProof) WireType() string { return ringPedersenProofWireType }
 
 // WireVersion returns the wire format version for RingPedersenProof.
 func (RingPedersenProof) WireVersion() uint16 { return proofVersion }
+
+// Clone returns a deep copy of the RingPedersenProof.
+func (p *RingPedersenProof) Clone() *RingPedersenProof {
+	if p == nil {
+		return nil
+	}
+	cp := &RingPedersenProof{
+		Version:        p.Version,
+		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+		Challenges:     append([]byte(nil), p.Challenges...),
+	}
+	for _, c := range p.Commitments {
+		cp.Commitments = append(cp.Commitments, append([]byte(nil), c...))
+	}
+	for _, r := range p.Responses {
+		cp.Responses = append(cp.Responses, append([]byte(nil), r...))
+	}
+	return cp
+}
 
 // EncryptionProof (Π^Enc) is a unified Σ-protocol proving that a Paillier
 // ciphertext c = Enc(m, r) encrypts a scalar m < q (the secp256k1 order)
@@ -173,3 +247,20 @@ func (EncryptionProof) WireType() string { return encryptionProofWireType }
 
 // WireVersion returns the wire format version for EncryptionProof.
 func (EncryptionProof) WireVersion() uint16 { return proofVersion }
+
+// Clone returns a deep copy of the EncryptionProof.
+func (p *EncryptionProof) Clone() *EncryptionProof {
+	if p == nil {
+		return nil
+	}
+	return &EncryptionProof{
+		Version:          p.Version,
+		ScalarCommitment: append([]byte(nil), p.ScalarCommitment...),
+		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
+		PointCommitment:  append([]byte(nil), p.PointCommitment...),
+		Bound:            append([]byte(nil), p.Bound...),
+		Response:         append([]byte(nil), p.Response...),
+		Randomness:       append([]byte(nil), p.Randomness...),
+		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
+	}
+}

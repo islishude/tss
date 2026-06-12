@@ -11,21 +11,6 @@ import (
 	"time"
 )
 
-func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 1024-bit safe-prime factor keygen in short mode")
-	}
-	sk, err := GenerateKeyForTest(context.Background(), nil, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sk.N.BitLen() != 2048 {
-		t.Fatalf("N has %d bits, want 2048", sk.N.BitLen())
-	}
-	assertSafePrimeFactor(t, sk.P, 1024)
-	assertSafePrimeFactor(t, sk.Q, 1024)
-}
-
 // TestGenerateKeyCustomReaderSafety verifies that GenerateKey works correctly
 // with a custom reader even though prime-search goroutines access it concurrently.
 // The lockedReader wrapper serialises Read calls so the reader implementation

@@ -21,7 +21,7 @@ func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
 	}
 
 	// Tamper with S: set it to N (not in Z*_N). The Z*_Nj check catches this.
-	tampered := cloneEncProof(proof)
+	tampered := proof.Clone()
 	tampered.S = new(big.Int).Set(stmt.VerifierAux.N) // N ≡ 0 mod N
 	if err := VerifyEnc(params, state, stmt, tampered); err == nil {
 		t.Fatal("EncProof accepted S = N (non-unit)")
@@ -29,7 +29,7 @@ func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
 
 	// Tamper with S: set it to 1 (a trivial RP commitment to k=0, m=0).
 	// This should be rejected by the RP equation unless S=1 is a valid commitment.
-	tampered = cloneEncProof(proof)
+	tampered = proof.Clone()
 	tampered.S = big.NewInt(1)
 	// A valid S=1 would mean k=0 and m=0, but the equations then require
 	// z1=0 and z3=0 to satisfy s^z1*t^z3 = C*S^e. Since z1 and z3 are
@@ -62,14 +62,14 @@ func TestAffGProofRejectsCrossProofFieldSubstitution(t *testing.T) {
 	// testPaillierKey(t, 512) which is cached — so the keys ARE identical).
 	// If the fixtures produce the same key, the proofs differ only in
 	// witness values.
-	tampered := cloneAffGProof(proof2)
+	tampered := proof2.Clone()
 	tampered.Z1 = new(big.Int).Set(proof1.Z1)
 	if err := VerifyAffG(params2, state, stmt2, tampered); err == nil {
 		t.Fatal("AffGProof accepted z1 from a different proof (cross-proof substitution)")
 	}
 
 	// Also try substituting z2.
-	tampered2 := cloneAffGProof(proof2)
+	tampered2 := proof2.Clone()
 	tampered2.Z2 = new(big.Int).Set(proof1.Z2)
 	if err := VerifyAffG(params2, state, stmt2, tampered2); err == nil {
 		t.Fatal("AffGProof accepted z2 from a different proof")
@@ -251,7 +251,7 @@ func TestAffGProofRejectsBxOffCurve(t *testing.T) {
 	params, stmt, _, proof := affGProofFixture(t)
 	state := []byte("affg matrix")
 
-	tampered := cloneAffGProof(proof)
+	tampered := proof.Clone()
 	tampered.Bx = nil
 	if err := VerifyAffG(params, state, stmt, tampered); err == nil {
 		t.Fatal("AffGProof accepted nil Bx")
@@ -276,7 +276,7 @@ func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
 	}
 
 	// Set response to represent zero.
-	tampered := cloneEncryptionProof(proof)
+	tampered := proof.Clone()
 	tampered.Response = []byte{0x00} // leading zero → non-minimal → rejected by validateEncryptionProof
 	if _, err := Marshal(tampered); err == nil {
 		t.Fatal("EncryptionProof with zero-leading response marshaled (should be rejected)")
@@ -290,7 +290,7 @@ func TestLogStarProofRejectsYOffCurve(t *testing.T) {
 	params, stmt, _, proof := logStarProofFixture(t)
 	state := []byte("logstar matrix")
 
-	tampered := cloneLogStarProof(proof)
+	tampered := proof.Clone()
 	tampered.Y = nil
 	if err := VerifyLogStar(params, state, stmt, tampered); err == nil {
 		t.Fatal("LogStarProof accepted nil Y")
@@ -309,7 +309,7 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 	t.Run("EncProof S=N", func(t *testing.T) {
 		_, stmt, _, proof := encProofFixture(t)
 		state := []byte("enc matrix")
-		tampered := cloneEncProof(proof)
+		tampered := proof.Clone()
 		tampered.S = new(big.Int).Set(stmt.VerifierAux.N) // N ≡ 0 mod N, not in Z*_N
 		if err := VerifyEnc(params, state, stmt, tampered); err == nil {
 			t.Fatal("EncProof accepted S=N")
@@ -324,7 +324,7 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 	t.Run("AffGProof A=N^2", func(t *testing.T) {
 		_, stmt, _, proof := affGProofFixture(t)
 		state := []byte("affg matrix")
-		tampered := cloneAffGProof(proof)
+		tampered := proof.Clone()
 		tampered.A = new(big.Int).Mul(stmt.ReceiverPaillierN.N, stmt.ReceiverPaillierN.N) // N^2 ≡ 0 mod N^2
 		if err := VerifyAffG(params, state, stmt, tampered); err == nil {
 			t.Fatal("AffGProof accepted A=N^2")
@@ -334,7 +334,7 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 	t.Run("LogStarProof A=N^2", func(t *testing.T) {
 		_, stmt, _, proof := logStarProofFixture(t)
 		state := []byte("logstar matrix")
-		tampered := cloneLogStarProof(proof)
+		tampered := proof.Clone()
 		tampered.A = new(big.Int).Mul(stmt.PaillierN.N, stmt.PaillierN.N)
 		if err := VerifyLogStar(params, state, stmt, tampered); err == nil {
 			t.Fatal("LogStarProof accepted A=N^2")
@@ -360,7 +360,7 @@ func TestLegacyEncryptionProofNonUnitCommitment(t *testing.T) {
 	}
 
 	// Tamper the point commitment to an invalid curve point.
-	tampered := cloneEncryptionProof(proof)
+	tampered := proof.Clone()
 	tampered.PointCommitment = []byte{0x00} // invalid point encoding
 	if VerifyEncryption(domain, &sk.PublicKey, ciphertext, tampered) {
 		t.Fatal("EncryptionProof accepted invalid point commitment")
