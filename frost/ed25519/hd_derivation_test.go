@@ -68,7 +68,6 @@ func TestDeriveNonHardenedBIP32Vectors(t *testing.T) {
 	chainCode := frostHDVectorChainCode(t)
 
 	for _, tc := range frostHDVectorCases() {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -127,7 +126,6 @@ func TestDeriveNonHardenedBIP32EmptyPathReturnsParent(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -219,7 +217,6 @@ func TestDeriveNonHardenedBIP32RejectsInvalidInputs(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
