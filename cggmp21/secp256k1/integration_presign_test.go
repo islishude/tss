@@ -76,7 +76,7 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 			}
 
 			_, _, err = StartSignDigest(shares[1], presign, reuseSessionID, reuseDigest)
-			_ = assertProtocolErrorCode(t, err, tc.wantCode)
+			_ = testutil.AssertProtocolError(t, err, tc.wantCode)
 		})
 	}
 }
@@ -260,7 +260,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 					t.Fatal(err)
 				}
 				_, _, err = StartSignDigest(shares[tc.signers[0]], restored, sessionID2, digest[:])
-				_ = assertProtocolErrorCode(t, err, tss.ErrCodeConsumed)
+				_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 			} else {
 				if restored.Consumed {
 					t.Fatal("fresh presign after round-trip is consumed")

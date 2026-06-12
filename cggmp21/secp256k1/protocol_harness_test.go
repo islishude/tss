@@ -318,18 +318,6 @@ func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.Prot
 	return protocolErr
 }
 
-func assertProtocolErrorCode(t testing.TB, err error, code string) *tss.ProtocolError {
-	t.Helper()
-	var protocolErr *tss.ProtocolError
-	if !errors.As(err, &protocolErr) {
-		t.Fatalf("expected ProtocolError %s, got %T: %v", code, err, err)
-	}
-	if protocolErr.Code != code {
-		t.Fatalf("expected code %s, got %s: %v", code, protocolErr.Code, err)
-	}
-	return protocolErr
-}
-
 func assertNoBlame(t testing.TB, protocolErr *tss.ProtocolError) {
 	t.Helper()
 	if protocolErr.Blame != nil {

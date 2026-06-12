@@ -43,7 +43,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err = kg1.HandleKeygenMessage(mutated)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong protocol", func(t *testing.T) {
 		mutated := commit
@@ -52,7 +52,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := kg1.HandleKeygenMessage(mutated)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := commit
@@ -61,7 +61,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := kg1.HandleKeygenMessage(mutated)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := share
@@ -101,7 +101,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated.TranscriptHash = [32]byte{}
 		_, err := kg1.HandleKeygenMessage(mutated)
 		// Transcript hash integrity check (step 4) catches this before auth check.
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate commitment", func(t *testing.T) {
 		kg, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
@@ -169,7 +169,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong session", func(t *testing.T) {
 		mutated := round1
@@ -181,7 +181,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := round1
@@ -190,7 +190,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := round1
@@ -199,7 +199,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated.Security.Authenticated = true
 		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate round1", func(t *testing.T) {
 		session, _, err := StartPresign(h.shares[1], sessionID, signers)
@@ -361,7 +361,7 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		proof.To = 3
 		proof = proof.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(proof))
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 
 	t.Run("mutated public hash", func(t *testing.T) {
@@ -469,7 +469,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		if _, err = session.HandleSignMessage(duplicate); err == nil {
 			t.Fatal("completed session accepted duplicate message")
 		}
-		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
+		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
 
 		wrongRecipient := out[0]
 		wrongRecipient.To = 2
@@ -477,7 +477,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		if _, err = session.HandleSignMessage(wrongRecipient); err == nil {
 			t.Fatal("completed session accepted wrong-recipient message")
 		}
-		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
+		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
 	})
 
 	t.Run("attributable presign abort is terminal", func(t *testing.T) {
@@ -507,7 +507,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0]))
-		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeAborted))
+		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeAborted))
 	})
 }
 
@@ -532,7 +532,7 @@ func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	round2[0].To = 3
 	round2[0] = round2[0].RecomputeTranscriptHash()
 	_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(round2[0]))
-	_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 }
 
 func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
@@ -654,7 +654,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		env.Round = 2
 		env = env.RecomputeTranscriptHash()
 		_, err = session.HandleSignMessage(env)
-		_ = assertProtocolErrorCode(t, err, tss.ErrCodeInvalidMessage)
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
 		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
@@ -666,7 +666,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
-		assertNoBlame(t, assertProtocolErrorCode(t, err, tss.ErrCodeCompleted))
+		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
 	})
 }
 
