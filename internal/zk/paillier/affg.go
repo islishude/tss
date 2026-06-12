@@ -18,25 +18,6 @@ const affGProofVersion = 1
 
 const affGProofWireType = "zk.paillier.aff-g-proof"
 
-const (
-	affGProofFieldVersion uint16 = iota + 1
-	affGProofFieldA
-	affGProofFieldBx
-	affGProofFieldBy
-	affGProofFieldE
-	affGProofFieldS
-	affGProofFieldF
-	affGProofFieldT
-	affGProofFieldY
-	affGProofFieldZ1
-	affGProofFieldZ2
-	affGProofFieldZ3
-	affGProofFieldZ4
-	affGProofFieldW
-	affGProofFieldWY
-	affGProofFieldTranscriptHash
-)
-
 // AffGStatement is the public input for a Πaff-g proof: the MtA ciphertexts,
 // the curve commitment, the Paillier keys of both parties, and the verifier's
 // Ring-Pedersen auxiliary parameters.

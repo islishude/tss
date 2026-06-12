@@ -46,6 +46,58 @@ func RewriteNestedWireField(raw []byte, outerType string, outerTag uint16, inner
 	return nil, fmt.Errorf("missing outer wire field %d", outerTag)
 }
 
+// MustFieldTag is like wire.FieldTag but panics on error. It is intended for
+// test struct literals where an error return is impractical.
+func MustFieldTag(model any, fieldName string) uint16 {
+	tag, err := wire.FieldTag(model, fieldName)
+	if err != nil {
+		panic(err)
+	}
+	return tag
+}
+
+// RewriteWireFieldByName is like RewriteWireField but resolves the field tag
+// from the Go struct field name. model must be a zero-value instance of the
+// payload struct (e.g. presignRound1Payload{}).
+func RewriteWireFieldByName(raw []byte, wireType string, model any, fieldName string, value []byte) ([]byte, error) {
+	tag, err := wire.FieldTag(model, fieldName)
+	if err != nil {
+		return nil, err
+	}
+	return RewriteWireField(raw, wireType, tag, value)
+}
+
+// RewriteNestedWireFieldByName is like RewriteNestedWireField but resolves both
+// outer and inner field tags from Go struct field names.
+func RewriteNestedWireFieldByName(raw []byte, outerType string, outerModel any, outerField string, innerType string, innerModel any, innerField string, value []byte) ([]byte, error) {
+	outerTag, err := wire.FieldTag(outerModel, outerField)
+	if err != nil {
+		return nil, err
+	}
+	innerTag, err := wire.FieldTag(innerModel, innerField)
+	if err != nil {
+		return nil, err
+	}
+	return RewriteNestedWireField(raw, outerType, outerTag, innerType, innerTag, value)
+}
+
+// MarshalFieldsByName marshals fields by struct field name rather than tag number.
+// model must be a zero-value instance of the wire struct.
+func MarshalFieldsByName(version uint16, wireType string, model any, named map[string][]byte) ([]byte, error) {
+	fields := make([]wire.Field, 0, len(named))
+	for name, value := range named {
+		tag, err := wire.FieldTag(model, name)
+		if err != nil {
+			return nil, err
+		}
+		fields = append(fields, wire.Field{
+			Tag:   tag,
+			Value: value,
+		})
+	}
+	return wire.MarshalFields(version, wireType, fields)
+}
+
 // AssertDeterministicRoundTrip checks that a value survives a marshal →
 // unmarshal → marshal cycle and produces identical bytes both times.
 // It calls t.Fatal on any error.

@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -61,7 +62,7 @@ func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldKeygenConfirmations, []byte{2})
+	mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "KeygenConfirmations", []byte{2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +78,7 @@ func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldKeygenConfirmations, wire.EncodeBytesList(nil))
+	mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "KeygenConfirmations", wire.EncodeBytesList(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -96,22 +97,22 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 
 	for _, tc := range []struct {
 		name  string
-		tag   uint16
+		field string
 		value []byte
 	}{
-		{name: "paillier public key", tag: keyShareFieldPaillierPublicKey, value: []byte{}},
-		{name: "paillier private key", tag: keyShareFieldPaillierPrivateKey, value: []byte{}},
-		{name: "paillier proof", tag: keyShareFieldPaillierProof, value: []byte{}},
-		{name: "Ring-Pedersen parameters", tag: keyShareFieldRingPedersenParams, value: []byte{}},
-		{name: "Ring-Pedersen proof", tag: keyShareFieldRingPedersenProof, value: []byte{}},
-		{name: "Ring-Pedersen public parameters", tag: keyShareFieldRingPedersenPublic, value: wire.Uint32(0)},
-		{name: "paillier public key set", tag: keyShareFieldPaillierPublicKeys, value: wire.Uint32(0)},
-		{name: "share proof", tag: keyShareFieldShareProof, value: []byte{}},
-		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
+		{name: "paillier public key", field: "PaillierPublicKey", value: []byte{}},
+		{name: "paillier private key", field: "PaillierPrivateKey", value: []byte{}},
+		{name: "paillier proof", field: "PaillierProof", value: []byte{}},
+		{name: "Ring-Pedersen parameters", field: "RingPedersenParams", value: []byte{}},
+		{name: "Ring-Pedersen proof", field: "RingPedersenProof", value: []byte{}},
+		{name: "Ring-Pedersen public parameters", field: "RingPedersenPublic", value: wire.Uint32(0)},
+		{name: "paillier public key set", field: "PaillierPublicKeys", value: wire.Uint32(0)},
+		{name: "share proof", field: "ShareProof", value: []byte{}},
+		{name: "keygen transcript hash", field: "KeygenTranscriptHash", value: []byte{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mutated, err := testutil.RewriteWireField(raw, keyShareWireType, tc.tag, tc.value)
+			mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, tc.field, tc.value)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -189,7 +190,7 @@ func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "Threshold", wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -210,13 +211,13 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 	}
 	mutate(&payload)
 	if !bytes.Equal(original.Gamma, payload.Gamma) {
-		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldGamma, payload.Gamma)
+		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "Gamma", payload.Gamma)
 	}
 	if !bytes.Equal(original.EncK, payload.EncK) {
-		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldEncK, payload.EncK)
+		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "EncK", payload.EncK)
 	}
 	if !bytes.Equal(original.PaillierPublicKey, payload.PaillierPublicKey) {
-		return testutil.RewriteWireField(raw, presignRound1PayloadWireType, presignRound1PayloadFieldPaillierPublicKey, payload.PaillierPublicKey)
+		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "PaillierPublicKey", payload.PaillierPublicKey)
 	}
 	return marshalPresignRound1Payload(payload)
 }
@@ -232,10 +233,10 @@ func mutatePresignRound1ProofPayload(raw []byte, mutate func(*presignRound1Proof
 	}
 	mutate(&payload)
 	if !bytes.Equal(original.PublicRound1Hash, payload.PublicRound1Hash) {
-		return testutil.RewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldPublicHash, payload.PublicRound1Hash)
+		return testutil.RewriteWireFieldByName(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayload{}, "PublicRound1Hash", payload.PublicRound1Hash)
 	}
 	if !bytes.Equal(original.EncKProof, payload.EncKProof) {
-		return testutil.RewriteWireField(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayloadFieldEncKProof, payload.EncKProof)
+		return testutil.RewriteWireFieldByName(raw, presignRound1ProofPayloadWireType, presignRound1ProofPayload{}, "EncKProof", payload.EncKProof)
 	}
 	return marshalPresignRound1ProofPayload(payload)
 }
@@ -251,24 +252,20 @@ func mutatePresignRound2Payload(raw []byte, mutate func(*presignRound2Payload)) 
 	}
 	mutate(&payload)
 	const mtaResponseWireType = "mta.response-message"
-	const (
-		mtaResponseFieldCiphertext uint16 = 1
-		mtaResponseFieldProof      uint16 = 2
-	)
 	if !bytes.Equal(original.Delta.Ciphertext, payload.Delta.Ciphertext) {
-		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Delta.Ciphertext)
+		return testutil.RewriteNestedWireFieldByName(raw, presignRound2PayloadWireType, presignRound2Payload{}, "Delta", mtaResponseWireType, mta.ResponseMessage{}, "Ciphertext", payload.Delta.Ciphertext)
 	}
 	if !bytes.Equal(original.Delta.Proof, payload.Delta.Proof) {
-		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldDelta, mtaResponseWireType, mtaResponseFieldProof, payload.Delta.Proof)
+		return testutil.RewriteNestedWireFieldByName(raw, presignRound2PayloadWireType, presignRound2Payload{}, "Delta", mtaResponseWireType, mta.ResponseMessage{}, "Proof", payload.Delta.Proof)
 	}
 	if !bytes.Equal(original.Sigma.Ciphertext, payload.Sigma.Ciphertext) {
-		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldCiphertext, payload.Sigma.Ciphertext)
+		return testutil.RewriteNestedWireFieldByName(raw, presignRound2PayloadWireType, presignRound2Payload{}, "Sigma", mtaResponseWireType, mta.ResponseMessage{}, "Ciphertext", payload.Sigma.Ciphertext)
 	}
 	if !bytes.Equal(original.Sigma.Proof, payload.Sigma.Proof) {
-		return testutil.RewriteNestedWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldSigma, mtaResponseWireType, mtaResponseFieldProof, payload.Sigma.Proof)
+		return testutil.RewriteNestedWireFieldByName(raw, presignRound2PayloadWireType, presignRound2Payload{}, "Sigma", mtaResponseWireType, mta.ResponseMessage{}, "Proof", payload.Sigma.Proof)
 	}
 	if !bytes.Equal(original.Round1Echo, payload.Round1Echo) {
-		return testutil.RewriteWireField(raw, presignRound2PayloadWireType, presignRound2PayloadFieldRound1Echo, payload.Round1Echo)
+		return testutil.RewriteWireFieldByName(raw, presignRound2PayloadWireType, presignRound2Payload{}, "Round1Echo", payload.Round1Echo)
 	}
 	return marshalPresignRound2Payload(payload)
 }

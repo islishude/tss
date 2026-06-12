@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -72,7 +73,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			name: "wrong wire type",
 			data: func() []byte {
 				b, _ := wire.MarshalFields(messageVersion, startMessageWireType, []wire.Field{
-					{Tag: startMessageFieldCiphertext, Value: []byte{0x01}},
+					{Tag: testutil.MustFieldTag(StartMessage{}, "Ciphertext"), Value: []byte{0x01}},
 				})
 				return b
 			}(),
@@ -86,7 +87,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			name: "missing proof field",
 			data: func() []byte {
 				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
-					{Tag: responseMessageFieldCiphertext, Value: validResponse.Ciphertext},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
 				})
 				return b
 			}(),
@@ -95,8 +96,8 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			name: "extra field",
 			data: func() []byte {
 				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
-					{Tag: responseMessageFieldCiphertext, Value: validResponse.Ciphertext},
-					{Tag: responseMessageFieldProof, Value: validResponse.Proof},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: validResponse.Proof},
 					{Tag: 99, Value: []byte{0x01}},
 				})
 				return b
@@ -126,8 +127,8 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext, proof []byte) []byte {
 	t.Helper()
 	b, err := wire.MarshalFields(version, responseMessageWireType, []wire.Field{
-		{Tag: responseMessageFieldCiphertext, Value: ciphertext},
-		{Tag: responseMessageFieldProof, Value: proof},
+		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: ciphertext},
+		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: proof},
 	})
 	if err != nil {
 		t.Fatal(err)

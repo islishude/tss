@@ -83,20 +83,6 @@ const (
 	privateKeyWireType = "paillier.private-key"
 )
 
-const (
-	publicKeyFieldN uint16 = iota + 1
-	publicKeyFieldG
-)
-
-const (
-	privateKeyFieldN uint16 = iota + 1
-	privateKeyFieldG
-	privateKeyFieldLambda
-	privateKeyFieldMu
-	privateKeyFieldP
-	privateKeyFieldQ
-)
-
 // privateKeyWire is the wire DTO for PrivateKey.
 type privateKeyWire struct {
 	N      []byte `wire:"1,bytes"`

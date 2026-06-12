@@ -197,9 +197,9 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tag := range []uint16{encProofFieldS, encProofFieldA, encProofFieldC, encProofFieldZ2} {
-		t.Run(fmt.Sprintf("enc field %d", tag), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(encRaw, encProofWireType, tag)
+	for _, name := range []string{"S", "A", "C", "Z2"} {
+		t.Run(fmt.Sprintf("enc field %s", name), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(encRaw, encProofWireType, EncProof{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -253,12 +253,12 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tag := range []uint16{
-		affGProofFieldA, affGProofFieldBy, affGProofFieldE, affGProofFieldS,
-		affGProofFieldF, affGProofFieldT, affGProofFieldY, affGProofFieldW, affGProofFieldWY,
+	for _, name := range []string{
+		"A", "By", "E", "S",
+		"F", "T", "Y", "W", "WY",
 	} {
-		t.Run(fmt.Sprintf("affg field %d", tag), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(affGRaw, affGProofWireType, tag)
+		t.Run(fmt.Sprintf("affg field %s", name), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(affGRaw, affGProofWireType, affGProofWire{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -291,9 +291,9 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, tag := range []uint16{logStarProofFieldS, logStarProofFieldA, logStarProofFieldD, logStarProofFieldZ2} {
-		t.Run(fmt.Sprintf("logstar field %d", tag), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(logRaw, logStarProofWireType, tag)
+	for _, name := range []string{"S", "A", "D", "Z2"} {
+		t.Run(fmt.Sprintf("logstar field %s", name), func(t *testing.T) {
+			mutated, err := prependZeroToWireField(logRaw, logStarProofWireType, logStarProofWire{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}

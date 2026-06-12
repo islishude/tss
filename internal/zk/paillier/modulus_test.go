@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -49,12 +50,12 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 	})
 	t.Run("prover y field", func(t *testing.T) {
 		raw := mustWireProof(t, modulusProofWireType, []wire.Field{
-			{Tag: modulusProofFieldW, Value: proof.W},
-			{Tag: modulusProofFieldTranscriptHash, Value: proof.TranscriptHash},
-			{Tag: modulusProofFieldX, Value: wire.EncodeBytesList(proof.X)},
-			{Tag: modulusProofFieldA, Value: proof.A},
-			{Tag: modulusProofFieldB, Value: proof.B},
-			{Tag: modulusProofFieldZ, Value: wire.EncodeBytesList(proof.Z)},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "W"), Value: proof.W},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "TranscriptHash"), Value: proof.TranscriptHash},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "X"), Value: wire.EncodeBytesList(proof.X)},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "A"), Value: proof.A},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "B"), Value: proof.B},
+			{Tag: testutil.MustFieldTag(ModulusProof{}, "Z"), Value: wire.EncodeBytesList(proof.Z)},
 			{Tag: 99, Value: wire.EncodeBytesList(proof.Z)},
 		})
 		if _, err := UnmarshalModulusProof(raw); err == nil {

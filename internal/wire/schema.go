@@ -68,6 +68,22 @@ func getSchema(t reflect.Type) (*schema, error) {
 	return actual.(*schema), nil
 }
 
+// FieldTag returns the wire tag number for the named field of model.
+// model must be a non-nil struct with a `wire:"N,…"` tag on every encoded field.
+func FieldTag(model any, fieldName string) (uint16, error) {
+	t := reflect.TypeOf(model)
+	s, err := getSchema(t)
+	if err != nil {
+		return 0, err
+	}
+	for _, f := range s.fields {
+		if f.name == fieldName {
+			return f.tag, nil
+		}
+	}
+	return 0, fmt.Errorf("wire.FieldTag: field %q not found in %s", fieldName, t.Name())
+}
+
 func parseSchema(t reflect.Type) (*schema, error) {
 	if t.Kind() != reflect.Struct {
 		return nil, fmt.Errorf("expected struct, got %s", t.Kind())

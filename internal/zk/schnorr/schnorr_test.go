@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -177,19 +178,19 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 		fields  []wire.Field
 	}{
 		{name: "wrong version", version: proofVersion + 1, fields: []wire.Field{
-			{Tag: proofFieldCommitment, Value: validCommitment},
-			{Tag: proofFieldResponse, Value: validResponse},
+			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
+			{Tag: testutil.MustFieldTag(Proof{}, "Response"), Value: validResponse},
 		}},
 		{name: "missing response", version: proofVersion, fields: []wire.Field{
-			{Tag: proofFieldCommitment, Value: validCommitment},
+			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 		}},
 		{name: "extra field", version: proofVersion, fields: []wire.Field{
-			{Tag: proofFieldCommitment, Value: validCommitment},
-			{Tag: proofFieldResponse, Value: validResponse},
+			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
+			{Tag: testutil.MustFieldTag(Proof{}, "Response"), Value: validResponse},
 			{Tag: 99, Value: []byte{1}},
 		}},
 		{name: "wrong response tag", version: proofVersion, fields: []wire.Field{
-			{Tag: proofFieldCommitment, Value: validCommitment},
+			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 			{Tag: 99, Value: validResponse},
 		}},
 	}

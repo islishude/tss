@@ -134,7 +134,7 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := testutil.RewriteWireField(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayloadFieldCommitments, wire.EncodeBytesList([][]byte{{0x02}}))
+	mutated, err := testutil.RewriteWireFieldByName(out2[0].Payload, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, "Commitments", wire.EncodeBytesList([][]byte{{0x02}}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -567,7 +567,7 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if len(round3From2) != 1 {
 		t.Fatalf("expected one round3 message, got %d", len(round3From2))
 	}
-	mutated, err := testutil.RewriteWireField(round3From2[0].Payload, presignRound3PayloadWireType, presignRound3PayloadFieldDelta, []byte{0})
+	mutated, err := testutil.RewriteWireFieldByName(round3From2[0].Payload, presignRound3PayloadWireType, presignRound3Payload{}, "Delta", []byte{0})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -634,7 +634,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 			t.Fatal(err)
 		}
 		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
-		mutated, err := testutil.RewriteWireField(out2[0].Payload, signPartialPayloadWireType, signPartialPayloadFieldS, []byte{0})
+		mutated, err := testutil.RewriteWireFieldByName(out2[0].Payload, signPartialPayloadWireType, signPartialPayload{}, "S", []byte{0})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -18,11 +18,6 @@ const (
 	responseMessageWireType = "mta.response-message"
 )
 
-const (
-	responseMessageFieldCiphertext uint16 = iota + 1
-	responseMessageFieldProof
-)
-
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
 type ResponseMessage struct {
 	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`

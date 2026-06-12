@@ -17,11 +17,6 @@ const proofVersion = 1
 
 const proofWireType = "zk.schnorr.proof"
 
-const (
-	proofFieldCommitment uint16 = iota + 1
-	proofFieldResponse
-)
-
 // Proof is a Schnorr proof of knowledge over secp256k1.
 type Proof struct {
 	Commitment []byte `wire:"1,bytes"`

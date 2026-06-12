@@ -3,10 +3,10 @@ package paillier
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -76,7 +76,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if _, err := UnmarshalPrivateKey([]byte(`{"public_key":{"n":"01","g":"02"}}`)); err == nil {
 		t.Fatal("expected JSON private key rejection")
 	}
-	withLeadingZero, err := rewritePaillierField(raw, publicKeyWireType, publicKeyFieldN, append([]byte{0}, sk.N.Bytes()...))
+	withLeadingZero, err := testutil.RewriteWireFieldByName(raw, publicKeyWireType, PublicKey{}, "N", append([]byte{0}, sk.N.Bytes()...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badPrivate, err := rewritePaillierField(privRaw, privateKeyWireType, privateKeyFieldP, append([]byte{0}, sk.P.Bytes()...))
+	badPrivate, err := testutil.RewriteWireFieldByName(privRaw, privateKeyWireType, privateKeyWire{}, "P", append([]byte{0}, sk.P.Bytes()...))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,20 +101,6 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if _, err := UnmarshalPublicKey(wrongType); err == nil {
 		t.Fatal("expected wrong public key type rejection")
 	}
-}
-func rewritePaillierField(raw []byte, typeID string, tag uint16, value []byte) ([]byte, error) {
-	version, fields, err := wire.UnmarshalFields(raw, typeID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range fields {
-		if fields[i].Tag == tag {
-			fields[i].Value = make([]byte, len(value))
-			copy(fields[i].Value, value)
-			return wire.MarshalFields(version, typeID, fields)
-		}
-	}
-	return nil, fmt.Errorf("missing Paillier field %d", tag)
 }
 
 func TestValidateBitsPassesAtOrAboveMin(t *testing.T) {

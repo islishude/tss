@@ -18,13 +18,6 @@ const (
 	startMessageWireType = "mta.start-message"
 )
 
-const (
-	startMessageFieldCiphertext uint16 = iota + 1
-	_                                  // 2: reserved (was EncProof)
-	_                                  // 3: reserved (was RangeProof)
-	_                                  // 4: reserved (was EncrProof)
-)
-
 // StartMessage carries an encrypted multiplicand.
 type StartMessage struct {
 	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`

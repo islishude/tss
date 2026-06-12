@@ -18,18 +18,6 @@ const logStarProofVersion = 1
 
 const logStarProofWireType = "zk.paillier.logstar-proof"
 
-const (
-	logStarProofFieldVersion uint16 = iota + 1
-	logStarProofFieldS
-	logStarProofFieldA
-	logStarProofFieldY
-	logStarProofFieldD
-	logStarProofFieldZ1
-	logStarProofFieldZ2
-	logStarProofFieldZ3
-	logStarProofFieldTranscriptHash
-)
-
 // LogStarStatement is the public input for a Πlog* proof: the Paillier
 // ciphertext, the curve points X = x*B and B, and the verifier's
 // Ring-Pedersen auxiliary parameters.

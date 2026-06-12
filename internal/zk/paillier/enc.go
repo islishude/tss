@@ -18,17 +18,6 @@ const encProofVersion = 1
 
 const encProofWireType = "zk.paillier.enc-proof"
 
-const (
-	encProofFieldVersion uint16 = iota + 1
-	encProofFieldS
-	encProofFieldA
-	encProofFieldC
-	encProofFieldZ1
-	encProofFieldZ2
-	encProofFieldZ3
-	encProofFieldTranscriptHash
-)
-
 // EncStatement is the public input for a Πenc proof: the prover's Paillier
 // modulus, the ciphertext, and the verifier's Ring-Pedersen auxiliary parameters.
 type EncStatement struct {

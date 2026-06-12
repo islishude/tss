@@ -31,14 +31,14 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 		name      string
 		raw       []byte
 		wireType  string
-		tags      []uint16
+		fields    []string
 		unmarshal func([]byte) error
 	}{
 		{
 			name:     "EncProof",
 			raw:      mustMarshalBinary(t, seedEncProof()),
 			wireType: encProofWireType,
-			tags:     []uint16{encProofFieldZ1, encProofFieldZ3},
+			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
 				_, err := UnmarshalEncProof(raw)
 				return err
@@ -48,7 +48,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 			name:     "AffGProof",
 			raw:      mustMarshalBinary(t, seedAffGProof(t)),
 			wireType: affGProofWireType,
-			tags:     []uint16{affGProofFieldZ1, affGProofFieldZ2, affGProofFieldZ3, affGProofFieldZ4},
+			fields:   []string{"Z1", "Z2", "Z3", "Z4"},
 			unmarshal: func(raw []byte) error {
 				_, err := UnmarshalAffGProof(raw)
 				return err
@@ -58,7 +58,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 			name:     "LogStarProof",
 			raw:      mustMarshalBinary(t, seedLogStarProof()),
 			wireType: logStarProofWireType,
-			tags:     []uint16{logStarProofFieldZ1, logStarProofFieldZ3},
+			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
 				_, err := UnmarshalLogStarProof(raw)
 				return err
@@ -66,9 +66,9 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			for _, tag := range tc.tags {
-				t.Run(wireFieldName(tag), func(t *testing.T) {
-					mutated, err := rewriteProofWireField(tc.raw, tc.wireType, tag, []byte{0x00, 0x00, 0x01})
+			for _, name := range tc.fields {
+				t.Run(wireFieldName(name), func(t *testing.T) {
+					mutated, err := rewriteProofWireField(tc.raw, tc.wireType, proofModelForWireType(tc.wireType), name, []byte{0x00, 0x00, 0x01})
 					if err != nil {
 						t.Fatal(err)
 					}
@@ -197,8 +197,12 @@ func multRangeOutside(n *big.Int, bits uint) *big.Int {
 	return out
 }
 
-func rewriteProofWireField(raw []byte, wireType string, tag uint16, value []byte) ([]byte, error) {
+func rewriteProofWireField(raw []byte, wireType string, model any, fieldName string, value []byte) ([]byte, error) {
 	version, fields, err := wire.UnmarshalFields(raw, wireType)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := wire.FieldTag(model, fieldName)
 	if err != nil {
 		return nil, err
 	}
@@ -208,9 +212,22 @@ func rewriteProofWireField(raw []byte, wireType string, tag uint16, value []byte
 			return wire.MarshalFields(version, wireType, fields)
 		}
 	}
-	return nil, fmt.Errorf("missing wire field %d", tag)
+	return nil, fmt.Errorf("missing wire field %q", fieldName)
 }
 
-func wireFieldName(tag uint16) string {
-	return fmt.Sprintf("field %d", tag)
+func wireFieldName(name string) string {
+	return fmt.Sprintf("field %s", name)
+}
+
+func proofModelForWireType(wireType string) any {
+	switch wireType {
+	case encProofWireType:
+		return EncProof{}
+	case affGProofWireType:
+		return affGProofWire{}
+	case logStarProofWireType:
+		return logStarProofWire{}
+	default:
+		panic(fmt.Sprintf("unknown proof wire type: %s", wireType))
+	}
 }

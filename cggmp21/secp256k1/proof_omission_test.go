@@ -140,13 +140,13 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
 		return nil, err
 	}
-	return wire.MarshalFields(tss.Version, keygenCommitmentsPayloadWireType, []wire.Field{
-		{Tag: keygenCommitmentsPayloadFieldCommitments, Value: wire.EncodeBytesList(p.Commitments)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierPublicKey, Value: wire.NonNilBytes(pkBytes)},
-		{Tag: keygenCommitmentsPayloadFieldPaillierProof, Value: wire.NonNilBytes(modProof)},
-		{Tag: keygenCommitmentsPayloadFieldChainCode, Value: wire.NonNilBytes(p.ChainCodeCommit)},
-		{Tag: keygenCommitmentsPayloadFieldRingPedersenParams, Value: wire.NonNilBytes(p.RingPedersenParams)},
-		{Tag: keygenCommitmentsPayloadFieldRingPedersenProof, Value: wire.NonNilBytes(rpProof)},
+	return testutil.MarshalFieldsByName(tss.Version, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, map[string][]byte{
+		"Commitments":        wire.EncodeBytesList(p.Commitments),
+		"PaillierPublicKey":  wire.NonNilBytes(pkBytes),
+		"PaillierProof":      wire.NonNilBytes(modProof),
+		"ChainCodeCommit":    wire.NonNilBytes(p.ChainCodeCommit),
+		"RingPedersenParams": wire.NonNilBytes(p.RingPedersenParams),
+		"RingPedersenProof":  wire.NonNilBytes(rpProof),
 	})
 }
 

@@ -11,12 +11,6 @@ import (
 
 const keyShareWireType = "frost.ed25519.keyshare"
 
-// Field tag constants retained for test mutation helpers.
-const (
-	keyShareFieldParty     uint16 = 1
-	keyShareFieldThreshold uint16 = 2
-)
-
 // keyShareWire is the wire DTO for KeyShare.
 type keyShareWire struct {
 	Party                tss.PartyID                    `wire:"1,u32"`

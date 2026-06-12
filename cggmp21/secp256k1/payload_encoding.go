@@ -29,47 +29,6 @@ const (
 	refreshSharePayloadWireType       = "cggmp21.secp256k1.payload.refresh.share"
 )
 
-const (
-	keygenCommitmentsPayloadFieldCommitments uint16 = iota + 1
-	keygenCommitmentsPayloadFieldPaillierPublicKey
-	keygenCommitmentsPayloadFieldPaillierProof
-	keygenCommitmentsPayloadFieldChainCode
-	keygenCommitmentsPayloadFieldRingPedersenParams
-	keygenCommitmentsPayloadFieldRingPedersenProof
-)
-
-const (
-	presignRound1PayloadFieldGamma uint16 = iota + 1
-	presignRound1PayloadFieldEncK
-	presignRound1PayloadFieldPaillierPublicKey
-)
-
-const (
-	presignRound1ProofPayloadFieldPublicHash uint16 = iota + 1
-	presignRound1ProofPayloadFieldEncKProof
-)
-
-const (
-	presignRound2PayloadFieldDelta uint16 = iota + 1
-	presignRound2PayloadFieldSigma
-	presignRound2PayloadFieldRound1Echo
-)
-
-const (
-	presignRound3PayloadFieldDelta uint16 = iota + 1
-	presignRound3PayloadFieldKPoint
-	presignRound3PayloadFieldChiPoint
-	presignRound3PayloadFieldProof
-)
-
-const (
-	signPartialPayloadFieldS uint16 = iota + 1
-	signPartialPayloadFieldPresignTranscript
-	signPartialPayloadFieldPresignContext
-	signPartialPayloadFieldDigestHash
-	signPartialPayloadFieldPartialEquationHash
-)
-
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return nil, err

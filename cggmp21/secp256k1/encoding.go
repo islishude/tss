@@ -17,51 +17,6 @@ const (
 	presignContextWireType = "cggmp21.secp256k1.presign.context"
 )
 
-const (
-	keyShareFieldParty uint16 = iota + 1
-	keyShareFieldThreshold
-	keyShareFieldParties
-	keyShareFieldPublicKey
-	keyShareFieldChainCode
-	keyShareFieldSecret
-	keyShareFieldGroupCommitments
-	keyShareFieldVerificationShares
-	keyShareFieldPaillierPublicKey
-	keyShareFieldPaillierPrivateKey
-	keyShareFieldPaillierProof
-	keyShareFieldRingPedersenParams
-	keyShareFieldRingPedersenProof
-	keyShareFieldRingPedersenPublic
-	keyShareFieldPaillierPublicKeys
-	keyShareFieldShareProof
-	keyShareFieldKeygenTranscriptHash
-	keyShareFieldPaillierProofSessionID
-	keyShareFieldPaillierProofDomain
-	keyShareFieldLogCiphertext
-	keyShareFieldLogProof
-	keyShareFieldKeygenConfirmations
-)
-
-const (
-	presignFieldParty uint16 = iota + 1
-	presignFieldThreshold
-	presignFieldSigners
-	presignFieldR
-	presignFieldLittleR
-	presignFieldKShare
-	presignFieldChiShare
-	presignFieldDelta
-	presignFieldTranscriptHash
-	presignFieldContext
-	presignFieldContextHash
-	presignFieldAdditiveShift
-	presignFieldConsumed
-	presignFieldPublicKey
-	presignFieldKeygenTranscriptHash
-	presignFieldPartiesHash
-	presignFieldVerifyShares
-)
-
 // keyShareWire is the wire DTO for KeyShare.
 type keyShareWire struct {
 	Party                  tss.PartyID                       `wire:"1,u32"`

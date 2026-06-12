@@ -40,7 +40,7 @@ func TestFast_Presign_RejectsOverflowThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, overflow := range []uint32{uint32(1<<31) + 1, ^uint32(0)} {
-		mutated, err := testutil.RewriteWireField(raw, presignWireType, presignFieldThreshold, wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireFieldByName(raw, presignWireType, presignWire{}, "Threshold", wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}

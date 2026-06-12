@@ -27,15 +27,6 @@ const (
 )
 
 const (
-	modulusProofFieldW uint16 = iota + 1
-	modulusProofFieldTranscriptHash
-	modulusProofFieldX
-	modulusProofFieldA
-	modulusProofFieldB
-	modulusProofFieldZ
-)
-
-const (
 	proofTranscriptLabel       = "cggmp24-paillier-proof-transcript-v1"
 	modulusProofTag            = "mod"
 	modulusYLabel              = "cggmp24-paillier-mod-y-v1"

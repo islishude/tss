@@ -66,7 +66,7 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 	}
 	// Rewrite the threshold field to uint32 values that overflow int on 32-bit platforms.
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, keyShareFieldThreshold, wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "Threshold", wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -107,8 +107,12 @@ func assertEncryptionProofRoundTrip(t *testing.T, proof *EncryptionProof) {
 	}
 }
 
-func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, error) {
+func prependZeroToWireField(raw []byte, typeID string, model any, fieldName string) ([]byte, error) {
 	version, fields, err := wire.UnmarshalFields(raw, typeID)
+	if err != nil {
+		return nil, err
+	}
+	tag, err := wire.FieldTag(model, fieldName)
 	if err != nil {
 		return nil, err
 	}
@@ -121,5 +125,5 @@ func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, erro
 			return wire.MarshalFields(version, typeID, fields)
 		}
 	}
-	return nil, fmt.Errorf("missing wire field %d", tag)
+	return nil, fmt.Errorf("missing wire field %q", fieldName)
 }
