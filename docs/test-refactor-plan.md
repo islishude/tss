@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–38 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split)_
+_Last updated: 2026-06-12 (items 20–39 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split, FROST HD test split)_
 
 ### Completed
 
@@ -1439,6 +1439,18 @@ The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with intern
       - `go test -short -p 4 -parallel 8 -count=1 -timeout 1m ./...` — passed.
       - Tier 1 verification not run; this change touched only `cggmp21/secp256k1/hd*_test.go` and `docs/test-refactor-plan.md`.
 
+39. ~~**FROST hd_test.go structural split and consolidation**~~ — Completed 2026-06-12:
+    - Split the 492-line monolithic `frost/ed25519/hd_test.go` into behavior-focused files:
+      - `hd_fixtures_test.go` — shared HD keygen helper, fixed Ed25519 public-key/chain-code vectors, golden derivation cases, and derivation assertion helpers.
+      - `hd_derivation_test.go` — public-key derivation, BIP32 vector cases, empty-path behavior, invalid-input matrix, single/multi-step consistency, and determinism.
+      - `hd_keygen_sign_test.go` — HD/non-HD keygen behavior and single-signer, 2-of-3, and zero-shift signing scenarios.
+      - `hd_wire_lifecycle_test.go` — HD/non-HD key-share round trips, deterministic HD key-share encoding, and `Destroy` chain-code clearing.
+    - Top-level HD tests consolidated from 21 standalone tests to 10 table-driven or behavior-family tests (**52% reduction**).
+    - Verification recorded during implementation:
+      - `go test -count=1 -run 'Test(DerivePublicKey|DeriveNonHardenedBIP32|HD|KeygenWithoutHD|NonHDKeyShare)' ./frost/ed25519` — passed.
+      - `go test -short -p 4 -parallel 8 -count=1 -timeout 1m ./...` — passed.
+      - Tier 1 verification not run; this change touched only `frost/ed25519/hd*_test.go` and `docs/test-refactor-plan.md`.
+
 ### Large-Scale Work (future dedicated PRs)
 
 These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
@@ -1449,4 +1461,4 @@ These files have 10+ standalone test functions that could benefit from structura
 | `internal/shamir/shamir_test.go`             | 27          | Consolidated from 43→27 (37% reduction) 2026-06-11; normalize/add/sub/mul/lagrange/interpolate/random-reject groups table-driven; `TestEvalKnownPolynomial` and `TestLagrangeCoefficientReconstructs` converted to `t.Run()` subtests 2026-06-11 final |
 | `cggmp21/secp256k1/tier0_regression_test.go` | 8 (was 18)  | Consolidated 2026-06-12: 18→8 (56% reduction); 9 presign Validate→1 table-driven, 2 sign payload→1, 2 round3 payload→1; 5 remaining genuinely unique                                                                                                   |
 | `cggmp21/secp256k1/hd*_test.go`              | 13 (was 21) | Completed 2026-06-12: monolithic `hd_test.go` split into fixtures, derivation, invalid-child, and xpub files; BIP32 vectors/rejects/xpub scenarios consolidated; 3 `hmacSHA512` mutation tests remain sequential                                       |
-| `frost/ed25519/hd_test.go`                   | 21          | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already                                                                                                                                                                             |
+| `frost/ed25519/hd*_test.go`                  | 10 (was 21) | Completed 2026-06-12: monolithic `hd_test.go` split into fixtures, derivation, keygen/sign, and wire/lifecycle files; BIP32 rejects/keygen/signing/wire scenarios consolidated                                                                         |
