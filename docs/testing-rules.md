@@ -189,64 +189,147 @@ Expected:  reject, no state mutation, no outbound message, no presign consumptio
 
 This makes test coverage auditable: when a new protocol or round is added, you can scan the invariant axes and see which combinations are missing.
 
-Recommended package-level grouping:
+Current package-level organization (as of 2026-06-12):
 
 ```text
-internal/testharness/
-  rng.go                  — 1. Deterministic RNG
-  parties.go              — 2. Party factory
-  protocol_runner.go      — 3. Protocol runner
-  network.go              — 4. Network simulator
-  state_snapshot.go       — 5. State snapshot
-  envelope_mutation.go    — 6. Mutation library
-  crash_store.go          — CrashPoint, CrashyStore for crash/restart
-  golden.go               — golden vector contracts
-  fuzz.go                 — fuzz corpus seeding
-  budget.go               — test runtime budget checker
+internal/testharness/           — shared test infrastructure (7 files)
+  rng.go                        — deterministic RNG + TSS_TEST_SEED support
+  parties.go                    — PartyID lists, ThresholdCase, SignerSubset
+  protocol_runner.go            — ProtocolCase interface, Session, Run
+  network.go                    — NetworkConfig with drop/duplicate/reorder/mutate
+  state_snapshot.go             — StateSnapshot, Snapshotter, fail-closed assertions
+  mutation.go                   — envelope mutation functions (WrongSession, WrongProtocol, …)
+  crash_store.go                — CrashPoint enum, CrashyStore for crash/restart tests
 
-internal/testvectors/
-  wire/
-    v1/
-      envelope/
-      frost/
-      cggmp21/
-      zk/
+  Note: golden vector contracts use testutil.CheckGolden (internal/testutil/).
+  Fuzz corpus seeding is programmatic via f.Add() in each fuzz target.
+  Test budget checking lives in internal/testutil/cmd/testbudget/.
+
+internal/testvectors/           — canonical test vector files
+  wire/v1/
+    envelope/                   — Envelope.golden
+    frost/                      — 5 FROST wire golden files
+    cggmp21/                    — 6 CGGMP21 wire golden files
+    zk/                         — 9 ZK proof wire golden files
   protocol/
-    frost-ed25519/
-    cggmp21-secp256k1/
+    frost-ed25519/              — FROST JSON cross-implementation vectors
+    cggmp21-secp256k1/          — CGGMP21 JSON cross-implementation vectors
 
-internal/wire/
-  canonical_test.go
-  golden_test.go
-  limits_test.go
-  mutation_test.go
-  fuzz_test.go
+internal/wire/                  — TLV codec tests (14 files)
+  message_fixtures_test.go      — shared message types, field fixtures, limits
+  message_codec_test.go         — marshal/unmarshal, field sets, hooks, validation, lists
+  message_custom_test.go        — custom field round trips, reject matrices, FuzzCustomField
+  message_bigint_test.go        — bigint/biguint/bigpos round trips, canonical, FuzzBigIntField
+  message_inference_test.go     — inferred kinds, array/string length checks
+  envelope_test.go              — wire-level envelope encode/decode
+  fields_test.go                — individual field type codecs
+  validate_test.go              — structural validation rules
+  limits_test.go                — size and count limit enforcement
+  primitives_test.go            — primitive type encoding/decoding
+  record_test.go                — single-record serialization
+  records_test.go               — multi-record serialization
+  stream_test.go                — streaming decoder behavior
+  hash_test.go                  — content-hash wire encoding
 
-root package tss
-  guard_test.go
-  replay_test.go
-  envelope_test.go
-  evidence_test.go
-  storage_test.go
+  Note: FuzzWireUnmarshalFields is in message_codec_test.go; FuzzCustomField in
+  message_custom_test.go; FuzzBigIntField in message_bigint_test.go.
+  Golden vectors live in internal/testvectors/wire/v1/, validated by
+  golden_test.go files in each consumer package (root, frost, cggmp21, zk).
 
-frost/ed25519/
-  invariant_guard_test.go
-  invariant_state_test.go
-  integration_keygen_test.go
-  integration_sign_test.go
-  integration_reshare_test.go
+root package tss                 — 14 test files
+  guard_test.go                  — 27 tests: EnvelopeGuard accept/reject matrix
+  broadcast_test.go              — 27 tests: broadcast commit/ack/equivocation
+  storage_test.go                — 20 tests: encrypt/decrypt, tamper resistance
+  replay_test.go                 — 7 tests: duplicate, equivocation, eviction
+  evidence_test.go               — 8 tests: blame marshal, verify, tamper resistance
+  envelope_test.go               — 2 tests: marshal/unmarshal round trip
+  limits_test.go                 — 15 tests: size/count boundaries
+  config_test.go                 — 12 tests: guard, policy, session config
+  errors_test.go                 — 7 tests: error wrapping and classification
+  transport_test.go              — 5 tests: transport authentication helpers
+  slog_test.go                   — 4 tests: structured logging redaction
+  golden_test.go                 — Envelope golden vector validation
+  doccheck_test.go               — documentation sanity check
+  examples_test.go               — executable examples
 
-cggmp21/secp256k1/
-  invariant_guard_test.go
-  invariant_state_test.go
-  invariant_domain_test.go
-  invariant_presign_test.go
-  invariant_blame_test.go
-  integration_keygen_test.go
-  integration_presign_test.go
-  integration_sign_test.go
-  integration_refresh_test.go
-  integration_reshare_test.go
+frost/ed25519/                   — 22 test files (including benchmarks, fixtures, and examples)
+  frost_test.go                  — 20 tests: keygen, sign, lifecycle, helpers
+  encoding_test.go               — 12 tests: wire format, keyshare marshal/unmarshal
+  sign_test.go                   — 6 tests: signing rounds, partial verification
+  lifecycle_test.go              — 6 tests: Destroy, state transitions, redaction
+  rfc9591_test.go                — 7 tests: RFC 9591 vector compliance
+  hd_derivation_test.go          — 7 tests: BIP32 derivation, invalid inputs, consistency
+  hd_keygen_sign_test.go         — 2 tests: HD keygen + signing scenarios
+  hd_wire_lifecycle_test.go      — 1 test: HD keyshare wire/lifecycle round trips
+  hd_fixtures_test.go            — shared HD fixtures and helpers
+  guard_integration_test.go      — 5 tests: guard-level integration (integration tag)
+  keygen_confirm_test.go         — 4 tests: keygen confirmation accept/reject
+  reshare_test.go                — 4 tests: committee transitions
+  adversary_test.go              — 3 tests: fail-closed envelope matrix
+  crash_recovery_test.go         — 3 tests: marshal→unmarshal→verify (integration tag)
+  golden_test.go                 — 5 tests: FROST golden vector validation
+  domain_test.go                 — 1 test: sign domain separation matrix
+  vector_test.go                 — JSON cross-implementation vector verification
+  test_setup_test.go             — shared test guard and helpers
+  benchmark_keygen_test.go       — BenchmarkFROSTKeygen*
+  benchmark_sign_test.go         — BenchmarkFROSTSign*
+  vectorgen_test.go              — JSON vector generation (vectorgen tag)
+  examples_test.go               — executable examples
+
+cggmp21/secp256k1/               — 43 test files (including benchmarks, helpers, fixtures, and examples)
+  Tier 0 (always compiled):
+    tier0_encoding_test.go       — 4 tests: fast encoding/decoding rejects
+    tier0_golden_test.go         — 4 tests: fast golden vector sanity
+    tier0_regression_test.go     — 8 tests: presign VerifyShares, sign payload, round3
+    encoding_test.go             — 9 tests: KeyShare/Presign canonical encoding
+    keyshare_test.go             — 10 tests: KeyShare accessors, copy safety, redaction
+    domain_test.go               — 2 tests: proof domain binding, MtA domain binding
+    keygen_confirm_test.go       — 8 tests: keygen confirmation accept/reject matrix
+    state_transition_test.go     — 11 tests: lifecycle, Destroy, session state
+    lifecycle_test.go            — 9 tests: Destroy, Consumed, Result/Complete states
+    reshare_plan_test.go         — 12 tests: invalid parameter matrix
+    scheduler_test.go            — 3 tests: round scheduling, message ordering
+    presign_policy_test.go       — 1 test: presign policy validation
+    hd_derivation_test.go        — 7 tests: BIP32 vectors, consistency, invalid inputs
+    hd_xpub_test.go              — 3 tests: ExtendedPublicKey serialize/parse/derive
+    hd_invalid_child_test.go     — 3 tests: hmacSHA512 hook (intentionally sequential)
+    hd_fixtures_test.go          — shared HD constants and helpers
+    helpers_test.go              — shared test helpers
+    protocol_harness_test.go     — CachedKeygenShares, keygen/presign helpers
+    examples_test.go             — executable examples
+
+  Tier 1 (//go:build tier1):
+    (no separate tier1 files; small-param crypto tests live in ZK/MtA/Paillier)
+
+  Tier 2 (//go:build integration):
+    integration_keygen_test.go   — 3 tests: HD chain code, Paillier mismatch, round trip
+    integration_presign_test.go  — 6 tests: reuse rejection, tamper, round trip
+    integration_sign_test.go     — 3 tests: sign flow, BIP32 binding
+    integration_refresh_test.go  — 5 tests: proactive refresh, public key preservation
+    integration_reshare_test.go  — 3 tests: membership changes, committee isolation
+    integration_hd_test.go       — 11 tests: HD presign/sign, derivation chains
+    integration_adversary_test.go— 5 tests: sign tampering, presign tamper blame
+    integration_setup_test.go    — 1 test: integration test setup
+    integration_helpers_test.go  — shared integration helpers
+    integration_example_test.go  — executable integration examples
+    guard_integration_test.go    — 6 tests: guard-level integration matrices
+    guard_full_flow_test.go      — 2 tests: full sign flow guard paths
+    adversary_test.go            — 11 tests: fail-closed, blame, out-of-order delivery
+    concurrency_test.go          — 2 tests: concurrent presign/sign safety
+    crash_recovery_test.go       — 5 tests: post-crash marshal→unmarshal→verify
+    proof_omission_test.go       — 10 tests: missing/invalid ZK proof rejection
+    golden_test.go               — 5 tests: CGGMP21 golden vector validation
+    vector_test.go               — 2 tests: JSON cross-implementation vectors
+    vectorgen_test.go            — JSON vector generation (vectorgen tag)
+
+  Tier 3 (//go:build slowcrypto):
+    slowcrypto_test.go           — 5 tests: production-parameter smoke
+
+  Benchmarks (no build tag):
+    benchmark_keygen_test.go     — BenchmarkCGGMP21Keygen*
+    benchmark_presign_test.go    — BenchmarkCGGMP21Presign*
+    benchmark_sign_test.go       — BenchmarkCGGMP21OnlineSign*
+    benchmark_wire_test.go       — BenchmarkWireMarshal*
 ```
 
 Use shared helpers from `internal/testharness/` and `internal/testutil/` for deterministic parties, sessions, reduced fixtures, envelope mutations, network scheduling, and protocol assertions. Avoid each test inventing its own mini-network or party setup.
@@ -397,12 +480,14 @@ func EquivocatePayload(env tss.Envelope) tss.Envelope
 
 Each function takes a valid envelope and returns a mutated copy. These are the building blocks for the fail-closed scenario matrix in Section 0. All protocol tests (FROST keygen/sign, CGGMP21 keygen/presign/sign/refresh/reshare) use the same mutation functions — protocol-specific mutation (e.g., tampering a specific proof field) lives alongside the protocol's own test files, not in the shared library.
 
-#### Additional Harness Files
+#### Additional Infrastructure
 
-- `crash_store.go` — `CrashPoint` enum (`BeforePersist`, `AfterPersist`, `BeforeOutbound`, `AfterOutbound`) and `CrashyStore` wrapper. Used by crash/restart tests (Section 8).
-- `golden.go` — `CheckGolden` helper with `UPDATE_GOLDEN=1` support. Used by all golden vector tests (Section 1).
-- `fuzz.go` — fuzz corpus seeding from golden vectors and historical regression cases. Used by fuzz tests (Fuzzing Rules).
-- `budget.go` — parses `go test -json` output and warns when individual tests exceed tier budgets (Test Budget section).
+The following functionality lives outside `internal/testharness/` but serves the same cross-cutting role:
+
+- `crash_store.go` (in `internal/testharness/`) — `CrashPoint` enum (`BeforePersist`, `AfterPersist`, `BeforeOutbound`, `AfterOutbound`) and `CrashyStore` wrapper. Used by crash/restart tests (Section 8).
+- `internal/testutil/testutil.go` — `CheckGolden` helper with `UPDATE_GOLDEN=1` support. Used by all golden vector tests (Section 1). Also provides `AssertProtocolError`, `DeliverEnvelope`, `SeedFromEnv`, `RewriteWireField`, and other shared assertion helpers.
+- Fuzz corpus seeding — done programmatically via `f.Add()` in each fuzz target file (see Fuzzing Rules). Persistent corpora live in `internal/wire/testdata/fuzz/`.
+- `internal/testutil/cmd/testbudget/` — standalone tool that parses `go test -json` output and warns when individual tests exceed tier budgets (Test Budget section). Invoked via `make test-budget`.
 
 ## Naming Convention
 
@@ -1437,21 +1522,46 @@ When refactoring the test suite, group existing tests into three categories.
 - Known regression tests — each with a comment linking to the issue or CVE it guards.
 - BIP32 / HD derivation tests — edge cases around hardened/non-hardened boundaries.
 
-### Merge into Invariant Matrices
+### Merge into Table-Driven Tests Within Existing Files
 
-Many scattered adversarial tests cover the same invariant from different angles. Merge them into table-driven matrices:
+Many scattered adversarial tests cover the same invariant from different angles. Merge them into table-driven tests within their existing files rather than creating new files. Prefer extracting a shared helper function when multiple test cases share the same setup:
 
 ```text
-adversary_test.go           \
-integration_adversary_test.go |
-guard_integration_test.go     |  →  invariant_guard_test.go
-guard_full_flow_test.go      /       invariant_state_machine_test.go
-                               →  invariant_delivery_faults_test.go
-state_transition_test.go      →  invariant_blame_test.go
-scheduler_test.go            /
+Before (standalone tests):                 After (table-driven):
+integration_adversary_test.go:
+  TestTamperedSProducesEquationFailure     TestIntegration_SignPartialTamperingBlamesSender
+  TestTamperedPartialEquationHashAlone     ├── "tampered s" case
+                                           ├── "tampered partial equation hash" case
+  TestPresignRejectsTamperedKPoint         ├── "tampered secret share" case
+  TestPresignRejectsTamperedChiPoint       └── … (5 cases total)
+                                           → assertSignPartialBlamesOnlySender helper
+                                           TestIntegration_PresignRejectsTamperedVerifySharePoints
+                                           ├── "tampered KPoint" case
+                                           └── "tampered ChiPoint" case
+
+integration_reshare_test.go:
+  4 standalone membership tests            TestThresholdECDSAReshareMembershipChange
+                                           ├── "add party"
+                                           ├── "remove party"
+                                           ├── "threshold increase"
+                                           └── "disjoint dealer subset"
+
+integration_refresh_test.go:
+  2 standalone multi-party tests           TestThresholdECDSAProactiveRefreshScenarios
+                                           ├── "2-of-3 non-HD"
+                                           └── "2-of-2 HD preserves chain code"
+
+keygen_confirm_test.go:
+  7 standalone tests                       TestKeygenConfirmationRejectsTamperedFields (3 cases)
+                                           TestKeygenConfirmationRejectsInvalidSenderSets (4 cases)
+
+shamir_test.go:
+  43 standalone tests                      27 table-driven tests (37% reduction)
 ```
 
-The merged tests use the shared `internal/testharness/` harnesses and cover the full fail-closed matrix (Section 0) with a single table of mutation functions per protocol session.
+Files remain focused on their invariant family (guard, adversary, state transition, domain, presign, etc.) rather than merging into a single `invariant_guard_test.go`. This preserves each file's clear ownership while reducing duplication through internal table-driven consolidation.
+
+When tests from multiple files can share a harness, extract the common helper into `internal/testutil/` or the protocol's own `*_helpers_test.go` file rather than merging the test files themselves.
 
 ### Delete or Downgrade
 
