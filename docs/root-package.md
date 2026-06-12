@@ -95,9 +95,7 @@ See [docs/wire.md](wire.md) for the full canonical encoding specification.
 
 ### Transcript Binding
 
-`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `ValidateEnvelopeBasic()` and `EnvelopeGuard.Validate()`.
-
-`ValidateEnvelopeBasic(env, protocol, session, parties)` checks protocol name, version, session ID, transcript integrity, and sender membership. **Prefer `EnvelopeGuard`** for production code; `ValidateEnvelopeBasic` does not enforce transport authentication, confidentiality, broadcast consistency, or replay detection.
+`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `EnvelopeGuard.Validate()`.
 
 ### Transport Semantics (SecurityContext)
 

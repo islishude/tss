@@ -266,34 +266,10 @@ func (e Envelope) RecomputeTranscriptHash() Envelope {
 	return e
 }
 
-// ValidateEnvelopeBasic performs basic envelope validation without a guard.
-// It checks protocol, version, session, transcript hash integrity, and
-// sender membership (when parties is non-empty). It does NOT enforce
-// transport authentication, confidentiality, broadcast consistency, or
-// replay detection. New code should use [EnvelopeGuard.Validate] instead.
-func ValidateEnvelopeBasic(env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties []PartyID) error {
-	if env.Protocol != expectedProtocol {
-		return fmt.Errorf("unexpected protocol %q", env.Protocol)
-	}
-	if env.Version != Version {
-		return fmt.Errorf("unexpected version %d", env.Version)
-	}
-	if env.SessionID != expectedSession {
-		return errors.New("session mismatch")
-	}
-	if err := VerifyTranscriptHash(env); err != nil {
-		return err
-	}
-	if len(parties) > 0 && !ContainsParty(parties, env.From) {
-		return fmt.Errorf("sender %d is not a participant", env.From)
-	}
-	return nil
-}
-
 // ValidateEnvelopePolicy checks delivery mode and confidentiality against a PolicySet.
-// It is a lightweight complement to [ValidateEnvelopeBasic] for the test fallback path
-// (when no EnvelopeGuard is set and the transport is unauthenticated).
-// It does NOT check broadcast consistency or replay — those require guard infrastructure.
+// It is a lightweight complement for the test fallback path (when no EnvelopeGuard
+// is set and the transport is unauthenticated). It does NOT check broadcast
+// consistency or replay — those require guard infrastructure.
 func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) error {
 	policy, err := policies.Match(env.Protocol, env.Round, env.PayloadType)
 	if err != nil {

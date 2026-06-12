@@ -67,14 +67,6 @@ func ExampleEnvelope_roundtrip() {
 	// compare it against the expected chain state.
 	copy(decoded.TranscriptHash[:], decoded.DomainSeparatedHash())
 
-	// --- 6. Validate the decoded envelope ---
-	// ValidateEnvelopeBasic checks protocol ID, session ID, round, and
-	// sender membership in the expected party set. It does NOT verify
-	// the EnvelopeGuard policies — use a guard for that.
-	if err := ValidateEnvelopeBasic(decoded, "example", sessionID, []PartyID{1}); err != nil {
-		panic(err)
-	}
-
 	fmt.Println(string(decoded.Payload))
 	// Output:
 	// roundtrip test
