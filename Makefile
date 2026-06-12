@@ -88,17 +88,17 @@ test-race: ## Race detector for integration-level protocol flows.
 test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
 	$(GO) test -race -tags='integration slowcrypto stress' -p 1 -parallel 1 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
 
-# -----------------------------------------------------------------------------
-# Fuzzing
 .PHONY: test-budget
 test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
 	$(GO) test -json -tags='tier1,integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) $(PKGS) | $(GO) run ./internal/testutil/cmd/testbudget
 
 # -----------------------------------------------------------------------------
+# Fuzzing
+# -----------------------------------------------------------------------------
 
 .PHONY: fuzz-smoke
 fuzz-smoke: ## Short fuzz smoke for changed fuzz targets.
-	FUZZTIME=$(FUZZ_SMOKE_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./internal/... ./cggmp21/... ./frost/...
+	FUZZTIME=$(FUZZ_SMOKE_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
 
 .PHONY: fuzz-ci
 fuzz-ci: ## CI-grade fuzz run; intended for dedicated fuzz jobs.
