@@ -3,6 +3,7 @@ package testutil
 import (
 	"bytes"
 	"fmt"
+	"sort"
 
 	"github.com/islishude/tss/internal/wire"
 )
@@ -95,6 +96,7 @@ func MarshalFieldsByName(version uint16, wireType string, model any, named map[s
 			Value: value,
 		})
 	}
+	sort.Slice(fields, func(i, j int) bool { return fields[i].Tag < fields[j].Tag })
 	return wire.MarshalFields(version, wireType, fields)
 }
 
