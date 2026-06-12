@@ -58,7 +58,7 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		}
 		encoded[i] = append([]byte(nil), confirmation...)
 	}
-	if err := verifyKeygenConfirmationSet(s.newShare, encoded); err != nil {
+	if err := verifyKeygenConfirmationSetWithoutChainCode(s.newShare, encoded); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
 	}

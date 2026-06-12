@@ -361,13 +361,41 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 }
 
 // Validate checks share structure, canonical secp256k1/Paillier material, and
-// the complete keygen confirmation evidence set.
+// the complete keygen confirmation evidence set against production limits.
 func (k *KeyShare) Validate() error {
+	return k.ValidateWithLimits(DefaultLimits())
+}
+
+// ValidateWithLimits checks share structure, canonical secp256k1/Paillier material,
+// and the complete keygen confirmation evidence set against the provided Limits.
+// It enforces hard caps on party count and threshold, and rejects configurations
+// below the production minimum threshold unless explicitly allowed by the limits.
+func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
 	}
-	if err := verifyKeygenConfirmationSet(k, k.KeygenConfirmations); err != nil {
-		return fmt.Errorf("invalid keygen confirmations: %w", err)
+	if len(k.Parties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many parties: %d > %d", len(k.Parties), limits.Threshold.MaxParties)
+	}
+	if k.Threshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("threshold too large: %d > %d", k.Threshold, limits.Threshold.MaxThreshold)
+	}
+	if err := limits.Threshold.ValidateThreshold(k.Threshold, len(k.Parties)); err != nil {
+		return err
+	}
+	// Chain code enforcement: during keygen, each party commits to an
+	// individual chain code that XORs to the aggregate; the confirmation
+	// set must prove correct aggregation. Refresh and reshare preserve
+	// the existing aggregate without generating fresh individual
+	// commitments, so chain code enforcement is skipped.
+	if k.PaillierProofDomain == domainLabelRefreshPaillier || k.PaillierProofDomain == domainLabelResharePaillier {
+		if err := verifyKeygenConfirmationSetWithoutChainCode(k, k.KeygenConfirmations); err != nil {
+			return fmt.Errorf("invalid keygen confirmations: %w", err)
+		}
+	} else {
+		if err := verifyKeygenConfirmationSet(k, k.KeygenConfirmations); err != nil {
+			return fmt.Errorf("invalid keygen confirmations: %w", err)
+		}
 	}
 	return nil
 }

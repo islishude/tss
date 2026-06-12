@@ -123,8 +123,17 @@ func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, ne
 	return plan, nil
 }
 
-// Validate checks that a reshare plan is canonical and internally consistent.
+// Validate checks that a reshare plan is canonical and internally consistent
+// against production limits.
 func (p ResharePlan) Validate() error {
+	return p.ValidateWithLimits(DefaultLimits())
+}
+
+// ValidateWithLimits checks that a reshare plan is canonical and internally
+// consistent against the provided Limits. It enforces hard caps on new party
+// count and new threshold, and rejects new configurations below the production
+// minimum threshold unless explicitly allowed by the limits.
+func (p ResharePlan) ValidateWithLimits(limits Limits) error {
 	if p.SessionID == (tss.SessionID{}) {
 		return errors.New("reshare plan session id must not be zero")
 	}
@@ -139,6 +148,15 @@ func (p ResharePlan) Validate() error {
 	}
 	if p.NewThreshold <= 0 || p.NewThreshold > len(p.NewParties) {
 		return errors.New("invalid new threshold")
+	}
+	if len(p.NewParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many new parties: %d > %d", len(p.NewParties), limits.Threshold.MaxParties)
+	}
+	if p.NewThreshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("new threshold too large: %d > %d", p.NewThreshold, limits.Threshold.MaxThreshold)
+	}
+	if err := limits.Threshold.ValidateThreshold(p.NewThreshold, len(p.NewParties)); err != nil {
+		return fmt.Errorf("new %w", err)
 	}
 	if len(p.OldGroupCommitments) != p.OldThreshold {
 		return errors.New("old group commitments length must equal old threshold")

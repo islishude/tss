@@ -1,5 +1,7 @@
 package tss
 
+import "fmt"
+
 const (
 	// DefaultMaxParties is the maximum number of participants across algorithms.
 	DefaultMaxParties = 64
@@ -81,6 +83,17 @@ type ThresholdLimits struct {
 	MinProductionThreshold  int
 	AllowOneOfOne           bool
 	AllowOversizedSignerSet bool
+}
+
+// ValidateThreshold checks that threshold and party count comply with the
+// configured production minimum and AllowOneOfOne policy.
+func (l ThresholdLimits) ValidateThreshold(threshold, nParties int) error {
+	if threshold < l.MinProductionThreshold {
+		if !l.AllowOneOfOne || threshold != 1 || nParties != 1 {
+			return fmt.Errorf("threshold %d is below production minimum %d", threshold, l.MinProductionThreshold)
+		}
+	}
+	return nil
 }
 
 // TLVLimits caps wire-level TLV field counts and per-field sizes.

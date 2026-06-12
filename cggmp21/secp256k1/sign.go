@@ -44,15 +44,15 @@ func (PresignContext) WireType() string { return presignContextWireType }
 func (PresignContext) WireVersion() uint16 { return tss.Version }
 
 // PresignStore is an optional durable claim interface. When provided to StartSign,
-// the library calls MarkConsumed with the presign's unique transcript hash before
-// it constructs any outbound signing partial. If the store write fails, StartSign
-// reverts the in-memory consumed flag and returns an error — the presign is not
-// consumed and can be retried.
+// the library calls MarkConsumed with the presign's content-derived identifier
+// ([Presign.ID]) before it constructs any outbound signing partial. If the store
+// write fails, StartSign reverts the in-memory consumed flag and returns an error
+// — the presign is not consumed and can be retried.
 //
 // A typical implementation persists the presign record with Consumed=true in an
-// atomic compare-and-swap or conditional-insert operation keyed by the transcript
-// hash. The transcript hash uniquely identifies one presign instance and can be
-// used as an idempotency key.
+// atomic compare-and-swap or conditional-insert operation keyed by the presign
+// identifier. The identifier is computed from the presign contents (including
+// secret material) and cannot be altered independently of the record.
 type PresignStore interface {
 	MarkConsumed(presignTranscriptHash []byte) error
 }
@@ -123,6 +123,39 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		PartiesHash:          p.PartiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.VerifyShares),
 	}, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+}
+
+const presignIDLabel = "cggmp21-secp256k1-presign-id-v1"
+
+// ID returns a content-derived presign identifier suitable for use as an
+// idempotency key in a durable [PresignStore]. The returned hash is computed
+// from all persisted presign fields, including secret material, and does not
+// depend on [Presign.TranscriptHash] or [Presign.Consumed]. Tampering with any
+// persisted field changes the identifier, so a storage layer cannot alter the
+// idempotency key independently of the presign contents.
+func (p *Presign) ID() []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(presignIDLabel))
+	wire.WriteHashPart(h, p.ContextHash)
+	wire.WriteHashPart(h, p.AdditiveShift)
+	wire.WriteHashPart(h, p.PublicKey)
+	wire.WriteHashPart(h, p.KeygenTranscriptHash)
+	wire.WriteHashPart(h, p.PartiesHash)
+	for _, id := range p.Signers {
+		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
+	}
+	for _, vs := range p.VerifyShares {
+		wire.WriteHashPart(h, vs.KPoint)
+		wire.WriteHashPart(h, vs.ChiPoint)
+		proofHash := sha256.Sum256(vs.Proof)
+		wire.WriteHashPart(h, proofHash[:])
+	}
+	wire.WriteHashPart(h, p.R)
+	wire.WriteHashPart(h, p.LittleR)
+	wire.WriteHashPart(h, p.kShare.FixedBytes())
+	wire.WriteHashPart(h, p.chiShare.FixedBytes())
+	wire.WriteHashPart(h, p.delta.FixedBytes())
+	return h.Sum(nil)
 }
 
 // Validate checks local presign structure and scalar/point encodings.

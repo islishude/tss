@@ -61,7 +61,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	// we construct any outbound partial. If persistence fails, revert the in-memory
 	// flag so the presign can be retried.
 	if store != nil {
-		if err := store.MarkConsumed(slices.Clone(presign.TranscriptHash)); err != nil {
+		if err := store.MarkConsumed(presign.ID()); err != nil {
 			presign.mu.Lock()
 			presign.Consumed = false
 			presign.mu.Unlock()

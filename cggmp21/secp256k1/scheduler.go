@@ -113,10 +113,18 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 		return fmt.Errorf("start refresh: %w", err)
 	}
 	defer session.Destroy()
+	guard, err := session.NewGuard(nil) // nil → in-memory replay cache
+	if err != nil {
+		return fmt.Errorf("new guard: %w", err)
+	}
+	session.SetGuard(guard)
 	if err := s.opts.Transport.Send(out); err != nil {
 		return fmt.Errorf("send refresh envelopes: %w", err)
 	}
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		newShare, ok := session.KeyShare()
 		if ok {
 			if err := s.opts.OnRefreshComplete(newShare); err != nil {

@@ -203,10 +203,8 @@ func (c ThresholdConfig) ValidateWithLimits(l ThresholdLimits) error {
 	if c.Threshold > l.MaxThreshold {
 		return fmt.Errorf("threshold too large: %d > %d", c.Threshold, l.MaxThreshold)
 	}
-	if c.Threshold < l.MinProductionThreshold {
-		if !l.AllowOneOfOne || c.Threshold != 1 || len(c.Parties) != 1 {
-			return fmt.Errorf("threshold %d is below production minimum %d", c.Threshold, l.MinProductionThreshold)
-		}
+	if err := l.ValidateThreshold(c.Threshold, len(c.Parties)); err != nil {
+		return err
 	}
 	seen := make(map[PartyID]struct{}, len(c.Parties))
 	hasSelf := false
