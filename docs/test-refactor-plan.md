@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–43 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split, FROST HD test split, golden/proof_omission/schnorr parallelism, fuzz corpus seeding, empty fuzz dir cleanup)_
+_Last updated: 2026-06-12 (items 20–47 completed — all 3 high-priority gap-closure tasks: FROST adversary fail-closed matrix, FROST domain separation, crash recovery tests for both protocols; all CI checks pass)_
 
 ### Completed
 
@@ -1485,3 +1485,36 @@ These files have 10+ standalone test functions that could benefit from structura
 | `cggmp21/secp256k1/tier0_regression_test.go` | 8 (was 18)  | Consolidated 2026-06-12: 18→8 (56% reduction); 9 presign Validate→1 table-driven, 2 sign payload→1, 2 round3 payload→1; 5 remaining genuinely unique                                                                                                   |
 | `cggmp21/secp256k1/hd*_test.go`              | 13 (was 21) | Completed 2026-06-12: monolithic `hd_test.go` split into fixtures, derivation, invalid-child, and xpub files; BIP32 vectors/rejects/xpub scenarios consolidated; 3 `hmacSHA512` mutation tests remain sequential                                       |
 | `frost/ed25519/hd*_test.go`                  | 10 (was 21) | Completed 2026-06-12: monolithic `hd_test.go` split into fixtures, derivation, keygen/sign, and wire/lifecycle files; BIP32 rejects/keygen/signing/wire scenarios consolidated                                                                         |
+
+### New Work Items (2026-06-12 — gap closure)
+
+44. ~~**FROST guard-level fail-closed matrix**~~ — Completed 2026-06-12:
+    - Created `frost/ed25519/adversary_test.go` with 3 table-driven test functions:
+      - `TestFROSTKeygenEnvelopeFailClosed` — 8 cases: wrong session, wrong protocol, wrong round, wrong recipient, broadcast share, non-confidential share, duplicate commitment.
+      - `TestFROSTSignEnvelopeFailClosed` — 7 cases: wrong session, wrong protocol, wrong round (commitment/partial), sender not signer, duplicate commitment, completed session rejects partial.
+      - `TestFROSTReshareEnvelopeFailClosed` — 4 cases: wrong session, wrong protocol, wrong round, missing confidentiality on share.
+    - Follows same mutation-on-real-envelope pattern as CGGMP21 adversary tests. Uses `testFROSTGuard` (relaxed broadcast consistency), `assertFROSTProtocolCode`, and `testutil.DeliverEnvelope`.
+
+45. ~~**FROST domain separation tests**~~ — Completed 2026-06-12:
+    - Created `frost/ed25519/domain_test.go` with `TestFROSTSignDomainSeparation` — 6 table-driven subtest cases:
+      - `cross-session`: commitment from session A rejected by session B (`ErrCodeInvalidMessage`).
+      - `cross-protocol`: wrong protocol string on commitment rejected by guard.
+      - `partial-acceptance`: valid partial from party 1 accepted by party 2's session — confirms partials are publicly verifiable.
+      - `wrong-message`: partial computed for message B delivered to message A session — `ErrCodeVerification` + blame.
+      - `wrong-signer-set`: partial computed with 3-signer Lagrange delivered to 2-signer session — `ErrCodeVerification`.
+      - `wrong-public-key-HD`: partial computed with shift2 delivered to shift1 session — `ErrCodeVerification`.
+    - All cross-context tests use shared session ID to pass guard validation, so protocol-level domain binding is tested.
+
+46. ~~**FROST crash recovery tests**~~ — Completed 2026-06-12:
+    - Created `frost/ed25519/crash_recovery_test.go` (behind `//go:build integration`) with 3 tests:
+      - `TestFROSTKeyShareCrashRecovery` — marshal → unmarshal → verify field integrity → `ValidateConsistency` → sign successfully.
+      - `TestFROSTKeyShareDestroyPersistence` — pre-destroy sign works, post-destroy `Sign` fails.
+      - `TestFROSTKeyShareDeterministicMarshal` — repeated `MarshalBinary` produces identical bytes; round-trip preserves encoding.
+
+47. ~~**CGGMP21 crash recovery tests**~~ — Completed 2026-06-12:
+    - Created `cggmp21/secp256k1/crash_recovery_test.go` (behind `//go:build integration`) with 5 tests:
+      - `TestCGGMP21_KeyShare_PostCrashIntegrity` — marshal → unmarshal → verify field integrity → `Validate` → presign + sign successfully.
+      - `TestCGGMP21_Presign_PostCrashRecovery` — marshal fresh presign → unmarshal → verify NOT consumed → `StartSignDigest` succeeds.
+      - `TestCGGMP21_Presign_ConsumedPostCrash` — consume presign → marshal → unmarshal → verify consumed flag preserved → `StartSignDigest` returns error.
+      - `TestCGGMP21_Presign_DestroyMarshal` — `Destroy()` → `MarshalBinary` fails (secrets cleared).
+      - `TestCGGMP21_KeyShare_DeterministicMarshal` — repeated marshal produces identical bytes; round-trip preserves encoding.
