@@ -68,7 +68,7 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 - `internal/zk/*`: zero-knowledge proofs used by CGGMP21 and related primitives.
 - `internal/shamir`: Shamir sharing and interpolation.
 - `internal/curve/*`: curve-specific scalar, point, commitment, and signature helpers.
-- `internal/testutil`: shared test helpers, deterministic readers, party/session factories, mutation helpers, assertions, fixtures, and reduced-parameter test controls.
+- `internal/testutil`/`internal/testharness`: shared test helpers, deterministic readers, party/session factories, mutation helpers, assertions, fixtures, and reduced-parameter test controls.
 
 ## Coding Rules
 
