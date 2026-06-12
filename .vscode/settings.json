@@ -1,4 +1,4 @@
 {
-  "go.buildTags": "vectorgen integration slowcrypto stress",
-  "go.testTags": "integration slowcrypto stress"
+  "go.buildTags": "vectorgen integration slowcrypto stress tier1 tier0",
+  "go.testTags": "integration slowcrypto stress tier1 tier0"
 }
