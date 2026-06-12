@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–55 completed — all high/medium priority tasks done; tier0 runtime ~8s, tier1 ~95s; 21 golden vectors migrated to internal/testvectors/; coverage thresholds enforced via `make coverage-check`; all CI checks pass)_
+_Last updated: 2026-06-12 (items 20–56 completed; all high/medium priority tasks done; tier0 runtime ~8s, tier1 ~95s; 23 test vectors migrated to internal/testvectors/; coverage thresholds enforced via `make coverage-check`; assertProtocolErrorCode unified; testing-rules.md updated to match actual conventions; testharness adoption analysis documented; all CI checks pass)_
 
 ### Completed
 
@@ -1296,11 +1296,14 @@ The following items are documented as intentionally deferred:
 - ~~**MIXED file tier1 extraction**~~ — Completed 2026-06-12 (items 29–34, 48): All `testing.Short()` calls fully migrated to `//go:build tier1` compile-time separation.
 - ~~**Fuzz corpus seeding**~~ — Completed 2026-06-12: 204 persistent corpus files populated across 3 wire fuzz targets.
 
-### Current Status Summary (2026-06-12 final)
+### Current Status Summary (2026-06-12 final, updated 2026-06-12)
 
-**Completed — all 55 items:**
+**Completed — all 55 items + 2 post-completion improvements:**
 
 - Items 1–55 are all completed. All high and medium priority tasks are done.
+- **`assertProtocolErrorCode` / `testutil.AssertProtocolError` unified** (2026-06-12): 18 call sites across 3 files replaced; local `assertProtocolErrorCode` removed from `protocol_harness_test.go`.
+- **`docs/testing-rules.md` updated** (2026-06-12): recommended package-level grouping replaced with actual file organization; aspirational `invariant_*` naming references removed; `testharness` additional file descriptions corrected to reflect `testutil.CheckGolden`, programmatic fuzz seeding, and `cmd/testbudget` locations.
+- **`docs/test-refactor-plan.md` updated** (2026-06-12): detailed `internal/testharness` adoption analysis added (~6–9 day estimate, medium risk, deferred).
 - **Build-tag tiering**: Zero `testing.Short()` calls remain in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`), where it adjusts a statistical sampling parameter (10000→1000 rounds), NOT a tier-skipping guard.
 - All tiering is compile-time via `//go:build` tags (`tier1`, `integration`, `slowcrypto`).
 - **Tier 0 tests**: all use `t.Parallel()` where safe; 600+ parallel test functions.
@@ -1318,10 +1321,95 @@ The following items are documented as intentionally deferred:
 
 **Intentionally deferred (low priority):**
 
-- `internal/testharness` adoption — requires rewriting all protocol tests to `ProtocolCase` interface. Package compiles and is available for future use.
-- `assertProtocolErrorCode`/`testutil.AssertProtocolError` unification — low-ROI due to 36+ call sites.
+- ~~`assertProtocolErrorCode`/`testutil.AssertProtocolError` unification~~ — Completed 2026-06-12: 18 call sites across 3 files replaced; local `assertProtocolErrorCode` function removed.
 - `testutil.AssertDeterministicRoundTrip`/`testutil.MutateBytes` — unused, kept as harness infrastructure for future tests.
 - Further table-driven consolidation of already-parallel standalone tests with distinct concerns.
+
+**`internal/testharness` protocol adoption** — deferred. Detailed analysis below (2026-06-12).
+
+### `internal/testharness` Adoption Analysis (2026-06-12)
+
+The `internal/testharness/` package was created during Phase 1 (item 22) with 7 files and 26 exported symbols. As of 2026-06-12 it has **zero importers** anywhere in the codebase. Protocol tests use approximately 45 local helper functions that overlap with testharness functionality: keygen runners, presign runners, delivery loops, blame assertions, plan validators, and lifecycle checkers.
+
+Adoption is deferred because three fundamental mismatches make it a rewrite rather than a migration:
+
+#### 1. `ProtocolCase` interface forces a shape that doesn't match existing test patterns
+
+Every test would need to implement 6 methods:
+
+```go
+type ProtocolCase interface {
+    Name() string
+    Start(t *testing.T) ([]Session, []tss.Envelope)
+    Step(t *testing.T, sessions []Session, envelopes []tss.Envelope) ([]tss.Envelope, error)
+    Done(sessions []Session) bool
+    AssertSuccess(t *testing.T, sessions []Session)
+    AssertFailClosed(t *testing.T, before, after StateSnapshot)
+}
+```
+
+Current tests use a direct, imperative style:
+
+```go
+// Current pattern — direct, self-contained.
+t.Run("wrong session", func(t *testing.T) {
+    mutated := commit
+    mutated.SessionID, _ = tss.NewSessionID(nil)
+    mutated = mutated.RecomputeTranscriptHash()
+    _, err = kg1.HandleKeygenMessage(mutated)
+    _ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
+})
+```
+
+Adopting `ProtocolCase` would require wrapping this into a struct with 6 methods. For table-driven tests with 8 subtests, that means 8 separate `ProtocolCase` implementations. The codebase has approximately 250 test functions across 47 files that would need this transformation.
+
+#### 2. `StateSnapshot` / `Snapshotter` requires production-code changes
+
+`StateSnapshot` depends on an interface that production session types do not implement:
+
+```go
+type Snapshotter interface {
+    CurrentRound() int
+    OutboxCount() int
+    IsConsumed() bool
+    IsComplete() bool
+}
+```
+
+Production types provide similar methods under different names: `Round()` not `CurrentRound()`, `Outbox()` returns `[]tss.Envelope` (needs counting) not `OutboxCount()`, `IsPresignConsumed()` not `IsConsumed()`. Each of the 6 session types across 2 protocols would need an adapter method or a test-only wrapper type — touching production code or adding per-session-type test wrappers.
+
+#### 3. `NetworkConfig` delivery model is too generic for protocol-level test needs
+
+`NetworkConfig` provides composable fault injection (`Drop`, `Duplicate`, `Reorder`, `Mutate`), but protocol tests require finer-grained control:
+
+- Stateful delivery across rounds (round 2 only starts after collecting all round 1 messages)
+- Per-recipient routing (direct messages only go to the recipient, not all parties)
+- Round-specific injection points (inject faults between rounds 2 and 3, not in a generic loop)
+
+Current helpers like `deliverKeygenMessages` (~40 lines) and `deliverPresignMessagesTo` (~25 lines) handle these concerns concisely and are tightly integrated with the protocols they serve. Replacing them with a generic `DeliverMessages` would add rather than remove complexity.
+
+#### Work Estimate
+
+| Work item                                        | Scope                                                         | Effort                                                                                       | Risk                                                         |
+| ------------------------------------------------ | ------------------------------------------------------------- | -------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Implement `ProtocolCase` for every test          | ~47 files, ~250 test functions                                | Heavy — repetitive, each test becomes a 6-method struct                                      | High — touches every test, churn risk                        |
+| Add `Snapshotter` adapters for all session types | 6 session types × 2 protocols ≈ 12 adapters                   | Medium — test-only wrappers on production code                                               | Medium — couples production code to test framework interface |
+| Replace delivery helpers                         | 6 `deliver*` functions, ~30 call sites                        | Medium — `NetworkConfig` too generic; protocol-specific wrappers likely needed               | Medium — delivery loops are correctness-sensitive            |
+| Replace keygen/presign runners                   | ~15 `secp*`/`frost*` runner functions, 85+ call sites         | Medium — local runners already efficient; replacing with `testharness.Parties()` is sideways | Low                                                          |
+| Replace mutation functions                       | ~10 local mutation patterns → `testharness.WrongSession` etc. | Low — cleanest overlap; testharness mutation functions usable directly                       | Low                                                          |
+| Replace RNG with `testharness.Reader`            | ~5 `testutil.DeterministicReaderFromEnv` call sites           | Low — near-identical semantics                                                               | Low                                                          |
+| Post-adoption regression testing                 | All — every delivery and assertion change                     | Heavy — `make test-integration` (~4m) + race (~20m), multiple rounds                         | High                                                         |
+| Documentation updates                            | `testing-rules.md`, `test-refactor-plan.md`                   | Low                                                                                          | Low                                                          |
+
+**Total estimate: ~6–9 days, medium risk.**
+
+#### Benefit/Cost Assessment
+
+Adoption would unify test structure — every test implements the same interface, fail-closed snapshots are automatic, and delivery loops are standardized. Adding a new protocol would become cheaper: register a `ProtocolCase` implementation and most adversarial tests are inherited.
+
+However, the cost is ~47 files rewritten for limited per-file benefit — the current imperative style is clear and readable for anyone familiar with the protocol. The `ProtocolCase` abstraction adds a layer of indirection that makes individual tests harder to follow (the reader must trace control flow through 6 interface methods rather than a single linear function body).
+
+**Decision:** `testharness` remains available and compiles cleanly. It should be adopted when adding a new protocol or when rewriting an existing protocol's tests from scratch — the interface then guides structure from the start rather than being retrofitted onto existing, well-tested code.
 
 ### New Work Items (from 2026-06-12 testing rules update) ✅ Completed 2026-06-12
 
