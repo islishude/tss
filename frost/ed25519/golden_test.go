@@ -42,7 +42,7 @@ func TestGoldenKeyShare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeyShare.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeyShare.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := UnmarshalKeyShare(raw)
@@ -73,7 +73,7 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenCommitmentsPayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenCommitmentsPayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenCommitmentsPayload(raw)
@@ -104,7 +104,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenSharePayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
@@ -139,7 +139,7 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "NonceCommitmentPayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "NonceCommitmentPayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalNonceCommitmentPayload(raw)
@@ -170,7 +170,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "SignPartialPayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "SignPartialPayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)

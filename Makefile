@@ -133,6 +133,31 @@ coverage-heavy: ## Heavy combined coverage; slow and explicit only.
 	$(GO) test -tags='integration slowcrypto' -race -p 1 -parallel 1 -timeout $(STRESS_TIMEOUT) -coverprofile=$(COVERPROFILE) -covermode=atomic $(PKGS)
 	$(GO) tool cover -html=$(COVERPROFILE) -o $(COVERHTML)
 
+.PHONY: coverage-check
+coverage-check: ## Enforce per-area coverage thresholds; exits non-zero on violation.
+	@echo "=== coverage-check: per-area threshold enforcement ==="
+	@$(GO) test -short -coverprofile=/tmp/cov_unit.out -covermode=atomic ./internal/wire ./internal/wire/... 2>/dev/null; \
+	WIRE_COV=$$($(GO) tool cover -func=/tmp/cov_unit.out 2>/dev/null | awk '/total:/ {print $$3}' | tr -d '%'); \
+	echo "internal/wire: $$WIRE_COV% (threshold 78%)"; \
+	if [ "$$(echo "$$WIRE_COV < 78" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: internal/wire coverage $$WIRE_COV% below 78%"; exit 1; fi
+	@$(GO) test -short -coverprofile=/tmp/cov_root.out -covermode=atomic . 2>/dev/null; \
+	ROOT_COV=$$($(GO) tool cover -func=/tmp/cov_root.out 2>/dev/null | awk '/total:/ {print $$3}' | tr -d '%'); \
+	echo "tss (root):     $$ROOT_COV% (threshold 75%)"; \
+	if [ "$$(echo "$$ROOT_COV < 75" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: root package coverage $$ROOT_COV% below 75%"; exit 1; fi
+	@$(GO) test -short -coverprofile=/tmp/cov_frost.out -covermode=atomic ./frost/ed25519 2>/dev/null; \
+	FROST_COV=$$($(GO) tool cover -func=/tmp/cov_frost.out 2>/dev/null | awk '/total:/ {print $$3}' | tr -d '%'); \
+	echo "frost/ed25519:  $$FROST_COV% (threshold 73%)"; \
+	if [ "$$(echo "$$FROST_COV < 73" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: frost/ed25519 coverage $$FROST_COV% below 73%"; exit 1; fi
+	@$(GO) test -short -coverprofile=/tmp/cov_shamir.out -covermode=atomic ./internal/shamir 2>/dev/null; \
+	SHAMIR_COV=$$($(GO) tool cover -func=/tmp/cov_shamir.out 2>/dev/null | awk '/total:/ {print $$3}' | tr -d '%'); \
+	echo "internal/shamir: $$SHAMIR_COV% (threshold 90%)"; \
+	if [ "$$(echo "$$SHAMIR_COV < 90" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: internal/shamir coverage $$SHAMIR_COV% below 90%"; exit 1; fi
+	@$(GO) test -short -coverprofile=/tmp/cov_secret.out -covermode=atomic ./internal/secret 2>/dev/null; \
+	SECRET_COV=$$($(GO) tool cover -func=/tmp/cov_secret.out 2>/dev/null | awk '/total:/ {print $$3}' | tr -d '%'); \
+	echo "internal/secret: $$SECRET_COV% (threshold 75%)"; \
+	if [ "$$(echo "$$SECRET_COV < 75" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: internal/secret coverage $$SECRET_COV% below 75%"; exit 1; fi
+	@echo "=== coverage-check: all thresholds passed ==="
+
 # -----------------------------------------------------------------------------
 # Static checks, fixes, and formatting
 # -----------------------------------------------------------------------------

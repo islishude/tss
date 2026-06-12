@@ -11,7 +11,7 @@ import (
 )
 
 func TestGenerateVectors(t *testing.T) {
-	generateFROSTVectors(t, filepath.Join("testdata", "frost_ed25519_vectors.json"))
+	generateFROSTVectors(t, filepath.Join("..", "..", "internal", "testvectors", "protocol", "frost-ed25519", "frost_ed25519_vectors.json"))
 }
 
 func generateFROSTVectors(t *testing.T, path string) {

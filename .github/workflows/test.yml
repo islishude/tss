@@ -32,6 +32,66 @@ jobs:
       - name: Run Tier 3 slowcrypto tests
         run: go test -v -race -tags 'tier1 integration slowcrypto' -timeout 5h ./...
 
+  test-stress-integration-cggmp21:
+    name: Test Stress Integration(cggmp21 ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./cggmp21/...
+
+  test-stress-integration-frost:
+    name: Test Stress Integration(frost ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./frost/...
+
+  test-stress-integration-internal:
+    name: Test Stress Integration(internal ${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 180
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Run Tier 4 stress tests
+        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./internal/...
+
   test-stress-integration:
     name: Test Stress Integration(${{ matrix.os }})
     strategy:
@@ -92,8 +152,8 @@ jobs:
       - name: Run Tier 4 stress tests
         run: go test -v -tags 'slowcrypto' -timeout 1h ./cggmp21/secp256k1/...
 
-  fuzzing-test-cggmp21:
-    name: Test Fuzzing cggmp21 (${{ matrix.os }})
+  fuzzing-test:
+    name: Test Fuzzing (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -110,7 +170,7 @@ jobs:
 
       - name: Run all fuzz targets
         shell: bash
-        run: ./.github/scripts/fuzz-ci.sh ./cggmp21/...
+        run: ./.github/scripts/fuzz-ci.sh ./...
         env:
           FUZZTIME: 3m
 
@@ -118,66 +178,6 @@ jobs:
         if: failure()
         uses: actions/upload-artifact@v7
         with:
-          name: fuzz-secp256k1-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
-          path: |
-            **/testdata/fuzz/**
-
-  fuzzing-test-frost:
-    name: Test Fuzzing frost (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: stable
-
-      - name: Run all fuzz targets
-        shell: bash
-        run: ./.github/scripts/fuzz-ci.sh ./frost/...
-        env:
-          FUZZTIME: 3m
-
-      - name: Upload failing corpus if generated
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fuzz-frost-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
-          path: |
-            **/testdata/fuzz/**
-
-  fuzzing-test-internal:
-    name: Test Fuzzing internal (${{ matrix.os }})
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, ubuntu-24.04-arm]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v6
-
-      - name: Set up Go
-        uses: actions/setup-go@v6
-        with:
-          go-version: stable
-
-      - name: Run all fuzz targets
-        shell: bash
-        run: ./.github/scripts/fuzz-ci.sh ./internal/...
-        env:
-          FUZZTIME: 3m
-
-      - name: Upload failing corpus if generated
-        if: failure()
-        uses: actions/upload-artifact@v7
-        with:
-          name: fuzz-internal-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
+          name: fuzz-failures-${{ github.run_id }}-${{ runner.os }}-${{ runner.arch }}
           path: |
             **/testdata/fuzz/**

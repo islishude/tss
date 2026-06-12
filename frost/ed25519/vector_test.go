@@ -69,7 +69,7 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 
 func TestFROSTCrossImplementationVectors(t *testing.T) {
 	t.Parallel()
-	vectorPath := filepath.Join("testdata", "frost_ed25519_vectors.json")
+	vectorPath := filepath.Join("..", "..", "internal", "testvectors", "protocol", "frost-ed25519", "frost_ed25519_vectors.json")
 	data, err := os.ReadFile(vectorPath) //nolint:gosec
 	if err != nil {
 		t.Fatal(err)

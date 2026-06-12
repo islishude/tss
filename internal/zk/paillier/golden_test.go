@@ -132,7 +132,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := tc.marshal(t)
-			testutil.CheckGolden(t, filepath.Join("testdata", tc.name+".golden"), raw)
+			testutil.CheckGolden(t, filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", tc.name+".golden"), raw)
 			tc.roundTrip(t, raw)
 		})
 	}

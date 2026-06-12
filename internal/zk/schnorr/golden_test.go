@@ -50,7 +50,7 @@ func TestGoldenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "Proof.golden")
+	golden := filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", "SchnorrProof.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
 			t.Fatal(err)

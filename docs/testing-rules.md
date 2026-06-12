@@ -53,7 +53,7 @@ test-integration:
 	go test -tags=integration -timeout 20m ./...
 ```
 
-The migration from `testing.Short()` to `//go:build tier1` is complete for all standalone tier1 tests. One file (`params_consistency_test.go`) retains internal `testing.Short()` guards for mixed subtests that share expensive Paillier keygen setup — see `docs/test-refactor-plan.md` for details.
+The migration from `testing.Short()` to `//go:build tier1` is complete for all tests. Zero `testing.Short()` calls exist in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`), where it adjusts a statistical sampling parameter (10000→1000 rounds) rather than performing tier-skipping — see `docs/test-refactor-plan.md` for details.
 
 ### Test Budget
 
@@ -81,33 +81,6 @@ Areas most likely to exceed budget and need attention:
 - Fuzz-like adversarial cases (unbounded by nature)
 
 Without runtime budgets, CI latency drifts upward as tests accumulate.
-
-### Deterministic Randomness with Reproducible Seeds
-
-Tests that use cryptographic randomness must default to deterministic, with a reproducible seed printed on failure:
-
-```go
-func DeterministicReader(t *testing.T, seed int64) io.Reader {
-    t.Helper()
-    t.Logf("seed=%x", seed)
-    return testutil.DeterministicReader(seed)
-}
-```
-
-For fuzz and randomized protocol tests, support an environment variable override:
-
-```bash
-TSS_TEST_SEED=0xdeadbeef go test ./...
-```
-
-This lets CI failures be reproduced locally. The existing `DeterministicReader` in `internal/testutil` already covers the core need; the seed-printing in failure logs and `TSS_TEST_SEED` env var are the additions.
-
-Areas where deterministic randomness matters most:
-
-- `internal/zk/paillier` (proof generation, challenge sampling)
-- `internal/mta` (MtA response generation)
-- `cggmp21/secp256k1` integration (keygen, presign, sign)
-- `frost/ed25519` lifecycle (keygen, sign, reshare)
 
 ## Parallelism and Performance Rules
 
@@ -576,19 +549,19 @@ Tests must verify that every semantically equivalent but non-canonical encoding 
 
 **Golden vectors as compatibility contracts:**
 
-Golden tests should move from "example snapshots" to "compatibility contracts." Each valid golden vector should be paired with explicit negative mutation vectors:
+Golden vectors live in `internal/testvectors/wire/v1/` as canonical compatibility contracts. Each valid golden vector should be paired with explicit negative mutation vectors:
 
 ```text
-testdata/golden/
-  wire/v1/
+internal/testvectors/wire/v1/
+  cggmp21/
     KeyShare.golden                  # valid — must continue to decode
-    KeyShare.dup_tag.golden          # reject — duplicate tag
-    KeyShare.trailing_bytes.golden   # reject — trailing bytes
-    KeyShare.non_minimal.golden      # reject — non-minimal integer
-    KeyShare.wrong_type.golden       # reject — wrong type ID
+    KeyShare.dup_tag.golden          # reject — duplicate tag (future)
+    KeyShare.trailing_bytes.golden   # reject — trailing bytes (future)
+    KeyShare.non_minimal.golden      # reject — non-minimal integer (future)
+    KeyShare.wrong_type.golden       # reject — wrong type ID (future)
 ```
 
-Negative golden vectors document the parser's strictness contract: they must continue to fail with the same error category across versions.
+Negative golden vectors document the parser's strictness contract: they must continue to fail with the same error category across versions. Currently 21 valid binary golden vectors exist across `envelope/`, `frost/`, `cggmp21/`, and `zk/`; negative vectors are planned for future addition.
 
 ### 2. Envelope Guard and Transport Boundary
 
@@ -1222,21 +1195,26 @@ coverage-integration:
 ## Test Data and Fixtures
 
 - Keep deterministic fixtures small and clearly labeled.
-- Do not store secret production material in testdata.
+- Do not store secret production material in `internal/testvectors/`.
 - Do not log fixture secrets in failing tests.
 - Reduced-parameter crypto fixtures must be visibly marked as test-only.
 - Production-parameter fixtures or long-running generation must live behind `slowcrypto` or explicit fixture-generation tooling.
 
-Recommended layout:
+All test vectors are consolidated in `internal/testvectors/`:
 
 ```text
-testdata/
-  golden/
-    wire/v1/
-    protocol/
-  fuzz/
-  regression/
+internal/testvectors/
+  wire/v1/              # binary golden vectors (wire format compatibility)
+    envelope/
+    frost/
+    cggmp21/
+    zk/
+  protocol/             # JSON cross-implementation vectors
+    frost-ed25519/
+    cggmp21-secp256k1/
 ```
+
+Fuzz corpora live in `internal/wire/testdata/fuzz/` (the only remaining per-package `testdata/` directory).
 
 ## Fixture Caching Rules
 

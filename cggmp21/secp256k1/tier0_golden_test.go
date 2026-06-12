@@ -20,7 +20,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "Presign.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.fast.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	// Round-trip: unmarshal → marshal must produce identical bytes.
@@ -50,7 +50,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeygenSharePayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
@@ -85,7 +85,7 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "SignPartialPayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignPartialPayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
@@ -122,7 +122,7 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "PresignRound3Payload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PresignRound3Payload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)

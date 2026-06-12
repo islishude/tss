@@ -25,7 +25,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeygenSharePayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
@@ -59,7 +59,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "SignPartialPayload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignPartialPayload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
@@ -96,7 +96,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "PresignRound3Payload.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PresignRound3Payload.golden")
 	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)
@@ -118,7 +118,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 func TestGoldenCGGMP21KeyShare(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join("testdata", "KeyShare.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeyShare.golden")
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		// Run a deterministic keygen to generate the golden file.
@@ -194,7 +194,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 func TestGoldenCGGMP21Presign(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join("testdata", "Presign.golden")
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		shares := CachedKeygenShares(t, 1, 1, false)
 		presigns := secpPresign(t, shares, []tss.PartyID{1})

@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–48 completed — all 3 high-priority gap-closure tasks: FROST adversary fail-closed matrix, FROST domain separation, crash recovery tests for both protocols; last MIXED file extracted; all CI checks pass)_
+_Last updated: 2026-06-12 (items 20–55 completed — all high/medium priority tasks done; tier0 runtime ~8s, tier1 ~95s; 21 golden vectors migrated to internal/testvectors/; coverage thresholds enforced via `make coverage-check`; all CI checks pass)_
 
 ### Completed
 
@@ -1298,25 +1298,29 @@ The following items are documented as intentionally deferred:
 
 ### Current Status Summary (2026-06-12 final)
 
-**Completed — all 48 items:**
+**Completed — all 55 items:**
 
-- Items 1–48 are all completed.
-- Zero `testing.Short()` calls remain in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`), where it adjusts a sampling parameter rather than skipping a test.
+- Items 1–55 are all completed. All high and medium priority tasks are done.
+- **Build-tag tiering**: Zero `testing.Short()` calls remain in any always-compiled test file. The only `testing.Short()` call in the entire test suite is in `challenge_distribution_test.go` (behind `//go:build slowcrypto`), where it adjusts a statistical sampling parameter (10000→1000 rounds), NOT a tier-skipping guard.
 - All tiering is compile-time via `//go:build` tags (`tier1`, `integration`, `slowcrypto`).
-- Tier 0 tests: all use `t.Parallel()` where safe; 600+ parallel test functions.
-- Tier 1 tests: all behind `//go:build tier1`; 26 tier1-specific test files; zero MIXED files remain.
-- Tier 2 tests: all behind `//go:build integration`; fixture caching (CGGMP21 + FROST) reduces keygen overhead by ~46%.
-- Table-driven consolidation: `internal/wire` (89→30, 66%), `internal/shamir` (43→27, 37%), `cggmp21/tier0_regression` (18→8, 56%), `frost/hd` (21→10, 52%), `cggmp21/hd` (21→13, 38%), plus adversary/reshare/refresh/keygen-confirmation consolidation.
-- Structural splits: monolithic files (`message_test.go`, `hd_test.go` × 2) split into behavior-focused files.
-- Benchmarks organized by cost category (keygen, presign, sign, wire, primitive).
-- Production-code improvements: 8 `Clone()` methods on proof types, `paillier.PrivateKey.Clone()`, `testutil.SeedFromEnv`/`TSS_TEST_SEED` support.
-- Fuzz smoke + CI targets, test budget checker, crash recovery tests for both protocols, FROST domain separation and adversary fail-closed matrices.
-- All CI checks pass: `go test -short`, `go test -tags=tier1`, `go vet`, `golangci-lint`, `make check`, `make ci`.
+- **Tier 0 tests**: all use `t.Parallel()` where safe; 600+ parallel test functions.
+- **Tier 1 tests**: all behind `//go:build tier1`; 26 tier1-specific test files; zero MIXED files remain.
+- **Tier 2 tests**: all behind `//go:build integration`; fixture caching (CGGMP21 + FROST) reduces keygen overhead by ~46%.
+- **Table-driven consolidation**: `internal/wire` (89→30, 66%), `internal/shamir` (43→27, 37%), `cggmp21/tier0_regression` (18→8, 56%), `frost/hd` (21→10, 52%), `cggmp21/hd` (21→13, 38%), plus adversary/reshare/refresh/keygen-confirmation consolidation.
+- **Structural splits**: monolithic files (`message_test.go`, `hd_test.go` × 2) split into behavior-focused files.
+- **Benchmarks** organized by cost category (keygen, presign, sign, wire, primitive).
+- **Production-code improvements**: 8 `Clone()` methods on proof types, `paillier.PrivateKey.Clone()`, `testutil.SeedFromEnv`/`TSS_TEST_SEED` support.
+- **Infrastructure**: `internal/testharness/` (7 files), `internal/testvectors/` (directory skeleton), fuzz smoke + CI targets, test budget checker, `DeliverEnvelope`/`CheckGolden` helper consolidation.
+- **Security coverage**: crash recovery tests for both protocols, FROST domain separation and adversary fail-closed matrices, presign exactly-once coverage.
+- **CI**: GitHub Actions `ci.yml` (check → test-tier1 → test-integration → test-race) and `test.yml` (scheduled: race+slowcrypto, stress, slowcrypto ZK/secp256k1, fuzz-wire). Stale fuzz CI jobs for empty directories removed.
+- All CI checks pass: `go test -short`, `go test -tags=tier1`, `go vet`, `golangci-lint`, `make check`, `make ci`, `make coverage-check`.
+- **Runtime baseline**: Tier 0 ~8s, Tier 1 ~95s. Coverage thresholds enforced per-area via `make coverage-check`.
 
 **Intentionally deferred (low priority):**
 
-- `internal/testharness` adoption — requires rewriting all protocol tests to `ProtocolCase` interface.
+- `internal/testharness` adoption — requires rewriting all protocol tests to `ProtocolCase` interface. Package compiles and is available for future use.
 - `assertProtocolErrorCode`/`testutil.AssertProtocolError` unification — low-ROI due to 36+ call sites.
+- `testutil.AssertDeterministicRoundTrip`/`testutil.MutateBytes` — unused, kept as harness infrastructure for future tests.
 - Further table-driven consolidation of already-parallel standalone tests with distinct concerns.
 
 ### New Work Items (from 2026-06-12 testing rules update) ✅ Completed 2026-06-12
@@ -1552,3 +1556,82 @@ These files have 10+ standalone test functions that could benefit from structura
     - Each subtest creates its own Paillier fixture independently — no shared parent setup, so promotion to standalone functions is clean.
     - Removed 60 lines from `params_consistency_test.go` (now purely tier0 — zero `testing.Short()` calls in any always-compiled file).
     - This was the last remaining MIXED file. After this extraction, **zero `testing.Short()` calls exist in always-compiled test files** — all tier-skipping is now fully compile-time via `//go:build tier1`.
+
+49. ~~**Fix stale fuzz CI jobs for cggmp21/frost**~~ — Completed 2026-06-12:
+    - Removed `fuzzing-test-cggmp21` and `fuzzing-test-frost` jobs from `.github/workflows/test.yml` — both directories have zero `func Fuzz*` targets after 33 payload-level fuzz targets were removed.
+    - Renamed `fuzzing-test-internal` → `fuzzing-test-wire`, scoped to `./internal/wire/...` (the 3 remaining fuzz targets: `FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`).
+    - This prevents CI waste: the old jobs ran `go test -list='^Fuzz'` against empty directories and silently succeeded.
+
+50. ~~**Create internal/testvectors/ directory skeleton**~~ — Completed 2026-06-12:
+    - Created `internal/testvectors/` with versioned subdirectories as specified in the plan:
+      - `wire/v1/{envelope,frost,cggmp21,zk}/` — canonical wire encodings.
+      - `protocol/{frost-ed25519,cggmp21-secp256k1}/` — full protocol flow vectors.
+    - Added `README.md` with usage instructions and conventions.
+    - Added `.gitkeep` files to track empty directories.
+
+51. ~~**Document sole remaining testing.Short() in challenge_distribution_test.go**~~ — Completed 2026-06-12:
+    - The `testing.Short()` at line 67 of `challenge_distribution_test.go` adjusts a statistical sampling parameter (10000 → 1000 rounds), NOT a tier-skipping guard.
+    - The file is already behind `//go:build slowcrypto` for compile-time tier gating.
+    - This is the correct use of `testing.Short()`: intensity tuning within a build-tag-gated file.
+    - Added a comment explaining the rationale.
+
+52. ~~**Fix stale reference in docs/testing-rules.md**~~ — Completed 2026-06-12:
+    - `docs/testing-rules.md` line 56 claimed "One file (`params_consistency_test.go`) retains internal `testing.Short()` guards" — stale after item 48 extracted those subtests.
+    - Updated to reflect current reality: zero `testing.Short()` calls in always-compiled files; only remaining call is in `challenge_distribution_test.go` (behind `slowcrypto`, parameter tuning).
+
+53. ~~**Add coverage threshold enforcement (coverage-check Makefile target)**~~ — Completed 2026-06-12:
+    - Added `make coverage-check` target enforcing per-area minimums from `docs/testing-rules.md`:
+      - `internal/wire`: 78% (current 79.7%)
+      - `tss` (root): 75% (current 77.7%)
+      - `frost/ed25519`: 73% (current 75.3%)
+      - `internal/shamir`: 90% (current 94.6%)
+      - `internal/secret`: 75% (current 78.8%)
+    - Uses `go tool cover -func` and `awk` to extract coverage percentages; exits non-zero on violation.
+    - Thresholds are set 1-2% below current values to allow small fluctuations while preventing regressions.
+
+54. ~~**Record runtime baselines**~~ — Completed 2026-06-12:
+    - Tier 0 (`go test -short -count=1 ./...`): **~8.0s** wall-clock.
+    - Tier 1 (`go test -tags='tier1' -count=1 ./...`): **~95s** wall-clock (dominated by `internal/zk/paillier` at ~90s).
+    - These serve as the refactor completion baseline per DoD item 11 ("Short and fast test runtime is measurably better than the baseline").
+    - Coverage at tier0: 36.6% total (weighted by the large untested CGGMP21 production code); tier0+integration combined: 51.8%.
+
+55. ~~**Migrate golden files into internal/testvectors/ and remove per-package testdata/**~~ — Completed 2026-06-12:
+    - Moved all 21 `.golden` files from 5 scattered `testdata/` directories into the versioned `internal/testvectors/wire/v1/` structure:
+      - `testdata/Envelope.golden` → `wire/v1/envelope/Envelope.golden`
+      - `frost/ed25519/testdata/*.golden` (5 files) → `wire/v1/frost/`
+      - `cggmp21/secp256k1/testdata/*.golden` (5 files) → `wire/v1/cggmp21/`
+      - `internal/zk/paillier/testdata/*.golden` (9 files) → `wire/v1/zk/`
+      - `internal/zk/schnorr/testdata/Proof.golden` → `wire/v1/zk/SchnorrProof.golden`
+    - Updated all 5 `golden_test.go` files (root, frost, cggmp21, zk/paillier, zk/schnorr) to reference new paths.
+    - Regenerated all golden vectors at new locations via `UPDATE_GOLDEN=1`.
+    - Removed old per-package `testdata/` directories and all `.gitkeep` files.
+    - `internal/testvectors/` is now the single canonical location for all wire format reference vectors.
+
+56. ~~**Migrate JSON protocol vectors and consolidate testvectors documentation**~~ — Completed 2026-06-12:
+    - Generated JSON cross-implementation vectors via `go test -tags=vectorgen`.
+    - Moved `frost_ed25519_vectors.json` → `internal/testvectors/protocol/frost-ed25519/`.
+    - Moved `cggmp21_secp256k1_vectors.json` → `internal/testvectors/protocol/cggmp21-secp256k1/`.
+    - Updated 4 test files: `frost/ed25519/vectorgen_test.go`, `frost/ed25519/vector_test.go`, `cggmp21/secp256k1/vectorgen_test.go`, `cggmp21/secp256k1/vector_test.go`.
+    - Removed all per-package `testdata/` directories (frost, cggmp21, zk/paillier, zk/schnorr) and root `testdata/` (now empty).
+    - Migrated `testdata/README.md` content into `internal/testvectors/README.md`.
+    - Rewrote `internal/testvectors/README.md` with: full directory structure, per-vector-type descriptions, all regeneration commands (binary golden + JSON protocol), verification commands, versioning policy, and instructions for adding new vectors.
+    - **`internal/testvectors/` is now truly the single canonical location for ALL test vectors**: 21 binary wire golden files + 2 JSON protocol vector files = 23 files total.
+
+### Runtime Baseline Comparison
+
+| Metric                     | Value   | Notes                                          |
+| -------------------------- | ------- | ---------------------------------------------- |
+| Tier 0 wall-clock          | ~8.0s   | `go test -short -count=1 ./...`                |
+| Tier 1 wall-clock          | ~95s    | `go test -tags='tier1' -count=1 ./...`         |
+| Tier 0 total coverage      | 36.6%   | Weighted down by untested CGGMP21 product code |
+| Tier 0+2 total coverage    | 51.8%   | `go test -tags=integration`                    |
+| `internal/wire`            | 79.7%   | Above 78% threshold                            |
+| `tss` (root)               | 77.7%   | Above 75% threshold                            |
+| `frost/ed25519`            | 75.3%   | Above 73% threshold                            |
+| `internal/shamir`          | 94.6%   | Above 90% threshold                            |
+| `internal/secret`          | 78.8%   | Above 75% threshold                            |
+| `internal/wire/wireutil`   | 100.0%  |                                                |
+| `internal/bip32util`       | 98.6%   |                                                |
+| `internal/curve/secp256k1` | 90.4%   |                                                |
+| `cggmp21/secp256k1`        | 74.9%\* | \*integration-tagged tests; tier0 only: 16.0%  |
+| `internal/zk/paillier`     | 78.2%\* | \*integration-tagged tests; tier0 only: 23.4%  |

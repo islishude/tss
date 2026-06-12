@@ -63,6 +63,10 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 
 	// Bit distribution test: generate many y_i values and check bit balance.
 	// Sample 10000 y values from different transcripts.
+	//
+	// testing.Short() adjusts intensity (10000 → 1000 rounds), not tier-skipping.
+	// This file is already behind //go:build slowcrypto for compile-time tier gating.
+	// Within the slowcrypto tier, -short reduces statistical sample size for faster CI.
 	nRounds := 10000
 	if testing.Short() {
 		nRounds = 1000
