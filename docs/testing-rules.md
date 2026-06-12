@@ -8,18 +8,18 @@ The goal is not to maximize test count or global coverage. The goal is to make s
 
 Tests are grouped by cost and purpose.
 
-| Tier   | Trigger                   | Purpose                                                                                                                                                                     |
-| ------ | ------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Tier 0 | default / `-short`        | Fast deterministic tests: wire encoding, guards, replay, party sets, state-machine units, malformed inputs, domain construction, and blame evidence. No full crypto keygen. |
-| Tier 1 | default non-short         | Fast crypto correctness with reduced parameters, cached fixtures, MtA correctness, proof correctness, and small deterministic protocol components.                          |
-| Tier 2 | `integration`             | Full protocol lifecycle tests: keygen, presign, sign, refresh, reshare, BIP32, duplicate/replay handling, and guard integration.                                            |
-| Tier 3 | `slowcrypto`              | Production-parameter Paillier and ZK smoke tests. Keep these narrow and intentional.                                                                                        |
-| Tier 4 | `stress`, race, long fuzz | Concurrency, repeated randomized schedules, long fuzzing, race-sensitive flows, and repeated protocol execution. Explicit or nightly only.                                  |
+| Tier   | Trigger             | Purpose                                                                                                                                                                     |
+| ------ | ------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Tier 0 | default / `-short`  | Fast deterministic tests: wire encoding, guards, replay, party sets, state-machine units, malformed inputs, domain construction, and blame evidence. No full crypto keygen. |
+| Tier 1 | `tier1` tag         | Fast crypto correctness with reduced parameters, cached fixtures, MtA correctness, proof correctness, and small deterministic protocol components.                          |
+| Tier 2 | `integration` tag   | Full protocol lifecycle tests: keygen, presign, sign, refresh, reshare, BIP32, duplicate/replay handling, and guard integration.                                            |
+| Tier 3 | `slowcrypto` tag    | Production-parameter Paillier and ZK smoke tests. Keep these narrow and intentional.                                                                                        |
+| Tier 4 | `stress` / explicit | Concurrency, repeated randomized schedules, long fuzzing, race-sensitive flows, and repeated protocol execution. Explicit or nightly only.                                  |
 
 Rules:
 
 - Tier 0 must be deterministic, fast, and free of full Paillier keygen or complete CGGMP21 keygen/presign flows.
-- Tier 1 may use reduced crypto parameters and cached fixtures, but must remain suitable for local fast feedback.
+- Tier 1 must use the `tier1` build tag. May use reduced crypto parameters and cached fixtures, but must remain suitable for local fast feedback.
 - Tier 2 must use the `integration` build tag.
 - Tier 3 must use the `slowcrypto` build tag and should cover production-parameter smoke behavior, not exhaustive matrices.
 - Tier 4 must be opt-in and must not run as part of ordinary local checks.
@@ -28,7 +28,7 @@ Rules:
 
 ### Build Tag Strategy
 
-The current tiering relies on `testing.Short()` to skip expensive Tier 1 tests in `-short` mode. This is fragile: a new slow test that forgets `testing.Short()` silently slows down `test-fast`. A more explicit approach uses Go build tags to separate tiers at compile time:
+Tier separation uses Go build tags at compile time rather than runtime `testing.Short()` checks. The original tiering relied on `testing.Short()` to skip expensive Tier 1 tests in `-short` mode, but this was fragile: a new slow test that forgets `testing.Short()` would silently slow down `test-fast`. The migration to explicit build tags (completed 2026-06-12) fixes this:
 
 ```text
 //go:build tier1       — small-param crypto correctness (requires explicit tag)
@@ -38,22 +38,22 @@ The current tiering relies on `testing.Short()` to skip expensive Tier 1 tests i
 //go:build vectorgen   — test vector generation only
 ```
 
-Tier 0 tests remain untagged and always compile. Tier 1 tests use `//go:build tier1`. Integration, slowcrypto, stress, and vectorgen tags remain as they are today.
+Tier 0 tests remain untagged and always compile. Tier 1 tests use `//go:build tier1`. Integration, slowcrypto, stress, and vectorgen tags separate the remaining tiers.
 
 Corresponding Makefile targets:
 
 ```make
-test:
-	go test -tags=tier0 -timeout 1m ./...
+test-unit:
+	go test -short -timeout 1m ./...
 
 test-fast:
-	go test -tags='tier0,tier1' -timeout 5m ./...
+	go test -tags='tier1' -timeout 5m ./...
 
 test-integration:
 	go test -tags=integration -timeout 20m ./...
 ```
 
-This is a one-way migration: existing Tier 1 tests without `testing.Short()` guards would be moved behind the `tier1` build tag, making the separation explicit at compile time rather than at runtime.
+The migration from `testing.Short()` to `//go:build tier1` is complete for all standalone tier1 tests. One file (`params_consistency_test.go`) retains internal `testing.Short()` guards for mixed subtests that share expensive Paillier keygen setup — see `docs/test-refactor-plan.md` for details.
 
 ### Test Budget
 
@@ -181,7 +181,7 @@ Recommended behavior:
 
 ```sh
 go test -short -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 1m ./...
-go test -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 5m ./...
+go test -tags='tier1' -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 5m ./...
 go test -tags=integration -p 2 -parallel $(INTEGRATION_PARALLEL) -timeout 20m ./...
 ```
 

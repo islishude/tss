@@ -192,7 +192,7 @@ Follow `docs/testing-rules.md` for the authoritative tier definitions. This refa
 | Tier   | Trigger             | Contents                                                                                                                                               |
 | ------ | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------ |
 | Tier 0 | default / `-short`  | Fast deterministic tests: wire, guard, replay, encoding, redaction, copy safety, state-machine units, malformed input. No full CGGMP21 keygen/presign. |
-| Tier 1 | `smallcrypto` tag   | Reduced-parameter crypto correctness: small-param Paillier, ZK proof checks, MtA, Shamir, curve ops, FROST small flows.                                |
+| Tier 1 | `tier1` tag         | Reduced-parameter crypto correctness: small-param Paillier, ZK proof checks, MtA, Shamir, curve ops, FROST small flows.                                |
 | Tier 2 | `integration` tag   | Full FROST and CGGMP21 lifecycle tests.                                                                                                                |
 | Tier 3 | `slowcrypto` tag    | Production-parameter Paillier/ZK smoke. Narrow and intentional.                                                                                        |
 | Tier 4 | `stress` / explicit | Stress, race-heavy, long fuzz, repeated randomized schedules.                                                                                          |
@@ -204,7 +204,7 @@ test-unit:
 	go test -short -timeout 1m ./...
 
 test-fast:
-	go test -tags=smallcrypto -timeout 5m ./...
+	go test -tags='tier1' -timeout 5m ./...
 
 test-integration:
 	go test -tags=integration -timeout 20m ./...
@@ -216,7 +216,7 @@ test-stress:
 	go test -race -tags='integration slowcrypto stress' -count=10 -timeout 5h ./...
 ```
 
-Tier 0 is always compiled. Tier 1 uses `//go:build smallcrypto` to separate small-parameter crypto tests from pure unit tests at compile time. This is explicit and cannot be silently bypassed by forgetting `testing.Short()`.
+Tier 0 is always compiled. Tier 1 uses `//go:build tier1` to separate small-parameter crypto tests from pure unit tests at compile time. This is explicit and cannot be silently bypassed by forgetting `testing.Short()`.
 
 ## 6. Table-Driven Testing Guidance
 
@@ -330,7 +330,7 @@ The semaphore (capacity 2) combined `t.Parallel()` with channel acquire/release.
 
 ```make
 test-integration:
-	go test -tags=integration -p 2 -parallel $(INTEGRATION_PARALLEL) -timeout 20m ./...
+	go test -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) $(PKGS)
 ```
 
 With fixture caching (`CachedKeygenShares`) reducing keygen cost, there is even less reason to throttle test entry — tests spend most time in protocol flows that benefit from unconstrained `t.Parallel()` when tests own their own state.
@@ -348,11 +348,11 @@ INTEGRATION_PARALLEL ?= 2
 Recommended targets:
 
 ```make
-test:
+test-unit:
 	go test -short -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 1m ./...
 
 test-fast:
-	go test -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 5m ./...
+	go test -tags='tier1' -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout 5m ./...
 
 test-integration:
 	go test -tags=integration -p 2 -parallel $(INTEGRATION_PARALLEL) -timeout 20m ./...
@@ -1303,9 +1303,9 @@ All six new work items were completed on 2026-06-12 as part of the final impleme
     - 8 ALL_TIER1 files received `//go:build tier1` with all `testing.Short()` guards removed: `internal/zk/paillier/encryption_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, `proofs_test.go`, `extractor_test.go`, `mta_response_test.go`, `adversarial_test.go`, `leakage_test.go`
     - 1 ALL_TIER1 MTA file: `internal/mta/finish_test.go` with `//go:build tier1`
     - 1 MIXED file extracted: `internal/zk/paillier/legacy_proofs_test.go` → `legacy_proofs_tier1_test.go` (1 Tier 1 test extracted)
-    - Shared helpers (`testPaillierKey`, `cloneEncryptionProof`, `cloneLogProof`, etc.) extracted to `internal/zk/paillier/proof_helpers_test.go` (always compiled, no build tag) to keep them available to both Tier 0 and Tier 1 tests
+    - Shared helpers (`testPaillierKey`, `mtaResponseForTest`, etc.) extracted to `internal/zk/paillier/proof_helpers_test.go` (always compiled, no build tag) to keep them available to both Tier 0 and Tier 1 tests. Note: standalone clone helpers were later replaced by `Clone()` methods on proof types (item 35).
     - `Makefile` `test-fast` target updated: `go test -tags='tier1'`
-    - Remaining MIXED files (`new_proofs_test.go`, `relation_audit_test.go`, `range_boundary_test.go`, `params_consistency_test.go`) retain `testing.Short()` for existing Tier 1 tests — full extraction deferred as future work due to complexity of cross-cutting helper dependencies
+    - Remaining MIXED files (`new_proofs_test.go`, `relation_audit_test.go`, `range_boundary_test.go`, `params_consistency_test.go`) and MTA/paillier files retained `testing.Short()` for Tier 1 tests — full extraction was initially deferred but later completed 2026-06-12 in items 29–34
     - Both `go vet ./...` and `go vet -tags='tier1' ./...` pass cleanly
 
 21. ~~**Test budget checker**~~ — Completed 2026-06-12:
