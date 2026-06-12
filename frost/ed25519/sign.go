@@ -13,25 +13,26 @@ import (
 
 // SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
-	mu            sync.Mutex
-	key           *KeyShare
-	sessionID     tss.SessionID
-	log           tss.Logger
-	limits        Limits
-	message       []byte
-	signers       []tss.PartyID
-	commitments   map[tss.PartyID]nonceCommitment
-	partials      map[tss.PartyID]*fed.Scalar
-	dNonce        []byte
-	eNonce        []byte
-	deltaScalar   *fed.Scalar
-	verifyKey     []byte
-	partialSent   bool
-	completed     bool
-	aborted       bool
-	signature     []byte
-	commitMessage tss.Envelope
-	guard         *tss.EnvelopeGuard
+	mu               sync.Mutex
+	key              *KeyShare
+	sessionID        tss.SessionID
+	log              tss.Logger
+	limits           Limits
+	message          []byte
+	signers          []tss.PartyID
+	commitments      map[tss.PartyID]nonceCommitment
+	partials         map[tss.PartyID]*fed.Scalar
+	partialEnvelopes map[tss.PartyID]tss.Envelope
+	dNonce           []byte
+	eNonce           []byte
+	deltaScalar      *fed.Scalar
+	verifyKey        []byte
+	partialSent      bool
+	completed        bool
+	aborted          bool
+	signature        []byte
+	commitMessage    tss.Envelope
+	guard            *tss.EnvelopeGuard
 }
 
 type nonceCommitment struct {
@@ -85,6 +86,12 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	limits := DefaultLimits()
 	if opts.Limits != nil {
 		limits = *opts.Limits
+	}
+	if limits.Payload.MaxMessageBytes <= 0 {
+		return nil, nil, errors.New("max message bytes must be positive")
+	}
+	if len(message) > limits.Payload.MaxMessageBytes {
+		return nil, nil, fmt.Errorf("message too large: %d > %d", len(message), limits.Payload.MaxMessageBytes)
 	}
 	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, nil, err
@@ -154,19 +161,20 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		return nil, nil, err
 	}
 	s := &SignSession{
-		key:           key,
-		sessionID:     sessionID,
-		log:           tss.NopLogger(),
-		limits:        limits,
-		message:       append([]byte(nil), message...),
-		signers:       signers,
-		commitments:   map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
-		partials:      make(map[tss.PartyID]*fed.Scalar),
-		dNonce:        dBytes,
-		eNonce:        eBytes,
-		deltaScalar:   deltaScalar,
-		verifyKey:     verifyKey,
-		commitMessage: env,
+		key:              key,
+		sessionID:        sessionID,
+		log:              tss.NopLogger(),
+		limits:           limits,
+		message:          append([]byte(nil), message...),
+		signers:          signers,
+		commitments:      map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
+		partials:         make(map[tss.PartyID]*fed.Scalar),
+		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
+		dNonce:           dBytes,
+		eNonce:           eBytes,
+		deltaScalar:      deltaScalar,
+		verifyKey:        verifyKey,
+		commitMessage:    env,
 	}
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
@@ -228,8 +236,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
-			s.clearNonceBytes()
+			s.abort()
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {
@@ -272,11 +279,15 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		}
 		if existing, ok := s.partials[env.From]; ok {
 			if existing.Equal(partial) == 1 {
+				if _, ok := s.partialEnvelopes[env.From]; !ok {
+					s.partialEnvelopes[env.From] = env.Clone()
+				}
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting partial signature"))
 		}
 		s.partials[env.From] = partial
+		s.partialEnvelopes[env.From] = env.Clone()
 		return nil, s.tryAggregate()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
@@ -319,6 +330,11 @@ func (s *SignSession) clearNonceBytes() {
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
+	if key.Threshold < limits.Threshold.MinProductionThreshold {
+		if !limits.Threshold.AllowOneOfOne || key.Threshold != 1 || len(key.Parties) != 1 {
+			return fmt.Errorf("key threshold %d is below production minimum %d", key.Threshold, limits.Threshold.MinProductionThreshold)
+		}
+	}
 	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits.ThresholdLimits())
 }
 

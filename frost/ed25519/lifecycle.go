@@ -12,21 +12,9 @@ func (s *KeygenSession) Destroy() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clearScalarMap(s.shares)
-	clearScalars(s.ownPoly)
-	clearEnvelopePayloads(s.ownMessages)
-	for _, cc := range s.chainCodes {
-		clear(cc)
-	}
-	s.chainCodes = nil
-	s.ownPoly = nil
-	s.ownMessages = nil
+	s.abort()
 	if s.keyShare != nil {
 		s.keyShare.Destroy()
-	}
-	if s.pending != nil {
-		s.pending.Destroy()
-		s.pending = nil
 	}
 }
 
@@ -37,11 +25,20 @@ func (s *SignSession) Destroy() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.abort()
+}
+
+func (s *SignSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
 	s.clearNonceBytes()
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
 	}
 	clearScalarMap(s.partials)
+	s.partialEnvelopes = nil
 	clear(s.message)
 	s.message = nil
 	clear(s.verifyKey)
@@ -57,11 +54,34 @@ func (s *ReshareSession) Destroy() {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	clearScalarMap(s.shares)
+	s.abort()
 	if s.newShare != nil {
 		s.newShare.Destroy()
 	}
 	s.newShare = nil
+}
+
+func (s *ReshareSession) abort() {
+	if s == nil {
+		return
+	}
+	s.aborted = true
+	s.clearSensitive()
+}
+
+func (s *KeygenSession) clearIntermediateSecrets() {
+	if s == nil {
+		return
+	}
+	clearScalarMap(s.shares)
+	clearScalars(s.ownPoly)
+	clearEnvelopePayloads(s.ownMessages)
+	for _, cc := range s.chainCodes {
+		clear(cc)
+	}
+	s.chainCodes = nil
+	s.ownPoly = nil
+	s.ownMessages = nil
 }
 
 func clearScalars(xs []*fed.Scalar) {

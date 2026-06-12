@@ -157,6 +157,41 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	}
 }
 
+func TestFROSTKeygenCompletionClearsIntermediateSecrets(t *testing.T) {
+	t.Parallel()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keygen, out, err := StartKeygen(tss.ThresholdConfig{
+		Threshold: 1,
+		Parties:   []tss.PartyID{1},
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 || len(out[0].Payload) == 0 {
+		t.Fatal("keygen completion cleared caller-owned outbound payload")
+	}
+	if share, ok := keygen.KeyShare(); !ok || share == nil {
+		t.Fatal("single-party keygen did not complete")
+	}
+	if len(keygen.shares) != 0 {
+		t.Fatal("completed keygen retained received share scalars")
+	}
+	if keygen.ownPoly != nil {
+		t.Fatal("completed keygen retained local polynomial")
+	}
+	if keygen.ownMessages != nil {
+		t.Fatal("completed keygen retained secret outbound messages")
+	}
+	if keygen.chainCodes != nil {
+		t.Fatal("completed keygen retained chain codes")
+	}
+}
+
 func TestFROSTTestLimitsAllowsOneOfOne(t *testing.T) {
 	t.Parallel()
 	limits := TestLimits()

@@ -28,11 +28,12 @@ func (s *SignSession) tryAggregate() error {
 		partial := s.partials[id]
 		// Verify each partial before aggregation so failures can be blamed on a signer.
 		if err := s.verifyPartial(id, partial, rhos[id], c); err != nil {
+			blameEnv := s.partialBlameEnvelope(id, partial)
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 2,
 				Party: id,
-				Blame: frostSignBlame(s.sessionID, s.signers, id, s.verifyKey),
+				Blame: frostSignBlame(blameEnv, s.signers, s.verifyKey),
 				Err:   err,
 			}
 		}
@@ -51,6 +52,29 @@ func (s *SignSession) tryAggregate() error {
 	s.signature = sig
 	s.completed = true
 	return nil
+}
+
+func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) tss.Envelope {
+	if env, ok := s.partialEnvelopes[id]; ok {
+		return env.Clone()
+	}
+	payload, err := marshalSignPartialPayload(signPartialPayload{Z: partial.Bytes()})
+	if err != nil {
+		return tss.Envelope{}
+	}
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    protocol,
+		Version:     tss.Version,
+		SessionID:   s.sessionID,
+		Round:       2,
+		From:        id,
+		PayloadType: payloadSignPartial,
+		Payload:     payload,
+	})
+	if err != nil {
+		return tss.Envelope{}
+	}
+	return env
 }
 
 func (s *SignSession) verifyPartial(id tss.PartyID, z *fed.Scalar, rho *fed.Scalar, challenge *fed.Scalar) error {

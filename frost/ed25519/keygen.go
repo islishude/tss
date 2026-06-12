@@ -56,6 +56,11 @@ func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType 
 // WireVersion returns the wire format version for keygenSharePayload.
 func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
 
+// MarshalJSON rejects default JSON encoding of secret DKG shares.
+func (keygenSharePayload) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("frost ed25519 keygen share payload must use wire encoding (MarshalBinary)")
+}
+
 // StartKeygen starts dealerless DKG and returns outbound round-one envelopes.
 func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
 	return StartKeygenWithOptions(config, KeygenOptions{})
@@ -135,7 +140,10 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		}
 		out = append(out, shareEnv)
 	}
-	s.ownMessages = append([]tss.Envelope(nil), out...)
+	s.ownMessages = make([]tss.Envelope, len(out))
+	for i := range out {
+		s.ownMessages[i] = out[i].Clone()
+	}
 	completionOut, err := s.tryComplete()
 	if err != nil {
 		return nil, nil, err
@@ -276,6 +284,7 @@ func (s *KeygenSession) abort() {
 		s.pending.Destroy()
 	}
 	s.pending = nil
+	s.clearIntermediateSecrets()
 }
 
 func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) (tss.Envelope, error) {

@@ -75,6 +75,10 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		s.clearNonceBytes()
 		return nil, err
 	}
+	if s.partialEnvelopes == nil {
+		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope)
+	}
+	s.partialEnvelopes[s.key.Party] = env.Clone()
 	s.partialSent = true
 	s.clearNonceBytes()
 	if err := s.tryAggregate(); err != nil {

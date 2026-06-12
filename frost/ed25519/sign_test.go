@@ -3,9 +3,12 @@ package ed25519
 import (
 	"bytes"
 	stded25519 "crypto/ed25519"
+	"crypto/sha256"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -86,6 +89,26 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 	}
 }
 
+func TestStartSignRejectsMessageOverLimit(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := TestLimits()
+	limits.Payload.MaxMessageBytes = 3
+	session, out, err := StartSignWithOptions(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("four"), SignOptions{
+		Limits: &limits,
+	})
+	if err == nil {
+		t.Fatal("expected oversized message to be rejected")
+	}
+	if session != nil || out != nil {
+		t.Fatal("oversized message produced signing session or outbound messages")
+	}
+}
+
 func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
@@ -153,6 +176,74 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	}
 }
 
+func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signers := []tss.PartyID{1, 2}
+	message := []byte("bad partial evidence")
+
+	session1, out1, err := StartSignWithOptions(shares[1], sessionID, signers, message, SignOptions{
+		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x11}, 64)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1.SetGuard(testFROSTGuard(1, tss.PartySet(shares[1].Parties), sessionID))
+	session2, out2, err := StartSignWithOptions(shares[2], sessionID, signers, message, SignOptions{
+		NonceReader: bytes.NewReader(bytes.Repeat([]byte{0x22}, 64)),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session2.SetGuard(testFROSTGuard(2, tss.PartySet(shares[2].Parties), sessionID))
+
+	if _, err := session1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+		t.Fatal(err)
+	}
+	partials2, err := session2.HandleSignMessage(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(partials2) != 1 || partials2[0].PayloadType != payloadSignPartial {
+		t.Fatalf("expected one partial from party 2, got %d", len(partials2))
+	}
+
+	partialPayload, err := unmarshalSignPartialPayload(partials2[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	partialScalar, err := edcurve.ScalarFromCanonical(partialPayload.Z)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badScalar := fed.NewScalar().Add(partialScalar, edcurve.ScalarOne())
+	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: badScalar.Bytes()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPartial := partials2[0]
+	badPartial.Payload = badPayload
+	badPartial = badPartial.RecomputeTranscriptHash()
+
+	_, err = session1.HandleSignMessage(testutil.DeliverEnvelope(badPartial))
+	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
+		t.Fatal("invalid partial did not carry blame evidence")
+	}
+	evidence, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	if err != nil {
+		t.Fatal(err)
+	}
+	wantHash := sha256.Sum256(badPayload)
+	if !bytes.Equal(evidence.PayloadHash, wantHash[:]) {
+		t.Fatal("blame evidence did not bind the bad partial payload")
+	}
+}
+
 func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message, randomness []byte) nonceCommitment {
 	t.Helper()
 	_, out, err := StartSignWithOptions(key, sessionID, signers, message, SignOptions{
@@ -186,6 +277,16 @@ func TestSignPartialPayloadMarshalJSONRejects(t *testing.T) {
 	sp := signPartialPayload{Z: []byte{0x03}}
 	if _, err := sp.MarshalJSON(); err == nil {
 		t.Fatal("signPartialPayload.MarshalJSON should reject JSON encoding")
+	}
+}
+
+func TestSecretSharePayloadMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	if _, err := (keygenSharePayload{Share: []byte{0x01}}).MarshalJSON(); err == nil {
+		t.Fatal("keygenSharePayload.MarshalJSON should reject JSON encoding")
+	}
+	if _, err := (reshareSharePayload{Share: []byte{0x02}}).MarshalJSON(); err == nil {
+		t.Fatal("reshareSharePayload.MarshalJSON should reject JSON encoding")
 	}
 }
 

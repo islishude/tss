@@ -111,6 +111,65 @@ func TestStartRefreshRequiresMatchingSelf(t *testing.T) {
 	}
 }
 
+func TestStartReshareValidatesNewParticipantSet(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	config := tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   []tss.PartyID{1, 2, 3},
+		Self:      1,
+		SessionID: sessionID,
+	}
+
+	for _, tc := range []struct {
+		name       string
+		newParties []tss.PartyID
+	}{
+		{name: "zero party", newParties: []tss.PartyID{0, 1, 2}},
+		{name: "duplicate party", newParties: []tss.PartyID{1, 1, 2}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			session, out, err := StartReshare(shares[1], tc.newParties, 2, config)
+			if err == nil || !strings.Contains(err.Error(), "invalid new participant set") {
+				t.Fatalf("expected invalid new participant set rejection, got %v", err)
+			}
+			if session != nil || out != nil {
+				t.Fatal("invalid reshare target produced session or outbound messages")
+			}
+		})
+	}
+}
+
+func TestStartReshareRejectsProductionOneOfOneTarget(t *testing.T) {
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	saved := testDefaultLimits
+	testDefaultLimits = nil
+	defer func() { testDefaultLimits = saved }()
+
+	session, out, err := StartReshare(shares[1], []tss.PartyID{1}, 1, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   []tss.PartyID{1, 2},
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err == nil || !strings.Contains(err.Error(), "below production minimum") {
+		t.Fatalf("expected production threshold rejection, got %v", err)
+	}
+	if session != nil || out != nil {
+		t.Fatal("invalid production reshare target produced session or outbound messages")
+	}
+}
+
 func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
@@ -176,6 +235,33 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 	}
 }
 
+func TestReshareNewRecipientCanCreateGuard(t *testing.T) {
+	t.Parallel()
+	oldShares := frostKeygen(t, 2, 3)
+	oldParties := []tss.PartyID{1, 2, 3}
+	newParties := []tss.PartyID{2, 3, 4}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipient, err := StartReshareRecipient(oldShares[1].PublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      4,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard, err := recipient.NewGuard(nil)
+	if err != nil {
+		t.Fatalf("new-only recipient could not create reshare guard: %v", err)
+	}
+	if guard.Self != 4 {
+		t.Fatalf("guard self = %d, want 4", guard.Self)
+	}
+}
+
 func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
@@ -237,5 +323,32 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
 	if err == nil || !strings.Contains(err.Error(), "reshare session is aborted") {
 		t.Fatalf("expected terminal aborted error, got %v", err)
+	}
+}
+
+func TestReshareCompletionClearsIntermediateShares(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 1, 1)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, out, err := StartRefresh(shares[1], tss.ThresholdConfig{
+		Threshold: 1,
+		Parties:   []tss.PartyID{1},
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) == 0 || len(out[0].Payload) == 0 {
+		t.Fatal("refresh completion cleared caller-owned outbound payload")
+	}
+	if !session.completed {
+		t.Fatal("single-party refresh did not complete")
+	}
+	if len(session.shares) != 0 {
+		t.Fatal("completed reshare retained intermediate share scalars")
 	}
 }

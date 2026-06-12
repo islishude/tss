@@ -4,8 +4,10 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"math/big"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
@@ -55,6 +57,20 @@ func TestDerivePublicKey(t *testing.T) {
 		}
 		if _, err := edcurve.PointFromBytes(child); err != nil {
 			t.Fatal(err)
+		}
+	})
+
+	t.Run("identity child is rejected", func(t *testing.T) {
+		t.Parallel()
+
+		parent := fed.NewIdentityPoint().ScalarBaseMult(edcurve.ScalarOne()).Bytes()
+		negativeOne := new(big.Int).Sub(edcurve.Order(), big.NewInt(1))
+		shift, err := scalarBytes(negativeOne)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := DerivePublicKey(parent, shift); err == nil {
+			t.Fatal("DerivePublicKey accepted identity child public key")
 		}
 	})
 }

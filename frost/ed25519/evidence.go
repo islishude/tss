@@ -78,18 +78,10 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 }
 
 // frostSignBlame builds Blame evidence for an invalid FROST partial signature.
-func frostSignBlame(sessionID tss.SessionID, signers []tss.PartyID, signer tss.PartyID, publicKey []byte) *tss.Blame {
-	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
-		Version:     tss.Version,
-		SessionID:   sessionID,
-		Round:       2,
-		From:        signer,
-		PayloadType: payloadSignPartial,
-	})
+func frostSignBlame(env tss.Envelope, signers []tss.PartyID, publicKey []byte) *tss.Blame {
 	return &tss.Blame{
 		Reason:  "invalid FROST partial signature",
-		Parties: []tss.PartyID{signer},
+		Parties: []tss.PartyID{env.From},
 		Evidence: frostMarshalEvidence(
 			env,
 			tss.EvidenceKindFrostPartialSignature,

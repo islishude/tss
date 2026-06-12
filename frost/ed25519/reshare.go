@@ -62,6 +62,11 @@ func (reshareSharePayload) WireType() string { return reshareSharePayloadWireTyp
 // WireVersion returns the wire format version for reshareSharePayload.
 func (reshareSharePayload) WireVersion() uint16 { return tss.Version }
 
+// MarshalJSON rejects default JSON encoding of secret reshare shares.
+func (reshareSharePayload) MarshalJSON() ([]byte, error) {
+	return nil, errors.New("frost ed25519 reshare share payload must use wire encoding (MarshalBinary)")
+}
+
 // Guard returns the session's envelope guard for use by transport adapters.
 func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 	if s == nil {
@@ -88,14 +93,60 @@ func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
 	}
-	// Use old parties as the guard's party set (the dealer set is the trusted set).
-	return tss.NewEnvelopeGuard(s.selfID, tss.PartySet(s.oldParties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
+	return tss.NewEnvelopeGuard(s.selfID, reshareGuardParties(s.oldParties, s.newParties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
+}
+
+func validateReshareTarget(parties []tss.PartyID, threshold int, limits Limits) error {
+	if len(parties) == 0 {
+		return errors.New("new participant set must not be empty")
+	}
+	if len(parties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many new parties: %d > %d", len(parties), limits.Threshold.MaxParties)
+	}
+	if threshold <= 0 {
+		return errors.New("invalid new threshold for reshare")
+	}
+	if threshold > len(parties) {
+		return errors.New("invalid new threshold for reshare")
+	}
+	if threshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("new threshold too large: %d > %d", threshold, limits.Threshold.MaxThreshold)
+	}
+	if threshold < limits.Threshold.MinProductionThreshold {
+		if !limits.Threshold.AllowOneOfOne || threshold != 1 || len(parties) != 1 {
+			return fmt.Errorf("new threshold %d is below production minimum %d", threshold, limits.Threshold.MinProductionThreshold)
+		}
+	}
+	if err := wire.ValidateStrictSortedIDs(parties); err != nil {
+		return fmt.Errorf("invalid new participant set: %w", err)
+	}
+	return nil
+}
+
+func reshareGuardParties(oldParties, newParties []tss.PartyID) tss.PartySet {
+	seen := make(map[tss.PartyID]struct{}, len(oldParties)+len(newParties))
+	union := make([]tss.PartyID, 0, len(oldParties)+len(newParties))
+	for _, id := range oldParties {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		union = append(union, id)
+	}
+	for _, id := range newParties {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		seen[id] = struct{}{}
+		union = append(union, id)
+	}
+	return tss.PartySet(tss.SortParties(union))
 }
 
 // StartReshare starts a FROST key resharing as an old-party dealer.
@@ -114,11 +165,8 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	newParties = tss.SortParties(newParties)
-	if newThreshold <= 0 || newThreshold > len(newParties) {
-		return nil, nil, errors.New("invalid new threshold for reshare")
-	}
-	if newThreshold > limits.Threshold.MaxThreshold {
-		return nil, nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.Threshold.MaxThreshold)
+	if err := validateReshareTarget(newParties, newThreshold, limits); err != nil {
+		return nil, nil, err
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
@@ -214,11 +262,8 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 	if err := wire.ValidateStrictSortedIDs(oldParties); err != nil {
 		return nil, fmt.Errorf("invalid old participant set: %w", err)
 	}
-	if newThreshold <= 0 || newThreshold > len(newParties) {
-		return nil, errors.New("invalid new threshold for reshare")
-	}
-	if newThreshold > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("new threshold too large: %d > %d", newThreshold, limits.Threshold.MaxThreshold)
+	if err := validateReshareTarget(newParties, newThreshold, limits); err != nil {
+		return nil, err
 	}
 	if !tss.ContainsParty(newParties, config.Self) {
 		return nil, errors.New("recipient must be in the new participant set")
@@ -341,8 +386,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	}
 	defer func() {
 		if shouldAbortSession(err) {
-			s.aborted = true
-			s.clearSensitive()
+			s.abort()
 		}
 	}()
 	if err := s.validateInbound(env); err != nil {

@@ -404,5 +404,8 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 		return nil, fmt.Errorf("invalid additive shift: %w", err)
 	}
 	shifted := edcurve.AddPoints(base, fed.NewIdentityPoint().ScalarBaseMult(shift))
+	if edcurve.IsIdentity(shifted) {
+		return nil, errors.New("derived public key is identity")
+	}
 	return shifted.Bytes(), nil
 }

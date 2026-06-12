@@ -29,6 +29,7 @@ func (s *ReshareSession) tryComplete() error {
 			return errors.New("reshared group public key does not match original")
 		}
 		s.completed = true
+		s.clearSensitive()
 		return nil
 	}
 	// Recipient: wait for commitments and shares from all old parties.
@@ -96,7 +97,7 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
 	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.refreshMode, s.commits, newCommitments, verificationShares)
-	s.newShare = &KeyShare{
+	newShare := &KeyShare{
 		Version:              tss.Version,
 		Party:                s.selfID,
 		Threshold:            s.newThreshold,
@@ -109,12 +110,18 @@ func (s *ReshareSession) tryComplete() error {
 		KeygenSessionID:      s.cfg.SessionID,
 		KeygenTranscriptHash: reshareTranscriptHash,
 	}
+	if err := newShare.ValidateConsistency(); err != nil {
+		newShare.Destroy()
+		return err
+	}
+	s.newShare = newShare
 	s.completed = true
+	s.clearSensitive()
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return s.newShare.ValidateConsistency()
+	return nil
 }
 
 func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
