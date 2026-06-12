@@ -9,7 +9,7 @@ on:
 permissions:
   contents: read
 
-# Tier 3 + Tier 4: Production security-parameter tests and stress tests.
+# Production security-parameter tests and stress tests.
 # Runs scheduled nightly runs only.
 jobs:
   test-race:
@@ -30,7 +30,7 @@ jobs:
           go-version: stable
 
       - name: Run Tier 3 slowcrypto tests
-        run: go test -v -race -tags 'integration slowcrypto' -timeout 5h ./...
+        run: go test -v -race -tags 'tier1 integration slowcrypto' -timeout 5h ./...
 
   test-stress-integration:
     name: Test Stress Integration(${{ matrix.os }})
@@ -50,7 +50,7 @@ jobs:
           go-version: stable
 
       - name: Run Tier 4 stress tests
-        run: go test -tags 'integration' -count=10 -timeout 5h ./...
+        run: go test -tags 'tier1 integration' -count=10 -timeout 5h ./...
 
   test-slowcrypto-zk:
     name: Test Stress ZK(${{ matrix.os }})

@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -10,9 +12,6 @@ import (
 )
 
 func TestModulusProofCGGMP24Checks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	domain := []byte("modulus proof")

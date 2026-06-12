@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -12,9 +14,6 @@ import (
 // the Ring-Pedersen commitment properly binds both witness components.
 func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params, stmt, _, proof := encProofFixture(t)
 	state := []byte("enc matrix")
 	if err := VerifyEnc(params, state, stmt, proof); err != nil {
@@ -45,9 +44,6 @@ func TestEncProofRejectsRPCommitmentWithWrongBase(t *testing.T) {
 // algebraic equations are coupled, so a cross-proof substitution should fail.
 func TestAffGProofRejectsCrossProofFieldSubstitution(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params1, stmt1, _, proof1 := affGProofFixture(t)
 	params2, stmt2, _, proof2 := affGProofFixture(t)
 	state := []byte("affg matrix")
@@ -85,9 +81,6 @@ func TestAffGProofRejectsCrossProofFieldSubstitution(t *testing.T) {
 // the statement, so changing any statement field causes rejection.
 func TestProofReplayAcrossDifferentStatements(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 
 	// EncProof replay.
 	t.Run("EncProof replay", func(t *testing.T) {
@@ -148,9 +141,6 @@ func TestProofReplayAcrossDifferentStatements(t *testing.T) {
 // the proof should still be sound.
 func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 512)
 	aux, _, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -258,9 +248,6 @@ func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
 // non-curve-point is rejected during structural validation.
 func TestAffGProofRejectsBxOffCurve(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params, stmt, _, proof := affGProofFixture(t)
 	state := []byte("affg matrix")
 
@@ -276,9 +263,6 @@ func TestAffGProofRejectsBxOffCurve(t *testing.T) {
 // The validatePositiveIntBytes check requires non-empty and no leading zero.
 func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("zero response test")
 	scalar := big.NewInt(42)
@@ -303,9 +287,6 @@ func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
 // to nil is rejected.
 func TestLogStarProofRejectsYOffCurve(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params, stmt, _, proof := logStarProofFixture(t)
 	state := []byte("logstar matrix")
 
@@ -322,9 +303,6 @@ func TestLogStarProofRejectsYOffCurve(t *testing.T) {
 // the algebraic equations.
 func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 
 	params := fastProofParams()
 
@@ -368,9 +346,6 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 // also reject non-unit commitment values.
 func TestLegacyEncryptionProofNonUnitCommitment(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	scalar := big.NewInt(42)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
@@ -410,9 +385,6 @@ func TestModulusProofRejectsEvenModulus(t *testing.T) {
 // Ring-Pedersen parameters where S=1 or T=1 (degenerate elements).
 func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 512)
 	params := fastProofParams()
 
@@ -454,9 +426,6 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 // parameters. This prevents parameter downgrade attacks.
 func TestProofSecurityParamMinimums(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	fastParams := fastProofParams()
 	prodParams := DefaultSecurityParams()
 

@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -14,7 +16,6 @@ import (
 // computationally infeasible to enumerate.
 func TestEncryptionProofLeakageResistance(t *testing.T) {
 	t.Parallel()
-	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test enc")
 	scalar := big.NewInt(123456789)
@@ -79,7 +80,6 @@ func TestEncryptionProofLeakageResistance(t *testing.T) {
 // does not leak the responder scalar b through BResponse = e·b + μ.
 func TestMTAResponseProofLeakageResistance(t *testing.T) {
 	t.Parallel()
-	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test mta")
 	a := big.NewInt(42)
@@ -145,7 +145,6 @@ func TestMTAResponseProofLeakageResistance(t *testing.T) {
 // the discrete logarithm through Response = e·a + α.
 func TestLogProofLeakageResistance(t *testing.T) {
 	t.Parallel()
-	skipProofLeakageInShort(t)
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("leakage test log")
 	scalar := big.NewInt(99)
@@ -191,10 +190,3 @@ func TestLogProofLeakageResistance(t *testing.T) {
 
 // TestProofsUseV1Version moved to new_proofs_test.go.
 // TestChallengeLabelsV1 moved to unit_test.go.
-
-func skipProofLeakageInShort(t *testing.T) {
-	t.Helper()
-	if testing.Short() {
-		t.Skip("skipping 1024-bit Paillier proof leakage test in short mode")
-	}
-}

@@ -1,3 +1,5 @@
+//go:build tier1
+
 package mta
 
 import (
@@ -11,9 +13,6 @@ import (
 
 func TestFinishErrors(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping Tier 1 test in short mode")
-	}
 	skA, skB, rpA, rpB := setupTestEnv(t)
 
 	a := big.NewInt(13)
@@ -83,9 +82,6 @@ func TestFinishErrors(t *testing.T) {
 
 func TestFinishMultipleValues(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping Tier 1 test in short mode")
-	}
 	skA, skB, rpA, rpB := setupTestEnv(t)
 	startDomain := []byte("start")
 	responseDomain := []byte("response")

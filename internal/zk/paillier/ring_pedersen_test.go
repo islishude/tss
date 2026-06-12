@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -9,9 +11,6 @@ import (
 )
 
 func TestRingPedersenProofChecks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)

@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -61,9 +63,6 @@ func (r *replayReader) reset() {
 // system does not actually extract the claimed knowledge.
 func TestEncryptionProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	scalar := big.NewInt(12345)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
@@ -138,9 +137,6 @@ func TestEncryptionProofSpecialSoundness(t *testing.T) {
 // TestLogProofSpecialSoundness demonstrates witness extraction for Π^log.
 func TestLogProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	scalar := big.NewInt(7777)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
@@ -208,9 +204,6 @@ func TestLogProofSpecialSoundness(t *testing.T) {
 // but different challenges allow extraction of both b and beta.
 func TestMTAResponseProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	a := big.NewInt(42)
 	b := big.NewInt(123)
@@ -299,9 +292,6 @@ func TestMTAResponseProofSpecialSoundness(t *testing.T) {
 // CGGMP Πenc proof. Extracts k = (z1 - z1')/(e - e').
 func TestEncProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
 	aux, _, err := GenerateRingPedersenParams(nil, sk)
@@ -372,9 +362,6 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 // Extracts x = (z1 - z1')/(e - e') and y = (z2 - z2')/(e - e').
 func TestAffGProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
 	aux, _, err := GenerateRingPedersenParams(nil, sk)
@@ -483,9 +470,6 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 // TestLogStarProofSpecialSoundness demonstrates witness extraction for Πlog*.
 func TestLogStarProofSpecialSoundness(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
 	aux, _, err := GenerateRingPedersenParams(nil, sk)
@@ -563,9 +547,6 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 // commitments and identical challenges do NOT allow witness extraction.
 func TestExtractorRequiresDifferentChallenges(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	scalar := big.NewInt(42)
 	ciphertext, randomness, err := sk.Encrypt(nil, scalar)

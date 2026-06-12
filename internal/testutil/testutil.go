@@ -15,6 +15,9 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
+	"strings"
+	"testing"
 
 	"github.com/islishude/tss"
 )
@@ -39,6 +42,55 @@ func (r *deterministicReader) Read(p []byte) (int, error) {
 //nolint:gosec // math/rand is intentional for deterministic test fixtures
 func DeterministicReader(seed int64) io.Reader {
 	return &deterministicReader{rng: rand.New(rand.NewPCG(uint64(seed), uint64(seed)))}
+}
+
+// SeedFromEnv checks the TSS_TEST_SEED environment variable. When set, it parses
+// the value (hex with optional 0x prefix, or decimal) and returns the seed.
+// When unset, it returns defaultSeed. The seed is always logged via t.Logf so
+// CI failures are reproducible: set TSS_TEST_SEED to the logged value and re-run.
+func SeedFromEnv(t testing.TB, defaultSeed int64) int64 {
+	t.Helper()
+	val := os.Getenv("TSS_TEST_SEED")
+	if val == "" {
+		t.Logf("seed=%016x (set TSS_TEST_SEED to reproduce)", defaultSeed)
+		return defaultSeed
+	}
+	seed, err := parseSeed(val)
+	if err != nil {
+		t.Fatalf("TSS_TEST_SEED=%q: %v", val, err)
+	}
+	t.Logf("seed=%016x (from TSS_TEST_SEED)", seed)
+	return seed
+}
+
+// DeterministicReaderFromEnv returns a deterministic io.Reader seeded from
+// TSS_TEST_SEED when set, or the provided defaultSeed otherwise.
+func DeterministicReaderFromEnv(t testing.TB, defaultSeed int64) io.Reader {
+	t.Helper()
+	return DeterministicReader(SeedFromEnv(t, defaultSeed))
+}
+
+// parseSeed parses a seed string as hex (with optional 0x prefix) or decimal.
+func parseSeed(s string) (int64, error) {
+	s = strings.TrimPrefix(s, "0x")
+	s = strings.TrimPrefix(s, "0X")
+	if len(s) > 0 {
+		// Try hex first.
+		b, err := hex.DecodeString(s)
+		if err == nil && len(b) > 0 && len(b) <= 8 {
+			var v int64
+			for i := range b {
+				v = v*256 + int64(b[i])
+			}
+			return v, nil
+		}
+	}
+	// Fall back to decimal.
+	v, err := strconv.ParseInt(s, 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("invalid seed: must be hex (with optional 0x prefix) or decimal int64")
+	}
+	return v, nil
 }
 
 // MustSessionID creates a deterministic 32-byte session identifier from a seed.

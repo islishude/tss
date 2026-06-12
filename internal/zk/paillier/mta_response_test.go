@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -10,9 +12,6 @@ import (
 
 func TestMTAResponseProofFieldTamper(t *testing.T) {
 	t.Parallel()
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("mta tamper")
 	a := big.NewInt(23)

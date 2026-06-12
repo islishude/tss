@@ -65,7 +65,7 @@ test-unit: ## Tier 0: fast deterministic tests; no full protocol crypto flows.
 
 .PHONY: test-fast
 test-fast: ## Tier 0 + Tier 1: fast local suite with reduced crypto fixtures.
-	$(GO) test -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout $(FAST_TIMEOUT) $(PKGS)
+	$(GO) test -tags='tier1' -p $(PKG_PARALLEL) -parallel $(TEST_PARALLEL) -timeout $(FAST_TIMEOUT) $(PKGS)
 
 .PHONY: test-integration
 test-integration: ## Tier 2: full protocol lifecycle tests with controlled concurrency.
@@ -90,6 +90,10 @@ test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
 
 # -----------------------------------------------------------------------------
 # Fuzzing
+.PHONY: test-budget
+test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
+	$(GO) test -json -tags='tier1,integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) $(PKGS) | $(GO) run ./internal/testutil/cmd/testbudget
+
 # -----------------------------------------------------------------------------
 
 .PHONY: fuzz-smoke

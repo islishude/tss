@@ -119,24 +119,6 @@ func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
 	}
 }
 
-func BenchmarkGenerateKey2048(b *testing.B) {
-	for b.Loop() {
-		_, err := GenerateKeyForTest(context.Background(), nil, 2048)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkGenerateKeyDefaultBits(b *testing.B) {
-	for b.Loop() {
-		_, err := GenerateKey(context.Background(), nil, 3072)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
 // func TestGenerateKeyTimeCost(t *testing.T) {
 // 	for range 10 {
 // 		start := time.Now()
