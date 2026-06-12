@@ -2,6 +2,7 @@ package wire
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 	"unicode/utf8"
 )
@@ -17,14 +18,18 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 		return Uint16(uint16(fv.Uint())), nil
 	case kindU32:
 		v := fs.uintValue(fv)
-		if v > maxUint32 {
+		if v > math.MaxUint32 {
 			return nil, fmt.Errorf("uint32 value %d exceeds max", v)
 		}
 		return Uint32(uint32(v)), nil
 	case kindBool:
 		return Bool(fv.Bool()), nil
 	case kindBytes:
-		return fs.encodeBytes(fv), nil
+		raw := fs.encodeBytes(fv)
+		if err := fs.checkByteLimits(raw, limitSet); err != nil {
+			return nil, err
+		}
+		return raw, nil
 	case kindString:
 		s := fv.String()
 		if !utf8.ValidString(s) {
@@ -36,7 +41,7 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 		}
 		return raw, nil
 	case kindU32List:
-		return fs.encodeU32List(fv)
+		return fs.encodeU32List(fv, limitSet)
 	case kindBytesList:
 		return fs.encodeBytesList(fv, limitSet)
 	case kindPartyBytes:
@@ -44,7 +49,7 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 	case kindPartyBytePairs:
 		return fs.encodePartyBytePairs(fv, limitSet)
 	case kindNested:
-		return fs.encodeNested(fv)
+		return fs.encodeNested(fv, limitSet)
 	case kindCustom:
 		return fs.encodeCustom(fv, limitSet)
 	case kindBigInt:
@@ -65,7 +70,7 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 // ---- decode dispatch ---------------------------------------------------------
 
 // decode deserialises raw into the settable field value fv.
-func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
+func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits, frameLimits FrameLimits) error {
 	switch fs.kind {
 	case kindU8:
 		return fs.decodeU8(fv, raw)
@@ -88,7 +93,7 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits)
 	case kindPartyBytePairs:
 		return fs.decodePartyBytePairs(fv, raw, limitSet)
 	case kindNested:
-		return fs.decodeNested(fv, raw)
+		return fs.decodeNested(fv, raw, limitSet, frameLimits)
 	case kindCustom:
 		return fs.decodeCustom(fv, raw, limitSet)
 	case kindBigInt:
@@ -98,17 +103,15 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits)
 	case kindBigPos:
 		return fs.decodeBigPosDispatch(fv, raw, limitSet)
 	case kindRecord:
-		return fs.decodeRecord(fv, raw, limitSet)
+		return fs.decodeRecord(fv, raw, limitSet, frameLimits)
 	case kindRecordList:
-		return fs.decodeRecordList(fv, raw, limitSet)
+		return fs.decodeRecordList(fv, raw, limitSet, frameLimits)
 	default:
 		return fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}
 }
 
 // ---- helpers ----------------------------------------------------------------
-
-const maxUint32 = (1 << 32) - 1
 
 // getLimit returns the limit value for name from the provided FieldLimits.
 // Fail-closed: when limitSet is nil or name is missing, an error is returned.
@@ -121,6 +124,9 @@ func (fs fieldSchema) getLimit(name string, limitSet FieldLimits) (int, error) {
 	v, ok := limitSet[name]
 	if !ok {
 		return 0, fmt.Errorf("wire: missing field limit %q for field %q", name, fs.name)
+	}
+	if v <= 0 {
+		return 0, fmt.Errorf("wire: field limit %q for field %q must be positive", name, fs.name)
 	}
 	return v, nil
 }

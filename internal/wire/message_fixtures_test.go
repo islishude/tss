@@ -60,6 +60,13 @@ type u32ListMessage struct {
 func (m u32ListMessage) WireType() string    { return "test.u32list" }
 func (m u32ListMessage) WireVersion() uint16 { return 1 }
 
+type intU32ListMessage struct {
+	IDs []int `wire:"1,u32list"`
+}
+
+func (m intU32ListMessage) WireType() string    { return "test.intu32list" }
+func (m intU32ListMessage) WireVersion() uint16 { return 1 }
+
 type bytesListMessage struct {
 	Items [][]byte `wire:"1,byteslist,max_bytes=field,max_items=items"`
 }
@@ -88,6 +95,20 @@ type nestedMessage struct {
 
 func (m nestedMessage) WireType() string    { return "test.nested" }
 func (m nestedMessage) WireVersion() uint16 { return 1 }
+
+type nestedLimitInnerMessage struct {
+	Payload []byte `wire:"1,bytes,max_bytes=field"`
+}
+
+func (m nestedLimitInnerMessage) WireType() string    { return "test.nestedlimit.inner" }
+func (m nestedLimitInnerMessage) WireVersion() uint16 { return 1 }
+
+type nestedLimitMessage struct {
+	Inner nestedLimitInnerMessage `wire:"1,nested"`
+}
+
+func (m nestedLimitMessage) WireType() string    { return "test.nestedlimit" }
+func (m nestedLimitMessage) WireVersion() uint16 { return 1 }
 
 type validatedMessage struct {
 	Value []byte `wire:"1,bytes"`

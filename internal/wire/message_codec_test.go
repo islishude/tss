@@ -222,21 +222,34 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 			},
 		},
 		{
+			name: "fixed length rejects wrong size on marshal",
+			run: func(t *testing.T) error {
+				_, err := Marshal(fixedLenMessage{Hash: make([]byte, 31)})
+				return err
+			},
+		},
+		{
 			name: "fixed length rejects wrong size on decode",
 			run: func(t *testing.T) error {
-				orig := fixedLenMessage{Hash: make([]byte, 31)}
-				raw, err := Marshal(orig)
+				raw, err := MarshalFields(1, "test.fixedlen", []Field{{Tag: 1, Value: make([]byte, 31)}})
 				if err != nil {
-					t.Fatalf("marshal should not reject wrong length: %v", err)
+					return err
 				}
 				var decoded fixedLenMessage
 				return Unmarshal(raw, &decoded)
 			},
 		},
 		{
+			name: "max bytes rejects oversized marshal",
+			run: func(t *testing.T) error {
+				_, err := Marshal(maxBytesMessage{Payload: []byte("hello")}, WithFieldLimitsForMarshal(FieldLimits{"field": 3}))
+				return err
+			},
+		},
+		{
 			name: "max bytes rejects oversized decode",
 			run: func(t *testing.T) error {
-				raw, err := Marshal(maxBytesMessage{Payload: []byte("hello")})
+				raw, err := Marshal(maxBytesMessage{Payload: []byte("hello")}, WithFieldLimitsForMarshal(FieldLimits{"field": 100}))
 				if err != nil {
 					return err
 				}
@@ -247,7 +260,7 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 		{
 			name: "max bytes accepts under limit",
 			run: func(t *testing.T) error {
-				raw, err := Marshal(maxBytesMessage{Payload: []byte("hi")})
+				raw, err := Marshal(maxBytesMessage{Payload: []byte("hi")}, WithFieldLimitsForMarshal(FieldLimits{"field": 10}))
 				if err != nil {
 					return err
 				}
@@ -258,12 +271,30 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 		{
 			name: "missing limit name rejects",
 			run: func(t *testing.T) error {
-				raw, err := Marshal(maxBytesMessage{Payload: []byte("hi")})
+				raw, err := Marshal(maxBytesMessage{Payload: []byte("hi")}, WithFieldLimitsForMarshal(FieldLimits{"field": 10}))
 				if err != nil {
 					return err
 				}
 				var decoded maxBytesMessage
 				return Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"other": 100}))
+			},
+		},
+		{
+			name: "nonpositive limit rejects marshal",
+			run: func(t *testing.T) error {
+				_, err := Marshal(maxBytesMessage{}, WithFieldLimitsForMarshal(FieldLimits{"field": 0}))
+				return err
+			},
+		},
+		{
+			name: "nonpositive limit rejects decode",
+			run: func(t *testing.T) error {
+				raw, err := MarshalFields(1, "test.maxbytes", []Field{{Tag: 1, Value: []byte{}}})
+				if err != nil {
+					return err
+				}
+				var decoded maxBytesMessage
+				return Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 0}))
 			},
 		},
 		{
@@ -312,12 +343,16 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 	}
 
 	wantErr := map[string]bool{
-		"fixed length rejects wrong size on decode": true,
-		"max bytes rejects oversized decode":        true,
-		"missing limit name rejects":                true,
-		"malformed u8 rejects":                      true,
-		"invalid utf8 rejects first form":           true,
-		"invalid utf8 rejects continuation byte":    true,
+		"fixed length rejects wrong size on marshal": true,
+		"fixed length rejects wrong size on decode":  true,
+		"max bytes rejects oversized marshal":        true,
+		"max bytes rejects oversized decode":         true,
+		"missing limit name rejects":                 true,
+		"nonpositive limit rejects marshal":          true,
+		"nonpositive limit rejects decode":           true,
+		"malformed u8 rejects":                       true,
+		"invalid utf8 rejects first form":            true,
+		"invalid utf8 rejects continuation byte":     true,
 	}
 
 	for _, tc := range tests {
@@ -371,7 +406,7 @@ func TestMessageCompoundRoundTrips(t *testing.T) {
 	t.Run("u32 list", func(t *testing.T) {
 		t.Parallel()
 
-		raw, err := Marshal(u32ListMessage{IDs: []uint32{1, 2, 3}})
+		raw, err := Marshal(u32ListMessage{IDs: []uint32{1, 2, 3}}, WithFieldLimitsForMarshal(FieldLimits{"ids": 10}))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -501,18 +536,67 @@ func TestMessageCompoundRoundTrips(t *testing.T) {
 			t.Fatalf("nested mismatch: %+v", decoded)
 		}
 	})
+
+	t.Run("nested propagates field limits", func(t *testing.T) {
+		t.Parallel()
+
+		orig := nestedLimitMessage{
+			Inner: nestedLimitInnerMessage{Payload: []byte("ok")},
+		}
+		raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"field": 4}))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded nestedLimitMessage
+		if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 4})); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(decoded.Inner.Payload, orig.Inner.Payload) {
+			t.Fatalf("nested payload mismatch: %x", decoded.Inner.Payload)
+		}
+	})
 }
 
 func TestMessageCompoundRejectsLimits(t *testing.T) {
 	t.Parallel()
 
-	raw, err := Marshal(u32ListMessage{IDs: []uint32{1, 2, 3, 4, 5}})
+	if _, err := Marshal(u32ListMessage{IDs: []uint32{1, 2, 3, 4, 5}}, WithFieldLimitsForMarshal(FieldLimits{"ids": 3})); err == nil {
+		t.Fatal("expected marshal error for too many u32list items")
+	}
+	if _, err := Marshal(intU32ListMessage{IDs: []int{-1}}); err == nil {
+		t.Fatal("expected marshal error for negative u32list item")
+	}
+
+	raw, err := Marshal(u32ListMessage{IDs: []uint32{1, 2, 3, 4, 5}}, WithFieldLimitsForMarshal(FieldLimits{"ids": 10}))
 	if err != nil {
 		t.Fatal(err)
 	}
 	var decoded u32ListMessage
 	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"ids": 3})); err == nil {
 		t.Fatal("expected error for too many items")
+	}
+}
+
+func TestMessageNestedRejectsLimitViolations(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Marshal(nestedLimitMessage{
+		Inner: nestedLimitInnerMessage{Payload: []byte("too long")},
+	}, WithFieldLimitsForMarshal(FieldLimits{"field": 3})); err == nil {
+		t.Fatal("expected nested marshal to enforce field limit")
+	}
+
+	innerRaw, err := MarshalFields(1, "test.nestedlimit.inner", []Field{{Tag: 1, Value: []byte("too long")}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := MarshalFields(1, "test.nestedlimit", []Field{{Tag: 1, Value: innerRaw}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded nestedLimitMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 3})); err == nil {
+		t.Fatal("expected nested decode to enforce field limit")
 	}
 }
 
@@ -540,9 +624,12 @@ func TestMessageValidateAndHooks(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		var decoded validatedMessage
+		decoded := validatedMessage{Value: []byte{9}}
 		if err := Unmarshal(raw, &decoded); err == nil {
 			t.Fatal("expected validation error on unmarshal")
+		}
+		if !bytes.Equal(decoded.Value, []byte{9}) {
+			t.Fatalf("failed unmarshal mutated destination to %x", decoded.Value)
 		}
 	})
 

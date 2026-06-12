@@ -194,8 +194,8 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			if err != nil {
 				return fieldSchema{}, fmt.Errorf("invalid len value %q", val)
 			}
-			if n < 0 {
-				return fieldSchema{}, fmt.Errorf("len must be non-negative")
+			if n <= 0 {
+				return fieldSchema{}, fmt.Errorf("len must be positive")
 			}
 			fs.fixedLen = n
 		case "max_bytes":
@@ -258,9 +258,15 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 		return kindString, nil
 	case "u32list":
 		if t.Kind() != reflect.Slice {
-			return 0, fmt.Errorf("u32list requires slice, got %s", t)
+			return 0, fmt.Errorf("u32list requires []uint32 or []int, got %s", t)
 		}
-		return kindU32List, nil
+		elem := indirectType(t.Elem())
+		switch elem.Kind() {
+		case reflect.Uint32, reflect.Int:
+			return kindU32List, nil
+		default:
+			return 0, fmt.Errorf("u32list requires []uint32 or []int, got %s", t)
+		}
 	case "byteslist":
 		if t.Kind() != reflect.Slice {
 			return 0, fmt.Errorf("byteslist requires slice, got %s", t)
@@ -310,6 +316,16 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 			return 0, fmt.Errorf("bigpos requires big.Int or *big.Int, got %s", t)
 		}
 		return kindBigPos, nil
+	case "record":
+		if indirectType(t).Kind() != reflect.Struct {
+			return 0, fmt.Errorf("record requires struct or *struct, got %s", t)
+		}
+		return kindRecord, nil
+	case "recordlist":
+		if t.Kind() != reflect.Slice || indirectType(t.Elem()).Kind() != reflect.Struct {
+			return 0, fmt.Errorf("recordlist requires []struct or []*struct, got %s", t)
+		}
+		return kindRecordList, nil
 	default:
 		return 0, fmt.Errorf("unknown wire kind %q", kindStr)
 	}
@@ -320,7 +336,7 @@ var knownKindNames = map[string]bool{
 	"u8": true, "u16": true, "u32": true, "bool": true,
 	"bytes": true, "string": true, "u32list": true, "byteslist": true,
 	"partybytes": true, "partybytepairs": true, "nested": true, "custom": true,
-	"bigint": true, "biguint": true, "bigpos": true,
+	"bigint": true, "biguint": true, "bigpos": true, "record": true, "recordlist": true,
 }
 
 // isKnownKind reports whether s is a recognized wire kind name.

@@ -99,3 +99,33 @@ func TestPartyBytePairs(t *testing.T) {
 		t.Fatal("DecodePartyBytePairs accepted impossible count")
 	}
 }
+
+func TestPartyTriples(t *testing.T) {
+	t.Parallel()
+	input := []PartyTriple[testID]{
+		{Party: 1, First: []byte{1}, Second: []byte{2}, Third: []byte{3}},
+		{Party: 2, First: []byte{}, Second: []byte{4, 5}, Third: []byte{6}},
+	}
+	raw := EncodePartyTriples(input)
+	got, err := DecodePartyTriplesWithLimit[testID](raw, 4, 8, 8, 8, "triple")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != len(input) {
+		t.Fatalf("got %d records", len(got))
+	}
+	for i := range input {
+		if got[i].Party != input[i].Party || !bytes.Equal(got[i].First, input[i].First) || !bytes.Equal(got[i].Second, input[i].Second) || !bytes.Equal(got[i].Third, input[i].Third) {
+			t.Fatalf("record %d got %#v", i, got[i])
+		}
+	}
+	if _, err := DecodePartyTriplesWithLimit[testID](append(raw, 0), 4, 8, 8, 8, "triple"); err == nil {
+		t.Fatal("DecodePartyTriplesWithLimit accepted trailing bytes")
+	}
+	if _, err := DecodePartyTriplesWithLimit[testID](raw, 1, 8, 8, 8, "triple"); err == nil {
+		t.Fatal("DecodePartyTriplesWithLimit accepted too many records")
+	}
+	if _, err := DecodePartyTriplesWithLimit[testID](raw, 4, 0, 1, 8, "triple"); err == nil {
+		t.Fatal("DecodePartyTriplesWithLimit accepted oversized field")
+	}
+}

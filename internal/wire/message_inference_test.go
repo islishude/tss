@@ -32,6 +32,17 @@ func TestLenMismatchWithArrayLength(t *testing.T) {
 			t.Fatalf("unexpected error for len=8 on [8]byte: %v", err)
 		}
 	})
+
+	t.Run("reject zero length", func(t *testing.T) {
+		t.Parallel()
+
+		type zeroLenBytes struct {
+			Val []byte `wire:"1,bytes,len=0"`
+		}
+		if _, err := getSchema(reflect.TypeFor[zeroLenBytes]()); err == nil {
+			t.Fatal("expected schema error for len=0")
+		}
+	})
 }
 
 func TestInferredKindRoundTripScenarios(t *testing.T) {

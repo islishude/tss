@@ -20,6 +20,13 @@ type recordMessage struct {
 func (m recordMessage) WireType() string    { return "test.record" }
 func (m recordMessage) WireVersion() uint16 { return 1 }
 
+type explicitRecordMessage struct {
+	Inner innerRecord `wire:"1,record"`
+}
+
+func (m explicitRecordMessage) WireType() string    { return "test.explicitrecord" }
+func (m explicitRecordMessage) WireVersion() uint16 { return 1 }
+
 type pointerRecordMessage struct {
 	Inner *innerRecord `wire:"1"`
 }
@@ -38,6 +45,13 @@ type recordListMessage struct {
 
 func (m recordListMessage) WireType() string    { return "test.recordlist" }
 func (m recordListMessage) WireVersion() uint16 { return 1 }
+
+type explicitRecordListMessage struct {
+	Items []itemRecord `wire:"1,recordlist,max_items=items"`
+}
+
+func (m explicitRecordListMessage) WireType() string    { return "test.explicitrecordlist" }
+func (m explicitRecordListMessage) WireVersion() uint16 { return 1 }
 
 type pointerRecordListMessage struct {
 	Items []*itemRecord `wire:"1,max_items=items"`
@@ -505,6 +519,23 @@ func TestRecordMaxBytesExceededEncode(t *testing.T) {
 	}
 }
 
+func TestRecordBytesMaxBytesExceededEncode(t *testing.T) {
+	t.Parallel()
+	orig := recordMessage{
+		Inner: innerRecord{
+			Name: "ok",
+			Data: []byte{1, 2, 3, 4},
+		},
+	}
+	_, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{
+		"name": 32,
+		"data": 3,
+	}))
+	if err == nil {
+		t.Fatal("expected error for exceeding max_bytes on record bytes field during encode")
+	}
+}
+
 func TestRecordMaxBytesExceededDecode(t *testing.T) {
 	t.Parallel()
 	body, err := marshalFieldBody([]Field{
@@ -600,5 +631,21 @@ func TestRecordSchemaParse(t *testing.T) {
 	}
 	if s2.fields[0].kind != kindRecordList {
 		t.Fatalf("expected kindRecordList, got %d", s2.fields[0].kind)
+	}
+
+	s3, err := getSchema(reflect.TypeFor[explicitRecordMessage]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s3.fields[0].kind != kindRecord {
+		t.Fatalf("expected explicit kindRecord, got %d", s3.fields[0].kind)
+	}
+
+	s4, err := getSchema(reflect.TypeFor[explicitRecordListMessage]())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if s4.fields[0].kind != kindRecordList {
+		t.Fatalf("expected explicit kindRecordList, got %d", s4.fields[0].kind)
 	}
 }

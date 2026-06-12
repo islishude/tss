@@ -16,6 +16,9 @@ func NonNilBytes(in []byte) []byte {
 
 // ReadUint16 reads a big-endian uint16 at offset and returns the next offset.
 func ReadUint16(in []byte, offset int) (uint16, int, error) {
+	if offset < 0 {
+		return 0, offset, errors.New("invalid uint16 offset")
+	}
 	if len(in)-offset < 2 {
 		return 0, offset, errors.New("truncated uint16")
 	}
@@ -24,6 +27,9 @@ func ReadUint16(in []byte, offset int) (uint16, int, error) {
 
 // ReadUint32 reads a big-endian uint32 at offset and returns the next offset.
 func ReadUint32(in []byte, offset int) (uint32, int, error) {
+	if offset < 0 {
+		return 0, offset, errors.New("invalid uint32 offset")
+	}
 	if len(in)-offset < 4 {
 		return 0, offset, errors.New("truncated uint32")
 	}

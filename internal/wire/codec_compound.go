@@ -2,21 +2,41 @@ package wire
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 )
 
 // ---- u32 list ---------------------------------------------------------------
 
-func (fs fieldSchema) encodeU32List(fv reflect.Value) ([]byte, error) {
+func (fs fieldSchema) encodeU32List(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("u32list count %d exceeds max", n)
+	}
+	if fs.maxItems != "" {
+		max, err := fs.getLimit(fs.maxItems, limitSet)
+		if err != nil {
+			return nil, err
+		}
+		if n > max {
+			return nil, fmt.Errorf("u32list count %d exceeds max_items=%d", n, max)
+		}
+	}
 	out := Uint32(uint32(n))
 	for i := range n {
 		elem := fv.Index(i)
 		var v uint64
 		if elem.Kind() == reflect.Int {
-			v = uint64(elem.Int())
+			signed := elem.Int()
+			if signed < 0 || uint64(signed) > math.MaxUint32 {
+				return nil, fmt.Errorf("u32list item %d value %d out of uint32 range", i, signed)
+			}
+			v = uint64(signed)
 		} else {
 			v = elem.Uint()
+			if v > math.MaxUint32 {
+				return nil, fmt.Errorf("u32list item %d value %d out of uint32 range", i, v)
+			}
 		}
 		out = append(out, Uint32(uint32(v))...)
 	}
@@ -329,7 +349,7 @@ func (fs fieldSchema) decodePartyBytePairs(fv reflect.Value, raw []byte, limitSe
 
 // ---- nested -----------------------------------------------------------------
 
-func (fs fieldSchema) encodeNested(fv reflect.Value) ([]byte, error) {
+func (fs fieldSchema) encodeNested(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	// If the field is a pointer, dereference it.
 	var msg Message
 	if fv.Kind() == reflect.Pointer {
@@ -342,10 +362,10 @@ func (fs fieldSchema) encodeNested(fv reflect.Value) ([]byte, error) {
 	} else {
 		msg = fv.Interface().(Message)
 	}
-	return Marshal(msg)
+	return Marshal(msg, WithFieldLimitsForMarshal(limitSet))
 }
 
-func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte) error {
+func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte, limitSet FieldLimits, frameLimits FrameLimits) error {
 	// Ensure we have a non-nil pointer to unmarshal into.
 	var ptr any
 	if fv.Kind() == reflect.Pointer {
@@ -358,13 +378,13 @@ func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte) error {
 	} else {
 		// Create a new value and unmarshal, then set.
 		newPtr := reflect.New(fv.Type())
-		if err := Unmarshal(raw, newPtr.Interface()); err != nil {
+		if err := Unmarshal(raw, newPtr.Interface(), WithFrameLimits(frameLimits), WithFieldLimits(limitSet)); err != nil {
 			return err
 		}
 		fv.Set(newPtr.Elem())
 		return nil
 	}
-	return Unmarshal(raw, ptr)
+	return Unmarshal(raw, ptr, WithFrameLimits(frameLimits), WithFieldLimits(limitSet))
 }
 
 // ---- custom ------------------------------------------------------------------

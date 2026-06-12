@@ -46,6 +46,9 @@ func TestReadUint16(t *testing.T) {
 	if _, _, err := ReadUint16([]byte{2, 1, 2}, 2); err == nil {
 		t.Fatal("ReadUint16 accepted truncated input")
 	}
+	if _, _, err := ReadUint16([]byte{1, 2}, -1); err == nil {
+		t.Fatal("ReadUint16 accepted negative offset")
+	}
 }
 
 func TestReadUint32(t *testing.T) {
@@ -59,5 +62,8 @@ func TestReadUint32(t *testing.T) {
 	}
 	if _, _, err := ReadUint32([]byte{1, 2, 3}, 0); err == nil {
 		t.Fatal("ReadUint32 accepted truncated input")
+	}
+	if _, _, err := ReadUint32([]byte{1, 2, 3, 4}, -1); err == nil {
+		t.Fatal("ReadUint32 accepted negative offset")
 	}
 }

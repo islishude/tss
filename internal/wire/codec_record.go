@@ -13,8 +13,8 @@ func (fs fieldSchema) encodeRecord(fv reflect.Value, limitSet FieldLimits) ([]by
 }
 
 // decodeRecord decodes a record body into a struct field value.
-func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
-	return unmarshalRecordValue(raw, fv, limitSet)
+func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet FieldLimits, frameLimits FrameLimits) error {
+	return unmarshalRecordValue(raw, fv, limitSet, frameLimits)
 }
 
 // ---- record list -------------------------------------------------------------
@@ -55,7 +55,7 @@ func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet FieldLimits) (
 }
 
 // decodeRecordList decodes a length-prefixed record list into a slice field value.
-func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
+func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet FieldLimits, frameLimits FrameLimits) error {
 	if len(raw) < 4 {
 		return fmt.Errorf("truncated recordlist count")
 	}
@@ -99,7 +99,7 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Fi
 			elem = reflect.New(elemType).Elem()
 		}
 
-		if err := unmarshalRecordValue(recBytes, elem, limitSet); err != nil {
+		if err := unmarshalRecordValue(recBytes, elem, limitSet, frameLimits); err != nil {
 			return fmt.Errorf("recordlist item %d: %w", i, err)
 		}
 
@@ -185,75 +185,87 @@ func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 
 // unmarshalRecordValue decodes a record body into a settable struct value.
 // The value must be a struct or pointer-to-struct. Nil pointers are auto-allocated.
-func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits) error {
+func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, frameLimits FrameLimits) error {
+	orig := dst
+	var typ reflect.Type
 	if dst.Kind() == reflect.Pointer {
-		if dst.IsNil() {
-			dst.Set(reflect.New(dst.Type().Elem()))
-		}
-		dst = dst.Elem()
+		typ = dst.Type().Elem()
+	} else {
+		typ = dst.Type()
 	}
-	if dst.Kind() != reflect.Struct {
-		return fmt.Errorf("record must be struct, got %s", dst.Kind())
+	if typ.Kind() != reflect.Struct {
+		return fmt.Errorf("record must be struct, got %s", typ.Kind())
 	}
 
-	s, err := getSchema(dst.Type())
+	s, err := getSchema(typ)
 	if err != nil {
-		return fmt.Errorf("record %s: %w", dst.Type().Name(), err)
+		return fmt.Errorf("record %s: %w", typ.Name(), err)
 	}
 
-	limits := DefaultFrameLimits()
-	fields, offset, err := unmarshalFieldBody(raw, 0, limits, dst.Type().Name())
+	work := reflect.New(typ).Elem()
+	fields, offset, err := unmarshalFieldBody(raw, 0, frameLimits, typ.Name())
 	if err != nil {
 		return err
 	}
 	if offset != len(raw) {
-		return fmt.Errorf("record %s: trailing bytes", dst.Type().Name())
+		return fmt.Errorf("record %s: trailing bytes", typ.Name())
 	}
 
 	// Exact field set: require same count and matching tag sequence.
 	if len(fields) != len(s.fields) {
-		return fmt.Errorf("record %s: got %d fields, want %d", dst.Type().Name(), len(fields), len(s.fields))
+		return fmt.Errorf("record %s: got %d fields, want %d", typ.Name(), len(fields), len(s.fields))
 	}
 	for i := range s.fields {
 		if fields[i].Tag != s.fields[i].tag {
 			return fmt.Errorf("record %s: unexpected field tag %d at index %d, want %d",
-				dst.Type().Name(), fields[i].Tag, i, s.fields[i].tag)
+				typ.Name(), fields[i].Tag, i, s.fields[i].tag)
 		}
 	}
 
 	for i := range s.fields {
 		fs2 := &s.fields[i]
-		fv := dst.FieldByIndex(fs2.index)
-		if err := fs2.decode(fv, fields[i].Value, limitSet); err != nil {
-			return fmt.Errorf("record %s field %s tag %d: %w", dst.Type().Name(), fs2.name, fs2.tag, err)
+		fv := work.FieldByIndex(fs2.index)
+		if err := fs2.decode(fv, fields[i].Value, limitSet, frameLimits); err != nil {
+			return fmt.Errorf("record %s field %s tag %d: %w", typ.Name(), fs2.name, fs2.tag, err)
 		}
 	}
 
 	// AfterUnmarshalWire hook — try value, then pointer.
-	if dst.CanAddr() {
-		if au, ok := dst.Addr().Interface().(AfterUnmarshaler); ok {
+	if work.CanAddr() {
+		if au, ok := work.Addr().Interface().(AfterUnmarshaler); ok {
 			if err := au.AfterUnmarshalWire(); err != nil {
-				return fmt.Errorf("record %s AfterUnmarshalWire: %w", dst.Type().Name(), err)
+				return fmt.Errorf("record %s AfterUnmarshalWire: %w", typ.Name(), err)
 			}
 		}
-	} else if au, ok := dst.Interface().(AfterUnmarshaler); ok {
+	} else if au, ok := work.Interface().(AfterUnmarshaler); ok {
 		if err := au.AfterUnmarshalWire(); err != nil {
-			return fmt.Errorf("record %s AfterUnmarshalWire: %w", dst.Type().Name(), err)
+			return fmt.Errorf("record %s AfterUnmarshalWire: %w", typ.Name(), err)
 		}
 	}
 
 	// Validate after unmarshal.
-	if dst.CanAddr() {
-		if val, ok := dst.Addr().Interface().(Validator); ok {
+	if work.CanAddr() {
+		if val, ok := work.Addr().Interface().(Validator); ok {
 			if err := val.Validate(); err != nil {
-				return fmt.Errorf("record %s Validate: %w", dst.Type().Name(), err)
+				return fmt.Errorf("record %s Validate: %w", typ.Name(), err)
 			}
 		}
-	} else if val, ok := dst.Interface().(Validator); ok {
+	} else if val, ok := work.Interface().(Validator); ok {
 		if err := val.Validate(); err != nil {
-			return fmt.Errorf("record %s Validate: %w", dst.Type().Name(), err)
+			return fmt.Errorf("record %s Validate: %w", typ.Name(), err)
 		}
 	}
 
+	if orig.Kind() == reflect.Pointer {
+		if orig.CanSet() {
+			out := reflect.New(typ)
+			out.Elem().Set(work)
+			orig.Set(out)
+		} else {
+			orig.Elem().Set(work)
+		}
+	} else {
+		orig.Set(work)
+	}
 	return nil
 }

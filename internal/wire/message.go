@@ -225,27 +225,30 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		}
 	}
 
+	work := reflect.New(v.Type()).Elem()
 	for i := range s.fields {
 		fs := &s.fields[i]
-		fv := v.FieldByIndex(fs.index)
-		if err := fs.decode(fv, fields[i].Value, cfg.fieldLimits); err != nil {
+		fv := work.FieldByIndex(fs.index)
+		if err := fs.decode(fv, fields[i].Value, cfg.fieldLimits, limits); err != nil {
 			return fmt.Errorf("wire %s field %s tag %d: %w", v.Type().Name(), fs.name, fs.tag, err)
 		}
 	}
 
 	// AfterUnmarshalWire hook.
-	if au, ok := dst.(AfterUnmarshaler); ok {
+	hookTarget := work.Addr().Interface()
+	if au, ok := hookTarget.(AfterUnmarshaler); ok {
 		if err := au.AfterUnmarshalWire(); err != nil {
 			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 		}
 	}
 
 	// Validate.
-	if val, ok := dst.(Validator); ok {
+	if val, ok := hookTarget.(Validator); ok {
 		if err := val.Validate(); err != nil {
 			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 		}
 	}
 
+	v.Set(work)
 	return nil
 }
