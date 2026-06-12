@@ -45,91 +45,91 @@ func TestFast_RefreshCommitmentsRejectNonzeroConstant(t *testing.T) {
 
 // --- Presign VerifyShares validation regression tests ---
 
-func TestFast_PresignRejectsMissingVerifyShares(t *testing.T) {
+func TestFast_PresignVerifySharesValidation(t *testing.T) {
 	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	// nil VerifyShares slices
-	presign.VerifyShares = nil
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject presign with nil VerifyShares")
-	}
-}
 
-func TestFast_PresignRejectsEmptyVerifyShares(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	presign.VerifyShares = []SignVerifyShare{}
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject presign with empty VerifyShares")
+	tests := []struct {
+		name    string
+		mutate  func(presign *Presign)
+		check   func(presign *Presign) error
+		wantMsg string
+	}{
+		{
+			name:    "nil VerifyShares",
+			mutate:  func(p *Presign) { p.VerifyShares = nil },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "nil VerifyShares",
+		},
+		{
+			name:    "empty VerifyShares",
+			mutate:  func(p *Presign) { p.VerifyShares = []SignVerifyShare{} },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "empty VerifyShares",
+		},
+		{
+			name:    "mismatched signer count",
+			mutate:  func(p *Presign) { p.Signers = []tss.PartyID{1, 2} },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "mismatched signer/verify share count",
+		},
+		{
+			name: "duplicate VerifyShare",
+			mutate: func(p *Presign) {
+				vs := p.VerifyShares[0]
+				p.Signers = []tss.PartyID{1, 1}
+				p.VerifyShares = []SignVerifyShare{vs, vs}
+			},
+			check:   func(p *Presign) error { return validateSignVerifyShares(p.Signers, p.VerifyShares) },
+			wantMsg: "duplicate verify share",
+		},
+		{
+			name: "non-signer party",
+			mutate: func(p *Presign) {
+				vs := p.VerifyShares[0]
+				vs.Party = 999
+				p.VerifyShares = []SignVerifyShare{vs}
+			},
+			check:   func(p *Presign) error { return validateSignVerifyShares(p.Signers, p.VerifyShares) },
+			wantMsg: "non-signer party in verify share",
+		},
+		{
+			name:    "non-canonical KPoint",
+			mutate:  func(p *Presign) { p.VerifyShares[0].KPoint = []byte{0xFF} },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "non-canonical KPoint",
+		},
+		{
+			name:    "non-canonical ChiPoint",
+			mutate:  func(p *Presign) { p.VerifyShares[0].ChiPoint = []byte{0xFF} },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "non-canonical ChiPoint",
+		},
+		{
+			name:    "empty proof",
+			mutate:  func(p *Presign) { p.VerifyShares[0].Proof = nil },
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "empty proof",
+		},
+		{
+			name: "oversize proof",
+			mutate: func(p *Presign) {
+				limits := TestLimits()
+				p.VerifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
+			},
+			check:   func(p *Presign) error { return p.Validate() },
+			wantMsg: "oversize proof",
+		},
 	}
-}
 
-func TestFast_PresignRejectsWrongVerifyShareCount(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	// Signers has 1 but we add extra without a share
-	presign.Signers = []tss.PartyID{1, 2}
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject mismatched signer/verify share count")
-	}
-}
-
-func TestFast_PresignRejectsDuplicateVerifyShare(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	vs := presign.VerifyShares[0]
-	presign.Signers = []tss.PartyID{1, 1}
-	presign.VerifyShares = []SignVerifyShare{vs, vs}
-	if err := validateSignVerifyShares(presign.Signers, presign.VerifyShares); err == nil {
-		t.Fatal("expected rejection of duplicate verify share")
-	}
-}
-
-func TestFast_PresignRejectsNonSignerParty(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	vs := presign.VerifyShares[0]
-	vs.Party = 999 // not in signer set
-	presign.VerifyShares = []SignVerifyShare{vs}
-	if err := validateSignVerifyShares(presign.Signers, presign.VerifyShares); err == nil {
-		t.Fatal("expected rejection of non-signer party in verify share")
-	}
-}
-
-func TestFast_PresignRejectsNonCanonicalKPoint(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	presign.VerifyShares[0].KPoint = []byte{0xFF}
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject non-canonical KPoint")
-	}
-}
-
-func TestFast_PresignRejectsNonCanonicalChiPoint(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	presign.VerifyShares[0].ChiPoint = []byte{0xFF}
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject non-canonical ChiPoint")
-	}
-}
-
-func TestFast_PresignRejectsEmptyProof(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	presign.VerifyShares[0].Proof = nil
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject empty proof")
-	}
-}
-
-func TestFast_PresignRejectsOversizeProof(t *testing.T) {
-	t.Parallel()
-	presign := minimalCGGMP21Presign(t)
-	limits := TestLimits()
-	presign.VerifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
-	if err := presign.Validate(); err == nil {
-		t.Fatal("expected Validate to reject oversize proof")
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			presign := minimalCGGMP21Presign(t)
+			tc.mutate(presign)
+			if err := tc.check(presign); err == nil {
+				t.Fatalf("expected rejection of %s", tc.wantMsg)
+			}
+		})
 	}
 }
 
@@ -155,31 +155,45 @@ func TestFast_AggregateFailureIsInvariantNotBlameAll(t *testing.T) {
 
 // --- SignPartialPayload encoding validation ---
 
-func TestFast_SignPartialPayloadRejectsMissingDigestHash(t *testing.T) {
+func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
 	t.Parallel()
-	p := signPartialPayload{
-		S:                   big.NewInt(1),
-		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
-		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
-		DigestHash:          nil, // missing
-		PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
-	}
-	if _, err := marshalSignPartialPayload(p); err == nil {
-		t.Fatal("expected rejection of missing DigestHash")
-	}
-}
 
-func TestFast_SignPartialPayloadRejectsMissingPartialEquationHash(t *testing.T) {
-	t.Parallel()
-	p := signPartialPayload{
-		S:                   big.NewInt(1),
-		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
-		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
-		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
-		PartialEquationHash: nil,
+	tests := []struct {
+		name    string
+		payload signPartialPayload
+		wantMsg string
+	}{
+		{
+			name: "missing DigestHash",
+			payload: signPartialPayload{
+				S:                   big.NewInt(1),
+				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
+				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
+				DigestHash:          nil,
+				PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
+			},
+			wantMsg: "missing DigestHash",
+		},
+		{
+			name: "missing PartialEquationHash",
+			payload: signPartialPayload{
+				S:                   big.NewInt(1),
+				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
+				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
+				DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
+				PartialEquationHash: nil,
+			},
+			wantMsg: "missing PartialEquationHash",
+		},
 	}
-	if _, err := marshalSignPartialPayload(p); err == nil {
-		t.Fatal("expected rejection of missing PartialEquationHash")
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := marshalSignPartialPayload(tc.payload); err == nil {
+				t.Fatalf("expected rejection of %s", tc.wantMsg)
+			}
+		})
 	}
 }
 
@@ -254,24 +268,41 @@ func TestFast_OriginalDefectCodeSeparation(t *testing.T) {
 
 // --- PresignRound3Payload validation ---
 
-func TestFast_PresignRound3PayloadRejectsEmptyProof(t *testing.T) {
+func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 	t.Parallel()
-	one := big.NewInt(1)
-	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
-	chiPoint := kPoint
-	p := presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: chiPoint, Proof: nil}
-	if _, err := marshalPresignRound3Payload(p); err == nil {
-		t.Fatal("expected rejection of empty proof in round3 payload")
-	}
-}
 
-func TestFast_PresignRound3PayloadRejectsNonCanonicalKPoint(t *testing.T) {
-	t.Parallel()
-	one := big.NewInt(1)
-	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
-	proof := mustMinimalSignPrepProofForTest(t)
-	p := presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof}
-	if _, err := marshalPresignRound3Payload(p); err == nil {
-		t.Fatal("expected rejection of non-canonical KPoint in round3 payload")
+	tests := []struct {
+		name    string
+		payload presignRound3Payload
+		wantMsg string
+	}{
+		{
+			name: "empty proof",
+			payload: func() presignRound3Payload {
+				one := big.NewInt(1)
+				kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
+				return presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: kPoint, Proof: nil}
+			}(),
+			wantMsg: "empty proof in round3 payload",
+		},
+		{
+			name: "non-canonical KPoint",
+			payload: func() presignRound3Payload {
+				one := big.NewInt(1)
+				chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
+				proof := mustMinimalSignPrepProofForTest(t)
+				return presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof}
+			}(),
+			wantMsg: "non-canonical KPoint in round3 payload",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := marshalPresignRound3Payload(tc.payload); err == nil {
+				t.Fatalf("expected rejection of %s", tc.wantMsg)
+			}
+		})
 	}
 }

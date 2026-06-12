@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–35 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 encoding/domain/keygen-confirm parallelism, tier1 extraction from MIXED files, proof Clone methods)_
+_Last updated: 2026-06-12 (items 20–36 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation)_
 
 ### Completed
 
@@ -1407,14 +1407,21 @@ The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with intern
     - Removed 8 standalone clone helper functions (~99 lines) from `new_proofs_test.go`, `proof_helpers_test.go`, `modulus_test.go`, `ring_pedersen_test.go`, and `mta_response_test.go`.
     - Pattern: `cloneXxxProof(v)` → `v.Clone()` — idiomatic Go, consistent with existing `KeyShare.Clone()` and `PrivateKey.Clone()` patterns.
 
+36. ~~**CGGMP21 tier0_regression_test.go table-driven consolidation**~~ — Completed 2026-06-12:
+    - 18 standalone test functions → 8 test functions (3 table-driven), **56% reduction**:
+      - 9 presign `VerifyShares` validation tests → `TestFast_PresignVerifySharesValidation` (9 subtests: nil VerifyShares, empty, mismatched count, duplicate, non-signer party, non-canonical KPoint/ChiPoint, empty/oversize proof).
+      - 2 sign partial payload tests → `TestFast_SignPartialPayloadEncodingRejectsMissingFields` (2 subtests: missing DigestHash, missing PartialEquationHash).
+      - 2 presign round3 payload tests → `TestFast_PresignRound3PayloadRejectsInvalidFields` (2 subtests: empty proof, non-canonical KPoint).
+    - 5 remaining standalone tests are genuinely unique (static code scan, refresh commitments, aggregate failure semantics, original defect blame shape, code separation).
+
 ### Large-Scale Work (future dedicated PRs)
 
 These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
 
-| File                                         | Tests | Notes                                                                                                                                                                                                                                                  |
-| -------------------------------------------- | ----- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `internal/wire/message_test.go`              | 89    | Largest single file; most tests share encode/decode/validate patterns                                                                                                                                                                                  |
-| `internal/shamir/shamir_test.go`             | 27    | Consolidated from 43→27 (37% reduction) 2026-06-11; normalize/add/sub/mul/lagrange/interpolate/random-reject groups table-driven; `TestEvalKnownPolynomial` and `TestLagrangeCoefficientReconstructs` converted to `t.Run()` subtests 2026-06-11 final |
-| `cggmp21/secp256k1/tier0_regression_test.go` | 18    | Many tests share presign/sign session construction + single-field validation pattern                                                                                                                                                                   |
-| `cggmp21/secp256k1/hd_test.go`               | 21    | 18/21 now parallel (2026-06-11); BIP32 + sign-with-derivation tests with remaining structural similarity                                                                                                                                               |
-| `frost/ed25519/hd_test.go`                   | 21    | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already                                                                                                                                                                             |
+| File                                         | Tests      | Notes                                                                                                                                                                                                                                                  |
+| -------------------------------------------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `internal/wire/message_test.go`              | 89         | Largest single file; most tests share encode/decode/validate patterns                                                                                                                                                                                  |
+| `internal/shamir/shamir_test.go`             | 27         | Consolidated from 43→27 (37% reduction) 2026-06-11; normalize/add/sub/mul/lagrange/interpolate/random-reject groups table-driven; `TestEvalKnownPolynomial` and `TestLagrangeCoefficientReconstructs` converted to `t.Run()` subtests 2026-06-11 final |
+| `cggmp21/secp256k1/tier0_regression_test.go` | 8 (was 18) | Consolidated 2026-06-12: 18→8 (56% reduction); 9 presign Validate→1 table-driven, 2 sign payload→1, 2 round3 payload→1; 5 remaining genuinely unique                                                                                                   |
+| `cggmp21/secp256k1/hd_test.go`               | 21         | 18/21 now parallel (2026-06-11); BIP32 + sign-with-derivation tests with remaining structural similarity                                                                                                                                               |
+| `frost/ed25519/hd_test.go`                   | 21         | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already                                                                                                                                                                             |
