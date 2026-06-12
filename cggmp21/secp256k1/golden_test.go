@@ -17,6 +17,8 @@ import (
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
+	t.Parallel()
+
 	payload := keygenSharePayload{Share: big.NewInt(1)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
@@ -43,6 +45,8 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 }
 
 func TestGoldenSignPartialPayload(t *testing.T) {
+	t.Parallel()
+
 	payload := signPartialPayload{
 		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
@@ -75,6 +79,8 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 }
 
 func TestGoldenPresignRound3Payload(t *testing.T) {
+	t.Parallel()
+
 	proof := mustMinimalSignPrepProofForTest(t)
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
 	twoScalar := secp.ScalarFromBigInt(big.NewInt(2))
@@ -110,6 +116,8 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 }
 
 func TestGoldenCGGMP21KeyShare(t *testing.T) {
+	t.Parallel()
+
 	golden := filepath.Join("testdata", "KeyShare.golden")
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
@@ -184,6 +192,8 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 }
 
 func TestGoldenCGGMP21Presign(t *testing.T) {
+	t.Parallel()
+
 	golden := filepath.Join("testdata", "Presign.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		shares := CachedKeygenShares(t, 1, 1, false)

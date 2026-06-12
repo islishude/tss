@@ -18,6 +18,8 @@ import (
 // allow a party to register a Paillier key without proving knowledge of
 // its factorization — a CVE-class vulnerability.
 func TestKeygenRejectsMissingModulusProof(t *testing.T) {
+	t.Parallel()
+
 	parties := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -62,6 +64,8 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 // Omitting Πprm allows a party to use Ring-Pedersen parameters without
 // proving knowledge of the discrete log relation with its Paillier key.
 func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
+	t.Parallel()
+
 	parties := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -150,6 +154,8 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 // message with a structurally valid but cryptographically wrong modulus proof
 // is rejected.
 func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
+	t.Parallel()
+
 	parties := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -188,6 +194,8 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 // TestKeygenRejectsInvalidRingPedersenProof verifies that a keygen
 // commitments message with an invalid Ring-Pedersen proof is rejected.
 func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
+	t.Parallel()
+
 	parties := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -229,6 +237,8 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 // an unrelated ciphertext that decrypts to a different scalar, recovering
 // the full private key share-by-share.
 func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
+	t.Parallel()
+
 	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
@@ -253,6 +263,8 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 // TestKeyShareValidateRejectsInvalidLogStarProof verifies that a KeyShare
 // with a tampered LogProof is rejected.
 func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
+	t.Parallel()
+
 	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
@@ -279,6 +291,8 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 // with an empty Schnorr share proof is rejected. Without the Schnorr proof,
 // the verification share cannot be authenticated.
 func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
+	t.Parallel()
+
 	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
@@ -302,6 +316,8 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 // without a PaillierProof cannot be marshaled (and thus cannot be persisted).
 // The PaillierProof (Πmod) proves knowledge of the Paillier key factorization.
 func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
+	t.Parallel()
+
 	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
@@ -324,6 +340,8 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 // TestKeyShareValidateRejectsMissingRingPedersenProof verifies that
 // a KeyShare without a RingPedersenProof is rejected.
 func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
+	t.Parallel()
+
 	shares := CachedKeygenShares(t, 2, 2, false)
 	share := shares[1]
 
@@ -349,6 +367,8 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 // catches this before the message is even sent, and HandleKeygenMessage
 // also validates it on receipt.
 func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
+	t.Parallel()
+
 	parties := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

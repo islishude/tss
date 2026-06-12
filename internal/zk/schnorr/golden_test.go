@@ -14,6 +14,8 @@ import (
 )
 
 func TestGoldenProof(t *testing.T) {
+	t.Parallel()
+
 	// Construct a valid proof deterministically using known scalars.
 	secret := big.NewInt(1)
 	nonce := big.NewInt(2)

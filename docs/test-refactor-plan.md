@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–39 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split, FROST HD test split)_
+_Last updated: 2026-06-12 (items 20–43 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split, FROST HD test split, golden/proof_omission/schnorr parallelism, fuzz corpus seeding, empty fuzz dir cleanup)_
 
 ### Completed
 
@@ -1293,7 +1293,7 @@ The following items are documented as intentionally deferred:
 - ~~**Fuzz CI integration tags**~~ — Resolved 2026-06-12: `.github/scripts/fuzz-ci.sh` now passes `-tags="$BUILD_TAGS"` (default: `tier1,integration`).
 - **Payload-level Fuzz\*Unmarshal cleanup**: ~~Completed (2026-06-11 late evening)~~: 33 payload-level fuzz targets removed across 8 files. **Remaining fuzz targets:** only `internal/wire` (3 tests: `FuzzWireUnmarshalFields`, `FuzzCustomField`, `FuzzBigIntField`) — fuzzing at the correct TLV parser layer.
 - ~~**MIXED file tier1 extraction**~~ — Completed 2026-06-12 (items 29–34): All standalone tier1 tests extracted from `new_proofs_test.go` (4 tests), `relation_audit_test.go` (11 tests), `range_boundary_test.go` (2 tests), `params_consistency_test.go` (1 test), MTA `start_test.go` (4 tests), MTA `response_test.go` (2 tests), and paillier `keygen_test.go` (1 test) into separate `//go:build tier1` files. One file remains partially mixed: `TestTranscriptBindsAllSecurityParams` in `params_consistency_test.go` has 3 subtests with `testing.Short()` that share expensive Paillier keygen setup — splitting across build tags would require restructuring the test logic.
-- **Fuzz corpus seeding**: All 3 wire fuzz targets have programmatic seeds via `f.Add()`. Persistent corpus files (`testdata/fuzz/`) remain empty — golden vector files use TLV-wrapped wire format incompatible with individual payload fuzz targets. Seeding could be done by running `go test -fuzz` briefly and copying the generated corpus.
+- ~~**Fuzz corpus seeding**~~ — Completed 2026-06-12: 204 persistent corpus files populated across 3 wire fuzz targets (`FuzzWireUnmarshalFields`: 190, `FuzzBigIntField`: 13, `FuzzCustomField`: 1) by running `go test -fuzz` and copying generated corpus from Go build cache to `internal/wire/testdata/fuzz/`. Empty leftover fuzz directories (`cggmp21/secp256k1/testdata/fuzz/`, `frost/ed25519/testdata/fuzz/`, `internal/zk/schnorr/testdata/fuzz/`, `internal/zk/paillier/testdata/fuzz/`, root `testdata/fuzz/`) removed — these were from 33 payload-level fuzz targets removed earlier.
 
 ### New Work Items (from 2026-06-12 testing rules update) ✅ Completed 2026-06-12
 
@@ -1450,6 +1450,29 @@ The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with intern
       - `go test -count=1 -run 'Test(DerivePublicKey|DeriveNonHardenedBIP32|HD|KeygenWithoutHD|NonHDKeyShare)' ./frost/ed25519` — passed.
       - `go test -short -p 4 -parallel 8 -count=1 -timeout 1m ./...` — passed.
       - Tier 1 verification not run; this change touched only `frost/ed25519/hd*_test.go` and `docs/test-refactor-plan.md`.
+
+40. ~~**Schnorr golden_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to `TestGoldenProof` in `internal/zk/schnorr/golden_test.go` — creates independent deterministic proof with known scalars. No shared mutable state, no file I/O in non-UPDATE_GOLDEN path.
+
+41. ~~**CGGMP21 golden_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to all 5 test functions in `cggmp21/secp256k1/golden_test.go` (behind `//go:build integration`):
+      - `TestGoldenKeygenSharePayload`, `TestGoldenSignPartialPayload`, `TestGoldenPresignRound3Payload` — construct independent wire payloads.
+      - `TestGoldenCGGMP21KeyShare`, `TestGoldenCGGMP21Presign` — use `CachedKeygenShares` (thread-safe `sync.Map`+`sync.Once`) and read unique golden files.
+    - Confirmed safe: each test owns independent state; golden file paths are unique; `CachedKeygenShares` is thread-safe. Non-UPDATE_GOLDEN path only reads files.
+
+42. ~~**CGGMP21 proof_omission_test.go parallelism**~~ — Completed 2026-06-12:
+    - `t.Parallel()` added to all 10 test functions in `cggmp21/secp256k1/proof_omission_test.go` (behind `//go:build integration`):
+      - 5 tests (`TestKeygenRejectsMissingModulusProof`, `TestKeygenRejectsMissingRingPedersenProof`, `TestKeygenRejectsInvalidModulusProof`, `TestKeygenRejectsInvalidRingPedersenProof`, `TestKeygenRejectsCorruptedPaillierPublicKey`) — each runs independent two-party keygen sessions.
+      - 5 tests (`TestKeyShareValidateRejectsMissingLogStarProof`, `TestKeyShareValidateRejectsInvalidLogStarProof`, `TestKeyShareValidateRejectsMissingSchnorrProof`, `TestKeyShareValidateRejectsMissingPaillierProof`, `TestKeyShareValidateRejectsMissingRingPedersenProof`) — use `CachedKeygenShares` (thread-safe) and operate on independent cloned shares.
+    - Confirmed safe: no package-global mutation, no file I/O, no shared mutable state. Each test documents a specific CVE-class vulnerability — independent functions preserved for security audit clarity.
+
+43. ~~**Fuzz corpus seeding and cleanup**~~ — Completed 2026-06-12:
+    - All 3 wire fuzz targets run with `-fuzztime=10s`, generated corpus copied from Go build cache to `internal/wire/testdata/fuzz/`:
+      - `FuzzWireUnmarshalFields`: 190 seed files.
+      - `FuzzCustomField`: 1 seed file.
+      - `FuzzBigIntField`: 13 seed files.
+    - Empty leftover fuzz directories from 33 removed payload-level fuzz targets cleaned up: `cggmp21/secp256k1/testdata/fuzz/`, `frost/ed25519/testdata/fuzz/`, `internal/zk/schnorr/testdata/fuzz/`, `internal/zk/paillier/testdata/fuzz/`, and root `testdata/fuzz/`.
+    - All 3 fuzz targets already have programmatic seeds via `f.Add()` — persistent corpus provides additional coverage from live fuzzing discoveries.
 
 ### Large-Scale Work (future dedicated PRs)
 
