@@ -193,7 +193,6 @@ func TestMessageRejectsInvalidObjectInputs(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -322,7 +321,6 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 	}
 
 	for _, tc := range tests {
-		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
@@ -344,7 +342,6 @@ func TestMessageBoolEncodeDecode(t *testing.T) {
 	t.Parallel()
 
 	for _, v := range []bool{true, false} {
-		v := v
 		t.Run(func() string {
 			if v {
 				return "true"

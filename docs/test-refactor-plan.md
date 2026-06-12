@@ -1033,7 +1033,7 @@ test budget           — runtime checker integrated into CI
 
 After PR 6, adding a new protocol or round requires only implementing the `ProtocolCase` interface and registering it with the shared harnesses — most adversarial tests are inherited automatically.
 
-_Last updated: 2026-06-12 (items 20–37 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split)_
+_Last updated: 2026-06-12 (items 20–38 completed — build tags, testharness, benchmarks, testbudget, TSS_TEST_SEED, fuzz CI, CGGMP21 parallelism, tier1 extraction, proof Clone methods, tier0_regression consolidation, wire message test split, CGGMP21 HD test split)_
 
 ### Completed
 
@@ -1427,6 +1427,18 @@ The one remaining MIXED file (`TestTranscriptBindsAllSecurityParams` with intern
       - `go test -short -p 4 -parallel 8 -count=1 -timeout 1m ./...` — passed.
       - `go test -tags='tier1' -p 4 -parallel 8 -count=1 -timeout 5m ./...` — passed; `internal/zk/paillier` took 92.021s.
 
+38. ~~**CGGMP21 hd_test.go structural split and consolidation**~~ — Completed 2026-06-12:
+    - Split the 819-line monolithic `cggmp21/secp256k1/hd_test.go` into behavior-focused files:
+      - `hd_fixtures_test.go` — shared BIP32 xpub constants, parse/assert helpers, additive-shift checks, and fake-HMAC helpers.
+      - `hd_derivation_test.go` — BIP32 vector cases, multi-step/chained consistency, invalid-input matrix, empty-path behavior, cumulative-shift checks, input immutability, and result metadata.
+      - `hd_invalid_child_test.go` — 3 package-global `hmacSHA512` hook tests kept intentionally sequential.
+      - `hd_xpub_test.go` — `ExtendedPublicKey` serialization, parsing rejects, derivation equivalence, fingerprint, BIP32 vector derivation, and empty-path behavior.
+    - Top-level HD tests consolidated from 21 standalone tests to 13 table-driven or behavior-family tests (**38% reduction**), while keeping all package-global mutation tests sequential.
+    - Verification recorded during implementation:
+      - `go test -count=1 -run 'Test(DeriveNonHardenedBIP32|ExtendedPublicKey)' ./cggmp21/secp256k1` — passed.
+      - `go test -short -p 4 -parallel 8 -count=1 -timeout 1m ./...` — passed.
+      - Tier 1 verification not run; this change touched only `cggmp21/secp256k1/hd*_test.go` and `docs/test-refactor-plan.md`.
+
 ### Large-Scale Work (future dedicated PRs)
 
 These files have 10+ standalone test functions that could benefit from structural reorganization, but the scale warrants dedicated workstreams:
@@ -1436,5 +1448,5 @@ These files have 10+ standalone test functions that could benefit from structura
 | `internal/wire/message_*_test.go`            | 30 (was 89) | Completed 2026-06-12: monolithic `message_test.go` split into fixtures, codec, custom, bigint, and inference/string files; obvious standalone tests consolidated into behavior-family tables; both fuzz targets preserved                              |
 | `internal/shamir/shamir_test.go`             | 27          | Consolidated from 43→27 (37% reduction) 2026-06-11; normalize/add/sub/mul/lagrange/interpolate/random-reject groups table-driven; `TestEvalKnownPolynomial` and `TestLagrangeCoefficientReconstructs` converted to `t.Run()` subtests 2026-06-11 final |
 | `cggmp21/secp256k1/tier0_regression_test.go` | 8 (was 18)  | Consolidated 2026-06-12: 18→8 (56% reduction); 9 presign Validate→1 table-driven, 2 sign payload→1, 2 round3 payload→1; 5 remaining genuinely unique                                                                                                   |
-| `cggmp21/secp256k1/hd_test.go`               | 21          | 18/21 now parallel (2026-06-11); BIP32 + sign-with-derivation tests with remaining structural similarity                                                                                                                                               |
+| `cggmp21/secp256k1/hd*_test.go`              | 13 (was 21) | Completed 2026-06-12: monolithic `hd_test.go` split into fixtures, derivation, invalid-child, and xpub files; BIP32 vectors/rejects/xpub scenarios consolidated; 3 `hmacSHA512` mutation tests remain sequential                                       |
 | `frost/ed25519/hd_test.go`                   | 21          | BIP32 derivation, keygen, and wire-format tests; heavy subtest use already                                                                                                                                                                             |
