@@ -89,6 +89,32 @@ type AffGProof struct {
 	TranscriptHash []byte
 }
 
+// Clone returns a deep copy of the AffGProof.
+func (p *AffGProof) Clone() *AffGProof {
+	if p == nil {
+		return nil
+	}
+	cp := &AffGProof{
+		Version:        p.Version,
+		A:              new(big.Int).Set(p.A),
+		Bx:             secp.Clone(p.Bx),
+		By:             new(big.Int).Set(p.By),
+		E:              new(big.Int).Set(p.E),
+		S:              new(big.Int).Set(p.S),
+		F:              new(big.Int).Set(p.F),
+		T:              new(big.Int).Set(p.T),
+		Y:              new(big.Int).Set(p.Y),
+		Z1:             new(big.Int).Set(p.Z1),
+		Z2:             new(big.Int).Set(p.Z2),
+		Z3:             new(big.Int).Set(p.Z3),
+		Z4:             new(big.Int).Set(p.Z4),
+		W:              new(big.Int).Set(p.W),
+		WY:             new(big.Int).Set(p.WY),
+		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+	}
+	return cp
+}
+
 // ProveAffG creates a Πaff-g proof for the MtA response.
 func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
 	if rng == nil {

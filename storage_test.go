@@ -8,6 +8,7 @@ import (
 )
 
 func TestEncryptDecryptKeyShareWithPassphrase(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test key share data for encryption round trip")
 	passphrase := []byte("super-secret-passphrase")
 
@@ -27,6 +28,7 @@ func TestEncryptDecryptKeyShareWithPassphrase(t *testing.T) {
 }
 
 func TestEncryptDecryptKeyShareWithPassphraseWrongPassphrase(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test key share data")
 	passphrase := []byte("correct-passphrase")
 
@@ -42,6 +44,7 @@ func TestEncryptDecryptKeyShareWithPassphraseWrongPassphrase(t *testing.T) {
 }
 
 func TestEncryptKeyShareWithPassphraseIsNonDeterministic(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test key share data")
 	passphrase := []byte("passphrase")
 
@@ -60,6 +63,7 @@ func TestEncryptKeyShareWithPassphraseIsNonDeterministic(t *testing.T) {
 }
 
 func TestEncryptDecryptPresignWithPassphrase(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test presign data for encryption round trip")
 	passphrase := []byte("presign-passphrase")
 
@@ -79,6 +83,7 @@ func TestEncryptDecryptPresignWithPassphrase(t *testing.T) {
 }
 
 func TestEncryptDecryptPresignWithPassphraseWrongPassphrase(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test presign data")
 	passphrase := []byte("correct")
 
@@ -94,6 +99,7 @@ func TestEncryptDecryptPresignWithPassphraseWrongPassphrase(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseTooShort(t *testing.T) {
+	t.Parallel()
 	_, err := DecryptKeyShareWithPassphrase([]byte("short"), []byte("pw"))
 	if err == nil {
 		t.Fatal("expected error for short input")
@@ -101,6 +107,7 @@ func TestDecryptWithPassphraseTooShort(t *testing.T) {
 }
 
 func TestEncryptDecryptWithPassphraseEmpty(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte{}
 	passphrase := []byte("pw")
 
@@ -120,6 +127,7 @@ func TestEncryptDecryptWithPassphraseEmpty(t *testing.T) {
 }
 
 func TestEncryptDecryptWithPassphraseLargePayload(t *testing.T) {
+	t.Parallel()
 	plaintext := make([]byte, 1024*1024) // 1 MiB
 	if _, err := rand.Read(plaintext); err != nil {
 		t.Fatal(err)
@@ -144,6 +152,7 @@ func TestEncryptDecryptWithPassphraseLargePayload(t *testing.T) {
 }
 
 func TestEncryptKeyShareWithPassphraseKeyID(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 	keyID := "my-key-id"
@@ -164,6 +173,7 @@ func TestEncryptKeyShareWithPassphraseKeyID(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseUnknownVersion(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -184,6 +194,7 @@ func TestDecryptWithPassphraseUnknownVersion(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseUnknownAlgorithm(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -204,6 +215,7 @@ func TestDecryptWithPassphraseUnknownAlgorithm(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseWrongRecordType(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -220,6 +232,7 @@ func TestDecryptWithPassphraseWrongRecordType(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseTamperedAAD(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -242,6 +255,7 @@ func TestDecryptWithPassphraseTamperedAAD(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseTamperedKeyID(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -263,6 +277,7 @@ func TestDecryptWithPassphraseTamperedKeyID(t *testing.T) {
 }
 
 func TestEncryptDecryptWithPassphraseCustomParams(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 	params := &PassphraseParams{Time: 2, Memory: 32 * 1024, Threads: 2}
@@ -283,6 +298,7 @@ func TestEncryptDecryptWithPassphraseCustomParams(t *testing.T) {
 }
 
 func TestEncryptWithPassphraseZeroParams(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 
@@ -303,6 +319,7 @@ func TestEncryptWithPassphraseZeroParams(t *testing.T) {
 }
 
 func TestEncryptWithPassphraseKeyIDTooLong(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 	longKeyID := string(make([]byte, maxKeyIDLen+1))
@@ -314,6 +331,7 @@ func TestEncryptWithPassphraseKeyIDTooLong(t *testing.T) {
 }
 
 func TestDefaultPassphraseParams(t *testing.T) {
+	t.Parallel()
 	p := DefaultPassphraseParams()
 	if p.Time != 3 {
 		t.Errorf("expected Time=3, got %d", p.Time)
@@ -327,6 +345,7 @@ func TestDefaultPassphraseParams(t *testing.T) {
 }
 
 func TestEncryptDecryptPresignWithPassphraseKeyID(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test presign data")
 	passphrase := []byte("passphrase")
 	keyID := "presign-k1"
@@ -347,6 +366,7 @@ func TestEncryptDecryptPresignWithPassphraseKeyID(t *testing.T) {
 }
 
 func TestDecryptWithPassphraseRejectsExcessiveParams(t *testing.T) {
+	t.Parallel()
 	plaintext := []byte("test data")
 	passphrase := []byte("passphrase")
 

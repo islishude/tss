@@ -7,6 +7,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // Example_full_lifecycle demonstrates the complete CGGMP21 lifecycle for
@@ -155,7 +156,7 @@ func Example_multiParty() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -216,7 +217,7 @@ func ExampleStartRefresh() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleRefreshMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -307,7 +308,7 @@ func ExampleStartReshare() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleReshareMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -397,7 +398,7 @@ func ExampleDeriveNonHardenedBIP32() {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -532,7 +533,7 @@ func runCGGMPKeygenWithOptions(parties []tss.PartyID, threshold int, opts Keygen
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}
@@ -591,7 +592,7 @@ func runCGGMPPresignWithContext(shares map[tss.PartyID]*KeyShare, signers []tss.
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandlePresignMessage(deliverCGGMPEnv(env))
+			out, err := sessions[id].HandlePresignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				panic(err)
 			}

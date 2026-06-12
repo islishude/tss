@@ -10,11 +10,13 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // TestRFC9591ContextString verifies the RFC 9591 Section 5.4.1 ciphersuite
 // context string used for domain separation.
 func TestRFC9591ContextString(t *testing.T) {
+	t.Parallel()
 	const expected = "FROST-ED25519-SHA512-v1"
 	if rfc9591ContextString != expected {
 		t.Errorf("context string mismatch: got %q, want %q", rfc9591ContextString, expected)
@@ -26,6 +28,7 @@ func TestRFC9591ContextString(t *testing.T) {
 // We check this by hashing known inputs and verifying the output is
 // deterministic and independent of any length encoding.
 func TestRFC9591HashToScalarDirectConcat(t *testing.T) {
+	t.Parallel()
 	a := []byte{0x01, 0x02, 0x03}
 	b := []byte{0x04, 0x05}
 
@@ -50,6 +53,7 @@ func TestRFC9591HashToScalarDirectConcat(t *testing.T) {
 // TestRFC9591Ed25519Challenge verifies the RFC 8032 challenge computation
 // format: H(R || A || msg) using SHA-512.
 func TestRFC9591Ed25519Challenge(t *testing.T) {
+	t.Parallel()
 	R := make([]byte, 32)
 	A := make([]byte, 32)
 	msg := []byte("test")
@@ -66,6 +70,7 @@ func TestRFC9591Ed25519Challenge(t *testing.T) {
 // signing, and Ed25519 signature verification produces valid output.
 // This exercises the complete RFC 9591 flow: keygen → sign → verify.
 func TestRFC9591EndToEndSignature(t *testing.T) {
+	t.Parallel()
 	// 2-of-3 keygen (matching RFC 9591 Appendix E configuration).
 	shares := frostKeygen(t, 2, 3)
 	key1 := shares[1]
@@ -91,6 +96,7 @@ func TestRFC9591EndToEndSignature(t *testing.T) {
 }
 
 func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
+	t.Parallel()
 	v := rfc9591Ed25519Vector(t)
 	commitments := map[tss.PartyID]nonceCommitment{
 		1: {D: v.p1HidingCommitment, E: v.p1BindingCommitment},
@@ -138,6 +144,7 @@ func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
 }
 
 func TestRFC9591Ed25519SigningVector(t *testing.T) {
+	t.Parallel()
 	v := rfc9591Ed25519Vector(t)
 	key1 := rfc9591KeyShare(t, 1, v.p1Share, v)
 	key3 := rfc9591KeyShare(t, 3, v.p3Share, v)
@@ -170,18 +177,18 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	assertCommitmentEnvelope(t, out1[0], v.p1HidingCommitment, v.p1BindingCommitment)
 	assertCommitmentEnvelope(t, out3[0], v.p3HidingCommitment, v.p3BindingCommitment)
 
-	p1Partial, err := s1.HandleSignMessage(deliverEnv(out3[0]))
+	p1Partial, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out3[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p3Partial, err := s3.HandleSignMessage(deliverEnv(out1[0]))
+	p3Partial, err := s3.HandleSignMessage(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertPartialEnvelope(t, p1Partial[0], v.p1SignatureShare)
 	assertPartialEnvelope(t, p3Partial[0], v.p3SignatureShare)
 
-	if _, err := s1.HandleSignMessage(deliverEnv(p3Partial[0])); err != nil {
+	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(p3Partial[0])); err != nil {
 		t.Fatal(err)
 	}
 	sig, ok := s1.Signature()
@@ -199,6 +206,7 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 // TestRFC9591ThresholdCombinations verifies FROST signatures work for
 // the standard threshold configurations from the RFC.
 func TestRFC9591ThresholdCombinations(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		threshold int

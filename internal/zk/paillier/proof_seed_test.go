@@ -163,3 +163,16 @@ func mustMarshalProof(tb proofFataler, proof any) []byte {
 	}
 	return out
 }
+
+type binaryProof interface {
+	MarshalBinary() ([]byte, error)
+}
+
+func mustMarshalBinary(tb proofFataler, proof binaryProof) []byte {
+	tb.Helper()
+	out, err := proof.MarshalBinary()
+	if err != nil {
+		tb.Fatal(err)
+	}
+	return out
+}

@@ -2,6 +2,7 @@ package paillier
 
 import (
 	"bytes"
+	"fmt"
 	"math/big"
 	"testing"
 
@@ -10,7 +11,9 @@ import (
 )
 
 func TestIntegerEncodingCanonical(t *testing.T) {
-	for _, tc := range []struct {
+	t.Parallel()
+
+	tests := []struct {
 		name string
 		x    *big.Int
 		want []byte
@@ -19,8 +22,11 @@ func TestIntegerEncodingCanonical(t *testing.T) {
 		{name: "zero", x: big.NewInt(0), want: []byte{0x00}},
 		{name: "positive", x: big.NewInt(258), want: []byte{0x00, 0x01, 0x02}},
 		{name: "negative", x: big.NewInt(-258), want: []byte{0x01, 0x01, 0x02}},
-	} {
+	}
+
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			got := EncodeSigned(tc.x)
 			if !bytes.Equal(got, tc.want) {
 				t.Fatalf("EncodeSigned() = %x, want %x", got, tc.want)
@@ -39,36 +45,53 @@ func TestIntegerEncodingCanonical(t *testing.T) {
 		})
 	}
 
-	for _, in := range [][]byte{
-		nil,
-		{},
-		{0x02},
-		{0x01},
-		{0x01, 0x00},
-		{0x00, 0x00},
-		{0x00, 0x00, 0x01},
-	} {
-		if _, err := DecodeSigned(in); err == nil {
-			t.Fatalf("DecodeSigned(%x) accepted non-canonical input", in)
+	t.Run("non-canonical signed", func(t *testing.T) {
+		t.Parallel()
+		for _, in := range [][]byte{
+			nil,
+			{},
+			{0x02},
+			{0x01},
+			{0x01, 0x00},
+			{0x00, 0x00},
+			{0x00, 0x00, 0x01},
+		} {
+			t.Run(fmt.Sprintf("%x", in), func(t *testing.T) {
+				t.Parallel()
+				if _, err := DecodeSigned(in); err == nil {
+					t.Fatalf("DecodeSigned(%x) accepted non-canonical input", in)
+				}
+			})
 		}
-	}
+	})
 
-	if got, err := DecodePositive([]byte{0x01, 0x02}); err != nil || got.Cmp(big.NewInt(258)) != 0 {
-		t.Fatalf("DecodePositive() = %v, %v; want 258, nil", got, err)
-	}
-	for _, in := range [][]byte{
-		nil,
-		{},
-		{0x00},
-		{0x00, 0x01},
-	} {
-		if _, err := DecodePositive(in); err == nil {
-			t.Fatalf("DecodePositive(%x) accepted non-canonical input", in)
+	t.Run("positive round-trip", func(t *testing.T) {
+		t.Parallel()
+		if got, err := DecodePositive([]byte{0x01, 0x02}); err != nil || got.Cmp(big.NewInt(258)) != 0 {
+			t.Fatalf("DecodePositive() = %v, %v; want 258, nil", got, err)
 		}
-	}
+	})
+
+	t.Run("non-canonical positive", func(t *testing.T) {
+		t.Parallel()
+		for _, in := range [][]byte{
+			nil,
+			{},
+			{0x00},
+			{0x00, 0x01},
+		} {
+			t.Run(fmt.Sprintf("%x", in), func(t *testing.T) {
+				t.Parallel()
+				if _, err := DecodePositive(in); err == nil {
+					t.Fatalf("DecodePositive(%x) accepted non-canonical input", in)
+				}
+			})
+		}
+	})
 }
 
 func TestIntegerRangeChecks(t *testing.T) {
+	t.Parallel()
 	if !InSignedPowerOfTwo(big.NewInt(-8), 3) || !InSignedPowerOfTwo(big.NewInt(8), 3) {
 		t.Fatal("signed power-of-two range rejected inclusive endpoint")
 	}
@@ -90,6 +113,7 @@ func TestIntegerRangeChecks(t *testing.T) {
 }
 
 func TestGroupMembershipChecks(t *testing.T) {
+	t.Parallel()
 	n := big.NewInt(15)
 	if !IsZNStar(big.NewInt(2), n) {
 		t.Fatal("valid Z*_N element rejected")
@@ -116,6 +140,8 @@ func TestGroupMembershipChecks(t *testing.T) {
 }
 
 func TestRingPedersenParamsValidation(t *testing.T) {
+	t.Parallel()
+
 	valid := seedRingPedersenParams()
 	if err := ValidateRingPedersenParams(valid); err != nil {
 		t.Fatal(err)
@@ -132,7 +158,7 @@ func TestRingPedersenParamsValidation(t *testing.T) {
 		t.Fatal("Ring-Pedersen params did not round-trip")
 	}
 
-	for _, tc := range []struct {
+	tests := []struct {
 		name   string
 		params *RingPedersenParams
 	}{
@@ -142,8 +168,10 @@ func TestRingPedersenParamsValidation(t *testing.T) {
 		{name: "s one", params: &RingPedersenParams{N: big.NewInt(15), S: big.NewInt(1), T: big.NewInt(4)}},
 		{name: "t non-unit", params: &RingPedersenParams{N: big.NewInt(15), S: big.NewInt(2), T: big.NewInt(3)}},
 		{name: "s out of range", params: &RingPedersenParams{N: big.NewInt(15), S: big.NewInt(15), T: big.NewInt(4)}},
-	} {
+	}
+	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			if err := ValidateRingPedersenParams(tc.params); err == nil {
 				t.Fatal("invalid Ring-Pedersen params validated")
 			}
@@ -155,6 +183,8 @@ func TestRingPedersenParamsValidation(t *testing.T) {
 }
 
 func TestSecurityParamsValidationAndBindingValues(t *testing.T) {
+	t.Parallel()
+
 	valid := SecurityParams{Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 512}
 	if err := valid.Validate(); err != nil {
 		t.Fatal(err)
@@ -183,6 +213,8 @@ func TestSecurityParamsValidationAndBindingValues(t *testing.T) {
 }
 
 func TestTranscriptDomainSeparation(t *testing.T) {
+	t.Parallel()
+
 	build := func(domain, label string, payload []byte) []byte {
 		t := NewTranscript(domain)
 		t.AppendBytes(label, payload)
@@ -228,5 +260,21 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 		if _, err := t1.ChallengeSigned(bits); err == nil {
 			t.Fatalf("ChallengeSigned accepted invalid bit length %d", bits)
 		}
+	}
+}
+
+// TestChallengeLabelsV1 verifies challenge labels use v1 (no backward-compat
+// version bumps before production-readiness).
+func TestChallengeLabelsV1(t *testing.T) {
+	t.Parallel()
+
+	if mtaChallengeLabel != "paillier-mta-response-challenge-v1" {
+		t.Fatalf("mtaChallengeLabel = %q, want v1", mtaChallengeLabel)
+	}
+	if logChallengeLabel != "paillier-log-challenge-v1" {
+		t.Fatalf("logChallengeLabel = %q, want v1", logChallengeLabel)
+	}
+	if encryptionChallengeLabel != "paillier-encryption-challenge-v1" {
+		t.Fatalf("encryptionChallengeLabel = %q, want v1", encryptionChallengeLabel)
 	}
 }

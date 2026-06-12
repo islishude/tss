@@ -7,6 +7,7 @@ import (
 )
 
 func TestUnmarshalRejectsOversizedInput(t *testing.T) {
+	t.Parallel()
 	// Construct a minimal valid message then pad it beyond the limit.
 	fields := []wire.Field{
 		{Tag: 1, Value: []byte("hello")},
@@ -28,6 +29,7 @@ func TestUnmarshalRejectsOversizedInput(t *testing.T) {
 }
 
 func TestUnmarshalRejectsTooManyFields(t *testing.T) {
+	t.Parallel()
 	// Build a message with more fields than the limit.
 	var fields []wire.Field
 	for i := range 5 {
@@ -50,6 +52,7 @@ func TestUnmarshalRejectsTooManyFields(t *testing.T) {
 }
 
 func TestUnmarshalRejectsOversizedField(t *testing.T) {
+	t.Parallel()
 	value := make([]byte, 100)
 	fields := []wire.Field{
 		{Tag: 1, Value: value},
@@ -71,6 +74,7 @@ func TestUnmarshalRejectsOversizedField(t *testing.T) {
 }
 
 func TestUnmarshalWithLimitsRejectsWrongType(t *testing.T) {
+	t.Parallel()
 	fields := []wire.Field{
 		{Tag: 1, Value: []byte("x")},
 	}
@@ -87,6 +91,7 @@ func TestUnmarshalWithLimitsRejectsWrongType(t *testing.T) {
 }
 
 func TestUnmarshalWithLimitsValidMessage(t *testing.T) {
+	t.Parallel()
 	fields := []wire.Field{
 		{Tag: 1, Value: []byte("hello")},
 		{Tag: 3, Value: []byte("world")},
@@ -110,6 +115,7 @@ func TestUnmarshalWithLimitsValidMessage(t *testing.T) {
 }
 
 func TestReadBytesWithLimitRejectsOversized(t *testing.T) {
+	t.Parallel()
 	raw := []byte{0x00, 0x00, 0x00, 0x10} // length = 16
 	_, _, err := wire.ReadBytesWithLimit(raw, 0, 8)
 	if err == nil {
@@ -118,6 +124,7 @@ func TestReadBytesWithLimitRejectsOversized(t *testing.T) {
 }
 
 func TestDecodeBytesListWithLimitRejectsTooManyItems(t *testing.T) {
+	t.Parallel()
 	// Encode a list with 3 items.
 	var items [][]byte
 	for i := range 3 {
@@ -132,6 +139,7 @@ func TestDecodeBytesListWithLimitRejectsTooManyItems(t *testing.T) {
 }
 
 func TestDecodeUint32ListWithLimitRejectsTooManyItems(t *testing.T) {
+	t.Parallel()
 	raw := wire.EncodeUint32List([]uint32{1, 2, 3, 4, 5})
 
 	_, err := wire.DecodeUint32ListWithLimit[uint32](raw, 3)

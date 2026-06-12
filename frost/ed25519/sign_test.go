@@ -6,9 +6,11 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	message := []byte("nonce regression")
@@ -39,6 +41,7 @@ func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
 }
 
 func TestSignClearsNonceAfterPartial(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -60,7 +63,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	round2, err := session.HandleSignMessage(deliverEnv(out2[0]))
+	round2, err := session.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,6 +87,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 }
 
 func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -110,7 +114,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 			if env.From == receiver {
 				continue
 			}
-			out, err := sessions[receiver].HandleSignMessage(deliverEnv(env))
+			out, err := sessions[receiver].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver commitment from %d to %d: %v", env.From, receiver, err)
 			}
@@ -121,11 +125,11 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("expected two remote partials, got %d", len(round2))
 	}
 
-	if _, err := sessions[1].HandleSignMessage(deliverEnv(round1[2])); err != nil {
+	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[2])); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range round2 {
-		if _, err := sessions[1].HandleSignMessage(deliverEnv(env)); err != nil {
+		if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatalf("early partial from %d returned fatal error: %v", env.From, err)
 		}
 	}
@@ -133,7 +137,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("signature completed before all commitments arrived: %x", sig)
 	}
 
-	out, err := sessions[1].HandleSignMessage(deliverEnv(round1[3]))
+	out, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[3]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -168,3 +172,34 @@ func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, s
 }
 
 // Helper to add test guards is already in frost_test.go (same package)
+
+func TestNonceCommitmentMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	nc := nonceCommitment{D: []byte{0x01}, E: []byte{0x02}}
+	if _, err := nc.MarshalJSON(); err == nil {
+		t.Fatal("nonceCommitment.MarshalJSON should reject JSON encoding")
+	}
+}
+
+func TestSignPartialPayloadMarshalJSONRejects(t *testing.T) {
+	t.Parallel()
+	sp := signPartialPayload{Z: []byte{0x03}}
+	if _, err := sp.MarshalJSON(); err == nil {
+		t.Fatal("signPartialPayload.MarshalJSON should reject JSON encoding")
+	}
+}
+
+func TestNoopSignVerifierVerifyAckAcceptsAny(t *testing.T) {
+	t.Parallel()
+	var v noopSignVerifier
+	// VerifyAck should accept any signature without error.
+	if err := v.VerifyAck(1, [32]byte{}, []byte("anything")); err != nil {
+		t.Fatalf("noopSignVerifier should accept any signature: %v", err)
+	}
+	if err := v.VerifyAck(99, [32]byte{0xff}, nil); err != nil {
+		t.Fatalf("noopSignVerifier should accept nil signature: %v", err)
+	}
+	if err := v.VerifyAck(0, [32]byte{}, []byte{}); err != nil {
+		t.Fatalf("noopSignVerifier should accept empty signature: %v", err)
+	}
+}

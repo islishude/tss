@@ -9,6 +9,7 @@ import (
 )
 
 func TestBlameEvidenceField(t *testing.T) {
+	t.Parallel()
 	makeEvidence := func(t *testing.T) *BlameEvidence {
 		t.Helper()
 		session, err := NewSessionID(nil)
@@ -138,6 +139,7 @@ func TestBlameEvidenceField(t *testing.T) {
 }
 
 func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -191,6 +193,7 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 }
 
 func TestBlameEvidenceRejectsMalformed(t *testing.T) {
+	t.Parallel()
 	// Garbage bytes that don't match the TLV magic prefix.
 	if _, err := UnmarshalBlameEvidence([]byte("not a valid TLV message")); err == nil {
 		t.Fatal("malformed evidence decoded")
@@ -220,6 +223,7 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 }
 
 func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -258,6 +262,7 @@ func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
 }
 
 func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
+	t.Parallel()
 	// Build a valid BlameEvidence first to get the correct envelope structure,
 	// then replace the PublicInputs recordlist with a malformed one.
 	session, err := NewSessionID(nil)
@@ -336,6 +341,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 }
 
 func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -382,6 +388,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 }
 
 func TestBlameEvidenceRecordListNonUTF8KeyRejected(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -400,6 +407,7 @@ func TestBlameEvidenceRecordListNonUTF8KeyRejected(t *testing.T) {
 }
 
 func TestBlameEvidenceRecordListValueExceedsLimitRejected(t *testing.T) {
+	t.Parallel()
 	session, err := NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

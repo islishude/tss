@@ -14,6 +14,7 @@ import (
 // that does not require cryptographic material.
 
 func TestPresignSessionRejectsNil(t *testing.T) {
+	t.Parallel()
 	var s *PresignSession
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -36,6 +37,7 @@ func TestPresignSessionRejectsNil(t *testing.T) {
 }
 
 func TestSignSessionRejectsNil(t *testing.T) {
+	t.Parallel()
 	var s *SignSession
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -58,6 +60,7 @@ func TestSignSessionRejectsNil(t *testing.T) {
 }
 
 func TestKeygenSessionRejectsNil(t *testing.T) {
+	t.Parallel()
 	var s *KeygenSession
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -83,6 +86,7 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 // verification failures and blame-bearing errors cause abort,
 // but duplicate messages do not (they are protocol-level retries).
 func TestShouldAbortSession(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name      string
 		err       error
@@ -140,6 +144,7 @@ func TestShouldAbortSession(t *testing.T) {
 }
 
 func TestCompletedSessionError(t *testing.T) {
+	t.Parallel()
 	err := completedSessionError(1, 2)
 	if err == nil {
 		t.Fatal("expected non-nil error")
@@ -157,6 +162,7 @@ func TestCompletedSessionError(t *testing.T) {
 }
 
 func TestAbortedSessionError(t *testing.T) {
+	t.Parallel()
 	err := abortedSessionError(2, 3)
 	if err == nil {
 		t.Fatal("expected non-nil error")
@@ -171,6 +177,7 @@ func TestAbortedSessionError(t *testing.T) {
 }
 
 func TestPresignMarshalJSONRejected(t *testing.T) {
+	t.Parallel()
 	p := minimalCGGMP21Presign(t)
 	_, err := p.MarshalJSON()
 	if err == nil {
@@ -179,6 +186,7 @@ func TestPresignMarshalJSONRejected(t *testing.T) {
 }
 
 func TestPresignDestroyClearsSecrets(t *testing.T) {
+	t.Parallel()
 	p := minimalCGGMP21Presign(t)
 	p.Destroy()
 	if !p.Consumed {
@@ -187,6 +195,7 @@ func TestPresignDestroyClearsSecrets(t *testing.T) {
 }
 
 func TestClaimPresignRejectsNil(t *testing.T) {
+	t.Parallel()
 	err := ClaimPresign(nil)
 	if err == nil {
 		t.Fatal("expected nil presign rejection")
@@ -194,6 +203,7 @@ func TestClaimPresignRejectsNil(t *testing.T) {
 }
 
 func TestValidateSignerSetRejectsEmptyKey(t *testing.T) {
+	t.Parallel()
 	key := &KeyShare{Party: 1, Threshold: 1, Parties: []tss.PartyID{1}}
 	err := validateSignerSet(key, []tss.PartyID{}, DefaultLimits())
 	if err == nil {
@@ -202,6 +212,7 @@ func TestValidateSignerSetRejectsEmptyKey(t *testing.T) {
 }
 
 func TestPresignContextValidation(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name    string
 		ctx     PresignContext

@@ -11,26 +11,13 @@ import (
 	"time"
 )
 
-func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping 1024-bit safe-prime factor keygen in short mode")
-	}
-	sk, err := GenerateKeyForTest(context.Background(), nil, 2048)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if sk.N.BitLen() != 2048 {
-		t.Fatalf("N has %d bits, want 2048", sk.N.BitLen())
-	}
-	assertSafePrimeFactor(t, sk.P, 1024)
-	assertSafePrimeFactor(t, sk.Q, 1024)
-}
-
 // TestGenerateKeyCustomReaderSafety verifies that GenerateKey works correctly
 // with a custom reader even though prime-search goroutines access it concurrently.
 // The lockedReader wrapper serialises Read calls so the reader implementation
 // never sees overlapping calls.
 func TestGenerateKeyCustomReaderSafety(t *testing.T) {
+	t.Parallel()
+
 	reader := new(concurrencyDetectingReader)
 	sk, err := GenerateKeyForTest(context.Background(), reader, 512)
 	if err != nil {
@@ -47,6 +34,8 @@ func TestGenerateKeyCustomReaderSafety(t *testing.T) {
 }
 
 func TestSameReaderHandlesNonComparableValues(t *testing.T) {
+	t.Parallel()
+
 	if !sameReader(crand.Reader, crand.Reader) {
 		t.Fatal("identical non-comparable readers should compare equal")
 	}
@@ -63,6 +52,8 @@ func TestSameReaderHandlesNonComparableValues(t *testing.T) {
 }
 
 func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
+	t.Parallel()
+
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -75,6 +66,8 @@ func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
 }
 
 func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
+	t.Parallel()
+
 	var pCalls atomic.Int32
 	var qCalls atomic.Int32
 	search := func(ctx context.Context, side primeSide, bits, workers int) (*big.Int, error) {
@@ -108,24 +101,6 @@ func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
 	}
 	if got := qCalls.Load(); got != 2 {
 		t.Fatalf("q search called %d times, want 2", got)
-	}
-}
-
-func BenchmarkGenerateKey2048(b *testing.B) {
-	for b.Loop() {
-		_, err := GenerateKeyForTest(context.Background(), nil, 2048)
-		if err != nil {
-			b.Fatal(err)
-		}
-	}
-}
-
-func BenchmarkGenerateKeyDefaultBits(b *testing.B) {
-	for b.Loop() {
-		_, err := GenerateKey(context.Background(), nil, 3072)
-		if err != nil {
-			b.Fatal(err)
-		}
 	}
 }
 

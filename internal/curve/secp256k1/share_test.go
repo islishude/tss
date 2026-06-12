@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"crypto/rand"
 	"testing"
 )
 
@@ -37,6 +36,8 @@ func evalPoly(x Scalar, coeffs ...Scalar) Scalar {
 }
 
 func TestEvalCommitments_empty(t *testing.T) {
+	t.Parallel()
+
 	got, err := EvalCommitments(nil, 1)
 	if err != nil {
 		t.Fatal(err)
@@ -47,11 +48,10 @@ func TestEvalCommitments_empty(t *testing.T) {
 }
 
 func TestEvalCommitments_constantPoly(t *testing.T) {
+	t.Parallel()
+
 	// f(x) = a₀  → commitment[0] = a₀*G, eval at any id = a₀*G
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 600)
 	com := makeCommitments(t, a0)
 	got, err := EvalCommitments(com, 42)
 	if err != nil {
@@ -64,15 +64,11 @@ func TestEvalCommitments_constantPoly(t *testing.T) {
 }
 
 func TestEvalCommitments_linearPoly(t *testing.T) {
+	t.Parallel()
+
 	// f(x) = a₀ + a₁*x
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a1, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 601)
+	a1 := deterministicScalar(t, 602)
 	com := makeCommitments(t, a0, a1)
 
 	id := uint32(7)
@@ -89,15 +85,13 @@ func TestEvalCommitments_linearPoly(t *testing.T) {
 }
 
 func TestEvalCommitments_degree5(t *testing.T) {
+	t.Parallel()
+
 	// f(x) = a₀ + a₁*x + … + a₄*x⁴
 	const deg = 5
 	coeffs := make([]Scalar, deg)
 	for i := range coeffs {
-		s, err := RandomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		coeffs[i] = s
+		coeffs[i] = deterministicScalar(t, int64(610+i))
 	}
 	com := makeCommitments(t, coeffs...)
 
@@ -115,16 +109,12 @@ func TestEvalCommitments_degree5(t *testing.T) {
 }
 
 func TestEvalCommitments_withNilEntries(t *testing.T) {
+	t.Parallel()
+
 	// f(x) = a₀ + 0*x + a₂*x²
 	// Commitments: [a₀*G, nil, a₂*G] — nil entry signals zero coefficient.
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a2, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 620)
+	a2 := deterministicScalar(t, 621)
 	com := [][]byte{
 		mustPointBytes(t, ScalarBaseMult(a0)),
 		nil, // zero coefficient
@@ -145,6 +135,8 @@ func TestEvalCommitments_withNilEntries(t *testing.T) {
 }
 
 func TestEvalCommitments_invalidBytes(t *testing.T) {
+	t.Parallel()
+
 	com := [][]byte{{0x00, 0x01, 0x02}} // too short, not compressed
 	_, err := EvalCommitments(com, 1)
 	if err == nil {
@@ -153,15 +145,11 @@ func TestEvalCommitments_invalidBytes(t *testing.T) {
 }
 
 func TestVerifyShare_valid(t *testing.T) {
+	t.Parallel()
+
 	// f(x) = a₀ + a₁*x  → share = f(id)
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a1, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 630)
+	a1 := deterministicScalar(t, 631)
 	com := makeCommitments(t, a0, a1)
 
 	id := uint32(99)
@@ -174,14 +162,10 @@ func TestVerifyShare_valid(t *testing.T) {
 }
 
 func TestVerifyShare_wrongShare(t *testing.T) {
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a1, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+
+	a0 := deterministicScalar(t, 640)
+	a1 := deterministicScalar(t, 641)
 	com := makeCommitments(t, a0, a1)
 
 	id := uint32(3)
@@ -195,10 +179,9 @@ func TestVerifyShare_wrongShare(t *testing.T) {
 }
 
 func TestVerifyShare_badCommitment(t *testing.T) {
-	share, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	t.Parallel()
+
+	share := deterministicScalar(t, 650)
 	com := [][]byte{{0xFF}} // invalid compressed point
 	if err := VerifyShare(com, 1, share); err == nil {
 		t.Fatal("expected error for bad commitment bytes")
@@ -206,15 +189,11 @@ func TestVerifyShare_badCommitment(t *testing.T) {
 }
 
 func TestVerifyShare_differentID(t *testing.T) {
+	t.Parallel()
+
 	// Share computed for id=5, but verified against id=7 should fail.
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
-	a1, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 660)
+	a1 := deterministicScalar(t, 661)
 	com := makeCommitments(t, a0, a1)
 
 	x5 := scalarFromUint64(5)
@@ -226,12 +205,11 @@ func TestVerifyShare_differentID(t *testing.T) {
 }
 
 func TestVerifyShare_zeroShare(t *testing.T) {
+	t.Parallel()
+
 	// f(x) where f(id) = 0 is a valid share (evaluates to zero scalar).
 	// Need a0 + a1*id = 0 mod n → a1 = -a0 * id^{-1}
-	a0, err := RandomScalar(rand.Reader)
-	if err != nil {
-		t.Fatal(err)
-	}
+	a0 := deterministicScalar(t, 670)
 	id := uint32(42)
 	x := scalarFromUint64(uint64(id))
 	inv, err := ScalarInvert(x)

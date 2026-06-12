@@ -3,9 +3,7 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
-	"encoding/hex"
 	"math/big"
-	"os"
 	"sync"
 	"testing"
 
@@ -208,31 +206,4 @@ func mustMinimalSignPrepProofForTest(tb interface{ Fatal(...any) }) []byte {
 		tb.Fatal("proof.MarshalBinary: " + err.Error())
 	}
 	return proofBytes
-}
-
-// checkGolden compares raw bytes against a golden file. When the environment
-// variable UPDATE_GOLDEN=1 is set, it writes the golden file. No crypto.
-func checkGolden(t *testing.T, golden string, raw []byte) {
-	t.Helper()
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
-}
-
-// deliverCGGMPEnv returns a copy of env with transport authentication set for guard validation.
-func deliverCGGMPEnv(env tss.Envelope) tss.Envelope {
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = env.From
-	return env
 }

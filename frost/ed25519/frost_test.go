@@ -10,6 +10,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // testFROSTGuard creates an EnvelopeGuard for FROST Ed25519 protocol tests.
@@ -32,14 +33,8 @@ func testFROSTPolicies() tss.PolicySet {
 	return ps
 }
 
-// deliverEnv returns a copy of env with transport authentication set for guard validation.
-func deliverEnv(env tss.Envelope) tss.Envelope {
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = env.From
-	return env
-}
-
 func TestFROSTSignScenarios(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		threshold int
@@ -68,6 +63,7 @@ func TestFROSTSignScenarios(t *testing.T) {
 }
 
 func TestFROSTKeyShareRoundTrip(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -83,6 +79,7 @@ func TestFROSTKeyShareRoundTrip(t *testing.T) {
 }
 
 func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -97,10 +94,10 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil {
+	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
+	if out, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate commitment should be ignored, out=%d err=%v", len(out), err)
 	} else if len(out) != 0 {
 		t.Fatalf("duplicate commitment produced unexpected output, out=%d", len(out))
@@ -108,6 +105,7 @@ func TestFROSTIgnoresDuplicateCommitment(t *testing.T) {
 }
 
 func TestFROSTRejectsConflictingCommitment(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -126,19 +124,20 @@ func TestFROSTRejectsConflictingCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil {
+	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	conflict := out3[0]
 	conflict.From = 2
 	conflict = conflict.RecomputeTranscriptHash()
-	_, err = s1.HandleSignMessage(deliverEnv(conflict))
+	_, err = s1.HandleSignMessage(testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting commitment, got %v", err)
 	}
 }
 
 func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
+	t.Parallel()
 	sessions, round2 := frostSigningRound2(t, 2, 3, []tss.PartyID{1, 2, 3}, []byte("msg"))
 	var partialFrom2 tss.Envelope
 	for _, env := range round2 {
@@ -150,10 +149,10 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 	if partialFrom2.Payload == nil {
 		t.Fatal("missing partial from party 2")
 	}
-	if _, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil {
+	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(partialFrom2)); err != nil {
 		t.Fatal(err)
 	}
-	if out, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
+	if out, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(partialFrom2)); err != nil && !errors.Is(err, tss.ErrDuplicateMessage) {
 		t.Fatalf("duplicate partial should be ignored, out=%d err=%v", len(out), err)
 	} else if len(out) != 0 {
 		t.Fatalf("duplicate partial produced unexpected output, out=%d", len(out))
@@ -161,6 +160,7 @@ func TestFROSTIgnoresDuplicatePartial(t *testing.T) {
 }
 
 func TestFROSTRejectsConflictingPartial(t *testing.T) {
+	t.Parallel()
 	sessions, round2 := frostSigningRound2(t, 2, 3, []tss.PartyID{1, 2, 3}, []byte("msg"))
 	var partialFrom2, partialFrom3 tss.Envelope
 	for _, env := range round2 {
@@ -174,19 +174,20 @@ func TestFROSTRejectsConflictingPartial(t *testing.T) {
 	if partialFrom2.Payload == nil || partialFrom3.Payload == nil {
 		t.Fatal("missing partials")
 	}
-	if _, err := sessions[1].HandleSignMessage(deliverEnv(partialFrom2)); err != nil {
+	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(partialFrom2)); err != nil {
 		t.Fatal(err)
 	}
 	conflict := partialFrom3
 	conflict.From = 2
 	conflict = conflict.RecomputeTranscriptHash()
-	_, err := sessions[1].HandleSignMessage(deliverEnv(conflict))
+	_, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting partial, got %v", err)
 	}
 }
 
 func TestFROSTConcurrentMessageHandling(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -206,7 +207,7 @@ func TestFROSTConcurrentMessageHandling(t *testing.T) {
 	errs := make(chan error, 2)
 	for range 2 {
 		wg.Go(func() {
-			_, err := s1.HandleSignMessage(deliverEnv(out2[0]))
+			_, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
 			errs <- err
 		})
 	}
@@ -220,6 +221,7 @@ func TestFROSTConcurrentMessageHandling(t *testing.T) {
 }
 
 func TestFROSTBlamesBadPartial(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -244,7 +246,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].HandleSignMessage(deliverEnv(env))
+			out, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -271,7 +273,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].HandleSignMessage(deliverEnv(round2[0])); err == nil {
+		if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(round2[0])); err == nil {
 			t.Fatal("expected bad partial rejection")
 		}
 	}
@@ -281,6 +283,7 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 }
 
 func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -300,7 +303,7 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 		mutated := share
 		mutated.To = 0
 		mutated = mutated.RecomputeTranscriptHash()
-		_, err := kg1.HandleKeygenMessage(deliverEnv(mutated))
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
 			t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
 		}
@@ -308,12 +311,13 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 	t.Run("non-confidential", func(t *testing.T) {
 		mutated := share
 		mutated.To = 99 // wrong recipient
-		_, err := kg1.HandleKeygenMessage(deliverEnv(mutated))
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 }
 
 func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -329,7 +333,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(deliverEnv(out2[0])); err != nil {
+	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalReshareSharePayload(out2[1].Payload)
@@ -347,7 +351,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[1] = out2[1].RecomputeTranscriptHash()
-	_, err = session.HandleReshareMessage(deliverEnv(out2[1]))
+	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid FROST reshare share did not carry evidence")
@@ -362,6 +366,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestFROSTSessionStateIsMonotonic(t *testing.T) {
+	t.Parallel()
 	t.Run("completed keygen rejects messages", func(t *testing.T) {
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
@@ -383,7 +388,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		env := out[0]
 		env.To = 2
 		env = env.RecomputeTranscriptHash()
-		_, err = keygen.HandleKeygenMessage(deliverEnv(env))
+		_, err = keygen.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
 
@@ -404,7 +409,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		env := out2[0]
 		env.TranscriptHash = [32]byte{}
-		_, err = sign.HandleSignMessage(deliverEnv(env))
+		_, err = sign.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
 
@@ -425,11 +430,11 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 			sessions[id] = session
 			round1 = append(round1, out[0])
 		}
-		round2, err := sessions[2].HandleSignMessage(deliverEnv(round1[0]))
+		round2, err := sessions[2].HandleSignMessage(testutil.DeliverEnvelope(round1[0]))
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := sessions[1].HandleSignMessage(deliverEnv(round1[1])); err != nil {
+		if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[1])); err != nil {
 			t.Fatal(err)
 		}
 		payload, err := unmarshalSignPartialPayload(round2[0].Payload)
@@ -444,9 +449,9 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		bad := round2[0]
 		bad.Payload = mutated
 		bad = bad.RecomputeTranscriptHash()
-		_, err = sessions[1].HandleSignMessage(deliverEnv(bad))
+		_, err = sessions[1].HandleSignMessage(testutil.DeliverEnvelope(bad))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
-		_, err = sessions[1].HandleSignMessage(deliverEnv(round2[0]))
+		_, err = sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round2[0]))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 	})
 }
@@ -468,7 +473,61 @@ func assertFROSTProtocolCode(t testing.TB, err error, code string) *tss.Protocol
 	return protocolErr
 }
 
+// --- FROST keygen fixture cache ---
+
+type frostFixtureKey struct {
+	threshold int
+	n         int
+	hd        bool
+}
+
+type frostFixtureEntry struct {
+	once   sync.Once
+	shares map[tss.PartyID]*KeyShare
+}
+
+var frostKeygenFixtureCache sync.Map // map[frostFixtureKey]*frostFixtureEntry
+
+// cachedFrostKeygen returns deep-cloned key shares from the fixture cache,
+// generating a fresh DKG on first use per (threshold, n, hd) tuple.
+func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	key := frostFixtureKey{threshold: threshold, n: n, hd: hd}
+	actual, _ := frostKeygenFixtureCache.LoadOrStore(key, &frostFixtureEntry{})
+	entry := actual.(*frostFixtureEntry)
+	entry.once.Do(func() {
+		defer func() {
+			if entry.shares == nil {
+				frostKeygenFixtureCache.Delete(key)
+			}
+		}()
+		if hd {
+			entry.shares = cloneFrostKeyShareMap(frostKeygenHDInner(t, threshold, n))
+		} else {
+			entry.shares = cloneFrostKeyShareMap(frostKeygenInner(t, threshold, n))
+		}
+	})
+	if entry.shares == nil {
+		t.Fatal("cached FROST keygen fixture was not initialized")
+	}
+	return cloneFrostKeyShareMap(entry.shares)
+}
+
+func cloneFrostKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
+	out := make(map[tss.PartyID]*KeyShare, len(shares))
+	for id, ks := range shares {
+		out[id] = ks.Clone()
+	}
+	return out
+}
+
 func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	return cachedFrostKeygen(t, threshold, n, false)
+}
+
+// frostKeygenInner performs the actual DKG without caching.
+func frostKeygenInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	session, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -506,6 +565,67 @@ func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	return out
 }
 
+// frostKeygenHDInner performs the actual HD-enabled DKG without caching.
+func frostKeygenHDInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	parties := make([]tss.PartyID, n)
+	for i := range n {
+		parties[i] = tss.PartyID(i + 1)
+	}
+	parties = tss.SortParties(parties)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	type sessionState struct {
+		session   *KeygenSession
+		envelopes []tss.Envelope
+	}
+	sessions := make(map[tss.PartyID]*sessionState, n)
+	for _, id := range parties {
+		cfg := tss.ThresholdConfig{
+			Threshold: threshold,
+			Parties:   parties,
+			Self:      id,
+			SessionID: sessionID,
+		}
+		session, out, err := StartKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
+		sessions[id] = &sessionState{session: session, envelopes: out}
+	}
+	queue := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		queue = append(queue, sessions[id].envelopes...)
+	}
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for _, receiver := range parties {
+			if receiver == env.From || (env.To != 0 && env.To != receiver) {
+				continue
+			}
+			delivered := testutil.DeliverEnvelope(env)
+			out, err := sessions[receiver].session.HandleKeygenMessage(delivered)
+			if err != nil {
+				t.Fatal(err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	shares := make(map[tss.PartyID]*KeyShare, n)
+	for _, id := range parties {
+		share, ok := sessions[id].session.KeyShare()
+		if !ok {
+			t.Fatalf("party %d did not complete keygen", id)
+		}
+		shares[id] = share
+	}
+	return shares
+}
+
 func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions map[tss.PartyID]*KeygenSession, messages []tss.Envelope) {
 	t.Helper()
 	// Attach test guards to sessions that don't already have one.
@@ -527,7 +647,7 @@ func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions ma
 			delivered := env
 			delivered.Security.Authenticated = true
 			delivered.Security.AuthenticatedParty = env.From
-			out, err := sessions[id].HandleKeygenMessage(deliverEnv(delivered))
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -569,7 +689,7 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, m
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].HandleSignMessage(deliverEnv(env))
+			out, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -584,6 +704,7 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, m
 }
 
 func TestFROSTReshareMembershipChange(t *testing.T) {
+	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
 
 	t.Run("add party", func(t *testing.T) {
@@ -816,7 +937,7 @@ func deliverReshareMessages(t *testing.T, receivers []tss.PartyID, messages []ts
 			delivered := env
 			delivered.Security.Authenticated = true
 			delivered.Security.AuthenticatedParty = env.From
-			_, err := sessions[id].HandleReshareMessage(deliverEnv(delivered))
+			_, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -839,6 +960,7 @@ func collectReshareShares(t *testing.T, parties []tss.PartyID, sessions map[tss.
 }
 
 func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		threshold int
@@ -897,7 +1019,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 					if env.To != 0 && env.To != id {
 						continue
 					}
-					_, err := refreshSessions[id].HandleReshareMessage(deliverEnv(env))
+					_, err := refreshSessions[id].HandleReshareMessage(testutil.DeliverEnvelope(env))
 					if err != nil {
 						t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 					}
@@ -945,6 +1067,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 }
 
 func TestFROSTStartRefreshConvenience(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -973,7 +1096,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, env := range out2 {
-		if _, err := session.HandleReshareMessage(deliverEnv(env)); err != nil {
+		if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -987,6 +1110,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 }
 
 func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	share := shares[1]
 
@@ -1041,6 +1165,7 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 }
 
 func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
+	t.Parallel()
 	// Identity point: canonical Ed25519 encoding of y=1.
 	identity := make([]byte, 32)
 	identity[0] = 1
@@ -1114,6 +1239,7 @@ func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
 }
 
 func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
+	t.Parallel()
 	// A round 2 partial from a party whose round 1 commitment hasn't arrived yet
 	// is stored but aggregation does not complete until all commitments arrive.
 	shares := frostKeygen(t, 2, 2)
@@ -1134,14 +1260,14 @@ func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
 	s2.SetGuard(testFROSTGuard(shares[2].Party, tss.PartySet(shares[2].Parties), sessionID))
 
 	// Party 1 receives party 2's commitment → emits party 1's partial.
-	round2, err := s1.HandleSignMessage(deliverEnv(out2[0]))
+	round2, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Party 2 receives party 1's partial before party 1's commitment.
 	// This is accepted — the partial is stored.
-	_, err = s2.HandleSignMessage(deliverEnv(round2[0]))
+	_, err = s2.HandleSignMessage(testutil.DeliverEnvelope(round2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1154,6 +1280,7 @@ func TestFROSTSignAcceptsPartialBeforeCommitment(t *testing.T) {
 }
 
 func TestFROSTSignRejectsNonSigner(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -1176,6 +1303,7 @@ func TestFROSTSignRejectsNonSigner(t *testing.T) {
 }
 
 func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -1195,7 +1323,7 @@ func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
 
 	// Deliver commitment from party 2 (who signed "msg2") to party 1 (who signed "msg1").
 	// The commitment itself doesn't contain the message, but the partial will mismatch.
-	if _, err := s1.HandleSignMessage(deliverEnv(out2[0])); err != nil {
+	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	// The session should still be alive — the mismatch will be caught during partial verification.
@@ -1205,6 +1333,7 @@ func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
 }
 
 func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
+	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -1232,6 +1361,6 @@ func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
 		To:          1,
 		PayloadType: payloadReshareCommitments,
 	}
-	_, err = session.HandleReshareMessage(deliverEnv(fakeEnv))
+	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(fakeEnv))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 }

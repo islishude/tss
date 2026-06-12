@@ -33,6 +33,8 @@ func scalarFromHex(s string) Scalar {
 }
 
 func TestPrecomputedValues(t *testing.T) {
+	t.Parallel()
+
 	var (
 		wantScalarModulus = mustModulus("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEBAAEDCE6AF48A03BBFD25E8CD0364141")
 		wantFieldModulus  = mustModulus("FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFFEFFFFFC2F")

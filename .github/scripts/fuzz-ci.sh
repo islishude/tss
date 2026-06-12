@@ -3,6 +3,7 @@ set -euo pipefail
 
 FUZZTIME="${FUZZTIME:-60s}"
 PARALLEL="${PARALLEL:-4}"
+BUILD_TAGS="${BUILD_TAGS:-tier1,integration}"
 
 # Usage:
 #   ./fuzz.sh                     # fuzz all packages: ./...
@@ -16,11 +17,12 @@ if [ "${#PKG_PATTERNS[@]}" -eq 0 ]; then
 fi
 
 for pkg in $(go list "${PKG_PATTERNS[@]}"); do
-  targets=$(go test -run=^$ -list='^Fuzz' "$pkg" | grep '^Fuzz' || true)
+  targets=$(go test -run=^$ -tags="$BUILD_TAGS" -list='^Fuzz' "$pkg" | grep '^Fuzz' || true)
 
   for target in $targets; do
     echo "==> fuzzing $pkg $target"
     go test -v -run=^$ \
+      -tags="$BUILD_TAGS" \
       -fuzz="^${target}$" \
       -fuzztime="$FUZZTIME" \
       -fuzzminimizetime=10s \

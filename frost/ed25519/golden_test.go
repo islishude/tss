@@ -2,18 +2,18 @@ package ed25519
 
 import (
 	"bytes"
-	"encoding/hex"
 	"math/big"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestGoldenKeyShare(t *testing.T) {
+	t.Parallel()
 	rng := rand.New(rand.NewSource(700)) //nolint:gosec // deterministic for golden test
 	session, err := tss.NewSessionID(rng)
 	if err != nil {
@@ -42,8 +42,8 @@ func TestGoldenKeyShare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeyShare.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeyShare.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := UnmarshalKeyShare(raw)
 	if err != nil {
@@ -62,6 +62,7 @@ func TestGoldenKeyShare(t *testing.T) {
 }
 
 func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
+	t.Parallel()
 	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -72,8 +73,8 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenCommitmentsPayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenCommitmentsPayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenCommitmentsPayload(raw)
 	if err != nil {
@@ -92,6 +93,7 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 }
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
+	t.Parallel()
 	scalar, err := scalarBytes(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -102,8 +104,8 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenSharePayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -122,6 +124,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 }
 
 func TestGoldenNonceCommitmentPayload(t *testing.T) {
+	t.Parallel()
 	dPoint, err := edcurve.ScalarBaseMultBig(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -136,8 +139,8 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "NonceCommitmentPayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "NonceCommitmentPayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalNonceCommitmentPayload(raw)
 	if err != nil {
@@ -156,6 +159,7 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 }
 
 func TestGoldenSignPartialPayload(t *testing.T) {
+	t.Parallel()
 	scalar, err := scalarBytes(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -166,8 +170,8 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "SignPartialPayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "SignPartialPayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
@@ -182,23 +186,5 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 	}
 	if _, err := unmarshalSignPartialPayload(append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
-	}
-}
-
-func checkGolden(t *testing.T, golden string, raw []byte) {
-	t.Helper()
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
 	}
 }

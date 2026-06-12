@@ -2,14 +2,15 @@ package paillier
 
 import (
 	"bytes"
-	"encoding/hex"
 	"math/big"
-	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestGoldenProofPayloads(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		marshal   func(t *testing.T) []byte
@@ -131,7 +132,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := tc.marshal(t)
-			checkPaillierGolden(t, filepath.Join("testdata", tc.name+".golden"), raw)
+			testutil.CheckGolden(t, filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", tc.name+".golden"), raw)
 			tc.roundTrip(t, raw)
 		})
 	}
@@ -178,26 +179,5 @@ func assertBinaryProofWireRoundTrip[P binaryProof](t *testing.T, raw []byte, unm
 	}
 	if _, err := unmarshal(append(append([]byte(nil), raw...), 0)); err == nil {
 		t.Fatal("proof accepted trailing byte")
-	}
-}
-
-func checkPaillierGolden(t *testing.T, golden string, raw []byte) {
-	t.Helper()
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.MkdirAll(filepath.Dir(golden), 0700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
 	}
 }

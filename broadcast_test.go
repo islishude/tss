@@ -50,6 +50,7 @@ func setupAckKeys(t *testing.T, parties PartySet) (map[PartyID]*ed25519AckSigner
 }
 
 func TestAckDigestDeterminism(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	ph := sha256.Sum256([]byte("hello"))
 	th := sha256.Sum256([]byte("transcript"))
@@ -66,6 +67,7 @@ func TestAckDigestDeterminism(t *testing.T) {
 }
 
 func TestNewBroadcastCertificateValid(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2, 3}
@@ -85,6 +87,7 @@ func TestNewBroadcastCertificateValid(t *testing.T) {
 }
 
 func TestNewBroadcastCertificateRejectsMismatchedPayloadHash(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2}
@@ -101,6 +104,7 @@ func TestNewBroadcastCertificateRejectsMismatchedPayloadHash(t *testing.T) {
 }
 
 func TestSignAndVerifyBroadcastAck(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	signers, verifier := setupAckKeys(t, PartySet{1})
@@ -114,6 +118,7 @@ func TestSignAndVerifyBroadcastAck(t *testing.T) {
 }
 
 func TestVerifyBroadcastAckRejectsTamperedEnvelope(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	signers, verifier := setupAckKeys(t, PartySet{1})
@@ -131,6 +136,7 @@ func TestVerifyBroadcastAckRejectsTamperedEnvelope(t *testing.T) {
 }
 
 func TestVerifyBroadcastCertificateWithSignatures(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2, 3}
@@ -156,6 +162,7 @@ func TestVerifyBroadcastCertificateWithSignatures(t *testing.T) {
 }
 
 func TestBroadcastConsistencyFullFlow(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2, 3}
@@ -197,6 +204,7 @@ func TestBroadcastConsistencyFullFlow(t *testing.T) {
 }
 
 func TestBroadcastConsistencyDetectsEquivocation(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env1 := testBroadcastEnvelope(t, sid)
 	env2 := testBroadcastEnvelope(t, sid)
@@ -222,6 +230,7 @@ func TestBroadcastConsistencyDetectsEquivocation(t *testing.T) {
 }
 
 func TestBroadcastConsistencyRejectsInvalidSignature(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2}
@@ -257,6 +266,7 @@ func TestBroadcastConsistencyRejectsInvalidSignature(t *testing.T) {
 }
 
 func TestBroadcastConsistencyRejectsEquivocatingAck(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
 	parties := PartySet{1, 2}
@@ -302,4 +312,301 @@ func testBroadcastEnvelope(t *testing.T, sid SessionID) Envelope {
 		t.Fatal(err)
 	}
 	return env
+}
+
+func TestAckCountReturnsCollectedCount(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1, 2, 3}
+	signers, verifier := setupAckKeys(t, parties)
+
+	bc, _ := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", parties, verifier)
+	if bc.AckCount() != 0 {
+		t.Fatalf("AckCount = %d, want 0 after init", bc.AckCount())
+	}
+
+	if _, err := bc.Commit(env); err != nil {
+		t.Fatal(err)
+	}
+	// Add one ack
+	ack, _ := SignBroadcastAck(env, 1, signers[1])
+	if err := bc.AddAck(env, ack); err != nil {
+		t.Fatal(err)
+	}
+	if bc.AckCount() != 1 {
+		t.Fatalf("AckCount = %d, want 1", bc.AckCount())
+	}
+
+	// Add another
+	ack, _ = SignBroadcastAck(env, 2, signers[2])
+	if err := bc.AddAck(env, ack); err != nil {
+		t.Fatal(err)
+	}
+	if bc.AckCount() != 2 {
+		t.Fatalf("AckCount = %d, want 2", bc.AckCount())
+	}
+}
+
+func TestNewInMemoryAckSignerAndSignAck(t *testing.T) {
+	t.Parallel()
+	signer := NewInMemoryAckSigner(5, func(digest [32]byte) ([]byte, error) {
+		return append([]byte("sig:"), digest[:4]...), nil
+	})
+	digest := sha256.Sum256([]byte("test-digest"))
+	sig, err := signer.SignAck(digest)
+	if err != nil {
+		t.Fatal(err)
+	}
+	expected := append([]byte("sig:"), digest[:4]...)
+	if string(sig) != string(expected) {
+		t.Fatalf("SignAck returned %x, want %x", sig, expected)
+	}
+}
+
+func TestNewInMemoryAckSignerError(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("signing failed")
+	signer := NewInMemoryAckSigner(1, func(digest [32]byte) ([]byte, error) {
+		return nil, wantErr
+	})
+	_, err := signer.SignAck([32]byte{})
+	if !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
+	}
+}
+
+func TestNewInMemoryAckVerifierAndVerifyAck(t *testing.T) {
+	t.Parallel()
+	verifier := NewInMemoryAckVerifier(func(party PartyID, digest [32]byte, signature []byte) error {
+		if party == 1 && string(signature) == "valid-sig" {
+			return nil
+		}
+		return errors.New("invalid")
+	})
+	// Valid
+	if err := verifier.VerifyAck(1, [32]byte{}, []byte("valid-sig")); err != nil {
+		t.Fatalf("valid signature rejected: %v", err)
+	}
+	// Invalid party
+	if err := verifier.VerifyAck(2, [32]byte{}, []byte("valid-sig")); err == nil {
+		t.Fatal("invalid party should be rejected")
+	}
+	// Invalid signature
+	if err := verifier.VerifyAck(1, [32]byte{}, []byte("bad-sig")); err == nil {
+		t.Fatal("invalid signature should be rejected")
+	}
+}
+
+func TestBroadcastAckCloneReturnsDeepCopy(t *testing.T) {
+	t.Parallel()
+	ack := BroadcastAck{
+		Party:          1,
+		PayloadHash:    sha256.Sum256([]byte("ph")),
+		TranscriptHash: sha256.Sum256([]byte("th")),
+		Signature:      []byte{0x01, 0x02, 0x03},
+	}
+	clone := ack.Clone()
+	clone.Signature[0] = 0xff
+	if ack.Signature[0] != 0x01 {
+		t.Fatal("Clone shares signature backing array")
+	}
+	// Party is a uint32 value type, so it is inherently copied by value
+	// when Clone() returns a BroadcastAck value.
+	_ = clone.Party
+}
+
+func TestBroadcastCertificateCloneReturnsDeepCopy(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1, 2}
+	signers, _ := setupAckKeys(t, parties)
+
+	var acks []BroadcastAck
+	for _, id := range parties {
+		ack, _ := SignBroadcastAck(env, id, signers[id])
+		acks = append(acks, ack)
+	}
+	cert, _ := NewBroadcastCertificate(env, parties, acks)
+	clone := cert.Clone()
+	// Mutate clone
+	clone.Acks[0].Signature[0] ^= 0xff
+	if cert.Acks[0].Signature[0] == clone.Acks[0].Signature[0] {
+		t.Fatal("Clone shares ack signature backing array")
+	}
+	clone.Recipients[0] = 99
+	if cert.Recipients[0] == 99 {
+		t.Fatal("Clone shares recipients backing array")
+	}
+	// Nil clone
+	var nilCert *BroadcastCertificate
+	if nilCert.Clone() != nil {
+		t.Fatal("nil certificate Clone should return nil")
+	}
+}
+
+func TestVerifyFullWithValidSignatures(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1, 2, 3}
+	signers, verifier := setupAckKeys(t, parties)
+
+	var acks []BroadcastAck
+	for _, id := range parties {
+		ack, _ := SignBroadcastAck(env, id, signers[id])
+		acks = append(acks, ack)
+	}
+	cert, _ := NewBroadcastCertificate(env, parties, acks)
+	if err := cert.VerifyFull(env, parties, verifier); err != nil {
+		t.Fatalf("VerifyFull should pass: %v", err)
+	}
+}
+
+func TestVerifyFullRejectsNilVerifier(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1}
+	signers, _ := setupAckKeys(t, parties)
+	ack, _ := SignBroadcastAck(env, 1, signers[1])
+	cert, _ := NewBroadcastCertificate(env, parties, []BroadcastAck{ack})
+	if err := cert.VerifyFull(env, parties, nil); err == nil {
+		t.Fatal("VerifyFull should reject nil verifier")
+	}
+}
+
+func TestVerifyFullRejectsTamperedSignature(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	parties := PartySet{1}
+	signers, verifier := setupAckKeys(t, parties)
+	ack, _ := SignBroadcastAck(env, 1, signers[1])
+	// Tamper the signature
+	ack.Signature[0] ^= 0xff
+	cert, err := NewBroadcastCertificate(env, parties, []BroadcastAck{ack})
+	// NewBroadcastCertificate only checks structure, not signatures, so it succeeds.
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := cert.VerifyFull(env, parties, verifier); err == nil {
+		t.Fatal("VerifyFull should reject tampered signature")
+	}
+}
+
+func TestNewBroadcastConsistencyRejectsNilVerifier(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	_, err := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1}, nil)
+	if err == nil {
+		t.Fatal("expected error for nil verifier")
+	}
+}
+
+func TestBroadcastConsistencyAckCountAndCompleteAfterInit(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	_, verifier := setupAckKeys(t, PartySet{1, 2})
+	bc, _ := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1, 2}, verifier)
+	if bc.Complete() {
+		t.Fatal("should not be complete with no acks")
+	}
+	if bc.AckCount() != 0 {
+		t.Fatalf("AckCount = %d, want 0", bc.AckCount())
+	}
+}
+
+func TestBroadcastConsistencyAddAckRejectsUnknownParty(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	signers, verifier := setupAckKeys(t, PartySet{1, 2, 3})
+	bc, _ := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1, 2}, verifier)
+	if _, err := bc.Commit(env); err != nil {
+		t.Fatal(err)
+	}
+	ack, _ := SignBroadcastAck(env, 3, signers[3]) // party 3 is NOT a recipient
+	if err := bc.AddAck(env, ack); err == nil {
+		t.Fatal("should reject ack from non-recipient party")
+	}
+}
+
+func TestBroadcastConsistencyAddAckRejectsDuplicate(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	signers, verifier := setupAckKeys(t, PartySet{1, 2})
+	bc, _ := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1, 2}, verifier)
+	if _, err := bc.Commit(env); err != nil {
+		t.Fatal(err)
+	}
+	ack, _ := SignBroadcastAck(env, 1, signers[1])
+	if err := bc.AddAck(env, ack); err != nil {
+		t.Fatal(err)
+	}
+	if err := bc.AddAck(env, ack); err == nil {
+		t.Fatal("should reject duplicate ack")
+	}
+}
+
+func TestBroadcastConsistencyCertificateIncomplete(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	signers, verifier := setupAckKeys(t, PartySet{1, 2, 3})
+	bc, _ := NewBroadcastConsistency("test", sid, 1, 2, "test.broadcast", PartySet{1, 2, 3}, verifier)
+	if _, err := bc.Commit(env); err != nil {
+		t.Fatal(err)
+	}
+	// Only collect one out of three acks
+	ack, _ := SignBroadcastAck(env, 1, signers[1])
+	if err := bc.AddAck(env, ack); err != nil {
+		t.Fatal(err)
+	}
+	_, err := bc.Certificate()
+	if err == nil {
+		t.Fatal("Certificate() should fail when acks are incomplete")
+	}
+}
+
+func TestVerifyBroadcastAckRejectsNilVerifier(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	ack := BroadcastAck{Party: 1}
+	if err := VerifyBroadcastAck(env, ack, nil); err == nil {
+		t.Fatal("should reject nil verifier")
+	}
+}
+
+func TestVerifyBroadcastAckRejectsPayloadHashMismatch(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	_, verifier := setupAckKeys(t, PartySet{1})
+	ack := BroadcastAck{
+		Party:          1,
+		PayloadHash:    sha256.Sum256([]byte("wrong")),
+		TranscriptHash: env.TranscriptHash,
+	}
+	if err := VerifyBroadcastAck(env, ack, verifier); err == nil {
+		t.Fatal("should reject payload hash mismatch")
+	}
+}
+
+func TestVerifyBroadcastAckRejectsTranscriptHashMismatch(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	env := testBroadcastEnvelope(t, sid)
+	_, verifier := setupAckKeys(t, PartySet{1})
+	ack := BroadcastAck{
+		Party:          1,
+		PayloadHash:    sha256.Sum256(env.Payload),
+		TranscriptHash: sha256.Sum256([]byte("wrong-transcript")),
+	}
+	if err := VerifyBroadcastAck(env, ack, verifier); err == nil {
+		t.Fatal("should reject transcript hash mismatch")
+	}
 }

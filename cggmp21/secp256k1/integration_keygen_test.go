@@ -3,11 +3,14 @@
 package secp256k1
 
 import (
-	"github.com/islishude/tss"
 	"testing"
+
+	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -36,6 +39,7 @@ func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
 }
 
 func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
+	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +68,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	}
 	out2[0].Payload = mutated
 	out2[0] = out2[0].RecomputeTranscriptHash()
-	if _, err := kg1.HandleKeygenMessage(deliverCGGMPEnv(out2[0])); err == nil {
+	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected keygen Paillier key mismatch rejection")
 	} else {
 		_ = assertBlameEvidence(t, err, EvidenceContext{Parties: parties})
@@ -72,7 +76,8 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 }
 
 func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)

@@ -20,6 +20,7 @@ func (t *testRefreshTransport) Recv(ctx context.Context) (tss.Envelope, error) {
 }
 
 func TestRefreshSchedulerInvalidOptions(t *testing.T) {
+	t.Parallel()
 	_, err := NewRefreshScheduler(RefreshSchedulerOptions{})
 	if err == nil {
 		t.Fatal("expected error for zero interval")
@@ -42,6 +43,7 @@ func TestRefreshSchedulerInvalidOptions(t *testing.T) {
 }
 
 func TestRefreshSchedulerStopWithoutStart(t *testing.T) {
+	t.Parallel()
 	sched, err := NewRefreshScheduler(RefreshSchedulerOptions{
 		Interval:          time.Minute,
 		Transport:         &testRefreshTransport{},
@@ -56,6 +58,7 @@ func TestRefreshSchedulerStopWithoutStart(t *testing.T) {
 }
 
 func TestRefreshSchedulerContextCancel(t *testing.T) {
+	t.Parallel()
 	sched, err := NewRefreshScheduler(RefreshSchedulerOptions{
 		Interval:          time.Hour,
 		Transport:         &testRefreshTransport{},

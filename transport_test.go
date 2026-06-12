@@ -8,6 +8,7 @@ import (
 )
 
 func TestInMemoryTransportSendAndReceive(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	party1 := NewInMemoryTransport(1, PartySet{1, 2}, policies)
@@ -50,6 +51,7 @@ func TestInMemoryTransportSendAndReceive(t *testing.T) {
 }
 
 func TestInMemoryTransportConfidentialityFlag(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	party1 := NewInMemoryTransport(1, PartySet{1, 2}, policies)
@@ -88,6 +90,7 @@ func TestInMemoryTransportConfidentialityFlag(t *testing.T) {
 }
 
 func TestMaliciousTransportSenderSpoof(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	inner := NewInMemoryTransport(1, PartySet{1, 2}, policies)
@@ -121,6 +124,7 @@ func TestMaliciousTransportSenderSpoof(t *testing.T) {
 }
 
 func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
+	t.Parallel()
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	inner := NewInMemoryTransport(1, PartySet{1, 2}, policies)
@@ -149,6 +153,7 @@ func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
 // TestTransportSecurityIntegration verifies that every MaliciousTransport attack
 // mode is caught by EnvelopeGuard.Validate before reaching the protocol handler.
 func TestTransportSecurityIntegration(t *testing.T) {
+	t.Parallel()
 	policies := testPolicySet()
 
 	t.Run("valid message passes guard", func(t *testing.T) {

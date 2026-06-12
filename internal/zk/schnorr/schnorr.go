@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
@@ -25,6 +26,14 @@ const (
 type Proof struct {
 	Commitment []byte `wire:"1,bytes"`
 	Response   []byte `wire:"2,bytes"`
+}
+
+// Clone returns a copy of Proof
+func (in *Proof) Clone() *Proof {
+	return &Proof{
+		Commitment: slices.Clone(in.Commitment),
+		Response:   slices.Clone(in.Response),
+	}
 }
 
 // WireType returns the canonical wire type identifier for Proof.

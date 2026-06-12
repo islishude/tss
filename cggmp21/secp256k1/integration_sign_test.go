@@ -4,8 +4,10 @@ package secp256k1
 
 import (
 	"crypto/sha256"
-	"github.com/islishude/tss"
 	"testing"
+
+	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestThresholdECDSASignScenarios(t *testing.T) {
@@ -38,7 +40,7 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 }
 
 func TestThresholdECDSASignerSubsets(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	for _, signers := range [][]tss.PartyID{{1, 2}, {1, 3}, {2, 3}} {
 		selected := make([]*KeyShare, 0, len(signers))
 		for _, id := range signers {
@@ -56,7 +58,7 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 }
 
 func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("online tamper"))
@@ -92,7 +94,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].HandleSignMessage(deliverCGGMPEnv(messages[0])); err == nil {
+		if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(messages[0])); err == nil {
 			t.Fatal("expected tampered partial rejection")
 		} else {
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))

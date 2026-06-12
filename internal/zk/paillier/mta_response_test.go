@@ -1,3 +1,5 @@
+//go:build tier1
+
 package paillier
 
 import (
@@ -9,9 +11,7 @@ import (
 )
 
 func TestMTAResponseProofFieldTamper(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("mta tamper")
 	a := big.NewInt(23)
@@ -44,7 +44,7 @@ func TestMTAResponseProofFieldTamper(t *testing.T) {
 		{name: "randomness", mutate: func(p *MTAResponseProof) { p.Randomness[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tampered := cloneMTAResponseProof(proof)
+			tampered := proof.Clone()
 			tc.mutate(tampered)
 			if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
 				t.Fatal("tampered MtA response proof verified")
@@ -73,17 +73,4 @@ func assertMTAResponseProofRoundTrip(t *testing.T, proof *MTAResponseProof) {
 	if _, err := UnmarshalMTAResponseProof(append(raw, 0)); err == nil {
 		t.Fatal("MtA response proof accepted trailing bytes")
 	}
-}
-
-func cloneMTAResponseProof(in *MTAResponseProof) *MTAResponseProof {
-	out := *in
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.BetaCommitment = append([]byte(nil), in.BetaCommitment...)
-	out.CipherCommitment = append([]byte(nil), in.CipherCommitment...)
-	out.BCommitment = append([]byte(nil), in.BCommitment...)
-	out.BetaNonce = append([]byte(nil), in.BetaNonce...)
-	out.BResponse = append([]byte(nil), in.BResponse...)
-	out.BetaResponse = append([]byte(nil), in.BetaResponse...)
-	out.Randomness = append([]byte(nil), in.Randomness...)
-	return &out
 }

@@ -1,3 +1,5 @@
+//go:build tier1
+
 package mta
 
 import (
@@ -10,9 +12,7 @@ import (
 // Tier 1: Finish error paths (needs crypto keygen).
 
 func TestFinishErrors(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Tier 1 test in short mode")
-	}
+	t.Parallel()
 	skA, skB, rpA, rpB := setupTestEnv(t)
 
 	a := big.NewInt(13)
@@ -81,9 +81,7 @@ func TestFinishErrors(t *testing.T) {
 }
 
 func TestFinishMultipleValues(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping Tier 1 test in short mode")
-	}
+	t.Parallel()
 	skA, skB, rpA, rpB := setupTestEnv(t)
 	startDomain := []byte("start")
 	responseDomain := []byte("response")

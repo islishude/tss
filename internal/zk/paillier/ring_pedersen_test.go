@@ -1,17 +1,15 @@
+//go:build tier1
+
 package paillier
 
 import (
 	"bytes"
 	"math/big"
 	"testing"
-
-	"github.com/islishude/tss/internal/testutil"
 )
 
 func TestRingPedersenProofChecks(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
+	t.Parallel()
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -55,7 +53,7 @@ func TestRingPedersenProofChecks(t *testing.T) {
 		}
 	})
 	t.Run("out of range response", func(t *testing.T) {
-		tampered := cloneRingPedersenProof(proof)
+		tampered := proof.Clone()
 		tampered.Responses[0] = fixedModNBytes(params.N, nLen)
 		if VerifyRingPedersen(domain, params, party, tampered) {
 			t.Fatal("Ring-Pedersen proof with out-of-range response verified")
@@ -71,7 +69,7 @@ func TestRingPedersenProofChecks(t *testing.T) {
 			{name: "response", mutate: func(p *RingPedersenProof) { p.Responses[0][len(p.Responses[0])-1] ^= 1 }},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
-				tampered := cloneRingPedersenProof(proof)
+				tampered := proof.Clone()
 				tc.mutate(tampered)
 				if VerifyRingPedersen(domain, params, party, tampered) {
 					t.Fatal("tampered Ring-Pedersen proof verified")
@@ -101,13 +99,4 @@ func assertRingPedersenProofRoundTrip(t *testing.T, proof *RingPedersenProof) {
 	if _, err := UnmarshalRingPedersenProof(append(raw, 0)); err == nil {
 		t.Fatal("Ring-Pedersen proof accepted trailing bytes")
 	}
-}
-
-func cloneRingPedersenProof(in *RingPedersenProof) *RingPedersenProof {
-	out := *in
-	out.TranscriptHash = append([]byte(nil), in.TranscriptHash...)
-	out.Commitments = testutil.CloneByteSlices(in.Commitments)
-	out.Challenges = append([]byte(nil), in.Challenges...)
-	out.Responses = testutil.CloneByteSlices(in.Responses)
-	return &out
 }

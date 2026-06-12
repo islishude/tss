@@ -65,6 +65,24 @@ type LogStarProof struct {
 	TranscriptHash []byte
 }
 
+// Clone returns a deep copy of the LogStarProof.
+func (p *LogStarProof) Clone() *LogStarProof {
+	if p == nil {
+		return nil
+	}
+	return &LogStarProof{
+		Version:        p.Version,
+		S:              new(big.Int).Set(p.S),
+		A:              new(big.Int).Set(p.A),
+		Y:              secp.Clone(p.Y),
+		D:              new(big.Int).Set(p.D),
+		Z1:             new(big.Int).Set(p.Z1),
+		Z2:             new(big.Int).Set(p.Z2),
+		Z3:             new(big.Int).Set(p.Z3),
+		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+	}
+}
+
 // ProveLogStar creates a Πlog* proof.
 func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
 	if rng == nil {

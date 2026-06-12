@@ -6,6 +6,7 @@ import (
 )
 
 func TestUintPrimitives(t *testing.T) {
+	t.Parallel()
 	if got := Uint16(0x1234); !bytes.Equal(got, []byte{0x12, 0x34}) {
 		t.Fatalf("Uint16 encoded %x", got)
 	}
@@ -27,6 +28,7 @@ func TestUintPrimitives(t *testing.T) {
 }
 
 func TestBoolPrimitive(t *testing.T) {
+	t.Parallel()
 	if got := Bool(true); !bytes.Equal(got, []byte{1}) {
 		t.Fatalf("true encoded %x", got)
 	}

@@ -6,6 +6,7 @@ import (
 )
 
 func TestClearBigIntClearsBackingWords(t *testing.T) {
+	t.Parallel()
 	words := make([]big.Word, 2, 4)
 	for i := range words[:cap(words)] {
 		words[:cap(words)][i] = big.Word(i + 1)

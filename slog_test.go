@@ -10,6 +10,7 @@ import (
 )
 
 func TestNewSLogger(t *testing.T) {
+	t.Parallel()
 	t.Run("nil logger uses default", func(t *testing.T) {
 		sl := NewSLogger(nil)
 		if sl == nil {
@@ -32,6 +33,7 @@ func TestNewSLogger(t *testing.T) {
 }
 
 func TestSLoggerMethods(t *testing.T) {
+	t.Parallel()
 	var buf bytes.Buffer
 	handler := slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug})
 	sl := NewSLogger(slog.New(handler))
@@ -119,6 +121,7 @@ func TestSLoggerMethods(t *testing.T) {
 }
 
 func TestPairsToAttrs(t *testing.T) {
+	t.Parallel()
 	t.Run("empty", func(t *testing.T) {
 		attrs := pairsToAttrs(nil)
 		if len(attrs) != 0 {
@@ -185,6 +188,7 @@ func TestPairsToAttrs(t *testing.T) {
 }
 
 func TestSLoggerImplementsLogger(t *testing.T) {
+	t.Parallel()
 	// Compile-time check: *SLogger must implement Logger.
 	var _ Logger = (*SLogger)(nil)
 }

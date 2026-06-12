@@ -4,10 +4,69 @@ import (
 	"errors"
 	"math/big"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
 )
+
+// fixtureKey identifies a cached keygen fixture by its essential parameters.
+type fixtureKey struct {
+	threshold int
+	n         int
+	enableHD  bool
+}
+
+type keygenFixtureEntry struct {
+	once   sync.Once
+	shares map[tss.PartyID]*KeyShare
+}
+
+// keygenFixtureCache avoids repeated full-DKG executions for identical
+// (threshold, n, enableHD) tuples across integration tests. Each call returns
+// independent clones, so callers may mutate their copy freely.
+var keygenFixtureCache sync.Map // map[fixtureKey]*keygenFixtureEntry
+
+// CachedKeygenShares returns a clone of a previously-generated keygen fixture
+// for (threshold, n), or generates a fresh one and caches clones on first use.
+// When enableHD is true, HD-enabled keygen is used.
+func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	key := fixtureKey{threshold: threshold, n: n, enableHD: enableHD}
+	actual, _ := keygenFixtureCache.LoadOrStore(key, &keygenFixtureEntry{})
+	entry := actual.(*keygenFixtureEntry)
+	entry.once.Do(func() {
+		defer func() {
+			if entry.shares == nil {
+				keygenFixtureCache.Delete(key)
+			}
+		}()
+		if enableHD {
+			entry.shares = cloneKeyShareMap(secpKeygenWithOptions(t, threshold, n, KeygenOptions{EnableHD: true}))
+		} else {
+			entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
+		}
+	})
+	if entry.shares == nil {
+		t.Fatal("cached keygen fixture was not initialized")
+	}
+	return cloneKeyShareMap(entry.shares)
+}
+
+// cachedKeygenFixture is a convenience wrapper around CachedKeygenShares for
+// non-HD keygen. Kept for backward compatibility with existing callers.
+func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
+	t.Helper()
+	return CachedKeygenShares(t, threshold, n, false)
+}
+
+func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
+	out := make(map[tss.PartyID]*KeyShare, len(shares))
+	for id, ks := range shares {
+		out[id] = ks.Clone()
+	}
+	return out
+}
 
 type protocolHarness struct {
 	threshold int
@@ -24,7 +83,7 @@ func newHarness(t testing.TB, threshold, n int) *protocolHarness {
 	return &protocolHarness{
 		threshold: threshold,
 		parties:   parties,
-		shares:    secpKeygen(t, threshold, n),
+		shares:    cachedKeygenFixture(t, threshold, n),
 	}
 }
 
@@ -255,18 +314,6 @@ func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.Prot
 	}
 	if VerifyBlameEvidence(mutated, ctx) == nil {
 		t.Fatal("tampered blame evidence verified")
-	}
-	return protocolErr
-}
-
-func assertProtocolErrorCode(t testing.TB, err error, code string) *tss.ProtocolError {
-	t.Helper()
-	var protocolErr *tss.ProtocolError
-	if !errors.As(err, &protocolErr) {
-		t.Fatalf("expected ProtocolError %s, got %T: %v", code, err, err)
-	}
-	if protocolErr.Code != code {
-		t.Fatalf("expected code %s, got %s: %v", code, protocolErr.Code, err)
 	}
 	return protocolErr
 }

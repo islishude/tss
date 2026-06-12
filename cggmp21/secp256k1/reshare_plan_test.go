@@ -9,6 +9,7 @@ import (
 )
 
 func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
+	t.Parallel()
 	plan := minimalValidResharePlan(t)
 	plan.DealerParties = []tss.PartyID{2}
 	if err := plan.Validate(); err != nil {
@@ -26,6 +27,7 @@ func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
 }
 
 func TestResharePlanValidateRejectsWrongOldPublicKey(t *testing.T) {
+	t.Parallel()
 	plan := minimalValidResharePlan(t)
 	plan.OldGroupPublicKey = mustResharePlanPoint(t, 2)
 	if err := plan.Validate(); err == nil {
@@ -34,6 +36,7 @@ func TestResharePlanValidateRejectsWrongOldPublicKey(t *testing.T) {
 }
 
 func TestResharePlanValidateRejectsDealerOutsideOldSet(t *testing.T) {
+	t.Parallel()
 	plan := minimalValidResharePlan(t)
 	plan.DealerParties = []tss.PartyID{3}
 	if err := plan.Validate(); err == nil {
@@ -42,6 +45,7 @@ func TestResharePlanValidateRejectsDealerOutsideOldSet(t *testing.T) {
 }
 
 func TestResharePlanValidateRejectsVerificationShareMismatch(t *testing.T) {
+	t.Parallel()
 	plan := minimalValidResharePlan(t)
 	plan.OldVerificationShares[2] = mustResharePlanPoint(t, 2)
 	if err := plan.Validate(); err == nil {
@@ -78,4 +82,75 @@ func mustResharePlanPoint(t *testing.T, scalar int64) []byte {
 		t.Fatal(err)
 	}
 	return out
+}
+
+func TestNewResharePlanRejectsEmptyOldParties(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 1, Parties: nil}, tss.SessionID{}, nil, []tss.PartyID{1}, 1)
+	if err == nil {
+		t.Fatal("expected error for empty old parties")
+	}
+}
+
+func TestNewResharePlanRejectsZeroThreshold(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 0, Parties: []tss.PartyID{1}}, tss.SessionID{}, []tss.PartyID{1}, []tss.PartyID{2}, 1)
+	if err == nil {
+		t.Fatal("expected error for zero threshold")
+	}
+}
+
+func TestNewResharePlanRejectsThresholdExceedsOldParties(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 3, Parties: []tss.PartyID{1, 2}}, tss.SessionID{}, []tss.PartyID{1}, []tss.PartyID{2}, 2)
+	if err == nil {
+		t.Fatal("expected error when threshold > old party count")
+	}
+}
+
+func TestNewResharePlanRejectsThresholdZeroParties(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 1, Parties: []tss.PartyID{1}}, tss.SessionID{}, nil, []tss.PartyID{1}, 1)
+	if err == nil {
+		t.Fatal("expected error for empty dealer parties")
+	}
+}
+
+func TestNewResharePlanRejectsNilNewParties(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 1, Parties: []tss.PartyID{1}}, tss.SessionID{}, []tss.PartyID{1}, nil, 1)
+	if err == nil {
+		t.Fatal("expected error for nil new parties")
+	}
+}
+
+func TestNewResharePlanRejectsInvalidNewThreshold(t *testing.T) {
+	t.Parallel()
+	_, err := NewResharePlan(&KeyShare{Party: 1, Threshold: 1, Parties: []tss.PartyID{1}}, tss.SessionID{}, []tss.PartyID{1}, []tss.PartyID{2, 3}, 5)
+	if err == nil {
+		t.Fatal("expected error when newThreshold > new party count")
+	}
+}
+
+func TestIsDealerReceiverOverlapFalseForNonMembers(t *testing.T) {
+	t.Parallel()
+	plan := minimalValidResharePlan(t)
+	if IsDealer(plan, 99) {
+		t.Fatal("party 99 should not be a dealer")
+	}
+	if IsReceiver(plan, 99) {
+		t.Fatal("party 99 should not be a receiver")
+	}
+	if IsOverlap(plan, 99) {
+		t.Fatal("party 99 should not be overlap")
+	}
+}
+
+func TestResharePlanValidateRejectsNilCurveID(t *testing.T) {
+	t.Parallel()
+	plan := minimalValidResharePlan(t)
+	plan.CurveID = ""
+	if err := plan.Validate(); err == nil {
+		t.Fatal("Validate accepted empty CurveID")
+	}
 }

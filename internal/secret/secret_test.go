@@ -7,6 +7,7 @@ import (
 )
 
 func TestNewScalar(t *testing.T) {
+	t.Parallel()
 	s, err := NewScalar([]byte{0x01, 0x02, 0x03}, 4)
 	if err != nil {
 		t.Fatal(err)
@@ -21,12 +22,14 @@ func TestNewScalar(t *testing.T) {
 }
 
 func TestNewScalarRejectsOversized(t *testing.T) {
+	t.Parallel()
 	if _, err := NewScalar([]byte{0x01, 0x02, 0x03, 0x04, 0x05}, 3); err == nil {
 		t.Fatal("expected error for oversized input")
 	}
 }
 
 func TestNewScalarRejectsEmpty(t *testing.T) {
+	t.Parallel()
 	if _, err := NewScalar(nil, 4); err == nil {
 		t.Fatal("expected error for nil input")
 	}
@@ -39,6 +42,7 @@ func TestNewScalarRejectsEmpty(t *testing.T) {
 }
 
 func TestScalarEqual(t *testing.T) {
+	t.Parallel()
 	a, _ := NewScalar([]byte{0x01, 0x02}, 4)
 	b, _ := NewScalar([]byte{0x01, 0x02}, 4)
 	c, _ := NewScalar([]byte{0x01, 0x03}, 4)
@@ -61,6 +65,7 @@ func TestScalarEqual(t *testing.T) {
 }
 
 func TestScalarDestroy(t *testing.T) {
+	t.Parallel()
 	s, _ := NewScalar([]byte{0xff, 0xfe}, 4)
 	s.Destroy()
 	for _, b := range s.buf {
@@ -73,6 +78,7 @@ func TestScalarDestroy(t *testing.T) {
 }
 
 func TestScalarMarshalBinary(t *testing.T) {
+	t.Parallel()
 	s, _ := NewScalar([]byte{0x01, 0x02, 0x03}, 4)
 	raw, err := s.MarshalBinary()
 	if err != nil {
@@ -91,6 +97,7 @@ func TestScalarMarshalBinary(t *testing.T) {
 }
 
 func TestUnmarshalScalarRoundTrip(t *testing.T) {
+	t.Parallel()
 	orig, _ := NewScalar([]byte{0xde, 0xad, 0xbe, 0xef}, 4)
 	raw, _ := orig.MarshalBinary()
 	s, err := UnmarshalScalar(raw, 4)
@@ -116,6 +123,7 @@ func TestUnmarshalScalarRoundTrip(t *testing.T) {
 }
 
 func TestScalarNoLeakVectors(t *testing.T) {
+	t.Parallel()
 	s, _ := NewScalar([]byte{0x42}, 32)
 	// String() is from the default struct formatter — ensure it doesn't leak bytes
 	str := `"` + string(s.FixedBytes()) + `"`
@@ -129,6 +137,7 @@ func TestScalarNoLeakVectors(t *testing.T) {
 }
 
 func TestScalar_Clone(t *testing.T) {
+	t.Parallel()
 	var nilS *Scalar
 	if clone := nilS.Clone(); clone != nil {
 		t.Fatal("Clone of nil should be nil")

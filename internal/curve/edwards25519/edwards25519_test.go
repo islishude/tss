@@ -11,6 +11,7 @@ import (
 )
 
 func TestScalarFromBigOne(t *testing.T) {
+	t.Parallel()
 	p, err := ScalarBaseMultBig(big.NewInt(1))
 	if err != nil {
 		t.Fatal(err)
@@ -21,6 +22,7 @@ func TestScalarFromBigOne(t *testing.T) {
 }
 
 func TestScalarAdditionMatchesPointAddition(t *testing.T) {
+	t.Parallel()
 	a := big.NewInt(7)
 	b := big.NewInt(11)
 	ab := new(big.Int).Add(a, b)
@@ -43,6 +45,7 @@ func TestScalarAdditionMatchesPointAddition(t *testing.T) {
 }
 
 func TestScalarHelpersReturnIndependentScalars(t *testing.T) {
+	t.Parallel()
 	one := ScalarOne()
 	one.Set(ScalarZero())
 	if ScalarOne().Equal(fed.NewScalar()) == 1 {
@@ -54,6 +57,7 @@ func TestScalarHelpersReturnIndependentScalars(t *testing.T) {
 }
 
 func TestScalarConversionsReduceModuloOrder(t *testing.T) {
+	t.Parallel()
 	order := Order()
 	x := new(big.Int).Add(order, big.NewInt(7))
 	fromBig, err := ScalarFromBig(x)
@@ -76,6 +80,7 @@ func TestScalarConversionsReduceModuloOrder(t *testing.T) {
 }
 
 func TestRandomScalarConsumesReaderAsBigEndian(t *testing.T) {
+	t.Parallel()
 	var sample [32]byte
 	sample[31] = 7
 	s, err := RandomScalar(bytes.NewReader(sample[:]))
@@ -88,12 +93,14 @@ func TestRandomScalarConsumesReaderAsBigEndian(t *testing.T) {
 }
 
 func TestVerifyScalarShareRejectsNilShare(t *testing.T) {
+	t.Parallel()
 	if err := VerifyScalarShare(nil, 1, nil); err == nil {
 		t.Fatal("VerifyScalarShare accepted nil scalar")
 	}
 }
 
 func TestVerifyShare(t *testing.T) {
+	t.Parallel()
 	order := Order()
 	coeffs, err := shamir.RandomPolynomial(nil, order, 3, nil)
 	if err != nil {
@@ -116,6 +123,7 @@ func TestVerifyShare(t *testing.T) {
 }
 
 func TestPointFromBytesRejectsTorsionComponent(t *testing.T) {
+	t.Parallel()
 	lowOrder, err := fed.NewIdentityPoint().SetBytes(make([]byte, 32))
 	if err != nil {
 		t.Fatal(err)

@@ -1,24 +1,17 @@
+//go:build tier1
+
 package paillier
 
 import (
-	"context"
 	"fmt"
 	"math/big"
-	"sync"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/paillier/paillierct"
-	"github.com/islishude/tss/internal/wire"
 )
 
-var testPaillierKeyCache sync.Map
-
 func TestProofMarshalCanonicalBinary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("canonical proof domain")
 
@@ -91,9 +84,7 @@ func TestProofMarshalCanonicalBinary(t *testing.T) {
 }
 
 func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("negative proof inputs")
 	a := big.NewInt(23)
@@ -118,7 +109,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 	}
 
 	t.Run("non canonical scalar response", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.Response = prependZero(tampered.Response)
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("non-canonical encryption response verified")
@@ -128,14 +119,14 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("fixed width ciphertext", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.CipherCommitment = prependZero(tampered.CipherCommitment)
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("wrong-width encryption cipher commitment verified")
 		}
 	})
 	t.Run("malformed curve point", func(t *testing.T) {
-		tampered := cloneEncryptionProof(encProof)
+		tampered := encProof.Clone()
 		tampered.ScalarCommitment = []byte{0x02}
 		if VerifyEncryption(domain, &sk.PublicKey, encA, tampered) {
 			t.Fatal("malformed scalar commitment verified")
@@ -145,7 +136,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("mta oversized response", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
+		tampered := mtaProof.Clone()
 		tampered.BResponse = append([]byte{1}, make([]byte, mtaResponseScalarMaxBytes)...)
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
 			t.Fatal("oversized MtA response verified")
@@ -155,7 +146,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 		}
 	})
 	t.Run("mta malformed point", func(t *testing.T) {
-		tampered := cloneMTAResponseProof(mtaProof)
+		tampered := mtaProof.Clone()
 		tampered.BCommitment = []byte{0x02}
 		if VerifyMTAResponse(domain, &sk.PublicKey, encA, response, bCommitment, tampered) {
 			t.Fatal("malformed MtA point verified")
@@ -175,9 +166,7 @@ func TestProofRejectsNonCanonicalAndMalformedInputs(t *testing.T) {
 }
 
 func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
+	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	params := SecurityParams{
 		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
@@ -313,77 +302,4 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 			}
 		})
 	}
-}
-
-// --- Shared test helpers ---
-
-func testPaillierKey(t *testing.T, bits int) *pai.PrivateKey {
-	t.Helper()
-	if sk, ok := testPaillierKeyCache.Load(bits); ok {
-		return sk.(*pai.PrivateKey)
-	}
-	sk, err := pai.GenerateKeyForTest(context.Background(), nil, bits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	actual, _ := testPaillierKeyCache.LoadOrStore(bits, sk)
-	if actual != sk {
-		return actual.(*pai.PrivateKey)
-	}
-	return sk
-}
-
-func mtaResponseForTest(t *testing.T, sk *pai.PrivateKey, encA, b, beta *big.Int) (*big.Int, *big.Int) {
-	t.Helper()
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nLen := modulusBytes(sk.N)
-	nSquaredLen := 2 * nLen
-	encPowBytes, err := paillierct.ExpCT(
-		paillierct.FixedEncode(sk.NSquared, nSquaredLen),
-		paillierct.FixedEncode(encA, nSquaredLen),
-		secp.ScalarFromBigInt(b).Bytes(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).SetBytes(encPowBytes)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
-	return response, betaRandomness
-}
-
-func prependZero(in []byte) []byte {
-	out := make([]byte, 0, len(in)+1)
-	out = append(out, 0)
-	out = append(out, in...)
-	return out
-}
-
-func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
-	t.Helper()
-	raw, err := wire.MarshalFields(proofVersion, typeID, fields)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
-func prependZeroToWireField(raw []byte, typeID string, tag uint16) ([]byte, error) {
-	version, fields, err := wire.UnmarshalFields(raw, typeID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range fields {
-		if fields[i].Tag == tag {
-			value := make([]byte, 0, len(fields[i].Value)+1)
-			value = append(value, 0)
-			value = append(value, fields[i].Value...)
-			fields[i].Value = value
-			return wire.MarshalFields(version, typeID, fields)
-		}
-	}
-	return nil, fmt.Errorf("missing wire field %d", tag)
 }

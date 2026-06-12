@@ -1,25 +1,23 @@
 package mta
 
 import (
-	"bytes"
 	"context"
-	"crypto/rand"
 	"math/big"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/testutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // setupTestEnv creates fresh Paillier keys and Ring-Pedersen parameters with
 // reduced security parameters for Tier 1 tests.
+//
+// Security parameters are set once in TestMain; do not call
+// SetSecurityParamsForTesting from this helper.
 func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.RingPedersenParams) {
 	tb.Helper()
-	restoreSP := zkpai.SetSecurityParamsForTesting(zkpai.SecurityParams{
-		Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 1024,
-	})
-	tb.Cleanup(restoreSP)
 	var err error
 	skA, err = pai.GenerateKeyForTest(context.Background(), nil, 1024)
 	if err != nil {
@@ -64,28 +62,11 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	return &start.Message, response
 }
 
-func assertPayloadRemarshals[P any](t *testing.T, p P, marshal func(P) ([]byte, error), unmarshal func([]byte) (P, error)) {
-	t.Helper()
-	raw, err := marshal(p)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := unmarshal(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("payload did not remarshal deterministically")
-	}
-}
-
 // Tier 0: helper validation tests (no crypto keygen).
 
 func TestValidatePositiveIntegerBytes(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		input   []byte
@@ -100,10 +81,13 @@ func TestValidatePositiveIntegerBytes(t *testing.T) {
 		{name: "valid medium", input: []byte{0x42}, wantErr: ""},
 		{name: "valid large", input: []byte{0xFF, 0xFF, 0xFF}, wantErr: ""},
 	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			err := validatePositiveIntegerBytes(tt.input)
-			if tt.wantErr == "" {
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := validatePositiveIntegerBytes(tc.input)
+			if tc.wantErr == "" {
 				if err != nil {
 					t.Fatalf("unexpected error: %v", err)
 				}
@@ -111,8 +95,8 @@ func TestValidatePositiveIntegerBytes(t *testing.T) {
 				if err == nil {
 					t.Fatal("expected error, got nil")
 				}
-				if err.Error() != tt.wantErr {
-					t.Fatalf("got error %q, want %q", err.Error(), tt.wantErr)
+				if err.Error() != tc.wantErr {
+					t.Fatalf("got error %q, want %q", err.Error(), tc.wantErr)
 				}
 			}
 		})
@@ -120,7 +104,11 @@ func TestValidatePositiveIntegerBytes(t *testing.T) {
 }
 
 func TestScalarFixedBytes(t *testing.T) {
+	t.Parallel()
+
 	t.Run("short scalar padded to 32 bytes", func(t *testing.T) {
+		t.Parallel()
+
 		x := big.NewInt(13)
 		b := scalarFixedBytes(x)
 		if len(b) != 32 {
@@ -131,6 +119,8 @@ func TestScalarFixedBytes(t *testing.T) {
 		}
 	})
 	t.Run("exact 32 byte scalar", func(t *testing.T) {
+		t.Parallel()
+
 		x := new(big.Int)
 		for i := range 32 {
 			x.Lsh(x, 8)
@@ -150,7 +140,9 @@ func TestScalarFixedBytes(t *testing.T) {
 }
 
 func TestRandomScalar(t *testing.T) {
-	x, err := randomScalar(rand.Reader)
+	t.Parallel()
+
+	x, err := randomScalar(testutil.DeterministicReader(1))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,18 +152,19 @@ func TestRandomScalar(t *testing.T) {
 	if x.Cmp(secp.Order()) >= 0 {
 		t.Fatal("random scalar out of range")
 	}
-	for i := range 10 {
-		y, err := randomScalar(rand.Reader)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if i > 0 && x.Cmp(y) == 0 {
-			t.Fatal("random scalars are not different")
-		}
+
+	xAgain, err := randomScalar(testutil.DeterministicReader(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if x.Cmp(xAgain) != 0 {
+		t.Fatal("randomScalar did not consume deterministic reader reproducibly")
 	}
 }
 
 func TestMessageVersion(t *testing.T) {
+	t.Parallel()
+
 	if messageVersion != 1 {
 		t.Fatal("messageVersion changed; wire format may be incompatible")
 	}

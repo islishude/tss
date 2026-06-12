@@ -14,6 +14,8 @@ import (
 )
 
 func TestGoldenProof(t *testing.T) {
+	t.Parallel()
+
 	// Construct a valid proof deterministically using known scalars.
 	secret := big.NewInt(1)
 	nonce := big.NewInt(2)
@@ -48,7 +50,7 @@ func TestGoldenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "Proof.golden")
+	golden := filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", "SchnorrProof.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
 			t.Fatal(err)
@@ -84,6 +86,8 @@ func TestGoldenProof(t *testing.T) {
 }
 
 func TestGoldenSchnorrMarshalBinaryRejectsInvalid(t *testing.T) {
+	t.Parallel()
+
 	if _, err := (&Proof{}).MarshalBinary(); err == nil {
 		t.Error("accepted nil fields")
 	}

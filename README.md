@@ -95,32 +95,7 @@ Full examples in [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp2
 | [docs/audit-guide.md](docs/audit-guide.md)                               | Complete proof-to-paper mapping for cryptographic review.                                     |
 | [docs/deployment.md](docs/deployment.md)                                 | Production guide: key lifecycle, transport, backups, monitoring.                              |
 | [docs/cggmp21-protocol-checklist.md](docs/cggmp21-protocol-checklist.md) | Implementation tracking against the CGGMP21 specification.                                    |
-
-## Internal Packages
-
-| Package                        | Purpose                                                                        |
-| ------------------------------ | ------------------------------------------------------------------------------ |
-| `internal/shamir`              | Shamir sharing and interpolation over prime-order fields.                      |
-| `internal/secret`              | Fixed-length `Scalar`; no `String()`, `BigInt()`, or JSON.                     |
-| `internal/curve/*`             | Curve helpers backed by fiat-crypto field arithmetic.                          |
-| `internal/fiat`                | fiat-crypto generated arithmetic for Ed25519/secp256k1 fields.                 |
-| `internal/mta`                 | Paillier MtA product-share protocol (Start/Respond/Finish) with Πaff-g proofs. |
-| `internal/paillier`            | Paillier primitives; constant-time `c^λ mod n²` via `paillierct`.              |
-| `internal/paillier/paillierct` | Constant-time `c^λ mod n²` via `filippo.io/bigmod`.                            |
-| `internal/wire`                | Strict TLV encoding for all binary records.                                    |
-| `internal/zk/paillier`         | ZK proofs: Πmod, Πprm, Πenc, Πaff-g, Πlog\*.                                   |
-| `internal/zk/schnorr`          | secp256k1 Schnorr proof-of-knowledge.                                          |
-
-## Development
-
-```sh
-make all          # build, test, vet, lint
-make test         # tests with race detector
-make test-count   # CI stress tests (10 iterations, 1h)
-make check        # CI-ready: build + vet + lint + format + tidy
-make lint-fix     # linter with auto-fix
-make help         # list all targets
-```
+| [docs/testing-rules.md](docs/testing-rules.md)                           | Test tiers, required invariants, fuzzing, golden vectors, crash/restart expectations.         |
 
 ## Security
 

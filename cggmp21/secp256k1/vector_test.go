@@ -95,7 +95,7 @@ func TestGenerateCGGMP21Vectors(t *testing.T) {
 	if os.Getenv("GENERATE_VECTORS") != "1" {
 		t.Skip("set GENERATE_VECTORS=1 to regenerate cross-implementation vectors")
 	}
-	vectorPath := filepath.Join("testdata", "cggmp21_secp256k1_vectors.json")
+	vectorPath := filepath.Join("..", "..", "internal", "testvectors", "protocol", "cggmp21-secp256k1", "cggmp21_secp256k1_vectors.json")
 	vectors := generateCGGMP21Vectors(t)
 	data, err := json.MarshalIndent(vectors, "", "  ")
 	if err != nil {
@@ -108,7 +108,7 @@ func TestGenerateCGGMP21Vectors(t *testing.T) {
 }
 
 func TestCGGMP21CrossImplementationVectors(t *testing.T) {
-	vectorPath := filepath.Join("testdata", "cggmp21_secp256k1_vectors.json")
+	vectorPath := filepath.Join("..", "..", "internal", "testvectors", "protocol", "cggmp21-secp256k1", "cggmp21_secp256k1_vectors.json")
 	data, err := os.ReadFile(vectorPath) //nolint:gosec
 	if err != nil {
 		t.Fatal(err)

@@ -13,7 +13,8 @@ import (
 )
 
 func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw1, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -39,7 +40,8 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	unsorted := (shares[1]).Clone()
 	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
@@ -53,7 +55,8 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -68,7 +71,8 @@ func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -83,7 +87,8 @@ func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -105,6 +110,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 		{name: "keygen transcript hash", tag: keyShareFieldKeygenTranscriptHash, value: []byte{}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mutated, err := testutil.RewriteWireField(raw, keyShareWireType, tc.tag, tc.value)
 			if err != nil {
 				t.Fatal(err)
@@ -117,7 +123,8 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 
 	badModulusProof := (shares[1]).Clone()
 	badModulusProof.PaillierPublicKeys[0].Proof = append([]byte(nil), badModulusProof.PaillierPublicKeys[1].Proof...)
@@ -133,7 +140,8 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 }
 
 func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	raw1, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -160,7 +168,8 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 }
 
 func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	unsorted := (presigns[1]).Clone()
 	unsorted.Signers[0], unsorted.Signers[1] = unsorted.Signers[1], unsorted.Signers[0]
@@ -173,7 +182,8 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 }
 
 func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
-	shares := secpKeygen(t, 2, 3)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -187,136 +197,6 @@ func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
 			t.Fatalf("key share threshold %d accepted", overflow)
 		}
 	}
-}
-
-func FuzzCGGMP21KeyShareUnmarshal(f *testing.F) {
-	share := secpKeygen(f, 1, 1)[1]
-	raw, err := share.MarshalBinary()
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"version":1}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		share, err := UnmarshalKeyShare(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, share, (*KeyShare).MarshalBinary, UnmarshalKeyShare)
-	})
-}
-
-func FuzzCGGMP21KeygenCommitmentsPayloadUnmarshal(f *testing.F) {
-	shares := secpKeygen(f, 1, 1)
-	payload := keygenCommitmentsPayload{
-		Commitments:        shares[1].GroupCommitments,
-		PaillierPublicKey:  shares[1].PaillierPublicKey,
-		PaillierProof:      shares[1].PaillierProof,
-		RingPedersenParams: shares[1].RingPedersenParams,
-		RingPedersenProof:  shares[1].RingPedersenProof,
-	}
-	raw, err := marshalKeygenCommitmentsPayload(payload)
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"commitments":[]}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalKeygenCommitmentsPayload(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, marshalKeygenCommitmentsPayload, unmarshalKeygenCommitmentsPayload)
-	})
-}
-
-func FuzzCGGMP21PresignRound2PayloadUnmarshal(f *testing.F) {
-	shares := secpKeygen(f, 2, 2)
-	sessionID := fuzzSessionID()
-	_, out1, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
-	if err != nil {
-		f.Fatal(err)
-	}
-	s2, _, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
-	if err != nil {
-		f.Fatal(err)
-	}
-	s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
-	round2 := deliverPresignMessagesTo(f, s2, 2, out1)
-	f.Add(round2[0].Payload)
-	f.Add([]byte(`{"delta":{},"sigma":{}}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalPresignRound2Payload(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, marshalPresignRound2Payload, unmarshalPresignRound2Payload)
-	})
-}
-
-func FuzzCGGMP21ReshareDealerCommitmentsPayloadUnmarshal(f *testing.F) {
-	shares := secpKeygen(f, 1, 1)
-	payload := reshareDealerCommitmentsPayload{Commitments: shares[1].GroupCommitments}
-	raw, err := marshalReshareDealerCommitmentsPayload(payload)
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"commitments":[]}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalReshareDealerCommitmentsPayload(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareDealerCommitmentsPayload, unmarshalReshareDealerCommitmentsPayload)
-	})
-}
-
-func FuzzCGGMP21ReshareReceiverMaterialPayloadUnmarshal(f *testing.F) {
-	shares := secpKeygen(f, 1, 1)
-	payload := reshareReceiverMaterialPayload{
-		PaillierPublicKey:  shares[1].PaillierPublicKey,
-		PaillierProof:      shares[1].PaillierProof,
-		RingPedersenParams: shares[1].RingPedersenParams,
-		RingPedersenProof:  shares[1].RingPedersenProof,
-	}
-	raw, err := marshalReshareReceiverMaterialPayload(payload)
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"paillier_public_key":"x"}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalReshareReceiverMaterialPayload(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, marshalReshareReceiverMaterialPayload, unmarshalReshareReceiverMaterialPayload)
-	})
-}
-
-func FuzzCGGMP21RefreshCommitmentsPayloadUnmarshal(f *testing.F) {
-	shares := secpKeygen(f, 1, 1)
-	payload := refreshCommitmentsPayload{
-		Commitments:        shares[1].GroupCommitments,
-		PaillierPublicKey:  shares[1].PaillierPublicKey,
-		PaillierProof:      shares[1].PaillierProof,
-		RingPedersenParams: shares[1].RingPedersenParams,
-		RingPedersenProof:  shares[1].RingPedersenProof,
-	}
-	raw, err := marshalRefreshCommitmentsPayload(payload)
-	if err != nil {
-		f.Fatal(err)
-	}
-	f.Add(raw)
-	f.Add([]byte(`{"commitments":[]}`))
-	f.Fuzz(func(t *testing.T, data []byte) {
-		p, err := unmarshalRefreshCommitmentsPayload(data)
-		if err != nil {
-			return
-		}
-		testutil.AssertDeterministicRoundTrip(t, p, marshalRefreshCommitmentsPayload, unmarshalRefreshCommitmentsPayload)
-	})
 }
 
 func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) ([]byte, error) {

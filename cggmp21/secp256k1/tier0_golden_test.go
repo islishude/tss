@@ -7,19 +7,21 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // TestFast_GoldenPresignMarshalBinary verifies deterministic wire encoding of
 // a full Presign record including VerifyShares. No keygen is required.
 func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
+	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
 	raw, err := presign.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "Presign.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.fast.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	// Round-trip: unmarshal → marshal must produce identical bytes.
 	decoded, err := UnmarshalPresign(raw)
@@ -41,14 +43,15 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 // TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
+	t.Parallel()
 	payload := keygenSharePayload{Share: big.NewInt(1)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "KeygenSharePayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeygenSharePayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -69,6 +72,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 // TestFast_GoldenSignPartialPayload verifies deterministic wire encoding of
 // sign partial payloads. No keygen or crypto is required.
 func TestFast_GoldenSignPartialPayload(t *testing.T) {
+	t.Parallel()
 	payload := signPartialPayload{
 		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
@@ -81,8 +85,8 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "SignPartialPayload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignPartialPayload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
@@ -103,6 +107,7 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 // TestFast_GoldenPresignRound3Payload verifies deterministic wire encoding of
 // presign round 3 payloads. No keygen or crypto is required.
 func TestFast_GoldenPresignRound3Payload(t *testing.T) {
+	t.Parallel()
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
 	proof := mustMinimalSignPrepProofForTest(t)
@@ -117,8 +122,8 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "PresignRound3Payload.golden")
-	checkGolden(t, golden, raw)
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PresignRound3Payload.golden")
+	testutil.CheckGolden(t, golden, raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)
 	if err != nil {

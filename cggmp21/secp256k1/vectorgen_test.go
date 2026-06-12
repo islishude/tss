@@ -13,7 +13,7 @@ import (
 )
 
 func TestGenerateVectors(t *testing.T) {
-	generateAndSaveCGGMP21Vectors(t, filepath.Join("testdata", "cggmp21_secp256k1_vectors.json"))
+	generateAndSaveCGGMP21Vectors(t, filepath.Join("..", "..", "internal", "testvectors", "protocol", "cggmp21-secp256k1", "cggmp21_secp256k1_vectors.json"))
 }
 
 func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {

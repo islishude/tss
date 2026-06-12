@@ -9,6 +9,7 @@ import (
 )
 
 func TestGoldenEnvelope(t *testing.T) {
+	t.Parallel()
 	sessionID, err := SessionIDFromBytes(bytes.Repeat([]byte{0x42}, 32))
 	if err != nil {
 		t.Fatal(err)
@@ -31,7 +32,7 @@ func TestGoldenEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("testdata", "Envelope.golden")
+	golden := filepath.Join("internal", "testvectors", "wire", "v1", "envelope", "Envelope.golden")
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {

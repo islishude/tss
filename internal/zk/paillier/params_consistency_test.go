@@ -1,7 +1,6 @@
 package paillier
 
 import (
-	"math/big"
 	"testing"
 )
 
@@ -9,6 +8,7 @@ import (
 // DefaultSecurityParams match their documented values. Any drift here
 // changes the security model of all CGGMP proofs.
 func TestDefaultSecurityParamsValues(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 
 	if sp.Ell != 256 {
@@ -43,6 +43,7 @@ func TestDefaultSecurityParamsValues(t *testing.T) {
 // This is below the 2^128 claimed in the code comments but still infeasible
 // to enumerate (2^102 > 2^80 security target for statistical hiding).
 func TestEncRangeFormula(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 
 	encRange := sp.EncRange()
@@ -74,6 +75,7 @@ func TestEncRangeFormula(t *testing.T) {
 // The statistical hiding is the logarithm of the minimum candidate set size:
 // log2(2^486 / 2^128) = 358 bits. This is well above the 128-bit target.
 func TestEncRangeStatisticalHiding(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	maskBits := sp.EncRange() // 486
 
@@ -94,6 +96,7 @@ func TestEncRangeStatisticalHiding(t *testing.T) {
 // since the challenge is derived from SHA-256. Using more bits than the hash
 // output would create a biased challenge distribution.
 func TestChallengeBitsDoNotExceedHashOutput(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	if sp.ChallengeBits > 256 {
 		t.Fatalf("ChallengeBits = %d exceeds SHA-256 output (256 bits)", sp.ChallengeBits)
@@ -105,73 +108,10 @@ func TestChallengeBitsDoNotExceedHashOutput(t *testing.T) {
 	}
 }
 
-// TestTranscriptBindsAllSecurityParams verifies that each new CGGMP proof
-// transcript binds Ell, EllPrime, Epsilon, and ChallengeBits. If these are
-// not bound, a malicious prover could use weaker parameters without the
-// verifier detecting it.
-func TestTranscriptBindsAllSecurityParams(t *testing.T) {
-	// Verify that buildEncTranscript, buildAffGTranscript, and
-	// buildLogStarTranscript all call t.AppendUint32 for each param.
-	// We indirectly verify by checking that Verify rejects a proof when
-	// params differ. Use the new proofs.
-
-	t.Run("EncProof params in transcript", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("skipping crypto proof test in short mode")
-		}
-		p1, stmt, _, proof := encProofFixture(t)
-		encState := []byte("enc matrix")
-		// Verify with same params
-		if err := VerifyEnc(p1, encState, stmt, proof); err != nil {
-			t.Fatal(err)
-		}
-		// Different epsilon: the transcript includes Epsilon, so the challenge
-		// will differ, causing verification to fail.
-		p3 := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime, Epsilon: p1.Epsilon + 1, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
-		if err := VerifyEnc(p3, encState, stmt, proof); err == nil {
-			t.Fatal("EncProof verified with wrong Epsilon (transcript should bind it)")
-		}
-
-		p4 := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime, Epsilon: p1.Epsilon, ChallengeBits: p1.ChallengeBits + 1, MinPaillierBits: p1.MinPaillierBits}
-		if err := VerifyEnc(p4, encState, stmt, proof); err == nil {
-			t.Fatal("EncProof verified with wrong ChallengeBits (transcript should bind it)")
-		}
-	})
-
-	t.Run("AffGProof params in transcript", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("skipping crypto proof test in short mode")
-		}
-		p1, stmt, _, proof := affGProofFixture(t)
-		affgState := []byte("affg matrix")
-		if err := VerifyAffG(p1, affgState, stmt, proof); err != nil {
-			t.Fatal(err)
-		}
-		pDiff := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime, Epsilon: p1.Epsilon + 1, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
-		if err := VerifyAffG(pDiff, affgState, stmt, proof); err == nil {
-			t.Fatal("AffGProof verified with wrong Epsilon (transcript should bind it)")
-		}
-	})
-
-	t.Run("LogStarProof params in transcript", func(t *testing.T) {
-		if testing.Short() {
-			t.Skip("skipping crypto proof test in short mode")
-		}
-		p1, stmt, _, proof := logStarProofFixture(t)
-		logState := []byte("logstar matrix")
-		if err := VerifyLogStar(p1, logState, stmt, proof); err != nil {
-			t.Fatal(err)
-		}
-		pDiff := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime, Epsilon: p1.Epsilon + 1, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
-		if err := VerifyLogStar(pDiff, logState, stmt, proof); err == nil {
-			t.Fatal("LogStarProof verified with wrong Epsilon (transcript should bind it)")
-		}
-	})
-}
-
 // TestFastSecurityParamsSanity verifies FastSecurityParams uses reduced
 // parameters that are suitable for tests but NOT for production.
 func TestFastSecurityParamsSanity(t *testing.T) {
+	t.Parallel()
 	fast := FastSecurityParams()
 	def := DefaultSecurityParams()
 
@@ -203,6 +143,7 @@ func TestFastSecurityParamsSanity(t *testing.T) {
 // TestSecurityParamsValidate verifies that Validate rejects invalid
 // parameter combinations.
 func TestSecurityParamsValidate(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name   string
 		params SecurityParams
@@ -230,47 +171,10 @@ func TestSecurityParamsValidate(t *testing.T) {
 	}
 }
 
-// TestCheckPaillierModulus verifies the minimum bit-length check on Paillier
-// moduli.
-func TestCheckPaillierModulus(t *testing.T) {
-	if testing.Short() {
-		t.Skip("skipping crypto proof test in short mode")
-	}
-
-	sp := DefaultSecurityParams()
-
-	// Test with a key that meets the minimum (requires keygen)
-	sk1024 := testPaillierKey(t, 1024)
-	err := sp.CheckPaillierModulus(&sk1024.PublicKey)
-	if err == nil {
-		// 1024 < 3072 — should fail for default params
-		t.Log("1024-bit modulus correctly rejected by DefaultSecurityParams")
-	} else {
-		t.Logf("CheckPaillierModulus(1024-bit): %v", err)
-	}
-
-	// FastSecurityParams should accept 1024-bit
-	fast := FastSecurityParams()
-	if err := fast.CheckPaillierModulus(&sk1024.PublicKey); err != nil {
-		t.Errorf("FastSecurityParams rejected 1024-bit modulus: %v", err)
-	}
-}
-
-// TestEncRangeDoesNotOverflow verifies that EncRange() can be represented
-// as a uint without overflow on 64-bit platforms.
-func TestEncRangeDoesNotOverflow(t *testing.T) {
-	sp := DefaultSecurityParams()
-	r := sp.EncRange()
-	// r = 486, stored as uint. Verify operations on it don't overflow.
-	_ = new(big.Int).Lsh(big.NewInt(1), r) // 2^486 must not panic
-
-	affR := sp.AffGRange()
-	_ = new(big.Int).Lsh(big.NewInt(1), affR) // 2^1078 must not panic
-}
-
 // TestEllPrimeExceedsEll verifies that EllPrime > Ell, which is required for
 // the affine proof range to be strictly larger than the scalar range.
 func TestEllPrimeExceedsEll(t *testing.T) {
+	t.Parallel()
 	sp := DefaultSecurityParams()
 	if sp.EllPrime <= sp.Ell {
 		t.Errorf("EllPrime (%d) must be strictly greater than Ell (%d)", sp.EllPrime, sp.Ell)

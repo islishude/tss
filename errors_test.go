@@ -7,6 +7,7 @@ import (
 )
 
 func TestProtocolErrorError(t *testing.T) {
+	t.Parallel()
 	t.Run("nil receiver", func(t *testing.T) {
 		var pe *ProtocolError
 		got := pe.Error()
@@ -83,6 +84,7 @@ func TestProtocolErrorError(t *testing.T) {
 }
 
 func TestProtocolErrorUnwrap(t *testing.T) {
+	t.Parallel()
 	t.Run("nil receiver", func(t *testing.T) {
 		var pe *ProtocolError
 		if err := pe.Unwrap(); err != nil {
@@ -131,6 +133,7 @@ func TestProtocolErrorUnwrap(t *testing.T) {
 }
 
 func TestNewProtocolError(t *testing.T) {
+	t.Parallel()
 	underlying := fmt.Errorf("test error")
 	pe := NewProtocolError(ErrCodeInvalidMessage, 4, 2, underlying)
 
@@ -152,6 +155,7 @@ func TestNewProtocolError(t *testing.T) {
 }
 
 func TestErrorCodeConstants(t *testing.T) {
+	t.Parallel()
 	// Ensure error code constants have the expected values and are distinct.
 	codes := map[string]struct{}{}
 	for _, c := range []string{
@@ -173,5 +177,85 @@ func TestErrorCodeConstants(t *testing.T) {
 			t.Errorf("duplicate error code %q", c)
 		}
 		codes[c] = struct{}{}
+	}
+}
+
+func TestIsSessionCompleted(t *testing.T) {
+	t.Parallel()
+	// Positive
+	pe := &ProtocolError{Code: ErrCodeCompleted}
+	if !IsSessionCompleted(pe) {
+		t.Fatal("ProtocolError with ErrCodeCompleted should be identified")
+	}
+	// Wrapped
+	wrapped := fmt.Errorf("wrap: %w", pe)
+	if !IsSessionCompleted(wrapped) {
+		t.Fatal("wrapped ProtocolError with ErrCodeCompleted should be identified")
+	}
+	// Negative: wrong code
+	if IsSessionCompleted(&ProtocolError{Code: ErrCodeAborted}) {
+		t.Fatal("ErrCodeAborted should not be IsSessionCompleted")
+	}
+	// Negative: plain error
+	if IsSessionCompleted(errors.New("plain")) {
+		t.Fatal("plain error should not be IsSessionCompleted")
+	}
+	// Negative: nil
+	if IsSessionCompleted(nil) {
+		t.Fatal("nil should not be IsSessionCompleted")
+	}
+}
+
+func TestIsSessionAborted(t *testing.T) {
+	t.Parallel()
+	// Positive
+	pe := &ProtocolError{Code: ErrCodeAborted}
+	if !IsSessionAborted(pe) {
+		t.Fatal("ProtocolError with ErrCodeAborted should be identified")
+	}
+	// Wrapped
+	wrapped := fmt.Errorf("wrap: %w", pe)
+	if !IsSessionAborted(wrapped) {
+		t.Fatal("wrapped ProtocolError with ErrCodeAborted should be identified")
+	}
+	// Negative: wrong code
+	if IsSessionAborted(&ProtocolError{Code: ErrCodeCompleted}) {
+		t.Fatal("ErrCodeCompleted should not be IsSessionAborted")
+	}
+	// Negative: plain error
+	if IsSessionAborted(errors.New("plain")) {
+		t.Fatal("plain error should not be IsSessionAborted")
+	}
+	// Negative: nil
+	if IsSessionAborted(nil) {
+		t.Fatal("nil should not be IsSessionAborted")
+	}
+}
+
+func TestIsAttributableError(t *testing.T) {
+	t.Parallel()
+	// Positive: verification failure
+	if !IsAttributableError(&ProtocolError{Code: ErrCodeVerification}) {
+		t.Fatal("ErrCodeVerification should be attributable")
+	}
+	// Positive: error with Blame
+	if !IsAttributableError(&ProtocolError{Code: ErrCodeInvalidMessage, Blame: &Blame{Reason: "test"}}) {
+		t.Fatal("error with Blame should be attributable")
+	}
+	// Negative: duplicate (never attributable)
+	if IsAttributableError(&ProtocolError{Code: ErrCodeDuplicate, Blame: &Blame{Reason: "test"}}) {
+		t.Fatal("ErrCodeDuplicate should NOT be attributable even with blame")
+	}
+	// Negative: plain error
+	if IsAttributableError(errors.New("plain")) {
+		t.Fatal("plain error should not be attributable")
+	}
+	// Negative: nil
+	if IsAttributableError(nil) {
+		t.Fatal("nil should not be attributable")
+	}
+	// Negative: completed without blame
+	if IsAttributableError(&ProtocolError{Code: ErrCodeCompleted}) {
+		t.Fatal("ErrCodeCompleted without blame should not be attributable")
 	}
 }

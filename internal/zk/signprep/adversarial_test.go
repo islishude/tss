@@ -13,6 +13,8 @@ import (
 // same witness but different nonces produce different encodings, confirming
 // the proof does not deterministically leak the witness.
 func TestSignPrepProofZeroKnowledge(t *testing.T) {
+	t.Parallel()
+
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
@@ -73,6 +75,8 @@ func TestSignPrepProofZeroKnowledge(t *testing.T) {
 // TestSignPrepProofDoesNotContainWitness verifies that the proof bytes do not
 // contain the secret witness values (k_i, chi_i, M_i) in plaintext.
 func TestSignPrepProofDoesNotContainWitness(t *testing.T) {
+	t.Parallel()
+
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	// Use large secret values to avoid coincidental byte matches.
@@ -146,6 +150,8 @@ func TestSignPrepProofDoesNotContainWitness(t *testing.T) {
 // TestSignPrepProofFuzzVerify fuzzes the Verify function with random proof
 // bytes to ensure it never panics.
 func TestSignPrepProofFuzzVerify(t *testing.T) {
+	t.Parallel()
+
 	one := big.NewInt(1)
 	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 	xBarPoint := kPoint

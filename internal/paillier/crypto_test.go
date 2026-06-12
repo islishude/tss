@@ -7,6 +7,8 @@ import (
 )
 
 func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -45,39 +47,60 @@ func TestEncryptDecryptAndHomomorphicOps(t *testing.T) {
 }
 
 func TestValidateCiphertextGroup(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := sk.ValidateCiphertext(big.NewInt(0)); err == nil {
-		t.Fatal("expected zero ciphertext rejection")
+
+	tests := []struct {
+		name       string
+		ciphertext *big.Int
+	}{
+		{name: "zero", ciphertext: big.NewInt(0)},
+		{name: "n squared", ciphertext: sk.NSquared},
+		{name: "non-invertible n", ciphertext: new(big.Int).Set(sk.N)},
 	}
-	if err := sk.ValidateCiphertext(sk.NSquared); err == nil {
-		t.Fatal("expected n^2 ciphertext rejection")
-	}
-	if err := sk.ValidateCiphertext(new(big.Int).Set(sk.N)); err == nil {
-		t.Fatal("expected non-invertible ciphertext rejection")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if err := sk.ValidateCiphertext(tc.ciphertext); err == nil {
+				t.Fatal("expected ciphertext rejection")
+			}
+		})
 	}
 }
 
 func TestDecryptRejectsNonUnitCiphertext(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// N is in range (0 < N < N^2) but gcd(N, N^2) = N, not 1.
-	bad := new(big.Int).Set(sk.N)
-	if _, err := sk.Decrypt(bad); err == nil {
-		t.Fatal("expected Decrypt to reject non-unit ciphertext N")
+
+	tests := []struct {
+		name       string
+		ciphertext *big.Int
+	}{
+		{name: "non-unit n", ciphertext: new(big.Int).Set(sk.N)},
+		{name: "zero", ciphertext: big.NewInt(0)},
+		{name: "n squared", ciphertext: sk.NSquared},
 	}
-	// Zero.
-	if _, err := sk.Decrypt(big.NewInt(0)); err == nil {
-		t.Fatal("expected Decrypt to reject zero ciphertext")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := sk.Decrypt(tc.ciphertext); err == nil {
+				t.Fatal("expected Decrypt to reject invalid ciphertext")
+			}
+		})
 	}
-	// N^2 (out of range).
-	if _, err := sk.Decrypt(sk.NSquared); err == nil {
-		t.Fatal("expected Decrypt to reject N^2 ciphertext")
-	}
+
 	// Valid ciphertext still works.
 	c, _, err := sk.Encrypt(nil, big.NewInt(42))
 	if err != nil {
@@ -93,6 +116,8 @@ func TestDecryptRejectsNonUnitCiphertext(t *testing.T) {
 }
 
 func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
@@ -106,21 +131,24 @@ func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// AddCiphertexts rejects non-unit left.
-	if _, err := pk.AddCiphertexts(bad, good); err == nil {
-		t.Fatal("AddCiphertexts accepted non-unit left ciphertext")
+	tests := []struct {
+		name string
+		call func() (*big.Int, error)
+	}{
+		{name: "AddCiphertexts left", call: func() (*big.Int, error) { return pk.AddCiphertexts(bad, good) }},
+		{name: "AddCiphertexts right", call: func() (*big.Int, error) { return pk.AddCiphertexts(good, bad) }},
+		{name: "AddPlaintext", call: func() (*big.Int, error) { return pk.AddPlaintext(bad, big.NewInt(1)) }},
+		{name: "MulPlaintext", call: func() (*big.Int, error) { return pk.MulPlaintext(bad, big.NewInt(2)) }},
 	}
-	// AddCiphertexts rejects non-unit right.
-	if _, err := pk.AddCiphertexts(good, bad); err == nil {
-		t.Fatal("AddCiphertexts accepted non-unit right ciphertext")
-	}
-	// AddPlaintext rejects non-unit ciphertext.
-	if _, err := pk.AddPlaintext(bad, big.NewInt(1)); err == nil {
-		t.Fatal("AddPlaintext accepted non-unit ciphertext")
-	}
-	// MulPlaintext rejects non-unit ciphertext.
-	if _, err := pk.MulPlaintext(bad, big.NewInt(2)); err == nil {
-		t.Fatal("MulPlaintext accepted non-unit ciphertext")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := tc.call(); err == nil {
+				t.Fatal("checked homomorphic operation accepted non-unit ciphertext")
+			}
+		})
 	}
 
 	// Valid operations still work.
@@ -138,48 +166,160 @@ func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
 }
 
 func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)
 	}
 	pk := &sk.PublicKey
 
-	// AddCiphertextsUnchecked rejects nil.
-	if _, err := pk.AddCiphertextsUnchecked(nil, big.NewInt(1)); err == nil {
-		t.Fatal("AddCiphertextsUnchecked accepted nil a")
+	tests := []struct {
+		name string
+		call func() (*big.Int, error)
+	}{
+		{name: "AddCiphertextsUnchecked nil left", call: func() (*big.Int, error) { return pk.AddCiphertextsUnchecked(nil, big.NewInt(1)) }},
+		{name: "AddCiphertextsUnchecked nil right", call: func() (*big.Int, error) { return pk.AddCiphertextsUnchecked(big.NewInt(1), nil) }},
+		{name: "AddCiphertextsUnchecked zero left", call: func() (*big.Int, error) { return pk.AddCiphertextsUnchecked(big.NewInt(0), big.NewInt(1)) }},
+		{name: "AddCiphertextsUnchecked n squared", call: func() (*big.Int, error) { return pk.AddCiphertextsUnchecked(pk.NSquared, big.NewInt(1)) }},
+		{name: "AddPlaintextUnchecked nil ciphertext", call: func() (*big.Int, error) { return pk.AddPlaintextUnchecked(nil, big.NewInt(1)) }},
+		{name: "AddPlaintextUnchecked zero ciphertext", call: func() (*big.Int, error) { return pk.AddPlaintextUnchecked(big.NewInt(0), big.NewInt(1)) }},
+		{name: "MulPlaintextUnchecked nil ciphertext", call: func() (*big.Int, error) { return pk.MulPlaintextUnchecked(nil, big.NewInt(1)) }},
+		{name: "MulPlaintextUnchecked zero ciphertext", call: func() (*big.Int, error) { return pk.MulPlaintextUnchecked(big.NewInt(0), big.NewInt(1)) }},
 	}
-	if _, err := pk.AddCiphertextsUnchecked(big.NewInt(1), nil); err == nil {
-		t.Fatal("AddCiphertextsUnchecked accepted nil b")
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := tc.call(); err == nil {
+				t.Fatal("unchecked helper accepted invalid ciphertext input")
+			}
+		})
 	}
-	// AddCiphertextsUnchecked rejects zero.
-	if _, err := pk.AddCiphertextsUnchecked(big.NewInt(0), big.NewInt(1)); err == nil {
-		t.Fatal("AddCiphertextsUnchecked accepted zero a")
+}
+
+func TestEncryptWithRandomnessDeterministic(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// AddCiphertextsUnchecked rejects out-of-range.
-	if _, err := pk.AddCiphertextsUnchecked(pk.NSquared, big.NewInt(1)); err == nil {
-		t.Fatal("AddCiphertextsUnchecked accepted N^2")
+	pk := sk.PublicKey
+	m := big.NewInt(42)
+	r := big.NewInt(13)
+
+	c1, err := pk.EncryptWithRandomness(m, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c2, err := pk.EncryptWithRandomness(m, r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c1.Cmp(c2) != 0 {
+		t.Fatal("EncryptWithRandomness is not deterministic: same (m,r) produced different ciphetexts")
 	}
 
-	// AddPlaintextUnchecked rejects nil.
-	if _, err := pk.AddPlaintextUnchecked(nil, big.NewInt(1)); err == nil {
-		t.Fatal("AddPlaintextUnchecked accepted nil ciphertext")
+	// Verify decryption round-trips.
+	got, err := sk.Decrypt(c1)
+	if err != nil {
+		t.Fatal(err)
 	}
-	// AddPlaintextUnchecked rejects zero.
-	if _, err := pk.AddPlaintextUnchecked(big.NewInt(0), big.NewInt(1)); err == nil {
-		t.Fatal("AddPlaintextUnchecked accepted zero ciphertext")
+	if got.Cmp(m) != 0 {
+		t.Fatalf("EncryptWithRandomness/Decrypt round-trip: got %s, want %s", got, m)
 	}
 
-	// MulPlaintextUnchecked rejects nil.
-	if _, err := pk.MulPlaintextUnchecked(nil, big.NewInt(1)); err == nil {
-		t.Fatal("MulPlaintextUnchecked accepted nil ciphertext")
+	// Different randomness → different ciphertext.
+	c3, err := pk.EncryptWithRandomness(m, big.NewInt(17))
+	if err != nil {
+		t.Fatal(err)
 	}
-	// MulPlaintextUnchecked rejects zero.
-	if _, err := pk.MulPlaintextUnchecked(big.NewInt(0), big.NewInt(1)); err == nil {
-		t.Fatal("MulPlaintextUnchecked accepted zero ciphertext")
+	if c1.Cmp(c3) == 0 {
+		t.Fatal("different randomness produced identical ciphertexts")
+	}
+	got, err = sk.Decrypt(c3)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.Cmp(m) != 0 {
+		t.Fatalf("c3 decrypt: got %s, want %s", got, m)
+	}
+}
+
+func TestEncryptWithRandomnessRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pk := sk.PublicKey
+
+	// Nil message.
+	if _, err := pk.EncryptWithRandomness(nil, big.NewInt(1)); err == nil {
+		t.Fatal("nil message accepted")
+	}
+	// Nil randomness.
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), nil); err == nil {
+		t.Fatal("nil randomness accepted")
+	}
+	// r not coprime to N.
+	badR := new(big.Int).Mul(sk.P, big.NewInt(2)) // multiple of P, not coprime to N
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), badR); err == nil {
+		t.Fatal("non-coprime randomness accepted")
+	}
+	// r = N (divisible by N, not coprime).
+	if _, err := pk.EncryptWithRandomness(big.NewInt(1), new(big.Int).Set(sk.N)); err == nil {
+		t.Fatal("r=N accepted")
+	}
+}
+
+func TestLFunction(t *testing.T) {
+	t.Parallel()
+	// For n=15: L(16) = (16-1)/15 = 1
+	n := big.NewInt(15)
+	if got := L(big.NewInt(16), n); got.Cmp(big.NewInt(1)) != 0 {
+		t.Fatalf("L(16,15) = %s, want 1", got)
+	}
+	// L(31) = (31-1)/15 = 2
+	if got := L(big.NewInt(31), n); got.Cmp(big.NewInt(2)) != 0 {
+		t.Fatalf("L(31,15) = %s, want 2", got)
+	}
+	// L(46) = (46-1)/15 = 3
+	if got := L(big.NewInt(46), n); got.Cmp(big.NewInt(3)) != 0 {
+		t.Fatalf("L(46,15) = %s, want 3", got)
+	}
+	// L(1) = (1-1)/15 = 0
+	if got := L(big.NewInt(1), n); got.Sign() != 0 {
+		t.Fatalf("L(1,15) = %s, want 0", got)
+	}
+}
+
+func TestEncryptRejectsNegativeMessage(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Negative values should be rejected or normalized modulo N.
+	c, _, err := sk.Encrypt(nil, big.NewInt(-5))
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := sk.Decrypt(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// -5 mod N should decrypt correctly (Encrypt normalizes).
+	expected := new(big.Int).Mod(big.NewInt(-5), sk.N)
+	if got.Cmp(expected) != 0 {
+		t.Fatalf("negative message: got %s, want %s", got, expected)
 	}
 }
 
 func TestUncheckedHelpersAcceptValidCiphertexts(t *testing.T) {
+	t.Parallel()
+
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
 	if err != nil {
 		t.Fatal(err)

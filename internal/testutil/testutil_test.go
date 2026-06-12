@@ -5,6 +5,7 @@ import (
 )
 
 func TestIsZeroBytes(t *testing.T) {
+	t.Parallel()
 	// nil and empty are zero.
 	if !IsZeroBytes(nil) {
 		t.Error("nil slice should be zero")

@@ -8,6 +8,7 @@ import (
 type testID uint32
 
 func TestWireFieldHelpers(t *testing.T) {
+	t.Parallel()
 	fields := []Field{
 		{Tag: 1, Value: Uint32(7)},
 		{Tag: 2, Value: Bool(true)},
@@ -41,6 +42,7 @@ func TestWireFieldHelpers(t *testing.T) {
 }
 
 func TestWireFieldHelperErrors(t *testing.T) {
+	t.Parallel()
 	fields := []Field{{Tag: 1, Value: Uint32(7)}}
 	if err := RequireExactTags(fields, 2); err == nil {
 		t.Fatal("RequireExactTags accepted wrong tag")

@@ -7,6 +7,7 @@ import (
 )
 
 func TestUint32List(t *testing.T) {
+	t.Parallel()
 	input := []testID{3, 7, 11}
 	raw := EncodeUint32List(input)
 	got, err := DecodeUint32List[testID](raw)
@@ -22,6 +23,7 @@ func TestUint32List(t *testing.T) {
 }
 
 func TestBytesList(t *testing.T) {
+	t.Parallel()
 	items := [][]byte{{1}, {}, {2, 3}}
 	raw := EncodeBytesList(items)
 	got, err := DecodeBytesList(raw)
@@ -45,6 +47,7 @@ func TestBytesList(t *testing.T) {
 }
 
 func TestPartyBytes(t *testing.T) {
+	t.Parallel()
 	input := []PartyBytes[testID]{
 		{Party: 1, Bytes: []byte{1, 2}},
 		{Party: 2, Bytes: []byte{}},
@@ -71,6 +74,7 @@ func TestPartyBytes(t *testing.T) {
 }
 
 func TestPartyBytePairs(t *testing.T) {
+	t.Parallel()
 	input := []PartyBytePair[testID]{
 		{Party: 1, First: []byte{1}, Second: []byte{2}},
 		{Party: 2, First: []byte{}, Second: []byte{3, 4}},

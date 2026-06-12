@@ -65,6 +65,23 @@ func (EncProof) WireType() string { return encProofWireType }
 // WireVersion returns the wire format version for EncProof.
 func (EncProof) WireVersion() uint16 { return encProofVersion }
 
+// Clone returns a deep copy of the EncProof.
+func (p *EncProof) Clone() *EncProof {
+	if p == nil {
+		return nil
+	}
+	return &EncProof{
+		Version:        p.Version,
+		S:              new(big.Int).Set(p.S),
+		A:              new(big.Int).Set(p.A),
+		C:              new(big.Int).Set(p.C),
+		Z1:             new(big.Int).Set(p.Z1),
+		Z2:             new(big.Int).Set(p.Z2),
+		Z3:             new(big.Int).Set(p.Z3),
+		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+	}
+}
+
 // Validate checks that the EncProof is structurally complete.
 func (p *EncProof) Validate() error {
 	if p.Version != encProofVersion {

@@ -9,6 +9,8 @@ run:
     - integration
     - slowcrypto
     - stress
+    - tier0
+    - tier1
 
 linters:
   default: standard

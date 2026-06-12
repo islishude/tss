@@ -2,354 +2,348 @@ package bip32util
 
 import (
 	"bytes"
-	"crypto/sha256"
-	"errors"
+	"io"
 	"testing"
+
+	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
-// ---------------------------------------------------------------------------
-// Sentinel errors
-// ---------------------------------------------------------------------------
+const masterXPub = "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
 
-func TestSentinelErrorsAreDistinct(t *testing.T) {
-	errs := []error{
-		ErrChainCodeRequired,
-		ErrInvalidChainCodeLength,
-		ErrInvalidPublicKey,
-		ErrHardenedDerivationUnsupported,
-		ErrInvalidChild,
-		ErrDerivationDepthOverflow,
-		ErrInvalidExtendedPublicKey,
-	}
-	for i, a := range errs {
-		if a == nil {
-			t.Errorf("sentinel error at index %d is nil", i)
-		}
-		for j := i + 1; j < len(errs); j++ {
-			if errors.Is(a, errs[j]) || errors.Is(errs[j], a) {
-				t.Errorf("errors at %d and %d should be distinct", i, j)
-			}
-		}
-	}
-}
+func TestAggregateChainCode_AggregatesInputs(t *testing.T) {
+	t.Parallel()
 
-func TestSentinelErrorsAreComparable(t *testing.T) {
-	// Verify that errors.Is works with the sentinel values.
-	if !errors.Is(ErrChainCodeRequired, ErrChainCodeRequired) {
-		t.Error("ErrChainCodeRequired should match itself via errors.Is")
-	}
-	if !errors.Is(ErrHardenedDerivationUnsupported, ErrHardenedDerivationUnsupported) {
-		t.Error("ErrHardenedDerivationUnsupported should match itself via errors.Is")
-	}
-	// Verify that distinct errors don't match.
-	if errors.Is(ErrChainCodeRequired, ErrInvalidChild) {
-		t.Error("distinct sentinel errors should not match via errors.Is")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Constants
-// ---------------------------------------------------------------------------
-
-func TestHardenedKeyStartValue(t *testing.T) {
-	if HardenedKeyStart != 1<<31 {
-		t.Errorf("HardenedKeyStart = %d, want %d", HardenedKeyStart, 1<<31)
-	}
-	if HardenedKeyStart != 0x80000000 {
-		t.Errorf("HardenedKeyStart = 0x%x, want 0x80000000", HardenedKeyStart)
-	}
-}
-
-func TestXPubVersion(t *testing.T) {
-	// BIP32 mainnet xpub version must be 0x0488B21E.
-	if XPubVersion != [4]byte{0x04, 0x88, 0xB2, 0x1E} {
-		t.Errorf("XPubVersion = %x, want 0488b21e", XPubVersion)
-	}
-}
-
-func TestTPubVersion(t *testing.T) {
-	// BIP32 testnet tpub version must be 0x043587CF.
-	if TPubVersion != [4]byte{0x04, 0x35, 0x87, 0xCF} {
-		t.Errorf("TPubVersion = %x, want 043587cf", TPubVersion)
-	}
-}
-
-func TestIsKnownVersion(t *testing.T) {
-	if !IsKnownVersion(XPubVersion) {
-		t.Error("XPubVersion should be known")
-	}
-	if !IsKnownVersion(TPubVersion) {
-		t.Error("TPubVersion should be known")
-	}
-	if IsKnownVersion([4]byte{0x00, 0x00, 0x00, 0x00}) {
-		t.Error("all-zero version should not be known")
-	}
-	if IsKnownVersion([4]byte{0x04, 0x88, 0xAD, 0xE4}) {
-		t.Error("xprv version should not be treated as known for xpub")
-	}
-	if IsKnownVersion([4]byte{0xDE, 0xAD, 0xBE, 0xEF}) {
-		t.Error("arbitrary version should not be known")
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Base58CheckEncode / Base58CheckDecode
-// ---------------------------------------------------------------------------
-
-func TestBase58Check_RoundTrip_KnownXPub(t *testing.T) {
-	// Decode a well-known mainnet xpub, then re-encode and compare.
-	original := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(original)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payload) != 78 {
-		t.Fatalf("expected 78-byte payload, got %d", len(payload))
+	tests := []struct {
+		name  string
+		setup func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte)
+	}{
+		{
+			name: "single party equals input",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				cc := bytes.Repeat([]byte{0xAB}, 32)
+				return []tss.PartyID{1}, map[tss.PartyID][]byte{1: cc}, cc
+			},
+		},
+		{
+			name: "two parties xor bytewise",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				a := bytes.Repeat([]byte{0xAB}, 32)
+				b := bytes.Repeat([]byte{0xCD}, 32)
+				return []tss.PartyID{1, 2}, map[tss.PartyID][]byte{1: a, 2: b}, xorChainCodes(a, b)
+			},
+		},
+		{
+			name: "three parties xor bytewise",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				a := bytes.Repeat([]byte{0x11}, 32)
+				b := bytes.Repeat([]byte{0x22}, 32)
+				c := bytes.Repeat([]byte{0x33}, 32)
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: a, 2: b, 3: c}, xorChainCodes(a, b, c)
+			},
+		},
+		{
+			name: "deterministic pseudo-random chain codes",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				parties := []tss.PartyID{0, 1, 2, 3, 4}
+				chainCodes := make(map[tss.PartyID][]byte, len(parties))
+				inputs := make([][]byte, 0, len(parties))
+				for _, id := range parties {
+					cc := deterministicChainCode(t, int64(100+id))
+					chainCodes[id] = cc
+					inputs = append(inputs, cc)
+				}
+				return parties, chainCodes, xorChainCodes(inputs...)
+			},
+		},
+		{
+			name: "all zero chain codes",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				z := make([]byte, 32)
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: z, 2: z, 3: z}, z
+			},
+		},
+		{
+			name: "empty party set",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				return nil, nil, make([]byte, 32)
+			},
+		},
+		{
+			name: "large party IDs",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				parties := []tss.PartyID{1 << 20, 1<<20 + 1}
+				a := bytes.Repeat([]byte{0x0F}, 32)
+				b := bytes.Repeat([]byte{0xF0}, 32)
+				return parties, map[tss.PartyID][]byte{parties[0]: a, parties[1]: b}, xorChainCodes(a, b)
+			},
+		},
+		{
+			name: "non-overlapping byte contributors",
+			setup: func(t *testing.T) ([]tss.PartyID, map[tss.PartyID][]byte, []byte) {
+				t.Helper()
+				p1 := make([]byte, 32)
+				p2 := make([]byte, 32)
+				p3 := make([]byte, 32)
+				for i := range 32 {
+					switch {
+					case i < 8:
+						p1[i] = byte(i + 1)
+					case i < 16:
+						p2[i] = byte(i + 1)
+					default:
+						p3[i] = byte(i + 1)
+					}
+				}
+				return []tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: p1, 2: p2, 3: p3}, xorChainCodes(p1, p2, p3)
+			},
+		},
 	}
 
-	// Verify known fields in the decoded payload.
-	version := [4]byte(payload[0:4])
-	if version != XPubVersion {
-		t.Errorf("expected xpub version %x, got %x", XPubVersion, version)
-	}
-	depth := payload[4]
-	if depth != 0 {
-		t.Errorf("master key depth should be 0, got %d", depth)
-	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	reEncoded := Base58CheckEncode(payload)
-	if reEncoded != original {
-		t.Errorf("round-trip mismatch:\n  original: %s\n  encoded:  %s", original, reEncoded)
-	}
-}
-
-func TestBase58Check_RoundTrip_ArbitraryPayload(t *testing.T) {
-	payload := make([]byte, 78)
-	// Fill with bytes that produce a valid base58 string.
-	for i := range payload {
-		payload[i] = byte(i)
-	}
-	encoded := Base58CheckEncode(payload)
-	decoded, err := Base58CheckDecode(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(decoded, payload) {
-		t.Errorf("round-trip mismatch for arbitrary 78-byte payload")
-	}
-}
-
-func TestBase58Check_RoundTrip_LeadingZeros(t *testing.T) {
-	// Payload with leading zero bytes — should preserve them.
-	payload := make([]byte, 78)
-	payload[0] = 0x00
-	payload[1] = 0x00
-	payload[2] = 0x01
-	encoded := Base58CheckEncode(payload)
-	if encoded[:2] != "11" {
-		t.Errorf("expected two leading '1's for leading zeros, got: %s", encoded[:5])
-	}
-	decoded, err := Base58CheckDecode(encoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(decoded, payload) {
-		t.Errorf("round-trip failed for payload with leading zeros")
-	}
-}
-
-func TestBase58CheckDecode_RejectsBadChecksum(t *testing.T) {
-	// Take a valid xpub and flip the last character to corrupt checksum.
-	valid := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	broken := valid[:len(valid)-1] + "X"
-	_, err := Base58CheckDecode(broken)
-	if err == nil {
-		t.Error("expected error for bad checksum")
-	}
-	if err.Error() != "base58 checksum mismatch" {
-		t.Errorf("unexpected error: %v", err)
-	}
-}
-
-func TestBase58CheckDecode_RejectsInvalidCharacter(t *testing.T) {
-	// '0', 'O', 'I', 'l' are not in the base58 alphabet.
-	for _, ch := range []string{"0", "O", "I", "l"} {
-		_, err := Base58CheckDecode(ch + "abc")
-		if err == nil {
-			t.Errorf("expected error for invalid character %q", ch)
-		}
-	}
-}
-
-func TestBase58CheckDecode_TooShortForChecksum(t *testing.T) {
-	// Single base58 character decodes to less than 4 bytes (no room for checksum).
-	_, err := Base58CheckDecode("A")
-	if err == nil {
-		t.Error("expected error for too-short data")
-	}
-}
-
-func TestBase58CheckDecode_EmptyString(t *testing.T) {
-	_, err := Base58CheckDecode("")
-	if err == nil {
-		t.Error("expected error for empty string")
-	}
-}
-
-func TestBase58CheckEncode_LargePayload(t *testing.T) {
-	// 78-byte payload is the standard xpub size.
-	payload := make([]byte, 78)
-	for i := range payload {
-		payload[i] = byte(i % 256)
-	}
-	encoded := Base58CheckEncode(payload)
-	if len(encoded) == 0 {
-		t.Error("encoded string should not be empty")
-	}
-	// Length should be roughly 78 * log(256)/log(58) + checksum ≈ 106 chars.
-	// We just check it's reasonable.
-	if len(encoded) < 100 || len(encoded) > 120 {
-		t.Logf("encoded length: %d (expected ~106)", len(encoded))
-	}
-}
-
-// ---------------------------------------------------------------------------
-// Known xpub / tpub round-trip (integration-style)
-// ---------------------------------------------------------------------------
-
-func TestKnownXPub_RoundTrip(t *testing.T) {
-	testCases := []string{
-		// TV1: m/0H xpub (depth 1, child 0x80000000)
-		"xpub68Gmy5EdvgibQVfPdqkBBCHxA5htiqg55crXYuXoQRKfDBFA1WEjWgP6LHhwBZeNK1VTsfTFUHCdrfp1bgwQ9xv5ski8PX9rL2dZXvgGDnw",
-		// TV2: m xpub (depth 0, master)
-		"xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB",
-		// TV2: m/0 xpub (depth 1)
-		"xpub69H7F5d8KSRgmmdJg2KhpAK8SR3DjMwAdkxj3ZuxV27CprR9LgpeyGmXUbC6wb7ERfvrnKZjXoUmmDznezpbZb7ap6r1D3tgFxHmwMkQTPH",
-	}
-	for _, tc := range testCases {
-		t.Run(tc[:20]+"...", func(t *testing.T) {
-			payload, err := Base58CheckDecode(tc)
+			parties, chainCodes, want := tc.setup(t)
+			got, err := AggregateChainCode(parties, chainCodes)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if len(payload) != 78 {
-				t.Fatalf("payload length = %d, want 78", len(payload))
-			}
-			reEncoded := Base58CheckEncode(payload)
-			if reEncoded != tc {
-				t.Errorf("round-trip failed:\n  got:  %s\n  want: %s", reEncoded, tc)
+			if !bytes.Equal(got, want) {
+				t.Fatalf("AggregateChainCode() = %x, want %x", got, want)
 			}
 		})
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Base58Check XPub-specific payload format checks
-// ---------------------------------------------------------------------------
+func TestAggregateChainCode_PreservesXORProperties(t *testing.T) {
+	t.Parallel()
 
-func TestBase58Check_XPubPayloadVersion(t *testing.T) {
-	// Verify that decoded xpub has the correct version bytes.
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, _ := Base58CheckDecode(xpub)
-	version := [4]byte(payload[0:4])
-	if version != XPubVersion {
-		t.Errorf("xpub version = %x, want %x", version, XPubVersion)
+	tests := []struct {
+		name   string
+		assert func(t *testing.T)
+	}{
+		{
+			name: "commutative party order",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
+				b := testutil.MustDecodeHex(t, "1a2b3c4d5e6f708192a3b4c5d6e7f809102132435465768798a9bacbdcedfe0f")
+				c := testutil.MustDecodeHex(t, "deadbeefcafebabedecafbadc0ffeeeebabe1234abcd5678ef901234fedcba98")
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
+
+				result1, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				result2, err := AggregateChainCode([]tss.PartyID{3, 1, 2}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(result1, result2) {
+					t.Fatal("party order changed aggregate chain code")
+				}
+			},
+		},
+		{
+			name: "associative regrouping",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+				b := testutil.MustDecodeHex(t, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
+				c := testutil.MustDecodeHex(t, "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc")
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b, 3: c}
+
+				allThree, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				firstTwo, err := AggregateChainCode([]tss.PartyID{1, 2}, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				thenThird, err := AggregateChainCode([]tss.PartyID{0, 3}, map[tss.PartyID][]byte{0: firstTwo, 3: c})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(allThree, thenThird) {
+					t.Fatal("regrouping changed aggregate chain code")
+				}
+			},
+		},
+		{
+			name: "double xor cancels",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "42f08ba1c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddee")
+				b := testutil.MustDecodeHex(t, "f1e2d3c4b5a69788796a5b4c3d2e1f00112233445566778899aabbccddeeff42")
+				result, err := AggregateChainCode([]tss.PartyID{1, 2, 3}, map[tss.PartyID][]byte{1: a, 2: a, 3: b})
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(result, b) {
+					t.Fatal("a ^ a ^ b did not equal b")
+				}
+			},
+		},
+		{
+			name: "same value parity",
+			assert: func(t *testing.T) {
+				t.Helper()
+				v := testutil.MustDecodeHex(t, "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344")
+				for _, n := range []int{1, 2, 3, 4, 6, 10} {
+					parties := make([]tss.PartyID, n)
+					chainCodes := make(map[tss.PartyID][]byte, n)
+					for i := range n {
+						parties[i] = tss.PartyID(i)
+						chainCodes[parties[i]] = v
+					}
+
+					got, err := AggregateChainCode(parties, chainCodes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					want := v
+					if n%2 == 0 {
+						want = make([]byte, 32)
+					}
+					if !bytes.Equal(got, want) {
+						t.Fatalf("n=%d: got %x, want %x", n, got, want)
+					}
+				}
+			},
+		},
+		{
+			name: "deterministic output",
+			assert: func(t *testing.T) {
+				t.Helper()
+				a := testutil.MustDecodeHex(t, "0102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f20")
+				b := testutil.MustDecodeHex(t, "a1b2c3d4e5f60718293a4b5c6d7e8f90112233445566778899aabbccddeeff01")
+				parties := []tss.PartyID{1, 2}
+				chainCodes := map[tss.PartyID][]byte{1: a, 2: b}
+
+				first, err := AggregateChainCode(parties, chainCodes)
+				if err != nil {
+					t.Fatal(err)
+				}
+				for i := range 10 {
+					got, err := AggregateChainCode(parties, chainCodes)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if !bytes.Equal(got, first) {
+						t.Fatalf("iteration %d: got %x, want %x", i, got, first)
+					}
+				}
+			},
+		},
+	}
+
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			tc.assert(t)
+		})
 	}
 }
 
-func TestBase58Check_XPubPayloadLayout(t *testing.T) {
-	// Verify the layout: version(4) depth(1) fp(4) child(4) chain(32) key(33)
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(xpub)
-	if err != nil {
-		t.Fatal(err)
+func TestAggregateChainCode_RejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name       string
+		parties    []tss.PartyID
+		chainCodes map[tss.PartyID][]byte
+	}{
+		{
+			name:    "zero length chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: nil,
+			},
+		},
+		{
+			name:    "one byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 1),
+			},
+		},
+		{
+			name:    "31 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 31),
+			},
+		},
+		{
+			name:    "33 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 33),
+			},
+		},
+		{
+			name:    "64 byte chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xAA}, 32),
+				2: bytes.Repeat([]byte{0xBB}, 64),
+			},
+		},
+		{
+			name:    "missing party chain code",
+			parties: []tss.PartyID{1, 2},
+			chainCodes: map[tss.PartyID][]byte{
+				1: bytes.Repeat([]byte{0xBB}, 32),
+			},
+		},
 	}
 
-	// Extract fields.
-	_ = [4]byte(payload[0:4]) // version
-	depth := payload[4]
-	_ = [4]byte(payload[5:9]) // parent fingerprint
-	_ = payload[9:13]         // child number
-	chainCode := payload[13:45]
-	publicKey := payload[45:78]
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	if depth != 0 {
-		t.Errorf("master depth = %d, want 0", depth)
-	}
-	if len(chainCode) != 32 {
-		t.Errorf("chain code length = %d, want 32", len(chainCode))
-	}
-	if len(publicKey) != 33 {
-		t.Errorf("public key length = %d, want 33", len(publicKey))
-	}
-	// The public key should be compressed (02 or 03 prefix).
-	if publicKey[0] != 0x02 && publicKey[0] != 0x03 {
-		t.Errorf("public key prefix = 0x%02x, want 0x02 or 0x03", publicKey[0])
+			if _, err := AggregateChainCode(tc.parties, tc.chainCodes); err == nil {
+				t.Fatal("expected invalid aggregate chain code input to be rejected")
+			}
+		})
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Determinism
-// ---------------------------------------------------------------------------
-
-func TestBase58CheckEncode_Deterministic(t *testing.T) {
-	payload := []byte("deterministic test payload for base58 check encoding")
-	first := Base58CheckEncode(payload)
-	for i := range 10 {
-		if got := Base58CheckEncode(payload); got != first {
-			t.Fatalf("Base58CheckEncode is not deterministic: iteration %d", i)
+func xorChainCodes(inputs ...[]byte) []byte {
+	out := make([]byte, 32)
+	for _, in := range inputs {
+		for i := range out {
+			out[i] ^= in[i]
 		}
 	}
+	return out
 }
 
-func TestBase58CheckDecode_Deterministic(t *testing.T) {
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	first, err := Base58CheckDecode(xpub)
+func deterministicChainCode(t *testing.T, seed int64) []byte {
+	t.Helper()
+	out := make([]byte, 32)
+	n, err := io.ReadFull(testutil.DeterministicReader(seed), out)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("deterministic reader failed: %v", err)
 	}
-	for i := range 10 {
-		got, err := Base58CheckDecode(xpub)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(got, first) {
-			t.Fatalf("Base58CheckDecode is not deterministic: iteration %d", i)
-		}
+	if n != len(out) {
+		t.Fatalf("short deterministic read: %d < %d", n, len(out))
 	}
-}
-
-// ---------------------------------------------------------------------------
-// Version constants are distinct
-// ---------------------------------------------------------------------------
-
-func TestVersionConstantsDistinct(t *testing.T) {
-	if XPubVersion == TPubVersion {
-		t.Error("XPubVersion and TPubVersion must be distinct")
-	}
-}
-
-// Test helper: verify that sha256d of a well-known xpub payload matches.
-func TestXPubChecksum(t *testing.T) {
-	// Manual checksum verification for the TV2 master xpub.
-	xpub := "xpub661MyMwAqRbcFW31YEwpkMuc5THy2PSt5bDMsktWQcFF8syAmRUapSCGu8ED9W6oDMSgv6Zz8idoc4a6mr8BDzTJY47LJhkJ8UB7WEGuduB"
-	payload, err := Base58CheckDecode(xpub)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(payload) != 78 {
-		t.Fatalf("payload length = %d, want 78", len(payload))
-	}
-
-	// Compute expected checksum.
-	h1 := sha256.Sum256(payload)
-	h2 := sha256.Sum256(h1[:])
-	expectedChecksum := h2[:4]
-
-	// Re-encode and verify it produces the same string.
-	reEncoded := Base58CheckEncode(payload)
-	if reEncoded != xpub {
-		t.Errorf("checksum verification failed via round-trip:\n  got:  %s\n  want: %s", reEncoded, xpub)
-	}
-	_ = expectedChecksum
+	return out
 }

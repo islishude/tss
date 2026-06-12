@@ -9,10 +9,12 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/testutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
+	t.Parallel()
 	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: defaultPaillierBits()})
 	share := shares[1]
 	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKey)
@@ -39,6 +41,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 		{name: "paillier public key", mutate: func(k *KeyShare) { k.PaillierPublicKey = shares[2].PaillierPublicKey }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			mutated := share.Clone()
 			tc.mutate(mutated)
 			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, uint32(mutated.Party), proof) {
@@ -49,6 +52,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 }
 
 func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
+	t.Parallel()
 	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: defaultPaillierBits()})
 	signers := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
@@ -102,16 +106,16 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[0])); err != nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandlePresignMessage(deliverCGGMPEnv(out2[1])); err != nil {
+	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[1])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s2.HandlePresignMessage(deliverCGGMPEnv(out1[0])); err != nil {
+	if _, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[0])); err != nil {
 		t.Fatal(err)
 	}
-	round2, err := s2.HandlePresignMessage(deliverCGGMPEnv(out1[1]))
+	round2, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
