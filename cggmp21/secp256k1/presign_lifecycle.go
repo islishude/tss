@@ -23,7 +23,7 @@ import (
 //     discarded rather than reused.
 //  6. For durable consumption tracking, provide a [PresignStore] via
 //     [SignRequest.PresignStore]. The library calls MarkConsumed with the
-//     presign's unique TranscriptHash after the in-memory claim but before
+//     presign's content-derived identifier ([Presign.ID]) after the in-memory claim but before
 //     constructing any outbound partial. If the store write fails, the
 //     in-memory consumed flag is reverted and StartSign returns an error.
 //     This integrates with atomic compare-and-swap storage to prevent reuse

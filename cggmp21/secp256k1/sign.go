@@ -54,7 +54,7 @@ func (PresignContext) WireVersion() uint16 { return tss.Version }
 // identifier. The identifier is computed from the presign contents (including
 // secret material) and cannot be altered independently of the record.
 type PresignStore interface {
-	MarkConsumed(presignTranscriptHash []byte) error
+	MarkConsumed(presignID []byte) error
 }
 
 // SignRequest is the context-bound online signing request for a persisted
