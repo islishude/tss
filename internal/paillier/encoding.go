@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"math/big"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -13,16 +14,33 @@ import (
 // MarshalBinary returns a deterministic TLV public-key record.
 // wire.Marshal calls Validate via the Validator interface.
 func (pk PublicKey) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(pk)
+	return wire.Marshal(pk, wire.WithFieldLimitsForMarshal(wire.FieldLimits{
+		"paillier_modulus_bits": tss.DefaultMaxPaillierModulusBits,
+	}))
 }
 
 // UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
 // wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
+	return UnmarshalPublicKeyWithMaxModulusBits(in, 0)
+}
+
+// UnmarshalPublicKeyWithMaxModulusBits decodes a public key and rejects an
+// oversized modulus before reconstructing N² or running primality checks.
+// The modulus bit-length check is enforced by wire.Unmarshal via the
+// max_bits=paillier_modulus_bits wire tag on PublicKey.
+func UnmarshalPublicKeyWithMaxModulusBits(in []byte, maxBits int) (*PublicKey, error) {
+	if maxBits <= 0 {
+		maxBits = tss.DefaultMaxPaillierModulusBits
+	}
 	var pk PublicKey
-	if err := wire.Unmarshal(in, &pk); err != nil {
+	if err := wire.Unmarshal(in, &pk, wire.WithFieldLimits(wire.FieldLimits{
+		"paillier_modulus_bits": maxBits,
+	})); err != nil {
 		return nil, err
 	}
+	// Validate is called automatically by wire.Unmarshal after AfterUnmarshalWire
+	// (which reconstructs NSquared). No manual validation needed.
 	return &pk, nil
 }
 

@@ -36,6 +36,22 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
 			return nil, errors.New("reshared group public key does not match original")
 		}
+		if len(s.confirmations) != len(s.newParties) {
+			return nil, nil
+		}
+		for _, id := range s.newParties {
+			raw, ok := s.confirmations[id]
+			if !ok {
+				return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing reshare confirmation from party %d", id))
+			}
+			confirmation, err := UnmarshalKeygenConfirmation(raw)
+			if err != nil {
+				return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, keygenConfirmationRound, id, err)
+			}
+			if err := s.verifyReshareConfirmationForPublicTranscript(confirmation, newCommitments); err != nil {
+				return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, err)
+			}
+		}
 		s.completed = true
 		return nil, nil
 	}
@@ -115,6 +131,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		KeygenTranscriptHash:   transcriptHash,
 		PaillierProofSessionID: s.cfg.SessionID,
 		PaillierProofDomain:    domainLabelResharePaillier,
+		ResharePlanHash:        s.planHash,
 	}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.selfID))
 	if err != nil {
@@ -147,6 +164,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		RingPedersenPublic:     s.sortedNewRingPedersenPublic(),
 		PaillierProofSessionID: s.cfg.SessionID,
 		PaillierProofDomain:    domainLabelResharePaillier,
+		ResharePlanHash:        append([]byte(nil), s.planHash...),
 		ShareProof:             shareProofBytes,
 		KeygenTranscriptHash:   transcriptHash,
 	}
@@ -154,7 +172,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localRP, err := zkpai.UnmarshalRingPedersenParams(s.newRingPedersen[s.selfID].Params)
+	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(s.newRingPedersen[s.selfID].Params, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}

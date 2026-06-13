@@ -23,6 +23,15 @@ type RefreshSchedulerOptions struct {
 	Interval time.Duration
 	// Transport delivers refresh envelopes between participants.
 	Transport RefreshTransport
+	// SessionIDSource returns the externally coordinated session ID for the
+	// next refresh run. All participants in one run must receive the same ID.
+	SessionIDSource func(ctx context.Context, current *KeyShare) (tss.SessionID, error)
+	// AckVerifier verifies broadcast consistency certificates for refresh
+	// broadcast envelopes.
+	AckVerifier tss.BroadcastAckVerifier
+	// ReplayCache stores seen refresh envelopes. If nil, an in-memory cache is
+	// created per scheduler run.
+	ReplayCache tss.ReplayCache
 	// GetKeyShare returns the current key share. It is called synchronously
 	// before each refresh run and must be safe for concurrent access.
 	GetKeyShare func() (*KeyShare, error)
@@ -48,6 +57,12 @@ func NewRefreshScheduler(opts RefreshSchedulerOptions) (*RefreshScheduler, error
 	}
 	if opts.Transport == nil {
 		return nil, errors.New("refresh transport must not be nil")
+	}
+	if opts.SessionIDSource == nil {
+		return nil, errors.New("refresh session id source must not be nil")
+	}
+	if opts.AckVerifier == nil {
+		return nil, tss.ErrMissingAckVerifier
 	}
 	if opts.GetKeyShare == nil {
 		return nil, errors.New("GetKeyShare callback must not be nil")
@@ -98,9 +113,9 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("get key share: %w", err)
 	}
-	sessionID, err := tss.NewSessionID(nil)
+	sessionID, err := s.opts.SessionIDSource(ctx, keyShare)
 	if err != nil {
-		return fmt.Errorf("new session id: %w", err)
+		return fmt.Errorf("refresh session id: %w", err)
 	}
 	config := tss.ThresholdConfig{
 		Threshold: keyShare.Threshold,
@@ -113,7 +128,19 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 		return fmt.Errorf("start refresh: %w", err)
 	}
 	defer session.Destroy()
-	guard, err := session.NewGuard(nil) // nil → in-memory replay cache
+	cache := s.opts.ReplayCache
+	if cache == nil {
+		cache = tss.NewInMemoryReplayCache()
+	}
+	guard, err := (tss.GuardConfig{
+		Self:        keyShare.Party,
+		Parties:     tss.PartySet(keyShare.Parties),
+		Protocol:    protocol,
+		SessionID:   sessionID,
+		Policies:    CGGMP21Policies(),
+		Cache:       cache,
+		AckVerifier: s.opts.AckVerifier,
+	}).BuildGuard()
 	if err != nil {
 		return fmt.Errorf("new guard: %w", err)
 	}

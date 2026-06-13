@@ -89,9 +89,10 @@ func Example_full_lifecycle() {
 		panic(err)
 	}
 	request := SignRequest{
-		Context: ctx,
-		Message: []byte("example full lifecycle"),
-		LowS:    true,
+		Context:      ctx,
+		Message:      []byte("example full lifecycle"),
+		LowS:         true,
+		PresignStore: newTestPresignStore(),
 	}
 	ss, _, err := StartSign(loaded, loadedPresign, signID, request)
 	if err != nil {

@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -12,6 +13,8 @@ import (
 )
 
 const reshareCurveID = "secp256k1"
+
+const resharePlanDigestLabel = "cggmp21-secp256k1-reshare-plan-v1"
 
 // ResharePlan is the canonical public input agreed by old dealers and new receivers.
 type ResharePlan struct {
@@ -214,6 +217,32 @@ func (p ResharePlan) ValidateWithLimits(limits Limits) error {
 		return errors.New("chain code must be empty or 32 bytes")
 	}
 	return nil
+}
+
+// Digest returns a canonical hash of the complete public reshare plan.
+func (p ResharePlan) Digest() ([]byte, error) {
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	h := sha256.New()
+	wire.WriteHashPart(h, []byte(resharePlanDigestLabel))
+	wire.WriteHashPart(h, []byte(protocol))
+	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
+	wire.WriteHashPart(h, p.SessionID[:])
+	wire.WriteHashPart(h, []byte(p.CurveID))
+	wire.WriteHashPart(h, p.OldGroupPublicKey)
+	wire.WriteHashPart(h, wire.EncodeBytesList(p.OldGroupCommitments))
+	wire.WritePartySet(h, p.OldParties)
+	wire.WritePartySet(h, p.DealerParties)
+	wire.WritePartySet(h, p.NewParties)
+	wire.WriteHashPart(h, wire.Uint32(uint32(p.OldThreshold)))
+	wire.WriteHashPart(h, wire.Uint32(uint32(p.NewThreshold)))
+	wire.WriteHashPart(h, p.ChainCode)
+	for _, id := range p.OldParties {
+		wire.WritePartyID(h, id)
+		wire.WriteHashPart(h, p.OldVerificationShares[id])
+	}
+	return h.Sum(nil), nil
 }
 
 // IsDealer reports whether party is in the plan's old dealer set.

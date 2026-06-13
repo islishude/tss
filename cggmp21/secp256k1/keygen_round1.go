@@ -205,7 +205,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 		)
 	}
-	pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
+	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -231,6 +231,17 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
+	if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
+		return nil, verificationErrorWithEvidence(
+			env,
+			tss.EvidenceKindKeygenPaillier,
+			"Paillier modulus does not meet security requirements",
+			[]tss.PartyID{env.From},
+			err,
+			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		)
+	}
 	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
 		s.log.Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
 			"party_id", s.cfg.Self,
@@ -246,18 +257,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
-		return nil, verificationErrorWithEvidence(
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"Paillier modulus does not meet security requirements",
-			[]tss.PartyID{env.From},
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
-	}
-	ringParams, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams)
+	ringParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,

@@ -285,10 +285,21 @@ func (x ExtendedPublicKey) Derive(path []uint32, opts ...bip32util.DeriveOption)
 	if err := x.Validate(); err != nil {
 		return nil, nil, err
 	}
+	if len(path) == 0 {
+		child := x
+		child.PublicKey = slices.Clone(x.PublicKey)
+		return &child, secp.ScalarZero().Bytes(), nil
+	}
+	if int(x.Depth)+len(path) > math.MaxUint8 {
+		return nil, nil, fmt.Errorf("%w: parent depth %d plus path length %d exceeds 255", bip32util.ErrDerivationDepthOverflow, x.Depth, len(path))
+	}
 
 	result, err := deriveNonHardenedBIP32(x.PublicKey, x.ChainCode[:], path, opts...)
 	if err != nil {
 		return nil, nil, err
+	}
+	if int(x.Depth)+int(result.Depth) > math.MaxUint8 {
+		return nil, nil, fmt.Errorf("%w: parent depth %d plus resolved path length %d exceeds 255", bip32util.ErrDerivationDepthOverflow, x.Depth, result.Depth)
 	}
 
 	child := &ExtendedPublicKey{

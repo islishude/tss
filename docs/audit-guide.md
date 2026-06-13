@@ -32,6 +32,9 @@ Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta),
 - secp256k1 points must be compressed canonical points and never infinity.
 - Presigns are bound to `PresignContext` and cannot be consumed under a different
   key id, chain id, derivation path, policy domain, or message domain.
+- Reshare receiver Paillier/Ring-Pedersen proofs and final reshare key-share
+  proofs bind the canonical `ResharePlan.Digest()` so receiver material cannot
+  be replayed across old/new party sets, thresholds, chain codes, or dealer sets.
 - Raw digest signing is only available through full interactive signing
   (`SignDigestInteractive`); persisted presigns use `StartSign` with a
   context-bound message.

@@ -41,6 +41,7 @@ type keyShareWire struct {
 	LogCiphertext          []byte                            `wire:"20,bytes,max_bytes=paillier_ciphertext"`
 	LogProof               []byte                            `wire:"21,bytes,max_bytes=zk_proof"`
 	KeygenConfirmations    [][]byte                          `wire:"22,byteslist,max_bytes=zk_proof"`
+	ResharePlanHash        []byte                            `wire:"23,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for keyShareWire.
@@ -85,6 +86,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		LogCiphertext:          k.LogCiphertext,
 		LogProof:               k.LogProof,
 		KeygenConfirmations:    k.KeygenConfirmations,
+		ResharePlanHash:        k.ResharePlanHash,
 	}, nil
 }
 
@@ -133,8 +135,8 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		return nil, fmt.Errorf("ring pedersen public too large: %d > %d", len(w.RingPedersenPublic), limits.Threshold.MaxParties)
 	}
 	for i, s := range w.RingPedersenPublic {
-		if len(s.First) > limits.Paillier.MaxProofBytes {
-			return nil, fmt.Errorf("ring pedersen public %d params too large: %d > %d", i, len(s.First), limits.Paillier.MaxProofBytes)
+		if len(s.First) > limits.Paillier.MaxRingPedersenBytes {
+			return nil, fmt.Errorf("ring pedersen public %d params too large: %d > %d", i, len(s.First), limits.Paillier.MaxRingPedersenBytes)
 		}
 		if len(s.Second) > limits.Paillier.MaxProofBytes {
 			return nil, fmt.Errorf("ring pedersen public %d proof too large: %d > %d", i, len(s.Second), limits.Paillier.MaxProofBytes)
@@ -144,8 +146,8 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		return nil, fmt.Errorf("paillier public keys too large: %d > %d", len(w.PaillierPublicKeys), limits.Threshold.MaxParties)
 	}
 	for i, s := range w.PaillierPublicKeys {
-		if len(s.First) > limits.Paillier.MaxProofBytes {
-			return nil, fmt.Errorf("paillier public key %d too large: %d > %d", i, len(s.First), limits.Paillier.MaxProofBytes)
+		if len(s.First) > limits.Paillier.MaxPublicKeyBytes {
+			return nil, fmt.Errorf("paillier public key %d too large: %d > %d", i, len(s.First), limits.Paillier.MaxPublicKeyBytes)
 		}
 		if len(s.Second) > limits.Paillier.MaxProofBytes {
 			return nil, fmt.Errorf("paillier public key %d proof too large: %d > %d", i, len(s.Second), limits.Paillier.MaxProofBytes)
@@ -202,6 +204,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		LogCiphertext:          w.LogCiphertext,
 		LogProof:               w.LogProof,
 		KeygenConfirmations:    w.KeygenConfirmations,
+		ResharePlanHash:        w.ResharePlanHash,
 	}
 	if err := k.Validate(); err != nil {
 		return nil, err
@@ -295,9 +298,13 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
+		restored:             true,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
+	}
+	if p.Consumed {
+		markPresignIDConsumed(p)
 	}
 	return p, nil
 }

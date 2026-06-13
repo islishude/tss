@@ -153,6 +153,7 @@ type KeyShare struct {
 	RingPedersenPublic     []RingPedersenPublicShare
 	PaillierProofSessionID tss.SessionID
 	PaillierProofDomain    string
+	ResharePlanHash        []byte
 	ShareProof             []byte
 	KeygenTranscriptHash   []byte
 	LogCiphertext          []byte

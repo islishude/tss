@@ -4,15 +4,13 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
-	if !s.isReceiver {
-		return nil, nil
-	}
 	// validateInbound was already called by HandleReshareMessage.
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
@@ -38,15 +36,43 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
 	}
 	if s.newShare != nil {
-		if err := verifyKeygenConfirmationForShare(s.newShare, confirmation); err != nil {
+		if err := verifyKeygenConfirmationForPreservedChainCode(s.newShare, confirmation); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
 	s.confirmations[env.From] = append([]byte(nil), canonical...)
-	if s.newShare != nil && len(s.confirmations) == len(s.newParties) {
-		return nil, s.finalizeConfirmedShare()
+	return s.tryComplete()
+}
+
+func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenConfirmation, newCommitments [][]byte) error {
+	if c == nil {
+		return errors.New("nil reshare confirmation")
 	}
-	return nil, nil
+	if !tss.ContainsParty(s.newParties, c.Sender) {
+		return fmt.Errorf("reshare confirmation from unknown new party %d", c.Sender)
+	}
+	if c.SessionID != s.cfg.SessionID {
+		return fmt.Errorf("reshare confirmation session mismatch from party %d", c.Sender)
+	}
+	if c.Threshold != s.newThreshold {
+		return fmt.Errorf("reshare confirmation threshold mismatch from party %d: got %d, want %d", c.Sender, c.Threshold, s.newThreshold)
+	}
+	if !slices.Equal(c.Parties, s.newParties) {
+		return fmt.Errorf("reshare confirmation party set mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.PublicKey, s.oldPublicKey) {
+		return fmt.Errorf("reshare confirmation public key mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.TranscriptHash, s.reshareTranscriptHash(newCommitments)) {
+		return fmt.Errorf("reshare confirmation transcript mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.CommitmentsHash, keygenCommitmentsHash(newCommitments)) {
+		return fmt.Errorf("reshare confirmation commitments mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.ChainCode, s.oldChainCode) {
+		return fmt.Errorf("reshare confirmation chain code mismatch from party %d", c.Sender)
+	}
+	return nil
 }
 
 func (s *ReshareSession) finalizeConfirmedShare() error {
@@ -63,7 +89,7 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		}
 		encoded[i] = append([]byte(nil), confirmation...)
 	}
-	if err := verifyKeygenConfirmationSetWithoutChainCode(s.newShare, encoded); err != nil {
+	if err := verifyKeygenConfirmationSetPreservedChainCode(s.newShare, encoded); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
@@ -73,6 +99,11 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
 	s.completed = true
+	clear(s.newPaillierPriv)
+	if s.newPaillier != nil {
+		s.newPaillier.Destroy()
+		s.newPaillier = nil
+	}
 	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
 		"party_id", s.selfID,

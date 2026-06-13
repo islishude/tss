@@ -73,6 +73,11 @@ if secp256k1.IsPresignConsumed(presign) {
 }
 ```
 
+Restored CGGMP21 presigns require a durable atomic claim before signing.
+Provide `SignRequest.PresignStore`; its `MarkConsumed(presign.ID())` operation
+should be a conditional write or compare-and-swap in the same durable store that
+tracks presign records.
+
 ### 4. Signing
 
 **FROST Ed25519:**
@@ -94,11 +99,17 @@ presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionI
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
 // Persist presign immediately.
-encrypted, _ := tss.EncryptPresignWithPassphrase(presign.MarshalBinary(), passphrase, "presign-1", nil)
+rawPresign, _ := presign.MarshalBinary()
+encrypted, _ := tss.EncryptPresignWithPassphrase(rawPresign, passphrase, "presign-1", nil)
 
 // Online signing (fast, one round):
 message := []byte("payload")
-request := secp256k1.SignRequest{Context: ctx, Message: message, LowS: true}
+request := secp256k1.SignRequest{
+    Context:      ctx,
+    Message:      message,
+    LowS:         true,
+    PresignStore: store, // required for presigns restored from storage
+}
 signSession, out, _ := secp256k1.StartSign(keyShare, presign, sessionID, request)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
@@ -109,9 +120,14 @@ After signing, mark the presign consumed:
 
 ```go
 consumed, _ := secp256k1.MarkPresignConsumed(presign)
-encrypted, _ := tss.EncryptPresignWithPassphrase(consumed.MarshalBinary(), passphrase, "presign-1", nil)
+rawConsumed, _ := consumed.MarshalBinary()
+encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
 // Persist updated record so restart won't reuse.
 ```
+
+For restored presigns, `StartSign` calls `PresignStore.MarkConsumed` before it
+constructs the outbound partial signature. If that durable claim fails, signing
+does not start and no partial is emitted.
 
 ### 5. Destruction
 
@@ -226,6 +242,7 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 3. Load into a new session.
 4. Verify against known group public key.
 5. If presigns exist, check consumed flags — discard consumed presigns.
+6. Configure a durable `PresignStore` before using any restored unconsumed presign.
 
 ## Monitoring and Alerting
 

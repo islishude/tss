@@ -195,6 +195,7 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"parties":                    l.Threshold.MaxParties,
 		"threshold":                  l.Threshold.MaxThreshold,
 		"signers":                    l.Threshold.MaxSigners,
+		"paillier_modulus_bits":      l.Paillier.MaxModulusBits,
 		"paillier_public_key":        l.Paillier.MaxPublicKeyBytes,
 		"paillier_private_key":       l.Paillier.MaxPrivateKeyBytes,
 		"paillier_ciphertext":        l.Paillier.MaxCiphertextBytes,

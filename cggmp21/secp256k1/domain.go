@@ -46,6 +46,7 @@ type proofDomainContext struct {
 	paillierPublicKey    []byte
 	ringPedersenParams   []byte
 	presignContextHash   []byte
+	resharePlanHash      []byte
 }
 
 func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
@@ -85,6 +86,7 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 		publicKey:            key.PublicKey,
 		keygenTranscriptHash: key.KeygenTranscriptHash,
 		paillierPublicKey:    key.PaillierPublicKey,
+		resharePlanHash:      key.ResharePlanHash,
 	})
 }
 
@@ -104,7 +106,7 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []
 	case domainLabelRefreshPaillier:
 		return refreshRingPedersenDomain(config, party, params)
 	case domainLabelResharePaillier:
-		return reshareRingPedersenDomain(config, party, params)
+		return reshareRingPedersenDomain(config, party, params, key.ResharePlanHash)
 	default:
 		return nil
 	}
@@ -127,7 +129,7 @@ func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.P
 	})
 }
 
-func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey []byte) []byte {
+func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:             domainLabelResharePaillier,
 		sessionID:         config.SessionID,
@@ -136,10 +138,11 @@ func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paill
 		sender:            sender,
 		kind:              domainKindPaillierModulus,
 		paillierPublicKey: paillierPublicKey,
+		resharePlanHash:   planHash,
 	})
 }
 
-func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params []byte) []byte {
+func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:              domainLabelReshareRingPedersen,
 		sessionID:          config.SessionID,
@@ -148,6 +151,7 @@ func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, p
 		sender:             sender,
 		kind:               domainKindRingPedersen,
 		ringPedersenParams: params,
+		resharePlanHash:    planHash,
 	})
 }
 
@@ -216,6 +220,7 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 		publicKey:            verificationShare, // verification share point binds this proof to the party's share
 		keygenTranscriptHash: transcriptHash,
 		paillierPublicKey:    pkBytes,
+		resharePlanHash:      key.ResharePlanHash,
 	})
 }
 
@@ -237,5 +242,6 @@ func proofDomain(ctx proofDomainContext) []byte {
 	wire.WriteHashPart(h, ctx.paillierPublicKey)
 	wire.WriteHashPart(h, ctx.ringPedersenParams)
 	wire.WriteHashPart(h, ctx.presignContextHash)
+	wire.WriteHashPart(h, ctx.resharePlanHash)
 	return h.Sum(nil)
 }

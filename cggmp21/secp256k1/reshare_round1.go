@@ -115,7 +115,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	proofConfig := s.receiverConfig()
-	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes), newPaillierKey, uint32(s.selfID))
+	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes, s.planHash), newPaillierKey, uint32(s.selfID))
 	if err != nil {
 		return err
 	}
@@ -131,7 +131,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParamsBytes), newPaillierKey, ringPedersenParams, ringPedersenLambda, uint32(s.selfID))
+	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParamsBytes, s.planHash), newPaillierKey, ringPedersenParams, ringPedersenLambda, uint32(s.selfID))
 	if err != nil {
 		return err
 	}
@@ -147,7 +147,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 }
 
 func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p reshareReceiverMaterialPayload) error {
-	pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
+	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
@@ -155,18 +155,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if !zkpai.VerifyModulus(resharePaillierDomain(s.receiverConfig(), env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
-		return verificationErrorWithEvidence(
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"invalid reshare Paillier modulus proof",
-			[]tss.PartyID{env.From},
-			errors.New("invalid reshare Paillier modulus proof"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
-	}
-	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
+	if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -177,7 +166,18 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	ringParams, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams)
+	if !zkpai.VerifyModulus(resharePaillierDomain(s.receiverConfig(), env.From, p.PaillierPublicKey, s.planHash), pk, uint32(env.From), proof) {
+		return verificationErrorWithEvidence(
+			env,
+			tss.EvidenceKindKeygenPaillier,
+			"invalid reshare Paillier modulus proof",
+			[]tss.PartyID{env.From},
+			errors.New("invalid reshare Paillier modulus proof"),
+			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+		)
+	}
+	ringParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -213,7 +213,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
 		)
 	}
-	if !zkpai.VerifyRingPedersen(reshareRingPedersenDomain(s.receiverConfig(), env.From, p.RingPedersenParams), ringParams, uint32(env.From), ringProof) {
+	if !zkpai.VerifyRingPedersen(reshareRingPedersenDomain(s.receiverConfig(), env.From, p.RingPedersenParams, s.planHash), ringParams, uint32(env.From), ringProof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,

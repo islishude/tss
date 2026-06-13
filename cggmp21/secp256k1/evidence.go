@@ -239,7 +239,7 @@ func compareEvidenceField(evidence *tss.BlameEvidence, key string, expected []by
 	}
 	actual, ok := evidence.Field(key)
 	if !ok {
-		return nil
+		return fmt.Errorf("missing evidence field %q", key)
 	}
 	if !bytes.Equal(actual, expected) {
 		return fmt.Errorf("evidence field %q mismatch", key)

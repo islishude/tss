@@ -224,7 +224,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := deliverWithCertificate(t, env, id, parties, km)
+			delivered := deliverWithCertificate(t, env, id, tss.PartySet(signers), km)
 			out, err := psSessions[id].HandlePresignMessage(delivered)
 			if err != nil {
 				t.Fatalf("presign delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
@@ -276,7 +276,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := deliverWithCertificate(t, env, id, parties, km)
+			delivered := deliverWithCertificate(t, env, id, tss.PartySet(signers), km)
 			_, err := signSessions[id].HandleSignMessage(delivered)
 			if err != nil {
 				t.Fatalf("sign delivery from %d to %d: %v", env.From, id, err)

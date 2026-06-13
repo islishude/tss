@@ -92,6 +92,8 @@ type Presign struct {
 	kShare   *secret.Scalar
 	chiShare *secret.Scalar
 	delta    *secret.Scalar
+
+	restored bool
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -104,6 +106,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
+	consumed := IsPresignConsumed(p)
 	return wire.Marshal(presignWire{
 		Party:                p.Party,
 		Threshold:            p.Threshold,
@@ -117,7 +120,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		Context:              p.Context,
 		ContextHash:          p.ContextHash,
 		AdditiveShift:        p.AdditiveShift,
-		Consumed:             p.Consumed,
+		Consumed:             consumed,
 		PublicKey:            p.PublicKey,
 		KeygenTranscriptHash: p.KeygenTranscriptHash,
 		PartiesHash:          p.PartiesHash,
@@ -249,6 +252,7 @@ func (p *Presign) Destroy() {
 		return
 	}
 	p.mu.Lock()
+	markPresignIDConsumed(p)
 	p.Consumed = true
 	p.mu.Unlock()
 	p.kShare.Destroy()
@@ -368,9 +372,9 @@ func (s *SignSession) abort() {
 }
 
 type presignRound1Payload struct {
-	Gamma             []byte `json:"gamma" wire:"1,bytes"`
-	EncK              []byte `json:"enc_k" wire:"2,bytes"`
-	PaillierPublicKey []byte `json:"paillier_public_key" wire:"3,bytes"`
+	Gamma             []byte `json:"gamma" wire:"1,bytes,max_bytes=point"`
+	EncK              []byte `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
+	PaillierPublicKey []byte `json:"paillier_public_key" wire:"3,bytes,max_bytes=paillier_public_key"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1Payload.
@@ -380,8 +384,8 @@ func (presignRound1Payload) WireType() string { return presignRound1PayloadWireT
 func (presignRound1Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound1ProofPayload struct {
-	PublicRound1Hash []byte `json:"public_round1_hash" wire:"1,bytes"`
-	EncKProof        []byte `json:"enc_k_proof" wire:"2,bytes"`
+	PublicRound1Hash []byte `json:"public_round1_hash" wire:"1,bytes,len=32"`
+	EncKProof        []byte `json:"enc_k_proof" wire:"2,bytes,max_bytes=zk_proof"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1ProofPayload.
@@ -393,7 +397,7 @@ func (presignRound1ProofPayload) WireVersion() uint16 { return tss.Version }
 type presignRound2Payload struct {
 	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested"`
 	Sigma      mta.ResponseMessage `json:"sigma" wire:"2,nested"`
-	Round1Echo []byte              `json:"round1_echo" wire:"3,bytes"`
+	Round1Echo []byte              `json:"round1_echo" wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound2Payload.
@@ -404,9 +408,9 @@ func (presignRound2Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound3Payload struct {
 	Delta    *big.Int `json:"-" wire:"1,bigpos,max_bytes=scalar"`
-	KPoint   []byte   `json:"k_point" wire:"2,bytes"`
-	ChiPoint []byte   `json:"chi_point" wire:"3,bytes"`
-	Proof    []byte   `json:"proof" wire:"4,bytes"`
+	KPoint   []byte   `json:"k_point" wire:"2,bytes,max_bytes=point"`
+	ChiPoint []byte   `json:"chi_point" wire:"3,bytes,max_bytes=point"`
+	Proof    []byte   `json:"proof" wire:"4,bytes,max_bytes=signprep_proof"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.
@@ -417,10 +421,10 @@ func (presignRound3Payload) WireVersion() uint16 { return tss.Version }
 
 type signPartialPayload struct {
 	S                   *big.Int `wire:"1,biguint,max_bytes=scalar"`
-	PresignTranscript   []byte   `json:"presign_transcript" wire:"2,bytes"`
-	PresignContext      []byte   `json:"presign_context" wire:"3,bytes"`
-	DigestHash          []byte   `json:"digest_hash" wire:"4,bytes"`
-	PartialEquationHash []byte   `json:"partial_equation_hash" wire:"5,bytes"`
+	PresignTranscript   []byte   `json:"presign_transcript" wire:"2,bytes,len=32"`
+	PresignContext      []byte   `json:"presign_context" wire:"3,bytes,len=32"`
+	DigestHash          []byte   `json:"digest_hash" wire:"4,bytes,len=32"`
+	PartialEquationHash []byte   `json:"partial_equation_hash" wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.
@@ -461,7 +465,7 @@ func (s *PresignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, er
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *PresignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.signers), s.key.Party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
@@ -545,7 +549,12 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 // will not hand out another copy. Callers must store the returned presign for
 // signing and persistence. Subsequent calls return (nil, false).
 func (s *PresignSession) Presign() (*Presign, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed {
 		return nil, false
 	}
 	if s.presignReturned {

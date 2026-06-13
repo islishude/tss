@@ -9,8 +9,8 @@ import (
 
 // PublicKey contains Paillier public parameters and cached n^2.
 type PublicKey struct {
-	N        *big.Int `wire:"1,bigpos"`
-	G        *big.Int `wire:"2,bigpos"`
+	N        *big.Int `wire:"1,bigpos,max_bits=paillier_modulus_bits"`
+	G        *big.Int `wire:"2,bigpos,max_bits=paillier_modulus_bits"`
 	NSquared *big.Int `wire:"-"`
 }
 

@@ -175,7 +175,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localRP, err := zkpai.UnmarshalRingPedersenParams(s.newRingPedersen[s.oldKey.Party].Params)
+	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(s.newRingPedersen[s.oldKey.Party].Params, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}
@@ -239,6 +239,10 @@ func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
 	wire.WriteHashPart(h, []byte(refreshTranscriptHashLabel))
 	wire.WriteHashPart(h, s.cfg.SessionID[:])
 	wire.WriteHashPart(h, s.oldKey.KeygenTranscriptHash)
+	wire.WritePartySet(h, s.oldKey.Parties)
+	wire.WriteHashPart(h, wire.Uint32(uint32(s.cfg.Threshold)))
+	wire.WriteHashPart(h, s.oldKey.PublicKey)
+	wire.WriteHashPart(h, s.oldKey.ChainCode)
 	for _, id := range s.oldKey.Parties {
 		item := s.newPaillierPubs[id]
 		wire.WriteHashPart(h, item.PublicKey)
@@ -254,6 +258,9 @@ func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
 }
 
 func validateRefreshCommitments(commitments [][]byte, threshold int) error {
+	if len(commitments) == 0 {
+		return errors.New("empty refresh commitments")
+	}
 	if len(commitments) != threshold {
 		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
 	}

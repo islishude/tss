@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -104,7 +105,7 @@ func (k *KeyShare) Format(state fmt.State, verb rune) {
 
 func (k KeyShare) redactedString() string {
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
 		k.Version,
 		k.Party,
 		k.Threshold,
@@ -121,6 +122,7 @@ func (k KeyShare) redactedString() string {
 		len(k.RingPedersenPublic),
 		k.PaillierProofSessionID,
 		k.PaillierProofDomain,
+		len(k.ResharePlanHash),
 		len(k.ShareProof),
 		k.KeygenTranscriptHash,
 		len(k.LogCiphertext),
@@ -217,6 +219,13 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if k.PaillierProofDomain == "" {
 		return errors.New("missing paillier public proof domain")
 	}
+	if k.PaillierProofDomain == domainLabelResharePaillier {
+		if len(k.ResharePlanHash) != sha256.Size {
+			return errors.New("missing reshare plan hash")
+		}
+	} else if len(k.ResharePlanHash) != 0 {
+		return errors.New("reshare plan hash is only valid for reshare key shares")
+	}
 	if len(k.ShareProof) == 0 {
 		return errors.New("missing share proof")
 	}
@@ -229,7 +238,8 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if len(k.LogProof) == 0 {
 		return errors.New("missing log proof")
 	}
-	pk, err := pai.UnmarshalPublicKey(k.PaillierPublicKey)
+	limits := DefaultLimits()
+	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(k.PaillierPublicKey, limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return fmt.Errorf("invalid paillier public key: %w", err)
 	}
@@ -248,13 +258,13 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if err != nil {
 		return fmt.Errorf("invalid paillier proof: %w", err)
 	}
+	if err := checkPaillierModulusBounds(pk, limits); err != nil {
+		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
+	}
 	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.Party), modProof) {
 		return errors.New("invalid local paillier proof")
 	}
-	if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
-		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
-	}
-	localRPParams, err := zkpai.UnmarshalRingPedersenParams(k.RingPedersenParams)
+	localRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.RingPedersenParams, limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return fmt.Errorf("invalid local Ring-Pedersen parameters: %w", err)
 	}
@@ -289,7 +299,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		if len(rp.Params) == 0 || len(rp.Proof) == 0 {
 			return fmt.Errorf("incomplete Ring-Pedersen public parameters for party %d", rp.Party)
 		}
-		peerPK, err := pai.UnmarshalPublicKey(item.PublicKey)
+		peerPK, err := pai.UnmarshalPublicKeyWithMaxModulusBits(item.PublicKey, limits.Paillier.MaxModulusBits)
 		if err != nil {
 			return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
 		}
@@ -301,13 +311,13 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		if err != nil {
 			return err
 		}
+		if err := checkPaillierModulusBounds(peerPK, limits); err != nil {
+			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", item.Party, err)
+		}
 		if !zkpai.VerifyModulus(proofDomain, peerPK, uint32(item.Party), peerProof) {
 			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
 		}
-		if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(peerPK); err != nil {
-			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", item.Party, err)
-		}
-		peerRPParams, err := zkpai.UnmarshalRingPedersenParams(rp.Params)
+		peerRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(rp.Params, limits.Paillier.MaxModulusBits)
 		if err != nil {
 			return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", rp.Party, err)
 		}
@@ -391,12 +401,11 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 		return err
 	}
 	// Chain code enforcement: during keygen, each party commits to an
-	// individual chain code that XORs to the aggregate; the confirmation
-	// set must prove correct aggregation. Refresh and reshare preserve
-	// the existing aggregate without generating fresh individual
-	// commitments, so chain code enforcement is skipped.
+	// individual chain code that XORs to the aggregate. Refresh and reshare
+	// preserve an existing aggregate chain code, so every confirmation must
+	// repeat exactly that preserved value.
 	if k.PaillierProofDomain == domainLabelRefreshPaillier || k.PaillierProofDomain == domainLabelResharePaillier {
-		if err := verifyKeygenConfirmationSetWithoutChainCode(k, k.KeygenConfirmations); err != nil {
+		if err := verifyKeygenConfirmationSetPreservedChainCode(k, k.KeygenConfirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	} else {
@@ -420,10 +429,20 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	case domainLabelRefreshPaillier:
 		return refreshPaillierDomain(config, party, paillierPublicKey), nil
 	case domainLabelResharePaillier:
-		return resharePaillierDomain(config, party, paillierPublicKey), nil
+		return resharePaillierDomain(config, party, paillierPublicKey, k.ResharePlanHash), nil
 	default:
 		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.PaillierProofDomain)
 	}
+}
+
+func checkPaillierModulusBounds(pk *pai.PublicKey, limits Limits) error {
+	if pk == nil || pk.N == nil {
+		return errors.New("nil paillier public key")
+	}
+	if limits.Paillier.MaxModulusBits > 0 && pk.N.BitLen() > limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("paillier modulus has %d bits, max %d", pk.N.BitLen(), limits.Paillier.MaxModulusBits)
+	}
+	return zkpai.ActiveSecurityParams().CheckPaillierModulus(pk)
 }
 
 // Destroy zeros the local secret scalar, Paillier private-key bytes, and chain
@@ -468,7 +487,8 @@ func (k *KeyShare) requireMPCMaterial() error {
 }
 
 func (k *KeyShare) paillierPublic() (*pai.PublicKey, error) {
-	return pai.UnmarshalPublicKey(k.PaillierPublicKey)
+	limits := DefaultLimits()
+	return pai.UnmarshalPublicKeyWithMaxModulusBits(k.PaillierPublicKey, limits.Paillier.MaxModulusBits)
 }
 
 func (k *KeyShare) paillierPrivate() (*pai.PrivateKey, error) {
@@ -481,7 +501,8 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
 	}
 	for _, item := range k.PaillierPublicKeys {
 		if item.Party == id {
-			return pai.UnmarshalPublicKey(item.PublicKey)
+			limits := DefaultLimits()
+			return pai.UnmarshalPublicKeyWithMaxModulusBits(item.PublicKey, limits.Paillier.MaxModulusBits)
 		}
 	}
 	return nil, fmt.Errorf("missing Paillier public key for party %d", id)
@@ -489,8 +510,9 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
 
 // ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
 func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID) (zkpai.RingPedersenParams, error) {
+	limits := DefaultLimits()
 	if id == k.Party {
-		params, err := zkpai.UnmarshalRingPedersenParams(k.RingPedersenParams)
+		params, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.RingPedersenParams, limits.Paillier.MaxModulusBits)
 		if err != nil {
 			return zkpai.RingPedersenParams{}, err
 		}
@@ -498,7 +520,7 @@ func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID) (zkpai.RingPedersenPara
 	}
 	for _, item := range k.RingPedersenPublic {
 		if item.Party == id {
-			params, err := zkpai.UnmarshalRingPedersenParams(item.Params)
+			params, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(item.Params, limits.Paillier.MaxModulusBits)
 			if err != nil {
 				return zkpai.RingPedersenParams{}, err
 			}
@@ -537,6 +559,7 @@ func (k *KeyShare) Clone() *KeyShare {
 	out.RingPedersenParams = slices.Clone(k.RingPedersenParams)
 	out.RingPedersenProof = slices.Clone(k.RingPedersenProof)
 	out.RingPedersenPublic = cloneRingPedersenPublicShares(k.RingPedersenPublic)
+	out.ResharePlanHash = slices.Clone(k.ResharePlanHash)
 	out.ShareProof = slices.Clone(k.ShareProof)
 	out.KeygenTranscriptHash = slices.Clone(k.KeygenTranscriptHash)
 	out.LogCiphertext = slices.Clone(k.LogCiphertext)

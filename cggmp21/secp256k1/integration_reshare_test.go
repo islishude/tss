@@ -129,6 +129,96 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
+	shares := CachedKeygenShares(t, 2, 2, false)
+	newShares, _ := runCGGMP21ReshareWithDealers(t, shares, []tss.PartyID{1, 2}, []tss.PartyID{3, 4}, 2)
+	share := newShares[3].Clone()
+	if len(share.ResharePlanHash) != sha256.Size {
+		t.Fatalf("got reshare plan hash length %d, want %d", len(share.ResharePlanHash), sha256.Size)
+	}
+	share.ResharePlanHash[0] ^= 1
+	if err := share.Validate(); err == nil {
+		t.Fatal("Validate accepted reshare key share with tampered plan hash")
+	}
+}
+
+func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
+	shares := CachedKeygenShares(t, 2, 2, false)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dealers := []tss.PartyID{1, 2}
+	newParties := []tss.PartyID{3, 4}
+	plan, err := NewResharePlan(shares[1], sessionID, dealers, newParties, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	allParties := tss.PartySet{1, 2, 3, 4}
+	sessions := make(map[tss.PartyID]*ReshareSession, len(allParties))
+	queue := make([]tss.Envelope, 0)
+	for _, id := range dealers {
+		session, out, err := StartReshareDealer(shares[id], plan, nil)
+		if err != nil {
+			t.Fatalf("start dealer %d: %v", id, err)
+		}
+		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+	for _, id := range newParties {
+		session, out, err := StartReshareReceiver(plan, id, nil)
+		if err != nil {
+			t.Fatalf("start receiver %d: %v", id, err)
+		}
+		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
+		sessions[id] = session
+		queue = append(queue, out...)
+	}
+
+	type skippedConfirmation struct {
+		to  tss.PartyID
+		env tss.Envelope
+	}
+	var skipped []skippedConfirmation
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
+		for id, session := range sessions {
+			if id == env.From || (env.To != 0 && env.To != id) {
+				continue
+			}
+			if env.PayloadType == payloadKeygenConfirmation && !session.isReceiver {
+				skipped = append(skipped, skippedConfirmation{to: id, env: env})
+				continue
+			}
+			out, err := session.HandleReshareMessage(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			queue = append(queue, out...)
+		}
+	}
+	if len(skipped) == 0 {
+		t.Fatal("test did not skip any receiver confirmations")
+	}
+	for _, id := range dealers {
+		if sessions[id].completed {
+			t.Fatalf("old-only dealer %d completed before receiver confirmations", id)
+		}
+	}
+	for _, item := range skipped {
+		if _, err := sessions[item.to].HandleReshareMessage(testutil.DeliverEnvelope(item.env)); err != nil {
+			t.Fatalf("deliver skipped confirmation from %d to %d: %v", item.env.From, item.to, err)
+		}
+	}
+	for _, id := range dealers {
+		if !sessions[id].completed {
+			t.Fatalf("old-only dealer %d did not complete after receiver confirmations", id)
+		}
+	}
+}
+
 // TestThresholdECDSAReshareMembershipChange verifies that reshare preserves the
 // group public key across add-party, remove-party, threshold-change, and
 // disjoint-dealer-subset scenarios.

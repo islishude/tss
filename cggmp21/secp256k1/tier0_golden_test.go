@@ -15,6 +15,7 @@ import (
 func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
+	forgetConsumedPresignForTest(presign)
 	raw, err := presign.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)

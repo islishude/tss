@@ -30,16 +30,17 @@ const (
 )
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {
+	limits := DefaultLimits()
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return nil, err
 	}
-	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
 		return nil, err
 	}
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
 		return nil, err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
 		return nil, err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
@@ -48,24 +49,25 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
 		return nil, errors.New("chain code must be 32 bytes")
 	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
+	limits := DefaultLimits()
 	var p keygenCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(DefaultLimits().fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
@@ -96,21 +98,23 @@ func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
 }
 
 func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
+	limits := DefaultLimits()
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return nil, err
 	}
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return nil, err
 	}
-	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
+	limits := DefaultLimits()
 	var p presignRound1Payload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(DefaultLimits().fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
 		return presignRound1Payload{}, err
 	}
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
@@ -119,7 +123,7 @@ func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return presignRound1Payload{}, err
 	}
-	if _, err := pai.UnmarshalPublicKey(p.PaillierPublicKey); err != nil {
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
 		return presignRound1Payload{}, err
 	}
 	return p, nil
@@ -338,11 +342,12 @@ func marshalReshareReceiverMaterialPayload(p reshareReceiverMaterialPayload) ([]
 }
 
 func unmarshalReshareReceiverMaterialPayload(in []byte) (reshareReceiverMaterialPayload, error) {
+	limits := DefaultLimits()
 	var p reshareReceiverMaterialPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(DefaultLimits().fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
 		return reshareReceiverMaterialPayload{}, err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
@@ -352,11 +357,11 @@ func unmarshalReshareReceiverMaterialPayload(in []byte) (reshareReceiverMaterial
 }
 
 type refreshCommitmentsPayload struct {
-	Commitments        [][]byte `wire:"1,byteslist"`
-	PaillierPublicKey  []byte   `wire:"2,bytes"`
-	PaillierProof      []byte   `wire:"3,bytes"`
-	RingPedersenParams []byte   `wire:"4,bytes"`
-	RingPedersenProof  []byte   `wire:"5,bytes"`
+	Commitments        [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PaillierPublicKey  []byte   `wire:"2,bytes,max_bytes=paillier_public_key"`
+	PaillierProof      []byte   `wire:"3,bytes,max_bytes=zk_proof"`
+	RingPedersenParams []byte   `wire:"4,bytes,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  []byte   `wire:"5,bytes,max_bytes=paillier_proof"`
 }
 
 // WireType returns the canonical wire type identifier for refreshCommitmentsPayload.
@@ -376,15 +381,22 @@ func (refreshSharePayload) WireType() string { return refreshSharePayloadWireTyp
 func (refreshSharePayload) WireVersion() uint16 { return tss.Version }
 
 func marshalRefreshCommitmentsPayload(p refreshCommitmentsPayload) ([]byte, error) {
+	if err := validateRefreshCommitments(p.Commitments, len(p.Commitments)); err != nil {
+		return nil, err
+	}
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
 func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, error) {
+	limits := DefaultLimits()
 	var p refreshCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(DefaultLimits().fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
+	if len(p.Commitments) == 0 {
+		return refreshCommitmentsPayload{}, errors.New("empty refresh commitments")
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
 		return refreshCommitmentsPayload{}, err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {

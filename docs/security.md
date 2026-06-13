@@ -24,6 +24,9 @@ Callers must provide:
   across parties as an additional defense-in-depth check;
 - replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
+- an atomic durable consumed-claim store for restored CGGMP21 presigns. `StartSign`
+  refuses an unconsumed presign loaded with `UnmarshalPresign` unless
+  `SignRequest.PresignStore` is provided;
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
 - operational monitoring for protocol errors and blame evidence.
 
@@ -107,6 +110,17 @@ key metadata, including the old group public key, chain code, keygen transcript
 hash, and old party set. Substituting any of that metadata can produce a share
 for the wrong key context even when the final public-key preservation check
 passes.
+
+CGGMP21 refresh and reshare preserve the existing chain code. Their final
+confirmation evidence must repeat the preserved chain code exactly; callers
+should treat the chain code as authenticated key metadata, not as an optional
+display field.
+
+CGGMP21 reshare does not cryptographically revoke old shares. Once a new
+authorization epoch is accepted, deployments must retire the old epoch in policy,
+wallet, coordinator, and transport layers; otherwise a threshold of old shares
+can still sign under the same group public key. Old and new shares must not be
+mixed in one protocol session.
 
 Zeroization in Go is best-effort. The library clears owned byte slices and
 overwrites currently referenced `big.Int` words, but Go's garbage collector,

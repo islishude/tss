@@ -19,6 +19,17 @@ func (t *testRefreshTransport) Recv(ctx context.Context) (tss.Envelope, error) {
 	return t.recv(ctx)
 }
 
+func testRefreshSchedulerSecurityOptions(t *testing.T) (func(context.Context, *KeyShare) (tss.SessionID, error), tss.BroadcastAckVerifier) {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return func(context.Context, *KeyShare) (tss.SessionID, error) {
+		return sessionID, nil
+	}, tss.NewInMemoryAckVerifier(nil)
+}
+
 func TestRefreshSchedulerInvalidOptions(t *testing.T) {
 	t.Parallel()
 	_, err := NewRefreshScheduler(RefreshSchedulerOptions{})
@@ -44,9 +55,12 @@ func TestRefreshSchedulerInvalidOptions(t *testing.T) {
 
 func TestRefreshSchedulerStopWithoutStart(t *testing.T) {
 	t.Parallel()
+	sessionIDSource, ackVerifier := testRefreshSchedulerSecurityOptions(t)
 	sched, err := NewRefreshScheduler(RefreshSchedulerOptions{
 		Interval:          time.Minute,
 		Transport:         &testRefreshTransport{},
+		SessionIDSource:   sessionIDSource,
+		AckVerifier:       ackVerifier,
 		GetKeyShare:       func() (*KeyShare, error) { return nil, errors.New("test") },
 		OnRefreshComplete: func(*KeyShare) error { return nil },
 	})
@@ -59,9 +73,12 @@ func TestRefreshSchedulerStopWithoutStart(t *testing.T) {
 
 func TestRefreshSchedulerContextCancel(t *testing.T) {
 	t.Parallel()
+	sessionIDSource, ackVerifier := testRefreshSchedulerSecurityOptions(t)
 	sched, err := NewRefreshScheduler(RefreshSchedulerOptions{
 		Interval:          time.Hour,
 		Transport:         &testRefreshTransport{},
+		SessionIDSource:   sessionIDSource,
+		AckVerifier:       ackVerifier,
 		GetKeyShare:       func() (*KeyShare, error) { return nil, errors.New(("test")) },
 		OnRefreshComplete: func(*KeyShare) error { return nil },
 	})

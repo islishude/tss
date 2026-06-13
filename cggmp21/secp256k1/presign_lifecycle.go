@@ -33,6 +33,13 @@ import (
 // so as long as the caller persists the Consumed flag, reuse is prevented
 // across restarts.
 
+var consumedPresignIDs = struct {
+	sync.Mutex
+	ids map[[32]byte]struct{}
+}{
+	ids: make(map[[32]byte]struct{}),
+}
+
 // MarkPresignConsumed returns a copy of p with Consumed set to true.
 // Callers should persist the returned copy after a successful signing session
 // (or even a failed one where online partials may have been emitted).
@@ -44,6 +51,7 @@ func MarkPresignConsumed(p *Presign) (*Presign, error) {
 	cp := p.Clone()
 	p.mu.Unlock()
 	cp.Consumed = true
+	markPresignIDConsumed(cp)
 	return cp, nil
 }
 
@@ -80,6 +88,7 @@ func (p *Presign) Clone() *Presign {
 		kShare:               p.kShare.Clone(),
 		chiShare:             p.chiShare.Clone(),
 		delta:                p.delta.Clone(),
+		restored:             p.restored,
 	}
 }
 
@@ -89,6 +98,68 @@ func IsPresignConsumed(p *Presign) bool {
 		return true // treat nil as consumed
 	}
 	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.Consumed
+	consumed := p.Consumed
+	p.mu.Unlock()
+	if consumed {
+		return true
+	}
+	return isPresignClaimed(p)
+}
+
+func claimPresignID(p *Presign) bool {
+	key, ok := presignIDKey(p)
+	if !ok {
+		return false
+	}
+	consumedPresignIDs.Lock()
+	defer consumedPresignIDs.Unlock()
+	if _, exists := consumedPresignIDs.ids[key]; exists {
+		return false
+	}
+	consumedPresignIDs.ids[key] = struct{}{}
+	return true
+}
+
+func releasePresignID(p *Presign) {
+	key, ok := presignIDKey(p)
+	if !ok {
+		return
+	}
+	consumedPresignIDs.Lock()
+	delete(consumedPresignIDs.ids, key)
+	consumedPresignIDs.Unlock()
+}
+
+func markPresignIDConsumed(p *Presign) {
+	key, ok := presignIDKey(p)
+	if !ok {
+		return
+	}
+	consumedPresignIDs.Lock()
+	consumedPresignIDs.ids[key] = struct{}{}
+	consumedPresignIDs.Unlock()
+}
+
+func isPresignClaimed(p *Presign) bool {
+	key, ok := presignIDKey(p)
+	if !ok {
+		return true
+	}
+	consumedPresignIDs.Lock()
+	_, consumed := consumedPresignIDs.ids[key]
+	consumedPresignIDs.Unlock()
+	return consumed
+}
+
+func presignIDKey(p *Presign) ([32]byte, bool) {
+	var key [32]byte
+	if p == nil {
+		return key, false
+	}
+	id := p.ID()
+	if len(id) != len(key) {
+		return key, false
+	}
+	copy(key[:], id)
+	return key, true
 }

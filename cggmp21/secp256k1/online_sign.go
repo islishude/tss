@@ -54,6 +54,12 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.ContextHash) {
 		return nil, nil, errors.New("presign context mismatch")
 	}
+	if IsPresignConsumed(presign) {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
+	}
+	if presign.restored && store == nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.Party, errors.New("restored presign requires SignRequest.PresignStore for durable one-use claim"))
+	}
 	if !claimPresignForSigning(presign) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
 	}
@@ -62,6 +68,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	// flag so the presign can be retried.
 	if store != nil {
 		if err := store.MarkConsumed(presign.ID()); err != nil {
+			releasePresignID(presign)
 			presign.mu.Lock()
 			presign.Consumed = false
 			presign.mu.Unlock()
@@ -178,7 +185,7 @@ func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.presign.Signers), s.key.Party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
@@ -220,7 +227,6 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 	}
 	p, err := unmarshalSignPartialPayload(env.Payload)
 	if err != nil {
-		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
 			env,
@@ -228,7 +234,7 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 			"malformed sign partial payload",
 			[]tss.PartyID{env.From},
 			err,
-			fields...,
+			s.signPartialContextEvidenceFields(env.Payload)...,
 		)
 	}
 
@@ -262,14 +268,11 @@ func (s *SignSession) Signature() (*Signature, bool) {
 }
 
 func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialPayload) []tss.EvidenceField {
-	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
+	fields := s.signPartialContextEvidenceFields(nil)
 	fields = append(fields,
-		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
 		hashEvidenceField("observed_presign_transcript_hash", p.PresignTranscript),
-		rawEvidenceField("presign_context_hash", s.presign.ContextHash),
 		hashEvidenceField("observed_presign_context_hash", p.PresignContext),
 		hashEvidenceField("sign_partial_hash", scalarBytes(p.S)),
-		hashEvidenceField(evidenceFieldDigestHash, s.digest),
 	)
 	// Include the sender's (blamed party's) KPoint/ChiPoint hashes.
 	if vs, ok := presignVerifyShare(s.presign, from); ok {
@@ -288,6 +291,19 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 			rawEvidenceField(evidenceFieldPartialEquationHash, expectedEqHash),
 			rawEvidenceField(evidenceFieldObservedPartialEquationHash, p.PartialEquationHash),
 		)
+	}
+	return fields
+}
+
+func (s *SignSession) signPartialContextEvidenceFields(rawPayload []byte) []tss.EvidenceField {
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.Signers)...)
+	fields = append(fields,
+		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.TranscriptHash),
+		rawEvidenceField("presign_context_hash", s.presign.ContextHash),
+		hashEvidenceField(evidenceFieldDigestHash, s.digest),
+	)
+	if rawPayload != nil {
+		fields = append(fields, hashEvidenceField("sign_partial_payload_hash", rawPayload))
 	}
 	return fields
 }
@@ -388,13 +404,19 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 
 func claimPresignForSigning(presign *Presign) bool {
 	presign.mu.Lock()
-	defer presign.mu.Unlock()
 	if presign.Consumed {
+		presign.mu.Unlock()
+		return false
+	}
+	presign.mu.Unlock()
+	if !claimPresignID(presign) {
 		return false
 	}
 	// Mark consumed before constructing the outbound sign envelope so accidental
 	// reuse fails before any new partial signature can leave the process.
+	presign.mu.Lock()
 	presign.Consumed = true
+	presign.mu.Unlock()
 	return true
 }
 

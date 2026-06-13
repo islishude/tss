@@ -269,7 +269,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				signSession, _, err := StartSignDigest(shares[tc.signers[0]], restored, sessionID, digest[:])
+				signSession, _, err := StartSignDigestWithStore(shares[tc.signers[0]], restored, sessionID, digest[:], newTestPresignStore())
 				if err != nil {
 					t.Fatalf("StartSignDigest with round-tripped presign: %v", err)
 				}

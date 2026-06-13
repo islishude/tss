@@ -51,8 +51,6 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 	if k == nil {
 		return nil, errors.New("nil key share")
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, wire.EncodeBytesList(k.GroupCommitments))
 	return &KeygenConfirmation{
 		SessionID:       k.PaillierProofSessionID,
 		Sender:          k.Party,
@@ -60,9 +58,15 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		Parties:         slices.Clone(k.Parties),
 		PublicKey:       slices.Clone(k.PublicKey),
 		TranscriptHash:  slices.Clone(k.KeygenTranscriptHash),
-		CommitmentsHash: h.Sum(nil),
+		CommitmentsHash: keygenCommitmentsHash(k.GroupCommitments),
 		ChainCode:       slices.Clone(k.ChainCode),
 	}, nil
+}
+
+func keygenCommitmentsHash(commitments [][]byte) []byte {
+	h := sha256.New()
+	wire.WriteHashPart(h, wire.EncodeBytesList(commitments))
+	return h.Sum(nil)
 }
 
 // Validate performs structural checks on the confirmation.
@@ -122,6 +126,22 @@ func verifyKeygenConfirmationSet(local *KeyShare, encoded [][]byte) error {
 // is computed (e.g., during finalizeConfirmedKeyShare).
 func verifyKeygenConfirmationSetWithoutChainCode(local *KeyShare, encoded [][]byte) error {
 	return verifyKeygenConfirmationSetInternal(local, encoded, false)
+}
+
+func verifyKeygenConfirmationSetPreservedChainCode(local *KeyShare, encoded [][]byte) error {
+	if err := verifyKeygenConfirmationSetWithoutChainCode(local, encoded); err != nil {
+		return err
+	}
+	for i, raw := range encoded {
+		c, err := UnmarshalKeygenConfirmation(raw)
+		if err != nil {
+			return fmt.Errorf("invalid keygen confirmation at index %d: %w", i, err)
+		}
+		if !bytes.Equal(c.ChainCode, local.ChainCode) {
+			return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
+		}
+	}
+	return nil
 }
 
 func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enforceChainCode bool) error {
@@ -245,6 +265,16 @@ func verifyKeygenConfirmationForShare(local *KeyShare, c *KeygenConfirmation) er
 	}
 	if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
 		return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
+	}
+	return nil
+}
+
+func verifyKeygenConfirmationForPreservedChainCode(local *KeyShare, c *KeygenConfirmation) error {
+	if err := verifyKeygenConfirmationForShare(local, c); err != nil {
+		return err
+	}
+	if !bytes.Equal(c.ChainCode, local.ChainCode) {
+		return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
 	}
 	return nil
 }

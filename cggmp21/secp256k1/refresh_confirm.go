@@ -34,7 +34,7 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
 	}
 	if s.newShare != nil {
-		if err := verifyKeygenConfirmationForShare(s.newShare, confirmation); err != nil {
+		if err := verifyKeygenConfirmationForPreservedChainCode(s.newShare, confirmation); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
@@ -59,7 +59,7 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		}
 		encoded[i] = append([]byte(nil), confirmation...)
 	}
-	if err := verifyKeygenConfirmationSetWithoutChainCode(s.newShare, encoded); err != nil {
+	if err := verifyKeygenConfirmationSetPreservedChainCode(s.newShare, encoded); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
 	}
@@ -69,6 +69,11 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
 	}
 	s.completed = true
+	clear(s.newPaillierPriv)
+	if s.newPaillier != nil {
+		s.newPaillier.Destroy()
+		s.newPaillier = nil
+	}
 	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
 	s.log.Info(s.cfg.Ctx(), "refresh complete",
 		"party_id", s.oldKey.Party,

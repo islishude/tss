@@ -12,6 +12,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/wire"
 )
 
 // runRefresh starts refresh sessions for all parties, delivers messages, and
@@ -167,7 +168,7 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[0].Payload, err = marshalRefreshCommitmentsPayload(payload)
+	out2[0].Payload, err = wire.Marshal(payload, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,6 +176,24 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0]))
 	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
 		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)
+	}
+}
+
+func TestThresholdECDSARefreshValidationBindsPreservedChainCode(t *testing.T) {
+	shares := CachedKeygenShares(t, 2, 3, true)
+	parties := []tss.PartyID{1, 2, 3}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := runRefresh(t, shares, parties, sessionID)
+	share, ok := sessions[1].KeyShare()
+	if !ok {
+		t.Fatal("refresh did not produce party 1 key share")
+	}
+	share.ChainCode[0] ^= 1
+	if err := share.Validate(); err == nil {
+		t.Fatal("Validate accepted refreshed share with tampered preserved chain code")
 	}
 }
 

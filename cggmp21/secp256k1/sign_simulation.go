@@ -43,13 +43,20 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	}
 	presignSessions := make(map[tss.PartyID]*PresignSession, len(ids))
 	presignQueue := make([]tss.Envelope, 0)
-	simPolicies := simulationCGGMP21Policies()
+	simPolicies, err := simulationCGGMP21Policies()
+	if err != nil {
+		return nil, nil, err
+	}
 	for _, id := range ids {
 		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx)
 		if err != nil {
 			return nil, nil, err
 		}
-		session.SetGuard(tss.NewTestEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, presignID, simPolicies))
+		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, presignID, simPolicies, tss.NewInMemoryReplayCache())
+		if err != nil {
+			return nil, nil, err
+		}
+		session.SetGuard(guard)
 		presignSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true
@@ -101,7 +108,11 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err != nil {
 			return nil, nil, err
 		}
-		session.SetGuard(tss.NewTestEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies))
+		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
+		if err != nil {
+			return nil, nil, err
+		}
+		session.SetGuard(guard)
 		signSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true
@@ -131,7 +142,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 // broadcast consistency relaxed to None for all payload types. It is used by
 // in-memory simulation helpers ([Sign], [SignDigestInteractive]) that route
 // messages directly without broadcast certificate coordination.
-func simulationCGGMP21Policies() tss.PolicySet {
+func simulationCGGMP21Policies() (tss.PolicySet, error) {
 	entries := CGGMP21Policies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
@@ -140,7 +151,7 @@ func simulationCGGMP21Policies() tss.PolicySet {
 	}
 	ps, err := tss.NewPolicySet(relaxed...)
 	if err != nil {
-		panic(err)
+		return tss.PolicySet{}, fmt.Errorf("build simulation CGGMP21 policy set: %w", err)
 	}
-	return ps
+	return ps, nil
 }

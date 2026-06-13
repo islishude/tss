@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // TestCGGMP21_KeyShare_PostCrashIntegrity verifies that a CGGMP21
@@ -92,7 +93,13 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	_, outbox, err := StartSignDigest(shares[1], restored, sid, digest[:])
+	if _, _, err := StartSignDigest(shares[1], restored, sid, digest[:]); err == nil {
+		t.Fatal("StartSignDigest without PresignStore succeeded for restored presign")
+	} else {
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	}
+	sid, _ = tss.NewSessionID(nil)
+	_, outbox, err := StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestPresignStore())
 	if err != nil {
 		t.Fatalf("StartSignDigest with restored presign failed: %v", err)
 	}

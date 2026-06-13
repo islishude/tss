@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"math/big"
 	"testing"
 
@@ -50,6 +51,31 @@ func TestResharePlanValidateRejectsVerificationShareMismatch(t *testing.T) {
 	plan.OldVerificationShares[2] = mustResharePlanPoint(t, 2)
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted wrong old verification share")
+	}
+}
+
+func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
+	t.Parallel()
+	plan := minimalValidResharePlan(t)
+	digest1, err := plan.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest2, err := plan.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(digest1, digest2) {
+		t.Fatal("reshare plan digest is not deterministic")
+	}
+	mutated := plan
+	mutated.ChainCode = bytes.Repeat([]byte{0x42}, 32)
+	digest3, err := mutated.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(digest1, digest3) {
+		t.Fatal("reshare plan digest did not change after chain-code mutation")
 	}
 }
 

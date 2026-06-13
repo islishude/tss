@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"math/big"
 	"sync"
 	"testing"
@@ -64,6 +65,46 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		return nil, nil, errNilPresign
 	}
 	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, nil)
+}
+
+func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store PresignStore) (*SignSession, []tss.Envelope, error) {
+	if presign == nil {
+		return nil, nil, errNilPresign
+	}
+	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, store)
+}
+
+type testPresignStore struct {
+	mu       sync.Mutex
+	consumed map[string]struct{}
+}
+
+func newTestPresignStore() *testPresignStore {
+	return &testPresignStore{consumed: make(map[string]struct{})}
+}
+
+func (s *testPresignStore) MarkConsumed(presignID []byte) error {
+	if s == nil {
+		return errors.New("nil test presign store")
+	}
+	key := string(presignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.consumed[key]; ok {
+		return errors.New("presign already consumed")
+	}
+	s.consumed[key] = struct{}{}
+	return nil
+}
+
+func forgetConsumedPresignForTest(p *Presign) {
+	key, ok := presignIDKey(p)
+	if !ok {
+		return
+	}
+	consumedPresignIDs.Lock()
+	delete(consumedPresignIDs.ids, key)
+	consumedPresignIDs.Unlock()
 }
 
 // errNilPresign is a sentinel error for nil presign in test helpers.

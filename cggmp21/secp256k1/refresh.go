@@ -251,13 +251,24 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		if err := validateRefreshCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		pk, err := pai.UnmarshalPublicKey(p.PaillierPublicKey)
+		pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, s.limits.Paillier.MaxModulusBits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
 		proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindKeygenPaillier,
+				"refresh Paillier modulus does not meet security requirements",
+				[]tss.PartyID{env.From},
+				err,
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
+				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			)
 		}
 		if !zkpai.VerifyModulus(refreshPaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
 			return nil, verificationErrorWithEvidence(
@@ -270,18 +281,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
-		if err := zkpai.ActiveSecurityParams().CheckPaillierModulus(pk); err != nil {
-			return nil, verificationErrorWithEvidence(
-				env,
-				tss.EvidenceKindKeygenPaillier,
-				"refresh Paillier modulus does not meet security requirements",
-				[]tss.PartyID{env.From},
-				err,
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.Parties, partySetHashLabel)),
-				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-			)
-		}
-		ringParams, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams)
+		ringParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, s.limits.Paillier.MaxModulusBits)
 		if err != nil {
 			return nil, protocolErrorWithEvidence(
 				tss.ErrCodeInvalidMessage,
@@ -350,7 +350,12 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 
 // KeyShare returns the refreshed key share when refresh completes.
 func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed || s.aborted || s.newShare == nil {
 		return nil, false
 	}
 	return s.newShare.Clone(), true
@@ -358,25 +363,18 @@ func (s *RefreshSession) KeyShare() (*KeyShare, bool) {
 
 // Destroy clears sensitive session state. Use only on material that will
 // never be needed for processing further messages.
-// It delegates to abort for common secret-bearing state, then clears
-// newPaillier material that abort intentionally preserves for potential
-// evidence construction.
 func (s *RefreshSession) Destroy() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.abort()
-	clear(s.newPaillierPriv)
-	if s.newPaillier != nil {
-		s.newPaillier.Destroy()
-	}
-	s.newPaillier = nil
 }
 
 // abort marks the session aborted and clears secret-bearing accumulated
-// state: received polynomial shares, own polynomial coefficients, and
-// unconfirmed new share. It preserves newPaillier so evidence can still
-// reference the attempted Paillier key after an abort.
+// state: received polynomial shares, own polynomial coefficients, generated
+// Paillier material, and any pending or completed new share.
 func (s *RefreshSession) abort() {
 	if s == nil {
 		return
@@ -387,7 +385,14 @@ func (s *RefreshSession) abort() {
 		secret.ClearBigInt(coeff)
 	}
 	s.ownPoly = nil
-	if s.newShare != nil && !s.completed {
-		s.newShare.Destroy()
+	clear(s.newPaillierPriv)
+	if s.newPaillier != nil {
+		s.newPaillier.Destroy()
+		s.newPaillier = nil
 	}
+	if s.newShare != nil {
+		s.newShare.Destroy()
+		s.newShare = nil
+	}
+	s.completed = false
 }

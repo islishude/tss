@@ -186,11 +186,21 @@ func TestPresignMarshalJSONRejected(t *testing.T) {
 }
 
 func TestPresignDestroyClearsSecrets(t *testing.T) {
-	t.Parallel()
 	p := minimalCGGMP21Presign(t)
+	defer forgetConsumedPresignForTest(p)
 	p.Destroy()
 	if !p.Consumed {
 		t.Fatal("expected Consumed=true after Destroy")
+	}
+}
+
+func TestPresignDestroyMarksCloneConsumed(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	clone := p.Clone()
+	defer forgetConsumedPresignForTest(clone)
+	p.Destroy()
+	if !IsPresignConsumed(clone) {
+		t.Fatal("destroying a presign did not mark an existing clone consumed")
 	}
 }
 

@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -333,9 +334,9 @@ func ValidateRingPedersenParams(params *RingPedersenParams) error {
 
 // ringPedersenParamsWire is the wire DTO for RingPedersenParams.
 type ringPedersenParamsWire struct {
-	N []byte `wire:"1,bytes"`
-	S []byte `wire:"2,bytes"`
-	T []byte `wire:"3,bytes"`
+	N []byte `wire:"1,bytes,max_bits=paillier_modulus_bits"`
+	S []byte `wire:"2,bytes,max_bits=paillier_modulus_bits"`
+	T []byte `wire:"3,bytes,max_bits=paillier_modulus_bits"`
 }
 
 // WireType returns the canonical wire type identifier for ringPedersenParamsWire.
@@ -354,13 +355,28 @@ func MarshalRingPedersenParams(params *RingPedersenParams) ([]byte, error) {
 		N: fixedModNBytes(params.N, nLen),
 		S: fixedModNBytes(params.S, nLen),
 		T: fixedModNBytes(params.T, nLen),
-	})
+	}, wire.WithFieldLimitsForMarshal(wire.FieldLimits{
+		"paillier_modulus_bits": tss.DefaultMaxPaillierModulusBits,
+	}))
 }
 
 // UnmarshalRingPedersenParams decodes Ring-Pedersen parameters.
 func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
+	return UnmarshalRingPedersenParamsWithMaxModulusBits(in, 0)
+}
+
+// UnmarshalRingPedersenParamsWithMaxModulusBits decodes Ring-Pedersen
+// parameters and rejects an oversized modulus before primality checks.
+// The modulus size check is enforced by wire.Unmarshal via the
+// max_bits=paillier_modulus_bits wire tag on ringPedersenParamsWire.
+func UnmarshalRingPedersenParamsWithMaxModulusBits(in []byte, maxBits int) (*RingPedersenParams, error) {
+	if maxBits <= 0 {
+		maxBits = tss.DefaultMaxPaillierModulusBits
+	}
 	var w ringPedersenParamsWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(wire.FieldLimits{
+		"paillier_modulus_bits": maxBits,
+	})); err != nil {
 		return nil, err
 	}
 	n := new(big.Int).SetBytes(w.N)

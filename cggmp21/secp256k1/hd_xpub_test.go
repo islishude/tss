@@ -130,6 +130,16 @@ func TestExtendedPublicKeyRejectsInvalidInputs(t *testing.T) {
 			},
 			wantErr: bip32util.ErrHardenedDerivationUnsupported,
 		},
+		{
+			name: "depth overflow",
+			run: func() error {
+				parent := *known
+				parent.Depth = 255
+				_, _, err := parent.Derive([]uint32{0})
+				return err
+			},
+			wantErr: bip32util.ErrDerivationDepthOverflow,
+		},
 	}
 
 	for _, tc := range tests {

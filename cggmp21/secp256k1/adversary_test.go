@@ -596,23 +596,28 @@ func TestCGGMP21SignerSetOrderCanonicalized(t *testing.T) {
 func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
-	presigns := secpPresign(t, h.shares, signers)
 	digest := sha256.Sum256([]byte("sign fail closed"))
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartSignDigest(h.shares[2], presigns[2], signID, digest[:])
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	t.Run("transcript mismatch", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
+	newSignCase := func(t *testing.T) (*SignSession, []tss.Envelope, map[tss.PartyID]*Presign) {
+		t.Helper()
+		presigns := secpPresign(t, h.shares, signers)
+		_, out2, err := StartSignDigest(h.shares[2], presigns[2], signID, digest[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, _, err := StartSignDigest(h.shares[1], presigns[1], signID, digest[:])
 		if err != nil {
 			t.Fatal(err)
 		}
 		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		return session, out2, presigns
+	}
+
+	t.Run("transcript mismatch", func(t *testing.T) {
+		session, out2, presigns := newSignCase(t)
 		payload, err := unmarshalSignPartialPayload(out2[0].Payload)
 		if err != nil {
 			t.Fatal(err)
@@ -629,11 +634,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("malformed scalar", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session, out2, presigns := newSignCase(t)
 		mutated, err := testutil.RewriteWireFieldByName(out2[0].Payload, signPartialPayloadWireType, signPartialPayload{}, "S", []byte{0})
 		if err != nil {
 			t.Fatal(err)
@@ -645,11 +646,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("wrong round", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session, out2, _ := newSignCase(t)
 		env := testutil.DeliverEnvelope(out2[0])
 		env.Round = 2
 		env = env.RecomputeTranscriptHash()
@@ -657,11 +654,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {
-		session, _, err := StartSignDigest(h.shares[1], (presigns[1]).Clone(), signID, digest[:])
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
+		session, out2, _ := newSignCase(t)
 		if _, err := session.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 			t.Fatal(err)
 		}

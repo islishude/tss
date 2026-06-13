@@ -49,6 +49,8 @@ type ReshareSession struct {
 
 	cfg           tss.ThresholdConfig
 	log           tss.Logger
+	limits        Limits
+	planHash      []byte
 	commits       map[tss.PartyID][][]byte
 	shares        map[tss.PartyID]*big.Int
 	completed     bool
@@ -67,7 +69,7 @@ type ReshareSession struct {
 }
 
 type reshareDealerCommitmentsPayload struct {
-	Commitments [][]byte `wire:"1,byteslist"`
+	Commitments [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
 }
 
 // WireType returns the canonical wire type identifier for reshareDealerCommitmentsPayload.
@@ -77,10 +79,10 @@ func (reshareDealerCommitmentsPayload) WireType() string { return reshareDealerC
 func (reshareDealerCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type reshareReceiverMaterialPayload struct {
-	PaillierPublicKey  []byte `wire:"1,bytes"`
-	PaillierProof      []byte `wire:"2,bytes"`
-	RingPedersenParams []byte `wire:"3,bytes"`
-	RingPedersenProof  []byte `wire:"4,bytes"`
+	PaillierPublicKey  []byte `wire:"1,bytes,max_bytes=paillier_public_key"`
+	PaillierProof      []byte `wire:"2,bytes,max_bytes=zk_proof"`
+	RingPedersenParams []byte `wire:"3,bytes,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  []byte `wire:"4,bytes,max_bytes=paillier_proof"`
 }
 
 // WireType returns the canonical wire type identifier for reshareReceiverMaterialPayload.
@@ -93,7 +95,7 @@ type reshareSharePayload struct {
 	Dealer               tss.PartyID `wire:"1,u32"`
 	Receiver             tss.PartyID `wire:"2,u32"`
 	Share                *big.Int    `wire:"3,bigpos,max_bytes=scalar"`
-	DealerCommitmentHash []byte      `wire:"4,bytes"`
+	DealerCommitmentHash []byte      `wire:"4,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for reshareSharePayload.
@@ -166,7 +168,8 @@ func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.
 // The target participant set is newParties and the target threshold is
 // config.Threshold. If the local old party is also in newParties, it also acts
 // as a receiver and will produce a new KeyShare after all old dealers and new
-// receivers contribute. Old-only parties complete without producing a new share.
+// receivers contribute. Old-only parties complete without producing a new share
+// only after they observe every new receiver's final confirmation.
 func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID) (*ReshareSession, []tss.Envelope, error) {
 	if oldKey == nil {
 		return nil, nil, errors.New("nil old key share")
@@ -207,6 +210,10 @@ func StartReshareOverlap(oldKey *KeyShare, plan ResharePlan, rng io.Reader) (*Re
 
 func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool) (*ReshareSession, []tss.Envelope, error) {
 	if err := plan.Validate(); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if dealer {
@@ -253,6 +260,8 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		isReceiver:      receiver,
 		cfg:             config,
 		log:             config.Logger(),
+		limits:          DefaultLimits(),
+		planHash:        append([]byte(nil), planHash...),
 		commits:         make(map[tss.PartyID][][]byte),
 		shares:          make(map[tss.PartyID]*big.Int),
 		confirmations:   make(map[tss.PartyID][]byte, len(plan.NewParties)),
@@ -428,7 +437,12 @@ func cloneReshareSharePayload(p reshareSharePayload) reshareSharePayload {
 
 // KeyShare returns the new key share when this session is a new receiver and resharing completes.
 func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
-	if s == nil || !s.completed || s.newShare == nil {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed || s.aborted || s.newShare == nil {
 		return nil, false
 	}
 	return s.newShare.Clone(), true
@@ -513,6 +527,8 @@ func (s *ReshareSession) Destroy() {
 	if s == nil {
 		return
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.abort()
 }
 
@@ -538,5 +554,7 @@ func (s *ReshareSession) abort() {
 	clear(s.newPaillierPriv)
 	if s.newShare != nil {
 		s.newShare.Destroy()
+		s.newShare = nil
 	}
+	s.completed = false
 }

@@ -36,6 +36,7 @@ type KeyShare struct {
     RingPedersenPublic      []RingPedersenPublicShare
     PaillierProofSessionID  tss.SessionID
     PaillierProofDomain     string
+    ResharePlanHash         []byte        // only for reshare shares; binds the reshare plan into Paillier/RP/log proofs
     ShareProof              []byte        // Schnorr proof of discrete-log knowledge
     KeygenTranscriptHash    []byte
     LogCiphertext           []byte        // Πlog* ciphertext (LogStarProof): Enc(x_i, ρ) under own Paillier key
@@ -307,6 +308,13 @@ partial signature leaves the process. This local claim is serialized inside the
 package, but distributed deployments still need a durable atomic claim in
 storage before online signing.
 
+If a presign was restored with `UnmarshalPresign`, `StartSign` requires
+`SignRequest.PresignStore`. The store's `MarkConsumed(presign.ID())` operation
+must be an atomic conditional write in the caller's durable storage, so two
+processes cannot consume the same restored presign after a restart or failover.
+Consumed restored presigns fail with `ErrCodeConsumed` before this configuration
+check.
+
 ## Refresh
 
 Refresh rotates key shares and Paillier keys while preserving the group public key and chain code. The participant set and threshold are **fixed** to the original key's parties and threshold.
@@ -325,11 +333,11 @@ Receivers verify shares, then:
 x'_j = x_j + Σ_i g_i(j)   mod q
 ```
 
-Refresh commitment validation rejects any non-empty degree-zero commitment. After aggregation, every party also checks that the refreshed group public key exactly equals the old key's public key before producing a new `KeyShare`. Each party then encrypts its new share under its new Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
+Refresh commitment validation rejects any non-empty degree-zero commitment. After aggregation, every party also checks that the refreshed group public key exactly equals the old key's public key before producing a new `KeyShare`. Each receiver confirmation must repeat the preserved chain code exactly; refresh does not re-aggregate chain-code shares. Each party then encrypts its new share under its new Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share. New Paillier material replaces the old. The keygen transcript hash is updated to the refresh session.
 
 ## Reshare
 
-Reshare allows changing the participant set and threshold while preserving the group public key and chain code. A `ResharePlan` fixes the old party set, dealer subset, new receiver set, thresholds, old commitments, old verification shares, and session id before any message is accepted. Dealers are an agreed subset of old parties with size at least the old threshold. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
+Reshare allows changing the participant set and threshold while preserving the group public key and chain code. A `ResharePlan` fixes the old party set, dealer subset, new receiver set, thresholds, old commitments, old verification shares, chain code, and session id before any message is accepted. The canonical `ResharePlan.Digest()` is bound into new-receiver Paillier/Ring-Pedersen proofs and into the final reshare `KeyShare` proof domains. Dealers are an agreed subset of old parties with size at least the old threshold. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
 
 Each new receiver first:
 
@@ -350,7 +358,12 @@ Each new receiver:
 3. Aggregates `x'_j = Σ_i g_i(j) mod q`.
 4. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
 
-New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare`. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
+New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare` only after observing every new receiver's final confirmation for the same transcript, public key, commitment hash, and preserved chain code. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
+
+Reshare does not cryptographically erase or invalidate already distributed old
+shares. A threshold of old shares can still sign for the same group public key
+unless the deployment retires that authorization epoch at the application,
+policy, or wallet layer. Do not mix old and new shares in one protocol session.
 
 The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commitment) is integrated into keygen, reshare, and refresh. Each `KeyShare` stores a ciphertext of its secret scalar under its own Paillier key together with a Πlog\* proof binding that ciphertext to the party's verification share. Re-verification on load catches out-of-context share material.
 
@@ -425,6 +438,8 @@ presign, ok := ps.Presign()
 
 ```go
 request := SignRequest{Context: ctx, Message: message, LowS: true}
+// If presign was restored from storage, set request.PresignStore to a durable
+// atomic consumed-claim implementation before StartSign.
 ss, out, err := StartSign(share, presign, sessionID, request)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
@@ -442,11 +457,11 @@ newShare, ok := rs.KeyShare()
 ### Reshare
 
 ```go
-plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold, SecurityParameters{})
+plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold)
 dealer, out, err := StartReshareDealer(oldShare, plan, rng)
 receiver, out, err := StartReshareReceiver(plan, localParty, rng)
 overlap, out, err := StartReshareOverlap(oldShare, plan, rng)
-out, err := overlap.HandleMessage(env)
+out, err := overlap.HandleReshareMessage(env)
 newShare, err := receiver.Result()
 ```
 
