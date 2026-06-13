@@ -413,6 +413,245 @@ Per-party signpartial evidence includes:
 | `cggmp21.secp256k1.reshare.share`              | point-to-point | yes          | Old dealer scalar share for one new receiver                                |
 | `cggmp21.secp256k1.reshare.receiver_material`  | broadcast      | no           | New receiver Paillier/Ring-Pedersen material                                |
 
+## Sequence Diagrams
+
+### Protocol Flow Summary
+
+```
+Keygen ──→ Presign (Offline) ──→ Sign (Online)
+                │                    │
+                │  no message        │  needs message digest m
+                │  pre-computation   │  fast single round
+                │  produces Presign  │  produces signature
+                │                    │
+           Refresh / Reshare (maintenance, PK preserved)
+```
+
+### Keygen (2 Rounds)
+
+Round 1: each party broadcasts polynomial commitments, Paillier key material, and ZK proofs, then delivers private Shamir shares point-to-point.
+
+Round 2: keygen confirmations are broadcast and cross-verified.
+
+```mermaid
+sequenceDiagram
+    participant P1 as Party 1
+    participant P2 as Party 2
+    participant PN as Party N
+
+    Note over P1,PN: Local Setup
+    P1->>P1: Generate Paillier key (N₁,λ₁,μ₁)
+    P1->>P1: Produce Πmod + Πprm proofs
+    P1->>P1: Sample f₁(x) of degree t-1
+    P2->>P2: Generate Paillier key (N₂,λ₂,μ₂)
+    P2->>P2: Produce Πmod + Πprm proofs
+    P2->>P2: Sample f₂(x) of degree t-1
+
+    Note over P1,PN: Round 1 — Broadcast Commitments
+    P1-->>PN: C_{1,k}, PaillierPK₁, Πmod, Πprm, chain-code-commit
+    P2-->>PN: C_{2,k}, PaillierPK₂, Πmod, Πprm, chain-code-commit
+
+    Note over P1,PN: Round 1 — Private Share Distribution (confidential)
+    P1->>P2: s_{1→2}=f₁(2) mod q
+    P1->>PN: s_{1→N}=f₁(N) mod q
+    P2->>P1: s_{2→1}=f₂(1) mod q
+    P2->>PN: s_{2→N}=f₂(N) mod q
+
+    Note over P1,PN: Local Completion (after all round-1 messages received)
+    P1->>P1: Verify shares against C_{j,k}
+    P1->>P1: x₁=Σ s_{j→1}, PK=Σ C_{j,0}
+    P1->>P1: V₁, ShareProof, Πlog*
+    P2->>P2: x₂=Σ s_{j→2}, PK=Σ C_{j,0}
+    P2->>P2: V₂, ShareProof, Πlog*
+
+    Note over P1,PN: Round 2 — Keygen Confirmation Broadcast
+    P1-->>PN: KeygenConfirmation (session, PK, transcript hash)
+    P2-->>PN: KeygenConfirmation (session, PK, transcript hash)
+    PN-->>P1: KeygenConfirmation (session, PK, transcript hash)
+
+    Note over P1,PN: Verify all confirmations → KeyShare ready
+```
+
+### Presign — Offline (3 Rounds)
+
+**Offline phase**: Pre-computation independent of the message to sign. Produces a one-use `Presign` record that must be persisted securely until online signing. No message digest is involved.
+
+Round 1: nonce commitments with verifier-specific Πenc proofs.
+
+Round 2: pairwise MtA exchanges.
+
+Round 3: delta broadcast with signprep proof.
+
+```mermaid
+sequenceDiagram
+    participant S1 as Signer 1
+    participant S2 as Signer 2
+    participant S3 as Signer 3
+
+    Note over S1,S3: 【Offline】 Round 1 — Nonce Commitments
+    S1->>S1: Sample k₁,γ₁&#59; compute Γ₁, Enc₁(k₁)
+    S2->>S2: Sample k₂,γ₂&#59; compute Γ₂, Enc₂(k₂)
+    S1-->>S3: Broadcast Γ₁, Enc₁(k₁), PaillierPK₁
+    S2-->>S3: Broadcast Γ₂, Enc₂(k₂), PaillierPK₂
+    S3-->>S1: Broadcast Γ₃, Enc₃(k₃), PaillierPK₃
+
+    Note over S1,S3: Round 1 — Πenc Proofs (confidential, verifier-specific)
+    S1->>S2: Πenc₁₂ (hash of public R1, verifier=j) for S2 RP params
+    S1->>S3: Πenc₁₃ (hash of public R1, verifier=j) for S3 RP params
+    S2->>S1: Πenc₂₁ for S1 RP params
+    S2->>S3: Πenc₂₃ for S3 RP params
+    S3->>S1: Πenc₃₁ for S1 RP params
+    S3->>S2: Πenc₃₂ for S2 RP params
+
+    Note over S1,S3: 【Offline】 Round 1 Echo (local)
+    S1->>S1: Echo₁ = Hash(all Round-1 broadcasts)
+    S2->>S2: Echo₂ = Hash(all Round-1 broadcasts)
+
+    Note over S1,S3: 【Offline】 Round 2 — Pairwise MtA (confidential)
+    S1->>S2: Delta MtA: Enc₁(k₁) + Πaff-g
+    S2->>S1: Delta MtA resp: Enc₁(γ₂·k₁+β₁₂) + Πaff-g
+    S1->>S3: Delta MtA: Enc₁(k₁) + Πaff-g
+    S3->>S1: Delta MtA resp: Enc₁(γ₃·k₁+β₁₃) + Πaff-g
+    S2->>S1: Delta MtA: Enc₂(k₂) + Πaff-g
+    S1->>S2: Delta MtA resp: Enc₂(γ₁·k₂+β₂₁) + Πaff-g
+    S1->>S2: Sigma MtA: Enc₁(k₁) + Πaff-g
+    S2->>S1: Sigma MtA resp: Enc₁(x̄₂·k₁+β̂₁₂) + Πaff-g
+    S2->>S1: Sigma MtA: Enc₂(k₂) + Πaff-g
+    S1->>S2: Sigma MtA resp: Enc₂(x̄₁·k₂+β̂₂₁) + Πaff-g
+
+    Note over S1: Accumulate: δ₁=k₁γ₁+Σα+Σβ, χ₁=k₁x̄₁+Σα̂+Σβ̂
+
+    Note over S1,S3: 【Offline】 Round 3 — Delta Broadcast
+    S1-->>S3: δ₁, KPoint₁, ChiPoint₁, SignprepProof
+    S2-->>S3: δ₂, KPoint₂, ChiPoint₂, SignprepProof
+    S3-->>S1: δ₃, KPoint₃, ChiPoint₃, SignprepProof
+
+    Note over S1,S3: Verify signprep proofs → δ=Σδᵢ → R=δ⁻¹·Γ → Presign stored
+```
+
+### Sign — Online (1 Round)
+
+**Online phase**: Requires the 32-byte message digest `m`. Each signer computes `s_i = m·k_i + r·χ_i` using the pre-computed presign material. Fast single round — the presign carries all the heavy crypto.
+
+Single-round partial signature exchange. Each signer verifies every incoming partial independently before aggregation.
+
+```mermaid
+sequenceDiagram
+    participant S1 as Signer 1
+    participant S2 as Signer 2
+    participant S3 as Signer 3
+
+    Note over S1,S3: 【Online】 StartSign: verify presign binding, mark consumed
+
+    S1->>S1: s₁ = m·k₁ + r·χ₁ mod q
+    S2->>S2: s₂ = m·k₂ + r·χ₂ mod q
+    S3->>S3: s₃ = m·k₃ + r·χ₃ mod q
+
+    S1-->>S3: Broadcast: s₁, presign transcript, context, digest hash
+    S2-->>S3: Broadcast: s₂, presign transcript, context, digest hash
+    S3-->>S1: Broadcast: s₃, presign transcript, context, digest hash
+
+    Note over S1: 【Online】 Per-party verify: sⱼ·G ≟ m·KPointⱼ + r·ChiPointⱼ
+    Note over S2: 【Online】 Per-party verify: sⱼ·G ≟ m·KPointⱼ + r·ChiPointⱼ
+    Note over S3: 【Online】 Per-party verify: sⱼ·G ≟ m·KPointⱼ + r·ChiPointⱼ
+
+    Note over S1,S3: Aggregate: s=Σsᵢ → verify (r,s) against PK → return signature
+```
+
+### Refresh (1 Round)
+
+Key-share refresh with Paillier key rotation. Party set and threshold are fixed. Group public key is preserved.
+
+```mermaid
+sequenceDiagram
+    participant P1 as Party 1
+    participant P2 as Party 2
+    participant PN as Party N
+
+    Note over P1,PN: Local Setup
+    P1->>P1: Generate new Paillier key (N₁',λ₁',μ₁')
+    P1->>P1: Produce Πmod + Πprm for new key
+    P1->>P1: Sample g₁(x) with g₁(0)=0, deg t-1
+    P2->>P2: Generate new Paillier key (N₂',λ₂',μ₂')
+    P2->>P2: Produce Πmod + Πprm for new key
+    P2->>P2: Sample g₂(x) with g₂(0)=0, deg t-1
+
+    Note over P1,PN: Broadcast Commitments + New Paillier Material
+    P1-->>PN: C'_{1,k}, PaillierPK₁', Πmod, Πprm
+    P2-->>PN: C'_{2,k}, PaillierPK₂', Πmod, Πprm
+
+    Note over P1,PN: Private Refresh Shares (confidential)
+    P1->>P2: g₁(2) mod q
+    P1->>PN: g₁(N) mod q
+    P2->>P1: g₂(1) mod q
+    P2->>PN: g₂(N) mod q
+
+    Note over P1,PN: Verify & Aggregate
+    P1->>P1: x₁'=x₁+Σ gⱼ(1), verify PK'=PK
+    P1->>P1: Πlog* with new Paillier key
+    P2->>P2: x₂'=x₂+Σ gⱼ(2), verify PK'=PK
+    P2->>P2: Πlog* with new Paillier key
+
+    Note over P1,PN: Keygen Confirmation Broadcast
+    P1-->>PN: KeygenConfirmation (preserved chain code)
+    P2-->>PN: KeygenConfirmation (preserved chain code)
+    PN-->>P1: KeygenConfirmation (preserved chain code)
+
+    Note over P1,PN: All confirmations verified → new KeyShare ready
+```
+
+### Reshare (1 Round)
+
+Changes participant set and/or threshold while preserving the group public key. Dealers (subset of old parties) distribute weighted shares to new receivers.
+
+```mermaid
+sequenceDiagram
+    participant D1 as Dealer 1
+    participant D2 as Dealer 2
+    participant R1 as New Receiver 1
+    participant R2 as New Receiver 2
+
+    Note over R1,R2: New Receivers: Generate Paillier Material
+    R1->>R1: Generate Paillier key, Πmod, Πprm
+    R2->>R2: Generate Paillier key, Πmod, Πprm
+
+    Note over D1,R2: Broadcast Receiver Material
+    R1-->>D1: PaillierPK_R1, RingPedersen_R1, Πmod, Πprm
+    R2-->>D2: PaillierPK_R2, RingPedersen_R2, Πmod, Πprm
+
+    Note over D1,D2: Dealers: Wait for all receiver material
+
+    D1->>D1: λ₁=interpolation coeff at 0
+    D1->>D1: Sample g₁(x), g₁(0)=λ₁·x₁, deg t_new-1
+    D2->>D2: λ₂=interpolation coeff at 0
+    D2->>D2: Sample g₂(x), g₂(0)=λ₂·x₂, deg t_new-1
+
+    Note over D1,R2: Broadcast Dealer Commitments
+    D1-->>R2: C^{reshare}_{1,k}, C₁₀=λ₁·V₁
+    D2-->>R2: C^{reshare}_{2,k}, C₂₀=λ₂·V₂
+
+    Note over D1,R2: Private Reshare Shares (confidential)
+    D1->>R1: g₁(1) mod q
+    D1->>R2: g₁(2) mod q
+    D2->>R1: g₂(1) mod q
+    D2->>R2: g₂(2) mod q
+
+    Note over R1,R2: Verify & Aggregate
+    R1->>R1: Verify gⱼ(1) against dealer commitments
+    R1->>R1: x₁'=Σ gⱼ(1), verify PK'=PK
+    R1->>R1: Πlog* with new Paillier key
+    R2->>R2: Verify gⱼ(2) against dealer commitments
+    R2->>R2: x₂'=Σ gⱼ(2), verify PK'=PK
+    R2->>R2: Πlog* with new Paillier key
+
+    Note over D1,R2: Keygen Confirmation Broadcast
+    R1-->>D1: KeygenConfirmation (preserved chain code)
+    R2-->>D2: KeygenConfirmation (preserved chain code)
+
+    Note over D1,R2: All confirmations verified → new KeyShare ready
+    Note over D1,D2: Dealers complete after observing all receiver confirmations
+```
+
 ## API Reference
 
 ### Keygen

@@ -318,6 +318,207 @@ crypto/ed25519.Verify(childPub, message, sig) // true
 | `frost.ed25519.reshare.commitments` | broadcast      | no           | Reshare polynomial commitments      |
 | `frost.ed25519.reshare.share`       | point-to-point | yes          | Reshare scalar for one recipient    |
 
+## Sequence Diagrams
+
+### Protocol Flow Summary
+
+```
+DKG ──→ Signing (Online, 2 Rounds)
+              │
+              │  no offline pre-computation
+              │  message required at round 1
+              │  produces standard 64-byte Ed25519 signature
+              │
+         Reshare / Refresh (maintenance, PK preserved)
+              │
+         BIP32 HD Derivation (local, no network rounds)
+```
+
+### DKG — Distributed Key Generation (2 Rounds)
+
+Round 1: each party broadcasts polynomial commitments and delivers private Shamir shares. Round 2: keygen confirmations are broadcast and cross-verified against the local transcript.
+
+```mermaid
+sequenceDiagram
+    participant P1 as Party 1
+    participant P2 as Party 2
+    participant PN as Party N
+
+    Note over P1,PN: Local Setup
+    P1->>P1: Sample f₁(x)=a₁₀+a₁₁x+… deg t-1
+    P1->>P1: C_{1,k}=a_{1,k}·B for k∈[0,t-1]
+    P2->>P2: Sample f₂(x)=a₂₀+a₂₁x+… deg t-1
+    P2->>P2: C_{2,k}=a_{2,k}·B for k∈[0,t-1]
+
+    Note over P1,PN: Round 1 — Broadcast Commitments
+    P1-->>PN: C_{1,k}, chain-code-commit₁
+    P2-->>PN: C_{2,k}, chain-code-commit₂
+
+    Note over P1,PN: Round 1 — Private Share Distribution (confidential)
+    P1->>P2: s_{1→2}=f₁(2) mod q
+    P1->>PN: s_{1→N}=f₁(N) mod q
+    P2->>P1: s_{2→1}=f₂(1) mod q
+    P2->>PN: s_{2→N}=f₂(N) mod q
+
+    Note over P1,PN: Local Verification & Aggregation
+    P1->>P1: s_{j→1}·B ≟ Σ(j^k·C_{j,k})
+    P1->>P1: x₁=Σ s_{j→1}, GC_k=Σ C_{j,k}
+    P1->>P1: PK=GC₀, V₁, transcript hash
+    P2->>P2: s_{j→2}·B ≟ Σ(j^k·C_{j,k})
+    P2->>P2: x₂=Σ s_{j→2}, PK=GC₀, V₂
+
+    Note over P1,PN: Round 2 — Keygen Confirmation Broadcast
+    P1-->>PN: KeygenConfirmation (session, PK, transcript, chain code)
+    P2-->>PN: KeygenConfirmation (session, PK, transcript, chain code)
+    PN-->>P1: KeygenConfirmation (session, PK, transcript, chain code)
+
+    Note over P1,PN: All confirmations verified → KeyShare ready
+```
+
+### Signing — Online (2 Rounds)
+
+**Online phase**: FROST has no offline pre-computation phase. The 2-round online signing requires the actual message at round 1 and produces a standard 64-byte Ed25519 signature `R‖z`. Partial signatures are verified per-party before aggregation.
+
+Round 1: nonce commitment broadcast. Round 2: partial signature exchange with per-party verification before aggregation.
+
+```mermaid
+sequenceDiagram
+    participant S1 as Signer 1
+    participant S2 as Signer 2
+    participant S3 as Signer 3
+
+    Note over S1,S3: 【Online】 Round 1 — Nonce Commitments
+    S1->>S1: d₁=H₃(rand‖x₁), e₁=H₃(rand‖x₁)
+    S1->>S1: D₁=d₁·B, E₁=e₁·B
+    S2->>S2: d₂=H₃(rand‖x₂), e₂=H₃(rand‖x₂)
+    S2->>S2: D₂=d₂·B, E₂=e₂·B
+
+    S1-->>S3: (D₁, E₁)
+    S2-->>S3: (D₂, E₂)
+    S3-->>S1: (D₃, E₃)
+
+    Note over S1,S3: 【Online】 Compute Binding Factors (local)
+    S1->>S1: ρⱼ=H₁(PK‖H₄(msg)‖H₅(encoded)‖j)
+    S1->>S1: R=Σ(Dⱼ+ρⱼ·Eⱼ), c=H_Ed25519(R‖PK‖msg)
+
+    Note over S1,S3: 【Online】 Round 2 — Partial Signatures
+    S1->>S1: z₁=d₁+ρ₁·e₁+λ₁·c·x₁ mod q
+    S2->>S2: z₂=d₂+ρ₂·e₂+λ₂·c·x₂ mod q
+    S3->>S3: z₃=d₃+ρ₃·e₃+λ₃·c·x₃ mod q
+
+    S1-->>S3: z₁
+    S2-->>S3: z₂
+    S3-->>S1: z₃
+
+    Note over S1: 【Online】 Verify: zⱼ·B ≟ Dⱼ+ρⱼ·Eⱼ+λⱼ·c·Vⱼ
+    Note over S2: 【Online】 Verify: zⱼ·B ≟ Dⱼ+ρⱼ·Eⱼ+λⱼ·c·Vⱼ
+    Note over S3: 【Online】 Verify: zⱼ·B ≟ Dⱼ+ρⱼ·Eⱼ+λⱼ·c·Vⱼ
+
+    Note over S1,S3: Aggregate: z=Σzⱼ → sig=R‖z → Ed25519.Verify(PK, msg, sig)
+```
+
+### Resharing (1 Round)
+
+Changes participant set and/or threshold while preserving the group public key. Dealers (old parties) sample weighted polynomials and distribute shares to new receivers.
+
+```mermaid
+sequenceDiagram
+    participant D1 as Dealer 1 (old)
+    participant D2 as Dealer 2 (old)
+    participant R1 as Receiver 1 (new)
+    participant R2 as Receiver 2 (new)
+
+    Note over D1,D2: Dealers: Compute Weighted Shares
+    D1->>D1: w₁=λ₁(old,0)·x₁
+    D1->>D1: Sample g₁(x), g₁(0)=w₁, deg t_new-1
+    D2->>D2: w₂=λ₂(old,0)·x₂
+    D2->>D2: Sample g₂(x), g₂(0)=w₂, deg t_new-1
+
+    Note over D1,R2: Broadcast Dealer Commitments
+    D1-->>R2: C'_{1,k}=g_{1,k}·B
+    D2-->>R2: C'_{2,k}=g_{2,k}·B
+
+    Note over D1,R2: Private Reshare Shares (confidential)
+    D1->>R1: g₁(1) mod q
+    D1->>R2: g₁(2) mod q
+    D2->>R1: g₂(1) mod q
+    D2->>R2: g₂(2) mod q
+
+    Note over R1,R2: Verify & Aggregate
+    R1->>R1: Verify gⱼ(1) against C'_{j,k}
+    R1->>R1: x₁'=Σ gⱼ(1), verify PK'=PK
+    R2->>R2: Verify gⱼ(2) against C'_{j,k}
+    R2->>R2: x₂'=Σ gⱼ(2), verify PK'=PK
+
+    Note over R1,R2: Broadcast Confirmations
+    R1-->>D1: KeygenConfirmation (preserved chain code)
+    R2-->>D2: KeygenConfirmation (preserved chain code)
+
+    Note over D1,R2: New KeyShare ready. Σ gᵢ(0) reconstructs old group secret → PK preserved
+```
+
+### Same-Party Refresh
+
+Proactive refresh preserving the participant set and threshold. Each party samples a zero-constant polynomial and adds shares to the existing key.
+
+```mermaid
+sequenceDiagram
+    participant P1 as Party 1
+    participant P2 as Party 2
+    participant PN as Party N
+
+    Note over P1,PN: Local Setup
+    P1->>P1: Sample g₁(x) with g₁(0)=0, deg t-1
+    P2->>P2: Sample g₂(x) with g₂(0)=0, deg t-1
+
+    Note over P1,PN: Broadcast Commitments
+    P1-->>PN: C'_{1,k}=g_{1,k}·B
+    P2-->>PN: C'_{2,k}=g_{2,k}·B
+
+    Note over P1,PN: Private Refresh Shares (confidential)
+    P1->>P2: g₁(2) mod q
+    P1->>PN: g₁(N) mod q
+    P2->>P1: g₂(1) mod q
+    P2->>PN: g₂(N) mod q
+
+    Note over P1,PN: Verify & Aggregate
+    P1->>P1: x₁'=x₁+Σ gⱼ(1), verify PK'=PK
+    P2->>P2: x₂'=x₂+Σ gⱼ(2), verify PK'=PK
+
+    Note over P1,PN: Broadcast Confirmations
+    P1-->>PN: KeygenConfirmation (preserved chain code)
+    P2-->>PN: KeygenConfirmation (preserved chain code)
+
+    Note over P1,PN: Old commitments summed with refresh commitments → new KeyShare
+```
+
+### BIP32 HD Derivation (Local)
+
+Non-hardened Khovratovich-Law child key derivation. Performed locally without network rounds; each signer applies the additive shift during partial signature generation.
+
+```mermaid
+sequenceDiagram
+    participant Caller
+    participant HD as HD Derivation (local)
+
+    Note over Caller,HD: For each path index i
+
+    Caller->>HD: DeriveBIP32(pubKey, chainCode, [0,1,2])
+
+    loop For each index i in path
+        HD->>HD: Z=F(c_par, 0x02‖A_par‖ser₃₂(i))
+        HD->>HD: zL=8·LE_OS2IP(Z[0:28]) mod q
+        HD->>HD: cumShift+=zL
+        HD->>HD: childPub=A_par+cumShift·B
+        HD->>HD: childChain=F(c_par, 0x03‖A_par‖ser₃₂(i))[32:64]
+    end
+
+    HD-->>Caller: (childPub, additiveShift, childChain)
+
+    Note over Caller: Signing: each party adds λᵢ·c·shift to partial
+    Note over Caller: Verify against childPub with Ed25519.Verify
+```
+
 ## API Reference
 
 ### Keygen
