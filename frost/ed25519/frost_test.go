@@ -49,28 +49,28 @@ func startFROSTKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions,
 
 func startFROSTSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
-		return testFROSTGuard(key.Party, testFROSTGuardParties(key.Parties, key.Party), sessionID)
+		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
 	return StartSign(key, sessionID, signers, message, guard)
 }
 
 func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
-		return testFROSTGuard(key.Party, testFROSTGuardParties(key.Parties, key.Party), sessionID)
+		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
 	return StartSignWithOptions(key, sessionID, signers, message, opts, guard)
 }
 
 func startFROSTRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
-		return testFROSTGuard(config.Self, testFROSTGuardParties(oldKey.Parties, config.Self), config.SessionID)
+		return testFROSTGuard(config.Self, testFROSTGuardParties(oldKey.state.parties, config.Self), config.SessionID)
 	})
 	return StartRefresh(oldKey, config, guard)
 }
 
 func startFROSTReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
-		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldKey.Parties, newParties)), config.Self), config.SessionID)
+		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldKey.state.parties, newParties)), config.Self), config.SessionID)
 	})
 	return StartReshare(oldKey, newParties, newThreshold, config, guard)
 }
@@ -137,7 +137,7 @@ func TestFROSTKeyShareRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(decoded.PublicKey) != string(shares[1].PublicKey) {
+	if string(decoded.state.publicKey) != string(shares[1].state.publicKey) {
 		t.Fatal("public key mismatch after round trip")
 	}
 }
@@ -578,7 +578,7 @@ func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]
 func cloneFrostKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
 	out := make(map[tss.PartyID]*KeyShare, len(shares))
 	for id, ks := range shares {
-		out[id] = ks.Clone()
+		out[id] = cloneKeyShareValue(ks)
 	}
 	return out
 }
@@ -618,8 +618,8 @@ func frostKeygenInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare 
 			t.Fatalf("keygen not complete for %d", id)
 		}
 		if pub == nil {
-			pub = share.PublicKey
-		} else if string(pub) != string(share.PublicKey) {
+			pub = share.state.publicKey
+		} else if string(pub) != string(share.state.publicKey) {
 			t.Fatal("group public key mismatch")
 		}
 		out[id] = share
@@ -784,7 +784,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			messages = append(messages, out...)
 		}
 		// Recipient-only: party 4 has no old KeyShare.
-		recipient, err := startFROSTReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -801,7 +801,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		if !stded25519.Verify(stded25519.PublicKey(pub), []byte("add party test"), sig) {
 			t.Fatal("reshared signature failed verification")
 		}
-		if !bytes.Equal(pub, oldShares[1].PublicKey) {
+		if !bytes.Equal(pub, oldShares[1].state.publicKey) {
 			t.Fatal("group public key changed after reshare")
 		}
 	})
@@ -817,7 +817,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		// All old parties (1,2,3) must participate as dealers. Party 3 is
 		// being removed from the new set — use old party set for config validation.
 		for _, id := range []tss.PartyID{1, 2, 3} {
-			session, out, err := startFROSTReshare(oldShares[id], newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: oldShares[id].Parties, Self: id, SessionID: sessionID})
+			session, out, err := startFROSTReshare(oldShares[id], newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: oldShares[id].state.parties, Self: id, SessionID: sessionID})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -838,7 +838,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		if !stded25519.Verify(stded25519.PublicKey(pub), []byte("remove party test"), sig) {
 			t.Fatal("reshared signature failed verification")
 		}
-		if !bytes.Equal(pub, oldShares[1].PublicKey) {
+		if !bytes.Equal(pub, oldShares[1].state.publicKey) {
 			t.Fatal("group public key changed after reshare")
 		}
 	})
@@ -862,7 +862,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
 			Parties: newParties, Self: 4, SessionID: sessionID,
 		})
 		if err != nil {
@@ -894,7 +894,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		for _, id := range []tss.PartyID{1, 2, 3} {
 			session, out, err := startFROSTReshare(oldShares[id], newParties, newThreshold, tss.ThresholdConfig{
 				Threshold: newThreshold,
-				Parties:   oldShares[id].Parties,
+				Parties:   oldShares[id].state.parties,
 				Self:      id,
 				SessionID: sessionID,
 			})
@@ -905,7 +905,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].PublicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
 			Parties:   newParties,
 			Self:      4,
@@ -925,7 +925,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		if !stded25519.Verify(stded25519.PublicKey(pub), []byte("replace party"), sig) {
 			t.Fatal("replace signature failed verification")
 		}
-		if !bytes.Equal(pub, oldShares[1].PublicKey) {
+		if !bytes.Equal(pub, oldShares[1].state.publicKey) {
 			t.Fatal("group public key changed after replace")
 		}
 	})
@@ -962,7 +962,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		if !stded25519.Verify(stded25519.PublicKey(pub), []byte("threshold decrease"), sig) {
 			t.Fatal("threshold-decrease signature failed verification")
 		}
-		if !bytes.Equal(pub, oldShares[1].PublicKey) {
+		if !bytes.Equal(pub, oldShares[1].state.publicKey) {
 			t.Fatal("group public key changed after threshold decrease")
 		}
 	})
@@ -1078,7 +1078,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 			}
 
 			for id, newShare := range newShares {
-				if !bytes.Equal(newShare.PublicKey, oldPubs[id]) {
+				if !bytes.Equal(newShare.state.publicKey, oldPubs[id]) {
 					t.Fatalf("party %d: group public key changed after refresh", id)
 				}
 			}
@@ -1145,7 +1145,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 	if !ok {
 		t.Fatal("refresh did not complete")
 	}
-	if !bytes.Equal(newShare.PublicKey, shares[1].PublicKey) {
+	if !bytes.Equal(newShare.state.publicKey, shares[1].state.publicKey) {
 		t.Fatal("StartRefresh changed the group public key")
 	}
 }
@@ -1163,7 +1163,7 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 
 	t.Run("tampered public key", func(t *testing.T) {
 		bad := cloneKeyShareValue(share)
-		bad.PublicKey[0] ^= 1
+		bad.state.publicKey[0] ^= 1
 		if err := bad.ValidateConsistency(); err == nil {
 			t.Fatal("tampered public key should fail consistency check")
 		}
@@ -1171,9 +1171,9 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 
 	t.Run("tampered verification share", func(t *testing.T) {
 		bad := cloneKeyShareValue(share)
-		for i := range bad.VerificationShares {
-			if bad.VerificationShares[i].Party == share.Party {
-				bad.VerificationShares[i].PublicKey[0] ^= 1
+		for i := range bad.state.verificationShares {
+			if bad.state.verificationShares[i].Party == share.state.party {
+				bad.state.verificationShares[i].PublicKey[0] ^= 1
 				break
 			}
 		}
@@ -1184,7 +1184,7 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 
 	t.Run("tampered group commitment", func(t *testing.T) {
 		bad := cloneKeyShareValue(share)
-		bad.GroupCommitments[0][0] ^= 1
+		bad.state.groupCommitments[0][0] ^= 1
 		if err := bad.ValidateConsistency(); err == nil {
 			t.Fatal("tampered group commitment should fail consistency check")
 		}
@@ -1231,7 +1231,7 @@ func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
 	t.Run("identity rejected as public key in KeyShare", func(t *testing.T) {
 		shares := frostKeygen(t, 2, 3)
 		bad := cloneKeyShareValue(shares[1])
-		bad.PublicKey = append([]byte(nil), identity...)
+		bad.state.publicKey = append([]byte(nil), identity...)
 		if err := bad.Validate(); err == nil {
 			t.Fatal("identity public key should be rejected")
 		}
@@ -1240,7 +1240,7 @@ func TestFROSTRejectsNonPrimeOrderPoints(t *testing.T) {
 	t.Run("identity rejected as group commitment[0]", func(t *testing.T) {
 		shares := frostKeygen(t, 2, 3)
 		bad := cloneKeyShareValue(shares[1])
-		bad.GroupCommitments[0] = append([]byte(nil), identity...)
+		bad.state.groupCommitments[0] = append([]byte(nil), identity...)
 		if err := bad.Validate(); err == nil {
 			t.Fatal("identity group commitment should be rejected")
 		}

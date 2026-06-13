@@ -23,31 +23,32 @@ import (
 // MarkPresignConsumed marks p's local claim consumed.
 // It is not a substitute for [PresignStore].
 func MarkPresignConsumed(p *Presign) error {
-	if p == nil {
+	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
-	if p.consumed == nil {
+	if p.state.consumed == nil {
 		return errors.New("presign claim state unavailable")
 	}
-	p.consumed.Store(true)
+	p.state.consumed.Store(true)
 	return nil
 }
 
 // IsPresignConsumed reports whether the presign has been consumed.
 func IsPresignConsumed(p *Presign) bool {
-	return p == nil || p.consumed == nil || p.consumed.Load()
+	return p == nil || p.state == nil || p.state.consumed == nil || p.state.consumed.Load()
 }
 
 func claimPresignForSigning(presign *Presign) bool {
 	// Mark consumed before constructing the outbound sign envelope so accidental
 	// reuse fails before any new partial signature can leave the process.
 	return presign != nil &&
-		presign.consumed != nil &&
-		presign.consumed.CompareAndSwap(false, true)
+		presign.state != nil &&
+		presign.state.consumed != nil &&
+		presign.state.consumed.CompareAndSwap(false, true)
 }
 
 func rollbackPresignClaim(presign *Presign) {
-	if presign != nil && presign.consumed != nil {
-		presign.consumed.Store(false)
+	if presign != nil && presign.state != nil && presign.state.consumed != nil {
+		presign.state.consumed.Store(false)
 	}
 }

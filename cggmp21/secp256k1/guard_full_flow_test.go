@@ -287,7 +287,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	}
 
 	// Verify the produced signature.
-	if !VerifySignature(shares[1].PublicKey, SignRequest{
+	if !VerifySignature(shares[1].PublicKeyBytes(), SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("hello guard-protected world"),
 	}, sig) {

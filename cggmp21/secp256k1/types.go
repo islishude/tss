@@ -44,13 +44,15 @@ func generatePaillierKey(ctx context.Context, reader io.Reader, bits int) (*pai.
 	return pai.GenerateKeyForTest(ctx, reader, bits)
 }
 
-// VerificationShare is one participant public ECDSA verification share.
+// VerificationShare is a caller-owned snapshot of one participant public ECDSA
+// verification share.
 type VerificationShare struct {
 	Party     tss.PartyID `json:"party"`
 	PublicKey []byte      `json:"public_key"`
 }
 
-// PaillierPublicShare records a participant Paillier public key and proof.
+// PaillierPublicShare is a caller-owned snapshot of a participant Paillier
+// public key and proof.
 type PaillierPublicShare struct {
 	Party     tss.PartyID `json:"party"`
 	PublicKey []byte      `json:"public_key"`
@@ -98,7 +100,8 @@ func cloneSignVerifyShares(in []SignVerifyShare) []SignVerifyShare {
 	return out
 }
 
-// RingPedersenPublicShare records a participant Ring-Pedersen parameters and proof.
+// RingPedersenPublicShare is a caller-owned snapshot of a participant
+// Ring-Pedersen parameters and proof.
 type RingPedersenPublicShare struct {
 	Party  tss.PartyID `json:"party"`
 	Params []byte      `json:"params"`
@@ -116,49 +119,41 @@ func (r RingPedersenPublicShare) Clone() RingPedersenPublicShare {
 
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 //
-// # Immutability contract
+// Its fields are intentionally opaque. Accessors that return slices, maps, or
+// nested records return caller-owned deep copies.
 //
-// After construction, after [KeyShare.Validate], or after receiving a KeyShare
-// from any session method, callers MUST NOT mutate the exported []byte fields
-// (PublicKey, ChainCode, GroupCommitments, PaillierPublicKey, PaillierProof,
-// RingPedersenParams, RingPedersenProof, ShareProof, KeygenTranscriptHash,
-// LogCiphertext, LogProof, KeygenConfirmations). Mutation breaks post-validation
-// invariants and can cause signature failures, proof verification errors, or
-// incorrect blame attribution.
-//
-// Use [KeyShare.Clone] to obtain a mutable deep copy. Use the copy-returning
-// getters ([KeyShare.PublicKeyBytes], [KeyShare.ChainCodeBytes],
-// [KeyShare.GroupCommitmentsCopy], [KeyShare.ShareProofBytes]) when only
-// read access is needed.
-//
-// Fields are exported for binary encoding via [KeyShare.MarshalBinary]; JSON
-// encoding is intentionally rejected by [KeyShare.MarshalJSON] to prevent
-// accidental exposure of secret material.
+// A shallow Go copy of KeyShare is another handle to the same lifecycle state:
+// destroying either handle destroys the shared secret material. Session
+// completion accessors instead return independently owned key shares.
 type KeyShare struct {
-	Version                uint16
-	Party                  tss.PartyID
-	Threshold              int
-	Parties                []tss.PartyID
-	PublicKey              []byte
-	ChainCode              []byte
+	state *keyShareState
+}
+
+type keyShareState struct {
+	version                uint16
+	party                  tss.PartyID
+	threshold              int
+	parties                []tss.PartyID
+	publicKey              []byte
+	chainCode              []byte
 	secret                 *secret.Scalar
-	GroupCommitments       [][]byte
-	VerificationShares     []VerificationShare
-	PaillierPublicKey      []byte
+	groupCommitments       [][]byte
+	verificationShares     []VerificationShare
+	paillierPublicKey      []byte
 	paillierPrivateKey     []byte
-	PaillierProof          []byte
-	PaillierPublicKeys     []PaillierPublicShare
-	RingPedersenParams     []byte
-	RingPedersenProof      []byte
-	RingPedersenPublic     []RingPedersenPublicShare
-	PaillierProofSessionID tss.SessionID
-	PaillierProofDomain    string
-	ResharePlanHash        []byte
-	ShareProof             []byte
-	KeygenTranscriptHash   []byte
-	LogCiphertext          []byte
-	LogProof               []byte
-	KeygenConfirmations    [][]byte
+	paillierProof          []byte
+	paillierPublicKeys     []PaillierPublicShare
+	ringPedersenParams     []byte
+	ringPedersenProof      []byte
+	ringPedersenPublic     []RingPedersenPublicShare
+	paillierProofSessionID tss.SessionID
+	paillierProofDomain    string
+	resharePlanHash        []byte
+	shareProof             []byte
+	keygenTranscriptHash   []byte
+	logCiphertext          []byte
+	logProof               []byte
+	keygenConfirmations    [][]byte
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer

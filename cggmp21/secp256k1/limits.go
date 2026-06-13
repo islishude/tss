@@ -19,8 +19,9 @@ const (
 
 // StateLimits caps serialized CGGMP21 key material.
 type StateLimits struct {
-	MaxSerializedKeyShareBytes int
-	MaxSerializedPresignBytes  int
+	MaxSerializedKeyShareBytes    int
+	MaxSerializedPresignBytes     int
+	MaxSerializedResharePlanBytes int
 }
 
 // PayloadLimits caps CGGMP21 payload sizes.
@@ -90,8 +91,9 @@ func DefaultLimits() Limits {
 			AllowOversizedSignerSet: false,
 		},
 		State: StateLimits{
-			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
-			MaxSerializedPresignBytes:  tss.DefaultMaxSerializedPresignBytes,
+			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
+			MaxSerializedPresignBytes:     tss.DefaultMaxSerializedPresignBytes,
+			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes: 65536,
@@ -137,8 +139,9 @@ func TestLimits() Limits {
 			AllowOversizedSignerSet: true,
 		},
 		State: StateLimits{
-			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
-			MaxSerializedPresignBytes:  tss.DefaultMaxSerializedPresignBytes,
+			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
+			MaxSerializedPresignBytes:     tss.DefaultMaxSerializedPresignBytes,
+			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes: 65536,
@@ -190,6 +193,7 @@ func (l Limits) frameLimits(maxTotal int) wire.FrameLimits {
 // fieldLimits returns semantic field limits for CGGMP21 wire encoding tags.
 func (l Limits) fieldLimits() wire.FieldLimits {
 	return wire.FieldLimits{
+		"curve_id":                   32,
 		"scalar":                     l.Curve.MaxScalarBytes,
 		"point":                      l.Curve.MaxPointBytes,
 		"parties":                    l.Threshold.MaxParties,

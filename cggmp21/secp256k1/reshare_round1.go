@@ -291,7 +291,7 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if !tss.ContainsParty(s.dealerParties, dealer) {
 		return fmt.Errorf("sender %d is not a dealer", dealer)
 	}
-	verificationShare, ok := s.plan.OldVerificationShares[dealer]
+	verificationShare, ok := s.plan.state.oldVerificationShares[dealer]
 	if !ok {
 		return fmt.Errorf("missing old verification share for dealer %d", dealer)
 	}

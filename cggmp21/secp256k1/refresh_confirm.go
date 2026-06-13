@@ -39,7 +39,7 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 		}
 	}
 	s.confirmations[env.From] = append([]byte(nil), canonical...)
-	if s.newShare != nil && len(s.confirmations) == len(s.oldKey.Parties) {
+	if s.newShare != nil && len(s.confirmations) == len(s.oldKey.state.parties) {
 		return nil, s.finalizeConfirmedShare()
 	}
 	return nil, nil
@@ -48,10 +48,10 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 func (s *RefreshSession) finalizeConfirmedShare() error {
 	if s.newShare == nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, errors.New("missing pending refresh share"))
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, errors.New("missing pending refresh share"))
 	}
-	encoded := make([][]byte, len(s.oldKey.Parties))
-	for i, id := range s.oldKey.Parties {
+	encoded := make([][]byte, len(s.oldKey.state.parties))
+	for i, id := range s.oldKey.state.parties {
 		confirmation, ok := s.confirmations[id]
 		if !ok {
 			s.abort()
@@ -61,12 +61,12 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 	}
 	if err := verifyKeygenConfirmationSetPreservedChainCode(s.newShare, encoded); err != nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
 	}
-	s.newShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
+	s.newShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := s.newShare.Validate(); err != nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.Party, err)
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
 	}
 	s.completed = true
 	clear(s.newPaillierPriv)
@@ -74,9 +74,9 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
 	}
-	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
+	confirmationSetHash := keygenConfirmationSetHash(s.newShare.state.keygenConfirmations)
 	s.log.Info(s.cfg.Ctx(), "refresh complete",
-		"party_id", s.oldKey.Party,
+		"party_id", s.oldKey.state.party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
 	)

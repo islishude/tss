@@ -79,14 +79,14 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 	}
 	return proofDomain(proofDomainContext{
 		label:                domainLabelKeySharePaillier,
-		threshold:            key.Threshold,
-		parties:              key.Parties,
-		sender:               key.Party,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		sender:               key.state.party,
 		kind:                 domainKindPaillierModulus,
-		publicKey:            key.PublicKey,
-		keygenTranscriptHash: key.KeygenTranscriptHash,
-		paillierPublicKey:    key.PaillierPublicKey,
-		resharePlanHash:      key.ResharePlanHash,
+		publicKey:            key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
+		paillierPublicKey:    key.state.paillierPublicKey,
+		resharePlanHash:      key.state.resharePlanHash,
 	})
 }
 
@@ -95,18 +95,18 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []
 		return nil
 	}
 	config := tss.ThresholdConfig{
-		Threshold: key.Threshold,
-		Parties:   key.Parties,
+		Threshold: key.state.threshold,
+		Parties:   key.state.parties,
 		Self:      party,
-		SessionID: key.PaillierProofSessionID,
+		SessionID: key.state.paillierProofSessionID,
 	}
-	switch key.PaillierProofDomain {
+	switch key.state.paillierProofDomain {
 	case domainLabelKeygenModulus:
 		return keygenRingPedersenDomain(config, party, params)
 	case domainLabelRefreshPaillier:
 		return refreshRingPedersenDomain(config, party, params)
 	case domainLabelResharePaillier:
-		return reshareRingPedersenDomain(config, party, params, key.ResharePlanHash)
+		return reshareRingPedersenDomain(config, party, params, key.state.resharePlanHash)
 	default:
 		return nil
 	}
@@ -116,14 +116,14 @@ func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.P
 	return proofDomain(proofDomainContext{
 		label:                domainLabelPresignMTAStartProof,
 		sessionID:            sessionID,
-		threshold:            key.Threshold,
-		parties:              key.Parties,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
 		signers:              signers,
 		sender:               prover,
 		receiver:             verifier,
 		kind:                 domainKindEncProof,
-		publicKey:            key.PublicKey,
-		keygenTranscriptHash: key.KeygenTranscriptHash,
+		publicKey:            key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
 		paillierPublicKey:    proverPaillierPublicKey,
 		presignContextHash:   presignContextHash,
 	})
@@ -183,14 +183,14 @@ func mtaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.Par
 	return proofDomain(proofDomainContext{
 		label:                domainLabelPresignMTAResponse,
 		sessionID:            sessionID,
-		threshold:            key.Threshold,
-		parties:              key.Parties,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
 		signers:              signers,
 		sender:               responder,
 		receiver:             initiator,
 		kind:                 kind,
-		publicKey:            key.PublicKey,
-		keygenTranscriptHash: key.KeygenTranscriptHash,
+		publicKey:            key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
 		paillierPublicKey:    initiatorPaillierPublicKey,
 		presignContextHash:   presignContextHash,
 	})
@@ -201,7 +201,7 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 		return nil
 	}
 	label := domainLabelKeyShareLogProof
-	switch key.PaillierProofDomain {
+	switch key.state.paillierProofDomain {
 	case domainLabelResharePaillier:
 		label = domainLabelReshareLogProof
 	case domainLabelRefreshPaillier:
@@ -212,15 +212,15 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 	pkBytes, _ := pk.MarshalBinary()
 	return proofDomain(proofDomainContext{
 		label:                label,
-		sessionID:            key.PaillierProofSessionID,
-		threshold:            key.Threshold,
-		parties:              key.Parties,
-		sender:               key.Party,
+		sessionID:            key.state.paillierProofSessionID,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		sender:               key.state.party,
 		kind:                 domainKindLogProof,
 		publicKey:            verificationShare, // verification share point binds this proof to the party's share
 		keygenTranscriptHash: transcriptHash,
 		paillierPublicKey:    pkBytes,
-		resharePlanHash:      key.ResharePlanHash,
+		resharePlanHash:      key.state.resharePlanHash,
 	})
 }
 

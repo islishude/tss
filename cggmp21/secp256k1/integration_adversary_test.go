@@ -57,11 +57,11 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 				wrongS := new(big.Int).Add(sVal.BigInt(), big.NewInt(1))
 				wrongS.Mod(wrongS, secp.Order())
 				p.S = wrongS
-				vs, _ := presignVerifyShare(presign, presign.Party)
+				vs, _ := presignVerifyShare(presign, presign.PartyID())
 				p.PartialEquationHash = partialEquationHash(
-					signID, presign.Party, p.PresignTranscript,
+					signID, presign.PartyID(), p.PresignTranscript,
 					p.PresignContext, digest,
-					presign.LittleR, scalarBytes(p.S),
+					presign.LittleRBytes(), scalarBytes(p.S),
 					vs.KPoint, vs.ChiPoint,
 				)
 			},
@@ -165,7 +165,7 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 		if !ok {
 			t.Fatal("session did not complete")
 		}
-		if !VerifyDigest(s.key.PublicKey, s.digest, sig) {
+		if !VerifyDigest(s.key.PublicKeyBytes(), s.digest, sig) {
 			t.Fatal("valid partials produced invalid aggregate ECDSA signature")
 		}
 	}
@@ -190,15 +190,15 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 			presigns := secpPresign(t, shares, signers)
 
 			for _, r := range presigns {
-				if len(r.VerifyShares) == 0 {
+				if len(r.state.verifyShares) == 0 {
 					continue
 				}
 				var original []byte
 				switch tc.field {
 				case "KPoint":
-					original = r.VerifyShares[0].KPoint
+					original = r.state.verifyShares[0].KPoint
 				case "ChiPoint":
-					original = r.VerifyShares[0].ChiPoint
+					original = r.state.verifyShares[0].ChiPoint
 				}
 				tampered := make([]byte, len(original))
 				copy(tampered, original)
@@ -206,9 +206,9 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 
 				switch tc.field {
 				case "KPoint":
-					r.VerifyShares[0].KPoint = tampered
+					r.state.verifyShares[0].KPoint = tampered
 				case "ChiPoint":
-					r.VerifyShares[0].ChiPoint = tampered
+					r.state.verifyShares[0].ChiPoint = tampered
 				}
 
 				err := r.VerifySignMaterial()
@@ -453,7 +453,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, digest[:],
-		presigns[maliciousSigner].LittleR, scalarBytes(p.S),
+		presigns[maliciousSigner].LittleRBytes(), scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)
 	mutated, err := marshalSignPartialPayload(p)

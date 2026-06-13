@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -75,28 +76,148 @@ type SignRequest struct {
 // MarshalBinary maps it to the canonical private wire record, including a
 // consumed snapshot from the internal claim. JSON encoding is intentionally
 // rejected by [Presign.MarshalJSON] to prevent accidental exposure of secret
-// material.
+// material. Its fields are opaque and copy-returning accessors expose public
+// metadata without permitting mutation of the validated record.
+//
+// A shallow Go copy of Presign is another handle to the same one-use lifecycle
+// state, including the consumed claim and secret material.
 type Presign struct {
-	Version              uint16
-	Party                tss.PartyID
-	Threshold            int
-	Signers              []tss.PartyID
-	R                    []byte
-	LittleR              []byte
-	TranscriptHash       []byte
-	Context              PresignContext
-	ContextHash          []byte
-	AdditiveShift        []byte
-	PublicKey            []byte
-	KeygenTranscriptHash []byte
-	PartiesHash          []byte
-	VerifyShares         []SignVerifyShare
+	state *presignState
+}
 
-	kShare   *secret.Scalar
-	chiShare *secret.Scalar
-	delta    *secret.Scalar
+type presignState struct {
+	version              uint16
+	party                tss.PartyID
+	threshold            int
+	signers              []tss.PartyID
+	r                    []byte
+	littleR              []byte
+	transcriptHash       []byte
+	context              PresignContext
+	contextHash          []byte
+	additiveShift        []byte
+	publicKey            []byte
+	keygenTranscriptHash []byte
+	partiesHash          []byte
+	verifyShares         []SignVerifyShare
+	kShare               *secret.Scalar
+	chiShare             *secret.Scalar
+	delta                *secret.Scalar
+	consumed             *atomic.Bool
+}
 
-	consumed *atomic.Bool
+// Version returns the presign wire version.
+func (p *Presign) Version() uint16 {
+	if p == nil || p.state == nil {
+		return 0
+	}
+	return p.state.version
+}
+
+// PartyID returns the owner of the local presign share.
+func (p *Presign) PartyID() tss.PartyID {
+	if p == nil || p.state == nil {
+		return 0
+	}
+	return p.state.party
+}
+
+// Threshold returns the signing threshold.
+func (p *Presign) Threshold() int {
+	if p == nil || p.state == nil {
+		return 0
+	}
+	return p.state.threshold
+}
+
+// Signers returns a copy of the canonical signer set.
+func (p *Presign) Signers() []tss.PartyID {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.signers)
+}
+
+// RBytes returns a copy of the aggregate nonce point.
+func (p *Presign) RBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.r)
+}
+
+// LittleRBytes returns a copy of the ECDSA r scalar.
+func (p *Presign) LittleRBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.littleR)
+}
+
+// TranscriptHashBytes returns a copy of the presign transcript hash.
+func (p *Presign) TranscriptHashBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.transcriptHash)
+}
+
+// Context returns a copy of the bound presign context.
+func (p *Presign) Context() PresignContext {
+	if p == nil || p.state == nil {
+		return PresignContext{}
+	}
+	out := p.state.context
+	out.DerivationPath = slices.Clone(out.DerivationPath)
+	return out
+}
+
+// ContextHashBytes returns a copy of the bound context hash.
+func (p *Presign) ContextHashBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.contextHash)
+}
+
+// AdditiveShiftBytes returns a copy of the bound HD additive shift.
+func (p *Presign) AdditiveShiftBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.additiveShift)
+}
+
+// PublicKeyBytes returns a copy of the bound group public key.
+func (p *Presign) PublicKeyBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.publicKey)
+}
+
+// KeygenTranscriptHashBytes returns a copy of the bound keygen transcript hash.
+func (p *Presign) KeygenTranscriptHashBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.keygenTranscriptHash)
+}
+
+// PartiesHashBytes returns a copy of the bound participant-set hash.
+func (p *Presign) PartiesHashBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.partiesHash)
+}
+
+// VerifyShares returns deep copies of the per-signer verification records.
+func (p *Presign) VerifyShares() []SignVerifyShare {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return cloneSignVerifyShares(p.state.verifyShares)
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -111,23 +232,23 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	}
 	consumed := IsPresignConsumed(p)
 	return wire.Marshal(presignWire{
-		Party:                p.Party,
-		Threshold:            p.Threshold,
-		Signers:              p.Signers,
-		R:                    p.R,
-		LittleR:              p.LittleR,
-		KShare:               p.kShare,
-		ChiShare:             p.chiShare,
-		Delta:                p.delta,
-		TranscriptHash:       p.TranscriptHash,
-		Context:              p.Context,
-		ContextHash:          p.ContextHash,
-		AdditiveShift:        p.AdditiveShift,
+		Party:                p.state.party,
+		Threshold:            p.state.threshold,
+		Signers:              p.state.signers,
+		R:                    p.state.r,
+		LittleR:              p.state.littleR,
+		KShare:               p.state.kShare,
+		ChiShare:             p.state.chiShare,
+		Delta:                p.state.delta,
+		TranscriptHash:       p.state.transcriptHash,
+		Context:              p.state.context,
+		ContextHash:          p.state.contextHash,
+		AdditiveShift:        p.state.additiveShift,
 		Consumed:             consumed,
-		PublicKey:            p.PublicKey,
-		KeygenTranscriptHash: p.KeygenTranscriptHash,
-		PartiesHash:          p.PartiesHash,
-		VerifyShares:         encodeSignVerifyShares(p.VerifyShares),
+		PublicKey:            p.state.publicKey,
+		KeygenTranscriptHash: p.state.keygenTranscriptHash,
+		PartiesHash:          p.state.partiesHash,
+		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
 	}, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
@@ -136,96 +257,100 @@ const presignIDLabel = "cggmp21-secp256k1-presign-id-v1"
 // ID returns a content-derived presign identifier suitable for use as an
 // idempotency key in a durable [PresignStore]. The returned hash is computed
 // from all persisted presign fields, including secret material, and does not
-// depend on [Presign.TranscriptHash] or the local consumed claim. Tampering with any
+// depend on the public transcript hash or the local consumed claim. Tampering with any
 // persisted field changes the identifier, so a storage layer cannot alter the
 // idempotency key independently of the presign contents.
 func (p *Presign) ID() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(presignIDLabel))
-	wire.WriteHashPart(h, p.ContextHash)
-	wire.WriteHashPart(h, p.AdditiveShift)
-	wire.WriteHashPart(h, p.PublicKey)
-	wire.WriteHashPart(h, p.KeygenTranscriptHash)
-	wire.WriteHashPart(h, p.PartiesHash)
-	for _, id := range p.Signers {
+	wire.WriteHashPart(h, p.state.contextHash)
+	wire.WriteHashPart(h, p.state.additiveShift)
+	wire.WriteHashPart(h, p.state.publicKey)
+	wire.WriteHashPart(h, p.state.keygenTranscriptHash)
+	wire.WriteHashPart(h, p.state.partiesHash)
+	for _, id := range p.state.signers {
 		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
 	}
-	for _, vs := range p.VerifyShares {
+	for _, vs := range p.state.verifyShares {
 		wire.WriteHashPart(h, vs.KPoint)
 		wire.WriteHashPart(h, vs.ChiPoint)
 		proofHash := sha256.Sum256(vs.Proof)
 		wire.WriteHashPart(h, proofHash[:])
 	}
-	wire.WriteHashPart(h, p.R)
-	wire.WriteHashPart(h, p.LittleR)
-	wire.WriteHashPart(h, p.kShare.FixedBytes())
-	wire.WriteHashPart(h, p.chiShare.FixedBytes())
-	wire.WriteHashPart(h, p.delta.FixedBytes())
+	wire.WriteHashPart(h, p.state.r)
+	wire.WriteHashPart(h, p.state.littleR)
+	wire.WriteHashPart(h, p.state.kShare.FixedBytes())
+	wire.WriteHashPart(h, p.state.chiShare.FixedBytes())
+	wire.WriteHashPart(h, p.state.delta.FixedBytes())
 	return h.Sum(nil)
 }
 
 // Validate checks local presign structure and scalar/point encodings.
 func (p *Presign) Validate() error {
-	if p == nil {
+	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
-	if p.consumed == nil {
+	if p.state.consumed == nil {
 		return errors.New("presign claim state unavailable")
 	}
-	if p.Version != tss.Version {
-		return fmt.Errorf("unexpected presign version %d", p.Version)
+	if p.state.version != tss.Version {
+		return fmt.Errorf("unexpected presign version %d", p.state.version)
 	}
-	if p.Threshold <= 0 || p.Threshold > len(p.Signers) {
+	if p.state.threshold <= 0 || p.state.threshold > len(p.state.signers) {
 		return errors.New("invalid presign threshold")
 	}
-	if err := wire.ValidateStrictSortedIDs(p.Signers); err != nil {
+	if err := wire.ValidateStrictSortedIDs(p.state.signers); err != nil {
 		return err
 	}
-	if !tss.ContainsParty(p.Signers, p.Party) {
+	if !tss.ContainsParty(p.state.signers, p.state.party) {
 		return errors.New("presign party is not in signer set")
 	}
-	if _, err := secp.PointFromBytes(p.R); err != nil {
+	if _, err := secp.PointFromBytes(p.state.r); err != nil {
 		return fmt.Errorf("invalid presign R: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.LittleR); err != nil {
+	if _, err := secp.ScalarFromBytes(p.state.littleR); err != nil {
 		return fmt.Errorf("invalid little r: %w", err)
 	}
-	if _, err := secpScalarFromSecret(p.kShare); err != nil {
+	if _, err := secpScalarFromSecret(p.state.kShare); err != nil {
 		return fmt.Errorf("invalid k share: %w", err)
 	}
-	if _, err := secpScalarFromSecret(p.chiShare); err != nil {
+	if _, err := secpScalarFromSecret(p.state.chiShare); err != nil {
 		return fmt.Errorf("invalid chi share: %w", err)
 	}
-	if _, err := secpScalarFromSecret(p.delta); err != nil {
+	if _, err := secpScalarFromSecret(p.state.delta); err != nil {
 		return fmt.Errorf("invalid delta: %w", err)
 	}
-	if len(p.TranscriptHash) != 32 {
+	if len(p.state.transcriptHash) != 32 {
 		return errors.New("invalid presign transcript hash")
 	}
-	if err := validatePresignContext(p.Context); err != nil {
+	if err := validatePresignContext(p.state.context); err != nil {
 		return err
 	}
-	if len(p.ContextHash) != 32 {
+	if len(p.state.contextHash) != 32 {
 		return errors.New("invalid presign context hash")
 	}
-	if len(p.AdditiveShift) > 0 {
-		if _, err := secp.ScalarFromBytes(p.AdditiveShift); err != nil {
+	if len(p.state.additiveShift) > 0 {
+		if _, err := secp.ScalarFromBytes(p.state.additiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
 	}
-	if _, err := secp.PointFromBytes(p.PublicKey); err != nil {
+	if _, err := secp.PointFromBytes(p.state.publicKey); err != nil {
 		return fmt.Errorf("invalid presign public key binding: %w", err)
 	}
-	if len(p.KeygenTranscriptHash) != sha256.Size {
+	if len(p.state.keygenTranscriptHash) != sha256.Size {
 		return errors.New("invalid presign keygen transcript hash binding")
 	}
-	if len(p.PartiesHash) != sha256.Size {
+	if len(p.state.partiesHash) != sha256.Size {
 		return errors.New("invalid presign party-set hash binding")
 	}
-	if !bytes.Equal(presignContextHash(p.Context), p.ContextHash) {
+	if !bytes.Equal(presignContextHash(p.state.context), p.state.contextHash) {
 		return errors.New("presign context hash mismatch")
 	}
-	if err := validateSignVerifyShares(p.Signers, p.VerifyShares); err != nil {
+	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares); err != nil {
 		return fmt.Errorf("invalid presign verify shares: %w", err)
 	}
 	return nil
@@ -238,13 +363,13 @@ func (p *Presign) Validate() error {
 // be caught by transcript mismatch. This method catches malformed proofs or
 // invalid point encodings that may have resulted from storage corruption.
 func (p *Presign) VerifySignMaterial() error {
-	if p == nil {
+	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
-	if err := validateSignVerifyShares(p.Signers, p.VerifyShares); err != nil {
+	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares); err != nil {
 		return err
 	}
-	for _, share := range p.VerifyShares {
+	for _, share := range p.state.verifyShares {
 		if _, err := signprep.UnmarshalProof(share.Proof); err != nil {
 			return fmt.Errorf("verify share party %d: invalid proof: %w", share.Party, err)
 		}
@@ -254,16 +379,22 @@ func (p *Presign) VerifySignMaterial() error {
 
 // Destroy marks the presign consumed and clears its local secret shares.
 func (p *Presign) Destroy() {
-	if p == nil {
+	if p == nil || p.state == nil {
 		return
 	}
-	if p.consumed != nil {
-		p.consumed.Store(true)
+	if p.state.consumed != nil {
+		p.state.consumed.Store(true)
 	}
-	p.kShare.Destroy()
-	p.chiShare.Destroy()
-	p.delta.Destroy()
-	clear(p.AdditiveShift)
+	if p.state.kShare != nil {
+		p.state.kShare.Destroy()
+	}
+	if p.state.chiShare != nil {
+		p.state.chiShare.Destroy()
+	}
+	if p.state.delta != nil {
+		p.state.delta.Destroy()
+	}
+	clear(p.state.additiveShift)
 }
 
 // PresignSession tracks the CGGMP21-style offline presign exchange.
@@ -448,7 +579,7 @@ func (s *PresignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *PresignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.signers), s.key.Party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.signers), s.key.state.party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
@@ -495,7 +626,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		if env.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 proof payload in wrong round"))
 		}
-		if env.From == s.key.Party {
+		if env.From == s.key.state.party {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("self presign round1 proof is not expected"))
 		}
 		if _, ok := s.round1Proofs[env.From]; ok {

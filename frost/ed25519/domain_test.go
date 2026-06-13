@@ -250,11 +250,11 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			hdShares := cachedFrostKeygen(t, 2, 2, true)
 
-			child1, err := DeriveNonHardenedBIP32(hdShares[1].PublicKey, hdShares[1].ChainCode, []uint32{1})
+			child1, err := DeriveNonHardenedBIP32(hdShares[1].state.publicKey, hdShares[1].state.chainCode, []uint32{1})
 			if err != nil {
 				t.Fatal(err)
 			}
-			child2, err := DeriveNonHardenedBIP32(hdShares[1].PublicKey, hdShares[1].ChainCode, []uint32{2})
+			child2, err := DeriveNonHardenedBIP32(hdShares[1].state.publicKey, hdShares[1].state.chainCode, []uint32{2})
 			if err != nil {
 				t.Fatal(err)
 			}

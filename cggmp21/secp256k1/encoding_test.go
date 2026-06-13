@@ -31,7 +31,7 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.PublicKey, shares[1].PublicKey) {
+	if !bytes.Equal(decoded.PublicKeyBytes(), shares[1].PublicKeyBytes()) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
@@ -43,13 +43,13 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	unsorted := (shares[1]).Clone()
-	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
+	unsorted := cloneKeyShareValue(shares[1])
+	unsorted.state.parties[0], unsorted.state.parties[1] = unsorted.state.parties[1], unsorted.state.parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted party set encoded")
 	}
-	nonCanonicalPaillier := (shares[1]).Clone()
-	nonCanonicalPaillier.PaillierPublicKey = append(nonCanonicalPaillier.PaillierPublicKey, ' ')
+	nonCanonicalPaillier := cloneKeyShareValue(shares[1])
+	nonCanonicalPaillier.state.paillierPublicKey = append(nonCanonicalPaillier.state.paillierPublicKey, ' ')
 	if _, err := nonCanonicalPaillier.MarshalBinary(); err == nil {
 		t.Fatal("non-canonical Paillier public key encoded")
 	}
@@ -127,14 +127,14 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 
-	badModulusProof := (shares[1]).Clone()
-	badModulusProof.PaillierPublicKeys[0].Proof = append([]byte(nil), badModulusProof.PaillierPublicKeys[1].Proof...)
+	badModulusProof := cloneKeyShareValue(shares[1])
+	badModulusProof.state.paillierPublicKeys[0].Proof = append([]byte(nil), badModulusProof.state.paillierPublicKeys[1].Proof...)
 	if err := badModulusProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Paillier modulus proof")
 	}
 
-	badRingPedersenProof := (shares[1]).Clone()
-	badRingPedersenProof.RingPedersenPublic[0].Proof = append([]byte(nil), badRingPedersenProof.RingPedersenPublic[1].Proof...)
+	badRingPedersenProof := cloneKeyShareValue(shares[1])
+	badRingPedersenProof.state.ringPedersenPublic[0].Proof = append([]byte(nil), badRingPedersenProof.state.ringPedersenPublic[1].Proof...)
 	if err := badRingPedersenProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Ring-Pedersen proof")
 	}
@@ -159,7 +159,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.TranscriptHash, presigns[1].TranscriptHash) {
+	if !bytes.Equal(decoded.TranscriptHashBytes(), presigns[1].TranscriptHashBytes()) {
 		t.Fatal("presign transcript mismatch after round trip")
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
@@ -173,7 +173,7 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	unsorted := clonePresignForTest(presigns[1])
-	unsorted.Signers[0], unsorted.Signers[1] = unsorted.Signers[1], unsorted.Signers[0]
+	unsorted.state.signers[0], unsorted.state.signers[1] = unsorted.state.signers[1], unsorted.state.signers[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted signer set encoded")
 	}

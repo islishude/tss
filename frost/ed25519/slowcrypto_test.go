@@ -120,9 +120,9 @@ func TestSlowCrypto_Keygen3of5(t *testing.T) {
 		t.Fatalf("expected 5 shares, got %d", len(shares))
 	}
 	// Verify all shares share the same public key.
-	pk := shares[1].PublicKey
+	pk := shares[1].PublicKeyBytes()
 	for i := 2; i <= 5; i++ {
-		if !bytes.Equal(pk, shares[tss.PartyID(i)].PublicKey) {
+		if !bytes.Equal(pk, shares[tss.PartyID(i)].PublicKeyBytes()) {
 			t.Fatalf("party %d public key mismatch", i)
 		}
 	}
@@ -299,7 +299,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 	path := []uint32{0, 17}
 
 	// Derive child public key.
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
+	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -323,7 +323,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 	}
 
 	// Sanity check: signature must not verify against the original key.
-	if stded25519.Verify(stded25519.PublicKey(shares[1].PublicKey), msg, sig) {
+	if stded25519.Verify(stded25519.PublicKey(shares[1].PublicKeyBytes()), msg, sig) {
 		t.Fatal("HD-derived signature incorrectly verified against parent key")
 	}
 }

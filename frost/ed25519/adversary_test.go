@@ -171,7 +171,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 3)
-	parties := tss.SortParties(shares[1].Parties)
+	parties := tss.SortParties(shares[1].state.parties)
 	signers := []tss.PartyID{1, 2}
 	message := []byte("test-message")
 

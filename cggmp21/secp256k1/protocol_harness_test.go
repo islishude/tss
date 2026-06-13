@@ -63,7 +63,7 @@ func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeySha
 func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
 	out := make(map[tss.PartyID]*KeyShare, len(shares))
 	for id, ks := range shares {
-		out[id] = ks.Clone()
+		out[id] = cloneKeyShareValue(ks)
 	}
 	return out
 }
@@ -134,7 +134,7 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 		if sessions[id].pending == nil || sessions[id].pending.share == nil {
 			t.Fatalf("keygen pending share not complete for %d", id)
 		}
-		out[id] = sessions[id].pending.share.Clone()
+		out[id] = cloneKeyShareValue(sessions[id].pending.share)
 	}
 	return out
 }
@@ -168,8 +168,8 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 			t.Fatalf("keygen not complete for %d", id)
 		}
 		if pub == nil {
-			pub = share.PublicKey
-		} else if string(pub) != string(share.PublicKey) {
+			pub = share.state.publicKey
+		} else if string(pub) != string(share.state.publicKey) {
 			t.Fatal("group public key mismatch")
 		}
 		out[id] = share
@@ -268,14 +268,14 @@ func bigOne() *big.Int {
 
 func secpEvidenceContext(share *KeyShare, signers []tss.PartyID, presign *Presign) EvidenceContext {
 	ctx := EvidenceContext{
-		Parties:              append([]tss.PartyID(nil), share.Parties...),
-		PublicKey:            append([]byte(nil), share.PublicKey...),
-		PaillierPublicKeys:   append([]PaillierPublicShare(nil), share.PaillierPublicKeys...),
+		Parties:              append([]tss.PartyID(nil), share.state.parties...),
+		PublicKey:            append([]byte(nil), share.state.publicKey...),
+		PaillierPublicKeys:   append([]PaillierPublicShare(nil), share.state.paillierPublicKeys...),
 		Signers:              append([]tss.PartyID(nil), signers...),
-		KeygenTranscriptHash: append([]byte(nil), share.KeygenTranscriptHash...),
+		KeygenTranscriptHash: append([]byte(nil), share.state.keygenTranscriptHash...),
 	}
 	if presign != nil {
-		ctx.PresignTranscriptHash = append([]byte(nil), presign.TranscriptHash...)
+		ctx.PresignTranscriptHash = append([]byte(nil), presign.state.transcriptHash...)
 	}
 	return ctx
 }
@@ -331,7 +331,7 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 		t.Fatal("missing old shares")
 		return nil, nil
 	}
-	return runCGGMP21ReshareWithDealers(t, oldShares, reference.Parties, newParties, newThreshold)
+	return runCGGMP21ReshareWithDealers(t, oldShares, reference.state.parties, newParties, newThreshold)
 }
 
 func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeyShare, dealerParties, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {

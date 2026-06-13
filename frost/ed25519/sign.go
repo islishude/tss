@@ -76,14 +76,14 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	if err := key.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
 		return nil, nil, err
 	}
 	signers = tss.SortParties(signers)
-	if len(signers) < key.Threshold {
+	if len(signers) < key.state.threshold {
 		return nil, nil, errors.New("not enough signers")
 	}
-	if !tss.ContainsParty(signers, key.Party) {
+	if !tss.ContainsParty(signers, key.state.party) {
 		return nil, nil, errors.New("local party is not in signer set")
 	}
 	limits := DefaultLimits()
@@ -107,7 +107,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
 		}
 		deltaScalar = shift
-		verifyKey, err = DerivePublicKey(key.PublicKey, opts.AdditiveShift)
+		verifyKey, err = DerivePublicKey(key.state.publicKey, opts.AdditiveShift)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -154,7 +154,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
-		From:        key.Party,
+		From:        key.state.party,
 		PayloadType: payloadSignCommitment,
 		Payload:     payload,
 	})
@@ -170,7 +170,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		limits:           limits,
 		message:          append([]byte(nil), message...),
 		signers:          signers,
-		commitments:      map[tss.PartyID]nonceCommitment{key.Party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
+		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
 		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
 		dNonce:           dBytes,
@@ -200,7 +200,7 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.state.parties, s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
@@ -312,12 +312,12 @@ func (s *SignSession) clearNonceBytes() {
 }
 
 func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
-	if key.Threshold < limits.Threshold.MinProductionThreshold {
-		if !limits.Threshold.AllowOneOfOne || key.Threshold != 1 || len(key.Parties) != 1 {
-			return fmt.Errorf("key threshold %d is below production minimum %d", key.Threshold, limits.Threshold.MinProductionThreshold)
+	if key.state.threshold < limits.Threshold.MinProductionThreshold {
+		if !limits.Threshold.AllowOneOfOne || key.state.threshold != 1 || len(key.state.parties) != 1 {
+			return fmt.Errorf("key threshold %d is below production minimum %d", key.state.threshold, limits.Threshold.MinProductionThreshold)
 		}
 	}
-	return tss.ValidateSignerSet(key.Parties, key.Threshold, signers, limits.ThresholdLimits())
+	return tss.ValidateSignerSet(key.state.parties, key.state.threshold, signers, limits.ThresholdLimits())
 }
 
 // Sign runs an in-memory FROST signing exchange for tests and simple integrations.
@@ -375,8 +375,8 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		if err := share.ValidateConsistency(); err != nil {
 			return nil, nil, err
 		}
-		ids[i] = share.Party
-		shares[share.Party] = share
+		ids[i] = share.state.party
+		shares[share.state.party] = share
 	}
 	ids = tss.SortParties(ids)
 	sessionID, err := tss.NewSessionID(nil)
@@ -387,7 +387,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round1 := make([]tss.Envelope, 0, len(signers))
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
-		guard := newInProcessGuard(id, tss.PartySet(shares[id].Parties), sessionID)
+		guard := newInProcessGuard(id, tss.PartySet(shares[id].state.parties), sessionID)
 		session, out, err := StartSignWithOptions(shares[id], sessionID, ids, message, opts, guard)
 		if err != nil {
 			return nil, nil, err

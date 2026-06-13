@@ -85,7 +85,7 @@ func TestFROSTCrossImplementationVectors(t *testing.T) {
 			shares := frostVectorKeygen(t, v.Seed, v.Threshold, v.N)
 
 			// Verify group public key matches.
-			if hex.EncodeToString(shares[0].PublicKey) != v.GroupPublicKey {
+			if hex.EncodeToString(shares[0].state.publicKey) != v.GroupPublicKey {
 				t.Fatal("group public key mismatch — possible wire format or curve operation change")
 			}
 
@@ -107,7 +107,7 @@ func TestFROSTCrossImplementationVectors(t *testing.T) {
 				if err := restored.Validate(); err != nil {
 					t.Fatalf("restored key share validation: %v", err)
 				}
-				if !bytes.Equal(restored.PublicKey, share.PublicKey) {
+				if !bytes.Equal(restored.state.publicKey, share.state.publicKey) {
 					t.Fatal("round-tripped public key mismatch")
 				}
 			}
@@ -134,7 +134,7 @@ func TestFROSTCrossImplementationVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				if !ed25519.Verify(shares[0].PublicKey, msg, storedSig) {
+				if !ed25519.Verify(shares[0].state.publicKey, msg, storedSig) {
 					t.Fatal("stored signature does not verify against group public key")
 				}
 			}

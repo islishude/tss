@@ -341,6 +341,21 @@ Copy-safety tests must mutate an accessor's return value and verify that a secon
 call does not expose the mutation. Apply this to byte slices, maps, commitments,
 public-key encodings, verification shares, transcript hashes, and chain codes.
 
+Long-lived validated protocol state (`KeyShare`, CGGMP21 `Presign`, and
+CGGMP21 `ResharePlan`) must remain opaque:
+
+- reflection tests assert that the public type has no exported fields;
+- byte, slice, map, context-path, and nested-record getters return independent
+  snapshots;
+- shallow key-share and presign copies share `Destroy` and consumed lifecycle
+  state; and
+- session completion accessors return independent secret state that requires a
+  separate `Destroy`.
+
+Reshare-plan wire tests must cover deterministic encoding, round trips, total
+size limits, canonical tag order, exact field sets, old-party verification-share
+order, trailing data rejection, and a golden vector.
+
 ## Coverage and Benchmarks
 
 Coverage is diagnostic, not the security objective. Review coverage by area and

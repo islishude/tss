@@ -51,42 +51,42 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
 func (k *KeyShare) toWire() (*keyShareWire, error) {
-	verificationShares := make([]wire.PartyBytes[tss.PartyID], len(k.VerificationShares))
-	for i, s := range k.VerificationShares {
+	verificationShares := make([]wire.PartyBytes[tss.PartyID], len(k.state.verificationShares))
+	for i, s := range k.state.verificationShares {
 		verificationShares[i] = wire.PartyBytes[tss.PartyID]{Party: s.Party, Bytes: s.PublicKey}
 	}
-	ringPedersenPublic := make([]wire.PartyBytePair[tss.PartyID], len(k.RingPedersenPublic))
-	for i, s := range k.RingPedersenPublic {
+	ringPedersenPublic := make([]wire.PartyBytePair[tss.PartyID], len(k.state.ringPedersenPublic))
+	for i, s := range k.state.ringPedersenPublic {
 		ringPedersenPublic[i] = wire.PartyBytePair[tss.PartyID]{Party: s.Party, First: s.Params, Second: s.Proof}
 	}
-	paillierPublicKeys := make([]wire.PartyBytePair[tss.PartyID], len(k.PaillierPublicKeys))
-	for i, s := range k.PaillierPublicKeys {
+	paillierPublicKeys := make([]wire.PartyBytePair[tss.PartyID], len(k.state.paillierPublicKeys))
+	for i, s := range k.state.paillierPublicKeys {
 		paillierPublicKeys[i] = wire.PartyBytePair[tss.PartyID]{Party: s.Party, First: s.PublicKey, Second: s.Proof}
 	}
 	return &keyShareWire{
-		Party:                  k.Party,
-		Threshold:              k.Threshold,
-		Parties:                k.Parties,
-		PublicKey:              k.PublicKey,
-		ChainCode:              k.ChainCode,
-		Secret:                 k.secret,
-		GroupCommitments:       k.GroupCommitments,
+		Party:                  k.state.party,
+		Threshold:              k.state.threshold,
+		Parties:                k.state.parties,
+		PublicKey:              k.state.publicKey,
+		ChainCode:              k.state.chainCode,
+		Secret:                 k.state.secret,
+		GroupCommitments:       k.state.groupCommitments,
 		VerificationShares:     verificationShares,
-		PaillierPublicKey:      k.PaillierPublicKey,
-		PaillierPrivateKey:     k.paillierPrivateKey,
-		PaillierProof:          k.PaillierProof,
-		RingPedersenParams:     k.RingPedersenParams,
-		RingPedersenProof:      k.RingPedersenProof,
+		PaillierPublicKey:      k.state.paillierPublicKey,
+		PaillierPrivateKey:     k.state.paillierPrivateKey,
+		PaillierProof:          k.state.paillierProof,
+		RingPedersenParams:     k.state.ringPedersenParams,
+		RingPedersenProof:      k.state.ringPedersenProof,
 		RingPedersenPublic:     ringPedersenPublic,
 		PaillierPublicKeys:     paillierPublicKeys,
-		ShareProof:             k.ShareProof,
-		KeygenTranscriptHash:   k.KeygenTranscriptHash,
-		PaillierProofSessionID: k.PaillierProofSessionID[:],
-		PaillierProofDomain:    k.PaillierProofDomain,
-		LogCiphertext:          k.LogCiphertext,
-		LogProof:               k.LogProof,
-		KeygenConfirmations:    k.KeygenConfirmations,
-		ResharePlanHash:        k.ResharePlanHash,
+		ShareProof:             k.state.shareProof,
+		KeygenTranscriptHash:   k.state.keygenTranscriptHash,
+		PaillierProofSessionID: k.state.paillierProofSessionID[:],
+		PaillierProofDomain:    k.state.paillierProofDomain,
+		LogCiphertext:          k.state.logCiphertext,
+		LogProof:               k.state.logProof,
+		KeygenConfirmations:    k.state.keygenConfirmations,
+		ResharePlanHash:        k.state.resharePlanHash,
 	}, nil
 }
 
@@ -180,32 +180,32 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	for i, s := range w.PaillierPublicKeys {
 		paillierPublicKeys[i] = PaillierPublicShare{Party: s.Party, PublicKey: s.First, Proof: s.Second}
 	}
-	k := &KeyShare{
-		Version:                tss.Version,
-		Party:                  w.Party,
-		Threshold:              w.Threshold,
-		Parties:                w.Parties,
-		PublicKey:              w.PublicKey,
-		ChainCode:              w.ChainCode,
+	k := &KeyShare{state: &keyShareState{
+		version:                tss.Version,
+		party:                  w.Party,
+		threshold:              w.Threshold,
+		parties:                w.Parties,
+		publicKey:              w.PublicKey,
+		chainCode:              w.ChainCode,
 		secret:                 w.Secret,
-		GroupCommitments:       w.GroupCommitments,
-		VerificationShares:     verificationShares,
-		PaillierPublicKey:      w.PaillierPublicKey,
+		groupCommitments:       w.GroupCommitments,
+		verificationShares:     verificationShares,
+		paillierPublicKey:      w.PaillierPublicKey,
 		paillierPrivateKey:     w.PaillierPrivateKey,
-		PaillierProof:          w.PaillierProof,
-		RingPedersenParams:     w.RingPedersenParams,
-		RingPedersenProof:      w.RingPedersenProof,
-		RingPedersenPublic:     ringPedersenPublic,
-		PaillierPublicKeys:     paillierPublicKeys,
-		ShareProof:             w.ShareProof,
-		KeygenTranscriptHash:   w.KeygenTranscriptHash,
-		PaillierProofSessionID: sid,
-		PaillierProofDomain:    w.PaillierProofDomain,
-		LogCiphertext:          w.LogCiphertext,
-		LogProof:               w.LogProof,
-		KeygenConfirmations:    w.KeygenConfirmations,
-		ResharePlanHash:        w.ResharePlanHash,
-	}
+		paillierProof:          w.PaillierProof,
+		ringPedersenParams:     w.RingPedersenParams,
+		ringPedersenProof:      w.RingPedersenProof,
+		ringPedersenPublic:     ringPedersenPublic,
+		paillierPublicKeys:     paillierPublicKeys,
+		shareProof:             w.ShareProof,
+		keygenTranscriptHash:   w.KeygenTranscriptHash,
+		paillierProofSessionID: sid,
+		paillierProofDomain:    w.PaillierProofDomain,
+		logCiphertext:          w.LogCiphertext,
+		logProof:               w.LogProof,
+		keygenConfirmations:    w.KeygenConfirmations,
+		resharePlanHash:        w.ResharePlanHash,
+	}}
 	if err := k.Validate(); err != nil {
 		return nil, err
 	}
@@ -280,26 +280,26 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	}
 	consumed := new(atomic.Bool)
 	consumed.Store(w.Consumed)
-	p := &Presign{
-		Version:              tss.Version,
-		Party:                w.Party,
-		Threshold:            w.Threshold,
-		Signers:              w.Signers,
-		R:                    w.R,
-		LittleR:              w.LittleR,
-		TranscriptHash:       w.TranscriptHash,
-		Context:              w.Context,
-		ContextHash:          w.ContextHash,
-		AdditiveShift:        w.AdditiveShift,
-		PublicKey:            w.PublicKey,
-		KeygenTranscriptHash: w.KeygenTranscriptHash,
-		PartiesHash:          w.PartiesHash,
-		VerifyShares:         verifyShares,
+	p := &Presign{state: &presignState{
+		version:              tss.Version,
+		party:                w.Party,
+		threshold:            w.Threshold,
+		signers:              w.Signers,
+		r:                    w.R,
+		littleR:              w.LittleR,
+		transcriptHash:       w.TranscriptHash,
+		context:              w.Context,
+		contextHash:          w.ContextHash,
+		additiveShift:        w.AdditiveShift,
+		publicKey:            w.PublicKey,
+		keygenTranscriptHash: w.KeygenTranscriptHash,
+		partiesHash:          w.PartiesHash,
+		verifyShares:         verifyShares,
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
 		consumed:             consumed,
-	}
+	}}
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}

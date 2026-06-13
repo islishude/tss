@@ -213,7 +213,7 @@ func TestThresholdECDSA_StartSignRequiresPresignStore(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := testCGGMP21Guard(shares[1].Party, tss.PartySet(shares[1].Parties), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
 	session, out, err := StartSign(shares[1], presigns[1], sessionID, SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("missing store"),
@@ -397,7 +397,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.PaillierPublicKey = shares[1].PaillierPublicKey
+	payload.PaillierPublicKey = shares[1].PaillierPublicKeyBytes()
 	mutated, err := marshalPresignRound1Payload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -497,7 +497,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 				if !ok {
 					t.Fatal("expected sign session to produce a signature")
 				}
-				if !VerifyDigest(shares[tc.signers[0]].PublicKey, digest[:], sig) {
+				if !VerifyDigest(shares[tc.signers[0]].PublicKeyBytes(), digest[:], sig) {
 					t.Fatal("ECDSA signature from round-tripped presign did not verify")
 				}
 			}
@@ -511,8 +511,8 @@ func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
 	presign := clonePresignForTest(presigns[1])
-	presign.KeygenTranscriptHash = append([]byte(nil), presign.KeygenTranscriptHash...)
-	presign.KeygenTranscriptHash[0] ^= 1
+	presign.state.keygenTranscriptHash = append([]byte(nil), presign.state.keygenTranscriptHash...)
+	presign.state.keygenTranscriptHash[0] ^= 1
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

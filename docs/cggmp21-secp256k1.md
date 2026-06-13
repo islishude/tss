@@ -14,39 +14,25 @@ The `cggmp21/secp256k1` package implements a ([CGGMP21-style](https://eprint.iac
 
 The signing path never transmits or reconstructs private key shares or nonce shares. Each presign record is strictly one-use; reuse is caught before any partial signature leaves the process.
 
-## KeyShare Structure
+## KeyShare API and Ownership
 
-```go
-type KeyShare struct {
-    Version                 uint16
-    Party                   tss.PartyID
-    Threshold               int
-    Parties                 []tss.PartyID
-    PublicKey               []byte        // group secp256k1 public key (33 bytes compressed)
-    ChainCode               []byte        // optional BIP32 chain code (32 bytes, XOR-aggregated)
-    secret                  *secret.Scalar // unexported: local scalar share x_i (fixed 32 bytes)
-    GroupCommitments        [][]byte
-    VerificationShares      []VerificationShare
-    PaillierPublicKey       []byte        // local Paillier public key (TLV-encoded)
-    paillierPrivateKey      []byte        // unexported: local Paillier private key (λ, μ)
-    PaillierProof           []byte        // Πmod modulus proof
-    PaillierPublicKeys      []PaillierPublicShare
-    RingPedersenParams      []byte        // local (N,s,t)
-    RingPedersenProof       []byte        // Πprm Ring-Pedersen proof
-    RingPedersenPublic      []RingPedersenPublicShare
-    PaillierProofSessionID  tss.SessionID
-    PaillierProofDomain     string
-    ResharePlanHash         []byte        // only for reshare shares; binds the reshare plan into Paillier/RP/log proofs
-    ShareProof              []byte        // Schnorr proof of discrete-log knowledge
-    KeygenTranscriptHash    []byte
-    LogCiphertext           []byte        // Πlog* ciphertext (LogStarProof): Enc(x_i, ρ) under own Paillier key
-    LogProof                []byte        // Πlog* proof (LogStarProof) of discrete-log equality with Ring-Pedersen commitment
-    KeygenConfirmations     [][]byte      // canonical KeygenConfirmation evidence, sorted by Parties
-    // logRandomness          []byte      // unexported: Paillier randomness for log ciphertext
-}
-```
+`KeyShare` is an opaque handle. All protocol state, including public metadata,
+is stored in private package state so callers cannot invalidate a validated
+share by mutating slices or nested records.
 
-The `secret` and `paillierPrivateKey` fields are unexported. The local secp256k1 share is stored as `internal/secret.Scalar` fixed-length bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact secret material. `Destroy()` zeroes secret material in place. `KeyShare()` accessors return caller-owned copies.
+Scalar metadata is exposed by value through `Version()`, `PartyID()`, and
+`Threshold()`. Byte getters such as `PublicKeyBytes()`, `ChainCodeBytes()`,
+`PaillierPublicKeyBytes()`, and `KeygenTranscriptHashBytes()` return copies.
+Collection getters such as `Parties()`, `GroupCommitments()`,
+`VerificationShares()`, `PaillierPublicKeys()`, `RingPedersenPublic()`, and
+`KeygenConfirmations()` return deep copies, including nested byte slices.
+
+The local secp256k1 share is stored as `internal/secret.Scalar` fixed-length
+bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` redact or reject
+secret material. `Destroy()` zeroes package-owned secret material in place. A
+shallow Go copy is another handle to the same lifecycle state, so destroying
+either handle destroys both. `Complete()` and session `KeyShare()` accessors
+return independently owned shares that must each be destroyed separately.
 
 ### MPC Material Requirement
 
@@ -135,9 +121,20 @@ Paillier proof domains bind `(protocol, version, session, threshold, parties, se
 
 ## Presign (Offline Phase)
 
-Presign produces a one-use `Presign` record containing local nonce shares and per-party verification material. It must be run in advance of signing and the result persisted securely. `PresignSession.Presign()` returns a deep copy of the completed record so callers can persist or hand it to the online signer without mutating session-owned material.
+Presign produces a one-use opaque `Presign` record containing local nonce shares
+and per-party verification material. It must be run in advance of signing and
+the result persisted securely. Public metadata is available only through
+copy-returning getters such as `Signers()`, `Context()`,
+`TranscriptHashBytes()`, `ContextHashBytes()`, `PublicKeyBytes()`, and
+`VerifyShares()`. Nested derivation paths, proof records, and point encodings are
+deep copied. A shallow Go copy shares the same secret and consumed lifecycle
+state and cannot bypass `Destroy()` or one-use claiming.
 
-The `Presign` record includes a `VerifyShares` field containing one `SignVerifyShare` per signer:
+`PresignSession.Presign()` returns an independently owned completed record so
+callers can persist or hand it to the online signer without mutating
+session-owned material.
+
+The `Presign.VerifyShares()` snapshot contains one `SignVerifyShare` per signer:
 
 ```go
 type SignVerifyShare struct {
@@ -341,7 +338,25 @@ Refresh commitment validation rejects any non-empty degree-zero commitment. Afte
 
 ## Reshare
 
-Reshare allows changing the participant set and threshold while preserving the group public key and chain code. A `ResharePlan` fixes the old party set, dealer subset, new receiver set, thresholds, old commitments, old verification shares, chain code, and session id before any message is accepted. The canonical `ResharePlan.Digest()` is bound into new-receiver Paillier/Ring-Pedersen proofs and into the final reshare `KeyShare` proof domains. Dealers are an agreed subset of old parties with size at least the old threshold. Parties in the new set act as receivers and generate fresh Paillier/Ring-Pedersen material for the new key share.
+Reshare allows changing the participant set and threshold while preserving the
+group public key and chain code. `NewResharePlan` returns an opaque
+`*ResharePlan` fixing the old party set, dealer subset, new receiver set,
+thresholds, old commitments, old verification shares, chain code, and session
+id before any message is accepted. Metadata getters return values or deep
+copies. The canonical `ResharePlan.Digest()` is bound into new-receiver
+Paillier/Ring-Pedersen proofs and into the final reshare `KeyShare` proof
+domains.
+
+`ResharePlan.MarshalBinary()` uses the canonical
+`cggmp21.secp256k1.reshare-plan` TLV record. Verification shares are encoded in
+old-party order. `UnmarshalResharePlan()` rejects missing, duplicate, reordered,
+oversized, or trailing fields and runs full plan validation before returning.
+Persist or distribute only these canonical bytes, not an application-defined
+JSON shape.
+
+Dealers are an agreed subset of old parties with size at least the old
+threshold. Parties in the new set act as receivers and generate fresh
+Paillier/Ring-Pedersen material for the new key share.
 
 Each new receiver first:
 
@@ -675,6 +690,8 @@ ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx, guard)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
 // presign ownership has moved from the session to the caller; persist it immediately.
+signers := presign.Signers() // caller-owned copy
+context := presign.Context() // includes a copied derivation path
 ```
 
 ### Online Signing
@@ -700,6 +717,8 @@ newShare, ok := rs.KeyShare()
 
 ```go
 plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold)
+rawPlan, err := plan.MarshalBinary()
+plan, err = UnmarshalResharePlan(rawPlan)
 dealer, out, err := StartReshareDealer(oldShare, plan, rng, guard)
 receiver, out, err := StartReshareReceiver(plan, localParty, rng, guard)
 overlap, out, err := StartReshareOverlap(oldShare, plan, rng, guard)
@@ -719,6 +738,7 @@ ok := IsPresignConsumed(presign)
 ```go
 share, err := UnmarshalKeyShare(raw)
 presign, err := UnmarshalPresign(raw)
+plan, err := UnmarshalResharePlan(rawPlan)
 pubKey, sig, err := Sign(message, shares, ctx) // in-memory exchange
 ```
 

@@ -100,16 +100,16 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localProofShare := &KeyShare{
-		Party:                  s.cfg.Self,
-		Threshold:              s.cfg.Threshold,
-		Parties:                s.cfg.Parties,
-		PublicKey:              groupCommitments[0],
-		PaillierPublicKey:      localPaillierPub,
-		KeygenTranscriptHash:   transcriptHash,
-		PaillierProofSessionID: s.cfg.SessionID,
-		PaillierProofDomain:    domainLabelKeygenModulus,
-	}
+	localProofShare := &KeyShare{state: &keyShareState{
+		party:                  s.cfg.Self,
+		threshold:              s.cfg.Threshold,
+		parties:                s.cfg.Parties,
+		publicKey:              groupCommitments[0],
+		paillierPublicKey:      localPaillierPub,
+		keygenTranscriptHash:   transcriptHash,
+		paillierProofSessionID: s.cfg.SessionID,
+		paillierProofDomain:    domainLabelKeygenModulus,
+	}}
 	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, uint32(s.cfg.Self))
 	if err != nil {
 		return nil, err
@@ -123,28 +123,28 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	share := &KeyShare{
-		Version:                tss.Version,
-		Party:                  s.cfg.Self,
-		Threshold:              s.cfg.Threshold,
-		Parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
-		PublicKey:              append([]byte(nil), groupCommitments[0]...),
-		ChainCode:              nil, // filled in after confirmation round
+	share := &KeyShare{state: &keyShareState{
+		version:                tss.Version,
+		party:                  s.cfg.Self,
+		threshold:              s.cfg.Threshold,
+		parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
+		publicKey:              append([]byte(nil), groupCommitments[0]...),
+		chainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
-		GroupCommitments:       groupCommitments,
-		VerificationShares:     verificationShares,
-		PaillierPublicKey:      localPaillierPub,
+		groupCommitments:       groupCommitments,
+		verificationShares:     verificationShares,
+		paillierPublicKey:      localPaillierPub,
 		paillierPrivateKey:     localPaillierPriv,
-		PaillierProof:          localPaillierProofBytes,
-		PaillierPublicKeys:     s.sortedPaillierPublicKeys(),
-		RingPedersenParams:     append([]byte(nil), localRingPedersen.Params...),
-		RingPedersenProof:      append([]byte(nil), localRingPedersen.Proof...),
-		RingPedersenPublic:     s.sortedRingPedersenPublic(),
-		PaillierProofSessionID: s.cfg.SessionID,
-		PaillierProofDomain:    domainLabelKeygenModulus,
-		ShareProof:             shareProofBytes,
-		KeygenTranscriptHash:   transcriptHash,
-	}
+		paillierProof:          localPaillierProofBytes,
+		paillierPublicKeys:     s.sortedPaillierPublicKeys(),
+		ringPedersenParams:     append([]byte(nil), localRingPedersen.Params...),
+		ringPedersenProof:      append([]byte(nil), localRingPedersen.Proof...),
+		ringPedersenPublic:     s.sortedRingPedersenPublic(),
+		paillierProofSessionID: s.cfg.SessionID,
+		paillierProofDomain:    domainLabelKeygenModulus,
+		shareProof:             shareProofBytes,
+		keygenTranscriptHash:   transcriptHash,
+	}}
 	// Π^log*: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i,
 	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.paillier.Encrypt(s.cfg.Reader(), secret)
@@ -179,10 +179,10 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	share.LogCiphertext = logCiphertext.Bytes()
-	share.LogProof = logProofBytes
+	share.state.logCiphertext = logCiphertext.Bytes()
+	share.state.logProof = logProofBytes
 	// Carry the local chain code into the confirmation for commit-reveal.
-	share.ChainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
+	share.state.chainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
 	if err := share.validateWithoutConfirmations(); err != nil {
 		return nil, err
 	}
@@ -192,7 +192,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	encodedConfirmation, err := confirmation.MarshalBinary()
 	// Don't leak the per-party chain code into the KeyShare — overwritten with aggregate after confirmations.
-	share.ChainCode = nil
+	share.state.chainCode = nil
 	if err != nil {
 		return nil, err
 	}

@@ -31,19 +31,19 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	}
 
 	// Verify structural integrity of the restored share.
-	if string(restored.PublicKey) != string(shares[1].PublicKey) {
+	if string(restored.PublicKeyBytes()) != string(shares[1].PublicKeyBytes()) {
 		t.Error("PublicKey mismatch after round-trip")
 	}
-	if restored.Party != shares[1].Party {
+	if restored.PartyID() != shares[1].PartyID() {
 		t.Error("Party mismatch after round-trip")
 	}
-	if restored.Threshold != shares[1].Threshold {
+	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !tss.PartySet(restored.Parties).Contains(restored.Party) {
+	if !tss.PartySet(restored.Parties()).Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
-	if string(restored.KeygenTranscriptHash) != string(shares[1].KeygenTranscriptHash) {
+	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {
 		t.Error("KeygenTranscriptHash mismatch after round-trip")
 	}
 
@@ -68,7 +68,7 @@ func TestFROSTKeyShareDestroyPersistence(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 2)
-	share := shares[1].Clone()
+	share := cloneKeyShareValue(shares[1])
 
 	// Before destroy, signing works.
 	pub, sig, err := Sign([]byte("pre-destroy"), []*KeyShare{share, shares[2]})

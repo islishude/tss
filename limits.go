@@ -47,6 +47,8 @@ const (
 	DefaultMaxSerializedKeyShareBytes = 2 << 20
 	// DefaultMaxSerializedPresignBytes caps serialized Presign size (2 MiB).
 	DefaultMaxSerializedPresignBytes = 2 << 20
+	// DefaultMaxSerializedResharePlanBytes caps serialized public reshare plans (1 MiB).
+	DefaultMaxSerializedResharePlanBytes = 1 << 20
 )
 
 const (

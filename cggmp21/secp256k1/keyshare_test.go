@@ -12,16 +12,16 @@ import (
 // Secret and crypto material fields are left empty — this is sufficient for
 // exercising accessors, formatting, and serialization rejection.
 func minimalKeyShare() *KeyShare {
-	return &KeyShare{
-		Version:                tss.Version,
-		Party:                  1,
-		Threshold:              2,
-		Parties:                []tss.PartyID{1, 2, 3},
-		PublicKey:              make([]byte, 33),
-		ChainCode:              make([]byte, 32),
-		PaillierProofDomain:    "keygen.modulus",
-		PaillierProofSessionID: tss.SessionID{},
-	}
+	return &KeyShare{state: &keyShareState{
+		version:                tss.Version,
+		party:                  1,
+		threshold:              2,
+		parties:                []tss.PartyID{1, 2, 3},
+		publicKey:              make([]byte, 33),
+		chainCode:              make([]byte, 32),
+		paillierProofDomain:    "keygen.modulus",
+		paillierProofSessionID: tss.SessionID{},
+	}}
 }
 
 func TestFast_KeyShareAlgorithm(t *testing.T) {
@@ -69,10 +69,10 @@ func TestFast_KeyShareRedactedStringNoSecrets(t *testing.T) {
 func TestFast_KeySharePublicKeyBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.PublicKey[0] = 0x02
+	k.state.publicKey[0] = 0x02
 	cp := k.PublicKeyBytes()
 	cp[0] = 0x03
-	if k.PublicKey[0] != 0x02 {
+	if k.state.publicKey[0] != 0x02 {
 		t.Fatal("PublicKeyBytes() did not return a copy")
 	}
 }
@@ -80,10 +80,10 @@ func TestFast_KeySharePublicKeyBytesReturnsCopy(t *testing.T) {
 func TestFast_KeyShareChainCodeBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.ChainCode[0] = 0xaa
+	k.state.chainCode[0] = 0xaa
 	cp := k.ChainCodeBytes()
 	cp[0] = 0xbb
-	if k.ChainCode[0] != 0xaa {
+	if k.state.chainCode[0] != 0xaa {
 		t.Fatal("ChainCodeBytes() did not return a copy")
 	}
 }
@@ -91,10 +91,10 @@ func TestFast_KeyShareChainCodeBytesReturnsCopy(t *testing.T) {
 func TestFast_KeyShareShareProofBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.ShareProof = []byte{0x01, 0x02, 0x03}
+	k.state.shareProof = []byte{0x01, 0x02, 0x03}
 	cp := k.ShareProofBytes()
 	cp[0] = 0xff
-	if k.ShareProof[0] != 0x01 {
+	if k.state.shareProof[0] != 0x01 {
 		t.Fatal("ShareProofBytes() did not return a copy")
 	}
 }
@@ -102,26 +102,26 @@ func TestFast_KeyShareShareProofBytesReturnsCopy(t *testing.T) {
 func TestFast_KeyShareKeygenTranscriptHashBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.KeygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
+	k.state.keygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
 	cp := k.KeygenTranscriptHashBytes()
 	cp[0] = 0x00
-	if k.KeygenTranscriptHash[0] != 0xde {
+	if k.state.keygenTranscriptHash[0] != 0xde {
 		t.Fatal("KeygenTranscriptHashBytes() did not return a copy")
 	}
 }
 
-func TestFast_KeyShareGroupCommitmentsCopyReturnsCopy(t *testing.T) {
+func TestFast_KeyShareGroupCommitmentsReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.GroupCommitments = [][]byte{{0x01, 0x02}, {0x03, 0x04}}
-	cp := k.GroupCommitmentsCopy()
+	k.state.groupCommitments = [][]byte{{0x01, 0x02}, {0x03, 0x04}}
+	cp := k.GroupCommitments()
 	cp[0][0] = 0xff
-	if k.GroupCommitments[0][0] != 0x01 {
-		t.Fatal("GroupCommitmentsCopy() did not deep-copy inner slices")
+	if k.state.groupCommitments[0][0] != 0x01 {
+		t.Fatal("GroupCommitments() did not deep-copy inner slices")
 	}
 	cp[0] = []byte{0x99}
-	if len(k.GroupCommitments[0]) != 2 {
-		t.Fatal("GroupCommitmentsCopy() did not deep-copy outer slice")
+	if len(k.state.groupCommitments[0]) != 2 {
+		t.Fatal("GroupCommitments() did not deep-copy outer slice")
 	}
 }
 
@@ -137,8 +137,8 @@ func TestFast_KeyShareNilAccessors(t *testing.T) {
 	if b := nilKey.KeygenTranscriptHashBytes(); b != nil {
 		t.Fatal("nil KeygenTranscriptHashBytes() should return nil")
 	}
-	if b := nilKey.GroupCommitmentsCopy(); b != nil {
-		t.Fatal("nil GroupCommitmentsCopy() should return nil")
+	if b := nilKey.GroupCommitments(); b != nil {
+		t.Fatal("nil GroupCommitments() should return nil")
 	}
 }
 

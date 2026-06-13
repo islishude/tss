@@ -110,9 +110,9 @@ func TestSlowCrypto_Keygen3of5Production(t *testing.T) {
 		t.Fatalf("expected 5 shares, got %d", len(shares))
 	}
 	// Verify all shares share the same public key.
-	pk := shares[1].PublicKey
+	pk := shares[1].PublicKeyBytes()
 	for i := 2; i <= 5; i++ {
-		if !bytes.Equal(pk, shares[tss.PartyID(i)].PublicKey) {
+		if !bytes.Equal(pk, shares[tss.PartyID(i)].PublicKeyBytes()) {
 			t.Fatalf("party %d public key mismatch", i)
 		}
 	}
@@ -206,7 +206,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 
 	// Verify group public key preserved.
 	for _, party := range parties {
-		if !bytes.Equal(shares[party].PublicKey, refreshed[party].PublicKey) {
+		if !bytes.Equal(shares[party].PublicKeyBytes(), refreshed[party].PublicKeyBytes()) {
 			t.Fatalf("party %d public key changed after refresh", party)
 		}
 	}
@@ -236,7 +236,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	path := []uint32{0, 17}
 
 	// Verify derivation produces valid child key.
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKey, shares[1].ChainCode, path)
+	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
 	if err != nil {
 		t.Fatal(err)
 	}

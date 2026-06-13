@@ -17,7 +17,7 @@ func TestDerivePublicKey(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 1, 1)
-	pub := shares[1].PublicKey
+	pub := shares[1].state.publicKey
 
 	t.Run("nil shift returns original", func(t *testing.T) {
 		t.Parallel()
@@ -130,8 +130,8 @@ func TestDeriveNonHardenedBIP32EmptyPathReturnsParent(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygenHD(t, 1, 1)
-	pub := shares[1].PublicKey
-	cc := shares[1].ChainCode
+	pub := shares[1].state.publicKey
+	cc := shares[1].state.chainCode
 
 	tests := []struct {
 		name string
@@ -169,10 +169,10 @@ func TestDeriveNonHardenedBIP32RejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 
 	hdShares := frostKeygenHD(t, 1, 1)
-	hdPub := hdShares[1].PublicKey
-	hdChain := hdShares[1].ChainCode
+	hdPub := hdShares[1].state.publicKey
+	hdChain := hdShares[1].state.chainCode
 	nonHDShares := frostKeygen(t, 1, 1)
-	nonHDPub := nonHDShares[1].PublicKey
+	nonHDPub := nonHDShares[1].state.publicKey
 
 	tests := []struct {
 		name    string
@@ -248,8 +248,8 @@ func TestDeriveNonHardenedBIP32SingleLevel(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygenHD(t, 1, 1)
-	pub := shares[1].PublicKey
-	cc := shares[1].ChainCode
+	pub := shares[1].state.publicKey
+	cc := shares[1].state.chainCode
 
 	result, err := DeriveNonHardenedBIP32(pub, cc, []uint32{0})
 	if err != nil {
@@ -274,8 +274,8 @@ func TestDeriveNonHardenedBIP32Determinism(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygenHD(t, 1, 1)
-	pub := shares[1].PublicKey
-	cc := shares[1].ChainCode
+	pub := shares[1].state.publicKey
+	cc := shares[1].state.chainCode
 	path := []uint32{0, 1, 2}
 
 	r1, err := DeriveNonHardenedBIP32(pub, cc, path)

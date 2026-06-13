@@ -146,19 +146,19 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	if err := validateReshareTarget(newParties, newThreshold, limits); err != nil {
 		return nil, nil, err
 	}
-	if config.Self != oldKey.Party {
+	if config.Self != oldKey.state.party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	oldParties := append([]tss.PartyID(nil), oldKey.Parties...)
+	oldParties := append([]tss.PartyID(nil), oldKey.state.parties...)
 	// Fix config.Parties to the old party set so blame evidence is deterministic.
 	config.Parties = oldParties
-	isRecipient := tss.ContainsParty(newParties, oldKey.Party)
+	isRecipient := tss.ContainsParty(newParties, oldKey.state.party)
 
 	// Compute w_i = λ_i(old, 0) * s_i (mod L).
-	lambda, err := lagrangeCoefficientScalar(oldKey.Party, oldParties)
+	lambda, err := lagrangeCoefficientScalar(oldKey.state.party, oldParties)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -181,30 +181,30 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.PublicKeyBytes(),
-		chainCode:    append([]byte(nil), oldKey.ChainCode...),
+		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   oldParties,
 		newParties:   newParties,
 		newThreshold: newThreshold,
 		isRecipient:  isRecipient,
-		selfID:       oldKey.Party,
+		selfID:       oldKey.state.party,
 		cfg:          config,
 		log:          config.Logger(),
 		limits:       limits,
-		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		commits:      map[tss.PartyID][][]byte{oldKey.state.party: commitments},
+		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	out := []tss.Envelope{commitEnv}
 	for _, id := range newParties {
-		if id == oldKey.Party {
+		if id == oldKey.state.party {
 			continue
 		}
 		share := evalScalarPolynomial(poly, id)
@@ -213,7 +213,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true)
+		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload, true)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -293,18 +293,18 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if config.Self != oldKey.Party {
+	if config.Self != oldKey.state.party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	parties := append([]tss.PartyID(nil), oldKey.Parties...)
+	parties := append([]tss.PartyID(nil), oldKey.state.parties...)
 	config.Parties = parties
-	config.Threshold = oldKey.Threshold
+	config.Threshold = oldKey.state.threshold
 	// Zero-coefficient polynomial preserves the group secret.
 	zero := fed.NewScalar()
-	poly, err := randomScalarPolynomial(config.Reader(), oldKey.Threshold, zero)
+	poly, err := randomScalarPolynomial(config.Reader(), oldKey.state.threshold, zero)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -316,31 +316,31 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.PublicKeyBytes(),
-		chainCode:    append([]byte(nil), oldKey.ChainCode...),
+		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   parties,
 		newParties:   parties,
-		newThreshold: oldKey.Threshold,
+		newThreshold: oldKey.state.threshold,
 		isRecipient:  true,
-		selfID:       oldKey.Party,
+		selfID:       oldKey.state.party,
 		refreshMode:  true,
 		cfg:          config,
 		log:          config.Logger(),
 		limits:       limits,
-		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
-		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		commits:      map[tss.PartyID][][]byte{oldKey.state.party: commitments},
+		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.Party, 0, payloadReshareCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload, false)
 	if err != nil {
 		return nil, nil, err
 	}
 	out := []tss.Envelope{commitEnv}
 	for _, id := range parties {
-		if id == oldKey.Party {
+		if id == oldKey.state.party {
 			continue
 		}
 		share := evalScalarPolynomial(poly, id)
@@ -349,7 +349,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.Party, id, payloadReshareShare, payload, true)
+		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload, true)
 		if err != nil {
 			return nil, nil, err
 		}

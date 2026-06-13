@@ -52,14 +52,14 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		return nil, errors.New("nil key share")
 	}
 	return &KeygenConfirmation{
-		SessionID:       k.PaillierProofSessionID,
-		Sender:          k.Party,
-		Threshold:       k.Threshold,
-		Parties:         slices.Clone(k.Parties),
-		PublicKey:       slices.Clone(k.PublicKey),
-		TranscriptHash:  slices.Clone(k.KeygenTranscriptHash),
-		CommitmentsHash: keygenCommitmentsHash(k.GroupCommitments),
-		ChainCode:       slices.Clone(k.ChainCode),
+		SessionID:       k.state.paillierProofSessionID,
+		Sender:          k.state.party,
+		Threshold:       k.state.threshold,
+		Parties:         slices.Clone(k.state.parties),
+		PublicKey:       slices.Clone(k.state.publicKey),
+		TranscriptHash:  slices.Clone(k.state.keygenTranscriptHash),
+		CommitmentsHash: keygenCommitmentsHash(k.state.groupCommitments),
+		ChainCode:       slices.Clone(k.state.chainCode),
 	}, nil
 }
 
@@ -137,7 +137,7 @@ func verifyKeygenConfirmationSetPreservedChainCode(local *KeyShare, encoded [][]
 		if err != nil {
 			return fmt.Errorf("invalid keygen confirmation at index %d: %w", i, err)
 		}
-		if !bytes.Equal(c.ChainCode, local.ChainCode) {
+		if !bytes.Equal(c.ChainCode, local.state.chainCode) {
 			return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
 		}
 	}
@@ -148,7 +148,7 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 	if local == nil {
 		return errors.New("nil local key share")
 	}
-	n := len(local.Parties)
+	n := len(local.state.parties)
 	if len(encoded) == 0 {
 		return errors.New("missing keygen confirmations")
 	}
@@ -164,7 +164,7 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 	seen := make(map[tss.PartyID]struct{}, n)
 	chainCodes := make(map[tss.PartyID][]byte, n)
 	for i, raw := range encoded {
-		expectedSender := local.Parties[i]
+		expectedSender := local.state.parties[i]
 		if len(raw) == 0 {
 			return fmt.Errorf("empty keygen confirmation at index %d for party %d", i, expectedSender)
 		}
@@ -179,7 +179,7 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 		if !bytes.Equal(canonical, raw) {
 			return fmt.Errorf("non-canonical keygen confirmation from party %d", c.Sender)
 		}
-		if !slices.Contains(local.Parties, c.Sender) {
+		if !slices.Contains(local.state.parties, c.Sender) {
 			return fmt.Errorf("keygen confirmation from unknown party %d", c.Sender)
 		}
 		if _, ok := seen[c.Sender]; ok {
@@ -210,25 +210,25 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 		chainCodes[c.Sender] = slices.Clone(c.ChainCode)
 	}
 
-	for _, id := range local.Parties {
+	for _, id := range local.state.parties {
 		if _, ok := seen[id]; !ok {
 			return fmt.Errorf("missing keygen confirmation from party %d", id)
 		}
 	}
 
 	if enforceChainCode {
-		if len(local.ChainCode) == 0 {
-			for _, id := range local.Parties {
+		if len(local.state.chainCode) == 0 {
+			for _, id := range local.state.parties {
 				if len(chainCodes[id]) != 0 {
 					return fmt.Errorf("keygen confirmation from party %d has unexpected chain code", id)
 				}
 			}
 		} else {
-			aggregate, err := bip32util.AggregateChainCode(local.Parties, chainCodes)
+			aggregate, err := bip32util.AggregateChainCode(local.state.parties, chainCodes)
 			if err != nil {
 				return fmt.Errorf("keygen confirmation chain code set: %w", err)
 			}
-			if !bytes.Equal(aggregate, local.ChainCode) {
+			if !bytes.Equal(aggregate, local.state.chainCode) {
 				return errors.New("keygen confirmation aggregate chain code mismatch")
 			}
 		}
@@ -273,7 +273,7 @@ func verifyKeygenConfirmationForPreservedChainCode(local *KeyShare, c *KeygenCon
 	if err := verifyKeygenConfirmationForShare(local, c); err != nil {
 		return err
 	}
-	if !bytes.Equal(c.ChainCode, local.ChainCode) {
+	if !bytes.Equal(c.ChainCode, local.state.chainCode) {
 		return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
 	}
 	return nil
@@ -286,15 +286,15 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := local.validateWithoutConfirmations(); err != nil {
 		return fmt.Errorf("invalid local key share: %w", err)
 	}
-	if len(confirmations) != len(local.Parties) {
-		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), len(local.Parties))
+	if len(confirmations) != len(local.state.parties) {
+		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), len(local.state.parties))
 	}
 	bySender := make(map[tss.PartyID][]byte, len(confirmations))
 	for _, confirmation := range confirmations {
 		if confirmation == nil {
 			return errors.New("nil keygen confirmation in set")
 		}
-		if !slices.Contains(local.Parties, confirmation.Sender) {
+		if !slices.Contains(local.state.parties, confirmation.Sender) {
 			return fmt.Errorf("keygen confirmation from unknown party %d", confirmation.Sender)
 		}
 		if _, ok := bySender[confirmation.Sender]; ok {
@@ -306,8 +306,8 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 		}
 		bySender[confirmation.Sender] = encoded
 	}
-	encoded := make([][]byte, len(local.Parties))
-	for i, id := range local.Parties {
+	encoded := make([][]byte, len(local.state.parties))
+	for i, id := range local.state.parties {
 		item, ok := bySender[id]
 		if !ok {
 			return fmt.Errorf("missing keygen confirmation from party %d", id)
@@ -317,7 +317,7 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := verifyKeygenConfirmationSet(local, encoded); err != nil {
 		return err
 	}
-	local.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
+	local.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
 	return nil
 }
 
@@ -424,12 +424,12 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 		}
 		chainCode = cc
 	}
-	finalShare := s.pending.share.Clone()
-	finalShare.ChainCode = chainCode
+	finalShare := cloneKeyShareValue(s.pending.share)
+	finalShare.state.chainCode = chainCode
 	// Recomputation: now that we have the real chain codes, produce the final
 	// transcript hash that binds them.
-	finalShare.KeygenTranscriptHash = s.keygenTranscriptHash(finalShare.GroupCommitments)
-	finalShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
+	finalShare.state.keygenTranscriptHash = s.keygenTranscriptHash(finalShare.state.groupCommitments)
+	finalShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := finalShare.Validate(); err != nil {
 		finalShare.Destroy()
 		s.abort()
@@ -440,8 +440,8 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	s.keyShare = finalShare
 	s.completed = true
 	s.state = keygenConfirmed
-	pubKeyHash := sha256.Sum256(finalShare.PublicKey)
-	confirmationSetHash := keygenConfirmationSetHash(finalShare.KeygenConfirmations)
+	pubKeyHash := sha256.Sum256(finalShare.state.publicKey)
+	confirmationSetHash := keygenConfirmationSetHash(finalShare.state.keygenConfirmations)
 	s.log.Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

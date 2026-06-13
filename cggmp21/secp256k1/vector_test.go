@@ -49,7 +49,7 @@ func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 				t.Fatal(err)
 			}
 			keygenShares[i] = hex.EncodeToString(raw)
-			pubKey = hex.EncodeToString(shares[tss.PartyID(i+1)].PublicKey)
+			pubKey = hex.EncodeToString(shares[tss.PartyID(i+1)].PublicKeyBytes())
 		}
 
 		presignMap := secpPresign(t, shares, signerIDs)
@@ -132,7 +132,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err := share.Validate(); err != nil {
 					t.Fatalf("key share %d validation: %v", pid, err)
 				}
-				if hex.EncodeToString(share.PublicKey) != v.GroupPublicKey {
+				if hex.EncodeToString(share.PublicKeyBytes()) != v.GroupPublicKey {
 					t.Fatalf("party %d public key does not match group public key in vector", pid)
 				}
 				// Verify round-trip encoding is stable.
@@ -187,7 +187,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignDigest: %v", err)
 			}
-			if !VerifyDigest(signerShares[0].PublicKey, digest, sig) {
+			if !VerifyDigest(signerShares[0].PublicKeyBytes(), digest, sig) {
 				t.Fatal("signature from deserialized shares did not verify")
 			}
 

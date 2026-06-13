@@ -39,7 +39,7 @@ func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, [
 	ctx.DerivationPath = append([]uint32(nil), ctx.DerivationPath...)
 	var additiveShift []byte
 	if len(ctx.DerivationPath) > 0 {
-		result, err := DeriveNonHardenedBIP32Extended(key.PublicKey, key.ChainCode, ctx.DerivationPath)
+		result, err := DeriveNonHardenedBIP32Extended(key.state.publicKey, key.state.chainCode, ctx.DerivationPath)
 		if err != nil {
 			return PresignContext{}, nil, nil, err
 		}

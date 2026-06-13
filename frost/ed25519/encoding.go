@@ -33,22 +33,22 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
 func (k *KeyShare) toWire() (*keyShareWire, error) {
-	shares := make([]wire.PartyBytes[tss.PartyID], len(k.VerificationShares))
-	for i, s := range k.VerificationShares {
+	shares := make([]wire.PartyBytes[tss.PartyID], len(k.state.verificationShares))
+	for i, s := range k.state.verificationShares {
 		shares[i] = wire.PartyBytes[tss.PartyID]{Party: s.Party, Bytes: s.PublicKey}
 	}
 	return &keyShareWire{
-		Party:                k.Party,
-		Threshold:            k.Threshold,
-		Parties:              k.Parties,
-		PublicKey:            k.PublicKey,
-		Secret:               k.secret,
-		GroupCommitments:     k.GroupCommitments,
+		Party:                k.state.party,
+		Threshold:            k.state.threshold,
+		Parties:              k.state.parties,
+		PublicKey:            k.state.publicKey,
+		Secret:               k.state.secret,
+		GroupCommitments:     k.state.groupCommitments,
 		VerificationShares:   shares,
-		KeygenTranscriptHash: k.KeygenTranscriptHash,
-		ChainCode:            k.ChainCode,
-		KeygenSessionID:      k.KeygenSessionID[:],
-		KeygenConfirmations:  k.KeygenConfirmations,
+		KeygenTranscriptHash: k.state.keygenTranscriptHash,
+		ChainCode:            k.state.chainCode,
+		KeygenSessionID:      k.state.keygenSessionID[:],
+		KeygenConfirmations:  k.state.keygenConfirmations,
 	}, nil
 }
 
@@ -64,20 +64,20 @@ func (w keyShareWire) toKeyShare() (*KeyShare, error) {
 	for i, s := range w.VerificationShares {
 		shares[i] = VerificationShare{Party: s.Party, PublicKey: s.Bytes}
 	}
-	return &KeyShare{
-		Version:              tss.Version,
-		Party:                w.Party,
-		Threshold:            w.Threshold,
-		Parties:              w.Parties,
-		PublicKey:            w.PublicKey,
-		ChainCode:            w.ChainCode,
+	return &KeyShare{state: &keyShareState{
+		version:              tss.Version,
+		party:                w.Party,
+		threshold:            w.Threshold,
+		parties:              w.Parties,
+		publicKey:            w.PublicKey,
+		chainCode:            w.ChainCode,
 		secret:               w.Secret,
-		GroupCommitments:     w.GroupCommitments,
-		VerificationShares:   shares,
-		KeygenSessionID:      sid,
-		KeygenTranscriptHash: w.KeygenTranscriptHash,
-		KeygenConfirmations:  w.KeygenConfirmations,
-	}, nil
+		groupCommitments:     w.GroupCommitments,
+		verificationShares:   shares,
+		keygenSessionID:      sid,
+		keygenTranscriptHash: w.KeygenTranscriptHash,
+		keygenConfirmations:  w.KeygenConfirmations,
+	}}, nil
 }
 
 func marshalKeyShare(k *KeyShare) ([]byte, error) {
@@ -103,32 +103,32 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	if k.Threshold > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("threshold too large: %d > %d", k.Threshold, limits.Threshold.MaxThreshold)
+	if k.state.threshold > limits.Threshold.MaxThreshold {
+		return nil, fmt.Errorf("threshold too large: %d > %d", k.state.threshold, limits.Threshold.MaxThreshold)
 	}
-	if len(k.Parties) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("parties too large: %d > %d", len(k.Parties), limits.Threshold.MaxParties)
+	if len(k.state.parties) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("parties too large: %d > %d", len(k.state.parties), limits.Threshold.MaxParties)
 	}
-	if len(k.GroupCommitments) > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("group commitments too large: %d > %d", len(k.GroupCommitments), limits.Threshold.MaxThreshold)
+	if len(k.state.groupCommitments) > limits.Threshold.MaxThreshold {
+		return nil, fmt.Errorf("group commitments too large: %d > %d", len(k.state.groupCommitments), limits.Threshold.MaxThreshold)
 	}
-	for i, c := range k.GroupCommitments {
+	for i, c := range k.state.groupCommitments {
 		if len(c) > limits.Curve.MaxPointBytes {
 			return nil, fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.VerificationShares) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("verification shares too large: %d > %d", len(k.VerificationShares), limits.Threshold.MaxParties)
+	if len(k.state.verificationShares) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("verification shares too large: %d > %d", len(k.state.verificationShares), limits.Threshold.MaxParties)
 	}
-	for i, s := range k.VerificationShares {
+	for i, s := range k.state.verificationShares {
 		if len(s.PublicKey) > limits.Curve.MaxPointBytes {
 			return nil, fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.KeygenConfirmations) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(k.KeygenConfirmations), limits.Threshold.MaxParties)
+	if len(k.state.keygenConfirmations) > limits.Threshold.MaxParties {
+		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(k.state.keygenConfirmations), limits.Threshold.MaxParties)
 	}
-	for i, c := range k.KeygenConfirmations {
+	for i, c := range k.state.keygenConfirmations {
 		if len(c) > limits.TLV.MaxFieldBytes {
 			return nil, fmt.Errorf("keygen confirmation %d too large: %d > %d", i, len(c), limits.TLV.MaxFieldBytes)
 		}

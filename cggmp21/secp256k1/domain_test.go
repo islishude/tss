@@ -17,15 +17,15 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	t.Parallel()
 	shares := secpKeygenWithOptions(t, 2, 2, KeygenOptions{PaillierBits: defaultPaillierBits()})
 	share := shares[1]
-	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKey)
+	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKeyBytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(share.PaillierProof)
+	proof, err := zkpai.UnmarshalModulusProof(share.PaillierProofBytes())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !zkpai.VerifyModulus(keySharePaillierProofDomain(share), pk, uint32(share.Party), proof) {
+	if !zkpai.VerifyModulus(keySharePaillierProofDomain(share), pk, uint32(share.PartyID()), proof) {
 		t.Fatal("key-share Paillier proof did not verify")
 	}
 
@@ -33,18 +33,18 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 		name   string
 		mutate func(*KeyShare)
 	}{
-		{name: "party", mutate: func(k *KeyShare) { k.Party = 2 }},
-		{name: "threshold", mutate: func(k *KeyShare) { k.Threshold++ }},
-		{name: "parties", mutate: func(k *KeyShare) { k.Parties = []tss.PartyID{1, 2, 3} }},
-		{name: "public key", mutate: func(k *KeyShare) { k.PublicKey[0] ^= 1 }},
-		{name: "keygen transcript", mutate: func(k *KeyShare) { k.KeygenTranscriptHash[0] ^= 1 }},
-		{name: "paillier public key", mutate: func(k *KeyShare) { k.PaillierPublicKey = shares[2].PaillierPublicKey }},
+		{name: "party", mutate: func(k *KeyShare) { k.state.party = 2 }},
+		{name: "threshold", mutate: func(k *KeyShare) { k.state.threshold++ }},
+		{name: "parties", mutate: func(k *KeyShare) { k.state.parties = []tss.PartyID{1, 2, 3} }},
+		{name: "public key", mutate: func(k *KeyShare) { k.state.publicKey[0] ^= 1 }},
+		{name: "keygen transcript", mutate: func(k *KeyShare) { k.state.keygenTranscriptHash[0] ^= 1 }},
+		{name: "paillier public key", mutate: func(k *KeyShare) { k.state.paillierPublicKey = shares[2].PaillierPublicKeyBytes() }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mutated := share.Clone()
+			mutated := cloneKeyShareValue(share)
 			tc.mutate(mutated)
-			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, uint32(mutated.Party), proof) {
+			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, uint32(mutated.PartyID()), proof) {
 				t.Fatal("key-share Paillier proof verified under mutated context")
 			}
 		})
@@ -90,8 +90,8 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err != nil {
 		t.Fatal("MtA start proof did not verify")
 	}
-	mutatedKey := (shares[1]).Clone()
-	mutatedKey.KeygenTranscriptHash[0] ^= 1
+	mutatedKey := cloneKeyShareValue(shares[1])
+	mutatedKey.state.keygenTranscriptHash[0] ^= 1
 	if err := mta.VerifyStart(mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
@@ -125,15 +125,15 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal(err)
 	}
 	localStart := mta.StartMessage{
-		Ciphertext: s1.round1[s1.key.Party].EncK,
+		Ciphertext: s1.round1[s1.key.PartyID()].EncK,
 	}
-	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "delta", s1.key.PaillierPublicKey, s1.contextHash)
+	responseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, "delta", s1.key.PaillierPublicKeyBytes(), s1.contextHash)
 
 	responderPK, err := s1.key.paillierPublicFor(2)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selfRP, err := s1.key.ringPedersenPublicFor(s1.key.Party)
+	selfRP, err := s1.key.ringPedersenPublicFor(s1.key.PartyID())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if _, err := mta.Finish(responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
-	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.Party, 2, "sigma", s1.key.PaillierPublicKey, s1.contextHash)
+	wrongResponseDomain := mtaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, "sigma", s1.key.PaillierPublicKeyBytes(), s1.contextHash)
 	if _, err := mta.Finish(wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}

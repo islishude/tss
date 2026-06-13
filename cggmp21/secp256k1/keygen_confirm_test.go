@@ -52,7 +52,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	if err := applyKeygenConfirmationSet(shares[1], confirmations); err != nil {
 		t.Fatal(err)
 	}
-	if len(shares[1].KeygenConfirmations) != len(confirmations) {
+	if len(shares[1].KeygenConfirmations()) != len(confirmations) {
 		t.Fatal("confirmation evidence not stored after successful verification")
 	}
 	if err := shares[1].Validate(); err != nil {

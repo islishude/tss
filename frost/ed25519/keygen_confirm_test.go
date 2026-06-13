@@ -61,8 +61,8 @@ func TestFROSTKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
 func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
-	tampered := shares[1].Clone()
-	tampered.ChainCode[0] ^= 1
+	tampered := cloneKeyShareValue(shares[1])
+	tampered.state.chainCode[0] ^= 1
 	if err := tampered.ValidateConsistency(); err == nil {
 		t.Fatal("expected tampered aggregate chain code to be rejected")
 	}
@@ -71,14 +71,14 @@ func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 func TestFROSTKeyShareRejectsTamperedConfirmationChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
-	tampered := shares[1].Clone()
-	confirmation, err := UnmarshalKeygenConfirmation(tampered.KeygenConfirmations[1])
+	tampered := cloneKeyShareValue(shares[1])
+	confirmation, err := UnmarshalKeygenConfirmation(tampered.state.keygenConfirmations[1])
 	if err != nil {
 		t.Fatal(err)
 	}
 	confirmation.ChainCode = bytes.Clone(confirmation.ChainCode)
 	confirmation.ChainCode[0] ^= 1
-	tampered.KeygenConfirmations[1], err = confirmation.MarshalBinary()
+	tampered.state.keygenConfirmations[1], err = confirmation.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}

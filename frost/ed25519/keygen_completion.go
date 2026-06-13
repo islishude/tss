@@ -82,27 +82,27 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		chainCodeCommitAggregate = agg
 	}
 	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.commits, groupCommitments, verificationShares)
-	share := &KeyShare{
-		Version:              tss.Version,
-		Party:                s.cfg.Self,
-		Threshold:            s.cfg.Threshold,
-		Parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
-		PublicKey:            append([]byte(nil), groupCommitments[0]...),
-		ChainCode:            nil, // filled in after confirmation round
+	share := &KeyShare{state: &keyShareState{
+		version:              tss.Version,
+		party:                s.cfg.Self,
+		threshold:            s.cfg.Threshold,
+		parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
+		publicKey:            append([]byte(nil), groupCommitments[0]...),
+		chainCode:            nil, // filled in after confirmation round
 		secret:               secretScalar,
-		GroupCommitments:     groupCommitments,
-		VerificationShares:   verificationShares,
-		KeygenSessionID:      s.cfg.SessionID,
-		KeygenTranscriptHash: keygenTranscriptHash,
-	}
+		groupCommitments:     groupCommitments,
+		verificationShares:   verificationShares,
+		keygenSessionID:      s.cfg.SessionID,
+		keygenTranscriptHash: keygenTranscriptHash,
+	}}
 	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
 		return nil, err
 	}
 	// Carry the local chain code into the confirmation for commit-reveal.
-	share.ChainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
+	share.state.chainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
 	confirmation, err := share.KeygenConfirmation()
 	// Do not leak the per-party chain code into the KeyShare.
-	share.ChainCode = nil
+	share.state.chainCode = nil
 	if err != nil {
 		return nil, err
 	}

@@ -83,7 +83,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    3,
 			parties: tss.PartySet{1, 2, 3},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, err := StartReshareRecipient(shares[1].PublicKey, nil, parties, newParties, 2, tss.ThresholdConfig{
+				_, err := StartReshareRecipient(shares[1].state.publicKey, nil, parties, newParties, 2, tss.ThresholdConfig{
 					Threshold: 2,
 					Parties:   newParties,
 					Self:      3,

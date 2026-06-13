@@ -126,7 +126,12 @@ Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) 
 
 ## DTO Pattern
 
-Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use unexported wire DTOs. The `custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte` conversions:
+Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use unexported wire
+DTOs. This includes opaque FROST/CGGMP21 key shares, CGGMP21 presigns, and the
+CGGMP21 reshare plan. The public domain object is never made mutable merely for
+serialization. The `custom` kind eliminates `*secret.Scalar ↔ []byte`
+mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate
+`*big.Int ↔ []byte` conversions:
 
 ```go
 type myMessageWire struct {

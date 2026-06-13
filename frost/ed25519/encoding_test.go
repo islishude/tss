@@ -30,7 +30,7 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.PublicKey, shares[1].PublicKey) {
+	if !bytes.Equal(decoded.PublicKeyBytes(), shares[1].PublicKeyBytes()) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
 	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
@@ -45,13 +45,13 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	unsorted := shares[1].Clone()
-	unsorted.Parties[0], unsorted.Parties[1] = unsorted.Parties[1], unsorted.Parties[0]
+	unsorted := cloneKeyShareValue(shares[1])
+	unsorted.state.parties[0], unsorted.state.parties[1] = unsorted.state.parties[1], unsorted.state.parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted party set encoded")
 	}
-	malformed := shares[1].Clone()
-	malformed.PublicKey = []byte{0x01}
+	malformed := cloneKeyShareValue(shares[1])
+	malformed.state.publicKey = []byte{0x01}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
 	}
@@ -78,25 +78,25 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 
 // minimalFROSTKeyShare returns a FROST KeyShare with only public metadata populated.
 func minimalFROSTKeyShare() *KeyShare {
-	return &KeyShare{
-		Version:              tss.Version,
-		Party:                1,
-		Threshold:            2,
-		Parties:              []tss.PartyID{1, 2, 3},
-		PublicKey:            make([]byte, 32),
-		ChainCode:            make([]byte, 32),
-		KeygenSessionID:      tss.SessionID{},
-		KeygenTranscriptHash: []byte{0x01, 0x02},
-	}
+	return &KeyShare{state: &keyShareState{
+		version:              tss.Version,
+		party:                1,
+		threshold:            2,
+		parties:              []tss.PartyID{1, 2, 3},
+		publicKey:            make([]byte, 32),
+		chainCode:            make([]byte, 32),
+		keygenSessionID:      tss.SessionID{},
+		keygenTranscriptHash: []byte{0x01, 0x02},
+	}}
 }
 
 func TestFROSTKeyShareChainCodeBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.ChainCode[0] = 0xaa
+	k.state.chainCode[0] = 0xaa
 	cp := k.ChainCodeBytes()
 	cp[0] = 0xbb
-	if k.ChainCode[0] != 0xaa {
+	if k.state.chainCode[0] != 0xaa {
 		t.Fatal("ChainCodeBytes() did not return a copy")
 	}
 }
@@ -104,10 +104,10 @@ func TestFROSTKeyShareChainCodeBytesReturnsCopy(t *testing.T) {
 func TestFROSTKeySharePublicKeyBytesReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.PublicKey[0] = 0x02
+	k.state.publicKey[0] = 0x02
 	cp := k.PublicKeyBytes()
 	cp[0] = 0x03
-	if k.PublicKey[0] != 0x02 {
+	if k.state.publicKey[0] != 0x02 {
 		t.Fatal("PublicKeyBytes() did not return a copy")
 	}
 }
@@ -146,14 +146,14 @@ func TestFROSTKeySharePartyID(t *testing.T) {
 	// nil already tested above
 }
 
-func TestFROSTKeyShareCloneIsDeepCopy(t *testing.T) {
+func TestFROSTKeyShareInternalCloneIsDeepCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.PublicKey[0] = 0xab
-	clone := k.Clone()
-	clone.PublicKey[0] = 0xcd
-	if k.PublicKey[0] != 0xab {
-		t.Fatal("Clone shares PublicKey backing array")
+	k.state.publicKey[0] = 0xab
+	clone := cloneKeyShareValue(k)
+	clone.state.publicKey[0] = 0xcd
+	if k.state.publicKey[0] != 0xab {
+		t.Fatal("internal clone shares public-key backing array")
 	}
 }
 

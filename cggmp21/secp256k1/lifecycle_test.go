@@ -30,7 +30,7 @@ func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
 			2: {0x01, 0x02, 0x03},
 		},
 		pending: &pendingKeyShare{
-			share: &KeyShare{secret: secretScalar, ChainCode: []byte{0x04, 0x05}},
+			share: &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04, 0x05}}},
 		},
 		commits: map[tss.PartyID][][]byte{
 			2: {{0x0a}},
@@ -232,7 +232,7 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 			2: {0x01, 0x02, 0x03},
 		},
 		pending: &pendingKeyShare{
-			share: &KeyShare{secret: secretScalar, ChainCode: []byte{0x04}},
+			share: &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04}}},
 		},
 	}
 
@@ -282,20 +282,20 @@ func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	secretScalar := fillSecretScalar(t, 0x42)
-	k := &KeyShare{
-		ChainCode:          []byte{0x01, 0x02, 0x03, 0x04},
+	k := &KeyShare{state: &keyShareState{
+		chainCode:          []byte{0x01, 0x02, 0x03, 0x04},
 		secret:             secretScalar,
 		paillierPrivateKey: []byte{0xaa, 0xbb, 0xcc},
-	}
+	}}
 
 	k.Destroy()
 
 	// Chain code must be zeroed (clear zeros elements but preserves length).
-	testutil.AssertBytesCleared(t, k.ChainCode)
+	testutil.AssertBytesCleared(t, k.state.chainCode)
 	// Paillier private key must be zeroed.
-	testutil.AssertBytesCleared(t, k.paillierPrivateKey)
+	testutil.AssertBytesCleared(t, k.state.paillierPrivateKey)
 	// secret must report zero length (buf is set to nil by Destroy).
-	if k.secret.FixedLen() != 0 {
+	if k.state.secret.FixedLen() != 0 {
 		t.Error("secret scalar not zeroed after Destroy")
 	}
 }
@@ -308,29 +308,29 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	chiShare := fillSecretScalar(t, 0x22)
 	delta := fillSecretScalar(t, 0x33)
 
-	p := &Presign{
+	p := &Presign{state: &presignState{
 		consumed:      new(atomic.Bool),
 		kShare:        kShare,
 		chiShare:      chiShare,
 		delta:         delta,
-		AdditiveShift: []byte{0x01, 0x02, 0x03},
-	}
+		additiveShift: []byte{0x01, 0x02, 0x03},
+	}}
 
 	p.Destroy()
 
 	if !IsPresignConsumed(p) {
 		t.Error("presign not consumed after Destroy")
 	}
-	if p.kShare.FixedLen() != 0 {
+	if p.state.kShare.FixedLen() != 0 {
 		t.Error("kShare not zeroed")
 	}
-	if p.chiShare.FixedLen() != 0 {
+	if p.state.chiShare.FixedLen() != 0 {
 		t.Error("chiShare not zeroed")
 	}
-	if p.delta.FixedLen() != 0 {
+	if p.state.delta.FixedLen() != 0 {
 		t.Error("delta not zeroed")
 	}
-	testutil.AssertBytesCleared(t, p.AdditiveShift)
+	testutil.AssertBytesCleared(t, p.state.additiveShift)
 }
 
 // TestDestroy_Idempotent verifies that calling Destroy twice does not panic.
@@ -341,7 +341,7 @@ func TestDestroy_Idempotent(t *testing.T) {
 	kg := &KeygenSession{
 		shares: map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(1)},
 		pending: &pendingKeyShare{
-			share: &KeyShare{secret: secretScalar},
+			share: &KeyShare{state: &keyShareState{secret: secretScalar}},
 		},
 	}
 	kg.Destroy()

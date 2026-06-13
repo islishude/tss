@@ -318,17 +318,17 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := &KeyShare{
-		Version:              tss.Version,
-		Party:                party,
-		Threshold:            2,
-		Parties:              parties,
-		PublicKey:            append([]byte(nil), v.groupPublicKey...),
+	key := &KeyShare{state: &keyShareState{
+		version:              tss.Version,
+		party:                party,
+		threshold:            2,
+		parties:              parties,
+		publicKey:            append([]byte(nil), v.groupPublicKey...),
 		secret:               secretScalar,
-		GroupCommitments:     groupCommitments,
-		VerificationShares:   verificationShares,
-		KeygenTranscriptHash: []byte("rfc9591-appendix-e1"),
-	}
+		groupCommitments:     groupCommitments,
+		verificationShares:   verificationShares,
+		keygenTranscriptHash: []byte("rfc9591-appendix-e1"),
+	}}
 	if err := key.ValidateConsistency(); err != nil {
 		t.Fatal(err)
 	}

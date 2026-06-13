@@ -22,7 +22,7 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.Pa
 	sessions := make(map[tss.PartyID]*RefreshSession)
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		session, out, err := startCGGMP21Refresh(shares[id], tss.ThresholdConfig{Threshold: shares[id].Threshold, Self: id, SessionID: sessionID})
+		session, out, err := startCGGMP21Refresh(shares[id], tss.ThresholdConfig{Threshold: shares[id].Threshold(), Self: id, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -73,10 +73,10 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	if err := newShare.Validate(); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(oldPub, newShare.PublicKey) {
+	if !bytes.Equal(oldPub, newShare.PublicKeyBytes()) {
 		t.Fatal("public key changed after refresh")
 	}
-	if !bytes.Equal(shares[1].ChainCode, newShare.ChainCode) {
+	if !bytes.Equal(shares[1].ChainCodeBytes(), newShare.ChainCodeBytes()) {
 		t.Fatal("chain code changed after refresh")
 	}
 	digest := sha256.Sum256([]byte("refresh 1-of-1"))
@@ -186,7 +186,7 @@ func TestThresholdECDSARefreshValidationBindsPreservedChainCode(t *testing.T) {
 	if !ok {
 		t.Fatal("refresh did not produce party 1 key share")
 	}
-	share.ChainCode[0] ^= 1
+	share.state.chainCode[0] ^= 1
 	if err := share.Validate(); err == nil {
 		t.Fatal("Validate accepted refreshed share with tampered preserved chain code")
 	}
@@ -229,14 +229,14 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 					t.Fatalf("refresh not complete for %d", id)
 				}
 				newShares[id] = share
-				if !bytes.Equal(oldPub, share.PublicKey) {
+				if !bytes.Equal(oldPub, share.PublicKeyBytes()) {
 					t.Fatalf("party %d public key changed after refresh", id)
 				}
 				if tc.hd {
-					if len(share.ChainCode) != 32 {
+					if len(share.ChainCodeBytes()) != 32 {
 						t.Fatalf("party %d missing chain code after refresh", id)
 					}
-					if !bytes.Equal(shares[id].ChainCode, share.ChainCode) {
+					if !bytes.Equal(shares[id].ChainCodeBytes(), share.ChainCodeBytes()) {
 						t.Fatalf("party %d chain code changed after refresh", id)
 					}
 				}

@@ -118,9 +118,9 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 		return fmt.Errorf("refresh session id: %w", err)
 	}
 	config := tss.ThresholdConfig{
-		Threshold: keyShare.Threshold,
-		Parties:   append([]tss.PartyID(nil), keyShare.Parties...),
-		Self:      keyShare.Party,
+		Threshold: keyShare.state.threshold,
+		Parties:   append([]tss.PartyID(nil), keyShare.state.parties...),
+		Self:      keyShare.state.party,
 		SessionID: sessionID,
 	}
 	cache := s.opts.ReplayCache
@@ -128,8 +128,8 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 		cache = tss.NewInMemoryReplayCache()
 	}
 	guard, err := (tss.GuardConfig{
-		Self:        keyShare.Party,
-		Parties:     tss.PartySet(keyShare.Parties),
+		Self:        keyShare.state.party,
+		Parties:     tss.PartySet(keyShare.state.parties),
 		Protocol:    protocol,
 		SessionID:   sessionID,
 		Policies:    CGGMP21Policies(),

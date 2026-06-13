@@ -13,26 +13,21 @@ The `frost/ed25519` package implements a dealerless FROST-style threshold Ed2551
 
 The group public key is a standard Ed25519 verification key. Signatures are standard 64-byte `R || S` Ed25519 values verifiable with `crypto/ed25519.Verify`.
 
-## KeyShare Structure
+## KeyShare API and Ownership
 
-```go
-type KeyShare struct {
-    Version              uint16
-    Party                tss.PartyID
-    Threshold            int
-    Parties              []tss.PartyID
-    PublicKey            []byte        // group Ed25519 public key (32 bytes)
-    ChainCode            []byte        // optional 32-byte BIP32 chain code
-    secret               *secret.Scalar // unexported: local scalar share x_i (fixed 32 bytes)
-    GroupCommitments     [][]byte      // degree 0..threshold-1 public polynomial commitments
-    VerificationShares   []VerificationShare
-    KeygenSessionID      tss.SessionID
-    KeygenTranscriptHash []byte
-    KeygenConfirmations  [][]byte
-}
-```
+`KeyShare` is an opaque handle. Public metadata cannot be changed through struct
+fields after validation. `Version()`, `PartyID()`, `Threshold()`, and
+`KeygenSessionID()` return values. `PublicKeyBytes()`, `ChainCodeBytes()`, and
+`KeygenTranscriptHashBytes()` return copied bytes. `Parties()`,
+`GroupCommitments()`, `VerificationShares()`, and `KeygenConfirmations()` return
+deep copies, including nested byte slices.
 
-The `secret` field is unexported and stored as `internal/secret.Scalar` fixed-length bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` all redact it. `Destroy()` zeroes `secret` and `ChainCode` in place.
+The local share is stored as `internal/secret.Scalar` fixed-length bytes.
+`String()`, `GoString()`, and `Format()` redact it, while `MarshalJSON()` rejects
+the record. `Destroy()` zeroes the package-owned secret and chain code in place.
+A shallow Go copy is only another handle to that same lifecycle state.
+`KeygenSession.KeyShare()` and reshare completion accessors return independently
+owned shares that must each be destroyed separately.
 
 ## Distributed Key Generation
 
@@ -528,6 +523,8 @@ kg, out, err := StartKeygen(config, guard)                  // standard
 kg, out, err := StartKeygenWithOptions(config, opts, guard) // with HD chain code
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.KeyShare()
+publicKey := share.PublicKeyBytes()
+parties := share.Parties()
 ```
 
 ### Signing

@@ -29,22 +29,22 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(restored.PublicKey) != string(shares[1].PublicKey) {
+	if string(restored.PublicKeyBytes()) != string(shares[1].PublicKeyBytes()) {
 		t.Error("PublicKey mismatch after round-trip")
 	}
-	if restored.Party != shares[1].Party {
+	if restored.PartyID() != shares[1].PartyID() {
 		t.Error("Party mismatch after round-trip")
 	}
-	if restored.Threshold != shares[1].Threshold {
+	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !tss.PartySet(restored.Parties).Contains(restored.Party) {
+	if !tss.PartySet(restored.Parties()).Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
-	if string(restored.KeygenTranscriptHash) != string(shares[1].KeygenTranscriptHash) {
+	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {
 		t.Error("KeygenTranscriptHash mismatch after round-trip")
 	}
-	if string(restored.PaillierPublicKey) != string(shares[1].PaillierPublicKey) {
+	if string(restored.PaillierPublicKeyBytes()) != string(shares[1].PaillierPublicKeyBytes()) {
 		t.Error("PaillierPublicKey mismatch after round-trip")
 	}
 
@@ -90,8 +90,8 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	guard := testCGGMP21Guard(shares[1].Party, tss.PartySet(shares[1].Parties), sid)
-	if _, _, err := startSignDigestBound(shares[1], restored, sid, digest[:], restored.ContextHash, true, nil, guard); err == nil {
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sid)
+	if _, _, err := startSignDigestBound(shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard); err == nil {
 		t.Fatal("startSignDigestBound without PresignStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)

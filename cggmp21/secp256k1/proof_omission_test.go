@@ -249,7 +249,7 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 	}
 
 	// Remove the log proof.
-	decoded.LogProof = nil
+	decoded.state.logProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing LogProof marshaled successfully")
@@ -274,8 +274,8 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 	}
 
 	// Tamper with the log proof bytes.
-	if len(decoded.LogProof) > 0 {
-		decoded.LogProof[len(decoded.LogProof)-1] ^= 1
+	if len(decoded.state.logProof) > 0 {
+		decoded.state.logProof[len(decoded.state.logProof)-1] ^= 1
 	}
 	_, err = decoded.MarshalBinary()
 	if err == nil {
@@ -301,7 +301,7 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.ShareProof = nil
+	decoded.state.shareProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing ShareProof marshaled successfully")
@@ -326,7 +326,7 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.PaillierProof = nil
+	decoded.state.paillierProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing PaillierProof marshaled successfully")
@@ -350,7 +350,7 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.RingPedersenProof = nil
+	decoded.state.ringPedersenProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing RingPedersenProof marshaled successfully")

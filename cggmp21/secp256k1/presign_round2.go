@@ -67,7 +67,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	for _, peer := range s.signers {
-		if peer == s.key.Party {
+		if peer == s.key.state.party {
 			continue
 		}
 		if !s.round1Verified[peer] {
@@ -79,7 +79,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +94,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 	}
 	defer secret.ClearBigInt(xBar)
 	for _, peer := range s.signers {
-		if peer == s.key.Party {
+		if peer == s.key.state.party {
 			continue
 		}
 		peerPK, err := s.key.paillierPublicFor(peer)
@@ -106,13 +106,13 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK}
-		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, s.round1[peer].PaillierPublicKey, s.contextHash)
+		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash)
 		startProof := s.round1Proofs[peer].EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
 			nil,
 			startProofDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			startProof,
 			gamma,
@@ -130,7 +130,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		sigmaResp, betaSigma, err := mta.Respond(
 			nil,
 			startProofDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.Party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
+			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
 			start,
 			startProof,
 			xBar,
@@ -149,7 +149,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		round2Env, err := envelope(s.config, 2, s.key.Party, peer, payloadPresignRound2, payload, true)
+		round2Env, err := envelope(s.config, 2, s.key.state.party, peer, payloadPresignRound2, payload, true)
 		if err != nil {
 			return nil, err
 		}
@@ -163,7 +163,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
 		return errors.New("presign round1 echo mismatch")
 	}
-	start := mta.StartMessage{Ciphertext: s.round1[s.key.Party].EncK}
+	start := mta.StartMessage{Ciphertext: s.round1[s.key.state.party].EncK}
 	gammaCommit := s.round1[from].Gamma
 
 	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
@@ -172,13 +172,13 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 	// Initiator's own Ring-Pedersen params (the verifier's auxiliary input).
-	selfRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	selfRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
 	if err != nil {
 		return err
 	}
 
 	alphaDelta, err := mta.Finish(
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "delta", s.key.PaillierPublicKey, s.contextHash),
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, "delta", s.key.state.paillierPublicKey, s.contextHash),
 		start,
 		p.Delta,
 		gammaCommit,
@@ -194,7 +194,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 	alphaSigma, err := mta.Finish(
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.Party, from, "sigma", s.key.PaillierPublicKey, s.contextHash),
+		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, "sigma", s.key.state.paillierPublicKey, s.contextHash),
 		start,
 		p.Sigma,
 		xBarCommit,

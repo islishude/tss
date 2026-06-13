@@ -175,6 +175,12 @@ partial is emitted and the local claim is rolled back so the caller can retry.
 
 Call `Destroy()` on sessions and key shares when they are no longer needed. Go zeroisation is best-effort; use short-lived processes for stronger guarantees.
 
+`KeyShare` and CGGMP21 `Presign` are opaque shared-lifecycle handles. Assigning
+one value to another variable does not clone secret material: destroying or
+consuming either shallow copy affects every handle to that state. Session
+completion accessors return independent records; destroy each one separately.
+All slice, map, context, and nested-record getters return caller-owned copies.
+
 ```go
 share.Destroy()
 presign.Destroy()

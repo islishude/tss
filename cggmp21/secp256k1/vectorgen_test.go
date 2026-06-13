@@ -36,7 +36,7 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 		v := &vectors[i]
 		shares := secpKeygen(t, v.Threshold, v.N)
 		pk1 := shares[tss.PartyID(v.Parties[0])]
-		v.GroupPublicKey = hex.EncodeToString(pk1.PublicKey)
+		v.GroupPublicKey = hex.EncodeToString(pk1.PublicKeyBytes())
 		for _, pid := range v.Parties {
 			raw, _ := shares[tss.PartyID(pid)].MarshalBinary()
 			v.KeygenShares = append(v.KeygenShares, hex.EncodeToString(raw))

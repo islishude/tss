@@ -39,7 +39,7 @@ func generateFROSTVectors(t *testing.T, path string) {
 	for i := range vectors {
 		v := &vectors[i]
 		shares := frostVectorKeygen(t, v.Seed, v.Threshold, v.N)
-		v.GroupPublicKey = hex.EncodeToString(shares[0].PublicKey)
+		v.GroupPublicKey = hex.EncodeToString(shares[0].PublicKeyBytes())
 		for _, s := range shares {
 			raw, err := s.MarshalBinary()
 			if err != nil {

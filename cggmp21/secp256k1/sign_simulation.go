@@ -34,8 +34,8 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err := share.requireMPCMaterial(); err != nil {
 			return nil, nil, err
 		}
-		ids[i] = share.Party
-		shares[share.Party] = share
+		ids[i] = share.state.party
+		shares[share.state.party] = share
 	}
 	ids = tss.SortParties(ids)
 	presignID, err := tss.NewSessionID(nil)
@@ -49,7 +49,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		return nil, nil, err
 	}
 	for _, id := range ids {
-		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, presignID, simPolicies, tss.NewInMemoryReplayCache())
+		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].state.parties), protocol, presignID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -96,12 +96,12 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 		var session *SignSession
 		var out []tss.Envelope
-		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
+		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].state.parties), protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, presignStore, guard)
+			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.state.contextHash, true, presignStore, guard)
 		} else {
 			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
 				Context:      ctx,

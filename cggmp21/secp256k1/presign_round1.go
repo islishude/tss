@@ -18,20 +18,20 @@ import (
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
 // signers and binds the resulting presignature to ctx before nonce generation.
 func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
-	if key == nil {
+	if key == nil || key.state == nil {
 		return nil, nil, errors.New("nil key share")
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
 		return nil, nil, err
 	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
 	signers = tss.SortParties(signers)
-	if len(signers) < key.Threshold {
+	if len(signers) < key.state.threshold {
 		return nil, nil, errors.New("not enough signers")
 	}
-	if !tss.ContainsParty(signers, key.Party) {
+	if !tss.ContainsParty(signers, key.state.party) {
 		return nil, nil, errors.New("local party is not in signer set")
 	}
 	limits := DefaultLimits()
@@ -60,7 +60,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	lambda, err := shamir.LagrangeCoefficient(key.Party, signers, secp.Order())
+	lambda, err := shamir.LagrangeCoefficient(key.state.party, signers, secp.Order())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +99,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 			xBarSecret.Destroy()
 		}
 	}()
-	localVerificationShare, ok := key.verificationShare(key.Party)
+	localVerificationShare, ok := key.verificationShare(key.state.party)
 	if !ok {
 		return nil, nil, errors.New("missing local verification share")
 	}
@@ -111,7 +111,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	config := tss.ThresholdConfig{Threshold: key.Threshold, Parties: signers, Self: key.Party, SessionID: sessionID}
+	config := tss.ThresholdConfig{Threshold: key.state.threshold, Parties: signers, Self: key.state.party, SessionID: sessionID}
 	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
 	// Πenc proof bound to that public payload and the peer's RP parameters.
 	startOpening, err := mta.Start(config.Reader(), kShare.BigInt(), &paillierKey.PublicKey)
@@ -127,7 +127,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	presignPayload := presignRound1Payload{
 		Gamma:             gammaComm,
 		EncK:              startOpening.Message.Ciphertext,
-		PaillierPublicKey: slices.Clone(key.PaillierPublicKey),
+		PaillierPublicKey: slices.Clone(key.state.paillierPublicKey),
 	}
 	payload, err := marshalPresignRound1Payload(presignPayload)
 	if err != nil {
@@ -137,7 +137,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := envelope(config, 1, key.Party, 0, payloadPresignRound1, payload, false)
+	env, err := envelope(config, 1, key.state.party, 0, payloadPresignRound1, payload, false)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -157,10 +157,10 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		xBar:                 xBarSecret,
 		gammaComm:            gammaComm,
 		xBarComm:             xBarComm,
-		round1:               map[tss.PartyID]presignRound1Payload{key.Party: presignPayload},
+		round1:               map[tss.PartyID]presignRound1Payload{key.state.party: presignPayload},
 		round1Proofs:         make(map[tss.PartyID]presignRound1ProofPayload),
 		round1ProofEnvelopes: make(map[tss.PartyID]tss.Envelope),
-		round1Verified:       map[tss.PartyID]bool{key.Party: true},
+		round1Verified:       map[tss.PartyID]bool{key.state.party: true},
 		round2:               make(map[tss.PartyID]presignRound2Payload),
 		deltas:               make(map[tss.PartyID]*big.Int),
 		verifyShares:         make(map[tss.PartyID]SignVerifyShare),
@@ -180,14 +180,14 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 
 	out = []tss.Envelope{env}
 	for _, peer := range signers {
-		if peer == key.Party {
+		if peer == key.state.party {
 			continue
 		}
 		peerRP, err := key.ringPedersenPublicFor(peer)
 		if err != nil {
 			return nil, nil, err
 		}
-		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.Party, peer, key.PaillierPublicKey, contextHash)
+		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.state.party, peer, key.state.paillierPublicKey, contextHash)
 		proofBytes, err := mta.ProveStartForVerifier(config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
@@ -199,7 +199,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		if err != nil {
 			return nil, nil, err
 		}
-		proofEnv, err := envelope(config, 1, key.Party, peer, payloadPresignRound1Proof, proofPayload, true)
+		proofEnv, err := envelope(config, 1, key.state.party, peer, payloadPresignRound1Proof, proofPayload, true)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -371,7 +371,7 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 }
 
 func (s *PresignSession) maybeValidateRound1Proof(from tss.PartyID) error {
-	if from == s.key.Party {
+	if from == s.key.state.party {
 		s.round1Verified[from] = true
 		return nil
 	}
@@ -402,12 +402,12 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if err != nil {
 		return err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.Party)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
 	if err != nil {
 		return err
 	}
 	start := mta.StartMessage{Ciphertext: public.EncK}
-	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.Party, public.PaillierPublicKey, s.contextHash)
+	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.party, public.PaillierPublicKey, s.contextHash)
 	return mta.VerifyStart(domain, start, proverPK, localRP, proof.EncKProof)
 }
 

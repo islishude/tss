@@ -16,17 +16,13 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	}
 
 	key := minimalKeyShare()
-	key.Party = 1
-	key.Threshold = 2
-	key.Parties = []tss.PartyID{1, 2}
+	key.state.party = 1
+	key.state.threshold = 2
+	key.state.parties = []tss.PartyID{1, 2}
 	minimalPresign := func() *Presign {
-		return &Presign{
-			consumed: new(atomic.Bool),
-		}
+		return &Presign{state: &presignState{consumed: new(atomic.Bool)}}
 	}
-	plan := ResharePlan{
-		SessionID: sessionID,
-	}
+	plan := &ResharePlan{state: &resharePlanState{sessionID: sessionID}}
 
 	type startCase struct {
 		name    string

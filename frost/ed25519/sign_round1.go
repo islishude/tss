@@ -32,7 +32,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	}
 	c, _ := edcurve.Ed25519Challenge(R.Bytes(), s.verifyKey, s.message)
 
-	lambda, err := lagrangeCoefficientScalar(s.key.Party, s.signers)
+	lambda, err := lagrangeCoefficientScalar(s.key.state.party, s.signers)
 	if err != nil {
 		s.clearNonceBytes()
 		return nil, err
@@ -46,7 +46,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	// z_i = d_i + rho_i*e_i + lambda_i*c*(x_i + delta).
 	// With HD additive shift delta: z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
 	lambdaC := fed.NewScalar().Multiply(lambda, c)
-	rho := rhos[s.key.Party]
+	rho := rhos[s.key.state.party]
 	z := fed.NewScalar().Multiply(rho, e)
 	z.Add(z, d)
 	lcs := fed.NewScalar().Multiply(lambdaC, x)
@@ -55,7 +55,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		shiftTerm := fed.NewScalar().Multiply(lambdaC, s.deltaScalar)
 		z.Add(z, shiftTerm)
 	}
-	s.partials[s.key.Party] = z
+	s.partials[s.key.state.party] = z
 	zBytes := z.Bytes()
 	payload, err := marshalSignPartialPayload(signPartialPayload{Z: zBytes})
 	if err != nil {
@@ -67,7 +67,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		Version:     tss.Version,
 		SessionID:   s.sessionID,
 		Round:       2,
-		From:        s.key.Party,
+		From:        s.key.state.party,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,
 	})
@@ -78,7 +78,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if s.partialEnvelopes == nil {
 		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope)
 	}
-	s.partialEnvelopes[s.key.Party] = env.Clone()
+	s.partialEnvelopes[s.key.state.party] = env.Clone()
 	s.partialSent = true
 	s.clearNonceBytes()
 	if err := s.tryAggregate(); err != nil {

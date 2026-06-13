@@ -169,7 +169,7 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
-	partySet := tss.PartySet(shares[signers[0]].Parties)
+	partySet := tss.PartySet(shares[signers[0]].Parties())
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

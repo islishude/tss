@@ -368,7 +368,7 @@ func (s *KeygenSession) Complete() (*KeyShare, bool) {
 	if s == nil || s.state != keygenConfirmed || !s.completed {
 		return nil, false
 	}
-	return s.keyShare.Clone(), true
+	return cloneKeyShareValue(s.keyShare), true
 }
 
 // KeyShare returns the confirmed local key share when keygen has finished.

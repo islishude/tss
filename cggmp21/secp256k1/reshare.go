@@ -35,7 +35,7 @@ var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: thresh
 type ReshareSession struct {
 	mu sync.Mutex
 
-	plan          ResharePlan
+	plan          *ResharePlan
 	oldKey        *KeyShare
 	oldPublicKey  []byte
 	oldChainCode  []byte
@@ -132,48 +132,51 @@ func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.
 // receivers contribute. Old-only parties complete without producing a new share
 // only after they observe every new receiver's final confirmation.
 func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
-	if oldKey == nil {
+	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
-	if config.Self != oldKey.Party {
+	if config.Self != oldKey.state.party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.Parties, newParties, config.Threshold)
+	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.state.parties, newParties, config.Threshold)
 	if err != nil {
 		return nil, nil, err
 	}
-	if tss.ContainsParty(plan.NewParties, oldKey.Party) {
+	if plan.IsReceiver(oldKey.state.party) {
 		return StartReshareOverlap(oldKey, plan, config.Rand, guard)
 	}
 	return StartReshareDealer(oldKey, plan, config.Rand, guard)
 }
 
 // StartReshareDealer starts resharing for an old-party dealer.
-func StartReshareDealer(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
-	if oldKey == nil {
+func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
+	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
-	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, false, guard)
+	return startReshareSession(oldKey, plan, oldKey.state.party, rng, true, false, guard)
 }
 
 // StartReshareReceiver starts resharing for a new-party receiver.
-func StartReshareReceiver(plan ResharePlan, localParty tss.PartyID, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
+func StartReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
 	return startReshareSession(nil, plan, localParty, rng, false, true, guard)
 }
 
 // StartReshareOverlap starts resharing for a party that is both dealer and receiver.
-func StartReshareOverlap(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
-	if oldKey == nil {
+func StartReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
+	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
-	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, true, guard)
+	return startReshareSession(oldKey, plan, oldKey.state.party, rng, true, true, guard)
 }
 
-func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
-	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.SessionID, localParty); err != nil {
+func startReshareSession(oldKey *KeyShare, plan *ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	if plan == nil || plan.state == nil {
+		return nil, nil, errors.New("nil reshare plan")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, localParty); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if err := plan.Validate(); err != nil {
@@ -184,13 +187,13 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if dealer {
-		if oldKey == nil {
+		if oldKey == nil || oldKey.state == nil {
 			return nil, nil, errors.New("dealer requires old key share")
 		}
-		if oldKey.Party != localParty {
+		if oldKey.state.party != localParty {
 			return nil, nil, errors.New("old key party does not match local party")
 		}
-		if !IsDealer(plan, localParty) {
+		if !plan.IsDealer(localParty) {
 			return nil, nil, errors.New("local party is not in dealer set")
 		}
 		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
@@ -200,28 +203,28 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 			return nil, nil, err
 		}
 	}
-	if receiver && !IsReceiver(plan, localParty) {
+	if receiver && !plan.IsReceiver(localParty) {
 		return nil, nil, errors.New("local party is not in new receiver set")
 	}
 	if !dealer && !receiver {
 		return nil, nil, errors.New("reshare session requires dealer or receiver role")
 	}
 	config := tss.ThresholdConfig{
-		Threshold: plan.NewThreshold,
-		Parties:   append([]tss.PartyID(nil), plan.NewParties...),
+		Threshold: plan.state.newThreshold,
+		Parties:   append([]tss.PartyID(nil), plan.state.newParties...),
 		Self:      localParty,
-		SessionID: plan.SessionID,
+		SessionID: plan.state.sessionID,
 		Rand:      rng,
 	}
 	s := &ReshareSession{
 		plan:            cloneResharePlan(plan),
 		oldKey:          oldKey,
-		oldPublicKey:    append([]byte(nil), plan.OldGroupPublicKey...),
-		oldChainCode:    append([]byte(nil), plan.ChainCode...),
-		oldParties:      append([]tss.PartyID(nil), plan.OldParties...),
-		dealerParties:   append([]tss.PartyID(nil), plan.DealerParties...),
-		newParties:      append([]tss.PartyID(nil), plan.NewParties...),
-		newThreshold:    plan.NewThreshold,
+		oldPublicKey:    append([]byte(nil), plan.state.oldGroupPublicKey...),
+		oldChainCode:    append([]byte(nil), plan.state.chainCode...),
+		oldParties:      append([]tss.PartyID(nil), plan.state.oldParties...),
+		dealerParties:   append([]tss.PartyID(nil), plan.state.dealerParties...),
+		newParties:      append([]tss.PartyID(nil), plan.state.newParties...),
+		newThreshold:    plan.state.newThreshold,
 		selfID:          localParty,
 		isDealer:        dealer,
 		isReceiver:      receiver,
@@ -231,7 +234,7 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		planHash:        append([]byte(nil), planHash...),
 		commits:         make(map[tss.PartyID][][]byte),
 		shares:          make(map[tss.PartyID]*big.Int),
-		confirmations:   make(map[tss.PartyID][]byte, len(plan.NewParties)),
+		confirmations:   make(map[tss.PartyID][]byte, len(plan.state.newParties)),
 		newPaillierPubs: make(map[tss.PartyID]PaillierPublicShare),
 		newRingPedersen: make(map[tss.PartyID]RingPedersenPublicShare),
 		pendingShares:   make(map[tss.PartyID]pendingReshareShare),
@@ -413,7 +416,7 @@ func (s *ReshareSession) KeyShare() (*KeyShare, bool) {
 	if !s.completed || s.aborted || s.newShare == nil {
 		return nil, false
 	}
-	return s.newShare.Clone(), true
+	return cloneKeyShareValue(s.newShare), true
 }
 
 // Result returns the completed receiver key share.
@@ -425,42 +428,53 @@ func (s *ReshareSession) Result() (*KeyShare, error) {
 	return share, nil
 }
 
-func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan ResharePlan) error {
-	if oldKey.Threshold != plan.OldThreshold {
+func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan *ResharePlan) error {
+	if plan == nil || plan.state == nil {
+		return errors.New("nil reshare plan")
+	}
+	if oldKey.state.threshold != plan.state.oldThreshold {
 		return errors.New("old key threshold does not match reshare plan")
 	}
-	if !bytes.Equal(oldKey.PublicKey, plan.OldGroupPublicKey) {
+	if !bytes.Equal(oldKey.state.publicKey, plan.state.oldGroupPublicKey) {
 		return errors.New("old key public key does not match reshare plan")
 	}
-	if !bytes.Equal(oldKey.ChainCode, plan.ChainCode) {
+	if !bytes.Equal(oldKey.state.chainCode, plan.state.chainCode) {
 		return errors.New("old key chain code does not match reshare plan")
 	}
-	if !sameParties(oldKey.Parties, plan.OldParties) {
+	if !sameParties(oldKey.state.parties, plan.state.oldParties) {
 		return errors.New("old key party set does not match reshare plan")
 	}
-	if !sameByteSlices(oldKey.GroupCommitments, plan.OldGroupCommitments) {
+	if !sameByteSlices(oldKey.state.groupCommitments, plan.state.oldGroupCommitments) {
 		return errors.New("old key commitments do not match reshare plan")
 	}
-	for _, vs := range oldKey.VerificationShares {
-		if !bytes.Equal(vs.PublicKey, plan.OldVerificationShares[vs.Party]) {
+	for _, vs := range oldKey.state.verificationShares {
+		if !bytes.Equal(vs.PublicKey, plan.state.oldVerificationShares[vs.Party]) {
 			return fmt.Errorf("old key verification share for party %d does not match reshare plan", vs.Party)
 		}
 	}
 	return nil
 }
 
-func cloneResharePlan(in ResharePlan) ResharePlan {
-	out := in
-	out.OldGroupPublicKey = append([]byte(nil), in.OldGroupPublicKey...)
-	out.OldGroupCommitments = wireutil.CloneByteSlices(in.OldGroupCommitments)
-	out.OldVerificationShares = make(map[tss.PartyID][]byte, len(in.OldVerificationShares))
-	for id, share := range in.OldVerificationShares {
-		out.OldVerificationShares[id] = append([]byte(nil), share...)
+func cloneResharePlan(in *ResharePlan) *ResharePlan {
+	if in == nil || in.state == nil {
+		return nil
 	}
-	out.OldParties = append([]tss.PartyID(nil), in.OldParties...)
-	out.DealerParties = append([]tss.PartyID(nil), in.DealerParties...)
-	out.NewParties = append([]tss.PartyID(nil), in.NewParties...)
-	out.ChainCode = append([]byte(nil), in.ChainCode...)
+	out := &ResharePlan{state: &resharePlanState{
+		sessionID:           in.state.sessionID,
+		curveID:             in.state.curveID,
+		oldGroupPublicKey:   append([]byte(nil), in.state.oldGroupPublicKey...),
+		oldGroupCommitments: wireutil.CloneByteSlices(in.state.oldGroupCommitments),
+		oldParties:          append([]tss.PartyID(nil), in.state.oldParties...),
+		oldThreshold:        in.state.oldThreshold,
+		dealerParties:       append([]tss.PartyID(nil), in.state.dealerParties...),
+		newParties:          append([]tss.PartyID(nil), in.state.newParties...),
+		newThreshold:        in.state.newThreshold,
+		chainCode:           append([]byte(nil), in.state.chainCode...),
+	}}
+	out.state.oldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.oldVerificationShares))
+	for id, share := range in.state.oldVerificationShares {
+		out.state.oldVerificationShares[id] = append([]byte(nil), share...)
+	}
 	return out
 }
 

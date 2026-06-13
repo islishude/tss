@@ -97,19 +97,19 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
 	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.refreshMode, s.commits, newCommitments, verificationShares)
-	newShare := &KeyShare{
-		Version:              tss.Version,
-		Party:                s.selfID,
-		Threshold:            s.newThreshold,
-		Parties:              append([]tss.PartyID(nil), s.newParties...),
-		PublicKey:            append([]byte(nil), publicKey...),
-		ChainCode:            chainCode,
+	newShare := &KeyShare{state: &keyShareState{
+		version:              tss.Version,
+		party:                s.selfID,
+		threshold:            s.newThreshold,
+		parties:              append([]tss.PartyID(nil), s.newParties...),
+		publicKey:            append([]byte(nil), publicKey...),
+		chainCode:            chainCode,
 		secret:               newSecretScalar,
-		GroupCommitments:     newCommitments,
-		VerificationShares:   verificationShares,
-		KeygenSessionID:      s.cfg.SessionID,
-		KeygenTranscriptHash: reshareTranscriptHash,
-	}
+		groupCommitments:     newCommitments,
+		verificationShares:   verificationShares,
+		keygenSessionID:      s.cfg.SessionID,
+		keygenTranscriptHash: reshareTranscriptHash,
+	}}
 	if err := newShare.ValidateConsistency(); err != nil {
 		newShare.Destroy()
 		return err
@@ -135,8 +135,8 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 			}
 			points = append(points, p)
 		}
-		if s.refreshMode && degree < len(s.oldKey.GroupCommitments) {
-			oldCommitment, err := edcurve.PointFromBytesAllowIdentity(s.oldKey.GroupCommitments[degree])
+		if s.refreshMode && degree < len(s.oldKey.state.groupCommitments) {
+			oldCommitment, err := edcurve.PointFromBytesAllowIdentity(s.oldKey.state.groupCommitments[degree])
 			if err != nil {
 				return nil, err
 			}

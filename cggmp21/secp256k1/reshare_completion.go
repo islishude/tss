@@ -122,17 +122,17 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localProofShare := &KeyShare{
-		Party:                  s.selfID,
-		Threshold:              s.newThreshold,
-		Parties:                s.newParties,
-		PublicKey:              newCommitments[0],
-		PaillierPublicKey:      s.newPaillierPubs[s.selfID].PublicKey,
-		KeygenTranscriptHash:   transcriptHash,
-		PaillierProofSessionID: s.cfg.SessionID,
-		PaillierProofDomain:    domainLabelResharePaillier,
-		ResharePlanHash:        s.planHash,
-	}
+	localProofShare := &KeyShare{state: &keyShareState{
+		party:                  s.selfID,
+		threshold:              s.newThreshold,
+		parties:                s.newParties,
+		publicKey:              newCommitments[0],
+		paillierPublicKey:      s.newPaillierPubs[s.selfID].PublicKey,
+		keygenTranscriptHash:   transcriptHash,
+		paillierProofSessionID: s.cfg.SessionID,
+		paillierProofDomain:    domainLabelResharePaillier,
+		resharePlanHash:        s.planHash,
+	}}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.selfID))
 	if err != nil {
 		return nil, err
@@ -145,29 +145,29 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.newShare = &KeyShare{
-		Version:                tss.Version,
-		Party:                  s.selfID,
-		Threshold:              s.newThreshold,
-		Parties:                append([]tss.PartyID(nil), s.newParties...),
-		PublicKey:              append([]byte(nil), newCommitments[0]...),
-		ChainCode:              append([]byte(nil), s.oldChainCode...),
+	s.newShare = &KeyShare{state: &keyShareState{
+		version:                tss.Version,
+		party:                  s.selfID,
+		threshold:              s.newThreshold,
+		parties:                append([]tss.PartyID(nil), s.newParties...),
+		publicKey:              append([]byte(nil), newCommitments[0]...),
+		chainCode:              append([]byte(nil), s.oldChainCode...),
 		secret:                 newSecretScalar,
-		GroupCommitments:       newCommitments,
-		VerificationShares:     verificationShares,
-		PaillierPublicKey:      append([]byte(nil), s.newPaillierPubs[s.selfID].PublicKey...),
+		groupCommitments:       newCommitments,
+		verificationShares:     verificationShares,
+		paillierPublicKey:      append([]byte(nil), s.newPaillierPubs[s.selfID].PublicKey...),
 		paillierPrivateKey:     append([]byte(nil), s.newPaillierPriv...),
-		PaillierProof:          paillierProofBytes,
-		PaillierPublicKeys:     s.sortedNewPaillierPublicKeys(),
-		RingPedersenParams:     append([]byte(nil), s.newRingPedersen[s.selfID].Params...),
-		RingPedersenProof:      append([]byte(nil), s.newRingPedersen[s.selfID].Proof...),
-		RingPedersenPublic:     s.sortedNewRingPedersenPublic(),
-		PaillierProofSessionID: s.cfg.SessionID,
-		PaillierProofDomain:    domainLabelResharePaillier,
-		ResharePlanHash:        append([]byte(nil), s.planHash...),
-		ShareProof:             shareProofBytes,
-		KeygenTranscriptHash:   transcriptHash,
-	}
+		paillierProof:          paillierProofBytes,
+		paillierPublicKeys:     s.sortedNewPaillierPublicKeys(),
+		ringPedersenParams:     append([]byte(nil), s.newRingPedersen[s.selfID].Params...),
+		ringPedersenProof:      append([]byte(nil), s.newRingPedersen[s.selfID].Proof...),
+		ringPedersenPublic:     s.sortedNewRingPedersenPublic(),
+		paillierProofSessionID: s.cfg.SessionID,
+		paillierProofDomain:    domainLabelResharePaillier,
+		resharePlanHash:        append([]byte(nil), s.planHash...),
+		shareProof:             shareProofBytes,
+		keygenTranscriptHash:   transcriptHash,
+	}}
 	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
 	if err != nil {
 		return nil, err
@@ -200,8 +200,8 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.newShare.LogCiphertext = logCiphertext.Bytes()
-	s.newShare.LogProof = logProofBytes
+	s.newShare.state.logCiphertext = logCiphertext.Bytes()
+	s.newShare.state.logProof = logProofBytes
 	if err := s.newShare.validateWithoutConfirmations(); err != nil {
 		return nil, err
 	}
@@ -258,20 +258,20 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	h := sha256.New()
 	wire.WriteHashPart(h, []byte(reshareTranscriptHashLabel))
-	wire.WriteHashPart(h, []byte(s.plan.CurveID))
+	wire.WriteHashPart(h, []byte(s.plan.state.curveID))
 	wire.WriteHashPart(h, s.cfg.SessionID[:])
 	wire.WriteHashPart(h, s.oldPublicKey)
-	wire.WriteHashPart(h, wire.EncodeBytesList(s.plan.OldGroupCommitments))
+	wire.WriteHashPart(h, wire.EncodeBytesList(s.plan.state.oldGroupCommitments))
 	wire.WritePartySet(h, s.oldParties)
 	wire.WritePartySet(h, s.dealerParties)
 	wire.WritePartySet(h, s.newParties)
-	wire.WriteHashPart(h, wire.Uint32(uint32(s.plan.OldThreshold)))
+	wire.WriteHashPart(h, wire.Uint32(uint32(s.plan.state.oldThreshold)))
 	wire.WriteHashPart(h, wire.Uint32(uint32(s.newThreshold)))
-	wire.WriteHashPart(h, s.plan.ChainCode)
+	wire.WriteHashPart(h, s.plan.state.chainCode)
 	wire.WriteHashPart(h, wire.Uint32(uint32(defaultPaillierBits())))
 	for _, dealer := range s.oldParties {
 		wire.WritePartyID(h, dealer)
-		wire.WriteHashPart(h, s.plan.OldVerificationShares[dealer])
+		wire.WriteHashPart(h, s.plan.state.oldVerificationShares[dealer])
 	}
 	for _, dealer := range s.dealerParties {
 		wire.WriteHashPart(h, wire.EncodeBytesList(s.commits[dealer]))

@@ -160,12 +160,12 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 		return nil
 	}
 	fields := []tss.EvidenceField{
-		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.Parties, partySetHashLabel)),
-		hashEvidenceField(evidenceFieldPublicKeyHash, key.PublicKey),
-		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(key.PaillierPublicKeys)),
+		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)),
+		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.publicKey),
+		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(key.state.paillierPublicKeys)),
 	}
-	if len(key.KeygenTranscriptHash) > 0 {
-		fields = append(fields, rawEvidenceField(evidenceFieldKeygenTranscriptHash, key.KeygenTranscriptHash))
+	if len(key.state.keygenTranscriptHash) > 0 {
+		fields = append(fields, rawEvidenceField(evidenceFieldKeygenTranscriptHash, key.state.keygenTranscriptHash))
 	}
 	return fields
 }

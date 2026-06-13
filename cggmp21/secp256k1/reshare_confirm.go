@@ -93,7 +93,7 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
-	s.newShare.KeygenConfirmations = wireutil.CloneByteSlices(encoded)
+	s.newShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := s.newShare.Validate(); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
@@ -104,7 +104,7 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
 	}
-	confirmationSetHash := keygenConfirmationSetHash(s.newShare.KeygenConfirmations)
+	confirmationSetHash := keygenConfirmationSetHash(s.newShare.state.keygenConfirmations)
 	s.log.Info(s.cfg.Ctx(), "reshare complete",
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
