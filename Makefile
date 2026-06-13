@@ -29,9 +29,9 @@ SLOWCRYPTO_TIMEOUT ?= 1h
 RACE_TIMEOUT ?= 1h
 STRESS_TIMEOUT ?= 5h
 
-FUZZTIME ?= 60s
-FUZZ_SMOKE_TIME ?= 10s
-FUZZ_NIGHTLY_TIME ?= 10m
+FUZZCOUNT ?= 100000x
+FUZZ_SMOKE_COUNT ?= 10000x
+FUZZ_NIGHTLY_COUNT ?= 1000000x
 
 COVERPROFILE ?= coverage.out
 COVERHTML ?= coverage.html
@@ -98,15 +98,15 @@ test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
 
 .PHONY: fuzz-smoke
 fuzz-smoke: ## Short fuzz smoke for changed fuzz targets.
-	FUZZTIME=$(FUZZ_SMOKE_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
+	FUZZTIME=$(FUZZ_SMOKE_COUNT) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
 
 .PHONY: fuzz-ci
 fuzz-ci: ## CI-grade fuzz run; intended for dedicated fuzz jobs.
-	FUZZTIME=$(FUZZTIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
+	FUZZTIME=$(FUZZCOUNT) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
 
 .PHONY: fuzz-nightly
 fuzz-nightly: ## Long fuzz run for scheduled jobs.
-	FUZZTIME=$(FUZZ_NIGHTLY_TIME) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
+	FUZZTIME=$(FUZZ_NIGHTLY_COUNT) PARALLEL=$(FUZZ_PARALLEL) ./.github/scripts/fuzz-ci.sh ./...
 
 # -----------------------------------------------------------------------------
 # Coverage

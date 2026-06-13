@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-FUZZTIME="${FUZZTIME:-60s}"
+FUZZTIME="${FUZZTIME:-100000x}"
 PARALLEL="${PARALLEL:-4}"
 BUILD_TAGS="${BUILD_TAGS:-tier1,integration}"
 

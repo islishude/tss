@@ -1228,13 +1228,13 @@ Distinguish between fast smoke fuzzing (local feedback) and CI fuzzing (broader 
 
 ```make
 fuzz-smoke:
-	go test -run=^$ -fuzz=. -fuzztime=10s ./internal/wire ./internal/zk/...
+	go test -run=^$ -fuzz=. -fuzztime=10000x ./internal/wire ./internal/zk/...
 
 fuzz-ci:
-	go test -run=^$ -fuzz=. -fuzztime=2m ./internal/wire ./internal/zk/... ./cggmp21/secp256k1
+	go test -run=^$ -fuzz=. -fuzztime=100000x ./internal/wire ./internal/zk/... ./cggmp21/secp256k1
 
 fuzz-nightly:
-	go test -run=^$ -fuzz=. -fuzztime=10m ./...
+	go test -run=^$ -fuzz=. -fuzztime=1000000x ./...
 ```
 
 Fuzz corpora should live in `testdata/fuzz/` and include historical regression samples. New bugs found by fuzzing should add their input to the corpus as a permanent regression guard.
