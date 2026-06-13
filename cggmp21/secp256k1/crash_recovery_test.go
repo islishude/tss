@@ -84,17 +84,15 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if restored.Consumed {
-		t.Fatal("restored presign is already consumed")
-	}
 	if IsPresignConsumed(restored) {
-		t.Fatal("IsPresignConsumed returned true on fresh restored presign")
+		t.Fatal("restored presign is already consumed")
 	}
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	if _, _, err := StartSignDigest(shares[1], restored, sid, digest[:]); err == nil {
-		t.Fatal("StartSignDigest without PresignStore succeeded for restored presign")
+	guard := testCGGMP21Guard(shares[1].Party, tss.PartySet(shares[1].Parties), sid)
+	if _, _, err := startSignDigestBound(shares[1], restored, sid, digest[:], restored.ContextHash, true, nil, guard); err == nil {
+		t.Fatal("startSignDigestBound without PresignStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 	}
@@ -123,7 +121,7 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 		t.Fatalf("StartSignDigest failed: %v", err)
 	}
 
-	if !presigns[1].Consumed {
+	if !IsPresignConsumed(presigns[1]) {
 		t.Fatal("presign not marked consumed after StartSignDigest")
 	}
 
@@ -136,11 +134,8 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !restored.Consumed {
-		t.Fatal("consumed flag not preserved through marshal/unmarshal")
-	}
 	if !IsPresignConsumed(restored) {
-		t.Fatal("IsPresignConsumed returned false on consumed restored presign")
+		t.Fatal("consumed flag not preserved through marshal/unmarshal")
 	}
 
 	sid2, _ := tss.NewSessionID(nil)

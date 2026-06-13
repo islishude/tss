@@ -288,32 +288,36 @@ Set `PresignContext.DerivationPath` before calling `StartPresignWithContext(...,
 
 ## Presign Lifecycle
 
-Presign records are strictly one-use:
+Presign records are strictly one-use. The security boundary is the local
+in-process claim plus the durable `PresignStore.ClaimPresign` operation.
+`MarshalBinary` includes a consumed snapshot in the wire record, but `Presign`
+does not expose a mutable consumed field:
 
 ```go
 // Check before use:
 if IsPresignConsumed(presign) { /* discard */ }
 
-// StartSign marks Consumed before emitting any outbound message:
+// StartSign requires request.PresignStore and claims before any outbound message:
 sess, out, err := StartSign(share, presign, sessionID, request, guard)
 
-// After signing, persist the consumed record:
-consumed, _ := MarkPresignConsumed(presign)
-encrypted, _ := tss.EncryptPresignWithPassphrase(consumed.MarshalBinary(), passphrase, "presign-1", nil)
+// Optionally persist a consumed snapshot for operators:
+_ = MarkPresignConsumed(presign)
+rawConsumed, _ := presign.MarshalBinary()
+encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
 ```
 
-`StartSign` sets `Consumed = true` **before** constructing the outbound signature
-envelope, so reuse of the same in-process `*Presign` pointer fails before any
-partial signature leaves the process. This local claim is serialized inside the
-package, but distributed deployments still need a durable atomic claim in
-storage before online signing.
+`StartSign` claims the presign locally **before** constructing the outbound
+signature envelope, so reuse of the same generated `*Presign` or a shallow copy
+fails before any partial signature leaves the process.
 
-If a presign was restored with `UnmarshalPresign`, `StartSign` requires
-`SignRequest.PresignStore`. The store's `MarkConsumed(presign.ID())` operation
-must be an atomic conditional write in the caller's durable storage, so two
-processes cannot consume the same restored presign after a restart or failover.
-Consumed restored presigns fail with `ErrCodeConsumed` before this configuration
-check.
+`StartSign` then calls `SignRequest.PresignStore.ClaimPresign(presign.ID())`
+before constructing the outbound partial. This method must be an atomic
+conditional write in the caller's durable storage, so serialized copies and
+processes after restart cannot consume the same presign ID twice. Return
+`ErrPresignAlreadyConsumed` for an existing claim; `StartSign` maps it to
+`ErrCodeConsumed` and does not roll back the local claim. Temporary store errors
+produce no outbound partial and roll back the local claim so the caller can
+retry.
 
 ## Refresh
 
@@ -670,15 +674,14 @@ ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy"
 ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx, guard)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
-// presign is a deep copy; persist it immediately.
+// presign ownership has moved from the session to the caller; persist it immediately.
 ```
 
 ### Online Signing
 
 ```go
-request := SignRequest{Context: ctx, Message: message, LowS: true}
-// If presign was restored from storage, set request.PresignStore to a durable
-// atomic consumed-claim implementation before StartSign.
+request := SignRequest{Context: ctx, Message: message, LowS: true, PresignStore: store}
+// PresignStore must atomically claim presign.ID() before StartSign emits a partial.
 ss, out, err := StartSign(share, presign, sessionID, request, guard)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
@@ -707,7 +710,7 @@ newShare, err := receiver.Result()
 ### Presign Lifecycle
 
 ```go
-consumed, err := MarkPresignConsumed(presign)
+err := MarkPresignConsumed(presign)
 ok := IsPresignConsumed(presign)
 ```
 

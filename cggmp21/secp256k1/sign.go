@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math/big"
 	"sync"
+	"sync/atomic"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -43,18 +44,22 @@ func (PresignContext) WireType() string { return presignContextWireType }
 // WireVersion returns the wire format version for PresignContext.
 func (PresignContext) WireVersion() uint16 { return tss.Version }
 
-// PresignStore is an optional durable claim interface. When provided to StartSign,
-// the library calls MarkConsumed with the presign's content-derived identifier
-// ([Presign.ID]) before it constructs any outbound signing partial. If the store
-// write fails, StartSign reverts the in-memory consumed flag and returns an error
-// — the presign is not consumed and can be retried.
+// ErrPresignAlreadyConsumed reports that a durable presign claim already exists.
+var ErrPresignAlreadyConsumed = errors.New("presign already consumed")
+
+// PresignStore is the durable one-use boundary for online signing. StartSign
+// calls ClaimPresign with the presign's content-derived identifier ([Presign.ID])
+// after the local in-process claim succeeds and before it constructs any
+// outbound signing partial.
 //
-// A typical implementation persists the presign record with Consumed=true in an
-// atomic compare-and-swap or conditional-insert operation keyed by the presign
-// identifier. The identifier is computed from the presign contents (including
-// secret material) and cannot be altered independently of the record.
+// ClaimPresign must be atomic for each presign identifier. It returns nil only
+// when this caller won the durable claim. It must return
+// [ErrPresignAlreadyConsumed] when the identifier was already claimed, so callers
+// can fail closed with [tss.ErrCodeConsumed]. For temporary storage failures,
+// return any other error; StartSign rolls back the local claim because no
+// outbound signing partial has been constructed yet.
 type PresignStore interface {
-	MarkConsumed(presignID []byte) error
+	ClaimPresign(presignID []byte) error
 }
 
 // SignRequest is the context-bound online signing request for a persisted
@@ -63,15 +68,16 @@ type SignRequest struct {
 	Context      PresignContext `json:"context"`
 	Message      []byte         `json:"message"`
 	LowS         bool           `json:"low_s"`
-	PresignStore PresignStore   `json:"-"` // optional durable claim hook
+	PresignStore PresignStore   `json:"-"` // required durable claim hook
 }
 
 // Presign contains one local offline signing record and must be consumed once.
-// Fields are exported for binary encoding via [Presign.MarshalBinary]; JSON encoding
-// is intentionally rejected by [Presign.MarshalJSON] to prevent accidental exposure
-// of secret material.
+// MarshalBinary maps it to the canonical private wire record, including a
+// consumed snapshot from the internal claim. JSON encoding is intentionally
+// rejected by [Presign.MarshalJSON] to prevent accidental exposure of secret
+// material.
 type Presign struct {
-	mu *sync.Mutex
+	consumed *atomic.Bool
 
 	Version              uint16
 	Party                tss.PartyID
@@ -86,14 +92,11 @@ type Presign struct {
 	PublicKey            []byte
 	KeygenTranscriptHash []byte
 	PartiesHash          []byte
-	Consumed             bool
 	VerifyShares         []SignVerifyShare
 
 	kShare   *secret.Scalar
 	chiShare *secret.Scalar
 	delta    *secret.Scalar
-
-	restored bool
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
@@ -133,7 +136,7 @@ const presignIDLabel = "cggmp21-secp256k1-presign-id-v1"
 // ID returns a content-derived presign identifier suitable for use as an
 // idempotency key in a durable [PresignStore]. The returned hash is computed
 // from all persisted presign fields, including secret material, and does not
-// depend on [Presign.TranscriptHash] or [Presign.Consumed]. Tampering with any
+// depend on [Presign.TranscriptHash] or the local consumed claim. Tampering with any
 // persisted field changes the identifier, so a storage layer cannot alter the
 // idempotency key independently of the presign contents.
 func (p *Presign) ID() []byte {
@@ -165,6 +168,9 @@ func (p *Presign) ID() []byte {
 func (p *Presign) Validate() error {
 	if p == nil {
 		return errors.New("nil presign")
+	}
+	if p.consumed == nil {
+		return errors.New("presign claim state unavailable")
 	}
 	if p.Version != tss.Version {
 		return fmt.Errorf("unexpected presign version %d", p.Version)
@@ -251,10 +257,9 @@ func (p *Presign) Destroy() {
 	if p == nil {
 		return
 	}
-	p.mu.Lock()
-	markPresignIDConsumed(p)
-	p.Consumed = true
-	p.mu.Unlock()
+	if p.consumed != nil {
+		p.consumed.Store(true)
+	}
 	p.kShare.Destroy()
 	p.chiShare.Destroy()
 	p.delta.Destroy()
@@ -521,7 +526,8 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 	}
 }
 
-// Presign returns a deep copy of the completed local presign record.
+// Presign returns the completed local presign record and transfers ownership to
+// the caller.
 //
 // Presign enforces single retrieval: after the first successful call the session
 // will not hand out another copy. Callers must store the returned presign for
@@ -538,6 +544,11 @@ func (s *PresignSession) Presign() (*Presign, bool) {
 	if s.presignReturned {
 		return nil, false
 	}
+	if s.presign == nil {
+		return nil, false
+	}
 	s.presignReturned = true
-	return s.presign.Clone(), true
+	p := s.presign
+	s.presign = nil
+	return p, true
 }

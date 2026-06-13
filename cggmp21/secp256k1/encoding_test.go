@@ -172,7 +172,7 @@ func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
-	unsorted := (presigns[1]).Clone()
+	unsorted := clonePresignForTest(presigns[1])
 	unsorted.Signers[0], unsorted.Signers[1] = unsorted.Signers[1], unsorted.Signers[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted signer set encoded")

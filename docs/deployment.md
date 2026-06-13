@@ -72,7 +72,9 @@ raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
 share, err := secp256k1.UnmarshalKeyShare(raw)
 ```
 
-For CGGMP21 presign records, check the consumed flag before use:
+For CGGMP21 presign records, the serialized consumed flag is only a local
+snapshot. It is useful for discarding records that were already persisted as
+consumed, but it is not the durable one-use boundary:
 
 ```go
 raw, _ := tss.DecryptPresignWithPassphrase(encrypted, passphrase)
@@ -83,9 +85,10 @@ if secp256k1.IsPresignConsumed(presign) {
 ```
 
 Restored CGGMP21 presigns require a durable atomic claim before signing.
-Provide `SignRequest.PresignStore`; its `MarkConsumed(presign.ID())` operation
-should be a conditional write or compare-and-swap in the same durable store that
-tracks presign records.
+Provide `SignRequest.PresignStore`; its `ClaimPresign(presign.ID())` operation
+must be a conditional insert or compare-and-swap in the same durable store that
+tracks presign records. Return `secp256k1.ErrPresignAlreadyConsumed` when the
+presign ID was already claimed.
 
 ### 4. Signing
 
@@ -135,7 +138,7 @@ request := secp256k1.SignRequest{
     Context:      ctx,
     Message:      message,
     LowS:         true,
-    PresignStore: store, // required for presigns restored from storage
+    PresignStore: store, // required durable one-use claim
 }
 signGuard, err := (tss.GuardConfig{
     Self:        keyShare.PartyID(),
@@ -152,18 +155,21 @@ sig, ok := signSession.Signature()
 secp256k1.VerifySignature(publicKey, request, sig) // true
 ```
 
-After signing, mark the presign consumed:
+After signing, you may persist a consumed snapshot for operational clarity, but
+this is not a replacement for the durable claim performed by `StartSign`:
 
 ```go
-consumed, _ := secp256k1.MarkPresignConsumed(presign)
-rawConsumed, _ := consumed.MarshalBinary()
+_ = secp256k1.MarkPresignConsumed(presign)
+rawConsumed, _ := presign.MarshalBinary()
 encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
-// Persist updated record so restart won't reuse.
+// Persist updated record so operators can see the consumed snapshot.
 ```
 
-For restored presigns, `StartSign` calls `PresignStore.MarkConsumed` before it
-constructs the outbound partial signature. If that durable claim fails, signing
-does not start and no partial is emitted.
+`StartSign` calls `PresignStore.ClaimPresign` after the local in-process claim
+and before it constructs the outbound partial signature. If the store returns
+`ErrPresignAlreadyConsumed`, signing fails closed with `ErrCodeConsumed` and the
+local claim remains consumed. If the store returns a temporary I/O error, no
+partial is emitted and the local claim is rolled back so the caller can retry.
 
 ### 5. Destruction
 
@@ -278,7 +284,7 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 3. Load into a new session.
 4. Verify against known group public key.
 5. If presigns exist, check consumed flags — discard consumed presigns.
-6. Configure a durable `PresignStore` before using any restored unconsumed presign.
+6. Configure a durable `PresignStore` before any CGGMP21 online signing call.
 
 ## Monitoring and Alerting
 

@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"errors"
 	"fmt"
-	"sync"
 
 	"github.com/islishude/tss"
 
@@ -279,7 +278,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		return nil, fmt.Errorf("invalid verify shares: %w", err)
 	}
 	p := &Presign{
-		mu:                   &sync.Mutex{},
+		consumed:             newPresignConsumedState(w.Consumed),
 		Version:              tss.Version,
 		Party:                w.Party,
 		Threshold:            w.Threshold,
@@ -293,18 +292,13 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		PublicKey:            w.PublicKey,
 		KeygenTranscriptHash: w.KeygenTranscriptHash,
 		PartiesHash:          w.PartiesHash,
-		Consumed:             w.Consumed,
 		VerifyShares:         verifyShares,
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
-		restored:             true,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
-	}
-	if p.Consumed {
-		markPresignIDConsumed(p)
 	}
 	return p, nil
 }

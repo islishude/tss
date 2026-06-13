@@ -187,20 +187,85 @@ func TestPresignMarshalJSONRejected(t *testing.T) {
 
 func TestPresignDestroyClearsSecrets(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
-	defer forgetConsumedPresignForTest(p)
 	p.Destroy()
-	if !p.Consumed {
-		t.Fatal("expected Consumed=true after Destroy")
+	if !IsPresignConsumed(p) {
+		t.Fatal("expected presign consumed after Destroy")
 	}
 }
 
-func TestPresignDestroyMarksCloneConsumed(t *testing.T) {
+func TestPresignDestroyMarksTestCopyConsumed(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
-	clone := p.Clone()
-	defer forgetConsumedPresignForTest(clone)
+	cp := clonePresignForTest(p)
 	p.Destroy()
-	if !IsPresignConsumed(clone) {
-		t.Fatal("destroying a presign did not mark an existing clone consumed")
+	if !IsPresignConsumed(cp) {
+		t.Fatal("destroying a presign did not mark an existing test copy consumed")
+	}
+}
+
+func TestMarkPresignConsumedMarksInPlace(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	cp := clonePresignForTest(p)
+
+	if err := MarkPresignConsumed(p); err != nil {
+		t.Fatal(err)
+	}
+	if !IsPresignConsumed(p) {
+		t.Fatal("MarkPresignConsumed did not mark the original presign consumed")
+	}
+	if !IsPresignConsumed(cp) {
+		t.Fatal("MarkPresignConsumed did not update the shared claim")
+	}
+}
+
+func TestPresignMissingClaimFailsClosed(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	p.consumed = nil
+
+	if !IsPresignConsumed(p) {
+		t.Fatal("presign without claim state was treated as unconsumed")
+	}
+	if p.consumed != nil {
+		t.Fatal("IsPresignConsumed lazily initialized missing claim state")
+	}
+	if err := p.Validate(); err == nil {
+		t.Fatal("presign without claim state passed validation")
+	}
+	err := ClaimPresign(p)
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeConsumed {
+		t.Fatalf("ClaimPresign error = %v, want ErrCodeConsumed", err)
+	}
+	if p.consumed != nil {
+		t.Fatal("ClaimPresign lazily initialized missing claim state")
+	}
+	if err := MarkPresignConsumed(p); err == nil {
+		t.Fatal("MarkPresignConsumed accepted missing claim state")
+	}
+	cp := clonePresignForTest(p)
+	if cp.consumed != nil || !IsPresignConsumed(cp) {
+		t.Fatal("test copy revived presign with missing claim state")
+	}
+}
+
+func TestPresignSessionPresignTransfersOwnership(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	session := &PresignSession{
+		completed: true,
+		presign:   p,
+	}
+	got, ok := session.Presign()
+	if !ok {
+		t.Fatal("first Presign call failed")
+	}
+	if got != p {
+		t.Fatal("Presign did not transfer the session-owned presign")
+	}
+	if session.presign != nil {
+		t.Fatal("session retained presign after transfer")
+	}
+	got, ok = session.Presign()
+	if ok || got != nil {
+		t.Fatal("second Presign call returned a presign")
 	}
 }
 

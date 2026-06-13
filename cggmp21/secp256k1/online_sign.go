@@ -69,26 +69,18 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.ContextHash) {
 		return nil, nil, errors.New("presign context mismatch")
 	}
-	if IsPresignConsumed(presign) {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
-	}
-	if presign.restored && store == nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.Party, errors.New("restored presign requires SignRequest.PresignStore for durable one-use claim"))
+	if store == nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.Party, errors.New("SignRequest.PresignStore is required for durable presign claim"))
 	}
 	if !claimPresignForSigning(presign) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, errors.New("presign already consumed"))
 	}
-	// Durable claim: if the caller provided a store, persist Consumed=true before
-	// we construct any outbound partial. If persistence fails, revert the in-memory
-	// flag so the presign can be retried.
-	if store != nil {
-		if err := store.MarkConsumed(presign.ID()); err != nil {
-			releasePresignID(presign)
-			presign.mu.Lock()
-			presign.Consumed = false
-			presign.mu.Unlock()
-			return nil, nil, fmt.Errorf("presign durable claim failed: %w", err)
+	if err := store.ClaimPresign(presign.ID()); err != nil {
+		if errors.Is(err, ErrPresignAlreadyConsumed) {
+			return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.Party, err)
 		}
+		rollbackPresignClaim(presign)
+		return nil, nil, fmt.Errorf("presign durable claim failed: %w", err)
 	}
 	kShare, err := secpScalarFromSecret(presign.kShare)
 	if err != nil {
@@ -397,31 +389,14 @@ func validatePresign(key *KeyShare, presign *Presign) error {
 	return nil
 }
 
-func claimPresignForSigning(presign *Presign) bool {
-	presign.mu.Lock()
-	if presign.Consumed {
-		presign.mu.Unlock()
-		return false
-	}
-	presign.mu.Unlock()
-	if !claimPresignID(presign) {
-		return false
-	}
-	// Mark consumed before constructing the outbound sign envelope so accidental
-	// reuse fails before any new partial signature can leave the process.
-	presign.mu.Lock()
-	presign.Consumed = true
-	presign.mu.Unlock()
-	return true
-}
-
-// ClaimPresign atomically checks and marks a presign as consumed.
+// ClaimPresign atomically checks and marks only the local in-process presign
+// claim as consumed.
 // It returns [tss.ErrCodeConsumed] if the presign has already been consumed.
-// Callers can use this as a pre-flight check before [StartSign] to avoid
-// double-consumption across concurrent signing attempts.
 //
-// ClaimPresign does not perform durable persistence — use [SignRequest.PresignStore]
-// for durable consumption tracking during [StartSign].
+// ClaimPresign does not perform durable persistence and is not a substitute for
+// [SignRequest.PresignStore]. Production signing should let [StartSign] perform
+// both the local claim and durable store claim before constructing a signing
+// partial.
 func ClaimPresign(presign *Presign) error {
 	if presign == nil {
 		return errors.New("nil presign")

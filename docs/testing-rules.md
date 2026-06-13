@@ -629,7 +629,7 @@ Tests must verify that every semantically equivalent but non-canonical encoding 
 - Same `KeyShare` marshal twice must produce byte-identical output.
 - Same `Presign` marshal twice must produce byte-identical output.
 - `Unmarshal(Marshal(x))` must preserve all public fields for keyshares, presign records, proof payloads, and blame evidence.
-- A consumed presign that is marshaled and unmarshaled must still report `Consumed == true`.
+- A consumed presign that is marshaled and unmarshaled must still report consumed via `IsPresignConsumed()`.
 - Non-canonical encodings that are semantically equivalent (e.g., different party ordering in a set) must either be canonicalized to a single representation or rejected.
 
 **Golden vectors as compatibility contracts:**
@@ -1002,17 +1002,19 @@ Key assertions:
 
 The presign must be marked consumed only when the code enters a path that could produce or externally observe a partial signature. The guiding principle: **if a partial signature could have been externally observed, the presign is consumed.**
 
-| Failure Scenario                                    | Consumed? | Reason                                                              |
-| --------------------------------------------------- | --------- | ------------------------------------------------------------------- |
-| Digest has invalid length (not 32 bytes)            | no        | Rejected before entering the signing path                           |
-| KeyShare does not match presign                     | no        | Rejected before entering the signing path                           |
-| BIP32 path mismatch                                 | no        | Rejected before entering the signing path                           |
-| Signer set mismatch                                 | no        | Rejected before entering the signing path                           |
-| `StartSign` succeeds, partial ready but not emitted | yes       | In-memory consumed flag is set before any outbound envelope         |
-| Partial signature emitted to outbox                 | yes       | Externally observable                                               |
-| Partial signature generated but send fails          | yes       | Must be consumed — caller cannot prove the partial was not observed |
-| Process crash after partial generated               | yes       | Reload must show consumed; presign must not be reusable             |
-| Caller-provided `PresignStore.MarkConsumed` fails   | no        | In-memory consumed flag is reverted, error returned to caller       |
+| Failure Scenario                                                | Consumed? | Reason                                                              |
+| --------------------------------------------------------------- | --------- | ------------------------------------------------------------------- |
+| Digest has invalid length (not 32 bytes)                        | no        | Rejected before entering the signing path                           |
+| KeyShare does not match presign                                 | no        | Rejected before entering the signing path                           |
+| BIP32 path mismatch                                             | no        | Rejected before entering the signing path                           |
+| Signer set mismatch                                             | no        | Rejected before entering the signing path                           |
+| `SignRequest.PresignStore` is nil                               | no        | Rejected before local claim                                         |
+| `PresignStore.ClaimPresign` returns temporary storage error     | no        | Local claim is reverted because no outbound partial was constructed |
+| `PresignStore.ClaimPresign` returns `ErrPresignAlreadyConsumed` | yes       | Fail closed; local claim is not rolled back                         |
+| `StartSign` succeeds, partial ready but not emitted             | yes       | Local and durable claims are complete before any outbound envelope  |
+| Partial signature emitted to outbox                             | yes       | Externally observable                                               |
+| Partial signature generated but send fails                      | yes       | Must be consumed — caller cannot prove the partial was not observed |
+| Process crash after partial generated                           | yes       | Reload must show consumed; presign must not be reusable             |
 
 #### 6.3 Serialization Bypass
 
@@ -1039,15 +1041,15 @@ func TestPresignShallowCopyDoesNotBypassConsumedState(t *testing.T) {
 }
 ```
 
-**Marshal/unmarshal round-trip:** `UnmarshalPresign(MarshalBinary(consumedPresign))` must produce a presign where `IsPresignConsumed()` returns true.
+**Marshal/unmarshal round-trip:** `UnmarshalPresign(MarshalBinary(consumedPresign))` must produce a presign where `IsPresignConsumed()` returns true. Two independently unmarshaled unconsumed copies must not both sign when pointed at the same durable `PresignStore`.
 
 **Encrypt/decrypt round-trip:** `DecryptPresignWithPassphrase(EncryptPresignWithPassphrase(consumedPresign, pw), pw)` must produce a presign where `IsPresignConsumed()` returns true.
 
-**Clone:** If a `Clone()` method exists, a cloned consumed presign must also be consumed.
+**Test-only deep copy:** A `_test.go` helper may deep-copy presign fields for mutation tests, but it must share the original local claim. Signing with either object must consume both. Production code must not expose or retain a presign clone API.
 
-**Design constraint:** The `Presign` struct must use internal synchronization (mutex or atomic) so that the consumed flag is not bypassable by value copying. Consider a `noCopy` marker or ensuring the consumed flag is the only mutable post-construction field that matters for safety.
+**Design constraint:** The `Presign` struct must use internal synchronization (mutex or atomic) so that the consumed claim is not bypassable by value copying. The consumed snapshot exists only in the wire DTO; `Presign` must not expose a second mutable consumed field.
 
-Existing implementations: `TestThresholdECDSA_PresignReuseRejected`, `TestThresholdECDSA_PresignRoundTripScenarios`, `TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound` in `cggmp21/secp256k1/integration_presign_test.go` and `guard_full_flow_test.go`.
+Existing implementations: `TestThresholdECDSA_PresignReuseRejected`, `TestThresholdECDSA_PresignCopiesShareClaim`, `TestThresholdECDSA_RestoredPresignStoreClaimsOnce`, `TestThresholdECDSA_PresignStoreAlreadyConsumedFailClosed`, `TestThresholdECDSA_PresignStoreTemporaryErrorRollsBack`, `TestThresholdECDSA_PresignRoundTripScenarios`, `TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound` in `cggmp21/secp256k1/integration_presign_test.go` and `guard_full_flow_test.go`.
 
 ### 7. Refresh and Reshare Safety
 
@@ -1115,8 +1117,8 @@ This lives in `internal/testharness/crash_store.go`. The `CrashPoint` enum and `
 
 **Design notes:**
 
-- The `PresignStore` interface (in `cggmp21/secp256k1/sign.go`) is the intended durability boundary for presign consumption. A production implementation should persist the consumed flag before any partial signature is emitted. If the store write fails, the in-memory consumed flag is reverted and the error is returned to the caller.
-- Tests must verify that a presign whose `Consumed` flag was set before a crash is still consumed after reload — the serialization round-trip test (`TestThresholdECDSA_PresignRoundTripScenarios`) already covers the marshal/unmarshal path, but full crash simulation (process-level restart) is a valuable addition for production deployment testing.
+- The `PresignStore` interface (in `cggmp21/secp256k1/sign.go`) is the durability boundary for presign consumption. A production implementation must atomically claim the presign ID before any partial signature is emitted. `ErrPresignAlreadyConsumed` keeps the local claim consumed and returns `ErrCodeConsumed`; temporary storage errors revert the local claim and return the error to the caller.
+- Tests must verify that a presign whose local claim was serialized as consumed before a crash is still consumed after reload — the serialization round-trip test (`TestThresholdECDSA_PresignRoundTripScenarios`) already covers the marshal/unmarshal path, but full crash simulation (process-level restart) is a valuable addition for production deployment testing.
 
 ### 9. Blame Evidence
 

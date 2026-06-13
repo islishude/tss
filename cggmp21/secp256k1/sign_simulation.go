@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/islishude/tss"
 )
@@ -87,6 +88,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	}
 	signSessions := make(map[tss.PartyID]*SignSession, len(ids))
 	signMessages := make([]tss.Envelope, 0, len(ids))
+	presignStore := newSimulationPresignStore()
 	for _, id := range ids {
 		presign, ok := presignSessions[id].Presign()
 		if !ok {
@@ -99,12 +101,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, nil, guard)
+			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, presignStore, guard)
 		} else {
 			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
-				Context: ctx,
-				Message: input,
-				LowS:    true,
+				Context:      ctx,
+				Message:      input,
+				LowS:         true,
+				PresignStore: presignStore,
 			}, guard)
 		}
 		if err != nil {
@@ -133,6 +136,31 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 	}
 	return nil, nil, errors.New("signature not completed")
+}
+
+type simulationPresignStore struct {
+	mu      sync.Mutex
+	claimed map[string]struct{}
+}
+
+func newSimulationPresignStore() *simulationPresignStore {
+	return &simulationPresignStore{claimed: make(map[string]struct{})}
+}
+
+// ClaimPresign atomically claims a presign ID for the current in-memory
+// simulation. It is not durable and must not be used as a production store.
+func (s *simulationPresignStore) ClaimPresign(presignID []byte) error {
+	if s == nil {
+		return errors.New("nil simulation presign store")
+	}
+	key := string(presignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.claimed[key]; ok {
+		return ErrPresignAlreadyConsumed
+	}
+	s.claimed[key] = struct{}{}
+	return nil
 }
 
 // simulationCGGMP21Policies returns the production CGGMP21 policy set with

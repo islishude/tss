@@ -298,7 +298,7 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 	ctxB.DerivationPath = []uint32{1}
 	requestB := SignRequest{Context: ctxB, Message: []byte("cross path"), LowS: true}
 	signID, _ := tss.NewSessionID(nil)
-	cloned := presignA.Clone()
+	cloned := clonePresignForTest(presignA)
 	_, _, err := startCGGMP21Sign(shares[1], cloned, signID, requestB)
 	if err == nil {
 		t.Fatal("expected error signing with mismatched derivation path")

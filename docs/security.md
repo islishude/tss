@@ -24,9 +24,10 @@ Callers must provide:
   across parties as an additional defense-in-depth check;
 - replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
-- an atomic durable consumed-claim store for restored CGGMP21 presigns. `StartSign`
-  refuses an unconsumed presign loaded with `UnmarshalPresign` unless
-  `SignRequest.PresignStore` is provided;
+- an atomic durable consumed-claim store for CGGMP21 presigns. `StartSign`
+  refuses to sign unless `SignRequest.PresignStore` is provided, and the store
+  must return `secp256k1.ErrPresignAlreadyConsumed` for an already claimed
+  presign ID;
 - secure deletion or `Destroy` calls for no-longer-needed local shares;
 - operational monitoring for protocol errors and blame evidence.
 
@@ -264,7 +265,7 @@ Caller responsibilities (not provided by this library):
 
 ## One-Time Presigns
 
-CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` verifies the presign's key binding fields against the supplied `KeyShare` before constructing any outbound partial, then sets `Presign.Consumed` before constructing the online signing envelope so reuse fails before a second partial signature leaves the process. Presigns are bound to both the key share `(group public key, keygen transcript hash, participant-set hash)` and `PresignContext` fields: key id, chain id, derivation path, policy domain, and message domain.
+CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` verifies the presign's key binding fields against the supplied `KeyShare`, claims the presign locally, and then atomically claims `presign.ID()` through `SignRequest.PresignStore` before constructing any outbound partial. `MarshalBinary` persists a consumed snapshot in the wire record, but the in-memory claim and durable store are the one-use boundary. Presigns are bound to both the key share `(group public key, keygen transcript hash, participant-set hash)` and `PresignContext` fields: key id, chain id, derivation path, policy domain, and message domain.
 
 ## Blame Evidence
 

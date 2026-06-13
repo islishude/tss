@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"math/big"
+	"slices"
 	"sync"
 	"testing"
 
@@ -56,6 +57,38 @@ func chooseTestGuard(guards []*tss.EnvelopeGuard, fallback func() *tss.EnvelopeG
 	return fallback()
 }
 
+func clonePresignForTest(p *Presign) *Presign {
+	if p == nil {
+		return nil
+	}
+	return &Presign{
+		consumed:       p.consumed,
+		Version:        p.Version,
+		Party:          p.Party,
+		Threshold:      p.Threshold,
+		Signers:        slices.Clone(p.Signers),
+		R:              slices.Clone(p.R),
+		LittleR:        slices.Clone(p.LittleR),
+		TranscriptHash: slices.Clone(p.TranscriptHash),
+		Context: PresignContext{
+			KeyID:          p.Context.KeyID,
+			ChainID:        p.Context.ChainID,
+			DerivationPath: slices.Clone(p.Context.DerivationPath),
+			PolicyDomain:   p.Context.PolicyDomain,
+			MessageDomain:  p.Context.MessageDomain,
+		},
+		ContextHash:          slices.Clone(p.ContextHash),
+		AdditiveShift:        slices.Clone(p.AdditiveShift),
+		PublicKey:            slices.Clone(p.PublicKey),
+		KeygenTranscriptHash: slices.Clone(p.KeygenTranscriptHash),
+		PartiesHash:          slices.Clone(p.PartiesHash),
+		VerifyShares:         cloneSignVerifyShares(p.VerifyShares),
+		kShare:               p.kShare.Clone(),
+		chiShare:             p.chiShare.Clone(),
+		delta:                p.delta.Clone(),
+	}
+}
+
 func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
@@ -81,6 +114,9 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.Party, testCGGMP21GuardParties(key.Parties, key.Party), sessionID)
 	})
+	if request.PresignStore == nil {
+		request.PresignStore = newTestPresignStore()
+	}
 	return StartSign(key, presign, sessionID, request, guard)
 }
 
@@ -170,7 +206,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		}
 		return testCGGMP21Guard(key.Party, tss.PartySet(key.Parties), sessionID)
 	})
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, nil, guard)
+	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, newTestPresignStore(), guard)
 }
 
 func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store PresignStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
@@ -195,7 +231,7 @@ func newTestPresignStore() *testPresignStore {
 	return &testPresignStore{consumed: make(map[string]struct{})}
 }
 
-func (s *testPresignStore) MarkConsumed(presignID []byte) error {
+func (s *testPresignStore) ClaimPresign(presignID []byte) error {
 	if s == nil {
 		return errors.New("nil test presign store")
 	}
@@ -203,20 +239,10 @@ func (s *testPresignStore) MarkConsumed(presignID []byte) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.consumed[key]; ok {
-		return errors.New("presign already consumed")
+		return ErrPresignAlreadyConsumed
 	}
 	s.consumed[key] = struct{}{}
 	return nil
-}
-
-func forgetConsumedPresignForTest(p *Presign) {
-	key, ok := presignIDKey(p)
-	if !ok {
-		return
-	}
-	consumedPresignIDs.Lock()
-	delete(consumedPresignIDs.ids, key)
-	consumedPresignIDs.Unlock()
 }
 
 // errNilPresign is a sentinel error for nil presign in test helpers.
@@ -292,7 +318,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{
-		mu:                   new(sync.Mutex),
+		consumed:             newPresignConsumedState(false),
 		Version:              tss.Version,
 		Party:                1,
 		Threshold:            1,

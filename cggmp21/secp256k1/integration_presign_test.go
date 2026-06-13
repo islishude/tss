@@ -81,6 +81,153 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name string
+		run  func(t *testing.T, share *KeyShare, presign *Presign, digest []byte)
+	}{
+		{
+			name: "original consumes test copy",
+			run: func(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
+				cp := clonePresignForTest(presign)
+				startSignDigestMustSucceed(t, share, presign, digest)
+				startSignDigestMustBeConsumed(t, share, cp, digest)
+				if !IsPresignConsumed(cp) {
+					t.Fatal("test copy did not observe shared consumed claim")
+				}
+			},
+		},
+		{
+			name: "test copy consumes original",
+			run: func(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
+				cp := clonePresignForTest(presign)
+				startSignDigestMustSucceed(t, share, cp, digest)
+				startSignDigestMustBeConsumed(t, share, presign, digest)
+				if !IsPresignConsumed(presign) {
+					t.Fatal("original did not observe shared consumed claim")
+				}
+			},
+		},
+		{
+			name: "shallow copy consumes original",
+			run: func(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
+				cp := *presign
+				startSignDigestMustSucceed(t, share, &cp, digest)
+				startSignDigestMustBeConsumed(t, share, presign, digest)
+				if !IsPresignConsumed(presign) {
+					t.Fatal("original did not observe shallow-copy consumed claim")
+				}
+			},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			shares := CachedKeygenShares(t, 2, 3, false)
+			signers := []tss.PartyID{1, 2}
+			presigns := secpPresign(t, shares, signers)
+			digest := sha256.Sum256([]byte(tc.name))
+			tc.run(t, shares[1], presigns[1], digest[:])
+		})
+	}
+}
+
+func TestThresholdECDSA_RestoredPresignStoreClaimsOnce(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	raw, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredA, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredB, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	store := newTestPresignStore()
+	digest := sha256.Sum256([]byte("restored store claims once"))
+	startSignDigestWithStoreMustSucceed(t, shares[1], restoredA, digest[:], store)
+	startSignDigestWithStoreMustBeConsumed(t, shares[1], restoredB, digest[:], store)
+	if !IsPresignConsumed(restoredB) {
+		t.Fatal("store conflict did not leave restored presign consumed")
+	}
+}
+
+func TestThresholdECDSA_PresignStoreAlreadyConsumedFailClosed(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	digest := sha256.Sum256([]byte("store already consumed"))
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], fixedErrPresignStore{err: ErrPresignAlreadyConsumed})
+	if session != nil || out != nil {
+		t.Fatal("already-consumed store returned signing output")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
+	if !IsPresignConsumed(presigns[1]) {
+		t.Fatal("already-consumed store error rolled back local claim")
+	}
+}
+
+func TestThresholdECDSA_PresignStoreTemporaryErrorRollsBack(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	digest := sha256.Sum256([]byte("store temporary error"))
+	storeErr := errors.New("temporary store failure")
+	store := &retryPresignStore{err: storeErr}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if !errors.Is(err, storeErr) {
+		t.Fatalf("expected temporary store error, got %v", err)
+	}
+	if session != nil || out != nil {
+		t.Fatal("temporary store error returned signing output")
+	}
+	if IsPresignConsumed(presigns[1]) {
+		t.Fatal("temporary store error did not roll back local claim")
+	}
+
+	startSignDigestWithStoreMustSucceed(t, shares[1], presigns[1], digest[:], store)
+}
+
+func TestThresholdECDSA_StartSignRequiresPresignStore(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := testCGGMP21Guard(shares[1].Party, tss.PartySet(shares[1].Parties), sessionID)
+	session, out, err := StartSign(shares[1], presigns[1], sessionID, SignRequest{
+		Context: testPresignContext(),
+		Message: []byte("missing store"),
+		LowS:    true,
+	}, guard)
+	if session != nil || out != nil {
+		t.Fatal("StartSign without store returned signing output")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	if IsPresignConsumed(presigns[1]) {
+		t.Fatal("StartSign without store consumed presign")
+	}
+}
+
 func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
@@ -103,6 +250,83 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	} else {
 		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
 	}
+}
+
+type fixedErrPresignStore struct {
+	err error
+}
+
+func (s fixedErrPresignStore) ClaimPresign([]byte) error {
+	return s.err
+}
+
+type retryPresignStore struct {
+	err   error
+	calls int
+}
+
+func (s *retryPresignStore) ClaimPresign([]byte) error {
+	s.calls++
+	if s.calls == 1 {
+		return s.err
+	}
+	return nil
+}
+
+func startSignDigestMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := StartSignDigest(share, presign, sessionID, digest)
+	if err != nil {
+		t.Fatalf("StartSignDigest: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("StartSignDigest returned no signing partial")
+	}
+}
+
+func startSignDigestMustBeConsumed(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, out, err := StartSignDigest(share, presign, sessionID, digest)
+	if session != nil || out != nil {
+		t.Fatal("consumed presign returned signing output")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
+}
+
+func startSignDigestWithStoreMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store PresignStore) {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := StartSignDigestWithStore(share, presign, sessionID, digest, store)
+	if err != nil {
+		t.Fatalf("StartSignDigestWithStore: %v", err)
+	}
+	if len(out) == 0 {
+		t.Fatal("StartSignDigestWithStore returned no signing partial")
+	}
+}
+
+func startSignDigestWithStoreMustBeConsumed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store PresignStore) {
+	t.Helper()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, out, err := StartSignDigestWithStore(share, presign, sessionID, digest, store)
+	if session != nil || out != nil {
+		t.Fatal("consumed store returned signing output")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 }
 
 func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
@@ -258,7 +482,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 				_, _, err = StartSignDigest(shares[tc.signers[0]], restored, sessionID2, digest[:])
 				_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 			} else {
-				if restored.Consumed {
+				if IsPresignConsumed(restored) {
 					t.Fatal("fresh presign after round-trip is consumed")
 				}
 				sessionID, err := tss.NewSessionID(nil)
@@ -286,7 +510,7 @@ func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing
 	shares := CachedKeygenShares(t, 2, 3, false)
 	signers := []tss.PartyID{1, 2}
 	presigns := secpPresign(t, shares, signers)
-	presign := (presigns[1]).Clone()
+	presign := clonePresignForTest(presigns[1])
 	presign.KeygenTranscriptHash = append([]byte(nil), presign.KeygenTranscriptHash...)
 	presign.KeygenTranscriptHash[0] ^= 1
 	signID, err := tss.NewSessionID(nil)
@@ -298,7 +522,7 @@ func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing
 	if err == nil || !strings.Contains(err.Error(), "keygen transcript binding") {
 		t.Fatalf("expected key binding rejection, got %v", err)
 	}
-	if presign.Consumed {
+	if IsPresignConsumed(presign) {
 		t.Fatal("presign was consumed before key binding validation completed")
 	}
 }

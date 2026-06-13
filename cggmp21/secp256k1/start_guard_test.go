@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"errors"
-	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -21,7 +20,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.Parties = []tss.PartyID{1, 2}
 	minimalPresign := func() *Presign {
 		return &Presign{
-			mu: &sync.Mutex{},
+			consumed: newPresignConsumedState(false),
 		}
 	}
 	plan := ResharePlan{
@@ -70,7 +69,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 					Message: []byte("guard"),
 					LowS:    true,
 				}, guard)
-				return out, p.Consumed, err
+				return out, IsPresignConsumed(p), err
 			},
 		},
 		{

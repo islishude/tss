@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"math/big"
-	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -309,18 +308,17 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	delta := fillSecretScalar(t, 0x33)
 
 	p := &Presign{
-		mu:            &sync.Mutex{},
+		consumed:      newPresignConsumedState(false),
 		kShare:        kShare,
 		chiShare:      chiShare,
 		delta:         delta,
 		AdditiveShift: []byte{0x01, 0x02, 0x03},
-		Consumed:      false,
 	}
 
 	p.Destroy()
 
-	if !p.Consumed {
-		t.Error("Consumed not set after Destroy")
+	if !IsPresignConsumed(p) {
+		t.Error("presign not consumed after Destroy")
 	}
 	if p.kShare.FixedLen() != 0 {
 		t.Error("kShare not zeroed")

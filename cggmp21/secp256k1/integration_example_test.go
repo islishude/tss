@@ -475,7 +475,7 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	presignOK := !restoredPresign.Consumed
+	presignOK := !IsPresignConsumed(restoredPresign)
 	fmt.Println("presign round-trip:", presignOK)
 	// Output:
 	// key share round-trip: true
@@ -597,8 +597,7 @@ func runCGGMPPresignWithContext(shares map[tss.PartyID]*KeyShare, signers []tss.
 		if !ok {
 			panic(fmt.Sprintf("presign not complete for party %d", id))
 		}
-		// Clone so the session can be garbage-collected.
-		presigns[id] = ps.Clone()
+		presigns[id] = ps
 	}
 	return presigns
 }
