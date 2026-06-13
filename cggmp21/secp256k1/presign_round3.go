@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math/big"
 	"slices"
+	"sync/atomic"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -253,7 +254,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		Proof:    proofBytes,
 	}
 	s.presign = &Presign{
-		consumed:             newPresignConsumedState(false),
+		consumed:             new(atomic.Bool),
 		Version:              tss.Version,
 		Party:                s.key.Party,
 		Threshold:            s.key.Threshold,

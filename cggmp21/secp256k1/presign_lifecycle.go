@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"errors"
-	"sync/atomic"
 )
 
 // Presign consumption lifecycle:
@@ -20,12 +19,6 @@ import (
 //  5. If the signing session fails after StartSign but the caller is
 //     uncertain whether a partial signature was emitted, the presign MUST be
 //     discarded rather than reused.
-
-func newPresignConsumedState(consumed bool) *atomic.Bool {
-	state := new(atomic.Bool)
-	state.Store(consumed)
-	return state
-}
 
 // MarkPresignConsumed marks p's local claim consumed.
 // It is not a substitute for [PresignStore].

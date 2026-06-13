@@ -77,8 +77,6 @@ type SignRequest struct {
 // rejected by [Presign.MarshalJSON] to prevent accidental exposure of secret
 // material.
 type Presign struct {
-	consumed *atomic.Bool
-
 	Version              uint16
 	Party                tss.PartyID
 	Threshold            int
@@ -97,6 +95,8 @@ type Presign struct {
 	kShare   *secret.Scalar
 	chiShare *secret.Scalar
 	delta    *secret.Scalar
+
+	consumed *atomic.Bool
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.

@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"math/big"
+	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -308,7 +309,7 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	delta := fillSecretScalar(t, 0x33)
 
 	p := &Presign{
-		consumed:      newPresignConsumedState(false),
+		consumed:      new(atomic.Bool),
 		kShare:        kShare,
 		chiShare:      chiShare,
 		delta:         delta,

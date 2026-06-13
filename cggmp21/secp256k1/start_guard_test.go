@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"errors"
+	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -20,7 +21,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.Parties = []tss.PartyID{1, 2}
 	minimalPresign := func() *Presign {
 		return &Presign{
-			consumed: newPresignConsumedState(false),
+			consumed: new(atomic.Bool),
 		}
 	}
 	plan := ResharePlan{

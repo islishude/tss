@@ -8,6 +8,7 @@ import (
 	"math/big"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -318,7 +319,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{
-		consumed:             newPresignConsumedState(false),
+		consumed:             new(atomic.Bool),
 		Version:              tss.Version,
 		Party:                1,
 		Threshold:            1,

@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"errors"
 	"fmt"
+	"sync/atomic"
 
 	"github.com/islishude/tss"
 
@@ -277,8 +278,9 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid verify shares: %w", err)
 	}
+	consumed := new(atomic.Bool)
+	consumed.Store(w.Consumed)
 	p := &Presign{
-		consumed:             newPresignConsumedState(w.Consumed),
 		Version:              tss.Version,
 		Party:                w.Party,
 		Threshold:            w.Threshold,
@@ -296,6 +298,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
+		consumed:             consumed,
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
