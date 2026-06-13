@@ -362,6 +362,44 @@ func TestBigPosRejectsInvalidValues(t *testing.T) {
 	}
 }
 
+func TestBigPosMaxBitsEnforced(t *testing.T) {
+	t.Parallel()
+
+	// 0xABCD = 16 bits, encoded as 2 bytes for bigpos.
+	raw, err := MarshalFields(1, "test.bigpos.maxbits", []Field{{Tag: 1, Value: []byte{0xAB, 0xCD}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bigPosMaxBitsMessage
+	// max_bits=8: 16-bit integer should be rejected.
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 8})); err == nil {
+		t.Fatal("expected max_bits error for 16-bit bigpos with limit 8")
+	}
+	// max_bits=1000: 16-bit integer should be accepted.
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 1000})); err != nil {
+		t.Fatalf("unmarshal with adequate limit: %v", err)
+	}
+}
+
+func TestBytesMaxBitsEnforced(t *testing.T) {
+	t.Parallel()
+
+	// 3-byte payload = 24 bits of byte-approximated size.
+	raw, err := MarshalFields(1, "test.bytes.maxbits", []Field{{Tag: 1, Value: []byte{0x01, 0x02, 0x03}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded bytesMaxBitsMessage
+	// max_bits=8: 3 bytes × 8 = 24 > 8 should be rejected.
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 8})); err == nil {
+		t.Fatal("expected max_bits error for 3-byte field with limit 8")
+	}
+	// max_bits=1000: 24 bits should be accepted.
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 1000})); err != nil {
+		t.Fatalf("unmarshal with adequate limit: %v", err)
+	}
+}
+
 func TestBigIntMaxBytesEnforced(t *testing.T) {
 	t.Parallel()
 

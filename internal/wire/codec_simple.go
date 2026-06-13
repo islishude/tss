@@ -89,6 +89,9 @@ func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet FieldLi
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
 		return err
 	}
+	if err := fs.checkBitsLimit(len(raw)*8, limitSet); err != nil {
+		return err
+	}
 	// Copy to prevent aliasing with the decode buffer.
 	out := make([]byte, len(raw))
 	copy(out, raw)

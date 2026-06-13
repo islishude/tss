@@ -29,6 +29,9 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 		if err := fs.checkByteLimits(raw, limitSet); err != nil {
 			return nil, err
 		}
+		if err := fs.checkBitsLimit(len(raw)*8, limitSet); err != nil {
+			return nil, err
+		}
 		return raw, nil
 	case kindString:
 		s := fv.String()
@@ -147,6 +150,26 @@ func (fs fieldSchema) checkByteLimits(raw []byte, limitSet FieldLimits) error {
 		if len(raw) > max {
 			return fmt.Errorf("bytes length %d exceeds max_bytes=%d", len(raw), max)
 		}
+	}
+	return nil
+}
+
+// ---- bit limit checks ---------------------------------------------------------
+
+// checkBitsLimit validates the bit length of a decoded big integer or the
+// approximated bit length of a byte slice against max_bits=<name>.  For
+// bigint/biguint/bigpos kinds the caller passes x.BitLen(); for bytes kind
+// the caller passes len(raw)*8 as a conservative upper bound.
+func (fs fieldSchema) checkBitsLimit(bits int, limitSet FieldLimits) error {
+	if fs.maxBits == "" {
+		return nil
+	}
+	max, err := fs.getLimit(fs.maxBits, limitSet)
+	if err != nil {
+		return err
+	}
+	if bits > max {
+		return fmt.Errorf("field %s: bit length %d exceeds max_bits=%d", fs.name, bits, max)
 	}
 	return nil
 }

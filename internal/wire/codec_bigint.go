@@ -166,6 +166,13 @@ func DecodeBigPos(in []byte) (*big.Int, error) { return decodeBigPos(in) }
 // encodeBigIntDispatch encodes a field value as a canonical signed integer.
 func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
+	bits := 0
+	if x != nil {
+		bits = x.BitLen()
+	}
+	if err := fs.checkBitsLimit(bits, limitSet); err != nil {
+		return nil, err
+	}
 	out, err := encodeBigIntSigned(x)
 	if err != nil {
 		return nil, fmt.Errorf("wire: field %s tag %d bigint marshal: %w", fs.name, fs.tag, err)
@@ -179,6 +186,13 @@ func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet FieldLimit
 // encodeBigUintDispatch encodes a field value as a canonical unsigned integer.
 func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
+	bits := 0
+	if x != nil {
+		bits = x.BitLen()
+	}
+	if err := fs.checkBitsLimit(bits, limitSet); err != nil {
+		return nil, err
+	}
 	out, err := encodeBigUint(x)
 	if err != nil {
 		return nil, fmt.Errorf("wire: field %s tag %d biguint marshal: %w", fs.name, fs.tag, err)
@@ -192,6 +206,13 @@ func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet FieldLimi
 // encodeBigPosDispatch encodes a field value as a canonical positive integer.
 func (fs fieldSchema) encodeBigPosDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
+	bits := 0
+	if x != nil {
+		bits = x.BitLen()
+	}
+	if err := fs.checkBitsLimit(bits, limitSet); err != nil {
+		return nil, err
+	}
 	out, err := encodeBigPos(x)
 	if err != nil {
 		return nil, fmt.Errorf("wire: field %s tag %d bigpos marshal: %w", fs.name, fs.tag, err)
@@ -214,6 +235,9 @@ func (fs fieldSchema) decodeBigIntDispatch(fv reflect.Value, raw []byte, limitSe
 	if err != nil {
 		return fmt.Errorf("wire: field %s tag %d bigint unmarshal: %w", fs.name, fs.tag, err)
 	}
+	if err := fs.checkBitsLimit(x.BitLen(), limitSet); err != nil {
+		return err
+	}
 	setBigIntValue(fv, x)
 	return nil
 }
@@ -230,6 +254,9 @@ func (fs fieldSchema) decodeBigUintDispatch(fv reflect.Value, raw []byte, limitS
 	if err != nil {
 		return fmt.Errorf("wire: field %s tag %d biguint unmarshal: %w", fs.name, fs.tag, err)
 	}
+	if err := fs.checkBitsLimit(x.BitLen(), limitSet); err != nil {
+		return err
+	}
 	setBigIntValue(fv, x)
 	return nil
 }
@@ -245,6 +272,9 @@ func (fs fieldSchema) decodeBigPosDispatch(fv reflect.Value, raw []byte, limitSe
 	x, err := decodeBigPos(raw)
 	if err != nil {
 		return fmt.Errorf("wire: field %s tag %d bigpos unmarshal: %w", fs.name, fs.tag, err)
+	}
+	if err := fs.checkBitsLimit(x.BitLen(), limitSet); err != nil {
+		return err
 	}
 	setBigIntValue(fv, x)
 	return nil

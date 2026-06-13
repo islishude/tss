@@ -43,6 +43,7 @@ type fieldSchema struct {
 	fixedLen int    // for len=N option
 	maxBytes string // limit name for max_bytes= option
 	maxItems string // limit name for max_items= option
+	maxBits  string // limit name for max_bits= option
 }
 
 // schema is the cached parsed struct-tag information for a wire-encodable type.
@@ -218,6 +219,8 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			fs.maxBytes = val
 		case "max_items":
 			fs.maxItems = val
+		case "max_bits":
+			fs.maxBits = val
 		default:
 			return fieldSchema{}, fmt.Errorf("unknown option %q", key)
 		}

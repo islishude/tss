@@ -340,6 +340,40 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 				return Unmarshal(raw, &dst)
 			},
 		},
+		{
+			name: "max_bits rejects oversized bigpos decode",
+			run: func(t *testing.T) error {
+				raw, err := MarshalFields(1, "test.bigpos.maxbits", []Field{{Tag: 1, Value: []byte{0xAB, 0xCD}}})
+				if err != nil {
+					return err
+				}
+				var decoded bigPosMaxBitsMessage
+				return Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 8}))
+			},
+		},
+		{
+			name: "max_bits accepts under-limit bigpos decode",
+			run: func(t *testing.T) error {
+				raw, err := MarshalFields(1, "test.bigpos.maxbits", []Field{{Tag: 1, Value: []byte{0xAB, 0xCD}}})
+				if err != nil {
+					return err
+				}
+				var decoded bigPosMaxBitsMessage
+				return Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"limit": 1000}))
+			},
+		},
+		{
+			name: "max_bits missing limit name rejects",
+			run: func(t *testing.T) error {
+				raw, err := MarshalFields(1, "test.bigpos.maxbits", []Field{{Tag: 1, Value: []byte{0xAB, 0xCD}}})
+				if err != nil {
+					return err
+				}
+				var decoded bigPosMaxBitsMessage
+				// "other" does not match the "limit" name in the wire tag.
+				return Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"other": 1000}))
+			},
+		},
 	}
 
 	wantErr := map[string]bool{
@@ -350,6 +384,9 @@ func TestMessageFieldConstraintScenarios(t *testing.T) {
 		"missing limit name rejects":                 true,
 		"nonpositive limit rejects marshal":          true,
 		"nonpositive limit rejects decode":           true,
+		"max_bits rejects oversized bigpos decode":   true,
+		"max_bits accepts under-limit bigpos decode": false,
+		"max_bits missing limit name rejects":        true,
 		"malformed u8 rejects":                       true,
 		"invalid utf8 rejects first form":            true,
 		"invalid utf8 rejects continuation byte":     true,

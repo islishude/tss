@@ -97,7 +97,8 @@ When the kind is omitted, the wire codec selects:
 #### Options
 
 - `len=N` — fixed byte length (validated on decode)
-- `max_bytes=name` — semantic byte limit (from `wire.WithLimitSet`)
+- `max_bytes=name` — semantic byte limit (from `wire.WithFieldLimits`)
+- `max_bits=name` — semantic bit-length limit for bigint/biguint/bigpos (validates `BitLen()`) or conservative `len*8` upper bound for bytes (from `wire.WithFieldLimits`)
 - `max_items=name` — semantic item count limit
 - `allow_empty` — documents that empty is permitted (no-op)
 
@@ -116,10 +117,10 @@ The low-level `MarshalFields` / `UnmarshalFields` / `UnmarshalFieldsWithLimits` 
 
 ### Limits
 
-Frame and semantic limits are **fail-closed**: any struct tag that declares `max_bytes=name` or `max_items=name` requires the caller to provide a `wire.FieldLimits` containing that name. Missing limits or missing keys produce an error — there is no silent fallback to unlimited.
+Frame and semantic limits are **fail-closed**: any struct tag that declares `max_bytes=name`, `max_bits=name`, or `max_items=name` requires the caller to provide a `wire.FieldLimits` containing that name. Missing limits or missing keys produce an error — there is no silent fallback to unlimited.
 
 - **Frame-level** (`wire.FrameLimits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during decode via `wire.WithFrameLimits`
-- **Semantic-level** (`wire.FieldLimits`): per-field max bytes/items checked against named limits via `wire.WithFieldLimits` (decode) or `wire.WithFieldLimitsForMarshal` (encode)
+- **Semantic-level** (`wire.FieldLimits`): per-field max bytes, bits, or items checked against named limits via `wire.WithFieldLimits` (decode) or `wire.WithFieldLimitsForMarshal` (encode)
 
 Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) provide `frameLimits(maxTotal int) wire.FrameLimits` and `fieldLimits() wire.FieldLimits` adapter methods to convert their structured limits into wire-layer options.
 
@@ -131,7 +132,7 @@ Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use unexported wire
 type myMessageWire struct {
     SessionID tss.SessionID `wire:"1,bytes,len=32"`
     Secret    *secret.Scalar `wire:"2,custom,len=32"`
-    Modulus   *big.Int       `wire:"3,bigpos,max_bytes=paillier_modulus"`
+    Modulus   *big.Int       `wire:"3,bigpos,max_bits=paillier_modulus_bits"`
     Response  *big.Int       `wire:"4,bigint,max_bytes=signed_response"`
 }
 func (myMessageWire) WireType() string    { return "my.type" }
@@ -152,6 +153,9 @@ Conversion functions (`toWire()` / `toDomain()`) handle structural mapping and d
   `bigint` — signed-magnitude (zero = `0x00`, nil = zero); `biguint` — minimal
   big-endian (zero = empty); `bigpos` — minimal big-endian (zero rejected).
   Non-canonical encodings (negative zero, leading zeroes, empty signed) are rejected.
+  When `max_bits=name` is declared, `BitLen()` is validated against the limit
+  after decoding; for `bytes` fields, `len(raw)*8` is used as a conservative
+  upper bound.
 - Proof scalar responses use canonical positive big-endian encoding; Paillier
   statement and commitment integers use fixed-width encodings derived from `N`
   or `N²`, with out-of-range values rejected before algebraic checks.

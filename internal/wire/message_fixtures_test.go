@@ -380,6 +380,22 @@ type bigIntMultiFieldMessage struct {
 func (m bigIntMultiFieldMessage) WireType() string    { return "test.bigint.multifield" }
 func (m bigIntMultiFieldMessage) WireVersion() uint16 { return 1 }
 
+// bigPosMaxBitsMessage tests max_bits enforcement on bigpos fields.
+type bigPosMaxBitsMessage struct {
+	Val *big.Int `wire:"1,bigpos,max_bits=limit"`
+}
+
+func (m bigPosMaxBitsMessage) WireType() string    { return "test.bigpos.maxbits" }
+func (m bigPosMaxBitsMessage) WireVersion() uint16 { return 1 }
+
+// bytesMaxBitsMessage tests max_bits enforcement on bytes fields.
+type bytesMaxBitsMessage struct {
+	Data []byte `wire:"1,bytes,max_bits=limit"`
+}
+
+func (m bytesMaxBitsMessage) WireType() string    { return "test.bytes.maxbits" }
+func (m bytesMaxBitsMessage) WireVersion() uint16 { return 1 }
+
 var errSentinel = &testError{"sentinel"}
 
 type testError struct{ msg string }
