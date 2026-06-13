@@ -97,6 +97,7 @@ jobs:
 
   test-fuzzing:
     name: Test Fuzzing (${{ matrix.os }})
+    needs: check
     strategy:
       fail-fast: false
       matrix:
