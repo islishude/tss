@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
@@ -12,7 +11,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/shamir"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
@@ -416,8 +415,7 @@ func presignRound1PublicHash(p presignRound1Payload) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(presignRound1PublicLabel))
-	wire.WriteHashPart(h, payload)
-	return h.Sum(nil), nil
+	t := transcript.New(presignRound1PublicLabel)
+	t.AppendBytes("payload", payload)
+	return t.Sum(), nil
 }

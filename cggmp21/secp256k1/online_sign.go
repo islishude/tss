@@ -12,7 +12,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
@@ -467,28 +467,26 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 }
 
 func digestHash(digest32, contextHash []byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte("cggmp21-secp256k1-sign-digest-binding"))
-	wire.WriteHashPart(h, contextHash)
-	wire.WriteHashPart(h, digest32)
-	return h.Sum(nil)
+	t := transcript.New("cggmp21-secp256k1-sign-digest-binding")
+	t.AppendBytes("context_hash", contextHash)
+	t.AppendBytes("digest", digest32)
+	return t.Sum()
 }
 
 const signPartialEquationDomain = "cggmp21-secp256k1-sign-partial-equation"
 
 func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(signPartialEquationDomain))
-	wire.WriteHashPart(h, sessionID[:])
-	wire.WriteHashPart(h, wire.Uint32(uint32(party)))
-	wire.WriteHashPart(h, presignTranscriptHash)
-	wire.WriteHashPart(h, contextHash)
-	wire.WriteHashPart(h, digestHash)
-	wire.WriteHashPart(h, littleR)
-	wire.WriteHashPart(h, s)
-	wire.WriteHashPart(h, kPoint)
-	wire.WriteHashPart(h, chiPoint)
-	return h.Sum(nil)
+	t := transcript.New(signPartialEquationDomain)
+	t.AppendBytes("session_id", sessionID[:])
+	t.AppendUint32("party", uint32(party))
+	t.AppendBytes("presign_transcript_hash", presignTranscriptHash)
+	t.AppendBytes("context_hash", contextHash)
+	t.AppendBytes("digest_hash", digestHash)
+	t.AppendBytes("little_r", littleR)
+	t.AppendBytes("s", s)
+	t.AppendBytes("k_point", kPoint)
+	t.AppendBytes("chi_point", chiPoint)
+	return t.Sum()
 }
 
 func presignVerifyShare(presign *Presign, party tss.PartyID) (SignVerifyShare, bool) {

@@ -1,10 +1,10 @@
 package tss
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -232,22 +232,18 @@ func (e Envelope) DomainSeparatedHash() []byte {
 }
 
 func (e Envelope) domainSeparatedHash() [32]byte {
-	h := sha256.New()
 	// The protocol/version/session/round tuple keeps transcripts from one
 	// algorithm or session from being replayed into another.
-	h.Write([]byte(envelopeHashLabel))
-	h.Write([]byte{0})
-	h.Write([]byte(e.Protocol))
-	h.Write([]byte{0, byte(e.Version >> 8), byte(e.Version), e.Round})
-	h.Write(e.SessionID[:])
-	h.Write(wire.Uint32(uint32(e.From)))
-	h.Write(wire.Uint32(uint32(e.To)))
-	h.Write([]byte(e.PayloadType))
-	h.Write([]byte{0})
-	h.Write(e.Payload)
-	var out [32]byte
-	h.Sum(out[:0])
-	return out
+	t := transcript.New(envelopeHashLabel)
+	t.AppendString("protocol", string(e.Protocol))
+	t.AppendUint16("version", e.Version)
+	t.AppendBytes("session_id", e.SessionID[:])
+	t.AppendUint8("round", e.Round)
+	t.AppendUint32("from", uint32(e.From))
+	t.AppendUint32("to", uint32(e.To))
+	t.AppendString("payload_type", string(e.PayloadType))
+	t.AppendBytes("payload", e.Payload)
+	return t.Sum32()
 }
 
 // VerifyTranscriptHash recomputes the transcript hash and compares it against the stored value.

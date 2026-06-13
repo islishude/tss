@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
@@ -188,18 +188,17 @@ func hashBytes(value []byte) []byte {
 }
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(paillierPublicSharesHashLabel))
+	t := transcript.New(paillierPublicSharesHashLabel)
 	sorted := clonePaillierPublicShares(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return int(a.Party) - int(b.Party)
 	})
 	for _, share := range sorted {
-		wire.WritePartyID(h, share.Party)
-		wire.WriteHashPart(h, share.PublicKey)
-		wire.WriteHashPart(h, share.Proof)
+		t.AppendUint32("party", uint32(share.Party))
+		t.AppendBytes("public_key", share.PublicKey)
+		t.AppendBytes("proof", share.Proof)
 	}
-	return h.Sum(nil)
+	return t.Sum()
 }
 
 func clonePaillierPublicShares(in []PaillierPublicShare) []PaillierPublicShare {

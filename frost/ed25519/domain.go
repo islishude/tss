@@ -1,10 +1,10 @@
 package ed25519
 
 import (
-	"crypto/sha256"
+	"slices"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // RFC 9591 Section 5.4.1 defines the Ed25519 ciphersuite context string.
@@ -16,52 +16,54 @@ const (
 )
 
 func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties []tss.PartyID, chainCode []byte, dealerCommitments map[tss.PartyID][][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(rfc9591ContextString))
-	wire.WriteHashPart(h, []byte(frostKeygenTranscriptLabel))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, sessionID[:])
-	wire.WriteHashPart(h, wire.Uint32(uint32(threshold)))
-	wire.WritePartySet(h, parties)
-	wire.WriteHashPart(h, chainCode)
-	for _, id := range parties {
-		wire.WritePartyID(h, id)
-		wire.WriteHashPart(h, wire.EncodeBytesList(dealerCommitments[id]))
+	t := transcript.New(frostKeygenTranscriptLabel)
+	t.AppendString("ciphersuite_context", rfc9591ContextString)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendBytes("session_id", sessionID[:])
+	t.AppendUint32("threshold", uint32(threshold))
+	sortedParties := tss.SortParties(parties)
+	t.AppendUint32List("parties", transcript.Uint32s(sortedParties))
+	t.AppendBytes("chain_code", chainCode)
+	for _, id := range sortedParties {
+		t.AppendUint32("dealer", uint32(id))
+		t.AppendBytesList("dealer_commitments", dealerCommitments[id])
 	}
-	for _, commitment := range groupCommitments {
-		wire.WriteHashPart(h, commitment)
-	}
-	for _, share := range verificationShares {
-		wire.WritePartyID(h, share.Party)
-		wire.WriteHashPart(h, share.PublicKey)
-	}
-	return h.Sum(nil)
+	t.AppendBytesList("group_commitments", groupCommitments)
+	appendVerificationShares(t, verificationShares)
+	return t.Sum()
 }
 
 func frostReshareTranscriptHash(sessionID tss.SessionID, oldParties, newParties []tss.PartyID, newThreshold int, oldPublicKey, chainCode []byte, refreshMode bool, dealerCommitments map[tss.PartyID][][]byte, newCommitments [][]byte, verificationShares []VerificationShare) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(rfc9591ContextString))
-	wire.WriteHashPart(h, []byte(frostReshareTranscriptLabel))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, sessionID[:])
-	wire.WritePartySet(h, oldParties)
-	wire.WritePartySet(h, newParties)
-	wire.WriteHashPart(h, wire.Uint32(uint32(newThreshold)))
-	wire.WriteHashPart(h, oldPublicKey)
-	wire.WriteHashPart(h, chainCode)
-	wire.WriteHashPart(h, wire.Bool(refreshMode))
-	for _, dealer := range oldParties {
-		wire.WritePartyID(h, dealer)
-		wire.WriteHashPart(h, wire.EncodeBytesList(dealerCommitments[dealer]))
+	t := transcript.New(frostReshareTranscriptLabel)
+	t.AppendString("ciphersuite_context", rfc9591ContextString)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendBytes("session_id", sessionID[:])
+	sortedOldParties := tss.SortParties(oldParties)
+	sortedNewParties := tss.SortParties(newParties)
+	t.AppendUint32List("old_parties", transcript.Uint32s(sortedOldParties))
+	t.AppendUint32List("new_parties", transcript.Uint32s(sortedNewParties))
+	t.AppendUint32("new_threshold", uint32(newThreshold))
+	t.AppendBytes("old_public_key", oldPublicKey)
+	t.AppendBytes("chain_code", chainCode)
+	t.AppendBool("refresh_mode", refreshMode)
+	for _, dealer := range sortedOldParties {
+		t.AppendUint32("dealer", uint32(dealer))
+		t.AppendBytesList("dealer_commitments", dealerCommitments[dealer])
 	}
-	for _, commitment := range newCommitments {
-		wire.WriteHashPart(h, commitment)
+	t.AppendBytesList("new_commitments", newCommitments)
+	appendVerificationShares(t, verificationShares)
+	return t.Sum()
+}
+
+func appendVerificationShares(t *transcript.Builder, verificationShares []VerificationShare) {
+	sorted := slices.Clone(verificationShares)
+	slices.SortFunc(sorted, func(a, b VerificationShare) int {
+		return int(a.Party) - int(b.Party)
+	})
+	for _, share := range sorted {
+		t.AppendUint32("verification_share_party", uint32(share.Party))
+		t.AppendBytes("verification_share_public_key", share.PublicKey)
 	}
-	for _, share := range verificationShares {
-		wire.WritePartyID(h, share.Party)
-		wire.WriteHashPart(h, share.PublicKey)
-	}
-	return h.Sum(nil)
 }

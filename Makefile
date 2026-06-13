@@ -243,6 +243,20 @@ check-wire-api: ## Ensure production code uses only the object-level wire API.
 		exit 1; \
 	fi
 
+.PHONY: check-transcript-api
+check-transcript-api: ## Ensure custom SHA-256 transcripts use internal/transcript.
+	@violations=$$(find . -name '*.go' \
+		-not -path './.git/*' \
+		-not -path './internal/transcript/*' \
+		-not -name '*_test.go' \
+		-exec grep -Eln 'sha256\.New[[:space:]]*\(' {} \;); \
+	if [ -n "$$violations" ]; then \
+		echo "ERROR: direct sha256.New() found outside internal/transcript:"; \
+		echo "$$violations"; \
+		echo "Use internal/transcript for custom SHA-256 transcripts."; \
+		exit 1; \
+	fi
+
 # -----------------------------------------------------------------------------
 # Combined workflows
 # -----------------------------------------------------------------------------
@@ -251,7 +265,7 @@ check-wire-api: ## Ensure production code uses only the object-level wire API.
 fix-all: go-fix lint-fix fmt tidy ## Apply source-modifying fixes, formatting, and module tidy.
 
 .PHONY: check
-check: build vet lint fmt-check tidy-check verify check-wire-api go-fix-check ## Fast local pre-commit check.
+check: build vet lint fmt-check tidy-check verify check-wire-api check-transcript-api go-fix-check ## Fast local pre-commit check.
 
 .PHONY: ci
 ci: check test-fast ## PR-grade checks; excludes source-modifying fixes, slowcrypto, race, stress, and long fuzzing.

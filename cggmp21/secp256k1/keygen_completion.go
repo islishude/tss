@@ -9,7 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
@@ -295,26 +295,21 @@ func (s *KeygenSession) sortedRingPedersenPublic() []RingPedersenPublicShare {
 }
 
 func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(keygenTranscriptHashLabel))
-	wire.WriteHashPart(h, s.cfg.SessionID[:])
-	for _, id := range s.cfg.Parties {
-		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-		for _, commitment := range s.commits[id] {
-			wire.WriteHashPart(h, commitment)
-		}
+	t := transcript.New(keygenTranscriptHashLabel)
+	t.AppendBytes("session_id", s.cfg.SessionID[:])
+	for _, id := range tss.SortParties(s.cfg.Parties) {
+		t.AppendUint32("party", uint32(id))
+		t.AppendBytesList("commitments", s.commits[id])
 		item := s.paillierPubs[id]
-		wire.WriteHashPart(h, item.PublicKey)
-		wire.WriteHashPart(h, item.Proof)
+		t.AppendBytes("paillier_public_key", item.PublicKey)
+		t.AppendBytes("paillier_proof", item.Proof)
 		rp := s.ringPedersen[id]
-		wire.WriteHashPart(h, rp.Params)
-		wire.WriteHashPart(h, rp.Proof)
-		wire.WriteHashPart(h, s.chainCodeComms[id])
+		t.AppendBytes("ring_pedersen_params", rp.Params)
+		t.AppendBytes("ring_pedersen_proof", rp.Proof)
+		t.AppendBytes("chain_code_commitment", s.chainCodeComms[id])
 	}
-	for _, commitment := range groupCommitments {
-		wire.WriteHashPart(h, commitment)
-	}
-	return h.Sum(nil)
+	t.AppendBytesList("group_commitments", groupCommitments)
+	return t.Sum()
 }
 
 func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, bool) {
@@ -334,12 +329,11 @@ func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCod
 	if len(chainCode) == 0 {
 		return nil
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(cggmpChainCodeCommitLabel))
-	wire.WriteHashPart(h, sessionID[:])
-	wire.WriteHashPart(h, []byte{byte(partyID >> 24), byte(partyID >> 16), byte(partyID >> 8), byte(partyID)})
-	wire.WriteHashPart(h, chainCode)
-	return h.Sum(nil)
+	t := transcript.New(cggmpChainCodeCommitLabel)
+	t.AppendBytes("session_id", sessionID[:])
+	t.AppendUint32("party_id", uint32(partyID))
+	t.AppendBytes("chain_code", chainCode)
+	return t.Sum()
 }
 
 // verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.

@@ -1,12 +1,12 @@
 package tss
 
 import (
-	"crypto/sha256"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"slices"
 	"sync"
+
+	"github.com/islishude/tss/internal/transcript"
 )
 
 const broadcastAckDigestLabel = "github.com/islishude/tss/broadcast-ack/v1"
@@ -27,24 +27,15 @@ type BroadcastAckVerifier interface {
 // AckDigest computes the canonical digest that parties sign for a broadcast ack.
 // It binds the ack to the complete broadcast message identity.
 func AckDigest(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, payloadHash, transcriptHash [32]byte) [32]byte {
-	h := sha256.New()
-	h.Write([]byte(broadcastAckDigestLabel))
-	h.Write([]byte{0})
-	h.Write([]byte(protocol))
-	var roundBuf [1]byte
-	roundBuf[0] = round
-	h.Write(roundBuf[:])
-	h.Write(sessionID[:])
-	var idBuf [4]byte
-	binary.BigEndian.PutUint32(idBuf[:], uint32(from))
-	h.Write(idBuf[:])
-	h.Write([]byte(payloadType))
-	h.Write([]byte{0})
-	h.Write(payloadHash[:])
-	h.Write(transcriptHash[:])
-	var out [32]byte
-	h.Sum(out[:0])
-	return out
+	t := transcript.New(broadcastAckDigestLabel)
+	t.AppendString("protocol", string(protocol))
+	t.AppendBytes("session_id", sessionID[:])
+	t.AppendUint8("round", round)
+	t.AppendUint32("from", uint32(from))
+	t.AppendString("payload_type", string(payloadType))
+	t.AppendBytes("payload_hash", payloadHash[:])
+	t.AppendBytes("transcript_hash", transcriptHash[:])
+	return t.Sum32()
 }
 
 // NewBroadcastCertificate constructs a certificate from an envelope and a complete
@@ -60,7 +51,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 	if len(acks) != len(recipients) {
 		return nil, fmt.Errorf("ack count %d does not match recipient count %d", len(acks), len(recipients))
 	}
-	payloadHash := sha256.Sum256(env.Payload)
+	payloadHash := PayloadHashFromEnvelope(env)
 	cert := &BroadcastCertificate{
 		Protocol:       env.Protocol,
 		SessionID:      env.SessionID,
@@ -96,7 +87,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 // SignBroadcastAck produces a signed BroadcastAck for a party over an envelope.
 // The caller must provide a signer bound to the party's identity key.
 func SignBroadcastAck(env Envelope, party PartyID, signer BroadcastAckSigner) (BroadcastAck, error) {
-	payloadHash := sha256.Sum256(env.Payload)
+	payloadHash := PayloadHashFromEnvelope(env)
 	digest := AckDigest(env.Protocol, env.SessionID, env.Round, env.From, env.PayloadType, payloadHash, env.TranscriptHash)
 	sig, err := signer.SignAck(digest)
 	if err != nil {
@@ -115,7 +106,7 @@ func VerifyBroadcastAck(env Envelope, ack BroadcastAck, verifier BroadcastAckVer
 	if verifier == nil {
 		return errors.New("nil BroadcastAckVerifier")
 	}
-	payloadHash := sha256.Sum256(env.Payload)
+	payloadHash := PayloadHashFromEnvelope(env)
 	if ack.PayloadHash != payloadHash {
 		return errors.New("ack payload hash mismatch")
 	}
@@ -206,7 +197,7 @@ func (bc *BroadcastConsistency) Commit(env Envelope) (bool, error) {
 	bc.mu.Lock()
 	defer bc.mu.Unlock()
 
-	ph := sha256.Sum256(env.Payload)
+	ph := PayloadHashFromEnvelope(env)
 	th := env.TranscriptHash
 
 	if !bc.committed {
@@ -241,7 +232,7 @@ func (bc *BroadcastConsistency) AddAck(env Envelope, ack BroadcastAck) error {
 	}
 
 	// Verify the ack signature against our canonical digest.
-	ph := sha256.Sum256(env.Payload)
+	ph := PayloadHashFromEnvelope(env)
 	th := env.TranscriptHash
 
 	if bc.committed {
@@ -408,7 +399,7 @@ func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) e
 	if c.PayloadType != env.PayloadType {
 		return ErrInvalidBroadcastCertificate
 	}
-	if c.PayloadHash != sha256.Sum256(env.Payload) {
+	if c.PayloadHash != PayloadHashFromEnvelope(env) {
 		return ErrInvalidBroadcastCertificate
 	}
 	if c.TranscriptHash != env.TranscriptHash {

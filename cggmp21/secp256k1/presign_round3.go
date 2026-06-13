@@ -12,7 +12,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
@@ -341,43 +341,41 @@ func (s *PresignSession) tryComplete() error {
 }
 
 func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(presignTranscriptHashLabel))
-	wire.WriteHashPart(h, s.sessionID[:])
-	wire.WriteHashPart(h, s.contextHash)
-	wire.WriteHashPart(h, s.additiveShift)
-	wire.WriteHashPart(h, s.key.state.publicKey)
-	wire.WriteHashPart(h, s.key.state.keygenTranscriptHash)
-	wire.WriteHashPart(h, wireutil.PartySetHash(s.key.state.parties, partySetHashLabel))
+	t := transcript.New(presignTranscriptHashLabel)
+	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("context_hash", s.contextHash)
+	t.AppendBytes("additive_shift", s.additiveShift)
+	t.AppendBytes("public_key", s.key.state.publicKey)
+	t.AppendBytes("keygen_transcript_hash", s.key.state.keygenTranscriptHash)
+	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.parties, partySetHashLabel))
 	for _, id := range s.signers {
-		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-		wire.WriteHashPart(h, s.round1[id].Gamma)
-		wire.WriteHashPart(h, s.round1[id].EncK)
-		wire.WriteHashPart(h, scalarBytes(s.deltas[id]))
+		t.AppendUint32("signer", uint32(id))
+		t.AppendBytes("gamma", s.round1[id].Gamma)
+		t.AppendBytes("enc_k", s.round1[id].EncK)
+		t.AppendBytes("delta_share", scalarBytes(s.deltas[id]))
 		vs := s.verifyShares[id]
-		wire.WriteHashPart(h, vs.KPoint)
-		wire.WriteHashPart(h, vs.ChiPoint)
+		t.AppendBytes("k_point", vs.KPoint)
+		t.AppendBytes("chi_point", vs.ChiPoint)
 		proofHash := sha256.Sum256(vs.Proof)
-		wire.WriteHashPart(h, proofHash[:])
+		t.AppendBytes("proof_hash", proofHash[:])
 	}
-	wire.WriteHashPart(h, R)
-	wire.WriteHashPart(h, scalarBytes(littleR))
-	wire.WriteHashPart(h, scalarBytes(delta))
-	return h.Sum(nil)
+	t.AppendBytes("r_point", R)
+	t.AppendBytes("little_r", scalarBytes(littleR))
+	t.AppendBytes("delta", scalarBytes(delta))
+	return t.Sum()
 }
 
 func (s *PresignSession) round1Echo() []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(presignRound1EchoLabel))
-	wire.WriteHashPart(h, s.sessionID[:])
-	wire.WriteHashPart(h, s.contextHash)
-	wire.WriteHashPart(h, s.additiveShift)
+	t := transcript.New(presignRound1EchoLabel)
+	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("context_hash", s.contextHash)
+	t.AppendBytes("additive_shift", s.additiveShift)
 	for _, id := range s.signers {
 		p := s.round1[id]
-		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-		wire.WriteHashPart(h, p.Gamma)
-		wire.WriteHashPart(h, p.EncK)
-		wire.WriteHashPart(h, p.PaillierPublicKey)
+		t.AppendUint32("signer", uint32(id))
+		t.AppendBytes("gamma", p.Gamma)
+		t.AppendBytes("enc_k", p.EncK)
+		t.AppendBytes("paillier_public_key", p.PaillierPublicKey)
 	}
-	return h.Sum(nil)
+	return t.Sum()
 }

@@ -2,14 +2,13 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
@@ -256,38 +255,40 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 }
 
 func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(reshareTranscriptHashLabel))
-	wire.WriteHashPart(h, []byte(s.plan.state.curveID))
-	wire.WriteHashPart(h, s.cfg.SessionID[:])
-	wire.WriteHashPart(h, s.oldPublicKey)
-	wire.WriteHashPart(h, wire.EncodeBytesList(s.plan.state.oldGroupCommitments))
-	wire.WritePartySet(h, s.oldParties)
-	wire.WritePartySet(h, s.dealerParties)
-	wire.WritePartySet(h, s.newParties)
-	wire.WriteHashPart(h, wire.Uint32(uint32(s.plan.state.oldThreshold)))
-	wire.WriteHashPart(h, wire.Uint32(uint32(s.newThreshold)))
-	wire.WriteHashPart(h, s.plan.state.chainCode)
-	wire.WriteHashPart(h, wire.Uint32(uint32(defaultPaillierBits())))
-	for _, dealer := range s.oldParties {
-		wire.WritePartyID(h, dealer)
-		wire.WriteHashPart(h, s.plan.state.oldVerificationShares[dealer])
+	t := transcript.New(reshareTranscriptHashLabel)
+	t.AppendString("curve", s.plan.state.curveID)
+	t.AppendBytes("session_id", s.cfg.SessionID[:])
+	t.AppendBytes("old_public_key", s.oldPublicKey)
+	t.AppendBytesList("old_group_commitments", s.plan.state.oldGroupCommitments)
+	sortedOldParties := tss.SortParties(s.oldParties)
+	sortedDealerParties := tss.SortParties(s.dealerParties)
+	sortedNewParties := tss.SortParties(s.newParties)
+	t.AppendUint32List("old_parties", transcript.Uint32s(sortedOldParties))
+	t.AppendUint32List("dealer_parties", transcript.Uint32s(sortedDealerParties))
+	t.AppendUint32List("new_parties", transcript.Uint32s(sortedNewParties))
+	t.AppendUint32("old_threshold", uint32(s.plan.state.oldThreshold))
+	t.AppendUint32("new_threshold", uint32(s.newThreshold))
+	t.AppendBytes("chain_code", s.plan.state.chainCode)
+	t.AppendUint32("paillier_bits", uint32(defaultPaillierBits()))
+	for _, dealer := range sortedOldParties {
+		t.AppendUint32("old_party", uint32(dealer))
+		t.AppendBytes("old_verification_share", s.plan.state.oldVerificationShares[dealer])
 	}
-	for _, dealer := range s.dealerParties {
-		wire.WriteHashPart(h, wire.EncodeBytesList(s.commits[dealer]))
+	for _, dealer := range sortedDealerParties {
+		t.AppendUint32("dealer", uint32(dealer))
+		t.AppendBytesList("dealer_commitments", s.commits[dealer])
 	}
-	for _, id := range s.newParties {
+	for _, id := range sortedNewParties {
+		t.AppendUint32("new_party", uint32(id))
 		item := s.newPaillierPubs[id]
-		wire.WriteHashPart(h, item.PublicKey)
-		wire.WriteHashPart(h, item.Proof)
+		t.AppendBytes("paillier_public_key", item.PublicKey)
+		t.AppendBytes("paillier_proof", item.Proof)
 		rp := s.newRingPedersen[id]
-		wire.WriteHashPart(h, rp.Params)
-		wire.WriteHashPart(h, rp.Proof)
+		t.AppendBytes("ring_pedersen_params", rp.Params)
+		t.AppendBytes("ring_pedersen_proof", rp.Proof)
 	}
-	for _, commitment := range newCommitments {
-		wire.WriteHashPart(h, commitment)
-	}
-	return h.Sum(nil)
+	t.AppendBytesList("new_commitments", newCommitments)
+	return t.Sum()
 }
 
 func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {

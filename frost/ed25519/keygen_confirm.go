@@ -10,6 +10,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
@@ -291,17 +292,15 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 }
 
 func keygenGroupCommitmentsHash(commitments [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(keygenConfirmationWireType))
-	wire.WriteHashPart(h, wire.EncodeBytesList(commitments))
-	return h.Sum(nil)
+	t := transcript.New(keygenConfirmationWireType)
+	t.AppendBytesList("group_commitments", commitments)
+	return t.Sum()
 }
 
 func keygenConfirmationSetHash(encoded [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(keygenConfirmationWireType))
-	wire.WriteHashPart(h, wire.EncodeBytesList(encoded))
-	return h.Sum(nil)
+	t := transcript.New(keygenConfirmationWireType)
+	t.AppendBytesList("confirmations", encoded)
+	return t.Sum()
 }
 
 func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelope, error) {

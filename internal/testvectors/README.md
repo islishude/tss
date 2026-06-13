@@ -36,6 +36,7 @@ To regenerate **all** binary golden vectors after a wire format change:
 UPDATE_GOLDEN=1 go test -run 'TestGolden' -count=1 . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
 
 # Tier 2 golden tests (CGGMP21 — requires full keygen/presign)
+UPDATE_GOLDEN=1 go test -run 'TestFast_Golden' -count=1 ./cggmp21/secp256k1
 UPDATE_GOLDEN=1 go test -tags=integration -run 'TestGolden' -count=1 ./cggmp21/secp256k1
 ```
 
@@ -62,6 +63,13 @@ Files are versioned by directory (`v1`, `v2`, ...). When a wire format change is
 2. Copy `v1/` vectors as the starting point (or regenerate fresh).
 3. Update `golden_test.go` references to `v2/`.
 4. **Never modify `v1/` vectors in place** — they remain as the prior-format compatibility contract.
+
+Pre-production protocol-domain changes are the only exception. Because this
+repository has no legacy production records to preserve, an intentional change
+to embedded transcript or challenge bytes may regenerate the existing `v1`
+files in place after review. Do not add a compatibility decoder or a `v2`
+transcript label for such a change. Record the incompatibility in the change
+documentation and regenerate both binary and protocol vectors together.
 
 ## Protocol Vectors (`protocol/`)
 
@@ -126,6 +134,7 @@ go test -tags=integration -run 'CrossImplementation' -count=1 ./cggmp21/secp256k
 ```sh
 # 1. Binary golden vectors (wire format)
 UPDATE_GOLDEN=1 go test -run 'TestGolden' -count=1 . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
+UPDATE_GOLDEN=1 go test -run 'TestFast_Golden' -count=1 ./cggmp21/secp256k1
 UPDATE_GOLDEN=1 go test -tags=integration -run 'TestGolden' -count=1 ./cggmp21/secp256k1
 
 # 2. JSON protocol vectors (cross-implementation)

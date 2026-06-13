@@ -54,15 +54,33 @@ func TestAckDigestDeterminism(t *testing.T) {
 	sid := testSessionID(t)
 	ph := sha256.Sum256([]byte("hello"))
 	th := sha256.Sum256([]byte("transcript"))
-	d1 := AckDigest("test", sid, 1, 2, "payload.type", ph, th)
-	d2 := AckDigest("test", sid, 1, 2, "payload.type", ph, th)
-	if d1 != d2 {
+	base := AckDigest("test", sid, 1, 2, "payload.type", ph, th)
+	if got := AckDigest("test", sid, 1, 2, "payload.type", ph, th); got != base {
 		t.Fatal("AckDigest must be deterministic")
 	}
-	// Different protocol → different digest
-	d3 := AckDigest("other", sid, 1, 2, "payload.type", ph, th)
-	if d1 == d3 {
-		t.Fatal("different protocol should produce different digest")
+
+	otherSID := sid
+	otherSID[0] ^= 1
+	otherPH := ph
+	otherPH[0] ^= 1
+	otherTH := th
+	otherTH[0] ^= 1
+	tests := []struct {
+		name string
+		got  [32]byte
+	}{
+		{name: "protocol", got: AckDigest("other", sid, 1, 2, "payload.type", ph, th)},
+		{name: "session", got: AckDigest("test", otherSID, 1, 2, "payload.type", ph, th)},
+		{name: "round", got: AckDigest("test", sid, 2, 2, "payload.type", ph, th)},
+		{name: "sender", got: AckDigest("test", sid, 1, 3, "payload.type", ph, th)},
+		{name: "payload type", got: AckDigest("test", sid, 1, 2, "other.type", ph, th)},
+		{name: "payload hash", got: AckDigest("test", sid, 1, 2, "payload.type", otherPH, th)},
+		{name: "transcript hash", got: AckDigest("test", sid, 1, 2, "payload.type", ph, otherTH)},
+	}
+	for _, tt := range tests {
+		if tt.got == base {
+			t.Errorf("%s change did not change digest", tt.name)
+		}
 	}
 }
 

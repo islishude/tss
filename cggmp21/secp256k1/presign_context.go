@@ -1,14 +1,13 @@
 package secp256k1
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/mta"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 func validatePresignContext(ctx PresignContext) error {
@@ -49,36 +48,33 @@ func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, [
 }
 
 func presignContextHash(ctx PresignContext) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(presignContextHashLabel))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, []byte("secp256k1"))
-	wire.WriteHashPart(h, []byte(ctx.KeyID))
-	wire.WriteHashPart(h, []byte(ctx.ChainID))
-	wire.WriteHashPart(h, wire.EncodeUint32List(ctx.DerivationPath))
-	wire.WriteHashPart(h, []byte(ctx.PolicyDomain))
-	wire.WriteHashPart(h, []byte(ctx.MessageDomain))
-	return h.Sum(nil)
+	t := transcript.New(presignContextHashLabel)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendString("curve", "secp256k1")
+	t.AppendString("key_id", ctx.KeyID)
+	t.AppendString("chain_id", ctx.ChainID)
+	t.AppendUint32List("derivation_path", ctx.DerivationPath)
+	t.AppendString("policy_domain", ctx.PolicyDomain)
+	t.AppendString("message_domain", ctx.MessageDomain)
+	return t.Sum()
 }
 
 func signMessageDigest(contextHash []byte, messageDomain string, message []byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(signMessageDigestLabel))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, []byte("secp256k1"))
-	wire.WriteHashPart(h, contextHash)
-	wire.WriteHashPart(h, []byte(messageDomain))
-	wire.WriteHashPart(h, message)
-	return h.Sum(nil)
+	t := transcript.New(signMessageDigestLabel)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendString("curve", "secp256k1")
+	t.AppendBytes("context_hash", contextHash)
+	t.AppendString("message_domain", messageDomain)
+	t.AppendBytes("message", message)
+	return t.Sum()
 }
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(mtaResponseEvidenceLabel))
-	wire.WriteHashPart(h, []byte(label))
-	wire.WriteHashPart(h, response.Ciphertext)
-	wire.WriteHashPart(h, response.Proof)
-	return h.Sum(nil)
+	t := transcript.New(mtaResponseEvidenceLabel)
+	t.AppendString("response_label", label)
+	t.AppendBytes("ciphertext", response.Ciphertext)
+	t.AppendBytes("proof", response.Proof)
+	return t.Sum()
 }

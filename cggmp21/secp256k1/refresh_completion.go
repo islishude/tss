@@ -2,14 +2,13 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
@@ -235,26 +234,25 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 }
 
 func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(refreshTranscriptHashLabel))
-	wire.WriteHashPart(h, s.cfg.SessionID[:])
-	wire.WriteHashPart(h, s.oldKey.state.keygenTranscriptHash)
-	wire.WritePartySet(h, s.oldKey.state.parties)
-	wire.WriteHashPart(h, wire.Uint32(uint32(s.cfg.Threshold)))
-	wire.WriteHashPart(h, s.oldKey.state.publicKey)
-	wire.WriteHashPart(h, s.oldKey.state.chainCode)
-	for _, id := range s.oldKey.state.parties {
+	t := transcript.New(refreshTranscriptHashLabel)
+	t.AppendBytes("session_id", s.cfg.SessionID[:])
+	t.AppendBytes("old_keygen_transcript_hash", s.oldKey.state.keygenTranscriptHash)
+	sortedParties := tss.SortParties(s.oldKey.state.parties)
+	t.AppendUint32List("parties", transcript.Uint32s(sortedParties))
+	t.AppendUint32("threshold", uint32(s.cfg.Threshold))
+	t.AppendBytes("public_key", s.oldKey.state.publicKey)
+	t.AppendBytes("chain_code", s.oldKey.state.chainCode)
+	for _, id := range sortedParties {
+		t.AppendUint32("party", uint32(id))
 		item := s.newPaillierPubs[id]
-		wire.WriteHashPart(h, item.PublicKey)
-		wire.WriteHashPart(h, item.Proof)
+		t.AppendBytes("paillier_public_key", item.PublicKey)
+		t.AppendBytes("paillier_proof", item.Proof)
 		rp := s.newRingPedersen[id]
-		wire.WriteHashPart(h, rp.Params)
-		wire.WriteHashPart(h, rp.Proof)
+		t.AppendBytes("ring_pedersen_params", rp.Params)
+		t.AppendBytes("ring_pedersen_proof", rp.Proof)
 	}
-	for _, commitment := range newCommitments {
-		wire.WriteHashPart(h, commitment)
-	}
-	return h.Sum(nil)
+	t.AppendBytesList("new_commitments", newCommitments)
+	return t.Sum()
 }
 
 func validateRefreshCommitments(commitments [][]byte, threshold int) error {

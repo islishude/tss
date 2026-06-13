@@ -172,6 +172,25 @@ Conversion functions (`toWire()` / `toDomain()`) handle structural mapping and d
 
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 
+## Labeled SHA-256 Transcripts
+
+Custom SHA-256 transcript, domain, commitment, challenge, and evidence hashes
+use `internal/transcript`. Each entry is encoded as:
+
+```text
+u32be(label_length) || label || u32be(value_length) || value
+```
+
+The first entry is always `("domain", domain_label)`. Every later entry has a
+non-empty stable ASCII `snake_case` label. Integer, boolean, uint32-list, and
+byte-list values use the canonical encodings from `internal/wire`; set-valued
+inputs are sorted before they enter the transcript.
+
+This encoding is part of the protocol contract. Renaming, reordering, adding,
+or removing a field changes the digest and requires transcript binding tests
+and vector regeneration. RFC-defined hashes and plain content hashes such as
+`SHA-256(payload)` do not use this transcript encoding.
+
 ## Current Records
 
 - `tss.BlameEvidence` (direct struct encoding; `PublicInputs` as `[]EvidenceField` record list)

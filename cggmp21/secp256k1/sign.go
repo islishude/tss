@@ -15,6 +15,7 @@ import (
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
@@ -24,6 +25,7 @@ const (
 	presignContextHashLabel    = "cggmp21-secp256k1-presign-context-v1"
 	presignRound1EchoLabel     = "cggmp21-secp256k1-presign-round1-echo-v1"
 	presignRound1PublicLabel   = "cggmp21-secp256k1-presign-round1-public-v1"
+	presignIDLabel             = "cggmp21-secp256k1-presign-id-v1"
 	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
 )
@@ -252,8 +254,6 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 	}, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
-const presignIDLabel = "cggmp21-secp256k1-presign-id-v1"
-
 // ID returns a content-derived presign identifier suitable for use as an
 // idempotency key in a durable [PresignStore]. The returned hash is computed
 // from all persisted presign fields, including secret material, and does not
@@ -265,28 +265,26 @@ func (p *Presign) ID() []byte {
 		return nil
 	}
 
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(presignIDLabel))
-	wire.WriteHashPart(h, p.state.contextHash)
-	wire.WriteHashPart(h, p.state.additiveShift)
-	wire.WriteHashPart(h, p.state.publicKey)
-	wire.WriteHashPart(h, p.state.keygenTranscriptHash)
-	wire.WriteHashPart(h, p.state.partiesHash)
-	for _, id := range p.state.signers {
-		wire.WriteHashPart(h, []byte{byte(id >> 24), byte(id >> 16), byte(id >> 8), byte(id)})
-	}
+	t := transcript.New(presignIDLabel)
+	t.AppendBytes("context_hash", p.state.contextHash)
+	t.AppendBytes("additive_shift", p.state.additiveShift)
+	t.AppendBytes("public_key", p.state.publicKey)
+	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
+	t.AppendBytes("parties_hash", p.state.partiesHash)
+	t.AppendUint32List("signers", transcript.Uint32s(p.state.signers))
 	for _, vs := range p.state.verifyShares {
-		wire.WriteHashPart(h, vs.KPoint)
-		wire.WriteHashPart(h, vs.ChiPoint)
+		t.AppendUint32("verify_share_party", uint32(vs.Party))
+		t.AppendBytes("k_point", vs.KPoint)
+		t.AppendBytes("chi_point", vs.ChiPoint)
 		proofHash := sha256.Sum256(vs.Proof)
-		wire.WriteHashPart(h, proofHash[:])
+		t.AppendBytes("proof_hash", proofHash[:])
 	}
-	wire.WriteHashPart(h, p.state.r)
-	wire.WriteHashPart(h, p.state.littleR)
-	wire.WriteHashPart(h, p.state.kShare.FixedBytes())
-	wire.WriteHashPart(h, p.state.chiShare.FixedBytes())
-	wire.WriteHashPart(h, p.state.delta.FixedBytes())
-	return h.Sum(nil)
+	t.AppendBytes("r_point", p.state.r)
+	t.AppendBytes("little_r", p.state.littleR)
+	t.AppendBytes("k_share", p.state.kShare.FixedBytes())
+	t.AppendBytes("chi_share", p.state.chiShare.FixedBytes())
+	t.AppendBytes("delta", p.state.delta.FixedBytes())
+	return t.Sum()
 }
 
 // Validate checks local presign structure and scalar/point encodings.

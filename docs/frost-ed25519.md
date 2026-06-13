@@ -80,7 +80,7 @@ When all `n` dealers' commitments and shares are collected and verified:
 3. **Group public key:** `PK = GC_0` (the aggregated degree-zero commitment)
 4. **Verification shares:** For each party `p`, `V_p = Σ_{k=0}^{t-1} (p^k · GC_k)`
 5. **Chain code:** If HD is enabled, `chain = XOR_{i=1}^{n} chainCode_i`
-6. **Transcript hash:** Domain-separated SHA-256 binding the session ID, threshold, sorted parties, aggregate chain code, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
+6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, aggregate chain code, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
 At this point the session has only local pending material. It then broadcasts a
 round-2 `KeygenConfirmation` payload binding the session ID, sender, threshold,
@@ -98,6 +98,13 @@ evidence.
 ### Domain Separation
 
 Keygen commitment hashing uses the label `frost-ed25519-keygen-commitments-v1`. The full domain binds `(session ID, threshold, sorted parties, dealer ID, commitment bytes)`.
+
+Repository-defined FROST transcript fields use the canonical labeled-entry
+encoding documented in [`wire.md`](wire.md). Party sets are sorted and encoded
+as canonical uint32 lists; dealer and verification-share records repeat their
+party ID before the associated public fields. RFC 9591 `H1`/`H4`/`H5` and nonce
+derivation retain the RFC-defined SHA-512 concatenation and are not rewritten
+through this helper.
 
 ## Signing
 

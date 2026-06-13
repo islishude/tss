@@ -2,7 +2,6 @@ package schnorr
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"encoding/hex"
 	"math/big"
 	"os"
@@ -10,7 +9,6 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire"
 )
 
 func TestGoldenProof(t *testing.T) {
@@ -31,15 +29,7 @@ func TestGoldenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Compute challenge: SHA256(challengeLabel || domain || public || commitment) mod order.
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(schnorrChallengeLabel))
-	wire.WriteHashPart(h, domain)
-	wire.WriteHashPart(h, public)
-	wire.WriteHashPart(h, commitment)
-	challenge := new(big.Int).SetBytes(h.Sum(nil))
-	challenge.Mod(challenge, secp.Order())
-	challengeScalar := secp.ScalarFromBigInt(challenge)
+	challengeScalar := secp.ScalarFromBigInt(challenge(domain, public, commitment))
 	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), n)
 
 	p := &Proof{Commitment: commitment, Response: response.Bytes()}

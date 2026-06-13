@@ -2,7 +2,6 @@ package paillier
 
 import (
 	"crypto/rand"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -11,50 +10,44 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/paillier/paillierct"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // --- Transcript / hash helpers ---
 
 func proofTranscript(tag string, domain []byte, statementParts, commitmentParts [][]byte) []byte {
-	return hashParts(
-		[]byte(proofTranscriptLabel),
-		wire.Uint32(uint32(proofVersion)),
-		[]byte("secp256k1"),
-		[]byte(tag),
-		domain,
-		wire.EncodeBytesList(statementParts),
-		wire.EncodeBytesList(commitmentParts),
-	)
+	t := transcript.New(proofTranscriptLabel)
+	t.AppendUint32("proof_version", uint32(proofVersion))
+	t.AppendString("curve", "secp256k1")
+	t.AppendString("proof_tag", tag)
+	t.AppendBytes("outer_domain", domain)
+	t.AppendBytesList("statement_parts", statementParts)
+	t.AppendBytesList("commitment_parts", commitmentParts)
+	return t.Sum()
 }
 
 // challenge returns the full 256-bit SHA-256 hash output as a Fiat-Shamir
 // challenge without modular reduction. Used by EncryptionProof, MTAResponseProof,
 // and LogProof where a ~256-bit challenge combined with a large mask α ∈ [0,2^384)
 // provides statistical zero-knowledge (~2^128 candidate witnesses).
-func challenge(parts ...[]byte) *big.Int {
-	return new(big.Int).SetBytes(hashParts(parts...))
+func challenge(domain, transcriptHash []byte) *big.Int {
+	t := transcript.New(string(domain))
+	t.AppendBytes("transcript_hash", transcriptHash)
+	return new(big.Int).SetBytes(t.Sum())
 }
 
-func hashParts(parts ...[]byte) []byte {
-	h := sha256.New()
-	for _, part := range parts {
-		_, _ = h.Write([]byte{byte(len(part) >> 24), byte(len(part) >> 16), byte(len(part) >> 8), byte(len(part))})
-		_, _ = h.Write(part)
-	}
-	return h.Sum(nil)
-}
-
-func expandHash(size int, parts ...[]byte) []byte {
+func expandHash(size int, domain, transcriptHash, round, attempt []byte) []byte {
 	if size <= 0 {
 		return nil
 	}
 	out := make([]byte, 0, size)
 	for counter := uint32(0); len(out) < size; counter++ {
-		blockParts := make([][]byte, 0, len(parts)+1)
-		blockParts = append(blockParts, parts...)
-		blockParts = append(blockParts, wire.Uint32(counter))
-		out = append(out, hashParts(blockParts...)...)
+		t := transcript.New(string(domain))
+		t.AppendBytes("transcript_hash", transcriptHash)
+		t.AppendBytes("round", round)
+		t.AppendBytes("attempt", attempt)
+		t.AppendUint32("block_counter", counter)
+		out = append(out, t.Sum()...)
 	}
 	return out[:size]
 }

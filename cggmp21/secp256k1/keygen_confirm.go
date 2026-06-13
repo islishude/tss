@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
@@ -64,9 +65,9 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 }
 
 func keygenCommitmentsHash(commitments [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, wire.EncodeBytesList(commitments))
-	return h.Sum(nil)
+	t := transcript.New(keygenCommitmentsHashLabel)
+	t.AppendBytesList("group_commitments", commitments)
+	return t.Sum()
 }
 
 // Validate performs structural checks on the confirmation.
@@ -322,10 +323,9 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 }
 
 func keygenConfirmationSetHash(encoded [][]byte) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(keygenConfirmationWireType))
-	wire.WriteHashPart(h, wire.EncodeBytesList(encoded))
-	return h.Sum(nil)
+	t := transcript.New(keygenConfirmationWireType)
+	t.AppendBytesList("confirmations", encoded)
+	return t.Sum()
 }
 
 // handleKeygenConfirmation validates and applies a keygen confirmation message.

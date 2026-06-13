@@ -57,6 +57,13 @@ Every inbound envelope must include the transcript hash produced by
 transcript hashes before payload decoding, so callers should recompute the hash
 after any relay, storage, or framing layer changes an envelope.
 
+All repository-defined SHA-256 transcripts use labeled entries through
+`internal/transcript`. The domain is the first entry, and every field binds both
+its stable name and canonical value encoding. This prevents ambiguity between
+adjacent byte strings and makes field omission, substitution, and reordering
+change the digest. RFC 9591 SHA-512 functions and direct content hashes remain
+defined by their respective standards or call sites.
+
 Session ids must be fresh, unpredictable, and scoped to one protocol run. A
 completed or attributable-aborted session rejects later messages without
 mutating local state; callers should stop routing messages to such sessions and

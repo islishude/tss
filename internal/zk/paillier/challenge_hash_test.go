@@ -5,8 +5,6 @@ import (
 	"math"
 	"math/big"
 	"testing"
-
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // TestNewProofChallengeDistribution verifies that the 128-bit challenges
@@ -104,25 +102,22 @@ func TestChallengeSignedNoModularBias(t *testing.T) {
 }
 
 // TestLegacyProofChallengeDistribution verifies that legacy challenge()
-// produces challenges that are uniform modulo the secp256k1 order.
-// The legacy challenge is the full 256-bit SHA-256 output reduced mod q,
-// so there IS a small bias (2^256 mod q). This test quantifies that bias.
+// produces uniformly distributed full-width SHA-256 challenges.
 func TestLegacyProofChallengeDistribution(t *testing.T) {
 	t.Parallel()
 	const nChallenges = 5000
 
 	// Generate challenges with different inputs.
 	mean := new(big.Int)
-	q := secp.Order()
 
 	for i := range nChallenges {
 		c := challenge([]byte("legacy dist test"), []byte{byte(i), byte(i >> 8)})
 		mean.Add(mean, c)
 	}
 
-	// Expected mean: (q-1)/2 ≈ q/2.
+	// Expected mean for uniform values in [0, 2^256) is approximately 2^255.
 	mean.Div(mean, big.NewInt(nChallenges))
-	expected := new(big.Int).Rsh(q, 1) // q/2
+	expected := new(big.Int).Lsh(big.NewInt(1), 255)
 
 	// Compute |mean - expected| / expected as relative deviation.
 	diff := new(big.Int).Sub(mean, expected)
@@ -133,10 +128,11 @@ func TestLegacyProofChallengeDistribution(t *testing.T) {
 	t.Logf("Legacy challenge mean: %s (expected ~q/2 = %s)", mean, expected)
 	t.Logf("Relative deviation: %d ppm", relDev.Int64())
 
-	// The bias is bounded by 2^256 mod q ≈ 4.3e38, which is about
-	// 2^128 / q ≈ 2^-128 relative bias — negligible.
-	if relDev.Cmp(big.NewInt(1000)) > 0 {
-		t.Errorf("Legacy challenge mean deviates >1000 ppm from expected (bias)")
+	// For 5,000 uniform 256-bit samples, the sample mean has roughly 0.8%
+	// relative standard deviation. A 5% bound catches gross bias without
+	// treating ordinary sample variance as a protocol failure.
+	if relDev.Cmp(big.NewInt(50000)) > 0 {
+		t.Errorf("Legacy challenge mean deviates >50000 ppm from expected")
 	}
 
 	// Verify no zero challenges in 5000 samples (probability ≈ 5000/q ≈ 0).

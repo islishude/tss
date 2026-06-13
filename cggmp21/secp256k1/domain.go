@@ -1,11 +1,9 @@
 package secp256k1
 
 import (
-	"crypto/sha256"
-
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 const (
@@ -225,23 +223,22 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 }
 
 func proofDomain(ctx proofDomainContext) []byte {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(proofDomainVersion))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, []byte(ctx.label))
-	wire.WriteHashPart(h, ctx.sessionID[:])
-	wire.WriteHashPart(h, wire.Uint32(uint32(ctx.threshold)))
-	wire.WritePartySet(h, ctx.parties)
-	wire.WritePartySet(h, ctx.signers)
-	wire.WritePartyID(h, ctx.sender)
-	wire.WritePartyID(h, ctx.receiver)
-	wire.WriteHashPart(h, []byte(ctx.kind))
-	wire.WriteHashPart(h, ctx.publicKey)
-	wire.WriteHashPart(h, ctx.keygenTranscriptHash)
-	wire.WriteHashPart(h, ctx.paillierPublicKey)
-	wire.WriteHashPart(h, ctx.ringPedersenParams)
-	wire.WriteHashPart(h, ctx.presignContextHash)
-	wire.WriteHashPart(h, ctx.resharePlanHash)
-	return h.Sum(nil)
+	t := transcript.New(proofDomainVersion)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendString("proof_label", ctx.label)
+	t.AppendBytes("session_id", ctx.sessionID[:])
+	t.AppendUint32("threshold", uint32(ctx.threshold))
+	t.AppendUint32List("parties", transcript.Uint32s(tss.SortParties(ctx.parties)))
+	t.AppendUint32List("signers", transcript.Uint32s(tss.SortParties(ctx.signers)))
+	t.AppendUint32("sender", uint32(ctx.sender))
+	t.AppendUint32("receiver", uint32(ctx.receiver))
+	t.AppendString("proof_kind", ctx.kind)
+	t.AppendBytes("public_key", ctx.publicKey)
+	t.AppendBytes("keygen_transcript_hash", ctx.keygenTranscriptHash)
+	t.AppendBytes("paillier_public_key", ctx.paillierPublicKey)
+	t.AppendBytes("ring_pedersen_params", ctx.ringPedersenParams)
+	t.AppendBytes("presign_context_hash", ctx.presignContextHash)
+	t.AppendBytes("reshare_plan_hash", ctx.resharePlanHash)
+	return t.Sum()
 }

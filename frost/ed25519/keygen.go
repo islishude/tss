@@ -11,7 +11,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
-	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // KeygenSession tracks dealerless FROST DKG state for one local party.
@@ -297,12 +297,11 @@ func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode
 	if len(chainCode) == 0 {
 		return nil
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(chainCodeCommitLabel))
-	wire.WriteHashPart(h, sessionID[:])
-	wire.WriteHashPart(h, []byte{byte(partyID >> 24), byte(partyID >> 16), byte(partyID >> 8), byte(partyID)})
-	wire.WriteHashPart(h, chainCode)
-	return h.Sum(nil)
+	t := transcript.New(chainCodeCommitLabel)
+	t.AppendBytes("session_id", sessionID[:])
+	t.AppendUint32("party_id", uint32(partyID))
+	t.AppendBytes("chain_code", chainCode)
+	return t.Sum()
 }
 
 // verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.

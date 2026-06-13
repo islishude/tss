@@ -1,13 +1,13 @@
 package schnorr
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"math/big"
 	"slices"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -115,12 +115,11 @@ func (p *Proof) Validate() error {
 }
 
 func challenge(domain, public, commitment []byte) *big.Int {
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(schnorrChallengeLabel))
-	wire.WriteHashPart(h, domain)
-	wire.WriteHashPart(h, public)
-	wire.WriteHashPart(h, commitment)
-	out := new(big.Int).SetBytes(h.Sum(nil))
+	t := transcript.New(schnorrChallengeLabel)
+	t.AppendBytes("outer_domain", domain)
+	t.AppendBytes("public_key", public)
+	t.AppendBytes("commitment", commitment)
+	out := new(big.Int).SetBytes(t.Sum())
 	out.Mod(out, secp.Order())
 	return out
 }

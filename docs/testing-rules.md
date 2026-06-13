@@ -194,6 +194,17 @@ fails after substituting another context. At minimum, test cross-session,
 cross-phase, cross-recipient, cross-signer-set, cross-digest, and cross-BIP32-path
 use. Signer-set ordering must have one canonical interpretation.
 
+Repository-defined SHA-256 transcripts must also test:
+
+- the fixed labeled-entry encoding and domain-first rule;
+- field-name, field-order, and domain separation;
+- canonical integer, boolean, uint32-list, and byte-list encodings; and
+- `Sum`/`Sum32` consistency without finalizing the builder.
+
+Production code must use `internal/transcript` rather than constructing custom
+SHA-256 streams directly. RFC-defined hashes and direct content hashes are
+excluded from this rule.
+
 ### 5. CGGMP21 Presign Safety
 
 CGGMP21 presigns are one-use security material. A presign must not be reusable

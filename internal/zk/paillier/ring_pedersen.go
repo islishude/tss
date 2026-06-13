@@ -11,6 +11,7 @@ import (
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
+	transcriptpkg "github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -451,6 +452,8 @@ func ringPedersenTranscript(domain []byte, params *RingPedersenParams, party uin
 }
 
 func ringPedersenChallenge(transcript []byte, round int) byte {
-	digest := hashParts([]byte(ringPedersenChallengeLabel), transcript, wire.Uint32(uint32(round)))
-	return digest[0] & 1
+	t := transcriptpkg.New(ringPedersenChallengeLabel)
+	t.AppendBytes("transcript_hash", transcript)
+	t.AppendUint32("round", uint32(round))
+	return t.Sum()[0] & 1
 }

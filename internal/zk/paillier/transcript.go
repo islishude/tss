@@ -1,13 +1,12 @@
 package paillier
 
 import (
-	"crypto/sha256"
 	"errors"
 	"fmt"
-	"hash"
 	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	transcriptpkg "github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -15,23 +14,17 @@ import (
 // messages and derives a signed challenge. Every field is length-prefixed
 // and labeled for domain separation.
 type Transcript struct {
-	domain string
-	h      hash.Hash
+	builder *transcriptpkg.Builder
 }
 
 // NewTranscript creates a transcript with the given domain separation label.
 func NewTranscript(domain string) *Transcript {
-	t := &Transcript{domain: domain}
-	t.h = sha256.New()
-	// Bind the domain label as the first transcript entry.
-	t.AppendBytes("domain", []byte(domain))
-	return t
+	return &Transcript{builder: transcriptpkg.New(domain)}
 }
 
 // AppendBytes writes a labeled byte string into the transcript.
 func (t *Transcript) AppendBytes(label string, b []byte) {
-	wire.WriteHashPart(t.h, []byte(label))
-	wire.WriteHashPart(t.h, b)
+	t.builder.AppendBytes(label, b)
 }
 
 // AppendBigInt writes a labeled positive big.Int in canonical big-endian form.
@@ -72,12 +65,12 @@ func (t *Transcript) AppendPointBytes(label string, pointBytes []byte) error {
 
 // AppendUint32 writes a labeled uint32 in big-endian encoding.
 func (t *Transcript) AppendUint32(label string, v uint32) {
-	t.AppendBytes(label, wire.Uint32(v))
+	t.builder.AppendUint32(label, v)
 }
 
 // AppendUint16 writes a labeled uint16 in big-endian encoding.
 func (t *Transcript) AppendUint16(label string, v uint16) {
-	t.AppendBytes(label, wire.Uint16(v))
+	t.builder.AppendUint16(label, v)
 }
 
 // ChallengeSigned derives a Fiat-Shamir challenge as a signed integer in
@@ -87,7 +80,7 @@ func (t *Transcript) ChallengeSigned(bits uint) (*big.Int, error) {
 	if bits == 0 || bits > 256 {
 		return nil, fmt.Errorf("challenge bits must be in [1, 256], got %d", bits)
 	}
-	digest := t.h.Sum(nil)
+	digest := t.builder.Sum()
 	challenge := new(big.Int).SetBytes(digest)
 	// Reduce to the target bit length.
 	mask := new(big.Int).Lsh(big.NewInt(1), bits)
@@ -101,5 +94,5 @@ func (t *Transcript) ChallengeSigned(bits uint) (*big.Int, error) {
 
 // Sum returns the current transcript hash without modifying state.
 func (t *Transcript) Sum() []byte {
-	return t.h.Sum(nil)
+	return t.builder.Sum()
 }

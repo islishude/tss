@@ -95,7 +95,11 @@ See [docs/wire.md](wire.md) for the full canonical encoding specification.
 
 ### Transcript Binding
 
-`DomainSeparatedHash()` hashes `(label, protocol, version, round, session, from, to, payload_type, payload)`. The hash is set automatically by `NewEnvelope()` and verified by `EnvelopeGuard.Validate()`.
+`DomainSeparatedHash()` uses the canonical labeled SHA-256 transcript encoding
+from [`wire.md`](wire.md). Its domain label is followed by named entries for
+`protocol`, `version`, `session_id`, `round`, `from`, `to`, `payload_type`, and
+`payload`. The hash is set automatically by `NewEnvelope()` and verified by
+`EnvelopeGuard.Validate()`.
 
 ### Transport Semantics (SecurityContext)
 

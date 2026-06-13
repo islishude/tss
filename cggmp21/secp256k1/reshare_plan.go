@@ -2,12 +2,12 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
@@ -337,25 +337,24 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	if err := p.Validate(); err != nil {
 		return nil, err
 	}
-	h := sha256.New()
-	wire.WriteHashPart(h, []byte(resharePlanDigestLabel))
-	wire.WriteHashPart(h, []byte(protocol))
-	wire.WriteHashPart(h, wire.Uint32(uint32(tss.Version)))
-	wire.WriteHashPart(h, p.state.sessionID[:])
-	wire.WriteHashPart(h, []byte(p.state.curveID))
-	wire.WriteHashPart(h, p.state.oldGroupPublicKey)
-	wire.WriteHashPart(h, wire.EncodeBytesList(p.state.oldGroupCommitments))
-	wire.WritePartySet(h, p.state.oldParties)
-	wire.WritePartySet(h, p.state.dealerParties)
-	wire.WritePartySet(h, p.state.newParties)
-	wire.WriteHashPart(h, wire.Uint32(uint32(p.state.oldThreshold)))
-	wire.WriteHashPart(h, wire.Uint32(uint32(p.state.newThreshold)))
-	wire.WriteHashPart(h, p.state.chainCode)
+	t := transcript.New(resharePlanDigestLabel)
+	t.AppendString("protocol", string(protocol))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendBytes("session_id", p.state.sessionID[:])
+	t.AppendString("curve", p.state.curveID)
+	t.AppendBytes("old_group_public_key", p.state.oldGroupPublicKey)
+	t.AppendBytesList("old_group_commitments", p.state.oldGroupCommitments)
+	t.AppendUint32List("old_parties", transcript.Uint32s(tss.SortParties(p.state.oldParties)))
+	t.AppendUint32List("dealer_parties", transcript.Uint32s(tss.SortParties(p.state.dealerParties)))
+	t.AppendUint32List("new_parties", transcript.Uint32s(tss.SortParties(p.state.newParties)))
+	t.AppendUint32("old_threshold", uint32(p.state.oldThreshold))
+	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
+	t.AppendBytes("chain_code", p.state.chainCode)
 	for _, id := range p.state.oldParties {
-		wire.WritePartyID(h, id)
-		wire.WriteHashPart(h, p.state.oldVerificationShares[id])
+		t.AppendUint32("old_party", uint32(id))
+		t.AppendBytes("old_verification_share", p.state.oldVerificationShares[id])
 	}
-	return h.Sum(nil), nil
+	return t.Sum(), nil
 }
 
 // IsDealer reports whether party is in the plan's old dealer set.

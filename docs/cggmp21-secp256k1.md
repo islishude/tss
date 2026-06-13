@@ -119,6 +119,12 @@ keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
 
 Paillier proof domains bind `(protocol, version, session, threshold, parties, self, proof_kind, paillier_pubkey)`. The key-share Paillier proof additionally binds `(group_public_key, keygen_transcript_hash)`.
 
+All repository-defined CGGMP21 SHA-256 domains, transcripts, commitments,
+challenges, evidence digests, reshare-plan digests, and presign identifiers use
+the canonical labeled-entry encoding in [`wire.md`](wire.md). The domain is
+always the first entry; party sets are sorted canonical uint32 lists, and
+repeated party-scoped records bind the party ID before their public fields.
+
 ## Presign (Offline Phase)
 
 Presign produces a one-use opaque `Presign` record containing local nonce shares
@@ -234,7 +240,7 @@ The proof uses a unified Fiat-Shamir transcript with three components:
 2. **Schnorr** (when `M_i ≠ 0`): `MPoint_i = M_i·G` — knowledge of the MTA correction sum. When `M_i = 0` (e.g., 1-of-1 signing with no MTA contributions), MPoint is the point at infinity and no Schnorr sub-proof is generated.
 3. **DLEQ** (Chaum-Pedersen): `ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i` — proving the same `k_i` is used in the ChiPoint derivation, where `X̄Point_i = λ_i·V_i` (publicly computable from the verification share and Lagrange coefficient). When `M_i = 0`, the DLEQ simplifies to `ChiPoint_i = k_i·(X̄Point_i + shift·G)`.
 
-The proof transcript binds `(protocol, session ID, party, signer set, context hash, additive shift, public key, keygen transcript hash, party-set hash, EncK, Paillier public key, round1 echo, Gamma, Delta, KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session, cross-context, cross-signer, cross-keygen, and proof-substitution attacks.
+The proof transcript binds labeled entries for `(protocol, session ID, party, signer set, context hash, additive shift, public key, keygen transcript hash, party-set hash, EncK, Paillier public key, round1 echo, Gamma, Delta, KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session, cross-context, cross-signer, cross-keygen, and proof-substitution attacks.
 
 Receivers verify the signprep proof during presign round 3 **before** accepting the delta share or writing any session state. An invalid proof produces `EvidenceKindPresignRound3` blame with the sender.
 
