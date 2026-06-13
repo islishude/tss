@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // Online latency: interactive signing path.
@@ -31,6 +32,7 @@ func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 			signSessions[id] = session
 			messages = append(messages, out...)
 		}
@@ -39,7 +41,7 @@ func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				if _, err := signSessions[id].HandleSignMessage(env); err != nil {
+				if _, err := signSessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -67,6 +69,7 @@ func BenchmarkCGGMP21OnlineSign3of5(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
+			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 			signSessions[id] = session
 			messages = append(messages, out...)
 		}
@@ -75,7 +78,7 @@ func BenchmarkCGGMP21OnlineSign3of5(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				if _, err := signSessions[id].HandleSignMessage(env); err != nil {
+				if _, err := signSessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
 					b.Fatal(err)
 				}
 			}

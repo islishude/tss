@@ -95,6 +95,26 @@ jobs:
       - name: Run race detector
         run: make test-race
 
+  test-benchmark:
+    name: Test Benchmark (${{ matrix.os }})
+    needs: check
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, ubuntu-24.04-arm]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set up Go
+        uses: actions/setup-go@v6
+        with:
+          go-version: stable
+
+      - name: Check Benchmark correctly
+        run: go test -run=^$ -tags 'integration slowcrypto stress tier1' -bench '^Benchmark' ./...
+
   test-fuzzing:
     name: Test Fuzzing (${{ matrix.os }})
     needs: check
