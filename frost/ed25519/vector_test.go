@@ -48,7 +48,7 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
 		cfg := tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session, Rand: rng}
-		kg, out, err := StartKeygen(cfg)
+		kg, out, err := startFROSTKeygen(cfg)
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -140,7 +140,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 				SessionID: session,
 				Rand:      rand.New(rand.NewSource(int64(id * 100))), //nolint:gosec // deterministic for golden test
 			}
-			kg, out, err := StartKeygen(cfg)
+			kg, out, err := startCGGMP21Keygen(cfg)
 			if err != nil {
 				t.Fatal(err)
 			}

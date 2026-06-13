@@ -35,7 +35,7 @@ func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 				t.Fatal(err)
 			}
 			candidate := presign.Clone()
-			session, out, err := StartSign(shares[1], candidate, signID, SignRequest{
+			session, out, err := startCGGMP21Sign(shares[1], candidate, signID, SignRequest{
 				Context: requestCtx,
 				Message: []byte("presign policy"),
 				LowS:    true,

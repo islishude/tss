@@ -17,7 +17,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 3)
-	parties := tss.SortParties(shares[1].Parties)
 	messageA := []byte("message-A")
 	messageB := []byte("message-B")
 
@@ -29,18 +28,17 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sidA, _ := tss.NewSessionID(nil)
-			_, outA, err := StartSign(shares[1], sidA, []tss.PartyID{1, 2}, messageA)
+			_, outA, err := startFROSTSign(shares[1], sidA, []tss.PartyID{1, 2}, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
 			commitA := outA[0]
 
 			sidB, _ := tss.NewSessionID(nil)
-			sess1B, _, err := StartSign(shares[1], sidB, []tss.PartyID{1, 2}, messageA)
+			sess1B, _, err := startFROSTSign(shares[1], sidB, []tss.PartyID{1, 2}, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1B.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sidB))
 
 			commitA.Security.Authenticated = true
 			commitA.Security.AuthenticatedParty = commitA.From
@@ -51,12 +49,11 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sid, _ := tss.NewSessionID(nil)
-			sess1, _, err := StartSign(shares[1], sid, []tss.PartyID{1, 2}, messageA)
+			sess1, _, err := startFROSTSign(shares[1], sid, []tss.PartyID{1, 2}, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sid))
-			_, out2, err := StartSign(shares[2], sid, []tss.PartyID{1, 2}, messageA)
+			_, out2, err := startFROSTSign(shares[2], sid, []tss.PartyID{1, 2}, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -76,17 +73,15 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			sid, _ := tss.NewSessionID(nil)
 			signers := []tss.PartyID{1, 2}
 
-			sess1, out1, err := StartSign(shares[1], sid, signers, messageA)
+			sess1, out1, err := startFROSTSign(shares[1], sid, signers, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sid))
 
-			sess2, out2, err := StartSign(shares[2], sid, signers, messageA)
+			sess2, out2, err := startFROSTSign(shares[2], sid, signers, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess2.SetGuard(testFROSTGuard(2, tss.PartySet(parties), sid))
 
 			// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 			cb := out2[0]
@@ -134,24 +129,22 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			sid, _ := tss.NewSessionID(nil)
 			signers := []tss.PartyID{1, 2}
 
-			sess1A, out1A, err := StartSign(shares[1], sid, signers, messageA)
+			sess1A, out1A, err := startFROSTSign(shares[1], sid, signers, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1A.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sid))
 
 			// Party 2 with message A — commitment only, for party 1's session.
-			_, out2A, err := StartSign(shares[2], sid, signers, messageA)
+			_, out2A, err := startFROSTSign(shares[2], sid, signers, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 2 with message B — to get partial computed with wrong message's binding factors.
-			sess2B, _, err := StartSign(shares[2], sid, signers, messageB)
+			sess2B, _, err := startFROSTSign(shares[2], sid, signers, messageB)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess2B.SetGuard(testFROSTGuard(2, tss.PartySet(parties), sid))
 
 			// Give party 1 party 2's message-A commitment → party 1 emits its partial.
 			cbA := out2A[0]
@@ -192,31 +185,28 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			signers3 := []tss.PartyID{1, 2, 3}
 
 			// Party 1 for 2-signer set.
-			sess1_2, out1, err := StartSign(shares[1], sid, signers2, messageA)
+			sess1_2, out1, err := startFROSTSign(shares[1], sid, signers2, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1_2.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sid))
 
 			// Party 2 for 2-signer set — commitment for party 1.
-			_, out2_2, err := StartSign(shares[2], sid, signers2, messageA)
+			_, out2_2, err := startFROSTSign(shares[2], sid, signers2, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 2 for 3-signer set — to get partial with 3-signer Lagrange.
-			sess2_3, out2_3, err := StartSign(shares[2], sid, signers3, messageA)
+			sess2_3, out2_3, err := startFROSTSign(shares[2], sid, signers3, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess2_3.SetGuard(testFROSTGuard(2, tss.PartySet(parties), sid))
 
 			// Party 3 for 3-signer set.
-			sess3, out3, err := StartSign(shares[3], sid, signers3, messageA)
+			_, out3, err := startFROSTSign(shares[3], sid, signers3, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess3.SetGuard(testFROSTGuard(3, tss.PartySet(parties), sid))
 
 			// Give party 1 (2-signer) party 2's 2-signer commitment → party 1 emits partial.
 			cb2 := out2_2[0]
@@ -276,27 +266,25 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			signers := []tss.PartyID{1, 2}
 
 			// Party 1 with shift1.
-			sess1, out1, err := StartSignWithOptions(hdShares[1], sid, signers, messageA,
+			sess1, out1, err := startFROSTSignWithOptions(hdShares[1], sid, signers, messageA,
 				SignOptions{AdditiveShift: child1.AdditiveShift})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess1.SetGuard(testFROSTGuard(1, tss.PartySet(hdShares[1].Parties), sid))
 
 			// Party 2 with shift1 — commitment only (for party 1).
-			_, out2_s1, err := StartSignWithOptions(hdShares[2], sid, signers, messageA,
+			_, out2_s1, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
 				SignOptions{AdditiveShift: child1.AdditiveShift})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 2 with shift2 — to get partial computed with wrong shift.
-			sess2_s2, out2_s2, err := StartSignWithOptions(hdShares[2], sid, signers, messageA,
+			sess2_s2, out2_s2, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
 				SignOptions{AdditiveShift: child2.AdditiveShift})
 			if err != nil {
 				t.Fatal(err)
 			}
-			sess2_s2.SetGuard(testFROSTGuard(2, tss.PartySet(hdShares[2].Parties), sid))
 
 			// Give party 1 party 2's shift1 commitment → party 1 emits partial.
 			cb1 := out2_s1[0]

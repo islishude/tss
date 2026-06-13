@@ -62,17 +62,20 @@ func (keygenSharePayload) MarshalJSON() ([]byte, error) {
 }
 
 // StartKeygen starts dealerless DKG and returns outbound round-one envelopes.
-func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
-	return StartKeygenWithOptions(config, KeygenOptions{})
+func StartKeygen(config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+	return StartKeygenWithOptions(config, KeygenOptions{}, guard)
 }
 
 // StartKeygenWithOptions starts dealerless DKG with optional HD chain code generation.
-func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
+func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	limits := DefaultLimits()
 	if opts.Limits != nil {
 		limits = *opts.Limits
 	}
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := config.SortedParties()
@@ -111,6 +114,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		},
 		confirmations: make(map[tss.PartyID][]byte, len(parties)),
 		ownPoly:       poly,
+		guard:         guard,
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
@@ -160,30 +164,7 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
-func (s *KeygenSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard configured for this keygen session from the
-// production FROST policy set. cache may be nil to use an in-memory cache
-// suitable for testing; production deployments must supply a durable ReplayCache.
-func (s *KeygenSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil keygen session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *KeygenSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }

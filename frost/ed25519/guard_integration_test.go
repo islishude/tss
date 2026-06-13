@@ -25,7 +25,7 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 	queue := make([]tss.Envelope, 0)
 
 	for _, id := range parties {
-		s, out, err := StartKeygen(tss.ThresholdConfig{
+		s, out, err := startFROSTKeygen(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -34,7 +34,6 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 		if err != nil {
 			t.Fatal(err)
 		}
-		s.SetGuard(testFROSTGuard(id, parties, sessionID))
 		sessions[id] = s
 		queue = append(queue, out...)
 	}
@@ -84,11 +83,10 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 		SessionID: sessionID,
 	}
 
-	session, _, err := StartKeygen(config)
+	session, _, err := StartKeygen(config, tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies()))
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
@@ -127,11 +125,10 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 		SessionID: sessionID,
 	}
 
-	session, _, err := StartKeygen(config)
+	session, _, err := startFROSTKeygen(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testFROSTGuard(21, parties, sessionID))
 
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
@@ -166,11 +163,10 @@ func TestFROSTRejectsSenderSpoofing(t *testing.T) {
 		t.Fatal(err)
 	}
 	signers := []tss.PartyID{31, 32}
-	signSession, _, err := StartSign(shares[31], signSessionID, signers, []byte("test-message"))
+	signSession, _, err := startFROSTSign(shares[31], signSessionID, signers, []byte("test-message"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	signSession.SetGuard(testFROSTGuard(31, parties, signSessionID))
 
 	// Send a spoofed sign commitment.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -209,11 +205,10 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 		SessionID: sessionID,
 	}
 
-	session, _, err := StartKeygen(config)
+	session, _, err := startFROSTKeygen(config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testFROSTGuard(41, parties, sessionID))
 
 	// Round-2 confirmation — passes guard policy check but handler rejects invalid payload.
 	confirmEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -264,7 +259,7 @@ func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
 	_ = dkgSessionID
 
 	// Test with a reshare that uses real dealer material.
-	reshareSession, _, err := StartReshare(shares[51], parties, 2, tss.ThresholdConfig{
+	reshareSession, _, err := startFROSTReshare(shares[51], parties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   parties,
 		Self:      51,
@@ -273,7 +268,6 @@ func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareSession.SetGuard(testFROSTGuard(51, parties, reshareSessionID))
 
 	// Send a plaintext reshare share.
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{

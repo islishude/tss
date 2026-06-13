@@ -48,15 +48,14 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		return nil, nil, err
 	}
 	for _, id := range ids {
-		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx)
-		if err != nil {
-			return nil, nil, err
-		}
 		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, presignID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}
-		session.SetGuard(guard)
+		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx, guard)
+		if err != nil {
+			return nil, nil, err
+		}
 		presignSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true
@@ -95,24 +94,22 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 		var session *SignSession
 		var out []tss.Envelope
-		var err error
+		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
+		if err != nil {
+			return nil, nil, err
+		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, nil)
+			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.ContextHash, true, nil, guard)
 		} else {
 			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
 				Context: ctx,
 				Message: input,
 				LowS:    true,
-			})
+			}, guard)
 		}
 		if err != nil {
 			return nil, nil, err
 		}
-		guard, err := tss.NewEnvelopeGuard(id, tss.PartySet(shares[id].Parties), protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
-		if err != nil {
-			return nil, nil, err
-		}
-		session.SetGuard(guard)
 		signSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true

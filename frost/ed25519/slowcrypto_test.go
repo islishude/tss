@@ -40,7 +40,7 @@ func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	var pending []tss.Envelope
 	for _, id := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{
+		kg, out, err := startFROSTKeygen(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -91,11 +91,10 @@ func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare
 			Self:      id,
 			SessionID: sessionID,
 		}
-		kg, out, err := StartKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
+		kg, out, err := startFROSTKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
 		if err != nil {
 			t.Fatal(err)
 		}
-		kg.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = kg
 		pending = append(pending, out...)
 	}
@@ -175,11 +174,10 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 			Self:      id,
 			SessionID: sessionID,
 		}
-		rs, out, err := StartRefresh(shares[id], cfg)
+		rs, out, err := startFROSTRefresh(shares[id], cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		rs.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = rs
 		pending = append(pending, out...)
 	}
@@ -242,7 +240,6 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	allPs := tss.PartySet{1, 2, 3, 4}
 	reshareSessions := make(map[tss.PartyID]*ReshareSession, 4)
 	var messages []tss.Envelope
 
@@ -254,17 +251,16 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 			Self:      id,
 			SessionID: sessionID,
 		}
-		session, out, err := StartReshare(oldShares[id], newParties, newThreshold, cfg)
+		session, out, err := startFROSTReshare(oldShares[id], newParties, newThreshold, cfg)
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testFROSTGuard(id, allPs, sessionID))
 		reshareSessions[id] = session
 		messages = append(messages, out...)
 	}
 
 	// Party 4 is a recipient-only.
-	recipient, err := StartReshareRecipient(oldPublicKey, nil, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldPublicKey, nil, oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   newParties,
 		Self:      4,
@@ -273,7 +269,6 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipient.SetGuard(testFROSTGuard(4, allPs, sessionID))
 	reshareSessions[4] = recipient
 
 	deliverReshareMessages(t, newParties, messages, reshareSessions)

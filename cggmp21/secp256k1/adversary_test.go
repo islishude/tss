@@ -18,12 +18,11 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
+	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,8 +103,7 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate commitment", func(t *testing.T) {
-		kg, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-		kg.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
+		kg, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,12 +123,11 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
+	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -155,7 +152,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(h.shares[2], sessionID, signers)
 	if err != nil {
 		t.Fatal(err)
@@ -206,7 +202,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		if _, err := session.HandlePresignMessage(testutil.DeliverEnvelope(round1)); err != nil {
 			t.Fatal(err)
 		}
@@ -235,7 +230,6 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 			_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
@@ -267,7 +261,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -298,7 +291,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -328,7 +320,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -352,7 +343,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -373,7 +363,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -403,7 +392,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -433,7 +421,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2, 3})
 		if err != nil {
 			t.Fatal(err)
@@ -490,7 +477,6 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
@@ -521,12 +507,10 @@ func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 	s2, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(h.shares[2].Parties), sessionID))
 	_ = deliverPresignMessagesTo(t, s1, 1, out2)
 	round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 	round2[0].To = 3
@@ -545,12 +529,10 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 	s2, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(h.shares[2].Parties), sessionID))
 	round2From1 := deliverPresignMessagesTo(t, s1, 1, out2)
 	round2From2 := deliverPresignMessagesTo(t, s2, 2, out1)
 	round3From2, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(round2From1[0]))
@@ -587,7 +569,6 @@ func TestCGGMP21SignerSetOrderCanonicalized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), sessionID))
 	if session.signers[0] != 1 || session.signers[1] != 2 {
 		t.Fatalf("signer set was not canonicalized: %v", session.signers)
 	}
@@ -612,7 +593,6 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(1, tss.PartySet(h.shares[1].Parties), signID))
 		return session, out2, presigns
 	}
 

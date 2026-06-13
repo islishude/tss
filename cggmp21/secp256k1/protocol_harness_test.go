@@ -105,13 +105,11 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 	}
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
-	ps := tss.PartySet(parties)
 	for _, id := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
+		kg, out, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
 		if err != nil {
 			t.Fatal(err)
 		}
-		kg.SetGuard(testCGGMP21Guard(id, ps, session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -154,11 +152,10 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
+		kg, out, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
 		if err != nil {
 			t.Fatal(err)
 		}
-		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -193,11 +190,10 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session}, opts)
+		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session}, opts)
 		if err != nil {
 			t.Fatal(err)
 		}
-		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), session))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -226,11 +222,10 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := StartPresignWithContext(shares[id], sessionID, signers, ctx)
+		session, out, err := startCGGMP21PresignWithContext(shares[id], sessionID, signers, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 		presignSessions[id] = session
 		for i := range out {
 			out[i].Security.Authenticated = true
@@ -355,14 +350,6 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		t.Fatal(err)
 	}
 	dealerParties = tss.SortParties(dealerParties)
-	allParties := make(tss.PartySet, 0, len(dealerParties)+len(newParties))
-	allParties = append(allParties, dealerParties...)
-	for _, id := range newParties {
-		if !allParties.Contains(id) {
-			allParties = append(allParties, id)
-		}
-	}
-	allParties = allParties.Sorted()
 	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold)
 	if err != nil {
 		t.Fatal(err)
@@ -373,27 +360,25 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		var session *ReshareSession
 		var out []tss.Envelope
 		if tss.ContainsParty(newParties, id) {
-			session, out, err = StartReshareOverlap(oldShares[id], plan, nil)
+			session, out, err = startCGGMP21ReshareOverlap(oldShares[id], plan, nil)
 		} else {
-			session, out, err = StartReshareDealer(oldShares[id], plan, nil)
+			session, out, err = startCGGMP21ReshareDealer(oldShares[id], plan, nil)
 		}
 		if err != nil {
 			t.Fatalf("start old dealer %d: %v", id, err)
 		}
 		sessions[id] = session
-		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		queue = append(queue, out...)
 	}
 	for _, id := range newParties {
 		if tss.ContainsParty(dealerParties, id) {
 			continue
 		}
-		session, out, err := StartReshareReceiver(plan, id, nil)
+		session, out, err := startCGGMP21ReshareReceiver(plan, id, nil)
 		if err != nil {
 			t.Fatalf("start new receiver %d: %v", id, err)
 		}
 		sessions[id] = session
-		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		queue = append(queue, out...)
 	}
 	deliverCGGMP21ReshareMessages(t, queue, sessions)

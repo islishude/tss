@@ -67,13 +67,16 @@ func (signPartialPayload) MarshalJSON() ([]byte, error) {
 }
 
 // StartSign starts a FROST signing session over the raw message.
-func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte) (*SignSession, []tss.Envelope, error) {
-	return StartSignWithOptions(key, sessionID, signers, message, SignOptions{})
+func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	return StartSignWithOptions(key, sessionID, signers, message, SignOptions{}, guard)
 }
 
 // StartSignWithOptions starts a FROST signing session with optional HD additive shift.
-func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions) (*SignSession, []tss.Envelope, error) {
+func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if err := key.ValidateConsistency(); err != nil {
+		return nil, nil, err
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
 		return nil, nil, err
 	}
 	signers = tss.SortParties(signers)
@@ -175,6 +178,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 		deltaScalar:      deltaScalar,
 		verifyKey:        verifyKey,
 		commitMessage:    env,
+		guard:            guard,
 	}
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
@@ -194,29 +198,7 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
-func (s *SignSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard configured for this signing session.
-// cache may be nil to use an in-memory cache suitable for testing.
-func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil sign session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, FROSTPolicies(), cache)
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *SignSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.Parties, s.key.Party)
 }
@@ -405,12 +387,11 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round1 := make([]tss.Envelope, 0, len(signers))
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
-		session, out, err := StartSignWithOptions(shares[id], sessionID, ids, message, opts)
+		guard := newInProcessGuard(id, tss.PartySet(shares[id].Parties), sessionID)
+		session, out, err := StartSignWithOptions(shares[id], sessionID, ids, message, opts, guard)
 		if err != nil {
 			return nil, nil, err
 		}
-		// Set up a guard for this in-process signing session.
-		session.SetGuard(newInProcessGuard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		for _, env := range out {
 			env.Security.Authenticated = true

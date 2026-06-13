@@ -524,8 +524,8 @@ sequenceDiagram
 ### Keygen
 
 ```go
-kg, out, err := StartKeygen(config)                  // standard
-kg, out, err := StartKeygenWithOptions(config, opts) // with HD chain code
+kg, out, err := StartKeygen(config, guard)                  // standard
+kg, out, err := StartKeygenWithOptions(config, opts, guard) // with HD chain code
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.KeyShare()
 ```
@@ -533,8 +533,8 @@ share, ok := kg.KeyShare()
 ### Signing
 
 ```go
-sess, out, err := StartSign(share, sessionID, signers, message)
-sess, out, err := StartSignWithOptions(share, sessionID, signers, message, opts)
+sess, out, err := StartSign(share, sessionID, signers, message, guard)
+sess, out, err := StartSignWithOptions(share, sessionID, signers, message, opts, guard)
 out, err := sess.HandleSignMessage(env)
 sig, ok := sess.Signature()
 ```
@@ -542,9 +542,9 @@ sig, ok := sess.Signature()
 ### Resharing
 
 ```go
-sess, out, err := StartReshare(oldShare, newParties, newThreshold, config)
-recipient, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, config)
-refresh, out, err := StartRefresh(oldShare, config)
+sess, out, err := StartReshare(oldShare, newParties, newThreshold, config, guard)
+recipient, err := StartReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, config, guard)
+refresh, out, err := StartRefresh(oldShare, config, guard)
 out, err := sess.HandleReshareMessage(env)
 newShare, ok := sess.KeyShare()
 ```

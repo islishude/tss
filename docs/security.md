@@ -39,9 +39,10 @@ same authorization checks used for key-share metadata.
 
 `EnvelopeGuard` is the mandatory first fail-closed boundary for every inbound
 envelope. Construct a guard via `tss.GuardConfig.BuildGuard` (production) or
-`tss.NewTestEnvelopeGuard` (tests only — panics outside `go test`) and attach
-it to every session with `SetGuard` **before** processing any inbound messages. Sessions return
-`ErrMissingEnvelopeGuard` when an envelope arrives without a configured guard.
+`tss.NewTestEnvelopeGuard` (tests only — panics outside `go test`) and pass it
+to the protocol `Start*` call that creates the session. Startup returns
+`ErrMissingEnvelopeGuard` when no guard is supplied, and handlers keep the same
+nil-guard fail-closed check for defense in depth.
 Production `GuardConfig.BuildGuard` requires a non-nil `AckVerifier`
 (`BroadcastAckVerifier`) for broadcast ack signature verification.
 

@@ -9,17 +9,6 @@ import (
 	"github.com/islishude/tss"
 )
 
-// testCGGMP21GuardFull is like testCGGMP21Guard but uses the production
-// policy set with BroadcastConsistencyRequired. Use this for tests that
-// specifically exercise broadcast certificate enforcement.
-func testCGGMP21GuardFull(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
-	if err != nil {
-		panic(err)
-	}
-	return g
-}
-
 // makeSessionID creates a random session ID for tests.
 func makeSessionID(t *testing.T) tss.SessionID {
 	t.Helper()
@@ -51,12 +40,12 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	// Start one session with guard.
-	session, _, err := StartKeygen(configs[11])
+	// Start one session with production policies (broadcast consistency required)
+	// so the guard rejects round-1 commitments without a BroadcastCertificate.
+	session, _, err := startCGGMP21Keygen(configs[11], tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, CGGMP21Policies()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(11, parties, sessionID))
 
 	// Construct a commitments broadcast without certificate.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -89,11 +78,10 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	session, _, err := StartKeygen(configs[21])
+	session, _, err := startCGGMP21Keygen(configs[21])
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(21, parties, sessionID))
 
 	// Construct a direct share envelope without confidentiality.
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -126,11 +114,10 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	session, _, err := StartKeygen(configs[31])
+	session, _, err := startCGGMP21Keygen(configs[31])
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(31, parties, sessionID))
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
@@ -159,11 +146,10 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	session, _, err := StartKeygen(configs[41])
+	session, _, err := startCGGMP21Keygen(configs[41])
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(41, parties, sessionID))
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
@@ -193,11 +179,10 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	session, _, err := StartKeygen(configs[51])
+	session, _, err := startCGGMP21Keygen(configs[51])
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(51, parties, sessionID))
 
 	// First delivery of a valid broadcast message.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -239,11 +224,10 @@ func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
-	session, _, err := StartKeygen(configs[61])
+	session, _, err := startCGGMP21Keygen(configs[61])
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21GuardFull(61, parties, sessionID))
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,

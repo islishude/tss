@@ -103,6 +103,18 @@ func MustSessionID(seed int64) tss.SessionID {
 	return id
 }
 
+// OtherParty returns any party in the set that is not self.
+// It panics when no other party exists, making it suitable for test fixture
+// setup where a single-party set is a programmer error.
+func OtherParty(parties tss.PartySet, self tss.PartyID) tss.PartyID {
+	for _, id := range parties {
+		if id != self {
+			return id
+		}
+	}
+	panic("testutil.OtherParty: no other party in set")
+}
+
 // MustPartySet returns a sorted party set {1, 2, ..., n}.
 func MustPartySet(n int) []tss.PartyID {
 	parties := make([]tss.PartyID, n)
@@ -116,7 +128,7 @@ func MustPartySet(n int) []tss.PartyID {
 // handler. Outbound envelopes produced by each handle call are queued and
 // processed in FIFO order until the queue drains. Fatal on error.
 func MustDeliverAll[S any](
-	tb interface{ Fatal(...any) },
+	tb testing.TB,
 	sessions map[tss.PartyID]S,
 	envelopes []tss.Envelope,
 	handler func(S, tss.Envelope) ([]tss.Envelope, error),
@@ -129,11 +141,11 @@ func MustDeliverAll[S any](
 
 		session, ok := sessions[env.To]
 		if !ok {
-			tb.Fatal(fmt.Sprintf("no session for party %d", env.To))
+			tb.Fatalf("no session for party %d", env.To)
 		}
 		out, err := handler(session, env)
 		if err != nil {
-			tb.Fatal(fmt.Sprintf("handle message from %d to %d: %v", env.From, env.To, err))
+			tb.Fatalf("handle message from %d to %d: %v", env.From, env.To, err)
 		}
 		queue = append(queue, out...)
 	}
@@ -152,21 +164,19 @@ func MutateBytes(in []byte) []byte {
 
 // AssertProtocolError asserts that err is a *tss.ProtocolError with the given
 // code. Returns the typed error for further inspection.
-func AssertProtocolError(tb interface{ Fatal(...any) }, err error, code string) *tss.ProtocolError {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func AssertProtocolError(tb testing.TB, err error, code string) *tss.ProtocolError {
+	tb.Helper()
 	if err == nil {
 		tb.Fatal("expected ProtocolError, got nil")
 		return nil
 	}
 	var pe *tss.ProtocolError
 	if !errors.As(err, &pe) {
-		tb.Fatal(fmt.Sprintf("expected *tss.ProtocolError, got %T: %v", err, err))
+		tb.Fatalf("expected *tss.ProtocolError, got %T: %v", err, err)
 		return nil
 	}
 	if pe.Code != code {
-		tb.Fatal(fmt.Sprintf("expected code %q, got %q: %v", code, pe.Code, pe))
+		tb.Fatalf("expected code %q, got %q: %v", code, pe.Code, pe)
 	}
 	return pe
 }
@@ -174,13 +184,12 @@ func AssertProtocolError(tb interface{ Fatal(...any) }, err error, code string) 
 // MustDecodeHex decodes a hex string into a byte slice. It calls t.Fatal if
 // decoding fails, making it suitable for test fixture setup where a malformed
 // hex literal is a programmer error.
-func MustDecodeHex(tb interface{ Fatal(...any) }, s string) []byte {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func MustDecodeHex(tb testing.TB, s string) []byte {
+	tb.Helper()
+
 	b, err := hex.DecodeString(s)
 	if err != nil {
-		tb.Fatal(fmt.Sprintf("testutil.MustDecodeHex: invalid hex %q: %v", s, err))
+		tb.Fatalf("testutil.MustDecodeHex: invalid hex %q: %v", s, err)
 		return nil
 	}
 	return b
@@ -200,41 +209,38 @@ func IsZeroBytes(b []byte) bool {
 // AssertBigIntCleared fails if x is non-nil and has not been cleared (non-zero
 // sign or non-empty backing words). A cleared big.Int has Sign() == 0 and
 // zero-length Bits().
-func AssertBigIntCleared(tb interface{ Fatal(...any) }, x *big.Int) {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func AssertBigIntCleared(tb testing.TB, x *big.Int) {
+	tb.Helper()
+
 	if x == nil {
 		return
 	}
 	if x.Sign() != 0 {
-		tb.Fatal(fmt.Sprintf("big.Int not cleared: sign=%d", x.Sign()))
+		tb.Fatalf("big.Int not cleared: sign=%d", x.Sign())
 	}
 	if len(x.Bits()) != 0 {
-		tb.Fatal(fmt.Sprintf("big.Int not cleared: bits len=%d", len(x.Bits())))
+		tb.Fatalf("big.Int not cleared: bits len=%d", len(x.Bits()))
 	}
 }
 
 // AssertBytesCleared fails if b is non-nil and any byte is non-zero.
-func AssertBytesCleared(tb interface{ Fatal(...any) }, b []byte) {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func AssertBytesCleared(tb testing.TB, b []byte) {
+	tb.Helper()
+
 	for i, v := range b {
 		if v != 0 {
-			tb.Fatal(fmt.Sprintf("byte at offset %d not cleared: 0x%02x", i, v))
+			tb.Fatalf("byte at offset %d not cleared: 0x%02x", i, v)
 		}
 	}
 }
 
 // AssertMapCleared fails if m has any entries. This helper uses reflection-free
 // iteration and is intended for maps that should be empty after Destroy/abort.
-func AssertMapCleared[M ~map[K]V, K comparable, V any](tb interface{ Fatal(...any) }, m M) {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func AssertMapCleared[M ~map[K]V, K comparable, V any](tb testing.TB, m M) {
+	tb.Helper()
+
 	if len(m) != 0 {
-		tb.Fatal(fmt.Sprintf("map not cleared: %d entries remain", len(m)))
+		tb.Fatalf("map not cleared: %d entries remain", len(m))
 	}
 }
 
@@ -250,10 +256,9 @@ func DeliverEnvelope(env tss.Envelope) tss.Envelope {
 // CheckGolden compares raw bytes against a golden file. When the environment
 // variable UPDATE_GOLDEN=1 is set, it writes the golden file (creating parent
 // directories as needed). Otherwise it reads and asserts exact match.
-func CheckGolden(tb interface{ Fatal(...any) }, golden string, raw []byte) {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+func CheckGolden(tb testing.TB, golden string, raw []byte) {
+	tb.Helper()
+
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		if err := os.MkdirAll(filepath.Dir(golden), 0o700); err != nil {
 			tb.Fatal(err)
@@ -266,11 +271,11 @@ func CheckGolden(tb interface{ Fatal(...any) }, golden string, raw []byte) {
 	}
 	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
 	if err != nil {
-		tb.Fatal(fmt.Sprintf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err))
+		tb.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
 		return
 	}
 	gotHex := hex.EncodeToString(raw)
 	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		tb.Fatal(fmt.Sprintf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex))))
+		tb.Fatalf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
 	}
 }

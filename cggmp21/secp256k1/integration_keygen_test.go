@@ -19,7 +19,7 @@ func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
 	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID}, KeygenOptions{EnableHD: true})
+		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID}, KeygenOptions{EnableHD: true})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -45,12 +45,11 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	kg1, _, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
-	kg1.SetGuard(testCGGMP21Guard(1, tss.PartySet(parties), sessionID))
+	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}

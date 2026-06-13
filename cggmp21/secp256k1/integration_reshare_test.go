@@ -24,16 +24,14 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, out1, err := StartReshareOverlap(shares[1], plan, nil)
+	session, out1, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
-	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
+	session2, out2, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
@@ -78,16 +76,14 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session1, out1, err := StartReshareOverlap(shares[1], plan, nil)
+	session1, out1, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
-	session2, out2, err := StartReshareOverlap(shares[2], plan, nil)
+	session2, out2, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 	dealer2Out, err := session2.HandleReshareMessage(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
@@ -158,20 +154,18 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 	sessions := make(map[tss.PartyID]*ReshareSession, len(allParties))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range dealers {
-		session, out, err := StartReshareDealer(shares[id], plan, nil)
+		session, out, err := startCGGMP21ReshareDealer(shares[id], plan, nil)
 		if err != nil {
 			t.Fatalf("start dealer %d: %v", id, err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
 	for _, id := range newParties {
-		session, out, err := StartReshareReceiver(plan, id, nil)
+		session, out, err := startCGGMP21ReshareReceiver(plan, id, nil)
 		if err != nil {
 			t.Fatalf("start receiver %d: %v", id, err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}

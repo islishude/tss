@@ -73,7 +73,6 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}

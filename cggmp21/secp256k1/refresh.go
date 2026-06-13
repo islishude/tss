@@ -50,9 +50,9 @@ type RefreshSession struct {
 // The participant set and threshold are fixed to oldKey.Parties and
 // oldKey.Threshold. The group public key and chain code are preserved from the
 // original key share.
-func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession, []tss.Envelope, error) {
-	if err := oldKey.requireMPCMaterial(); err != nil {
-		return nil, nil, err
+func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
+	if oldKey == nil {
+		return nil, nil, errors.New("nil old key share")
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
@@ -64,6 +64,12 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 	limits := DefaultLimits()
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if err := oldKey.requireMPCMaterial(); err != nil {
+		return nil, nil, err
 	}
 	// Generate a new Paillier keypair for key rotation.
 	newPaillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), defaultPaillierBits())
@@ -135,6 +141,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*RefreshSession
 		newRingPedersen: map[tss.PartyID]RingPedersenPublicShare{
 			oldKey.Party: {Party: oldKey.Party, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
 		},
+		guard: guard,
 	}
 	commitPayload, err := marshalRefreshCommitmentsPayload(refreshCommitmentsPayload{
 		Commitments:        commitments,
@@ -182,29 +189,7 @@ func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
-func (s *RefreshSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard configured for this refresh session.
-// cache may be nil to use an in-memory cache suitable for testing.
-func (s *RefreshSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil refresh session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	return tss.NewEnvelopeGuard(s.cfg.Self, tss.PartySet(s.cfg.Parties), protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *RefreshSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }

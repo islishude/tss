@@ -9,18 +9,18 @@
 //
 // # Security Model
 //
-// Every protocol session must hold an [EnvelopeGuard], attached via SetGuard
-// before processing any inbound envelopes. The guard enforces:
+// Every protocol session must receive an [EnvelopeGuard] at its Start* entry
+// point before it can emit or process protocol envelopes. The guard enforces:
 //   - transport authentication ([SecurityContext.Authenticated])
 //   - sender identity binding (AuthenticatedParty == Envelope.From)
 //   - confidentiality per protocol policy ([DeliveryPolicy.Confidentiality])
 //   - broadcast consistency via [BroadcastCertificate] where required
 //   - replay detection via [ReplayCache]
 //
-// Sessions reject authenticated transport envelopes when no guard is
-// configured. Production integrations must construct a guard via
-// [NewEnvelopeGuard] or [GuardConfig.BuildGuard] with a production
-// [PolicySet] and a durable [ReplayCache].
+// Sessions reject startup and inbound handling when no guard is configured.
+// Production integrations must construct a guard via [NewEnvelopeGuard] or
+// [GuardConfig.BuildGuard] with a production [PolicySet] and a durable
+// [ReplayCache].
 //
 // See docs/security.md for the complete threat model and integration checklist.
 package tss

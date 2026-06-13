@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"io"
 	"math/big"
 	"sync"
 	"testing"
@@ -23,6 +24,14 @@ func testCGGMP21Guard(self tss.PartyID, parties tss.PartySet, sessionID tss.Sess
 	return tss.NewTestEnvelopeGuard(self, parties, protocol, sessionID, testCGGMP21Policies())
 }
 
+func testCGGMP21GuardParties(parties []tss.PartyID, self tss.PartyID) tss.PartySet {
+	ps := tss.PartySet(parties).Clone()
+	if !ps.Contains(self) {
+		ps = append(ps, self)
+	}
+	return ps.Sorted()
+}
+
 // testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
 // consistency relaxed to None for all payload types. Tests that specifically
 // exercise broadcast consistency should use CGGMP21Policies directly.
@@ -40,6 +49,91 @@ func testCGGMP21Policies() tss.PolicySet {
 	return ps
 }
 
+func chooseTestGuard(guards []*tss.EnvelopeGuard, fallback func() *tss.EnvelopeGuard) *tss.EnvelopeGuard {
+	if len(guards) > 0 {
+		return guards[0]
+	}
+	return fallback()
+}
+
+func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
+	})
+	return StartKeygen(config, guard)
+}
+
+func startCGGMP21KeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
+	})
+	return StartKeygenWithOptions(config, opts, guard)
+}
+
+func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext, guards ...*tss.EnvelopeGuard) (*PresignSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(key.Party, testCGGMP21GuardParties(key.Parties, key.Party), sessionID)
+	})
+	return StartPresignWithContext(key, sessionID, signers, ctx, guard)
+}
+
+func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(key.Party, testCGGMP21GuardParties(key.Parties, key.Party), sessionID)
+	})
+	return StartSign(key, presign, sessionID, request, guard)
+}
+
+func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(oldKey.Parties, config.Self), config.SessionID)
+	})
+	return StartRefresh(oldKey, config, guard)
+}
+
+func startCGGMP21Reshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties([]tss.PartyID(testCGGMP21ReshareParties(oldKey.Parties, newParties)), config.Self), config.SessionID)
+	})
+	return StartReshare(oldKey, config, newParties, guard)
+}
+
+func startCGGMP21ReshareDealer(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(oldKey.Party, testCGGMP21GuardParties([]tss.PartyID(testCGGMP21ReshareParties(plan.DealerParties, plan.NewParties)), oldKey.Party), plan.SessionID)
+	})
+	return StartReshareDealer(oldKey, plan, rng, guard)
+}
+
+func startCGGMP21ReshareReceiver(plan ResharePlan, localParty tss.PartyID, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(localParty, testCGGMP21GuardParties([]tss.PartyID(testCGGMP21ReshareParties(plan.DealerParties, plan.NewParties)), localParty), plan.SessionID)
+	})
+	return StartReshareReceiver(plan, localParty, rng, guard)
+}
+
+func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		return testCGGMP21Guard(oldKey.Party, testCGGMP21GuardParties([]tss.PartyID(testCGGMP21ReshareParties(plan.DealerParties, plan.NewParties)), oldKey.Party), plan.SessionID)
+	})
+	return StartReshareOverlap(oldKey, plan, rng, guard)
+}
+
+func testCGGMP21ReshareParties(a, b []tss.PartyID) tss.PartySet {
+	seen := make(map[tss.PartyID]struct{}, len(a)+len(b))
+	parties := make([]tss.PartyID, 0, len(a)+len(b))
+	for _, set := range [][]tss.PartyID{a, b} {
+		for _, id := range set {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			parties = append(parties, id)
+		}
+	}
+	return tss.PartySet(tss.SortParties(parties))
+}
+
 // --- PresignContext factory ---
 
 func testPresignContext() PresignContext {
@@ -55,23 +149,41 @@ func testPresignContext() PresignContext {
 
 // StartPresign is a convenience wrapper around StartPresignWithContext that
 // uses testPresignContext(). Only for use in tests.
-func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID) (*PresignSession, []tss.Envelope, error) {
-	return StartPresignWithContext(key, sessionID, signers, testPresignContext())
+func StartPresign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, guards ...*tss.EnvelopeGuard) (*PresignSession, []tss.Envelope, error) {
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		if !sessionID.Valid() {
+			return nil
+		}
+		return testCGGMP21Guard(key.Party, tss.PartySet(key.Parties), sessionID)
+	})
+	return startCGGMP21PresignWithContext(key, sessionID, signers, testPresignContext(), guard)
 }
 
 // StartSignDigest is a convenience wrapper around startSignDigestBound for tests.
-func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte) (*SignSession, []tss.Envelope, error) {
+func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if presign == nil {
 		return nil, nil, errNilPresign
 	}
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, nil)
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		if !sessionID.Valid() {
+			return nil
+		}
+		return testCGGMP21Guard(key.Party, tss.PartySet(key.Parties), sessionID)
+	})
+	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, nil, guard)
 }
 
-func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store PresignStore) (*SignSession, []tss.Envelope, error) {
+func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store PresignStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if presign == nil {
 		return nil, nil, errNilPresign
 	}
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, store)
+	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
+		if !sessionID.Valid() {
+			return nil
+		}
+		return testCGGMP21Guard(key.Party, tss.PartySet(key.Parties), sessionID)
+	})
+	return startSignDigestBound(key, presign, sessionID, digest32, presign.ContextHash, true, store, guard)
 }
 
 type testPresignStore struct {
@@ -121,13 +233,10 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 
 func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties []tss.PartyID, messages []tss.Envelope) {
 	t.Helper()
-	// Attach test guards to sessions that don't already have one. Authenticated
-	// transport delivery requires a guard from v1 onwards.
-	ps := tss.PartySet(parties)
 	for _, id := range parties {
 		s := sessions[id]
 		if s.Guard() == nil {
-			s.SetGuard(testCGGMP21Guard(id, ps, s.cfg.SessionID))
+			t.Fatalf("missing guard for keygen session %d", id)
 		}
 	}
 	queue := append([]tss.Envelope(nil), messages...)
@@ -158,7 +267,7 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 
 // minimalCGGMP21Presign creates a Presign with minimal valid fields for
 // wire-format testing. No keygen or Paillier crypto is performed.
-func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
+func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	one := big.NewInt(1)
 	RPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 	R, err := secp.PointBytes(RPoint)
@@ -208,7 +317,7 @@ func minimalCGGMP21Presign(tb interface{ Fatal(...any) }) *Presign {
 	}
 }
 
-func mustMinimalSignPrepProofForTest(tb interface{ Fatal(...any) }) []byte {
+func mustMinimalSignPrepProofForTest(tb testing.TB) []byte {
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	kScalar := secp.ScalarFromBigInt(one)

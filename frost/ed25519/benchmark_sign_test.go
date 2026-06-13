@@ -26,11 +26,10 @@ func BenchmarkFROSTSign2of3(b *testing.B) {
 		sessions := make(map[tss.PartyID]*SignSession, len(signers))
 		var messages []tss.Envelope
 		for _, id := range signers {
-			session, out, err := StartSign(shares[id], sessionID, signers, message[:])
+			session, out, err := startFROSTSign(shares[id], sessionID, signers, message[:])
 			if err != nil {
 				b.Fatal(err)
 			}
-			session.SetGuard(testFROSTGuard(id, tss.PartySet(shares[id].Parties), sessionID))
 			sessions[id] = session
 			messages = append(messages, out...)
 		}

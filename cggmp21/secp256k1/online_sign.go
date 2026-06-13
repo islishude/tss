@@ -17,12 +17,18 @@ import (
 )
 
 // StartSign starts online signing using a context-bound presignature.
-func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest) (*SignSession, []tss.Envelope, error) {
-	if err := key.Validate(); err != nil {
-		return nil, nil, err
+func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	if key == nil {
+		return nil, nil, errors.New("nil key share")
 	}
 	if presign == nil {
 		return nil, nil, errors.New("nil presign")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
+		return nil, nil, err
+	}
+	if err := key.Validate(); err != nil {
+		return nil, nil, err
 	}
 	_, contextHash, additiveShift, err := preparePresignContext(key, request.Context)
 	if err != nil {
@@ -35,10 +41,19 @@ func StartSign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request
 		return nil, nil, errors.New("presign additive shift mismatch")
 	}
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
-	return startSignDigestBound(key, presign, sessionID, digest, contextHash, request.LowS, request.PresignStore)
+	return startSignDigestBound(key, presign, sessionID, digest, contextHash, request.LowS, request.PresignStore, guard)
 }
 
-func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store PresignStore) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store PresignStore, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	if key == nil {
+		return nil, nil, errors.New("nil key share")
+	}
+	if presign == nil {
+		return nil, nil, errors.New("nil presign")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
+		return nil, nil, err
+	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -130,6 +145,7 @@ func startSignDigestBound(key *KeyShare, presign *Presign, sessionID tss.Session
 		lowS:      lowS,
 		publicKey: verifyKey,
 		partials:  make(map[tss.PartyID]*big.Int),
+		guard:     guard,
 	}
 	if _, err := s.verifySignPartial(key.Party, payload); err != nil {
 		return nil, nil, fmt.Errorf("local sign partial self-verification failed: %w", err)
@@ -160,27 +176,6 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 		return nil
 	}
 	return s.guard
-}
-
-// SetGuard attaches an envelope guard to the session. It must be called before
-// processing any inbound messages. A nil guard causes [HandleSignMessage] to
-// return [tss.ErrMissingEnvelopeGuard].
-func (s *SignSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard suitable for testing this session.
-// Production callers must use [tss.GuardConfig.BuildGuard] with a real AckVerifier.
-func (s *SignSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil sign session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	return tss.NewEnvelopeGuard(s.key.Party, tss.PartySet(s.key.Parties), protocol, s.sessionID, CGGMP21Policies(), cache)
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.

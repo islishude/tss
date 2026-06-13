@@ -19,7 +19,7 @@ func ExampleSign() {
 	}
 
 	// --- 2. Start keygen — for 1-of-1 this completes immediately ---
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -76,7 +76,7 @@ func ExampleSign_multiParty() {
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{
+		kg, out, err := startFROSTKeygen(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -88,7 +88,6 @@ func ExampleSign_multiParty() {
 		// testFROSTGuard creates a guard with the FROST policy set and
 		// relaxed broadcast consistency (suitable for examples without
 		// a broadcast certificate infrastructure).
-		kg.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
@@ -149,7 +148,7 @@ func ExampleKeyShare() {
 	if err != nil {
 		panic(err)
 	}
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -213,7 +212,7 @@ func ExampleStartRefresh() {
 	sessions := make(map[tss.PartyID]*ReshareSession, n)
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{
+		session, out, err := startFROSTRefresh(shares[id], tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -222,7 +221,6 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testFROSTGuard(id, tss.PartySet(parties), refreshID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -295,13 +293,12 @@ func ExampleStartReshare() {
 		panic(err)
 	}
 
-	allPs := tss.PartySet{1, 2, 3, 4}
 	sessions := make(map[tss.PartyID]*ReshareSession, newN)
 	queue := make([]tss.Envelope, 0)
 
 	// Existing parties act as dealers, redistributing their shares.
 	for _, id := range oldParties {
-		session, out, err := StartReshare(shares[id], newParties, newThreshold, tss.ThresholdConfig{
+		session, out, err := startFROSTReshare(shares[id], newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
 			Parties:   oldParties,
 			Self:      id,
@@ -310,13 +307,12 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testFROSTGuard(id, allPs, reshareID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
 
 	// The new party starts as a recipient (no existing share).
-	recipient, err := StartReshareRecipient(oldPub, nil, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldPub, nil, oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   oldParties,
 		Self:      4,
@@ -325,7 +321,6 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	recipient.SetGuard(testFROSTGuard(4, allPs, reshareID))
 	sessions[4] = recipient
 
 	// --- 4. Route reshare messages ---
@@ -382,7 +377,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	if err != nil {
 		panic(err)
 	}
-	kg, _, err := StartKeygenWithOptions(tss.ThresholdConfig{
+	kg, _, err := startFROSTKeygenWithOptions(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -434,7 +429,7 @@ func runFrostKeygen(parties []tss.PartyID, threshold int, sessionID tss.SessionI
 	queue := make([]tss.Envelope, 0)
 
 	for _, id := range parties {
-		s, out, err := StartKeygen(tss.ThresholdConfig{
+		s, out, err := startFROSTKeygen(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -443,7 +438,6 @@ func runFrostKeygen(parties []tss.PartyID, threshold int, sessionID tss.SessionI
 		if err != nil {
 			panic(err)
 		}
-		s.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = s
 		queue = append(queue, out...)
 	}

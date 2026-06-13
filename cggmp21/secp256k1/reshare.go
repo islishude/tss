@@ -117,48 +117,9 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
-func (s *ReshareSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard configured for this reshare session.
-// cache may be nil to use an in-memory cache suitable for testing.
-// The guard party set is the union of dealers and new receivers since both
-// sets may send messages during the reshare protocol.
-func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil reshare session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	// Union of dealer parties and new parties: both sets may send envelopes.
-	union := make(tss.PartySet, 0, len(s.dealerParties)+len(s.newParties))
-	seen := make(map[tss.PartyID]bool)
-	for _, id := range s.dealerParties {
-		if !seen[id] {
-			seen[id] = true
-			union = append(union, id)
-		}
-	}
-	for _, id := range s.newParties {
-		if !seen[id] {
-			seen[id] = true
-			union = append(union, id)
-		}
-	}
-	return tss.NewEnvelopeGuard(s.selfID, union, protocol, s.cfg.SessionID, CGGMP21Policies(), cache)
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // The allowedParties parameter selects which participants are accepted as senders
 // for this round (e.g. old parties for dealer messages, new parties for receiver messages).
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
 }
@@ -170,45 +131,51 @@ func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.
 // as a receiver and will produce a new KeyShare after all old dealers and new
 // receivers contribute. Old-only parties complete without producing a new share
 // only after they observe every new receiver's final confirmation.
-func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID) (*ReshareSession, []tss.Envelope, error) {
+func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if oldKey == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
 	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
 	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.Parties, newParties, config.Threshold)
 	if err != nil {
 		return nil, nil, err
 	}
 	if tss.ContainsParty(plan.NewParties, oldKey.Party) {
-		return StartReshareOverlap(oldKey, plan, config.Rand)
+		return StartReshareOverlap(oldKey, plan, config.Rand, guard)
 	}
-	return StartReshareDealer(oldKey, plan, config.Rand)
+	return StartReshareDealer(oldKey, plan, config.Rand, guard)
 }
 
 // StartReshareDealer starts resharing for an old-party dealer.
-func StartReshareDealer(oldKey *KeyShare, plan ResharePlan, rng io.Reader) (*ReshareDealerSession, []tss.Envelope, error) {
+func StartReshareDealer(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
 	if oldKey == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
-	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, false)
+	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, false, guard)
 }
 
 // StartReshareReceiver starts resharing for a new-party receiver.
-func StartReshareReceiver(plan ResharePlan, localParty tss.PartyID, rng io.Reader) (*ReshareReceiverSession, []tss.Envelope, error) {
-	return startReshareSession(nil, plan, localParty, rng, false, true)
+func StartReshareReceiver(plan ResharePlan, localParty tss.PartyID, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
+	return startReshareSession(nil, plan, localParty, rng, false, true, guard)
 }
 
 // StartReshareOverlap starts resharing for a party that is both dealer and receiver.
-func StartReshareOverlap(oldKey *KeyShare, plan ResharePlan, rng io.Reader) (*ReshareOverlapSession, []tss.Envelope, error) {
+func StartReshareOverlap(oldKey *KeyShare, plan ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
 	if oldKey == nil {
 		return nil, nil, errors.New("nil old key share")
 	}
-	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, true)
+	return startReshareSession(oldKey, plan, oldKey.Party, rng, true, true, guard)
 }
 
-func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool) (*ReshareSession, []tss.Envelope, error) {
+func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.SessionID, localParty); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
+	}
 	if err := plan.Validate(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
@@ -268,6 +235,7 @@ func startReshareSession(oldKey *KeyShare, plan ResharePlan, localParty tss.Part
 		newPaillierPubs: make(map[tss.PartyID]PaillierPublicShare),
 		newRingPedersen: make(map[tss.PartyID]RingPedersenPublicShare),
 		pendingShares:   make(map[tss.PartyID]pendingReshareShare),
+		guard:           guard,
 	}
 	if receiver {
 		if err := s.initReceiverMaterial(); err != nil {

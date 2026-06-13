@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"sort"
+	"testing"
 
 	"github.com/islishude/tss/internal/wire"
 )
@@ -104,27 +105,25 @@ func MarshalFieldsByName(version uint16, wireType string, model any, named map[s
 // unmarshal → marshal cycle and produces identical bytes both times.
 // It calls t.Fatal on any error.
 func AssertDeterministicRoundTrip[P any](
-	tb interface{ Fatal(...any) },
+	tb testing.TB,
 	p P,
 	marshal func(P) ([]byte, error),
 	unmarshal func([]byte) (P, error),
 ) {
-	if h, ok := tb.(interface{ Helper() }); ok {
-		h.Helper()
-	}
+	tb.Helper()
 	raw, err := marshal(p)
 	if err != nil {
-		tb.Fatal(fmt.Sprintf("initial marshal: %v", err))
+		tb.Fatalf("initial marshal: %v", err)
 		return
 	}
 	decoded, err := unmarshal(raw)
 	if err != nil {
-		tb.Fatal(fmt.Sprintf("unmarshal: %v", err))
+		tb.Fatalf("unmarshal: %v", err)
 		return
 	}
 	again, err := marshal(decoded)
 	if err != nil {
-		tb.Fatal(fmt.Sprintf("second marshal: %v", err))
+		tb.Fatalf("second marshal: %v", err)
 		return
 	}
 	if !bytes.Equal(raw, again) {

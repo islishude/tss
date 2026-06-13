@@ -17,7 +17,13 @@ import (
 
 // StartPresignWithContext starts the offline CGGMP-style presign protocol for
 // signers and binds the resulting presignature to ctx before nonce generation.
-func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (s *PresignSession, out []tss.Envelope, err error) {
+func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
+	if key == nil {
+		return nil, nil, errors.New("nil key share")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.Party); err != nil {
+		return nil, nil, err
+	}
 	if err := key.requireMPCMaterial(); err != nil {
 		return nil, nil, err
 	}
@@ -163,6 +169,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		alphaSigma:           make(map[tss.PartyID]*big.Int),
 		betaSigma:            make(map[tss.PartyID]*big.Int),
 		startOpening:         startOpening,
+		guard:                guard,
 	}
 	// Defensive: clear local secret scalar references so only session fields
 	// own the secrets. The defer guards above will not fire since err is nil.

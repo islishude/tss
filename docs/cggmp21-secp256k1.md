@@ -284,7 +284,7 @@ Since every partial is independently verified before aggregation, a failure at t
 
 ### HD Derivation
 
-Set `PresignContext.DerivationPath` before calling `StartPresignWithContext`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
+Set `PresignContext.DerivationPath` before calling `StartPresignWithContext(..., guard)`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
 
 ## Presign Lifecycle
 
@@ -295,7 +295,7 @@ Presign records are strictly one-use:
 if IsPresignConsumed(presign) { /* discard */ }
 
 // StartSign marks Consumed before emitting any outbound message:
-sess, out, err := StartSign(share, presign, sessionID, request)
+sess, out, err := StartSign(share, presign, sessionID, request, guard)
 
 // After signing, persist the consumed record:
 consumed, _ := MarkPresignConsumed(presign)
@@ -358,7 +358,7 @@ Each new receiver:
 3. Aggregates `x'_j = Σ_i g_i(j) mod q`.
 4. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
 
-New-only participants call `StartReshareReceiver(plan, localParty, rng)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng)` and complete without a new `KeyShare` only after observing every new receiver's final confirmation for the same transcript, public key, commitment hash, and preserved chain code. Overlap parties call `StartReshareOverlap(oldShare, plan, rng)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
+New-only participants call `StartReshareReceiver(plan, localParty, rng, guard)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng, guard)` and complete without a new `KeyShare` only after observing every new receiver's final confirmation for the same transcript, public key, commitment hash, and preserved chain code. Overlap parties call `StartReshareOverlap(oldShare, plan, rng, guard)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
 
 Reshare does not cryptographically erase or invalidate already distributed old
 shares. A threshold of old shares can still sign for the same group public key
@@ -657,8 +657,8 @@ sequenceDiagram
 ### Keygen
 
 ```go
-kg, out, err := StartKeygen(config)
-kg, out, err := StartKeygenWithOptions(config, KeygenOptions{PaillierBits: 2048, EnableHD: true})
+kg, out, err := StartKeygen(config, guard)
+kg, out, err := StartKeygenWithOptions(config, KeygenOptions{PaillierBits: 2048, EnableHD: true}, guard)
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.Complete()
 ```
@@ -667,7 +667,7 @@ share, ok := kg.Complete()
 
 ```go
 ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
-ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx)
+ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx, guard)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
 // presign is a deep copy; persist it immediately.
@@ -679,7 +679,7 @@ presign, ok := ps.Presign()
 request := SignRequest{Context: ctx, Message: message, LowS: true}
 // If presign was restored from storage, set request.PresignStore to a durable
 // atomic consumed-claim implementation before StartSign.
-ss, out, err := StartSign(share, presign, sessionID, request)
+ss, out, err := StartSign(share, presign, sessionID, request, guard)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
 ok := VerifySignature(publicKey, request, sig)
@@ -688,7 +688,7 @@ ok := VerifySignature(publicKey, request, sig)
 ### Refresh
 
 ```go
-rs, out, err := StartRefresh(oldShare, config)
+rs, out, err := StartRefresh(oldShare, config, guard)
 out, err := rs.HandleRefreshMessage(env)
 newShare, ok := rs.KeyShare()
 ```
@@ -697,9 +697,9 @@ newShare, ok := rs.KeyShare()
 
 ```go
 plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold)
-dealer, out, err := StartReshareDealer(oldShare, plan, rng)
-receiver, out, err := StartReshareReceiver(plan, localParty, rng)
-overlap, out, err := StartReshareOverlap(oldShare, plan, rng)
+dealer, out, err := StartReshareDealer(oldShare, plan, rng, guard)
+receiver, out, err := StartReshareReceiver(plan, localParty, rng, guard)
+overlap, out, err := StartReshareOverlap(oldShare, plan, rng, guard)
 out, err := overlap.HandleReshareMessage(env)
 newShare, err := receiver.Result()
 ```

@@ -97,11 +97,10 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		session, out, err := StartKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID})
+		session, out, err := startFROSTKeygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testFROSTGuard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}

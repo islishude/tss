@@ -75,29 +75,7 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
-// SetGuard attaches an envelope guard to the session. When set, all inbound
-// envelopes are validated against protocol policies, transport authentication,
-// confidentiality requirements, broadcast consistency, and replay detection.
-func (s *ReshareSession) SetGuard(g *tss.EnvelopeGuard) {
-	if s != nil {
-		s.guard = g
-	}
-}
-
-// NewGuard creates an EnvelopeGuard configured for this reshare session.
-// cache may be nil to use an in-memory cache suitable for testing.
-func (s *ReshareSession) NewGuard(cache tss.ReplayCache) (*tss.EnvelopeGuard, error) {
-	if s == nil {
-		return nil, errors.New("nil reshare session")
-	}
-	if cache == nil {
-		cache = tss.NewInMemoryReplayCache()
-	}
-	return tss.NewEnvelopeGuard(s.selfID, reshareGuardParties(s.oldParties, s.newParties), protocol, s.cfg.SessionID, FROSTPolicies(), cache)
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-// Production deployments MUST attach a guard via SetGuard before processing messages.
 func (s *ReshareSession) validateInbound(env tss.Envelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
 }
@@ -156,7 +134,7 @@ func reshareGuardParties(oldParties, newParties []tss.PartyID) tss.PartySet {
 //
 // newParties defines the target participant set and newThreshold the target
 // threshold. Both may differ from the old key's parties and threshold.
-func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, []tss.Envelope, error) {
+func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
@@ -170,6 +148,9 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	oldParties := append([]tss.PartyID(nil), oldKey.Parties...)
 	// Fix config.Parties to the old party set so blame evidence is deterministic.
@@ -211,6 +192,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 		limits:       limits,
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {
@@ -246,7 +228,7 @@ func StartReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, 
 // StartReshareRecipient starts a resharing session for a new participant.
 // config.Self is the recipient ID. The function validates membership against
 // newParties and validates incoming dealer messages against oldParties.
-func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig) (*ReshareSession, error) {
+func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*ReshareSession, error) {
 	limits := DefaultLimits()
 	if _, err := edcurve.PointFromBytes(oldPublicKey); err != nil {
 		return nil, fmt.Errorf("invalid old public key: %w", err)
@@ -277,6 +259,9 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 	if err := validationConfig.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
 	config.Parties = oldParties
 	config.Threshold = len(oldParties)
@@ -293,13 +278,14 @@ func StartReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newPar
 		limits:       limits,
 		commits:      make(map[tss.PartyID][][]byte),
 		shares:       make(map[tss.PartyID]*fed.Scalar),
+		guard:        guard,
 	}, nil
 }
 
 // StartRefresh starts a FROST same-party proactive key refresh using the
 // simpler zero-constant-term polynomial approach. The participant set and
 // threshold are unchanged.
-func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession, []tss.Envelope, error) {
+func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, err
 	}
@@ -309,6 +295,9 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 	}
 	if config.Self != oldKey.Party {
 		return nil, nil, errors.New("config.Self must match the old key's party ID")
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := append([]tss.PartyID(nil), oldKey.Parties...)
 	config.Parties = parties
@@ -339,6 +328,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig) (*ReshareSession
 		limits:       limits,
 		commits:      map[tss.PartyID][][]byte{oldKey.Party: commitments},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.Party: evalScalarPolynomial(poly, oldKey.Party)},
+		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments})
 	if err != nil {

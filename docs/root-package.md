@@ -149,7 +149,7 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 12. Broadcast consistency certificate verification with `VerifyFull` (when required)
 13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
-Each protocol session must hold an `EnvelopeGuard` and call `Validate(env)` as the first step in every handler. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when not running under `go test` to prevent accidental production use.
+Each protocol session must be constructed with an `EnvelopeGuard` passed to its `Start*` entry point, and handlers call `Validate(env)` as their first step. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when not running under `go test` to prevent accidental production use. Sessions expose `Guard()` as a read-only accessor for transport adapters.
 
 ### BroadcastCertificate
 

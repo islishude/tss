@@ -627,6 +627,57 @@ func TestBuildGuardSucceedsWithValidConfig(t *testing.T) {
 	}
 }
 
+func TestRequireEnvelopeGuard(t *testing.T) {
+	t.Parallel()
+	sid := testSessionID(t)
+	guard := NewTestEnvelopeGuard(1, PartySet{1, 2, 3}, "test-proto", sid, testPolicySet())
+	if err := RequireEnvelopeGuard(guard, "test-proto", sid, 1); err != nil {
+		t.Fatalf("RequireEnvelopeGuard rejected valid guard: %v", err)
+	}
+
+	t.Run("nil", func(t *testing.T) {
+		err := RequireEnvelopeGuard(nil, "test-proto", sid, 1)
+		if !errors.Is(err, ErrMissingEnvelopeGuard) {
+			t.Fatalf("expected ErrMissingEnvelopeGuard, got %v", err)
+		}
+	})
+
+	t.Run("wrong protocol", func(t *testing.T) {
+		if err := RequireEnvelopeGuard(guard, "wrong-proto", sid, 1); err == nil {
+			t.Fatal("expected protocol mismatch")
+		}
+	})
+
+	t.Run("wrong session", func(t *testing.T) {
+		if err := RequireEnvelopeGuard(guard, "test-proto", testSessionID(t), 1); err == nil {
+			t.Fatal("expected session mismatch")
+		}
+	})
+
+	t.Run("wrong self", func(t *testing.T) {
+		if err := RequireEnvelopeGuard(guard, "test-proto", sid, 2); err == nil {
+			t.Fatal("expected self mismatch")
+		}
+	})
+
+	t.Run("empty policies", func(t *testing.T) {
+		bad := *guard
+		bad.Policies = PolicySet{}
+		if err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1); err == nil {
+			t.Fatal("expected empty policy set rejection")
+		}
+	})
+
+	t.Run("nil replay cache", func(t *testing.T) {
+		bad := *guard
+		bad.ReplayCache = nil
+		err := RequireEnvelopeGuard(&bad, "test-proto", sid, 1)
+		if !errors.Is(err, ErrMissingReplayCache) {
+			t.Fatalf("expected ErrMissingReplayCache, got %v", err)
+		}
+	})
+}
+
 func TestValidateInboundNilGuard(t *testing.T) {
 	t.Parallel()
 	env := testEnvelope("test-proto", 1, "test.direct.plain", 2, 1)

@@ -31,11 +31,10 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	messages := make([]tss.Envelope, 0, len(signers))
 	for _, id := range signers {
-		session, out, err := StartSign(shares[id], presigns[id], signID, request)
+		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -171,11 +170,10 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	messages := make([]tss.Envelope, 0, len(signers))
 	for _, id := range signers {
-		session, out, err := StartSign(shares[id], presigns[id], signID, request)
+		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -236,7 +234,7 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, out, err := StartSign(shares[1], presigns[1], signID, request)
+	session, out, err := startCGGMP21Sign(shares[1], presigns[1], signID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -266,7 +264,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	request := SignRequest{Context: ctx, Message: []byte("child key verify"), LowS: true}
 	signID, _ := tss.NewSessionID(nil)
-	session, out, err := StartSign(shares[1], presigns[1], signID, request)
+	session, out, err := startCGGMP21Sign(shares[1], presigns[1], signID, request)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -301,7 +299,7 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 	requestB := SignRequest{Context: ctxB, Message: []byte("cross path"), LowS: true}
 	signID, _ := tss.NewSessionID(nil)
 	cloned := presignA.Clone()
-	_, _, err := StartSign(shares[1], cloned, signID, requestB)
+	_, _, err := startCGGMP21Sign(shares[1], cloned, signID, requestB)
 	if err == nil {
 		t.Fatal("expected error signing with mismatched derivation path")
 	}

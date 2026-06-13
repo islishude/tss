@@ -20,7 +20,16 @@ config := tss.ThresholdConfig{
     Self:      1,
     SessionID: sessionID,
 }
-session, envelopes, err := secp256k1.StartKeygen(config)
+guard, err := (tss.GuardConfig{
+    Self:        config.Self,
+    Parties:     tss.PartySet(config.Parties),
+    Protocol:    tss.ProtocolCGGMP21Secp256k1,
+    SessionID:   sessionID,
+    Policies:    secp256k1.CGGMP21Policies(),
+    Cache:       replayCache,
+    AckVerifier: ackVerifier,
+}).BuildGuard()
+session, envelopes, err := secp256k1.StartKeygen(config, guard)
 // Route envelopes to other parties via authenticated transport. Keep routing
 // any envelopes returned by HandleKeygenMessage; keygen emits a confirmation
 // round before KeyShare() becomes available.
@@ -83,7 +92,16 @@ tracks presign records.
 **FROST Ed25519:**
 
 ```go
-signSession, out, err := ed25519.StartSign(share, sessionID, signers, message)
+signGuard, err := (tss.GuardConfig{
+    Self:        share.PartyID(),
+    Parties:     tss.PartySet(signers),
+    Protocol:    tss.ProtocolFROSTEd25519,
+    SessionID:   sessionID,
+    Policies:    ed25519.FROSTPolicies(),
+    Cache:       replayCache,
+    AckVerifier: ackVerifier,
+}).BuildGuard()
+signSession, out, err := ed25519.StartSign(share, sessionID, signers, message, signGuard)
 // Route out (round 1 commitments) to other signers.
 // Handle round 1 responses; obtain round 2 partials.
 sig, ok := signSession.Signature()
@@ -95,7 +113,16 @@ sig, ok := signSession.Signature()
 ```go
 // Offline presign (can be done in advance):
 ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
-presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionID, signers, ctx)
+presignGuard, err := (tss.GuardConfig{
+    Self:        keyShare.PartyID(),
+    Parties:     tss.PartySet(signers),
+    Protocol:    tss.ProtocolCGGMP21Secp256k1,
+    SessionID:   sessionID,
+    Policies:    secp256k1.CGGMP21Policies(),
+    Cache:       replayCache,
+    AckVerifier: ackVerifier,
+}).BuildGuard()
+presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionID, signers, ctx, presignGuard)
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
 // Persist presign immediately.
@@ -110,7 +137,16 @@ request := secp256k1.SignRequest{
     LowS:         true,
     PresignStore: store, // required for presigns restored from storage
 }
-signSession, out, _ := secp256k1.StartSign(keyShare, presign, sessionID, request)
+signGuard, err := (tss.GuardConfig{
+    Self:        keyShare.PartyID(),
+    Parties:     tss.PartySet(signers),
+    Protocol:    tss.ProtocolCGGMP21Secp256k1,
+    SessionID:   sessionID,
+    Policies:    secp256k1.CGGMP21Policies(),
+    Cache:       replayCache,
+    AckVerifier: ackVerifier,
+}).BuildGuard()
+signSession, out, _ := secp256k1.StartSign(keyShare, presign, sessionID, request, signGuard)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
 secp256k1.VerifySignature(publicKey, request, sig) // true

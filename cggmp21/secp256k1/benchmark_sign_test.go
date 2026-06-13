@@ -32,7 +32,6 @@ func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 			signSessions[id] = session
 			messages = append(messages, out...)
 		}
@@ -69,7 +68,6 @@ func BenchmarkCGGMP21OnlineSign3of5(b *testing.B) {
 			if err != nil {
 				b.Fatal(err)
 			}
-			session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 			signSessions[id] = session
 			messages = append(messages, out...)
 		}

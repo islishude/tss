@@ -123,11 +123,6 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 		Self:      keyShare.Party,
 		SessionID: sessionID,
 	}
-	session, out, err := StartRefresh(keyShare, config)
-	if err != nil {
-		return fmt.Errorf("start refresh: %w", err)
-	}
-	defer session.Destroy()
 	cache := s.opts.ReplayCache
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
@@ -144,7 +139,11 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("new guard: %w", err)
 	}
-	session.SetGuard(guard)
+	session, out, err := StartRefresh(keyShare, config, guard)
+	if err != nil {
+		return fmt.Errorf("start refresh: %w", err)
+	}
+	defer session.Destroy()
 	if err := s.opts.Transport.Send(out); err != nil {
 		return fmt.Errorf("send refresh envelopes: %w", err)
 	}

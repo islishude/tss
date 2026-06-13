@@ -191,6 +191,32 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 	return nil
 }
 
+// RequireEnvelopeGuard verifies that guard is bound to the expected protocol
+// session and has the fixed validation dependencies required by inbound
+// handlers. It does not validate the guard's party set; protocol handlers pass
+// the per-message allowed sender set to [ValidateInbound].
+func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, expectedSession SessionID, self PartyID) error {
+	if guard == nil {
+		return ErrMissingEnvelopeGuard
+	}
+	if guard.Protocol != expectedProtocol {
+		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
+	}
+	if guard.SessionID != expectedSession {
+		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	}
+	if guard.Self != self {
+		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
+	}
+	if len(guard.Policies.entries) == 0 || guard.Policies.index == nil {
+		return errors.New("guard policy set must not be empty")
+	}
+	if guard.ReplayCache == nil {
+		return ErrMissingReplayCache
+	}
+	return nil
+}
+
 // ValidateInbound validates an incoming envelope through the provided guard.
 // The guard must be non-nil — a nil guard returns [ErrMissingEnvelopeGuard].
 // This ensures transport authentication, confidentiality enforcement, broadcast
@@ -204,20 +230,11 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 // subsets), this design avoids coupling the guard's construction-time party set
 // to per-message validation.
 func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
-	if guard == nil {
-		return ErrMissingEnvelopeGuard
-	}
-	if guard.Protocol != expectedProtocol {
-		return fmt.Errorf("guard protocol %q does not match expected %q", guard.Protocol, expectedProtocol)
-	}
-	if guard.SessionID != expectedSession {
-		return fmt.Errorf("guard session %x does not match expected %x", guard.SessionID[:], expectedSession[:])
+	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
+		return err
 	}
 	if len(parties) == 0 {
 		return errors.New("parties must not be empty")
-	}
-	if guard.Self != self {
-		return fmt.Errorf("guard self %d does not match expected %d", guard.Self, self)
 	}
 	return guard.ValidateWithParties(env, parties)
 }

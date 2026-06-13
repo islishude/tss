@@ -22,11 +22,10 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.Pa
 	sessions := make(map[tss.PartyID]*RefreshSession)
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{Threshold: shares[id].Threshold, Self: id, SessionID: sessionID})
+		session, out, err := startCGGMP21Refresh(shares[id], tss.ThresholdConfig{Threshold: shares[id].Threshold, Self: id, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -56,11 +55,10 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 		t.Fatal(err)
 	}
 	config := tss.ThresholdConfig{Threshold: 1, Self: 1, SessionID: sessionID}
-	session, out, err := StartRefresh(shares[1], config)
+	session, out, err := startCGGMP21Refresh(shares[1], config)
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	for _, env := range out {
 		if _, err := session.HandleRefreshMessage(testutil.DeliverEnvelope(env)); err != nil {
 			if !strings.Contains(err.Error(), "already completed") {
@@ -101,13 +99,11 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	session, _, err := StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	session, _, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
-	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +135,7 @@ func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, _, err = StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	_, _, err = startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err == nil || !strings.Contains(err.Error(), "config.Self") {
 		t.Fatalf("expected config.Self mismatch rejection, got %v", err)
 	}
@@ -151,12 +147,11 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := StartRefresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	session, _, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	session.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
-	_, out2, err := StartRefresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	_, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}

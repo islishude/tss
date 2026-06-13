@@ -152,16 +152,15 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			Self:      id,
 			SessionID: kgSessionID,
 		}
-		session, out, err := StartKeygen(cfg)
+		g, err := tss.NewEnvelopeGuard(id, parties, protocol, kgSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
-		g, err := session.NewGuard(tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(g)
 		g.AckVerifier = km.verifier
+		session, out, err := startCGGMP21Keygen(cfg, g)
+		if err != nil {
+			t.Fatal(err)
+		}
 		kgSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -203,16 +202,15 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		session, out, err := StartPresignWithContext(shares[id], presignSessionID, signers, testPresignContext())
+		g, err := tss.NewEnvelopeGuard(id, tss.PartySet(signers), protocol, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
-		g, err := session.NewGuard(tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(g)
 		g.AckVerifier = km.verifier
+		session, out, err := startCGGMP21PresignWithContext(shares[id], presignSessionID, signers, testPresignContext(), g)
+		if err != nil {
+			t.Fatal(err)
+		}
 		psSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -251,20 +249,19 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		session, out, err := StartSign(shares[id], presigns[id], signSessionID, SignRequest{
+		g, err := tss.NewEnvelopeGuard(id, tss.PartySet(signers), protocol, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		if err != nil {
+			t.Fatal(err)
+		}
+		g.AckVerifier = km.verifier
+		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signSessionID, SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
 			LowS:    true,
-		})
+		}, g)
 		if err != nil {
 			t.Fatal(err)
 		}
-		g, err := session.NewGuard(tss.NewInMemoryReplayCache())
-		if err != nil {
-			t.Fatal(err)
-		}
-		session.SetGuard(g)
-		g.AckVerifier = km.verifier
 		signSessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -311,16 +308,15 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	km := newKeyMaterial(t, parties)
 
 	cfg := tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 71, SessionID: sessionID}
-	session, _, err := StartKeygen(cfg)
+	g, err := tss.NewEnvelopeGuard(71, parties, protocol, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 	if err != nil {
 		t.Fatal(err)
 	}
-	g, err := session.NewGuard(tss.NewInMemoryReplayCache())
-	if err != nil {
-		t.Fatal(err)
-	}
-	session.SetGuard(g)
 	g.AckVerifier = km.verifier
+	session, _, err := startCGGMP21Keygen(cfg, g)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	// Create a valid broadcast envelope.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{

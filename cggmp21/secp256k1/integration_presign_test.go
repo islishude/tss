@@ -92,7 +92,6 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
@@ -127,12 +126,10 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 			s2, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
-			s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 			_ = deliverPresignMessagesTo(t, s1, 1, out2)
 			round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 			if len(round2) != 1 || round2[0].To != 1 {
@@ -168,7 +165,6 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)

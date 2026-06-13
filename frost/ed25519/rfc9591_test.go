@@ -153,20 +153,18 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, out1, err := StartSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
+	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
 		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testFROSTGuard(key1.Party, tss.PartySet(key1.Parties), sessionID))
-	s3, out3, err := StartSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
+	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
 		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s3.SetGuard(testFROSTGuard(key3.Party, tss.PartySet(key3.Parties), sessionID))
 
 	if !bytes.Equal(s1.dNonce, v.p1HidingNonce) || !bytes.Equal(s1.eNonce, v.p1BindingNonce) {
 		t.Fatal("P1 nonce generation does not match RFC vector")

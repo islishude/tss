@@ -33,11 +33,10 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 	sessions := make(map[tss.PartyID]*lockedSession, n)
 	var allMessages []tss.Envelope
 	for _, id := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: sessionID})
+		kg, out, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
-		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = &lockedSession{KeygenSession: kg}
 		allMessages = append(allMessages, out...)
 	}
@@ -110,7 +109,6 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), sessionID))
 			sess[id] = s
 			for _, env := range out {
 				switch env.Round {
@@ -171,7 +169,6 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s.SetGuard(testCGGMP21Guard(id, tss.PartySet(shares[id].Parties), signID))
 			signSessions[id] = s
 			sigMessages = append(sigMessages, out...)
 		}

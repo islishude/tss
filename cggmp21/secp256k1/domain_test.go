@@ -63,12 +63,10 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1.SetGuard(testCGGMP21Guard(1, tss.PartySet(shares[1].Parties), sessionID))
 	s2, out2, err := StartPresign(shares[2], sessionID, signers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2.SetGuard(testCGGMP21Guard(2, tss.PartySet(shares[2].Parties), sessionID))
 
 	round1From2, err := unmarshalPresignRound1Payload(out2[0].Payload)
 	if err != nil {

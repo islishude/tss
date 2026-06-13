@@ -23,7 +23,7 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startCGGMP21Keygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -62,7 +62,7 @@ func Example_full_lifecycle() {
 		PolicyDomain:  "example-policy",
 		MessageDomain: "example-message",
 	}
-	ps, _, err := StartPresignWithContext(loaded, presignID, []tss.PartyID{1}, ctx)
+	ps, _, err := startCGGMP21PresignWithContext(loaded, presignID, []tss.PartyID{1}, ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -94,7 +94,7 @@ func Example_full_lifecycle() {
 		LowS:         true,
 		PresignStore: newTestPresignStore(),
 	}
-	ss, _, err := StartSign(loaded, loadedPresign, signID, request)
+	ss, _, err := startCGGMP21Sign(loaded, loadedPresign, signID, request)
 	if err != nil {
 		panic(err)
 	}
@@ -140,11 +140,10 @@ func Example_multiParty() {
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := StartSign(shares[id], presigns[id], signID, request)
+		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -197,7 +196,7 @@ func ExampleStartRefresh() {
 	sessions := make(map[tss.PartyID]*RefreshSession, n)
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		session, out, err := StartRefresh(shares[id], tss.ThresholdConfig{
+		session, out, err := startCGGMP21Refresh(shares[id], tss.ThresholdConfig{
 			Threshold: threshold,
 			Self:      id,
 			SessionID: refreshID,
@@ -205,7 +204,6 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), refreshID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
@@ -285,19 +283,17 @@ func ExampleStartReshare() {
 	sessions := make(map[tss.PartyID]*ReshareOverlapSession, len(newParties))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range oldParties {
-		session, out, err := StartReshareOverlap(shares[id], plan, nil)
+		session, out, err := startCGGMP21ReshareOverlap(shares[id], plan, nil)
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(newParties), sessionID))
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
-	receiverSession, out, err := StartReshareReceiver(plan, 4, nil)
+	receiverSession, out, err := startCGGMP21ReshareReceiver(plan, 4, nil)
 	if err != nil {
 		panic(err)
 	}
-	receiverSession.SetGuard(testCGGMP21Guard(4, tss.PartySet(newParties), sessionID))
 	sessions[4] = receiverSession
 	queue = append(queue, out...)
 
@@ -384,11 +380,10 @@ func ExampleDeriveNonHardenedBIP32() {
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := StartSign(shares[id], presigns[id], signID, request)
+		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signID, request)
 		if err != nil {
 			panic(err)
 		}
-		session.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), signID))
 		sessions[id] = session
 		messages = append(messages, out...)
 	}
@@ -430,7 +425,7 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startCGGMP21Keygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -462,7 +457,7 @@ func Example_serialization() {
 		panic(err)
 	}
 	ctx := testPresignContext()
-	ps, _, err := StartPresignWithContext(restoredShare, presignID, []tss.PartyID{1}, ctx)
+	ps, _, err := startCGGMP21PresignWithContext(restoredShare, presignID, []tss.PartyID{1}, ctx)
 	if err != nil {
 		panic(err)
 	}
@@ -512,7 +507,7 @@ func runCGGMPKeygenWithOptions(parties []tss.PartyID, threshold int, opts Keygen
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{
+		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      id,
@@ -521,7 +516,6 @@ func runCGGMPKeygenWithOptions(parties []tss.PartyID, threshold int, opts Keygen
 		if err != nil {
 			panic(err)
 		}
-		kg.SetGuard(testCGGMP21Guard(id, tss.PartySet(parties), sessionID))
 		sessions[id] = kg
 		queue = append(queue, out...)
 	}
@@ -568,19 +562,14 @@ func runCGGMPPresignWithContext(shares map[tss.PartyID]*KeyShare, signers []tss.
 		panic(err)
 	}
 
-	// Determine the full party set from the first share.
-	first := shares[signers[0]]
-	allParties := tss.PartySet(first.Parties)
-
 	// Start presign for each signer.
 	sessions := make(map[tss.PartyID]*PresignSession, len(signers))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		ps, out, err := StartPresignWithContext(shares[id], sessionID, signers, ctx)
+		ps, out, err := startCGGMP21PresignWithContext(shares[id], sessionID, signers, ctx)
 		if err != nil {
 			panic(err)
 		}
-		ps.SetGuard(testCGGMP21Guard(id, allParties, sessionID))
 		sessions[id] = ps
 		queue = append(queue, out...)
 	}

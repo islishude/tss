@@ -37,7 +37,7 @@ func TestFROSTKeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -85,7 +85,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keygen, _, err := StartKeygen(tss.ThresholdConfig{
+	keygen, _, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,
@@ -118,15 +118,14 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sign, _, err := StartSign(shares[1], signID, []tss.PartyID{1, 2}, []byte("message"))
+	sign, _, err := startFROSTSign(shares[1], signID, []tss.PartyID{1, 2}, []byte("message"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sign.SetGuard(testFROSTGuard(shares[1].Party, tss.PartySet(shares[1].Parties), signID))
 	if len(sign.dNonce) == 0 || len(sign.eNonce) == 0 {
 		t.Fatal("sign session did not retain expected local nonce bytes before round 2")
 	}
-	_, out2, err := StartSign(shares[2], signID, []tss.PartyID{1, 2}, []byte("message"))
+	_, out2, err := startFROSTSign(shares[2], signID, []tss.PartyID{1, 2}, []byte("message"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -163,7 +162,7 @@ func TestFROSTKeygenCompletionClearsIntermediateSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keygen, out, err := StartKeygen(tss.ThresholdConfig{
+	keygen, out, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 1,
 		Parties:   []tss.PartyID{1},
 		Self:      1,

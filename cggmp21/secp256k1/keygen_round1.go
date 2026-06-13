@@ -16,18 +16,13 @@ import (
 )
 
 // StartKeygen starts CGGMP21-style threshold ECDSA key generation.
-// Callers must attach an EnvelopeGuard via [KeygenSession.SetGuard] before
-// processing inbound messages.
-func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, error) {
-	return StartKeygenWithOptions(config, KeygenOptions{})
+func StartKeygen(config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+	return StartKeygenWithOptions(config, KeygenOptions{}, guard)
 }
 
 // StartKeygenWithOptions starts keygen with explicit Paillier key-size or HD
 // chain-code options. ZK security parameters are governed by
 // [zkpai.ActiveSecurityParams], not by a per-keygen option.
-//
-// Callers must attach an EnvelopeGuard via [KeygenSession.SetGuard] before
-// processing inbound messages.
 //
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
 // to all parties. The caller MUST ensure that every recipient receives identical
@@ -35,12 +30,15 @@ func StartKeygen(config tss.ThresholdConfig) (*KeygenSession, []tss.Envelope, er
 // all parties SHOULD compare KeygenTranscriptHash out-of-band to detect
 // equivocation. A mismatch indicates a dishonest participant or compromised
 // transport and requires aborting the key material.
-func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*KeygenSession, []tss.Envelope, error) {
+func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	limits := DefaultLimits()
 	if opts.Limits != nil {
 		limits = *opts.Limits
 	}
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 
@@ -131,6 +129,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions) (*Ke
 		},
 		state:         keygenCollecting,
 		confirmations: make(map[tss.PartyID][]byte, len(config.Parties)),
+		guard:         guard,
 	}
 	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{

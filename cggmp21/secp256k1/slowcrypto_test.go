@@ -28,7 +28,7 @@ func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare 
 	sessions := make(map[tss.PartyID]*KeygenSession)
 	var pending []tss.Envelope
 	for _, party := range parties {
-		kg, out, err := StartKeygen(tss.ThresholdConfig{
+		kg, out, err := startCGGMP21Keygen(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      party,
@@ -71,7 +71,6 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 		if err != nil {
 			t.Fatal(err)
 		}
-		ps.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), sessionID))
 		sessions[party] = ps
 		pending = append(pending, out...)
 	}
@@ -168,7 +167,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 	sessions := make(map[tss.PartyID]*RefreshSession)
 	var pending []tss.Envelope
 	for _, party := range parties {
-		rs, out, err := StartRefresh(shares[party], tss.ThresholdConfig{
+		rs, out, err := startCGGMP21Refresh(shares[party], tss.ThresholdConfig{
 			Threshold: 2,
 			Parties:   parties,
 			Self:      party,
@@ -177,7 +176,6 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		rs.SetGuard(testCGGMP21Guard(party, tss.PartySet(parties), sessionID))
 		sessions[party] = rs
 		pending = append(pending, out...)
 	}
@@ -257,11 +255,10 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	sessions := make(map[tss.PartyID]*SignSession)
 	var pending []tss.Envelope
 	for _, party := range signers {
-		ss, out, err := StartSign(shares[party], presigns[party], signID, request)
+		ss, out, err := startCGGMP21Sign(shares[party], presigns[party], signID, request)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ss.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), signID))
 		sessions[party] = ss
 		pending = append(pending, out...)
 	}
@@ -308,7 +305,7 @@ func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOpti
 	sessions := make(map[tss.PartyID]*KeygenSession)
 	var pending []tss.Envelope
 	for _, party := range parties {
-		kg, out, err := StartKeygenWithOptions(tss.ThresholdConfig{
+		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      party,
@@ -346,11 +343,10 @@ func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare
 	sessions := make(map[tss.PartyID]*PresignSession)
 	var pending []tss.Envelope
 	for _, party := range signers {
-		ps, out, err := StartPresignWithContext(shares[party], sessionID, signers, ctx)
+		ps, out, err := startCGGMP21PresignWithContext(shares[party], sessionID, signers, ctx)
 		if err != nil {
 			t.Fatal(err)
 		}
-		ps.SetGuard(testCGGMP21Guard(party, tss.PartySet(signers), sessionID))
 		sessions[party] = ps
 		pending = append(pending, out...)
 	}

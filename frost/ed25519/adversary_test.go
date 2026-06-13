@@ -19,23 +19,22 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	kg1, _, err := StartKeygen(tss.ThresholdConfig{
+	kg1, _, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   parties,
 		Self:      1,
 		SessionID: sessionID,
-	})
+	}, testFROSTGuard(1, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	kg1.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sessionID))
 
-	_, out2, err := StartKeygen(tss.ThresholdConfig{
+	_, out2, err := startFROSTKeygen(tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   parties,
 		Self:      2,
 		SessionID: sessionID,
-	})
+	}, testFROSTGuard(2, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,16 +140,15 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 	t.Run("duplicate commitment", func(t *testing.T) {
 		t.Parallel()
 
-		sess2, _, err := StartKeygen(tss.ThresholdConfig{
+		sess2, _, err := startFROSTKeygen(tss.ThresholdConfig{
 			Threshold: 2,
 			Parties:   parties,
 			Self:      1,
 			SessionID: sessionID,
-		})
+		}, testFROSTGuard(1, tss.PartySet(parties), sessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sess2.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sessionID))
 
 		dup := commit
 		dup.Security.Authenticated = true
@@ -182,13 +180,12 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sign1, _, err := StartSign(shares[1], sessionID, signers, message)
+	sign1, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	sign1.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sessionID))
 
-	_, out2, err := StartSign(shares[2], sessionID, signers, message)
+	_, out2, err := startFROSTSign(shares[2], sessionID, signers, message, testFROSTGuard(2, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -202,7 +199,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 	// Start party 3 (not a signer) to get a commitment from outside the signer set.
 	// Use a separate signer set that includes party 3.
 	signersWith3 := []tss.PartyID{1, 2, 3}
-	_, out3, err := StartSign(shares[3], sessionID, signersWith3, message)
+	_, out3, err := startFROSTSign(shares[3], sessionID, signersWith3, message, testFROSTGuard(3, tss.PartySet(parties), sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -296,11 +293,10 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 	t.Run("duplicate commitment", func(t *testing.T) {
 		t.Parallel()
 
-		sess2, _, err := StartSign(shares[1], sessionID, signers, message)
+		sess2, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, tss.PartySet(parties), sessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sess2.SetGuard(testFROSTGuard(1, tss.PartySet(parties), sessionID))
 
 		dup := commit2
 		dup.Security.Authenticated = true
@@ -324,18 +320,16 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		signers2 := []tss.PartyID{1, 2}
 
 		// Start party 1 with 2 signers so delivery of party 2's partial triggers completion.
-		sess1, out1, err := StartSign(shares[1], dupSessionID, signers2, message)
+		sess1, out1, err := startFROSTSign(shares[1], dupSessionID, signers2, message, testFROSTGuard(1, tss.PartySet(parties), dupSessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sess1.SetGuard(testFROSTGuard(1, tss.PartySet(parties), dupSessionID))
 
 		// Start party 2.
-		sess2, out2, err := StartSign(shares[2], dupSessionID, signers2, message)
+		sess2, out2, err := startFROSTSign(shares[2], dupSessionID, signers2, message, testFROSTGuard(2, tss.PartySet(parties), dupSessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
-		sess2.SetGuard(testFROSTGuard(2, tss.PartySet(parties), dupSessionID))
 
 		// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 		cb := out2[0]
@@ -387,23 +381,22 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	reshare1, _, err := StartReshare(shares[1], newParties, 2, tss.ThresholdConfig{
+	reshare1, _, err := startFROSTReshare(shares[1], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      1,
 		SessionID: reshareSessionID,
-	})
+	}, testFROSTGuard(1, tss.PartySet(oldParties), reshareSessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshare1.SetGuard(testFROSTGuard(1, tss.PartySet(oldParties), reshareSessionID))
 
-	_, out2, err := StartReshare(shares[2], newParties, 2, tss.ThresholdConfig{
+	_, out2, err := startFROSTReshare(shares[2], newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      2,
 		SessionID: reshareSessionID,
-	})
+	}, testFROSTGuard(2, tss.PartySet(oldParties), reshareSessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
