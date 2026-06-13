@@ -17,70 +17,37 @@ Go threshold-signature building blocks.
 
 ### Ed25519 (FROST)
 
-```go
-import (
-    stded "crypto/ed25519"
-    "github.com/islishude/tss"
-    ed25519 "github.com/islishude/tss/frost/ed25519"
-)
+Run the executable 2-of-2 DKG and signing example:
 
-// DKG with guard — every protocol Start* call requires an EnvelopeGuard
-// that enforces transport authentication, confidentiality, and replay protection.
-sessionID, _ := tss.NewSessionID(nil)
-parties := []tss.PartyID{1, 2, 3}
-ps := tss.PartySet(parties)
-
-sessions := make(map[tss.PartyID]*ed25519.KeygenSession)
-var messages []tss.Envelope
-for _, id := range parties {
-    guard := tss.NewTestEnvelopeGuard(id, ps, tss.ProtocolFROSTEd25519, sessionID, ed25519.FROSTPolicies())
-    kg, out, _ := ed25519.StartKeygen(tss.ThresholdConfig{
-        Threshold: 2, Parties: parties, Self: id, SessionID: sessionID,
-    }, guard)
-    sessions[id] = kg
-    messages = append(messages, out...)
-}
-for _, env := range messages { /* deliver authenticated+confidential to recipients */ }
-share, _ := sessions[1].KeyShare()
-
-// Sign
-sig, _ := stded.Sign(message, map[tss.PartyID]*ed25519.KeyShare{1: share, 2: share2})
-stded.Verify(share.PublicKey, message, sig) // true
+```sh
+go test ./frost/ed25519 -run '^ExampleSign$' -count=1
 ```
 
-Full examples in [`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go).
+The example constructs guards with `tss.GuardConfig.BuildGuard`, signs broadcast
+acknowledgments with Ed25519 identity keys, attaches complete broadcast
+certificates, and marks direct share messages confidential. See
+[`frost/ed25519/examples_test.go`](frost/ed25519/examples_test.go) and its
+[`example_helpers_test.go`](frost/ed25519/example_helpers_test.go) transport
+adapter.
 
 ### secp256k1 (CGGMP21)
 
-```go
-// DKG → Presign (offline) → Sign (online, one round)
-sessionID, _ := tss.NewSessionID(nil)
-parties := tss.PartySet{1, 2, 3}
-kgGuard := tss.NewTestEnvelopeGuard(1, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, secp256k1.CGGMP21Policies())
+Run the executable DKG, persistence, presign, and online-signing example:
 
-kg, kgOut, _ := secp256k1.StartKeygen(tss.ThresholdConfig{...}, kgGuard)
-// ... exchange kgOut and handler-returned keygen messages through confirmation round ...
-share, _ := kg.KeyShare()
-
-signers := []tss.PartyID{1, 2}
-ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
-presignID, _ := tss.NewSessionID(nil)
-presignGuard := tss.NewTestEnvelopeGuard(1, tss.PartySet(signers), tss.ProtocolCGGMP21Secp256k1, presignID, secp256k1.CGGMP21Policies())
-presign, presignOut, _ := secp256k1.StartPresignWithContext(share, presignID, signers, ctx, presignGuard)
-// ... exchange presignOut messages over authenticated+confidential transport ...
-pre, _ := presign.Presign()
-
-message := []byte("payload")
-request := secp256k1.SignRequest{Context: ctx, Message: message, LowS: true}
-signID, _ := tss.NewSessionID(nil)
-signGuard := tss.NewTestEnvelopeGuard(1, tss.PartySet(signers), tss.ProtocolCGGMP21Secp256k1, signID, secp256k1.CGGMP21Policies())
-signSess, signOut, _ := secp256k1.StartSign(share, pre, signID, request, signGuard)
-// ... exchange signOut messages ...
-sig, _ := signSess.Signature()
-secp256k1.VerifySignature(share.PublicKey, request, sig) // true
+```sh
+go test -tags=integration ./cggmp21/secp256k1 \
+  -run '^Example_full_lifecycle$' -count=1
 ```
 
-Full examples in [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp256k1/integration_example_test.go) and [`cggmp21/secp256k1/examples_test.go`](cggmp21/secp256k1/examples_test.go).
+The integration example uses production policy sets and guards, complete
+broadcast certificates, confidential direct delivery, and an atomic
+file-backed `PresignStore`. A deployment must replace the in-process transport,
+replay cache, identity keys, and temporary claim directory with durable
+application infrastructure. See
+[`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp256k1/integration_example_test.go),
+[`example_integration_helpers_test.go`](cggmp21/secp256k1/example_integration_helpers_test.go),
+and the lightweight public-vector examples in
+[`examples_test.go`](cggmp21/secp256k1/examples_test.go).
 
 ## Documentation
 

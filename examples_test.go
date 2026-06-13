@@ -1,8 +1,10 @@
-package tss
+package tss_test
 
 import (
 	"bytes"
 	"fmt"
+
+	"github.com/islishude/tss"
 )
 
 // ExampleNewSessionID demonstrates how to generate a unique session identifier
@@ -10,7 +12,7 @@ import (
 // Session IDs are used to bind all messages in a protocol run together,
 // preventing cross-session replay attacks.
 func ExampleNewSessionID() {
-	sessionID, err := NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x11}, 32)))
+	sessionID, err := tss.NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x11}, 32)))
 	if err != nil {
 		panic(err)
 	}
@@ -27,7 +29,7 @@ func ExampleNewSessionID() {
 // duplicate detection.
 func ExampleEnvelope_roundtrip() {
 	// --- 1. Create a session ID that binds all messages in this run ---
-	sessionID, err := NewSessionID(nil)
+	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		panic(err)
 	}
@@ -36,9 +38,9 @@ func ExampleEnvelope_roundtrip() {
 	// NewEnvelope validates fields, computes the transcript hash, and
 	// returns a ready-to-send envelope. Always prefer NewEnvelope over
 	// constructing the struct directly.
-	envelope, err := NewEnvelope(EnvelopeInput{
+	envelope, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    "example",
-		Version:     Version,
+		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,
@@ -56,7 +58,7 @@ func ExampleEnvelope_roundtrip() {
 	}
 
 	// --- 4. Deserialize on the receiving side ---
-	var decoded Envelope
+	var decoded tss.Envelope
 	if err := decoded.UnmarshalBinary(encoded); err != nil {
 		panic(err)
 	}
@@ -80,15 +82,15 @@ func ExampleEnvelope_roundtrip() {
 // fault to a specific party. It is designed to be stored or transmitted
 // for later dispute resolution.
 func ExampleBlameEvidence_lifecycle() {
-	sessionID, err := NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x33}, 32)))
+	sessionID, err := tss.NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x33}, 32)))
 	if err != nil {
 		panic(err)
 	}
 
 	// --- 1. Construct the envelope that triggered the fault ---
-	envelope := Envelope{
+	envelope := tss.Envelope{
 		Protocol:    "example",
-		Version:     Version,
+		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,
@@ -100,11 +102,11 @@ func ExampleBlameEvidence_lifecycle() {
 	// EvidenceKind describes the protocol phase where the fault occurred.
 	// EvidenceFields carry structured key-value metadata (e.g., hashes,
 	// party sets) that verifiers can cross-check.
-	evidence, err := NewBlameEvidence(
+	evidence, err := tss.NewBlameEvidence(
 		envelope,
-		EvidenceKindSignPartial,
+		tss.EvidenceKindSignPartial,
 		"invalid partial signature",
-		[]EvidenceField{
+		[]tss.EvidenceField{
 			{Key: "public_hash", Value: []byte{1, 2, 3}},
 		},
 	)
@@ -121,7 +123,7 @@ func ExampleBlameEvidence_lifecycle() {
 	// --- 4. Deserialize using the typed unmarshaler ---
 	// UnmarshalBlameEvidence returns a *BlameEvidence (not a raw struct)
 	// so the Validate method is available on the decoded value.
-	decoded, err := UnmarshalBlameEvidence(encoded)
+	decoded, err := tss.UnmarshalBlameEvidence(encoded)
 	if err != nil {
 		panic(err)
 	}
@@ -147,7 +149,7 @@ func Example_encryptDecrypt() {
 	// --- 1. Encrypt key material with a passphrase ---
 	// The optional PassphraseParams can tune scrypt cost parameters.
 	// A nil params uses production defaults (N=32768, r=8, p=1).
-	encrypted, err := EncryptKeyShareWithPassphrase(keyMaterial, passphrase, "my-key-id", nil)
+	encrypted, err := tss.EncryptKeyShareWithPassphrase(keyMaterial, passphrase, "my-key-id", nil)
 	if err != nil {
 		panic(err)
 	}
@@ -155,7 +157,7 @@ func Example_encryptDecrypt() {
 	// --- 2. Decrypt the ciphertext with the same passphrase ---
 	// DecryptKeyShareWithPassphrase verifies the key ID and AEAD tag,
 	// returning the original plaintext only if both are correct.
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
 	if err != nil {
 		panic(err)
 	}

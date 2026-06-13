@@ -63,6 +63,11 @@ General rules:
 
 - Prefer deterministic randomness. Randomized tests must expose enough seed
   information to reproduce failures.
+- User-facing `Example*` functions must use an external test package and only
+  public APIs. They must not import `internal/*` packages or call test-only
+  helpers such as `NewTestEnvelopeGuard`, `TestGuardConfig`, or `TestLimits`.
+  Full cryptographic lifecycle examples must retain the build tag for their
+  corresponding test tier.
 - Reject-path tests must assert the error category and all relevant negative side
   effects, not only `err != nil`.
 - Test failure messages, fixtures, snapshots, and logs must not expose shares,

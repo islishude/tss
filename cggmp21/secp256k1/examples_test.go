@@ -1,106 +1,51 @@
-package secp256k1
+package secp256k1_test
 
 import (
 	"bytes"
-	"crypto/rand"
-	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 
 	"github.com/islishude/tss"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/wire/wireutil"
+	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
-// ExampleVerifyDigest demonstrates standalone ECDSA signature verification
-// against a raw SHA-256 digest. This operates on single-party ECDSA keys
-// without any threshold logic and is useful for verifying signatures produced
-// by a completed threshold signing session.
-//
-// For threshold verification (including signer set and context binding),
-// use [VerifySignature] instead.
+// ExampleVerifyDigest verifies a fixed public CGGMP21 protocol vector.
 func ExampleVerifyDigest() {
-	// --- 1. Compute a SHA-256 digest to sign ---
-	digest := sha256.Sum256([]byte("hello secp256k1"))
-
-	// --- 2. Generate a single-party secp256k1 key ---
-	secret, err := secp.RandomScalar(rand.Reader)
+	publicKey, err := hex.DecodeString("0232b6a8d851397f9564a05f7a1d2a873266471d3ee513b8fd977244ceef056a38")
+	if err != nil {
+		panic(err)
+	}
+	digest, err := hex.DecodeString("0360ea0d1a3b6b7db198b31c22e8d93d8d7976b43e3e89676755bdd31ceed1f5")
+	if err != nil {
+		panic(err)
+	}
+	r, err := hex.DecodeString("ac99b283cdd4f3024da08ced4088bd9445bb08c8660541316189d9a642dc60f2")
+	if err != nil {
+		panic(err)
+	}
+	s, err := hex.DecodeString("6cecc6ba1b1d26d6c616157402d915990b4037cd75d9a2e9743c24a1465a6c23")
 	if err != nil {
 		panic(err)
 	}
 
-	// --- 3. Produce an ECDSA signature (r, s) ---
-	r, s, err := secp.SignECDSA(rand.Reader, digest[:], secret, true)
-	if err != nil {
-		panic(err)
-	}
-
-	// --- 4. Derive the public key from the secret scalar ---
-	publicKey, err := secp.PointBytes(secp.ScalarBaseMult(secret))
-	if err != nil {
-		panic(err)
-	}
-
-	// --- 5. Verify with the threshold-aware verifier ---
-	// VerifyDigest checks the signature against the given public key and
-	// digest without any threshold context (signer set, derivation path).
-	signature := &Signature{R: r.Bytes(), S: s.Bytes()}
-	fmt.Println(VerifyDigest(publicKey, digest[:], signature))
+	fmt.Println(cggmp.VerifyDigest(publicKey, digest, &cggmp.Signature{R: r, S: s}))
 	// Output:
 	// true
 }
 
-// ExampleVerifyBlameEvidence demonstrates how to verify blame evidence
-// produced during a CGGMP21 protocol run. The verifier uses [EvidenceContext]
-// to bind the evidence to the expected session parameters.
+// ExampleVerifyBlameEvidence verifies a fixed, public-only evidence vector.
 func ExampleVerifyBlameEvidence() {
-	// --- 1. Create a session ID for the evidence context ---
+	encoded, err := hex.DecodeString(
+		"5453533100097473732e626c616d650001000c00010000000200010002000000116367676d7032312d736563703235366b31000300000020444444444444444444444444444444444444444444444444444444444444444400040000000101000500000004000000010006000000040000000000070000001e6367676d7032312e736563703235366b312e7369676e2e7061727469616c0008000000203a6d26e75af02fd981bf250052015a218be16d30cae3da5a580d374be1d25b9e000900000020674d31c3dc1f2c771ac22d209937be45297827a5fbd95ef900c1b4d752657b09000a0000000c7369676e5f7061727469616c000b00000014696e76616c6964207369676e207061727469616c000c0000000400000000")
+	if err != nil {
+		panic(err)
+	}
 	sessionID, err := tss.NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x44}, 32)))
 	if err != nil {
 		panic(err)
 	}
 
-	// --- 2. Build an envelope that represents the disputed message ---
-	envelope := tss.Envelope{
-		Protocol:    protocol,
-		Version:     tss.Version,
-		SessionID:   sessionID,
-		Round:       1,
-		From:        1,
-		PayloadType: payloadSignPartial,
-		Payload:     []byte("bad sign partial"),
-	}
-
-	// --- 3. Construct blame evidence with protocol-specific fields ---
-	// partySetHashLabel and evidence field keys are protocol-internal
-	// constants that bind the evidence to the expected party configuration.
-	evidence, err := tss.NewBlameEvidence(
-		envelope,
-		tss.EvidenceKindSignPartial,
-		"invalid sign partial signature",
-		[]tss.EvidenceField{
-			{Key: evidenceFieldPartiesHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},
-			{Key: evidenceFieldSignerSetHash, Value: wireutil.PartySetHash([]tss.PartyID{1}, partySetHashLabel)},
-		},
-	)
-	if err != nil {
-		panic(err)
-	}
-
-	// --- 4. Encode the evidence for transmission ---
-	encoded, err := evidence.MarshalBinary()
-	if err != nil {
-		panic(err)
-	}
-
-	// --- 5. Verify with the expected session context ---
-	// EvidenceContext carries the session parameters the verifier expects.
-	// VerifyBlameEvidence cross-checks these against the embedded evidence
-	// fields and validates structural integrity.
-	err = VerifyBlameEvidence(encoded, EvidenceContext{
-		SessionID: sessionID,
-		Parties:   []tss.PartyID{1},
-		Signers:   []tss.PartyID{1},
-	})
+	err = cggmp.VerifyBlameEvidence(encoded, cggmp.EvidenceContext{SessionID: sessionID})
 	fmt.Println(err == nil)
 	// Output:
 	// true
