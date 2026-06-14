@@ -42,6 +42,7 @@ type keyShareWire struct {
 	LogProof               []byte                            `wire:"21,bytes,max_bytes=zk_proof"`
 	KeygenConfirmations    [][]byte                          `wire:"22,byteslist,max_bytes=zk_proof"`
 	ResharePlanHash        []byte                            `wire:"23,bytes"`
+	PlanHash               []byte                            `wire:"24,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keyShareWire.
@@ -87,6 +88,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		LogProof:               k.state.logProof,
 		KeygenConfirmations:    k.state.keygenConfirmations,
 		ResharePlanHash:        k.state.resharePlanHash,
+		PlanHash:               k.state.planHash,
 	}, nil
 }
 
@@ -205,6 +207,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		logProof:               w.LogProof,
 		keygenConfirmations:    w.KeygenConfirmations,
 		resharePlanHash:        w.ResharePlanHash,
+		planHash:               w.PlanHash,
 	}}
 	if err := k.Validate(); err != nil {
 		return nil, err
@@ -243,6 +246,7 @@ type presignWire struct {
 	KeygenTranscriptHash []byte         `wire:"15,bytes"`
 	PartiesHash          []byte         `wire:"16,bytes"`
 	VerifyShares         []byte         `wire:"17,bytes,max_bytes=signprep_verify_shares"`
+	PlanHash             []byte         `wire:"18,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -291,6 +295,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		context:              w.Context,
 		contextHash:          w.ContextHash,
 		additiveShift:        w.AdditiveShift,
+		planHash:             w.PlanHash,
 		publicKey:            w.PublicKey,
 		keygenTranscriptHash: w.KeygenTranscriptHash,
 		partiesHash:          w.PartiesHash,

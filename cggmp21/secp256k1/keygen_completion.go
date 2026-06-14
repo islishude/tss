@@ -106,6 +106,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		parties:                s.cfg.Parties,
 		publicKey:              groupCommitments[0],
 		paillierPublicKey:      localPaillierPub,
+		planHash:               append([]byte(nil), s.planHash...),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
@@ -143,6 +144,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
 		shareProof:             shareProofBytes,
+		planHash:               append([]byte(nil), s.planHash...),
 		keygenTranscriptHash:   transcriptHash,
 	}}
 	// Π^log*: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i,
@@ -297,6 +299,7 @@ func (s *KeygenSession) sortedRingPedersenPublic() []RingPedersenPublicShare {
 func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 	t := transcript.New(keygenTranscriptHashLabel)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
+	t.AppendBytes("plan_hash", s.planHash)
 	for _, id := range tss.SortParties(s.cfg.Parties) {
 		t.AppendUint32("party", uint32(id))
 		t.AppendBytesList("commitments", s.commits[id])

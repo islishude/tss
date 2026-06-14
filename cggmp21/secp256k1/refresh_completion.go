@@ -130,6 +130,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		parties:                s.oldKey.state.parties,
 		publicKey:              newCommitments[0],
 		paillierPublicKey:      s.newPaillierPubs[s.oldKey.state.party].PublicKey,
+		planHash:               append([]byte(nil), s.planHash...),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelRefreshPaillier,
@@ -166,6 +167,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelRefreshPaillier,
 		shareProof:             shareProofBytes,
+		planHash:               append([]byte(nil), s.planHash...),
 		keygenTranscriptHash:   transcriptHash,
 	}}
 	// Π^log*: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret,
@@ -236,6 +238,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
 	t := transcript.New(refreshTranscriptHashLabel)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
+	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("old_keygen_transcript_hash", s.oldKey.state.keygenTranscriptHash)
 	sortedParties := tss.SortParties(s.oldKey.state.parties)
 	t.AppendUint32List("parties", transcript.Uint32s(sortedParties))

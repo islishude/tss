@@ -117,12 +117,6 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("refresh session id: %w", err)
 	}
-	config := tss.ThresholdConfig{
-		Threshold: keyShare.state.threshold,
-		Parties:   append([]tss.PartyID(nil), keyShare.state.parties...),
-		Self:      keyShare.state.party,
-		SessionID: sessionID,
-	}
 	cache := s.opts.ReplayCache
 	if cache == nil {
 		cache = tss.NewInMemoryReplayCache()
@@ -139,7 +133,11 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("new guard: %w", err)
 	}
-	session, out, err := StartRefresh(keyShare, config, guard)
+	plan, err := NewRefreshPlan(keyShare, sessionID)
+	if err != nil {
+		return fmt.Errorf("build refresh plan: %w", err)
+	}
+	session, out, err := StartRefresh(keyShare, plan, tss.LocalConfig{Self: keyShare.state.party, Context: ctx}, guard)
 	if err != nil {
 		return fmt.Errorf("start refresh: %w", err)
 	}

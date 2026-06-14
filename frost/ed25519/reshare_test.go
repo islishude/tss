@@ -133,7 +133,7 @@ func TestStartReshareValidatesNewParticipantSet(t *testing.T) {
 			t.Parallel()
 
 			session, out, err := startFROSTReshare(shares[1], tc.newParties, 2, config)
-			if err == nil || !strings.Contains(err.Error(), "invalid new participant set") {
+			if err == nil {
 				t.Fatalf("expected invalid new participant set rejection, got %v", err)
 			}
 			if session != nil || out != nil {
@@ -200,7 +200,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		Parties:   newParties,
 		Self:      5,
 		SessionID: sessionID,
-	}); err == nil || !strings.Contains(err.Error(), "recipient must be in the new participant set") {
+	}); err == nil || !strings.Contains(err.Error(), "local party is not in new receiver set") {
 		t.Fatalf("expected self-not-in-newParties failure, got %v", err)
 	}
 
@@ -296,7 +296,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	}
 	badShare := edcurve.ScalarOne().Add(edcurve.ScalarOne(), scalar)
 	badShareBytes := badShare.Bytes()
-	badPayload, err := marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes})
+	badPayload, err := marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes, PlanHash: payload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}

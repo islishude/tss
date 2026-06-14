@@ -14,7 +14,7 @@ const (
 	maxSignPrepProofBytes      = 512 << 10
 	maxSignVerifyShareBytes    = 65*2 + maxSignPrepProofBytes + 8
 	maxSignVerifySharesBytes   = maxCGGMPSigners * maxSignVerifyShareBytes
-	maxSignPartialPayloadBytes = 32*5 + maxSignPrepProofBytes + 256
+	maxSignPartialPayloadBytes = 32*6 + maxSignPrepProofBytes + 256
 )
 
 // StateLimits caps serialized CGGMP21 key material.

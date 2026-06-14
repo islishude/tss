@@ -129,17 +129,16 @@ func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, opts frost.Keyg
 	}
 	sessions := make(map[tss.PartyID]*frost.KeygenSession, len(parties))
 	queue := make([]tss.Envelope, 0)
+	plan, err := frost.NewKeygenPlan(sessionID, parties, threshold, opts.EnableHD)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range parties {
 		guard, err := security.guard(id, partySet, sessionID)
 		if err != nil {
 			return nil, err
 		}
-		session, out, err := frost.StartKeygenWithOptions(tss.ThresholdConfig{
-			Threshold: threshold,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
-		}, opts, guard)
+		session, out, err := frost.StartKeygen(plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			return nil, err
 		}
@@ -182,7 +181,11 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := frost.StartSignWithOptions(shares[id], sessionID, signers, message, opts, guard)
+		plan, err := frost.NewSignPlan(shares[id], sessionID, signers, message, opts.AdditiveShift)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, out, err := frost.StartSign(shares[id], plan, tss.LocalConfig{Self: id, Rand: opts.NonceReader}, guard)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -42,6 +42,7 @@ type KeygenSession struct {
 	cfg            tss.ThresholdConfig
 	log            tss.Logger
 	limits         Limits
+	planHash       []byte
 	commits        map[tss.PartyID][][]byte
 	shares         map[tss.PartyID]*big.Int
 	chainCodes     map[tss.PartyID][]byte
@@ -70,6 +71,7 @@ type keygenCommitmentsPayload struct {
 	ChainCodeCommit    []byte   `json:"chain_code_commit,omitempty" wire:"4,bytes"`
 	RingPedersenParams []byte   `json:"ring_pedersen_params" wire:"5,bytes,max_bytes=ring_pedersen_params"`
 	RingPedersenProof  []byte   `json:"ring_pedersen_proof" wire:"6,bytes,max_bytes=paillier_proof"`
+	PlanHash           []byte   `json:"plan_hash" wire:"7,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
@@ -79,7 +81,8 @@ func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayl
 func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type keygenSharePayload struct {
-	Share *big.Int `wire:"1,bigpos,max_bytes=scalar"`
+	Share    *big.Int `wire:"1,bigpos,max_bytes=scalar"`
+	PlanHash []byte   `wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.

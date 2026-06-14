@@ -96,12 +96,11 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := frost.StartRefresh(shares[id], tss.ThresholdConfig{
-			Threshold: 2,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
-		}, guard)
+		plan, err := frost.NewRefreshPlan(shares[id], sessionID)
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := frost.StartRefresh(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -161,12 +160,11 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := frost.StartReshare(shares[id], newParties, 2, tss.ThresholdConfig{
-			Threshold: 2,
-			Parties:   oldParties,
-			Self:      id,
-			SessionID: sessionID,
-		}, guard)
+		plan, err := frost.NewResharePlan(shares[id], sessionID, newParties, 2)
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := frost.StartReshare(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -177,12 +175,11 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	sessions[4], err = frost.StartReshareRecipient(oldPublicKey, nil, oldParties, newParties, 2, tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   newParties,
-		Self:      4,
-		SessionID: sessionID,
-	}, guard)
+	recipientPlan, err := frost.NewResharePlanFromPublic(oldPublicKey, nil, oldParties, sessionID, newParties, 2)
+	if err != nil {
+		panic(err)
+	}
+	sessions[4], err = frost.StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: 4}, guard)
 	if err != nil {
 		panic(err)
 	}

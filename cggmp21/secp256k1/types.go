@@ -150,6 +150,7 @@ type keyShareState struct {
 	paillierProofDomain    string
 	resharePlanHash        []byte
 	shareProof             []byte
+	planHash               []byte
 	keygenTranscriptHash   []byte
 	logCiphertext          []byte
 	logProof               []byte

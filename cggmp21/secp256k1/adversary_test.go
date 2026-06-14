@@ -149,11 +149,11 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	signers := []tss.PartyID{1, 2}
-	s1, _, err := StartPresign(h.shares[1], sessionID, signers)
+	s1, _, err := startTestPresign(h.shares[1], sessionID, signers)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartPresign(h.shares[2], sessionID, signers)
+	_, out2, err := startTestPresign(h.shares[2], sessionID, signers)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -199,7 +199,7 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate round1", func(t *testing.T) {
-		session, _, err := StartPresign(h.shares[1], sessionID, signers)
+		session, _, err := startTestPresign(h.shares[1], sessionID, signers)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -227,11 +227,11 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+			s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+			_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -258,11 +258,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -288,11 +288,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -317,11 +317,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -340,11 +340,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -360,11 +360,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -389,11 +389,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -418,11 +418,11 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2, 3})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2, 3})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2, 3})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2, 3})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -474,11 +474,11 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		s1, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+		s1, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
-		_, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+		_, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -504,11 +504,11 @@ func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, out1, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, out1, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+	s2, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -526,11 +526,11 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, out1, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, out1, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	s2, out2, err := StartPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
+	s2, out2, err := startTestPresign(h.shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -566,7 +566,7 @@ func TestCGGMP21SignerSetOrderCanonicalized(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session, _, err := StartPresign(h.shares[1], sessionID, []tss.PartyID{2, 1})
+	session, _, err := startTestPresign(h.shares[1], sessionID, []tss.PartyID{2, 1})
 	if err != nil {
 		t.Fatal(err)
 	}

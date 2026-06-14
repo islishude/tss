@@ -15,14 +15,8 @@ import (
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
-// StartKeygen starts CGGMP21-style threshold ECDSA key generation.
-func StartKeygen(config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
-	return StartKeygenWithOptions(config, KeygenOptions{}, guard)
-}
-
-// StartKeygenWithOptions starts keygen with explicit Paillier key-size or HD
-// chain-code options. ZK security parameters are governed by
-// [zkpai.ActiveSecurityParams], not by a per-keygen option.
+// StartKeygen starts CGGMP21-style threshold ECDSA key generation from a shared
+// keygen plan and local runtime configuration.
 //
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
 // to all parties. The caller MUST ensure that every recipient receives identical
@@ -30,12 +24,17 @@ func StartKeygen(config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*KeygenS
 // all parties SHOULD compare KeygenTranscriptHash out-of-band to detect
 // equivocation. A mismatch indicates a dishonest participant or compromised
 // transport and requires aborting the key material.
-func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	limits := DefaultLimits()
-	if opts.Limits != nil {
-		limits = *opts.Limits
+	config, err := plan.thresholdConfig(local)
+	if err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
@@ -45,24 +44,16 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
 	config.Parties = config.SortedParties()
 
-	defPaillierBits := defaultPaillierBits()
-	if opts.PaillierBits == 0 {
-		opts.PaillierBits = defPaillierBits
-	}
-	if opts.PaillierBits < defPaillierBits {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self,
-			fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", opts.PaillierBits, defPaillierBits))
-	}
 	var chainCode []byte
 	var chainCodeCommit []byte
-	if opts.EnableHD {
+	if plan.state.enableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
 		}
 		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	}
-	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), opts.PaillierBits)
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), plan.state.paillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -70,7 +61,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes), paillierKey, uint32(config.Self))
+	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes, planHash), paillierKey, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -86,7 +77,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 	if err != nil {
 		return nil, nil, err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), keygenRingPedersenDomain(config, config.Self, ringPedersenParamsBytes), paillierKey, ringPedersenParams, ringPedersenLambda, uint32(config.Self))
+	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), keygenRingPedersenDomain(config, config.Self, ringPedersenParamsBytes, planHash), paillierKey, ringPedersenParams, ringPedersenLambda, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,18 +99,19 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 		commitments[i] = enc
 	}
 	s := &KeygenSession{
-		cfg:     config,
-		log:     config.Logger(),
-		limits:  limits,
-		commits: map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:  map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		cfg:      config,
+		log:      config.Logger(),
+		limits:   limits,
+		planHash: append([]byte(nil), planHash...),
+		commits:  map[tss.PartyID][][]byte{config.Self: commitments},
+		shares:   map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
 		},
-		enableHD: opts.EnableHD,
+		enableHD: plan.state.enableHD,
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
@@ -139,6 +131,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 		ChainCodeCommit:    chainCodeCommit,
 		RingPedersenParams: ringPedersenParamsBytes,
 		RingPedersenProof:  ringPedersenProofBytes,
+		PlanHash:           planHash,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -153,7 +146,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: share})
+		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: share, PlanHash: planHash})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -191,6 +184,9 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 
 	// ---- 2. POLICY VALIDATE ----
 	// (duplicate check done in dispatcher)
+	if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
@@ -241,7 +237,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
+	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, uint32(env.From), proof) {
 		s.log.Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -293,7 +289,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams), ringParams, uint32(env.From), ringProof) {
+	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, uint32(env.From), ringProof) {
 		s.log.Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -334,6 +330,9 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 
 	// ---- 2. POLICY VALIDATE ----
 	// (direct-confidential, duplicate checks done in dispatcher)
+	if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	share := secp.ScalarFromBigInt(p.Share)

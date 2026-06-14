@@ -131,6 +131,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
 		resharePlanHash:        s.planHash,
+		planHash:               append([]byte(nil), s.planHash...),
 	}}
 	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.selfID))
 	if err != nil {
@@ -164,6 +165,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
 		resharePlanHash:        append([]byte(nil), s.planHash...),
+		planHash:               append([]byte(nil), s.planHash...),
 		shareProof:             shareProofBytes,
 		keygenTranscriptHash:   transcriptHash,
 	}}
@@ -269,7 +271,8 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	t.AppendUint32("old_threshold", uint32(s.plan.state.oldThreshold))
 	t.AppendUint32("new_threshold", uint32(s.newThreshold))
 	t.AppendBytes("chain_code", s.plan.state.chainCode)
-	t.AppendUint32("paillier_bits", uint32(defaultPaillierBits()))
+	t.AppendUint32("paillier_bits", uint32(s.plan.state.paillierBits))
+	t.AppendBytes("plan_hash", s.planHash)
 	for _, dealer := range sortedOldParties {
 		t.AppendUint32("old_party", uint32(dealer))
 		t.AppendBytes("old_verification_share", s.plan.state.oldVerificationShares[dealer])

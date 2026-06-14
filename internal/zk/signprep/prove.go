@@ -147,6 +147,9 @@ func validateStatement(stmt Statement) error {
 	if len(stmt.Signers) == 0 {
 		return errors.New("signprep: missing signers")
 	}
+	if len(stmt.PlanHash) != 0 && len(stmt.PlanHash) != 32 {
+		return errors.New("signprep: plan hash must be 32 bytes")
+	}
 	if len(stmt.ContextHash) != 32 {
 		return errors.New("signprep: context hash must be 32 bytes")
 	}

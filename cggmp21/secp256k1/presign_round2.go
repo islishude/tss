@@ -33,6 +33,9 @@ func (s *PresignSession) handlePresignRound2(env tss.Envelope) ([]tss.Envelope, 
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round and duplicate checks done in dispatcher)
+	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	if err := s.finishRound2(env.From, p); err != nil {
@@ -106,13 +109,13 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK}
-		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash)
+		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash)
 		startProof := s.round1Proofs[peer].EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
 			nil,
 			startProofDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, "delta", s.round1[peer].PaillierPublicKey, s.contextHash),
+			mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
 			start,
 			startProof,
 			gamma,
@@ -130,7 +133,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		sigmaResp, betaSigma, err := mta.Respond(
 			nil,
 			startProofDomain,
-			mtaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, "sigma", s.round1[peer].PaillierPublicKey, s.contextHash),
+			mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
 			start,
 			startProof,
 			xBar,
@@ -145,7 +148,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 		s.betaDelta[peer] = betaDelta
 		s.betaSigma[peer] = betaSigma
-		payload, err := marshalPresignRound2Payload(presignRound2Payload{Delta: *deltaResp, Sigma: *sigmaResp, Round1Echo: s.round1Echo()})
+		payload, err := marshalPresignRound2Payload(presignRound2Payload{
+			Delta:      *deltaResp,
+			Sigma:      *sigmaResp,
+			Round1Echo: s.round1Echo(),
+			PlanHash:   s.planHash,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -178,7 +186,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	}
 
 	alphaDelta, err := mta.Finish(
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, "delta", s.key.state.paillierPublicKey, s.contextHash),
+		mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
 		start,
 		p.Delta,
 		gammaCommit,
@@ -194,7 +202,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 	alphaSigma, err := mta.Finish(
-		mtaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, "sigma", s.key.state.paillierPublicKey, s.contextHash),
+		mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
 		start,
 		p.Sigma,
 		xBarCommit,

@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -23,7 +22,34 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	minimalPresign := func() *Presign {
 		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
-	plan := &ResharePlan{state: &resharePlanState{sessionID: sessionID}}
+	keygenPlan, err := NewKeygenPlan(sessionID, []tss.PartyID{1, 2}, 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	presignPlan := &PresignPlan{state: &presignPlanState{sessionID: sessionID}}
+	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID}}
+	refreshPlan := &RefreshPlan{state: &refreshPlanState{
+		sessionID:    sessionID,
+		threshold:    2,
+		parties:      []tss.PartyID{1, 2},
+		publicKey:    key.state.publicKey,
+		chainCode:    key.state.chainCode,
+		paillierBits: defaultPaillierBits(),
+	}}
+	plan := &ResharePlan{state: &resharePlanState{
+		sessionID:             sessionID,
+		curveID:               reshareCurveID,
+		oldParties:            []tss.PartyID{1, 2},
+		oldThreshold:          2,
+		dealerParties:         []tss.PartyID{1, 2},
+		newParties:            []tss.PartyID{1, 2, 3},
+		newThreshold:          2,
+		paillierBits:          defaultPaillierBits(),
+		chainCode:             nil,
+		oldGroupPublicKey:     nil,
+		oldGroupCommitments:   nil,
+		oldVerificationShares: map[tss.PartyID][]byte{},
+	}}
 
 	type startCase struct {
 		name    string
@@ -38,12 +64,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartKeygen(tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   []tss.PartyID{1, 2},
-					Self:      1,
-					SessionID: sessionID,
-				}, guard)
+				_, out, err := StartKeygen(keygenPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
 			},
 		},
@@ -52,7 +73,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartPresignWithContext(key, sessionID, []tss.PartyID{1, 2}, testPresignContext(), guard)
+				_, out, err := StartPresign(key, presignPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
 			},
 		},
@@ -62,11 +83,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			parties: tss.PartySet{1, 2},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				p := minimalPresign()
-				_, out, err := StartSign(context.Background(), key, p, sessionID, SignRequest{
-					Context: testPresignContext(),
-					Message: []byte("guard"),
-					LowS:    true,
-				}, guard)
+				_, out, err := StartSign(key, p, signPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, IsPresignConsumed(p), err
 			},
 		},
@@ -75,26 +92,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartRefresh(key, tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   []tss.PartyID{1, 2},
-					Self:      1,
-					SessionID: sessionID,
-				}, guard)
-				return out, false, err
-			},
-		},
-		{
-			name:    "reshare",
-			self:    1,
-			parties: tss.PartySet{1, 2},
-			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := startCGGMP21Reshare(key, tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   []tss.PartyID{1, 2},
-					Self:      1,
-					SessionID: sessionID,
-				}, []tss.PartyID{1, 2}, guard)
+				_, out, err := StartRefresh(key, refreshPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
 			},
 		},
@@ -103,7 +101,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2, 3, 4},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareDealer(key, plan, nil, guard)
+				_, out, err := StartReshareDealer(key, plan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
 			},
 		},
@@ -112,7 +110,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    3,
 			parties: tss.PartySet{1, 2, 3},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareReceiver(plan, 3, nil, guard)
+				_, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: 3}, guard)
 				return out, false, err
 			},
 		},
@@ -121,7 +119,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2, 3},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
-				_, out, err := StartReshareOverlap(key, plan, nil, guard)
+				_, out, err := StartReshareOverlap(key, plan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
 			},
 		},

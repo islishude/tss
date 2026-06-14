@@ -3,7 +3,6 @@
 package secp256k1_test
 
 import (
-	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/binary"
 	"errors"
@@ -133,17 +132,16 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, opts cggmp.Keyg
 	}
 	sessions := make(map[tss.PartyID]*cggmp.KeygenSession, len(parties))
 	queue := make([]tss.Envelope, 0)
+	plan, err := cggmp.NewKeygenPlanWithPaillierBits(sessionID, parties, threshold, opts.EnableHD, opts.PaillierBits)
+	if err != nil {
+		return nil, err
+	}
 	for _, id := range parties {
 		guard, err := security.guard(id, partySet, sessionID)
 		if err != nil {
 			return nil, err
 		}
-		session, out, err := cggmp.StartKeygenWithOptions(tss.ThresholdConfig{
-			Threshold: threshold,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
-		}, opts, guard)
+		session, out, err := cggmp.StartKeygen(plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			return nil, err
 		}
@@ -187,7 +185,11 @@ func runExampleCGGMPPresign(
 		if err != nil {
 			return nil, err
 		}
-		session, out, err := cggmp.StartPresignWithContext(shares[id], sessionID, signers, ctx, guard)
+		plan, err := cggmp.NewPresignPlan(shares[id], sessionID, signers, ctx)
+		if err != nil {
+			return nil, err
+		}
+		session, out, err := cggmp.StartPresign(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			return nil, err
 		}
@@ -232,7 +234,11 @@ func runExampleCGGMPSign(
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := cggmp.StartSign(context.Background(), shares[id], presigns[id], sessionID, request, guard)
+		plan, err := cggmp.NewSignPlan(shares[id], presigns[id], sessionID, request)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, out, err := cggmp.StartSign(shares[id], presigns[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			return nil, nil, err
 		}

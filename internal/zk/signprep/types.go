@@ -13,6 +13,7 @@ type Statement struct {
 	SessionID            tss.SessionID
 	Party                tss.PartyID
 	Signers              []tss.PartyID
+	PlanHash             []byte
 	ContextHash          []byte
 	AdditiveShift        []byte
 	PublicKey            []byte

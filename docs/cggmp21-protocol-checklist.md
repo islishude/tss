@@ -33,7 +33,7 @@ Ring-Pedersen Πprm semantics.
 
 | Requirement                                                                         | Code Location                                                | Status |
 | ----------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------ |
-| Bind presigns to `PresignContext` before nonce generation                           | `StartPresignWithContext`                                    | DONE   |
+| Bind presigns to `PresignContext` before nonce generation                           | `NewPresignPlan` + `StartPresign`                            | DONE   |
 | Bind key id, chain id, derivation path, policy domain, and message domain           | `presignContextHash`, `Presign` TLV                          | DONE   |
 | Move BIP32 additive shift into presign creation                                     | `preparePresignContext`, `tryEmitRound3`                     | DONE   |
 | Reject online signing under a mismatched context or additive shift before consuming | `StartSign`                                                  | DONE   |

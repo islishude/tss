@@ -76,14 +76,12 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	config := tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      11,
-		SessionID: sessionID,
+	plan, err := NewKeygenPlan(sessionID, parties, 2, false)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	session, _, err := StartKeygen(config, tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies()))
+	session, _, err := StartKeygen(plan, tss.LocalConfig{Self: 11}, tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, FROSTPolicies()))
 	if err != nil {
 		t.Fatal(err)
 	}

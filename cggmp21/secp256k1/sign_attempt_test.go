@@ -382,12 +382,14 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	contextHash := bytes.Repeat([]byte{0x22}, sha256.Size)
 	digest := bytes.Repeat([]byte{marker}, sha256.Size)
 	digestBindingHash := digestHash(digest, contextHash)
+	signPlanHash := bytes.Repeat([]byte{0x33}, sha256.Size)
 	payload := signPartialPayload{
 		S:                   big.NewInt(1),
 		PresignTranscript:   bytes.Repeat([]byte{0x11}, sha256.Size),
 		PresignContext:      contextHash,
 		DigestHash:          digestBindingHash,
 		PartialEquationHash: bytes.Repeat([]byte{0x44}, sha256.Size),
+		PlanHash:            signPlanHash,
 	}
 	payloadBytes, err := marshalSignPartialPayload(payload)
 	if err != nil {
@@ -423,6 +425,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		SessionID:                  sessionID,
 		Party:                      1,
 		SignerSetHash:              signAttemptSignerSetHash([]tss.PartyID{1, 2}),
+		SignPlanHash:               signPlanHash,
 		ContextHash:                contextHash,
 		Digest:                     digest,
 		DigestBindingHash:          digestBindingHash,

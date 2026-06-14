@@ -67,7 +67,7 @@ func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers [
 	sessions := make(map[tss.PartyID]*PresignSession)
 	var pending []tss.Envelope
 	for _, party := range signers {
-		ps, out, err := StartPresign(shares[party], sessionID, signers)
+		ps, out, err := startTestPresign(shares[party], sessionID, signers)
 		if err != nil {
 			t.Fatal(err)
 		}

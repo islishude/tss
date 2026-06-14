@@ -1,9 +1,12 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
+	"sync"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -12,7 +15,6 @@ import (
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
-	"sync"
 )
 
 const (
@@ -32,6 +34,7 @@ type RefreshSession struct {
 	cfg             tss.ThresholdConfig
 	log             tss.Logger
 	limits          Limits
+	planHash        []byte
 	commits         map[tss.PartyID][][]byte
 	shares          map[tss.PartyID]*big.Int
 	completed       bool
@@ -50,19 +53,29 @@ type RefreshSession struct {
 // The participant set and threshold are fixed to oldKey.state.parties and
 // oldKey.state.threshold. The group public key and chain code are preserved from the
 // original key share.
-func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
+func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, errors.New("nil old key share")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
 	}
-	if config.Self != oldKey.state.party {
-		return nil, nil, errors.New("config.Self must match the old key's party ID")
+	config, err := plan.thresholdConfig(local)
+	if err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	if config.Threshold != oldKey.state.threshold {
-		return nil, nil, ErrUnsupportedRefreshThresholdChange
+	if local.Self != oldKey.state.party {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self must match the old key's party ID"))
 	}
-	config.Parties = append([]tss.PartyID(nil), oldKey.state.parties...)
+	if plan.state.threshold != oldKey.state.threshold ||
+		!bytes.Equal(plan.state.publicKey, oldKey.state.publicKey) ||
+		!bytes.Equal(plan.state.chainCode, oldKey.state.chainCode) ||
+		!slices.Equal(plan.state.parties, oldKey.state.parties) {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("refresh plan does not match old key share"))
+	}
 	limits := DefaultLimits()
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
@@ -72,7 +85,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 		return nil, nil, err
 	}
 	// Generate a new Paillier keypair for key rotation.
-	newPaillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), defaultPaillierBits())
+	newPaillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), plan.state.paillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -84,7 +97,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.Reader(), refreshPaillierDomain(config, config.Self, newPaillierPubBytes), newPaillierKey, uint32(config.Self))
+	modProof, err := zkpai.ProveModulus(config.Reader(), refreshPaillierDomain(config, config.Self, newPaillierPubBytes, planHash), newPaillierKey, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -100,7 +113,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 	if err != nil {
 		return nil, nil, err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), refreshRingPedersenDomain(config, config.Self, ringPedersenParamsBytes), newPaillierKey, ringPedersenParams, ringPedersenLambda, uint32(config.Self))
+	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), refreshRingPedersenDomain(config, config.Self, ringPedersenParamsBytes, planHash), newPaillierKey, ringPedersenParams, ringPedersenLambda, uint32(config.Self))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,6 +142,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 		cfg:             config,
 		log:             config.Logger(),
 		limits:          limits,
+		planHash:        append([]byte(nil), planHash...),
 		commits:         map[tss.PartyID][][]byte{oldKey.state.party: commitments},
 		shares:          map[tss.PartyID]*big.Int{oldKey.state.party: shamir.Eval(poly, oldKey.state.party, secp.Order())},
 		confirmations:   make(map[tss.PartyID][]byte, len(oldKey.state.parties)),
@@ -149,6 +163,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 		PaillierProof:      modProofBytes,
 		RingPedersenParams: ringPedersenParamsBytes,
 		RingPedersenProof:  ringPedersenProofBytes,
+		PlanHash:           planHash,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -163,7 +178,7 @@ func StartRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guard *tss.Envel
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalRefreshSharePayload(refreshSharePayload{Share: share})
+		payload, err := marshalRefreshSharePayload(refreshSharePayload{Share: share, PlanHash: planHash})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -233,6 +248,9 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
+		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
 		if err := validateRefreshCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
@@ -255,7 +273,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
-		if !zkpai.VerifyModulus(refreshPaillierDomain(s.cfg, env.From, p.PaillierPublicKey), pk, uint32(env.From), proof) {
+		if !zkpai.VerifyModulus(refreshPaillierDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, uint32(env.From), proof) {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -303,7 +321,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
-		if !zkpai.VerifyRingPedersen(refreshRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams), ringParams, uint32(env.From), ringProof) {
+		if !zkpai.VerifyRingPedersen(refreshRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, uint32(env.From), ringProof) {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -324,6 +342,9 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 		p, err := unmarshalRefreshSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		share := secp.ScalarFromBigInt(p.Share)
 		s.shares[env.From] = share.BigInt()

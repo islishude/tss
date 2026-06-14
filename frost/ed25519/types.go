@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -58,6 +59,7 @@ type keyShareState struct {
 	verificationShares   []VerificationShare
 	keygenSessionID      tss.SessionID
 	keygenTranscriptHash []byte
+	planHash             []byte
 	keygenConfirmations  [][]byte
 }
 
@@ -148,6 +150,15 @@ func (k *KeyShare) KeygenTranscriptHashBytes() []byte {
 	return slices.Clone(k.state.keygenTranscriptHash)
 }
 
+// PlanHashBytes returns a copy of the lifecycle plan hash that produced this
+// key share.
+func (k *KeyShare) PlanHashBytes() []byte {
+	if k == nil || k.state == nil {
+		return nil
+	}
+	return slices.Clone(k.state.planHash)
+}
+
 // KeygenConfirmations returns a deep copy of the keygen confirmation set.
 func (k *KeyShare) KeygenConfirmations() [][]byte {
 	if k == nil || k.state == nil {
@@ -190,7 +201,7 @@ func (k KeyShare) redactedString() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenSessionID:%s KeygenTranscriptHash:%x KeygenConfirmations:%d}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenSessionID:%s KeygenTranscriptHash:%x PlanHash:%d bytes KeygenConfirmations:%d}",
 		k.state.version,
 		k.state.party,
 		k.state.threshold,
@@ -201,6 +212,7 @@ func (k KeyShare) redactedString() string {
 		len(k.state.verificationShares),
 		k.state.keygenSessionID,
 		k.state.keygenTranscriptHash,
+		len(k.state.planHash),
 		len(k.state.keygenConfirmations),
 	)
 }
@@ -241,6 +253,9 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	}
 	if len(k.state.keygenTranscriptHash) == 0 {
 		return errors.New("key share has no keygen transcript hash")
+	}
+	if len(k.state.planHash) != sha256.Size {
+		return errors.New("key share has no lifecycle plan hash")
 	}
 	if _, err := edScalarFromSecret(k.state.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
@@ -395,6 +410,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		verificationShares:   cloneVerificationShares(k.state.verificationShares),
 		keygenSessionID:      k.state.keygenSessionID,
 		keygenTranscriptHash: slices.Clone(k.state.keygenTranscriptHash),
+		planHash:             slices.Clone(k.state.planHash),
 		keygenConfirmations:  wireutil.CloneByteSlices(k.state.keygenConfirmations),
 	}}
 }

@@ -54,6 +54,13 @@ func (b *Builder) AppendUint32(label string, value uint32) {
 	b.append(label, wire.Uint32(value))
 }
 
+// AppendUint64 appends a labeled big-endian uint64.
+func (b *Builder) AppendUint64(label string, value uint64) {
+	var encoded [8]byte
+	binary.BigEndian.PutUint64(encoded[:], value)
+	b.append(label, encoded[:])
+}
+
 // AppendBool appends a labeled canonical bool.
 func (b *Builder) AppendBool(label string, value bool) {
 	b.append(label, wire.Bool(value))

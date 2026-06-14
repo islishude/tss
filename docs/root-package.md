@@ -2,32 +2,30 @@
 
 The `github.com/islishude/tss` root package provides shared types used by both `frost/ed25519` and `cggmp21/secp256k1`.
 
-## ThresholdConfig
+## LocalConfig
 
-`ThresholdConfig` carries local participant configuration for a protocol run. It is validated by `Validate()` and passed to `StartKeygen`, `StartPresign`, and `StartSign` constructors.
+`LocalConfig` carries only party-local runtime dependencies. Lifecycle-wide intent such as the session ID, threshold, participant set, signer set, HD mode, and message context belongs in the protocol-specific immutable plan.
 
 ```go
-type ThresholdConfig struct {
-    Threshold    int
-    Parties      []PartyID
+type LocalConfig struct {
     Self         PartyID
-    SessionID    SessionID
     Rand         io.Reader       // optional; defaults to crypto/rand
     Context      context.Context // optional; defaults to context.Background()
-    RoundTimeout time.Duration   // reserved for future use
+    RoundTimeout time.Duration
     Log          Logger          // optional; defaults to no-op
 }
 ```
 
-`Validate()` checks:
+Protocol lifecycle APIs use the plan-first shape:
 
-- `Threshold > 0`, `len(Parties) > 0`, `Threshold <= len(Parties)`.
-- No duplicate or zero-value party IDs.
-- `Self` is in the party set.
+```go
+plan, err := secp256k1.NewKeygenPlan(sessionID, parties, threshold, enableHD)
+session, out, err := secp256k1.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
+```
 
-`SortedParties()` returns the canonical ascending-order copy used by transcript binding and interpolation.
+Plan constructors canonicalize and validate global intent. Start functions validate `LocalConfig.Self` against that plan and return `ErrCodeInvalidConfig` for invalid local startup configuration.
 
-`Reader()` returns `c.Rand` when set, falling back to `crypto/rand.Reader`.
+`ThresholdConfig` remains the protocol state-machine representation assembled from a validated plan plus `LocalConfig`; lifecycle callers should not use it to express global intent.
 
 ## PartyID
 
@@ -266,7 +264,7 @@ type Logger interface {
 
 `NopLogger()` returns a no-op implementation. `SLogger` adapts `log/slog.Logger` via `tss.NewSLogger(slog.Default())`.
 
-Set `ThresholdConfig.Log` to capture structured logs. Protocol completion and failure events include `party_id` and `session_id` for cross-party correlation.
+Set `LocalConfig.Log` to capture structured logs. Protocol completion and failure events include `party_id` and `session_id` for cross-party correlation.
 
 ## Algorithm & Signature
 
@@ -324,4 +322,4 @@ These are **reference/demo implementations**. Production deployments should use 
 ## Party Utilities
 
 - `ContainsParty(parties, id)` — reports whether `id` appears in `parties`.
-- `SortParties(parties)` — returns a sorted copy. Used by `ThresholdConfig.SortedParties()` and by protocol handlers that need canonical signer ordering.
+- `SortParties(parties)` — returns a sorted copy used by plan constructors and protocol handlers that need canonical participant ordering.

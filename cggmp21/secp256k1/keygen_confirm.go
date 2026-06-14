@@ -32,6 +32,7 @@ type KeygenConfirmation struct {
 	TranscriptHash  []byte        `wire:"6,bytes"`
 	CommitmentsHash []byte        `wire:"7,bytes"`
 	ChainCode       []byte        `wire:"8,bytes"`
+	PlanHash        []byte        `wire:"9,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for KeygenConfirmation.
@@ -61,6 +62,7 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		TranscriptHash:  slices.Clone(k.state.keygenTranscriptHash),
 		CommitmentsHash: keygenCommitmentsHash(k.state.groupCommitments),
 		ChainCode:       slices.Clone(k.state.chainCode),
+		PlanHash:        slices.Clone(k.state.planHash),
 	}, nil
 }
 
@@ -92,6 +94,9 @@ func (c KeygenConfirmation) Validate() error {
 	}
 	if len(c.ChainCode) != 0 && len(c.ChainCode) != 32 {
 		return errors.New("keygen confirmation: chain code must be empty or 32 bytes")
+	}
+	if len(c.PlanHash) != sha256.Size {
+		return errors.New("keygen confirmation: invalid plan hash length")
 	}
 	if err := wire.ValidateStrictSortedIDs(c.Parties); err != nil {
 		return fmt.Errorf("keygen confirmation: %w", err)
@@ -208,6 +213,9 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 		if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
 			return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
 		}
+		if !bytes.Equal(c.PlanHash, localConf.PlanHash) {
+			return fmt.Errorf("keygen confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
+		}
 		chainCodes[c.Sender] = slices.Clone(c.ChainCode)
 	}
 
@@ -266,6 +274,9 @@ func verifyKeygenConfirmationForShare(local *KeyShare, c *KeygenConfirmation) er
 	}
 	if !bytes.Equal(c.CommitmentsHash, localConf.CommitmentsHash) {
 		return fmt.Errorf("keygen confirmation commitments mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.PlanHash, localConf.PlanHash) {
+		return fmt.Errorf("keygen confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
 	}
 	return nil
 }
@@ -353,6 +364,9 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 	}
 	if !bytes.Equal(canonical, env.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical keygen confirmation"))
+	}
+	if err := requirePlanHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 	if existing, ok := s.confirmations[env.From]; ok {
 		if bytes.Equal(existing, canonical) {

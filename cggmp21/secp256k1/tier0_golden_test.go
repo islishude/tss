@@ -44,7 +44,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
-	payload := keygenSharePayload{Share: big.NewInt(1)}
+	payload := keygenSharePayload{Share: big.NewInt(1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -79,6 +79,7 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
 		PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
+		PlanHash:            bytes.Repeat([]byte{0xde}, 32),
 	}
 	raw, err := marshalSignPartialPayload(payload)
 	if err != nil {
@@ -145,6 +146,7 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,
+		PlanHash: bytes.Repeat([]byte{0x91}, 32),
 	}
 	raw, err := marshalPresignRound3Payload(payload)
 	if err != nil {

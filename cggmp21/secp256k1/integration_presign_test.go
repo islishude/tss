@@ -663,11 +663,16 @@ func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
-	session, out, err := StartSign(context.Background(), shares[1], presigns[1], sessionID, SignRequest{
+	plan, err := NewSignPlan(shares[1], presigns[1], sessionID, SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("missing store"),
 		LowS:    true,
-	}, guard)
+	})
+	var session *SignSession
+	var out []tss.Envelope
+	if err == nil {
+		session, out, err = StartSign(shares[1], presigns[1], plan, tss.LocalConfig{Self: 1, Context: context.Background()}, guard)
+	}
 	if session != nil || out != nil {
 		t.Fatal("StartSign without store returned signing output")
 	}
@@ -684,11 +689,11 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, _, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, _, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	_, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -920,11 +925,11 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1, out1, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+			s1, out1, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
-			s2, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+			s2, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -959,11 +964,11 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, _, err := StartPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, _, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := StartPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	_, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
 	if err != nil {
 		t.Fatal(err)
 	}

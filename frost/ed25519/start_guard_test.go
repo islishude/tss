@@ -18,6 +18,26 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	keygenPlan, err := NewKeygenPlan(sessionID, parties, 2, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	signPlan, err := NewSignPlan(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("guard"), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshPlan, err := NewRefreshPlan(shares[1], sessionID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	resharePlan, err := NewResharePlan(shares[1], sessionID, newParties, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recipientPlan, err := NewResharePlanFromPublic(shares[1].state.publicKey, nil, parties, sessionID, newParties, 2)
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	type startCase struct {
 		name    string
@@ -32,12 +52,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: parties,
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartKeygen(tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   parties,
-					Self:      1,
-					SessionID: sessionID,
-				}, guard)
+				_, out, err := StartKeygen(keygenPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
 			},
 		},
@@ -46,7 +61,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: parties,
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartSign(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("guard"), guard)
+				_, out, err := StartSign(shares[1], signPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
 			},
 		},
@@ -55,12 +70,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: parties,
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartRefresh(shares[1], tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   parties,
-					Self:      1,
-					SessionID: sessionID,
-				}, guard)
+				_, out, err := StartRefresh(shares[1], refreshPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
 			},
 		},
@@ -69,12 +79,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: tss.PartySet{1, 2, 3},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartReshare(shares[1], newParties, 2, tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   parties,
-					Self:      1,
-					SessionID: sessionID,
-				}, guard)
+				_, out, err := StartReshare(shares[1], resharePlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
 			},
 		},
@@ -83,12 +88,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    3,
 			parties: tss.PartySet{1, 2, 3},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, err := StartReshareRecipient(shares[1].state.publicKey, nil, parties, newParties, 2, tss.ThresholdConfig{
-					Threshold: 2,
-					Parties:   newParties,
-					Self:      3,
-					SessionID: sessionID,
-				}, guard)
+				_, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: 3}, guard)
 				return nil, err
 			},
 		},

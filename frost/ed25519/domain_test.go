@@ -155,27 +155,14 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Give party 2 (message B) party 1's commitment → party 2 emits partial (for message B).
+			// Give party 2 (message B) party 1's message-A commitment.
+			// The lifecycle plan hash rejects the cross-message intent before a
+			// partial is emitted.
 			ca := out1A[0]
 			ca.Security.Authenticated = true
 			ca.Security.AuthenticatedParty = ca.From
-			partialsB, err := sess2B.HandleSignMessage(testutil.DeliverEnvelope(ca))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(partialsB) == 0 || partialsB[0].PayloadType != payloadSignPartial {
-				t.Fatal("expected party 2 to emit partial for message B")
-			}
-			part2B := partialsB[0]
-			part2B.Security.Authenticated = true
-			part2B.Security.AuthenticatedParty = part2B.From
-
-			// Deliver message-B partial to message-A session — binding factors mismatch.
-			_, err = sess1A.HandleSignMessage(testutil.DeliverEnvelope(part2B))
-			pe := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
-			if pe.Blame == nil {
-				t.Fatal("expected blame evidence on verification failure")
-			}
+			_, err = sess2B.HandleSignMessage(testutil.DeliverEnvelope(ca))
+			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
 		{name: "wrong-signer-set", fn: func(t *testing.T) {
 			t.Parallel()
@@ -196,14 +183,14 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Party 2 for 3-signer set — to get partial with 3-signer Lagrange.
-			sess2_3, out2_3, err := startFROSTSign(shares[2], sid, signers3, messageA)
+			// Party 2 for 3-signer set.
+			sess2_3, _, err := startFROSTSign(shares[2], sid, signers3, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 3 for 3-signer set.
-			_, out3, err := startFROSTSign(shares[3], sid, signers3, messageA)
+			_, _, err = startFROSTSign(shares[3], sid, signers3, messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -217,33 +204,13 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Give party 2 (3-signer) party 1's and party 3's commitments → parry 2 emits 3-signer partial.
+			// Give party 2 (3-signer) party 1's 2-signer commitment. The plan
+			// hash rejects the cross-signer-set intent before a partial is emitted.
 			ca := out1[0]
 			ca.Security.Authenticated = true
 			ca.Security.AuthenticatedParty = ca.From
 			_, err = sess2_3.HandleSignMessage(testutil.DeliverEnvelope(ca))
-			if err != nil {
-				t.Fatal(err)
-			}
-			cc3 := out3[0]
-			cc3.Security.Authenticated = true
-			cc3.Security.AuthenticatedParty = cc3.From
-			partials3, err := sess2_3.HandleSignMessage(testutil.DeliverEnvelope(cc3))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(partials3) == 0 || partials3[0].PayloadType != payloadSignPartial {
-				t.Fatal("expected party 2 to emit 3-signer partial")
-			}
-			part2_3 := partials3[0]
-			part2_3.Security.Authenticated = true
-			part2_3.Security.AuthenticatedParty = part2_3.From
-
-			// Deliver 3-signer partial to 2-signer session — Lagrange/binding factor mismatch.
-			_, err = sess1_2.HandleSignMessage(testutil.DeliverEnvelope(part2_3))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
-
-			_ = out2_3 // avoid unused warning
 		}},
 		{name: "wrong-public-key-HD", fn: func(t *testing.T) {
 			t.Parallel()
@@ -279,8 +246,8 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Party 2 with shift2 — to get partial computed with wrong shift.
-			sess2_s2, out2_s2, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
+			// Party 2 with shift2.
+			sess2_s2, _, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
 				SignOptions{AdditiveShift: child2.AdditiveShift})
 			if err != nil {
 				t.Fatal(err)
@@ -295,26 +262,13 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			// Give party 2 (shift2) party 1's commitment → party 2 emits shift2 partial.
+			// Give party 2 (shift2) party 1's shift1 commitment. The plan hash
+			// rejects the cross-HD-path intent before a partial is emitted.
 			ca := out1[0]
 			ca.Security.Authenticated = true
 			ca.Security.AuthenticatedParty = ca.From
-			partials2, err := sess2_s2.HandleSignMessage(testutil.DeliverEnvelope(ca))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if len(partials2) == 0 || partials2[0].PayloadType != payloadSignPartial {
-				t.Fatal("expected party 2 to emit shift2 partial")
-			}
-			part2_s2 := partials2[0]
-			part2_s2.Security.Authenticated = true
-			part2_s2.Security.AuthenticatedParty = part2_s2.From
-
-			// Deliver shift2 partial to shift1 session — verifyKey mismatch in binding factors.
-			_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(part2_s2))
+			_, err = sess2_s2.HandleSignMessage(testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
-
-			_ = out2_s2 // avoid unused warning
 		}},
 	}
 

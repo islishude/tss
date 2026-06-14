@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 
 	fed "filippo.io/edwards25519"
@@ -20,6 +21,7 @@ type SignSession struct {
 	limits           Limits
 	message          []byte
 	signers          []tss.PartyID
+	planHash         []byte
 	commitments      map[tss.PartyID]nonceCommitment
 	partials         map[tss.PartyID]*fed.Scalar
 	partialEnvelopes map[tss.PartyID]tss.Envelope
@@ -36,8 +38,9 @@ type SignSession struct {
 }
 
 type nonceCommitment struct {
-	D []byte `wire:"1,bytes,max_bytes=point"` // hiding nonce commitment
-	E []byte `wire:"2,bytes,max_bytes=point"` // binding nonce commitment
+	D        []byte `wire:"1,bytes,max_bytes=point"` // hiding nonce commitment
+	E        []byte `wire:"2,bytes,max_bytes=point"` // binding nonce commitment
+	PlanHash []byte `wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for nonceCommitment.
@@ -52,7 +55,8 @@ func (nonceCommitment) MarshalJSON() ([]byte, error) {
 }
 
 type signPartialPayload struct {
-	Z []byte `wire:"1,bytes,max_bytes=scalar"`
+	Z        []byte `wire:"1,bytes,max_bytes=scalar"`
+	PlanHash []byte `wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.
@@ -66,48 +70,58 @@ func (signPartialPayload) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("frost ed25519 sign partial payload must use wire encoding (MarshalBinary)")
 }
 
-// StartSign starts a FROST signing session over the raw message.
-func StartSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
-	return StartSignWithOptions(key, sessionID, signers, message, SignOptions{}, guard)
-}
-
-// StartSignWithOptions starts a FROST signing session with optional HD additive shift.
-func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+// StartSign starts a FROST signing session from a shared immutable lifecycle
+// plan and local runtime configuration.
+func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	if key == nil || key.state == nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil key share"))
+	}
+	if local.Self == 0 {
+		local.Self = key.state.party
+	}
 	if err := key.ValidateConsistency(); err != nil {
-		return nil, nil, err
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
-		return nil, nil, err
+	if plan == nil || plan.state == nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil sign plan"))
 	}
-	signers = tss.SortParties(signers)
+	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
+	}
+	signers := slices.Clone(plan.state.signers)
+	if err := plan.validateKey(key, local); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
+	}
 	if len(signers) < key.state.threshold {
-		return nil, nil, errors.New("not enough signers")
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("not enough signers"))
 	}
-	if !tss.ContainsParty(signers, key.state.party) {
-		return nil, nil, errors.New("local party is not in signer set")
+	if !tss.ContainsParty(signers, local.Self) {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("local party is not in signer set"))
 	}
 	limits := DefaultLimits()
-	if opts.Limits != nil {
-		limits = *opts.Limits
-	}
 	if limits.Payload.MaxMessageBytes <= 0 {
-		return nil, nil, errors.New("max message bytes must be positive")
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("max message bytes must be positive"))
 	}
+	message := slices.Clone(plan.state.message)
 	if len(message) > limits.Payload.MaxMessageBytes {
-		return nil, nil, fmt.Errorf("message too large: %d > %d", len(message), limits.Payload.MaxMessageBytes)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, fmt.Errorf("message too large: %d > %d", len(message), limits.Payload.MaxMessageBytes))
 	}
 	if err := validateSignerSet(key, signers, limits); err != nil {
-		return nil, nil, err
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	verifyKey := key.PublicKeyBytes()
 	var deltaScalar *fed.Scalar
-	if len(opts.AdditiveShift) > 0 {
-		shift, err := edcurve.ScalarFromCanonical(opts.AdditiveShift)
+	if len(plan.state.additiveShift) > 0 {
+		shift, err := edcurve.ScalarFromCanonical(plan.state.additiveShift)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
 		}
 		deltaScalar = shift
-		verifyKey, err = DerivePublicKey(key.state.publicKey, opts.AdditiveShift)
+		verifyKey, err = DerivePublicKey(key.state.publicKey, plan.state.additiveShift)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -118,11 +132,11 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	}
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	dBytes, err := signingNonceGenerate(x, opts.NonceReader)
+	dBytes, err := signingNonceGenerate(x, local.Rand)
 	if err != nil {
 		return nil, nil, err
 	}
-	eBytes, err := signingNonceGenerate(x, opts.NonceReader)
+	eBytes, err := signingNonceGenerate(x, local.Rand)
 	if err != nil {
 		clear(dBytes)
 		return nil, nil, err
@@ -143,7 +157,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 
 	dPoint := fed.NewIdentityPoint().ScalarBaseMult(d)
 	ePoint := fed.NewIdentityPoint().ScalarBaseMult(e)
-	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes()})
+	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: planHash})
 	if err != nil {
 		clear(dBytes)
 		clear(eBytes)
@@ -152,7 +166,7 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
-		SessionID:   sessionID,
+		SessionID:   plan.state.sessionID,
 		Round:       1,
 		From:        key.state.party,
 		PayloadType: payloadSignCommitment,
@@ -165,12 +179,13 @@ func StartSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.
 	}
 	s := &SignSession{
 		key:              key,
-		sessionID:        sessionID,
+		sessionID:        plan.state.sessionID,
 		log:              tss.NopLogger(),
 		limits:           limits,
 		message:          append([]byte(nil), message...),
 		signers:          signers,
-		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: {D: dPoint.Bytes(), E: ePoint.Bytes()}},
+		planHash:         slices.Clone(planHash),
+		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: {D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: slices.Clone(planHash)}},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
 		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
 		dNonce:           dBytes,
@@ -239,8 +254,11 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
+		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
 		if existing, ok := s.commitments[env.From]; ok {
-			if bytes.Equal(existing.D, p.D) && bytes.Equal(existing.E, p.E) {
+			if bytes.Equal(existing.D, p.D) && bytes.Equal(existing.E, p.E) && bytes.Equal(existing.PlanHash, p.PlanHash) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting nonce commitment"))
@@ -254,6 +272,9 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		p, err := unmarshalSignPartialPayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		partial, err := edcurve.ScalarFromCanonical(p.Z)
 		if err != nil {
@@ -388,7 +409,11 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
 		guard := newInProcessGuard(id, tss.PartySet(shares[id].state.parties), sessionID)
-		session, out, err := StartSignWithOptions(shares[id], sessionID, ids, message, opts, guard)
+		plan, err := NewSignPlan(shares[id], sessionID, ids, message, opts.AdditiveShift)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, out, err := StartSign(shares[id], plan, tss.LocalConfig{Self: id, Rand: opts.NonceReader}, guard)
 		if err != nil {
 			return nil, nil, err
 		}

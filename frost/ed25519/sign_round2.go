@@ -58,7 +58,7 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 	if env, ok := s.partialEnvelopes[id]; ok {
 		return env.Clone()
 	}
-	payload, err := marshalSignPartialPayload(signPartialPayload{Z: partial.Bytes()})
+	payload, err := marshalSignPartialPayload(signPartialPayload{Z: partial.Bytes(), PlanHash: s.planHash})
 	if err != nil {
 		return tss.Envelope{}
 	}

@@ -120,7 +120,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if badShare.Sign() == 0 {
 		badShare.SetInt64(1)
 	}
-	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: badShare})
+	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: badShare, PlanHash: payload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -136,8 +136,8 @@ func TestThresholdECDSARefreshRejectsMismatchedSelf(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
-	if err == nil || !strings.Contains(err.Error(), "config.Self") {
-		t.Fatalf("expected config.Self mismatch rejection, got %v", err)
+	if err == nil || !strings.Contains(err.Error(), "local self") {
+		t.Fatalf("expected local self mismatch rejection, got %v", err)
 	}
 }
 

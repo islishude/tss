@@ -38,6 +38,9 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round and duplicate checks done in dispatcher)
+	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	delta := secp.ScalarFromBigInt(p.Delta)
@@ -94,6 +97,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		SessionID:            s.sessionID,
 		Party:                from,
 		Signers:              slices.Clone(s.signers),
+		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
 		AdditiveShift:        slices.Clone(s.additiveShift),
 		PublicKey:            slices.Clone(s.key.state.publicKey),
@@ -209,6 +213,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		SessionID:            s.sessionID,
 		Party:                s.key.state.party,
 		Signers:              slices.Clone(s.signers),
+		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
 		AdditiveShift:        slices.Clone(s.additiveShift),
 		PublicKey:            slices.Clone(s.key.state.publicKey),
@@ -242,6 +247,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proofBytes,
+		PlanHash: s.planHash,
 	})
 	if err != nil {
 		return nil, err
@@ -265,6 +271,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		context:              context,
 		contextHash:          append([]byte(nil), s.contextHash...),
 		additiveShift:        append([]byte(nil), s.additiveShift...),
+		planHash:             append([]byte(nil), s.planHash...),
 		publicKey:            append([]byte(nil), s.key.state.publicKey...),
 		keygenTranscriptHash: append([]byte(nil), s.key.state.keygenTranscriptHash...),
 		partiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
@@ -344,6 +351,7 @@ func (s *PresignSession) tryComplete() error {
 func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
 	t := transcript.New(presignTranscriptHashLabel)
 	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
 	t.AppendBytes("additive_shift", s.additiveShift)
 	t.AppendBytes("public_key", s.key.state.publicKey)
@@ -369,6 +377,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 func (s *PresignSession) round1Echo() []byte {
 	t := transcript.New(presignRound1EchoLabel)
 	t.AppendBytes("session_id", s.sessionID[:])
+	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
 	t.AppendBytes("additive_shift", s.additiveShift)
 	for _, id := range s.signers {

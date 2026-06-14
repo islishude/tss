@@ -162,6 +162,34 @@ type ThresholdConfig struct {
 	Log          Logger          `json:"-"`
 }
 
+// LocalConfig contains per-process runtime configuration for one protocol
+// participant. Consensus parameters such as threshold, party set, session ID,
+// signer set, derivation context, and HD enablement belong in protocol-specific
+// plan objects, not in LocalConfig.
+type LocalConfig struct {
+	Self         PartyID
+	Rand         io.Reader       `json:"-"`
+	Context      context.Context `json:"-"`
+	RoundTimeout time.Duration   `json:"-"`
+	Log          Logger          `json:"-"`
+}
+
+// Ctx returns the local configuration context or context.Background when unset.
+func (c LocalConfig) Ctx() context.Context {
+	if c.Context != nil {
+		return c.Context
+	}
+	return context.Background()
+}
+
+// Reader returns the configured randomness source or crypto/rand.
+func (c LocalConfig) Reader() io.Reader {
+	if c.Rand != nil {
+		return c.Rand
+	}
+	return rand.Reader
+}
+
 // Ctx returns the configuration context or context.Background when unset.
 func (c ThresholdConfig) Ctx() context.Context {
 	if c.Context != nil {

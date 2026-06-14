@@ -24,7 +24,7 @@ var hmacSHA512 = func(key, data []byte) (il, ir []byte) {
 
 // DeriveNonHardenedBIP32 performs non-hardened BIP32 public derivation for
 // threshold ECDSA keys. It returns the child public key, the cumulative
-// additive shift suitable for use in StartPresignWithContext, and the child
+// additive shift bound by NewPresignPlan, and the child
 // chain code.
 //
 // Only non-hardened indices (i < 2^31) are supported. If path is nil or empty,

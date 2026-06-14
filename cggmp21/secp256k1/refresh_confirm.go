@@ -27,6 +27,9 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 	if !bytes.Equal(canonical, env.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical refresh confirmation"))
 	}
+	if err := requirePlanHash("refresh confirmation", confirmation.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 	if existing, ok := s.confirmations[env.From]; ok {
 		if bytes.Equal(existing, canonical) {
 			return nil, nil

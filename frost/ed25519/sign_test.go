@@ -95,11 +95,8 @@ func TestStartSignRejectsMessageOverLimit(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	limits := TestLimits()
-	limits.Payload.MaxMessageBytes = 3
-	session, out, err := startFROSTSignWithOptions(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("four"), SignOptions{
-		Limits: &limits,
-	})
+	message := bytes.Repeat([]byte{'x'}, DefaultLimits().Payload.MaxMessageBytes+1)
+	session, out, err := startFROSTSign(shares[1], sessionID, []tss.PartyID{1, 2}, message)
 	if err == nil {
 		t.Fatal("expected oversized message to be rejected")
 	}
@@ -217,7 +214,7 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 	badScalar := fed.NewScalar().Add(partialScalar, edcurve.ScalarOne())
-	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: badScalar.Bytes()})
+	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: badScalar.Bytes(), PlanHash: partialPayload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}

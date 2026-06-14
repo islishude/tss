@@ -81,7 +81,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		chainCodeCommitAggregate = agg
 	}
-	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.commits, groupCommitments, verificationShares)
+	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, s.commits, groupCommitments, verificationShares)
 	share := &KeyShare{state: &keyShareState{
 		version:              tss.Version,
 		party:                s.cfg.Self,
@@ -94,6 +94,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		verificationShares:   verificationShares,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: keygenTranscriptHash,
+		planHash:             append([]byte(nil), s.planHash...),
 	}}
 	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
 		return nil, err

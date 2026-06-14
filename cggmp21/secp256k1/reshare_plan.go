@@ -35,6 +35,7 @@ type resharePlanState struct {
 	newParties            []tss.PartyID
 	newThreshold          int
 	chainCode             []byte
+	paillierBits          int
 }
 
 // SessionID returns the reshare session identifier.
@@ -129,6 +130,15 @@ func (p *ResharePlan) ChainCodeBytes() []byte {
 	return append([]byte(nil), p.state.chainCode...)
 }
 
+// PaillierBits returns the shared Paillier modulus size for new receiver
+// auxiliary material.
+func (p *ResharePlan) PaillierBits() int {
+	if p == nil || p.state == nil {
+		return 0
+	}
+	return p.state.paillierBits
+}
+
 // ReshareMessageHeader identifies one logical resharing message.
 type ReshareMessageHeader struct {
 	SessionID tss.SessionID
@@ -193,11 +203,28 @@ type ReshareOverlapSession = ReshareSession
 
 // NewResharePlan constructs a canonical plan from authenticated old key metadata.
 func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int) (*ResharePlan, error) {
+	return NewResharePlanWithPaillierBits(oldKey, sessionID, dealerParties, newParties, newThreshold, defaultPaillierBits())
+}
+
+// NewResharePlanWithPaillierBits constructs a canonical reshare plan with an
+// explicit Paillier modulus size shared by every new receiver.
+func NewResharePlanWithPaillierBits(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int, paillierBits int) (*ResharePlan, error) {
 	if oldKey == nil {
-		return nil, errors.New("nil old key share")
+		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
+	}
+	var party tss.PartyID
+	if oldKey.state != nil {
+		party = oldKey.state.party
 	}
 	if err := oldKey.Validate(); err != nil {
-		return nil, fmt.Errorf("invalid old key share: %w", err)
+		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old key share: %w", err))
+	}
+	defPaillierBits := defaultPaillierBits()
+	if paillierBits == 0 {
+		paillierBits = defPaillierBits
+	}
+	if paillierBits < defPaillierBits {
+		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, defPaillierBits))
 	}
 	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.verificationShares))
 	for _, vs := range oldKey.state.verificationShares {
@@ -215,12 +242,13 @@ func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, ne
 		newParties:            tss.SortParties(newParties),
 		newThreshold:          newThreshold,
 		chainCode:             append([]byte(nil), oldKey.state.chainCode...),
+		paillierBits:          paillierBits,
 	}}
 	if len(plan.state.dealerParties) == 0 {
 		plan.state.dealerParties = append([]tss.PartyID(nil), plan.state.oldParties...)
 	}
 	if err := plan.Validate(); err != nil {
-		return nil, err
+		return nil, invalidPlanConfig(party, err)
 	}
 	return plan, nil
 }
@@ -329,6 +357,12 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if len(p.state.chainCode) != 0 && len(p.state.chainCode) != 32 {
 		return errors.New("chain code must be empty or 32 bytes")
 	}
+	if p.state.paillierBits < defaultPaillierBits() {
+		return fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", p.state.paillierBits, defaultPaillierBits())
+	}
+	if limits.Paillier.MaxModulusBits > 0 && p.state.paillierBits > limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("paillier key size %d exceeds max %d", p.state.paillierBits, limits.Paillier.MaxModulusBits)
+	}
 	return nil
 }
 
@@ -350,6 +384,7 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendUint32("old_threshold", uint32(p.state.oldThreshold))
 	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
 	t.AppendBytes("chain_code", p.state.chainCode)
+	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
 	for _, id := range p.state.oldParties {
 		t.AppendUint32("old_party", uint32(id))
 		t.AppendBytes("old_verification_share", p.state.oldVerificationShares[id])

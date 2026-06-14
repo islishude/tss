@@ -161,6 +161,15 @@ func (k *KeyShare) ResharePlanHashBytes() []byte {
 	return slices.Clone(k.state.resharePlanHash)
 }
 
+// PlanHashBytes returns a copy of the lifecycle plan hash that produced this
+// key share.
+func (k *KeyShare) PlanHashBytes() []byte {
+	if k == nil || k.state == nil {
+		return nil
+	}
+	return slices.Clone(k.state.planHash)
+}
+
 // ShareProofBytes returns a copy of the Schnorr share-proof encoding.
 func (k *KeyShare) ShareProofBytes() []byte {
 	if k == nil || k.state == nil {
@@ -236,7 +245,7 @@ func (k KeyShare) redactedString() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
+		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes PlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
 		k.state.version,
 		k.state.party,
 		k.state.threshold,
@@ -254,6 +263,7 @@ func (k KeyShare) redactedString() string {
 		k.state.paillierProofSessionID,
 		k.state.paillierProofDomain,
 		len(k.state.resharePlanHash),
+		len(k.state.planHash),
 		len(k.state.shareProof),
 		k.state.keygenTranscriptHash,
 		len(k.state.logCiphertext),
@@ -350,9 +360,15 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if k.state.paillierProofDomain == "" {
 		return errors.New("missing paillier public proof domain")
 	}
+	if len(k.state.planHash) != sha256.Size {
+		return errors.New("missing lifecycle plan hash")
+	}
 	if k.state.paillierProofDomain == domainLabelResharePaillier {
 		if len(k.state.resharePlanHash) != sha256.Size {
 			return errors.New("missing reshare plan hash")
+		}
+		if !bytes.Equal(k.state.resharePlanHash, k.state.planHash) {
+			return errors.New("reshare plan hash does not match lifecycle plan hash")
 		}
 	} else if len(k.state.resharePlanHash) != 0 {
 		return errors.New("reshare plan hash is only valid for reshare key shares")
@@ -556,11 +572,11 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	}
 	switch k.state.paillierProofDomain {
 	case domainLabelKeygenModulus:
-		return keygenModulusDomain(config, party, paillierPublicKey), nil
+		return keygenModulusDomain(config, party, paillierPublicKey, k.state.planHash), nil
 	case domainLabelRefreshPaillier:
-		return refreshPaillierDomain(config, party, paillierPublicKey), nil
+		return refreshPaillierDomain(config, party, paillierPublicKey, k.state.planHash), nil
 	case domainLabelResharePaillier:
-		return resharePaillierDomain(config, party, paillierPublicKey, k.state.resharePlanHash), nil
+		return resharePaillierDomain(config, party, paillierPublicKey, k.state.planHash), nil
 	default:
 		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.state.paillierProofDomain)
 	}
@@ -696,6 +712,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		paillierProofSessionID: k.state.paillierProofSessionID,
 		paillierProofDomain:    k.state.paillierProofDomain,
 		resharePlanHash:        slices.Clone(k.state.resharePlanHash),
+		planHash:               slices.Clone(k.state.planHash),
 		shareProof:             slices.Clone(k.state.shareProof),
 		keygenTranscriptHash:   slices.Clone(k.state.keygenTranscriptHash),
 		logCiphertext:          slices.Clone(k.state.logCiphertext),

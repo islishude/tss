@@ -25,6 +25,7 @@ type KeygenSession struct {
 	chainCodes     map[tss.PartyID][]byte
 	chainCodeComms map[tss.PartyID][]byte
 	enableHD       bool
+	planHash       []byte
 	completed      bool
 	aborted        bool
 	pending        *KeyShare
@@ -38,6 +39,7 @@ type KeygenSession struct {
 type keygenCommitmentsPayload struct {
 	Commitments     [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
 	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty" wire:"2,bytes"`
+	PlanHash        []byte   `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
@@ -47,7 +49,8 @@ func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayl
 func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type keygenSharePayload struct {
-	Share []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
+	Share    []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
+	PlanHash []byte `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.
@@ -61,18 +64,18 @@ func (keygenSharePayload) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("frost ed25519 keygen share payload must use wire encoding (MarshalBinary)")
 }
 
-// StartKeygen starts dealerless DKG and returns outbound round-one envelopes.
-func StartKeygen(config tss.ThresholdConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
-	return StartKeygenWithOptions(config, KeygenOptions{}, guard)
-}
-
-// StartKeygenWithOptions starts dealerless DKG with optional HD chain code generation.
-func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+// StartKeygen starts dealerless DKG from a shared immutable lifecycle plan.
+func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	limits := DefaultLimits()
-	if opts.Limits != nil {
-		limits = *opts.Limits
+	config, err := plan.thresholdConfig(local)
+	if err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
@@ -92,7 +95,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 	}
 	var chainCode []byte
 	var chainCodeCommit []byte
-	if opts.EnableHD {
+	if plan.state.enableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
@@ -108,7 +111,8 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
-		enableHD: opts.EnableHD,
+		enableHD: plan.state.enableHD,
+		planHash: append([]byte(nil), planHash...),
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
 		},
@@ -118,7 +122,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit})
+	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit, PlanHash: planHash})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -133,7 +137,7 @@ func StartKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guar
 		}
 		share := evalScalarPolynomial(poly, id)
 		shareBytes := share.Bytes()
-		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: shareBytes})
+		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: shareBytes, PlanHash: planHash})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -205,6 +209,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
+		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
@@ -223,6 +230,9 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		p, err := unmarshalKeygenSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		scalar, err := edcurve.ScalarFromCanonical(p.Share)
 		if err != nil {

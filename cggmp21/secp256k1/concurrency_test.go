@@ -105,7 +105,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 		sess := make(map[tss.PartyID]*PresignSession, len(signers))
 		var round1, round2, round3 []tss.Envelope
 		for _, id := range signers {
-			s, out, err := StartPresign(shares[id], sessionID, signers)
+			s, out, err := startTestPresign(shares[id], sessionID, signers)
 			if err != nil {
 				t.Fatal(err)
 			}

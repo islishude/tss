@@ -67,7 +67,10 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if s.isReceiver {
 		s.shares[s.selfID] = shamir.Eval(poly, s.selfID, order)
 	}
-	payload, err := marshalReshareDealerCommitmentsPayload(reshareDealerCommitmentsPayload{Commitments: commitments})
+	payload, err := marshalReshareDealerCommitmentsPayload(reshareDealerCommitmentsPayload{
+		Commitments: commitments,
+		PlanHash:    s.planHash,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -88,6 +91,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 			Receiver:             id,
 			Share:                share,
 			DealerCommitmentHash: commitmentsHash,
+			PlanHash:             s.planHash,
 		})
 		if err != nil {
 			return nil, err
@@ -102,7 +106,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) initReceiverMaterial() error {
-	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), defaultPaillierBits())
+	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.state.paillierBits)
 	if err != nil {
 		return err
 	}

@@ -22,6 +22,7 @@ type resharePlanWire struct {
 	NewParties            []tss.PartyID                  `wire:"9,u32list,max_items=parties"`
 	NewThreshold          int                            `wire:"10,u32"`
 	ChainCode             []byte                         `wire:"11,bytes,max_bytes=scalar"`
+	PaillierBits          int                            `wire:"12,u32"`
 }
 
 // WireType returns the canonical wire type identifier for resharePlanWire.
@@ -55,6 +56,7 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 		NewParties:            p.state.newParties,
 		NewThreshold:          p.state.newThreshold,
 		ChainCode:             p.state.chainCode,
+		PaillierBits:          p.state.paillierBits,
 	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	if err != nil {
 		return nil, err
@@ -83,6 +85,9 @@ func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, err
 	}
 	if w.NewThreshold > limits.Threshold.MaxThreshold {
 		return nil, fmt.Errorf("new threshold too large: %d > %d", w.NewThreshold, limits.Threshold.MaxThreshold)
+	}
+	if w.PaillierBits > limits.Paillier.MaxModulusBits {
+		return nil, fmt.Errorf("paillier key size %d exceeds max %d", w.PaillierBits, limits.Paillier.MaxModulusBits)
 	}
 	if len(w.OldVerificationShares) != len(w.OldParties) {
 		return nil, fmt.Errorf("old verification share count must equal old party count")
@@ -113,6 +118,7 @@ func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, err
 		newParties:            w.NewParties,
 		newThreshold:          w.NewThreshold,
 		chainCode:             w.ChainCode,
+		paillierBits:          w.PaillierBits,
 	}}
 	if err := plan.ValidateWithLimits(limits); err != nil {
 		return nil, err

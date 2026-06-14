@@ -60,7 +60,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 				vs, _ := presignVerifyShare(presign, presign.PartyID())
 				p.PartialEquationHash = partialEquationHash(
 					signID, presign.PartyID(), p.PresignTranscript,
-					p.PresignContext, digest,
+					p.PresignContext, p.PlanHash, digest[:],
 					presign.LittleRBytes(), scalarBytes(p.S),
 					vs.KPoint, vs.ChiPoint,
 				)
@@ -262,7 +262,7 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 	presignSessions := map[tss.PartyID]*PresignSession{}
 	messages := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		session, out, err := StartPresign(shares[id], sessionID, signers)
+		session, out, err := startTestPresign(shares[id], sessionID, signers)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -452,7 +452,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	vs, _ := presignVerifyShare(presigns[maliciousSigner], maliciousSigner)
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
-		p.PresignContext, digest[:],
+		p.PresignContext, p.PlanHash, digest[:],
 		presigns[maliciousSigner].LittleRBytes(), scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)

@@ -128,6 +128,7 @@ type presignState struct {
 	context              PresignContext
 	contextHash          []byte
 	additiveShift        []byte
+	planHash             []byte
 	publicKey            []byte
 	keygenTranscriptHash []byte
 	partiesHash          []byte
@@ -221,6 +222,14 @@ func (p *Presign) AdditiveShiftBytes() []byte {
 	return slices.Clone(p.state.additiveShift)
 }
 
+// PlanHashBytes returns a copy of the presign lifecycle plan hash.
+func (p *Presign) PlanHashBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.planHash)
+}
+
 // PublicKeyBytes returns a copy of the bound group public key.
 func (p *Presign) PublicKeyBytes() []byte {
 	if p == nil || p.state == nil {
@@ -277,6 +286,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		Context:              p.state.context,
 		ContextHash:          p.state.contextHash,
 		AdditiveShift:        p.state.additiveShift,
+		PlanHash:             p.state.planHash,
 		Consumed:             consumed,
 		PublicKey:            p.state.publicKey,
 		KeygenTranscriptHash: p.state.keygenTranscriptHash,
@@ -299,6 +309,7 @@ func (p *Presign) ID() []byte {
 	t := transcript.New(presignIDLabel)
 	t.AppendBytes("context_hash", p.state.contextHash)
 	t.AppendBytes("additive_shift", p.state.additiveShift)
+	t.AppendBytes("plan_hash", p.state.planHash)
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
 	t.AppendBytes("parties_hash", p.state.partiesHash)
@@ -370,6 +381,9 @@ func (p *Presign) Validate() error {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
 	}
+	if len(p.state.planHash) != sha256.Size {
+		return errors.New("invalid presign plan hash")
+	}
 	if _, err := secp.PointFromBytes(p.state.publicKey); err != nil {
 		return fmt.Errorf("invalid presign public key binding: %w", err)
 	}
@@ -430,6 +444,7 @@ func (p *Presign) Destroy() {
 		p.state.delta.Destroy()
 	}
 	clear(p.state.additiveShift)
+	clear(p.state.planHash)
 }
 
 // PresignSession tracks the CGGMP21-style offline presign exchange.
@@ -445,6 +460,7 @@ type PresignSession struct {
 	context       PresignContext
 	contextHash   []byte
 	additiveShift []byte
+	planHash      []byte
 	paillier      *pai.PrivateKey
 	guard         *tss.EnvelopeGuard
 
@@ -523,6 +539,7 @@ type SignSession struct {
 	limits    Limits
 	digest    []byte
 	lowS      bool
+	planHash  []byte
 	publicKey []byte
 	partials  map[tss.PartyID]*big.Int
 	completed bool
@@ -550,6 +567,7 @@ type presignRound1Payload struct {
 	Gamma             []byte `json:"gamma" wire:"1,bytes,max_bytes=point"`
 	EncK              []byte `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
 	PaillierPublicKey []byte `json:"paillier_public_key" wire:"3,bytes,max_bytes=paillier_public_key"`
+	PlanHash          []byte `json:"plan_hash" wire:"4,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1Payload.
@@ -561,6 +579,7 @@ func (presignRound1Payload) WireVersion() uint16 { return tss.Version }
 type presignRound1ProofPayload struct {
 	PublicRound1Hash []byte `json:"public_round1_hash" wire:"1,bytes,len=32"`
 	EncKProof        []byte `json:"enc_k_proof" wire:"2,bytes,max_bytes=zk_proof"`
+	PlanHash         []byte `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1ProofPayload.
@@ -573,6 +592,7 @@ type presignRound2Payload struct {
 	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested"`
 	Sigma      mta.ResponseMessage `json:"sigma" wire:"2,nested"`
 	Round1Echo []byte              `json:"round1_echo" wire:"3,bytes,len=32"`
+	PlanHash   []byte              `json:"plan_hash" wire:"4,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound2Payload.
@@ -586,6 +606,7 @@ type presignRound3Payload struct {
 	KPoint   []byte   `json:"k_point" wire:"2,bytes,max_bytes=point"`
 	ChiPoint []byte   `json:"chi_point" wire:"3,bytes,max_bytes=point"`
 	Proof    []byte   `json:"proof" wire:"4,bytes,max_bytes=signprep_proof"`
+	PlanHash []byte   `json:"plan_hash" wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.
@@ -600,6 +621,7 @@ type signPartialPayload struct {
 	PresignContext      []byte   `json:"presign_context" wire:"3,bytes,len=32"`
 	DigestHash          []byte   `json:"digest_hash" wire:"4,bytes,len=32"`
 	PartialEquationHash []byte   `json:"partial_equation_hash" wire:"5,bytes,len=32"`
+	PlanHash            []byte   `json:"plan_hash" wire:"6,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.

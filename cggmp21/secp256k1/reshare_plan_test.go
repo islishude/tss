@@ -13,6 +13,8 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+const testResharePlanPaillierBits = 3072
+
 func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
@@ -274,6 +276,7 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 		dealerParties: []tss.PartyID{1, 2},
 		newParties:    []tss.PartyID{2, 3},
 		newThreshold:  2,
+		paillierBits:  testResharePlanPaillierBits,
 	}}
 }
 

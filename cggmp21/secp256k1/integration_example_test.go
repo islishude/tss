@@ -115,12 +115,11 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartRefresh(shares[id], tss.ThresholdConfig{
-			Threshold: 2,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
-		}, guard)
+		plan, err := cggmp.NewRefreshPlan(shares[id], sessionID)
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := cggmp.StartRefresh(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -171,8 +170,8 @@ func ExampleStartRefresh() {
 	// true
 }
 
-// ExampleStartReshare demonstrates a disjoint committee change.
-func ExampleStartReshare() {
+// ExampleStartReshareDealer demonstrates a disjoint committee change.
+func ExampleStartReshareDealer() {
 	oldParties := []tss.PartyID{1, 2}
 	newParties := []tss.PartyID{3, 4}
 	oldPartySet := tss.PartySet(oldParties)
@@ -200,7 +199,7 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareDealer(shares[id], plan, nil, guard)
+		session, out, err := cggmp.StartReshareDealer(shares[id], plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -212,7 +211,7 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareReceiver(plan, id, nil, guard)
+		session, out, err := cggmp.StartReshareReceiver(plan, tss.LocalConfig{Self: id}, guard)
 		if err != nil {
 			panic(err)
 		}

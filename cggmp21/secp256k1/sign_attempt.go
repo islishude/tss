@@ -126,6 +126,7 @@ type SignAttemptRecord struct {
 	SessionID     tss.SessionID
 	Party         tss.PartyID
 	SignerSetHash []byte
+	SignPlanHash  []byte
 
 	ContextHash       []byte
 	Digest            []byte
@@ -157,6 +158,7 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 		SessionID:                  r.SessionID,
 		Party:                      r.Party,
 		SignerSetHash:              slices.Clone(r.SignerSetHash),
+		SignPlanHash:               slices.Clone(r.SignPlanHash),
 		ContextHash:                slices.Clone(r.ContextHash),
 		Digest:                     slices.Clone(r.Digest),
 		DigestBindingHash:          slices.Clone(r.DigestBindingHash),
@@ -205,6 +207,7 @@ func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
 		bytes.Equal(r.AttemptHash, other.AttemptHash) &&
 		bytes.Equal(r.IntentHash, other.IntentHash) &&
 		bytes.Equal(r.SignerSetHash, other.SignerSetHash) &&
+		bytes.Equal(r.SignPlanHash, other.SignPlanHash) &&
 		bytes.Equal(r.ContextHash, other.ContextHash) &&
 		bytes.Equal(r.Digest, other.Digest) &&
 		bytes.Equal(r.DigestBindingHash, other.DigestBindingHash) &&
@@ -263,6 +266,7 @@ func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
 		SessionID:                  sessionID,
 		Party:                      w.Party,
 		SignerSetHash:              w.SignerSetHash,
+		SignPlanHash:               w.SignPlanHash,
 		ContextHash:                w.ContextHash,
 		Digest:                     w.Digest,
 		DigestBindingHash:          w.DigestBindingHash,
@@ -325,24 +329,25 @@ type signAttemptWire struct {
 	SessionID                  []byte      `wire:"7,bytes,len=32"`
 	Party                      tss.PartyID `wire:"8,u32"`
 	SignerSetHash              []byte      `wire:"9,bytes,len=32"`
-	ContextHash                []byte      `wire:"10,bytes,len=32"`
-	Digest                     []byte      `wire:"11,bytes,len=32"`
-	DigestBindingHash          []byte      `wire:"12,bytes,len=32"`
-	LowS                       bool        `wire:"13,bool"`
-	CanonicalBaseEnvelopeBytes []byte      `wire:"14,bytes,max_bytes=envelope"`
-	CanonicalBaseEnvelopeHash  []byte      `wire:"15,bytes,len=32"`
-	EnvelopeTranscriptHash     []byte      `wire:"16,bytes,len=32"`
-	PayloadHash                []byte      `wire:"17,bytes,len=32"`
-	DeliveryMode               uint8       `wire:"18,u8"`
-	Confidentiality            uint8       `wire:"19,u8"`
-	BroadcastConsistency       uint8       `wire:"20,u8"`
-	Recipients                 []uint32    `wire:"21,u32list"`
-	Acks                       []ackWire   `wire:"22,recordlist"`
-	Certificate                []byte      `wire:"23,bytes,max_bytes=envelope"`
-	DeliveryComplete           bool        `wire:"24,bool"`
-	Completed                  bool        `wire:"25,bool"`
-	SignatureR                 []byte      `wire:"26,bytes,max_bytes=scalar"`
-	SignatureS                 []byte      `wire:"27,bytes,max_bytes=scalar"`
+	SignPlanHash               []byte      `wire:"10,bytes,len=32"`
+	ContextHash                []byte      `wire:"11,bytes,len=32"`
+	Digest                     []byte      `wire:"12,bytes,len=32"`
+	DigestBindingHash          []byte      `wire:"13,bytes,len=32"`
+	LowS                       bool        `wire:"14,bool"`
+	CanonicalBaseEnvelopeBytes []byte      `wire:"15,bytes,max_bytes=envelope"`
+	CanonicalBaseEnvelopeHash  []byte      `wire:"16,bytes,len=32"`
+	EnvelopeTranscriptHash     []byte      `wire:"17,bytes,len=32"`
+	PayloadHash                []byte      `wire:"18,bytes,len=32"`
+	DeliveryMode               uint8       `wire:"19,u8"`
+	Confidentiality            uint8       `wire:"20,u8"`
+	BroadcastConsistency       uint8       `wire:"21,u8"`
+	Recipients                 []uint32    `wire:"22,u32list"`
+	Acks                       []ackWire   `wire:"23,recordlist"`
+	Certificate                []byte      `wire:"24,bytes,max_bytes=envelope"`
+	DeliveryComplete           bool        `wire:"25,bool"`
+	Completed                  bool        `wire:"26,bool"`
+	SignatureR                 []byte      `wire:"27,bytes,max_bytes=scalar"`
+	SignatureS                 []byte      `wire:"28,bytes,max_bytes=scalar"`
 }
 
 // WireType returns the canonical sign-attempt wire type.
@@ -387,6 +392,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 		SessionID:                  r.SessionID[:],
 		Party:                      r.Party,
 		SignerSetHash:              r.SignerSetHash,
+		SignPlanHash:               r.SignPlanHash,
 		ContextHash:                r.ContextHash,
 		Digest:                     r.Digest,
 		DigestBindingHash:          r.DigestBindingHash,
@@ -420,6 +426,7 @@ func validateSignAttemptRecord(r SignAttemptRecord) error {
 	}
 	if len(r.PresignID) != sha256.Size || len(r.AttemptHash) != sha256.Size ||
 		len(r.IntentHash) != sha256.Size || len(r.SignerSetHash) != sha256.Size ||
+		len(r.SignPlanHash) != sha256.Size ||
 		len(r.ContextHash) != sha256.Size || len(r.Digest) != sha256.Size ||
 		len(r.DigestBindingHash) != sha256.Size || len(r.CanonicalBaseEnvelopeHash) != sha256.Size ||
 		len(r.EnvelopeTranscriptHash) != sha256.Size || len(r.PayloadHash) != sha256.Size {
@@ -463,6 +470,9 @@ func validateSignAttemptRecord(r SignAttemptRecord) error {
 	}
 	if !bytes.Equal(payload.PresignContext, r.ContextHash) {
 		return fmt.Errorf("%w: payload context hash mismatch", ErrSignAttemptCorrupt)
+	}
+	if !bytes.Equal(payload.PlanHash, r.SignPlanHash) {
+		return fmt.Errorf("%w: payload sign plan hash mismatch", ErrSignAttemptCorrupt)
 	}
 	if err := validateSignAttemptDeliveryPolicy(r, env); err != nil {
 		return err
@@ -713,6 +723,7 @@ func signAttemptIntentHash(r SignAttemptRecord) []byte {
 	t.AppendBytes("session_id", r.SessionID[:])
 	t.AppendUint32("party", uint32(r.Party))
 	t.AppendBytes("signer_set_hash", r.SignerSetHash)
+	t.AppendBytes("sign_plan_hash", r.SignPlanHash)
 	t.AppendBytes("context_hash", r.ContextHash)
 	t.AppendBytes("digest", r.Digest)
 	t.AppendBytes("digest_binding_hash", r.DigestBindingHash)

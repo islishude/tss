@@ -171,6 +171,7 @@ func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
 				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 				DigestHash:          nil,
 				PartialEquationHash: bytes.Repeat([]byte{0xdd}, 32),
+				PlanHash:            bytes.Repeat([]byte{0xee}, 32),
 			},
 			wantMsg: "missing DigestHash",
 		},
@@ -182,6 +183,7 @@ func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
 				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 				DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
 				PartialEquationHash: nil,
+				PlanHash:            bytes.Repeat([]byte{0xee}, 32),
 			},
 			wantMsg: "missing PartialEquationHash",
 		},
@@ -281,7 +283,7 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 			payload: func() presignRound3Payload {
 				one := big.NewInt(1)
 				kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
-				return presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: kPoint, Proof: nil}
+				return presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: kPoint, Proof: nil, PlanHash: bytes.Repeat([]byte{0xef}, 32)}
 			}(),
 			wantMsg: "empty proof in round3 payload",
 		},
@@ -291,7 +293,7 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 				one := big.NewInt(1)
 				chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
 				proof := mustMinimalSignPrepProofForTest(t)
-				return presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof}
+				return presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof, PlanHash: bytes.Repeat([]byte{0xef}, 32)}
 			}(),
 			wantMsg: "non-canonical KPoint in round3 payload",
 		},

@@ -96,7 +96,7 @@ func (s *ReshareSession) tryComplete() error {
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
-	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.refreshMode, s.commits, newCommitments, verificationShares)
+	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.planHash, s.refreshMode, s.commits, newCommitments, verificationShares)
 	newShare := &KeyShare{state: &keyShareState{
 		version:              tss.Version,
 		party:                s.selfID,
@@ -109,6 +109,7 @@ func (s *ReshareSession) tryComplete() error {
 		verificationShares:   verificationShares,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: reshareTranscriptHash,
+		planHash:             append([]byte(nil), s.planHash...),
 	}}
 	if err := newShare.ValidateConsistency(); err != nil {
 		newShare.Destroy()

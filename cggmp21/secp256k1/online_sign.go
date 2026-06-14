@@ -16,43 +16,47 @@ import (
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
-// StartSign starts or idempotently resumes online signing using a
-// context-bound presignature.
-func StartSign(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
-	if ctx == nil {
-		return nil, nil, errors.New("nil context")
-	}
+// StartSign starts or idempotently resumes online signing from a shared
+// immutable lifecycle plan using a context-bound presignature.
+func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if key == nil || key.state == nil {
-		return nil, nil, errors.New("nil key share")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
 	}
 	if presign == nil || presign.state == nil {
-		return nil, nil, errors.New("nil presign")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
-		return nil, nil, err
+	if local.Self == 0 {
+		local.Self = key.state.party
+	}
+	if plan == nil || plan.state == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil sign plan"))
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	if err := key.Validate(); err != nil {
-		return nil, nil, err
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	_, contextHash, additiveShift, err := preparePresignContext(key, request.Context)
+	if err := plan.validate(key, presign, local); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	if !bytes.Equal(contextHash, presign.state.contextHash) {
-		return nil, nil, errors.New("presign context mismatch")
-	}
-	if !bytes.Equal(additiveShift, presign.state.additiveShift) {
-		return nil, nil, errors.New("presign additive shift mismatch")
-	}
-	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest, contextHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout))
+	request := cloneSignRequest(plan.state.request)
+	return startSignDigestBoundWithTimeout(local.Ctx(), key, presign, plan.state.sessionID, plan.state.digest, plan.state.contextHash, planHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout))
 }
 
 func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, lowS, store, guard, DefaultSignAttemptStoreTimeout)
+	var planHash []byte
+	if presign != nil && presign.state != nil {
+		planHash = presign.state.planHash
+	}
+	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, store, guard, DefaultSignAttemptStoreTimeout)
 }
 
-func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
@@ -80,11 +84,14 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.state.contextHash) {
 		return nil, nil, errors.New("presign context mismatch")
 	}
+	if len(planHash) != sha256.Size {
+		return nil, nil, errors.New("sign plan hash must be 32 bytes")
+	}
 	if store == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
 	}
 
-	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, lowS, guard)
+	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, planHash, lowS, guard)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -130,7 +137,7 @@ func signAttemptConsumedError(err error) bool {
 		errors.Is(err, ErrSignAttemptNonDeterminism)
 }
 
-func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, guard *tss.EnvelopeGuard) (SignAttemptRecord, error) {
+func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard) (SignAttemptRecord, error) {
 	kShare, err := secpScalarFromSecret(presign.state.kShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -158,9 +165,10 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 		PresignTranscript: slices.Clone(presign.state.transcriptHash),
 		PresignContext:    slices.Clone(contextHash),
 		DigestHash:        digestHash(digest32, contextHash),
+		PlanHash:          slices.Clone(planHash),
 		PartialEquationHash: partialEquationHash(
 			sessionID, key.state.party, presign.state.transcriptHash,
-			contextHash, digest32,
+			contextHash, planHash, digest32,
 			littleR.Bytes(), scalarBytes(partial),
 			localVS.KPoint, localVS.ChiPoint,
 		),
@@ -200,6 +208,7 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 		SessionID:                  sessionID,
 		Party:                      key.state.party,
 		SignerSetHash:              signAttemptSignerSetHash(presign.state.signers),
+		SignPlanHash:               slices.Clone(planHash),
 		ContextHash:                slices.Clone(contextHash),
 		Digest:                     slices.Clone(digest32),
 		DigestBindingHash:          digestBindingHash,
@@ -312,6 +321,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		limits:    DefaultLimits(),
 		digest:    slices.Clone(record.Digest),
 		lowS:      record.LowS,
+		planHash:  slices.Clone(record.SignPlanHash),
 		publicKey: verifyKey,
 		partials:  make(map[tss.PartyID]*big.Int),
 		guard:     guard,
@@ -526,7 +536,7 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 		// Compute the expected equation hash for independent auditability.
 		expectedEqHash := partialEquationHash(
 			s.sessionID, from, s.presign.state.transcriptHash,
-			s.presign.state.contextHash, s.digest,
+			s.presign.state.contextHash, s.planHash, s.digest,
 			s.presign.state.littleR, scalarBytes(p.S),
 			vs.KPoint, vs.ChiPoint,
 		)
@@ -696,6 +706,9 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	if !bytes.Equal(p.PresignContext, s.presign.state.contextHash) {
 		return nil, errors.New("presign context mismatch")
 	}
+	if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
+		return nil, err
+	}
 	expectedDigestHash := digestHash(s.digest, s.presign.state.contextHash)
 	if !bytes.Equal(p.DigestHash, expectedDigestHash) {
 		return nil, errors.New("digest hash mismatch")
@@ -719,7 +732,7 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	}
 	expectedEqHash := partialEquationHash(
 		s.sessionID, from, s.presign.state.transcriptHash,
-		s.presign.state.contextHash, s.digest,
+		s.presign.state.contextHash, s.planHash, s.digest,
 		littleR.Bytes(), scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)
@@ -750,12 +763,13 @@ func digestHash(digest32, contextHash []byte) []byte {
 
 const signPartialEquationDomain = "cggmp21-secp256k1-sign-partial-equation"
 
-func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
+func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, planHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
 	t := transcript.New(signPartialEquationDomain)
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("party", uint32(party))
 	t.AppendBytes("presign_transcript_hash", presignTranscriptHash)
 	t.AppendBytes("context_hash", contextHash)
+	t.AppendBytes("plan_hash", planHash)
 	t.AppendBytes("digest_hash", digestHash)
 	t.AppendBytes("little_r", littleR)
 	t.AppendBytes("s", s)

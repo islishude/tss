@@ -117,7 +117,11 @@ keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
 ```
 
-Paillier proof domains bind `(protocol, version, session, threshold, parties, self, proof_kind, paillier_pubkey)`. The key-share Paillier proof additionally binds `(group_public_key, keygen_transcript_hash)`.
+Proof labels identify both the lifecycle phase and proof relation. Proof domains
+bind `(protocol, version, label, session, threshold, parties, sender, receiver,
+paillier_pubkey, lifecycle_plan_hash)` plus the phase-specific signer set,
+statement public key, Ring-Pedersen parameters, key transcript hash, and presign
+context. MtA delta and sigma responses use distinct labels.
 
 All repository-defined CGGMP21 SHA-256 domains, transcripts, commitments,
 challenges, evidence digests, reshare-plan digests, and presign identifiers use
@@ -287,7 +291,7 @@ Since every partial is independently verified before aggregation, a failure at t
 
 ### HD Derivation
 
-Set `PresignContext.DerivationPath` before calling `StartPresignWithContext(..., guard)`. The BIP32 additive shift is derived and bound into the presign; online signing rejects a different key id, chain id, path, policy domain, or message domain. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
+Set `PresignContext.DerivationPath` before constructing `NewPresignPlan(...)`. The BIP32 additive shift is derived and bound into the presign plan; online signing rejects a different key id, chain id, path, policy domain, message domain, presign, or sign plan. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
 
 ## Presign Lifecycle
 
@@ -302,8 +306,9 @@ durable attempt record is authoritative after restart:
 // Check before use:
 if IsPresignConsumed(presign) { /* discard */ }
 
-// StartSign requires request.AttemptStore and commits before returning out:
-sess, out, err := StartSign(ctx, share, presign, sessionID, request, guard)
+// NewSignPlan/StartSign require request.AttemptStore and commit before returning out:
+plan, err := NewSignPlan(share, presign, sessionID, request)
+sess, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: ctx}, guard)
 
 // After restart, replay the exact committed envelope while delivery is pending,
 // or load the final signature if completion is durable:
@@ -720,8 +725,8 @@ sequenceDiagram
 ### Keygen
 
 ```go
-kg, out, err := StartKeygen(config, guard)
-kg, out, err := StartKeygenWithOptions(config, KeygenOptions{PaillierBits: 2048, EnableHD: true}, guard)
+plan, err := NewKeygenPlanWithPaillierBits(sessionID, parties, threshold, enableHD, paillierBits)
+kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.Complete()
 ```
@@ -730,7 +735,8 @@ share, ok := kg.Complete()
 
 ```go
 ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
-ps, out, err := StartPresignWithContext(share, sessionID, signers, ctx, guard)
+plan, err := NewPresignPlan(share, sessionID, signers, ctx)
+ps, out, err := StartPresign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: rng}, guard)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
 // presign ownership has moved from the session to the caller; persist it immediately.
@@ -743,7 +749,8 @@ context := presign.Context() // includes a copied derivation path
 ```go
 request := SignRequest{Context: ctx, Message: message, LowS: true, AttemptStore: store}
 // AttemptStore atomically binds presign.ID() to the exact encrypted outbox.
-ss, out, err := StartSign(context.Background(), share, presign, sessionID, request, guard)
+plan, err := NewSignPlan(share, presign, sessionID, request)
+ss, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: context.Background()}, guard)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
 ok := VerifySignature(publicKey, request, sig)
@@ -752,7 +759,8 @@ ok := VerifySignature(publicKey, request, sig)
 ### Refresh
 
 ```go
-rs, out, err := StartRefresh(oldShare, config, guard)
+plan, err := NewRefreshPlan(oldShare, sessionID)
+rs, out, err := StartRefresh(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 out, err := rs.HandleRefreshMessage(env)
 newShare, ok := rs.KeyShare()
 ```
@@ -763,9 +771,9 @@ newShare, ok := rs.KeyShare()
 plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold)
 rawPlan, err := plan.MarshalBinary()
 plan, err = UnmarshalResharePlan(rawPlan)
-dealer, out, err := StartReshareDealer(oldShare, plan, rng, guard)
-receiver, out, err := StartReshareReceiver(plan, localParty, rng, guard)
-overlap, out, err := StartReshareOverlap(oldShare, plan, rng, guard)
+dealer, out, err := StartReshareDealer(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
+receiver, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: localParty, Rand: rng}, guard)
+overlap, out, err := StartReshareOverlap(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 out, err := overlap.HandleReshareMessage(env)
 newShare, err := receiver.Result()
 ```

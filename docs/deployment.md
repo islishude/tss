@@ -14,22 +14,19 @@ import (
     "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
-config := tss.ThresholdConfig{
-    Threshold: 2,
-    Parties:   []tss.PartyID{1, 2, 3},
-    Self:      1,
-    SessionID: sessionID,
-}
+parties := []tss.PartyID{1, 2, 3}
+plan, err := secp256k1.NewKeygenPlan(sessionID, parties, 2, false)
+local := tss.LocalConfig{Self: 1}
 guard, err := (tss.GuardConfig{
-    Self:        config.Self,
-    Parties:     tss.PartySet(config.Parties),
+    Self:        local.Self,
+    Parties:     tss.PartySet(parties),
     Protocol:    tss.ProtocolCGGMP21Secp256k1,
     SessionID:   sessionID,
     Policies:    secp256k1.CGGMP21Policies(),
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-session, envelopes, err := secp256k1.StartKeygen(config, guard)
+session, envelopes, err := secp256k1.StartKeygen(plan, local, guard)
 // Route envelopes to other parties via authenticated transport. Keep routing
 // any envelopes returned by HandleKeygenMessage; keygen emits a confirmation
 // round before KeyShare() becomes available.
@@ -109,7 +106,8 @@ signGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-signSession, out, err := ed25519.StartSign(share, sessionID, signers, message, signGuard)
+signPlan, err := ed25519.NewSignPlan(share, sessionID, signers, message, nil)
+signSession, out, err := ed25519.StartSign(share, signPlan, tss.LocalConfig{Self: share.PartyID()}, signGuard)
 // Route out (round 1 commitments) to other signers.
 // Handle round 1 responses; obtain round 2 partials.
 sig, ok := signSession.Signature()
@@ -130,7 +128,8 @@ presignGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-presignSession, out, err := secp256k1.StartPresignWithContext(keyShare, sessionID, signers, ctx, presignGuard)
+presignPlan, err := secp256k1.NewPresignPlan(keyShare, sessionID, signers, ctx)
+presignSession, out, err := secp256k1.StartPresign(keyShare, presignPlan, tss.LocalConfig{Self: keyShare.PartyID()}, presignGuard)
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
 // Persist presign immediately.
@@ -154,7 +153,8 @@ signGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-signSession, out, _ := secp256k1.StartSign(context.Background(), keyShare, presign, sessionID, request, signGuard)
+signPlan, _ := secp256k1.NewSignPlan(keyShare, presign, sessionID, request)
+signSession, out, _ := secp256k1.StartSign(keyShare, presign, signPlan, tss.LocalConfig{Self: keyShare.PartyID(), Context: context.Background()}, signGuard)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
 secp256k1.VerifySignature(publicKey, request, sig) // true
@@ -332,11 +332,11 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 
 ### Log-Based Monitoring
 
-Enable the `Logger` interface on `ThresholdConfig` to capture structured logs. Protocol completion/failure events include `party_id` and `session_id` for cross-party correlation.
+Set the `Logger` interface on `LocalConfig` to capture structured logs. Protocol completion/failure events include `party_id` and `session_id` for cross-party correlation.
 
 ```go
-config := tss.ThresholdConfig{
-    // ...
+local := tss.LocalConfig{
+    Self: 1,
     Log: tss.NewSLogger(slog.Default()),
 }
 ```

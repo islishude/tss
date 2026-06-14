@@ -55,7 +55,11 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := StartPresignWithContext(shares[id], presignID, ids, ctx, guard)
+		plan, err := NewPresignPlan(shares[id], presignID, ids, ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		session, out, err := StartPresign(shares[id], plan, tss.LocalConfig{Self: id, Context: context.Background()}, guard)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -105,12 +109,17 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if rawDigest {
 			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, true, attemptStore, guard)
 		} else {
-			session, out, err = StartSign(context.Background(), shares[id], presign, signID, SignRequest{
+			request := SignRequest{
 				Context:      ctx,
 				Message:      input,
 				LowS:         true,
 				AttemptStore: attemptStore,
-			}, guard)
+			}
+			plan, planErr := NewSignPlan(shares[id], presign, signID, request)
+			if planErr != nil {
+				return nil, nil, planErr
+			}
+			session, out, err = StartSign(shares[id], presign, plan, tss.LocalConfig{Self: id, Context: context.Background()}, guard)
 		}
 		if err != nil {
 			return nil, nil, err

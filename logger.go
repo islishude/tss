@@ -37,3 +37,11 @@ func (c ThresholdConfig) Logger() Logger {
 	}
 	return nopLogger
 }
+
+// Logger returns the configured Logger or a no-op implementation when unset.
+func (c LocalConfig) Logger() Logger {
+	if c.Log != nil {
+		return c.Log
+	}
+	return nopLogger
+}

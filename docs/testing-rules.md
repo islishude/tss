@@ -109,7 +109,7 @@ cryptographic blame. Protocol-level rejection happens before state advancement.
 | Boundary | Required reject cases                                                                                                                                                                                 |
 | -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Guard    | Unknown, non-committee, or self sender; wrong protocol, version, session, round, recipient, or transcript; direct/broadcast mismatch; missing confidentiality; missing broadcast certificate; replay. |
-| Protocol | Wrong payload type; malformed payload; payload in the wrong round; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature.                                    |
+| Protocol | Wrong payload type; malformed payload; payload in the wrong round; lifecycle plan hash mismatch; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature.      |
 
 For every rejection, snapshot the relevant public state before delivery and verify
 it is unchanged afterward. Depending on the phase, that includes round, outbound
@@ -161,6 +161,11 @@ Required behavior:
 - Direct and broadcast messages, confidentiality policy, and broadcast
   certificates are enforced before handler execution.
 - Replay and equivocation are detected deterministically.
+- Lifecycle plans for keygen, refresh, reshare, presign, and sign bind global
+  intent before local runtime configuration. Mixed threshold, party set, session,
+  HD, PaillierBits, signer set, path, context, presign, or message intent must
+  fail closed at the first plan-bound payload without outbound messages or
+  secret/state advancement.
 
 Round transitions must be monotonic. Duplicates, replay, corruption, wrong
 recipients, non-signers, invalid thresholds, and invalid committee or reshare

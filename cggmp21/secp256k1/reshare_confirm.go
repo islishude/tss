@@ -29,6 +29,9 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	if !bytes.Equal(canonical, env.Payload) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("non-canonical reshare confirmation"))
 	}
+	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 	if existing, ok := s.confirmations[env.From]; ok {
 		if bytes.Equal(existing, canonical) {
 			return nil, nil
@@ -65,6 +68,9 @@ func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenC
 	}
 	if !bytes.Equal(c.TranscriptHash, s.reshareTranscriptHash(newCommitments)) {
 		return fmt.Errorf("reshare confirmation transcript mismatch from party %d", c.Sender)
+	}
+	if !bytes.Equal(c.PlanHash, s.planHash) {
+		return fmt.Errorf("reshare confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
 	}
 	if !bytes.Equal(c.CommitmentsHash, keygenCommitmentsHash(newCommitments)) {
 		return fmt.Errorf("reshare confirmation commitments mismatch from party %d", c.Sender)

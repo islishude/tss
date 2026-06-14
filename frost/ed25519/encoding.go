@@ -24,6 +24,7 @@ type keyShareWire struct {
 	ChainCode            []byte                         `wire:"9,bytes"`
 	KeygenSessionID      []byte                         `wire:"10,bytes,len=32"`
 	KeygenConfirmations  [][]byte                       `wire:"11,byteslist"`
+	PlanHash             []byte                         `wire:"12,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keyShareWire.
@@ -49,6 +50,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		ChainCode:            k.state.chainCode,
 		KeygenSessionID:      k.state.keygenSessionID[:],
 		KeygenConfirmations:  k.state.keygenConfirmations,
+		PlanHash:             k.state.planHash,
 	}, nil
 }
 
@@ -76,6 +78,7 @@ func (w keyShareWire) toKeyShare() (*KeyShare, error) {
 		verificationShares:   shares,
 		keygenSessionID:      sid,
 		keygenTranscriptHash: w.KeygenTranscriptHash,
+		planHash:             w.PlanHash,
 		keygenConfirmations:  w.KeygenConfirmations,
 	}}, nil
 }

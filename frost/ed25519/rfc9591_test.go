@@ -328,6 +328,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		groupCommitments:     groupCommitments,
 		verificationShares:   verificationShares,
 		keygenTranscriptHash: []byte("rfc9591-appendix-e1"),
+		planHash:             bytes.Repeat([]byte{0x95}, 32),
 	}}
 	if err := key.ValidateConsistency(); err != nil {
 		t.Fatal(err)

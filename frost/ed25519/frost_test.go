@@ -37,49 +37,87 @@ func startFROSTKeygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) 
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	return StartKeygen(config, guard)
+	plan, err := NewKeygenPlan(config.SessionID, config.Parties, config.Threshold, false)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
 func startFROSTKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	return StartKeygenWithOptions(config, opts, guard)
+	plan, err := NewKeygenPlan(config.SessionID, config.Parties, config.Threshold, opts.EnableHD)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
 func startFROSTSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	return StartSign(key, sessionID, signers, message, guard)
+	plan, err := NewSignPlan(key, sessionID, signers, message, nil)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartSign(key, plan, tss.LocalConfig{Self: key.state.party}, guard)
 }
 
 func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, opts SignOptions, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	return StartSignWithOptions(key, sessionID, signers, message, opts, guard)
+	plan, err := NewSignPlan(key, sessionID, signers, message, opts.AdditiveShift)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartSign(key, plan, tss.LocalConfig{Self: key.state.party, Rand: opts.NonceReader}, guard)
 }
 
 func startFROSTRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(oldKey.state.parties, config.Self), config.SessionID)
 	})
-	return StartRefresh(oldKey, config, guard)
+	plan, err := NewRefreshPlan(oldKey, config.SessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartRefresh(oldKey, plan, localConfigFromThresholdConfig(config), guard)
 }
 
 func startFROSTReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldKey.state.parties, newParties)), config.Self), config.SessionID)
 	})
-	return StartReshare(oldKey, newParties, newThreshold, config, guard)
+	plan, err := NewResharePlan(oldKey, config.SessionID, newParties, newThreshold)
+	if err != nil {
+		return nil, nil, err
+	}
+	return StartReshare(oldKey, plan, localConfigFromThresholdConfig(config), guard)
 }
 
 func startFROSTReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties []tss.PartyID, newThreshold int, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldParties, newParties)), config.Self), config.SessionID)
 	})
-	return StartReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, config, guard)
+	plan, err := NewResharePlanFromPublic(oldPublicKey, oldChainCode, oldParties, config.SessionID, newParties, newThreshold)
+	if err != nil {
+		return nil, err
+	}
+	return StartReshareRecipient(plan, localConfigFromThresholdConfig(config), guard)
+}
+
+func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
+	return tss.LocalConfig{
+		Self:         config.Self,
+		Rand:         config.Rand,
+		Context:      config.Context,
+		RoundTimeout: config.RoundTimeout,
+		Log:          config.Log,
+	}
 }
 
 // testFROSTPolicies returns the FROST policy set with broadcast consistency relaxed.
@@ -404,7 +442,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	}
 	badShare := fed.NewScalar().Add(scalar, edcurve.ScalarOne())
 	badShareBytes := badShare.Bytes()
-	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes})
+	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes, PlanHash: payload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1359,11 +1397,10 @@ func TestFROSTSignRejectsMismatchedMessage(t *testing.T) {
 	}
 
 	// Deliver commitment from party 2 (who signed "msg2") to party 1 (who signed "msg1").
-	// The commitment itself doesn't contain the message, but the partial will mismatch.
-	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
-		t.Fatal(err)
-	}
-	// The session should still be alive — the mismatch will be caught during partial verification.
+	// The plan hash binds the message, so the mismatch is rejected before a partial.
+	_, err = s1.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
+	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
+	// The session should still be alive; lifecycle plan mismatches are non-mutating rejects.
 	if s1.aborted {
 		t.Fatal("session should not abort on commitment with different message")
 	}

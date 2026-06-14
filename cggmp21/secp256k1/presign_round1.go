@@ -14,44 +14,58 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
-// StartPresignWithContext starts the offline CGGMP-style presign protocol for
-// signers and binds the resulting presignature to ctx before nonce generation.
-func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
+// StartPresign starts the offline CGGMP-style presign protocol from a shared
+// immutable lifecycle plan.
+func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
 	if key == nil || key.state == nil {
-		return nil, nil, errors.New("nil key share")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
-		return nil, nil, err
+	if local.Self == 0 {
+		local.Self = key.state.party
+	}
+	if plan == nil || plan.state == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign plan"))
+	}
+	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	if err := key.requireMPCMaterial(); err != nil {
-		return nil, nil, err
-	}
-	signers = tss.SortParties(signers)
-	if len(signers) < key.state.threshold {
-		return nil, nil, errors.New("not enough signers")
-	}
-	if !tss.ContainsParty(signers, key.state.party) {
-		return nil, nil, errors.New("local party is not in signer set")
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	limits := DefaultLimits()
-	if err := validateSignerSet(key, signers, limits); err != nil {
-		return nil, nil, err
+	if err := plan.validateKey(key, local); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	ctx, contextHash, additiveShift, err := preparePresignContext(key, ctx)
+	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
+	sessionID := plan.state.sessionID
+	signers := slices.Clone(plan.state.signers)
+	ctx := clonePresignContext(plan.state.context)
+	contextHash := slices.Clone(plan.state.contextHash)
+	additiveShift := slices.Clone(plan.state.additiveShift)
 	paillierKey, err := key.paillierPrivate()
 	if err != nil {
 		return nil, nil, err
 	}
+	config := tss.ThresholdConfig{
+		Threshold:    key.state.threshold,
+		Parties:      signers,
+		Self:         local.Self,
+		SessionID:    sessionID,
+		Rand:         local.Rand,
+		Context:      local.Context,
+		RoundTimeout: local.RoundTimeout,
+		Log:          local.Log,
+	}
 	// k_i and gamma_i are local nonce scalars. Only Enc(k_i) and Gamma_i leave
 	// the process; the raw nonce scalars stay inside the local presign record.
-	kShare, err := secp.RandomScalar(nil)
+	kShare, err := secp.RandomScalar(config.Reader())
 	if err != nil {
 		return nil, nil, err
 	}
-	gamma, err := secp.RandomScalar(nil)
+	gamma, err := secp.RandomScalar(config.Reader())
 	if err != nil {
 		return nil, nil, err
 	}
@@ -110,7 +124,6 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 	if err != nil {
 		return nil, nil, err
 	}
-	config := tss.ThresholdConfig{Threshold: key.state.threshold, Parties: signers, Self: key.state.party, SessionID: sessionID}
 	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
 	// Πenc proof bound to that public payload and the peer's RP parameters.
 	startOpening, err := mta.Start(config.Reader(), kShare.BigInt(), &paillierKey.PublicKey)
@@ -127,6 +140,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		Gamma:             gammaComm,
 		EncK:              startOpening.Message.Ciphertext,
 		PaillierPublicKey: slices.Clone(key.state.paillierPublicKey),
+		PlanHash:          slices.Clone(planHash),
 	}
 	payload, err := marshalPresignRound1Payload(presignPayload)
 	if err != nil {
@@ -150,6 +164,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		context:              ctx,
 		contextHash:          contextHash,
 		additiveShift:        additiveShift,
+		planHash:             slices.Clone(planHash),
 		paillier:             paillierKey,
 		kShare:               kShareSecret,
 		gamma:                gammaSecret,
@@ -186,7 +201,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		if err != nil {
 			return nil, nil, err
 		}
-		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.state.party, peer, key.state.paillierPublicKey, contextHash)
+		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.state.party, peer, key.state.paillierPublicKey, contextHash, planHash)
 		proofBytes, err := mta.ProveStartForVerifier(config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
@@ -194,6 +209,7 @@ func StartPresignWithContext(key *KeyShare, sessionID tss.SessionID, signers []t
 		proofPayload, err := marshalPresignRound1ProofPayload(presignRound1ProofPayload{
 			PublicRound1Hash: publicHash,
 			EncKProof:        proofBytes,
+			PlanHash:         slices.Clone(planHash),
 		})
 		if err != nil {
 			return nil, nil, err
@@ -247,6 +263,9 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round, broadcast, duplicate, transport checks done in dispatcher)
+	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	if err := s.validateRound1Public(env.From, p); err != nil {
@@ -299,6 +318,9 @@ func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envel
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round, direct-confidential, self-send, duplicate checks done in dispatcher)
+	if err := requirePlanHash("presign", p.PlanHash, s.planHash); err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	// (deferred until both public and proof are available — see maybeValidateRound1Proof)
@@ -406,7 +428,7 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 		return err
 	}
 	start := mta.StartMessage{Ciphertext: public.EncK}
-	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.party, public.PaillierPublicKey, s.contextHash)
+	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.party, public.PaillierPublicKey, s.contextHash, s.planHash)
 	return mta.VerifyStart(domain, start, proverPK, localRP, proof.EncKProof)
 }
 

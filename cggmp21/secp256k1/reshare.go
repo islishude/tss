@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"io"
 	"math/big"
 	"sync"
 
@@ -70,6 +69,7 @@ type ReshareSession struct {
 
 type reshareDealerCommitmentsPayload struct {
 	Commitments [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PlanHash    []byte   `wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for reshareDealerCommitmentsPayload.
@@ -83,6 +83,7 @@ type reshareReceiverMaterialPayload struct {
 	PaillierProof      []byte `wire:"2,bytes,max_bytes=zk_proof"`
 	RingPedersenParams []byte `wire:"3,bytes,max_bytes=ring_pedersen_params"`
 	RingPedersenProof  []byte `wire:"4,bytes,max_bytes=paillier_proof"`
+	PlanHash           []byte `wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for reshareReceiverMaterialPayload.
@@ -96,6 +97,7 @@ type reshareSharePayload struct {
 	Receiver             tss.PartyID `wire:"2,u32"`
 	Share                *big.Int    `wire:"3,bigpos,max_bytes=scalar"`
 	DealerCommitmentHash []byte      `wire:"4,bytes,len=32"`
+	PlanHash             []byte      `wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for reshareSharePayload.
@@ -124,57 +126,37 @@ func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
 }
 
-// StartReshare starts CGGMP21 resharing as an old-party dealer.
-//
-// The target participant set is newParties and the target threshold is
-// config.Threshold. If the local old party is also in newParties, it also acts
-// as a receiver and will produce a new KeyShare after all old dealers and new
-// receivers contribute. Old-only parties complete without producing a new share
-// only after they observe every new receiver's final confirmation.
-func StartReshare(oldKey *KeyShare, config tss.ThresholdConfig, newParties []tss.PartyID, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
-	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, errors.New("nil old key share")
-	}
-	if config.Self != oldKey.state.party {
-		return nil, nil, errors.New("config.Self must match the old key's party ID")
-	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
-	}
-	plan, err := NewResharePlan(oldKey, config.SessionID, oldKey.state.parties, newParties, config.Threshold)
-	if err != nil {
-		return nil, nil, err
-	}
-	if plan.IsReceiver(oldKey.state.party) {
-		return StartReshareOverlap(oldKey, plan, config.Rand, guard)
-	}
-	return StartReshareDealer(oldKey, plan, config.Rand, guard)
-}
-
 // StartReshareDealer starts resharing for an old-party dealer.
-func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
+func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, errors.New("nil old key share")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
 	}
-	return startReshareSession(oldKey, plan, oldKey.state.party, rng, true, false, guard)
+	if local.Self == 0 {
+		local.Self = oldKey.state.party
+	}
+	return startReshareSession(oldKey, plan, local, true, false, guard)
 }
 
 // StartReshareReceiver starts resharing for a new-party receiver.
-func StartReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
-	return startReshareSession(nil, plan, localParty, rng, false, true, guard)
+func StartReshareReceiver(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
+	return startReshareSession(nil, plan, local, false, true, guard)
 }
 
 // StartReshareOverlap starts resharing for a party that is both dealer and receiver.
-func StartReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
+func StartReshareOverlap(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
-		return nil, nil, errors.New("nil old key share")
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
 	}
-	return startReshareSession(oldKey, plan, oldKey.state.party, rng, true, true, guard)
+	if local.Self == 0 {
+		local.Self = oldKey.state.party
+	}
+	return startReshareSession(oldKey, plan, local, true, true, guard)
 }
 
-func startReshareSession(oldKey *KeyShare, plan *ResharePlan, localParty tss.PartyID, rng io.Reader, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, dealer, receiver bool, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	localParty := local.Self
 	if plan == nil || plan.state == nil {
-		return nil, nil, errors.New("nil reshare plan")
+		return nil, nil, invalidPlanConfig(localParty, errors.New("nil reshare plan"))
 	}
 	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, localParty); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
@@ -188,33 +170,36 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, localParty tss.Par
 	}
 	if dealer {
 		if oldKey == nil || oldKey.state == nil {
-			return nil, nil, errors.New("dealer requires old key share")
+			return nil, nil, invalidPlanConfig(localParty, errors.New("dealer requires old key share"))
 		}
 		if oldKey.state.party != localParty {
-			return nil, nil, errors.New("old key party does not match local party")
+			return nil, nil, invalidPlanConfig(localParty, errors.New("old key party does not match local party"))
 		}
 		if !plan.IsDealer(localParty) {
-			return nil, nil, errors.New("local party is not in dealer set")
+			return nil, nil, invalidPlanConfig(localParty, errors.New("local party is not in dealer set"))
 		}
 		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
-			return nil, nil, err
+			return nil, nil, invalidPlanConfig(localParty, err)
 		}
 		if err := oldKey.requireMPCMaterial(); err != nil {
 			return nil, nil, err
 		}
 	}
 	if receiver && !plan.IsReceiver(localParty) {
-		return nil, nil, errors.New("local party is not in new receiver set")
+		return nil, nil, invalidPlanConfig(localParty, errors.New("local party is not in new receiver set"))
 	}
 	if !dealer && !receiver {
-		return nil, nil, errors.New("reshare session requires dealer or receiver role")
+		return nil, nil, invalidPlanConfig(localParty, errors.New("reshare session requires dealer or receiver role"))
 	}
 	config := tss.ThresholdConfig{
-		Threshold: plan.state.newThreshold,
-		Parties:   append([]tss.PartyID(nil), plan.state.newParties...),
-		Self:      localParty,
-		SessionID: plan.state.sessionID,
-		Rand:      rng,
+		Threshold:    plan.state.newThreshold,
+		Parties:      append([]tss.PartyID(nil), plan.state.newParties...),
+		Self:         localParty,
+		SessionID:    plan.state.sessionID,
+		Rand:         local.Rand,
+		Context:      local.Context,
+		RoundTimeout: local.RoundTimeout,
+		Log:          local.Log,
 	}
 	s := &ReshareSession{
 		plan:            cloneResharePlan(plan),
@@ -249,6 +234,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, localParty tss.Par
 			PaillierProof:      s.newPaillierPubs[s.selfID].Proof,
 			RingPedersenParams: s.newRingPedersen[s.selfID].Params,
 			RingPedersenProof:  s.newRingPedersen[s.selfID].Proof,
+			PlanHash:           s.planHash,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -337,6 +323,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
+		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
 		if err := s.validateDealerCommitments(env.From, p.Commitments); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
@@ -354,6 +343,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		p, err := unmarshalReshareSharePayload(env.Payload)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
@@ -379,6 +371,9 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
+		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		}
 		if err := s.verifyAndStoreReceiverMaterial(env, p); err != nil {
 			return nil, err
 		}
@@ -403,6 +398,7 @@ func cloneReshareSharePayload(p reshareSharePayload) reshareSharePayload {
 		Receiver:             p.Receiver,
 		Share:                new(big.Int).Set(p.Share),
 		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
+		PlanHash:             append([]byte(nil), p.PlanHash...),
 	}
 }
 
@@ -470,6 +466,7 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 		newParties:          append([]tss.PartyID(nil), in.state.newParties...),
 		newThreshold:        in.state.newThreshold,
 		chainCode:           append([]byte(nil), in.state.chainCode...),
+		paillierBits:        in.state.paillierBits,
 	}}
 	out.state.oldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.oldVerificationShares))
 	for id, share := range in.state.oldVerificationShares {
