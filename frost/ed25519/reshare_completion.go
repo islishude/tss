@@ -38,7 +38,7 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	// Verify each dealer's share against their commitments at the local party's ID.
 	for dealer, share := range s.shares {
-		if err := edcurve.VerifyScalarShare(s.commits[dealer], uint32(s.selfID), share); err != nil {
+		if err := edcurve.VerifyScalarShare(s.commits[dealer], s.selfID, share); err != nil {
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
@@ -89,7 +89,7 @@ func (s *ReshareSession) tryComplete() error {
 
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
-		pub, err := edcurve.EvalCommitments(newCommitments, uint32(id))
+		pub, err := edcurve.EvalCommitments(newCommitments, id)
 		if err != nil {
 			return err
 		}

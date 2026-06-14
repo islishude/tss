@@ -103,7 +103,7 @@ func (p *KeygenPlan) Digest() ([]byte, error) {
 	t := transcript.New(keygenPlanDigestLabel)
 	t.AppendBytes("session_id", p.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.threshold))
-	t.AppendUint32List("parties", transcript.Uint32s(p.parties))
+	t.AppendUint32List("parties", p.parties)
 	t.AppendBool("enable_hd", p.enableHD)
 	return t.Sum(), nil
 }
@@ -221,7 +221,7 @@ func (p *RefreshPlan) Digest() ([]byte, error) {
 	t := transcript.New(refreshPlanDigestLabel)
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.state.threshold))
-	t.AppendUint32List("parties", transcript.Uint32s(p.state.parties))
+	t.AppendUint32List("parties", p.state.parties)
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("chain_code", p.state.chainCode)
 	return t.Sum(), nil
@@ -359,8 +359,8 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendBytes("old_public_key", p.state.oldPublicKey)
 	t.AppendBytes("old_chain_code", p.state.oldChainCode)
-	t.AppendUint32List("old_parties", transcript.Uint32s(p.state.oldParties))
-	t.AppendUint32List("new_parties", transcript.Uint32s(p.state.newParties))
+	t.AppendUint32List("old_parties", p.state.oldParties)
+	t.AppendUint32List("new_parties", p.state.newParties)
 	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
 	return t.Sum(), nil
 }
@@ -506,11 +506,11 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t := transcript.New(signPlanDigestLabel)
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.state.threshold))
-	t.AppendUint32List("parties", transcript.Uint32s(p.state.parties))
+	t.AppendUint32List("parties", p.state.parties)
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenHash)
-	t.AppendUint32List("signers", transcript.Uint32s(p.state.signers))
+	t.AppendUint32List("signers", p.state.signers)
 	t.AppendBytes("message", p.state.message)
 	t.AppendBytes("additive_shift", p.state.additiveShift)
 	return t.Sum(), nil

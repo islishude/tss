@@ -25,7 +25,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !zkpai.VerifyModulus(keySharePaillierProofDomain(share), pk, uint32(share.PartyID()), proof) {
+	if !zkpai.VerifyModulus(keySharePaillierProofDomain(share), pk, share.PartyID(), proof) {
 		t.Fatal("key-share Paillier proof did not verify")
 	}
 
@@ -45,7 +45,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 			t.Parallel()
 			mutated := cloneKeyShareValue(share)
 			tc.mutate(mutated)
-			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, uint32(mutated.PartyID()), proof) {
+			if zkpai.VerifyModulus(keySharePaillierProofDomain(mutated), pk, mutated.PartyID(), proof) {
 				t.Fatal("key-share Paillier proof verified under mutated context")
 			}
 		})

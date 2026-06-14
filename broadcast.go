@@ -31,7 +31,7 @@ func AckDigest(protocol ProtocolID, sessionID SessionID, round uint8, from Party
 	t.AppendString("protocol", string(protocol))
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint8("round", round)
-	t.AppendUint32("from", uint32(from))
+	t.AppendUint32("from", from)
 	t.AppendString("payload_type", string(payloadType))
 	t.AppendBytes("payload_hash", payloadHash[:])
 	t.AppendBytes("transcript_hash", transcriptHash[:])

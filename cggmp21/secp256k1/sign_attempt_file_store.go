@@ -594,7 +594,7 @@ func signAttemptFileObjectKeyID(kind string, record SignAttemptRecord) string {
 	t.AppendBytes("presign_id", record.PresignID)
 	t.AppendBytes("attempt_hash", record.AttemptHash)
 	t.AppendBytes("session_id", record.SessionID[:])
-	t.AppendUint32("party", uint32(record.Party))
+	t.AppendUint32("party", record.Party)
 	t.AppendUint16("record_version", record.RecordVersion)
 	return "cggmp21-sign-attempt:" + kind + ":" + hex.EncodeToString(t.Sum())
 }

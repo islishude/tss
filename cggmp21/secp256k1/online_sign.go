@@ -766,7 +766,7 @@ const signPartialEquationDomain = "cggmp21-secp256k1-sign-partial-equation"
 func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, planHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
 	t := transcript.New(signPartialEquationDomain)
 	t.AppendBytes("session_id", sessionID[:])
-	t.AppendUint32("party", uint32(party))
+	t.AppendUint32("party", party)
 	t.AppendBytes("presign_transcript_hash", presignTranscriptHash)
 	t.AppendBytes("context_hash", contextHash)
 	t.AppendBytes("plan_hash", planHash)

@@ -308,7 +308,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 	parties := []tss.PartyID{1, 2, 3}
 	verificationShares := make([]VerificationShare, 0, len(parties))
 	for _, id := range parties {
-		pub, err := edcurve.EvalCommitments(groupCommitments, uint32(id))
+		pub, err := edcurve.EvalCommitments(groupCommitments, id)
 		if err != nil {
 			t.Fatal(err)
 		}

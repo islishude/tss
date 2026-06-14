@@ -30,7 +30,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.cfg.Self), secp.ScalarFromBigInt(share)); err != nil {
+		if err := secp.VerifyShare(s.commits[dealer], s.cfg.Self, secp.ScalarFromBigInt(share)); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
@@ -66,7 +66,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		pub, err := secp.EvalCommitments(groupCommitments, uint32(id))
+		pub, err := secp.EvalCommitments(groupCommitments, id)
 		if err != nil {
 			return nil, err
 		}
@@ -111,7 +111,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
 	}}
-	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, uint32(s.cfg.Self))
+	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, s.cfg.Self)
 	if err != nil {
 		return nil, err
 	}
@@ -301,7 +301,7 @@ func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
 	for _, id := range tss.SortParties(s.cfg.Parties) {
-		t.AppendUint32("party", uint32(id))
+		t.AppendUint32("party", id)
 		t.AppendBytesList("commitments", s.commits[id])
 		item := s.paillierPubs[id]
 		t.AppendBytes("paillier_public_key", item.PublicKey)
@@ -334,7 +334,7 @@ func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCod
 	}
 	t := transcript.New(cggmpChainCodeCommitLabel)
 	t.AppendBytes("session_id", sessionID[:])
-	t.AppendUint32("party_id", uint32(partyID))
+	t.AppendUint32("party_id", partyID)
 	t.AppendBytes("chain_code", chainCode)
 	return t.Sum()
 }

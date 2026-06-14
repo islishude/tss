@@ -20,7 +20,7 @@ func newExampleFROSTSecurity(parties tss.PartySet) *exampleFROSTSecurity {
 	publicKeys := make(map[tss.PartyID]stded25519.PublicKey, len(parties))
 	for _, id := range parties {
 		var seed [stded25519.SeedSize]byte
-		binary.BigEndian.PutUint32(seed[len(seed)-4:], uint32(id))
+		binary.BigEndian.PutUint32(seed[len(seed)-4:], id)
 		privateKey := stded25519.NewKeyFromSeed(seed[:])
 		privateKeys[id] = privateKey
 		publicKeys[id] = privateKey.Public().(stded25519.PublicKey)

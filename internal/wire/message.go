@@ -20,7 +20,7 @@
 // record, recordlist.
 //
 // The kind may be omitted from the struct tag, in which case it is inferred
-// from the Go field type. Named primitive types (e.g. type PartyID uint32)
+// from the Go field type. Named primitive types (e.g. type SessionID [32]byte)
 // are handled correctly. big.Int must always be declared explicitly.
 //
 // The "custom" kind delegates field value encoding to the field type via

@@ -35,7 +35,7 @@ func newExampleCGGMPSecurity(parties tss.PartySet) *exampleCGGMPSecurity {
 		// Place the party ID at the end of a fixed-size seed so every example
 		// party receives a stable and distinct Ed25519 transport identity.
 		var seed [stded25519.SeedSize]byte
-		binary.BigEndian.PutUint32(seed[len(seed)-4:], uint32(id))
+		binary.BigEndian.PutUint32(seed[len(seed)-4:], id)
 		privateKey := stded25519.NewKeyFromSeed(seed[:])
 		privateKeys[id] = privateKey
 		publicKeys[id] = privateKey.Public().(stded25519.PublicKey)
@@ -180,8 +180,7 @@ func (s *exampleCGGMPSecurity) route(
 // using only the package's public integration API. All parties share one global
 // plan, while each party owns an independent guard and KeygenSession.
 func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggmp.KeyShare, error) {
-	partySet := tss.PartySet(parties)
-	security := newExampleCGGMPSecurity(partySet)
+	security := newExampleCGGMPSecurity(parties)
 	// A fresh session ID prevents messages from another keygen execution from
 	// being accepted by these guards or bound into this lifecycle transcript.
 	sessionID, err := tss.NewSessionID(nil)
@@ -200,7 +199,7 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.Ke
 		return nil, err
 	}
 	for _, id := range parties {
-		guard, err := security.guard(id, partySet, sessionID)
+		guard, err := security.guard(id, parties, sessionID)
 		if err != nil {
 			return nil, err
 		}
@@ -212,8 +211,8 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.Ke
 		queue = append(queue, out...)
 	}
 	// Keygen broadcasts are certified by the complete keygen committee.
-	if err := security.route(queue, partySet, func(tss.Envelope) tss.PartySet {
-		return partySet
+	if err := security.route(queue, parties, func(tss.Envelope) tss.PartySet {
+		return parties
 	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleKeygenMessage(env)
 	}); err != nil {

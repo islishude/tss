@@ -90,17 +90,6 @@ func TestBuilderSumDoesNotFinalize(t *testing.T) {
 	}
 }
 
-func TestUint32sConvertsNamedValues(t *testing.T) {
-	t.Parallel()
-
-	type id uint32
-	got := Uint32s([]id{1, 2, 3})
-	want := []uint32{1, 2, 3}
-	if !bytes.Equal(uint32Bytes(got), uint32Bytes(want)) {
-		t.Fatalf("Uint32s() = %v, want %v", got, want)
-	}
-}
-
 func TestBuilderRejectsEmptyDomainAndLabel(t *testing.T) {
 	t.Parallel()
 
@@ -124,12 +113,4 @@ func TestBuilderRejectsEmptyDomainAndLabel(t *testing.T) {
 			New("domain").AppendBytes("", []byte("secret"))
 		})
 	})
-}
-
-func uint32Bytes(values []uint32) []byte {
-	var out []byte
-	for _, value := range values {
-		out = binary.BigEndian.AppendUint32(out, value)
-	}
-	return out
 }

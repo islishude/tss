@@ -6,7 +6,6 @@ import (
 	"testing"
 
 	fed "filippo.io/edwards25519"
-	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/shamir"
 )
 
@@ -115,7 +114,7 @@ func TestVerifyShare(t *testing.T) {
 		commitments[i] = p.Bytes()
 	}
 	for id := uint32(1); id <= 5; id++ {
-		share := shamir.Eval(coeffs, tss.PartyID(id), order)
+		share := shamir.Eval(coeffs, id, order)
 		if err := VerifyShare(commitments, id, share); err != nil {
 			t.Fatalf("id %d: %v", id, err)
 		}

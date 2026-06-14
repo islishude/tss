@@ -342,7 +342,7 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 		if _, err := secp.PointFromBytes(verificationShare); err != nil {
 			return fmt.Errorf("invalid old verification share for party %d: %w", id, err)
 		}
-		expected, err := secp.EvalCommitments(p.state.oldGroupCommitments, uint32(id))
+		expected, err := secp.EvalCommitments(p.state.oldGroupCommitments, id)
 		if err != nil {
 			return fmt.Errorf("evaluate old verification share for party %d: %w", id, err)
 		}
@@ -378,15 +378,15 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendString("curve", p.state.curveID)
 	t.AppendBytes("old_group_public_key", p.state.oldGroupPublicKey)
 	t.AppendBytesList("old_group_commitments", p.state.oldGroupCommitments)
-	t.AppendUint32List("old_parties", transcript.Uint32s(tss.SortParties(p.state.oldParties)))
-	t.AppendUint32List("dealer_parties", transcript.Uint32s(tss.SortParties(p.state.dealerParties)))
-	t.AppendUint32List("new_parties", transcript.Uint32s(tss.SortParties(p.state.newParties)))
+	t.AppendUint32List("old_parties", tss.SortParties(p.state.oldParties))
+	t.AppendUint32List("dealer_parties", tss.SortParties(p.state.dealerParties))
+	t.AppendUint32List("new_parties", tss.SortParties(p.state.newParties))
 	t.AppendUint32("old_threshold", uint32(p.state.oldThreshold))
 	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
 	for _, id := range p.state.oldParties {
-		t.AppendUint32("old_party", uint32(id))
+		t.AppendUint32("old_party", id)
 		t.AppendBytes("old_verification_share", p.state.oldVerificationShares[id])
 	}
 	return t.Sum(), nil

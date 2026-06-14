@@ -24,7 +24,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	for dealer, share := range s.shares {
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		if err := edcurve.VerifyScalarShare(s.commits[dealer], uint32(s.cfg.Self), share); err != nil {
+		if err := edcurve.VerifyScalarShare(s.commits[dealer], s.cfg.Self, share); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", dealer,
@@ -64,7 +64,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		pub, err := edcurve.EvalCommitments(groupCommitments, uint32(id))
+		pub, err := edcurve.EvalCommitments(groupCommitments, id)
 		if err != nil {
 			return nil, err
 		}

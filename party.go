@@ -65,15 +65,3 @@ func ValidateSignerSet(keyParties []PartyID, threshold int, signers []PartyID, l
 	}
 	return nil
 }
-
-// Uint32sToPartySet converts uint32-compatible values for PartyId list
-func Uint32sToPartySet(ids []uint32) []PartyID {
-	if ids == nil {
-		return nil
-	}
-	out := make([]PartyID, len(ids))
-	for i, id := range ids {
-		out[i] = PartyID(id)
-	}
-	return out
-}

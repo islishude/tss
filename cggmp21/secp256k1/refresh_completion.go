@@ -29,7 +29,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	order := secp.Order()
 	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.oldKey.state.party), secp.ScalarFromBigInt(share)); err != nil {
+		if err := secp.VerifyShare(s.commits[dealer], s.oldKey.state.party, secp.ScalarFromBigInt(share)); err != nil {
 			verifyErr := err
 			evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.oldKey.state.party, payloadRefreshShare, nil, true)
 			if evErr != nil {
@@ -97,7 +97,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.oldKey.state.parties))
 	for _, id := range s.oldKey.state.parties {
-		pub, err := secp.EvalCommitments(newCommitments, uint32(id))
+		pub, err := secp.EvalCommitments(newCommitments, id)
 		if err != nil {
 			return nil, err
 		}
@@ -135,7 +135,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelRefreshPaillier,
 	}}
-	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.oldKey.state.party))
+	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, s.oldKey.state.party)
 	if err != nil {
 		return nil, err
 	}
@@ -241,12 +241,12 @@ func (s *RefreshSession) refreshTranscriptHash(newCommitments [][]byte) []byte {
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("old_keygen_transcript_hash", s.oldKey.state.keygenTranscriptHash)
 	sortedParties := tss.SortParties(s.oldKey.state.parties)
-	t.AppendUint32List("parties", transcript.Uint32s(sortedParties))
+	t.AppendUint32List("parties", sortedParties)
 	t.AppendUint32("threshold", uint32(s.cfg.Threshold))
 	t.AppendBytes("public_key", s.oldKey.state.publicKey)
 	t.AppendBytes("chain_code", s.oldKey.state.chainCode)
 	for _, id := range sortedParties {
-		t.AppendUint32("party", uint32(id))
+		t.AppendUint32("party", id)
 		item := s.newPaillierPubs[id]
 		t.AppendBytes("paillier_public_key", item.PublicKey)
 		t.AppendBytes("paillier_proof", item.Proof)

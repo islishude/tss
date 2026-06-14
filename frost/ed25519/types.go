@@ -337,7 +337,7 @@ func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	}
 	// Verification shares must equal commitments evaluated at each party's ID.
 	for _, vs := range k.state.verificationShares {
-		expected, err := edcurve.EvalCommitments(k.state.groupCommitments, uint32(vs.Party))
+		expected, err := edcurve.EvalCommitments(k.state.groupCommitments, vs.Party)
 		if err != nil {
 			return fmt.Errorf("cannot evaluate commitments for party %d: %w", vs.Party, err)
 		}

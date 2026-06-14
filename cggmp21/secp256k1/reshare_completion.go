@@ -58,7 +58,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], uint32(s.selfID), secp.ScalarFromBigInt(share)); err != nil {
+		if err := secp.VerifyShare(s.commits[dealer], s.selfID, secp.ScalarFromBigInt(share)); err != nil {
 			verifyErr := err
 			evidenceEnv, evErr := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil, true)
 			if evErr != nil {
@@ -95,7 +95,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
-		pub, err := secp.EvalCommitments(newCommitments, uint32(id))
+		pub, err := secp.EvalCommitments(newCommitments, id)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +133,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		resharePlanHash:        s.planHash,
 		planHash:               append([]byte(nil), s.planHash...),
 	}}
-	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, uint32(s.selfID))
+	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, s.selfID)
 	if err != nil {
 		return nil, err
 	}
@@ -265,24 +265,24 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	sortedOldParties := tss.SortParties(s.oldParties)
 	sortedDealerParties := tss.SortParties(s.dealerParties)
 	sortedNewParties := tss.SortParties(s.newParties)
-	t.AppendUint32List("old_parties", transcript.Uint32s(sortedOldParties))
-	t.AppendUint32List("dealer_parties", transcript.Uint32s(sortedDealerParties))
-	t.AppendUint32List("new_parties", transcript.Uint32s(sortedNewParties))
+	t.AppendUint32List("old_parties", sortedOldParties)
+	t.AppendUint32List("dealer_parties", sortedDealerParties)
+	t.AppendUint32List("new_parties", sortedNewParties)
 	t.AppendUint32("old_threshold", uint32(s.plan.state.oldThreshold))
 	t.AppendUint32("new_threshold", uint32(s.newThreshold))
 	t.AppendBytes("chain_code", s.plan.state.chainCode)
 	t.AppendUint32("paillier_bits", uint32(s.plan.state.paillierBits))
 	t.AppendBytes("plan_hash", s.planHash)
 	for _, dealer := range sortedOldParties {
-		t.AppendUint32("old_party", uint32(dealer))
+		t.AppendUint32("old_party", dealer)
 		t.AppendBytes("old_verification_share", s.plan.state.oldVerificationShares[dealer])
 	}
 	for _, dealer := range sortedDealerParties {
-		t.AppendUint32("dealer", uint32(dealer))
+		t.AppendUint32("dealer", dealer)
 		t.AppendBytesList("dealer_commitments", s.commits[dealer])
 	}
 	for _, id := range sortedNewParties {
-		t.AppendUint32("new_party", uint32(id))
+		t.AppendUint32("new_party", id)
 		item := s.newPaillierPubs[id]
 		t.AppendBytes("paillier_public_key", item.PublicKey)
 		t.AppendBytes("paillier_proof", item.Proof)

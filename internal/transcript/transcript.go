@@ -10,10 +10,6 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-type uint32Value interface {
-	~uint32
-}
-
 // Builder incrementally constructs a labeled SHA-256 transcript.
 type Builder struct {
 	h hash.Hash
@@ -69,15 +65,6 @@ func (b *Builder) AppendBool(label string, value bool) {
 // AppendUint32List appends a labeled canonical uint32 list.
 func (b *Builder) AppendUint32List(label string, values []uint32) {
 	b.append(label, wire.EncodeUint32List(values))
-}
-
-// Uint32s converts uint32-compatible values for AppendUint32List.
-func Uint32s[T uint32Value](values []T) []uint32 {
-	out := make([]uint32, len(values))
-	for i, value := range values {
-		out[i] = uint32(value)
-	}
-	return out
 }
 
 // AppendBytesList appends a labeled canonical byte-string list.

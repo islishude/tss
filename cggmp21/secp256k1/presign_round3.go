@@ -358,7 +358,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	t.AppendBytes("keygen_transcript_hash", s.key.state.keygenTranscriptHash)
 	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.parties, partySetHashLabel))
 	for _, id := range s.signers {
-		t.AppendUint32("signer", uint32(id))
+		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", s.round1[id].Gamma)
 		t.AppendBytes("enc_k", s.round1[id].EncK)
 		t.AppendBytes("delta_share", scalarBytes(s.deltas[id]))
@@ -382,7 +382,7 @@ func (s *PresignSession) round1Echo() []byte {
 	t.AppendBytes("additive_shift", s.additiveShift)
 	for _, id := range s.signers {
 		p := s.round1[id]
-		t.AppendUint32("signer", uint32(id))
+		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", p.Gamma)
 		t.AppendBytes("enc_k", p.EncK)
 		t.AppendBytes("paillier_public_key", p.PaillierPublicKey)

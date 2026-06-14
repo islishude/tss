@@ -14,7 +14,7 @@ import (
 // "keygen" and "signing" labels will produce distinct digests.
 func PartySetHash(parties []tss.PartyID, label string) []byte {
 	t := transcript.New(label)
-	t.AppendUint32List("parties", transcript.Uint32s(tss.SortParties(parties)))
+	t.AppendUint32List("parties", tss.SortParties(parties))
 	return t.Sum()
 }
 

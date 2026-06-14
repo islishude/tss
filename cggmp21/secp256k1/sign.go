@@ -313,9 +313,9 @@ func (p *Presign) ID() []byte {
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
 	t.AppendBytes("parties_hash", p.state.partiesHash)
-	t.AppendUint32List("signers", transcript.Uint32s(p.state.signers))
+	t.AppendUint32List("signers", p.state.signers)
 	for _, vs := range p.state.verifyShares {
-		t.AppendUint32("verify_share_party", uint32(vs.Party))
+		t.AppendUint32("verify_share_party", vs.Party)
 		t.AppendBytes("k_point", vs.KPoint)
 		t.AppendBytes("chi_point", vs.ChiPoint)
 		proofHash := sha256.Sum256(vs.Proof)

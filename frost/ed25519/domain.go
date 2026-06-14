@@ -23,11 +23,11 @@ func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties [
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("threshold", uint32(threshold))
 	sortedParties := tss.SortParties(parties)
-	t.AppendUint32List("parties", transcript.Uint32s(sortedParties))
+	t.AppendUint32List("parties", sortedParties)
 	t.AppendBytes("chain_code", chainCode)
 	t.AppendBytes("plan_hash", planHash)
 	for _, id := range sortedParties {
-		t.AppendUint32("dealer", uint32(id))
+		t.AppendUint32("dealer", id)
 		t.AppendBytesList("dealer_commitments", dealerCommitments[id])
 	}
 	t.AppendBytesList("group_commitments", groupCommitments)
@@ -43,15 +43,15 @@ func frostReshareTranscriptHash(sessionID tss.SessionID, oldParties, newParties 
 	t.AppendBytes("session_id", sessionID[:])
 	sortedOldParties := tss.SortParties(oldParties)
 	sortedNewParties := tss.SortParties(newParties)
-	t.AppendUint32List("old_parties", transcript.Uint32s(sortedOldParties))
-	t.AppendUint32List("new_parties", transcript.Uint32s(sortedNewParties))
+	t.AppendUint32List("old_parties", sortedOldParties)
+	t.AppendUint32List("new_parties", sortedNewParties)
 	t.AppendUint32("new_threshold", uint32(newThreshold))
 	t.AppendBytes("old_public_key", oldPublicKey)
 	t.AppendBytes("chain_code", chainCode)
 	t.AppendBytes("plan_hash", planHash)
 	t.AppendBool("refresh_mode", refreshMode)
 	for _, dealer := range sortedOldParties {
-		t.AppendUint32("dealer", uint32(dealer))
+		t.AppendUint32("dealer", dealer)
 		t.AppendBytesList("dealer_commitments", dealerCommitments[dealer])
 	}
 	t.AppendBytesList("new_commitments", newCommitments)
@@ -65,7 +65,7 @@ func appendVerificationShares(t *transcript.Builder, verificationShares []Verifi
 		return int(a.Party) - int(b.Party)
 	})
 	for _, share := range sorted {
-		t.AppendUint32("verification_share_party", uint32(share.Party))
+		t.AppendUint32("verification_share_party", share.Party)
 		t.AppendBytes("verification_share_public_key", share.PublicKey)
 	}
 }

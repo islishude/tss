@@ -194,7 +194,7 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 		return int(a.Party) - int(b.Party)
 	})
 	for _, share := range sorted {
-		t.AppendUint32("party", uint32(share.Party))
+		t.AppendUint32("party", share.Party)
 		t.AppendBytes("public_key", share.PublicKey)
 		t.AppendBytes("proof", share.Proof)
 	}

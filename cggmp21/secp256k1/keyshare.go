@@ -408,7 +408,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if err := checkPaillierModulusBounds(pk, limits); err != nil {
 		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
 	}
-	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, uint32(k.state.party), modProof) {
+	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, k.state.party, modProof) {
 		return errors.New("invalid local paillier proof")
 	}
 	localRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.state.ringPedersenParams, limits.Paillier.MaxModulusBits)
@@ -426,7 +426,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if localRPDomain == nil {
 		return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.state.paillierProofDomain)
 	}
-	if !zkpai.VerifyRingPedersen(localRPDomain, localRPParams, uint32(k.state.party), localRPProof) {
+	if !zkpai.VerifyRingPedersen(localRPDomain, localRPParams, k.state.party, localRPProof) {
 		return errors.New("invalid local Ring-Pedersen proof")
 	}
 	for i, item := range k.state.paillierPublicKeys {
@@ -461,7 +461,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		if err := checkPaillierModulusBounds(peerPK, limits); err != nil {
 			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", item.Party, err)
 		}
-		if !zkpai.VerifyModulus(proofDomain, peerPK, uint32(item.Party), peerProof) {
+		if !zkpai.VerifyModulus(proofDomain, peerPK, item.Party, peerProof) {
 			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
 		}
 		peerRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(rp.Params, limits.Paillier.MaxModulusBits)
@@ -479,7 +479,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		if rpDomain == nil {
 			return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.state.paillierProofDomain)
 		}
-		if !zkpai.VerifyRingPedersen(rpDomain, peerRPParams, uint32(rp.Party), peerRPProof) {
+		if !zkpai.VerifyRingPedersen(rpDomain, peerRPParams, rp.Party, peerRPProof) {
 			return fmt.Errorf("invalid Ring-Pedersen proof for party %d", rp.Party)
 		}
 	}

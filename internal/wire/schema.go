@@ -384,7 +384,7 @@ func isKnownKind(s string) bool {
 func inferKind(t reflect.Type) (wireKind, error) {
 	t = indirectType(t)
 
-	// Check for ValueMarshaler first — domain types like SessionID, PartyID,
+	// Check for ValueMarshaler first — domain types like SessionID
 	// and other named primitives may implement it for custom encoding.
 	vmType := reflect.TypeFor[ValueMarshaler]()
 	if t.Implements(vmType) || reflect.PointerTo(t).Implements(vmType) {

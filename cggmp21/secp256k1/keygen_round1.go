@@ -61,7 +61,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes, planHash), paillierKey, uint32(config.Self))
+	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes, planHash), paillierKey, config.Self)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -77,7 +77,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), keygenRingPedersenDomain(config, config.Self, ringPedersenParamsBytes, planHash), paillierKey, ringPedersenParams, ringPedersenLambda, uint32(config.Self))
+	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), keygenRingPedersenDomain(config, config.Self, ringPedersenParamsBytes, planHash), paillierKey, ringPedersenParams, ringPedersenLambda, config.Self)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -237,7 +237,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, uint32(env.From), proof) {
+	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, env.From, proof) {
 		s.log.Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -289,7 +289,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, uint32(env.From), ringProof) {
+	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, env.From, ringProof) {
 		s.log.Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -342,7 +342,7 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	// yet, defer verification to tryComplete (which re-checks all shares
 	// once every party's commitments are in).
 	if commits, ok := s.commits[env.From]; ok {
-		if err := secp.VerifyShare(commits, uint32(s.cfg.Self), share); err != nil {
+		if err := secp.VerifyShare(commits, s.cfg.Self, share); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
 				"party_id", s.cfg.Self,
 				"dealer", env.From,

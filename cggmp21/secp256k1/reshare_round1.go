@@ -119,7 +119,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	proofConfig := s.receiverConfig()
-	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes, s.planHash), newPaillierKey, uint32(s.selfID))
+	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes, s.planHash), newPaillierKey, s.selfID)
 	if err != nil {
 		return err
 	}
@@ -135,7 +135,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParamsBytes, s.planHash), newPaillierKey, ringPedersenParams, ringPedersenLambda, uint32(s.selfID))
+	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParamsBytes, s.planHash), newPaillierKey, ringPedersenParams, ringPedersenLambda, s.selfID)
 	if err != nil {
 		return err
 	}
@@ -170,7 +170,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if !zkpai.VerifyModulus(resharePaillierDomain(s.receiverConfig(), env.From, p.PaillierPublicKey, s.planHash), pk, uint32(env.From), proof) {
+	if !zkpai.VerifyModulus(resharePaillierDomain(s.receiverConfig(), env.From, p.PaillierPublicKey, s.planHash), pk, env.From, proof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -217,7 +217,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
 		)
 	}
-	if !zkpai.VerifyRingPedersen(reshareRingPedersenDomain(s.receiverConfig(), env.From, p.RingPedersenParams, s.planHash), ringParams, uint32(env.From), ringProof) {
+	if !zkpai.VerifyRingPedersen(reshareRingPedersenDomain(s.receiverConfig(), env.From, p.RingPedersenParams, s.planHash), ringParams, env.From, ringProof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -247,7 +247,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
 	}
 	share := secp.ScalarFromBigInt(p.Share)
-	if err := secp.VerifyShare(commitments, uint32(s.selfID), share); err != nil {
+	if err := secp.VerifyShare(commitments, s.selfID, share); err != nil {
 		verifyErr := err
 		evidenceEnv, evErr := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload, true)
 		if evErr != nil {

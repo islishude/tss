@@ -309,7 +309,7 @@ func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode
 	}
 	t := transcript.New(chainCodeCommitLabel)
 	t.AppendBytes("session_id", sessionID[:])
-	t.AppendUint32("party_id", uint32(partyID))
+	t.AppendUint32("party_id", partyID)
 	t.AppendBytes("chain_code", chainCode)
 	return t.Sum()
 }

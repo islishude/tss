@@ -30,13 +30,13 @@ func WrongRound(env tss.Envelope) tss.Envelope {
 
 // WrongSender replaces the sender with a different party ID.
 func WrongSender(env tss.Envelope) tss.Envelope {
-	env.From = tss.PartyID(uint32(env.From) + 99)
+	env.From = env.From + 99
 	return env
 }
 
 // WrongRecipient replaces the recipient.
 func WrongRecipient(env tss.Envelope) tss.Envelope {
-	env.To = tss.PartyID(99)
+	env.To = 99
 	return env
 }
 

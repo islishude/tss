@@ -279,7 +279,7 @@ func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
 			Mode:                 tss.DeliveryMode(w.DeliveryMode),
 			Confidentiality:      tss.ConfidentialityPolicy(w.Confidentiality),
 			BroadcastConsistency: tss.BroadcastConsistencyPolicy(w.BroadcastConsistency),
-			Recipients:           tss.Uint32sToPartySet(w.Recipients),
+			Recipients:           w.Recipients,
 		},
 		DeliveryState: SignAttemptDeliveryState{
 			Acks:             signAttemptAcksFromWire(w.Acks),
@@ -404,7 +404,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 		DeliveryMode:               uint8(r.DeliveryPolicy.Mode),
 		Confidentiality:            uint8(r.DeliveryPolicy.Confidentiality),
 		BroadcastConsistency:       uint8(r.DeliveryPolicy.BroadcastConsistency),
-		Recipients:                 transcript.Uint32s(r.DeliveryPolicy.Recipients),
+		Recipients:                 r.DeliveryPolicy.Recipients,
 		Acks:                       signAttemptAcksToWire(r.DeliveryState.Acks),
 		Certificate:                signAttemptCertificateToWire(r.DeliveryState.Certificate),
 		DeliveryComplete:           r.DeliveryState.DeliveryComplete,
@@ -721,7 +721,7 @@ func signAttemptIntentHash(r SignAttemptRecord) []byte {
 	t.AppendUint16("protocol_version", r.Version)
 	t.AppendBytes("presign_id", r.PresignID)
 	t.AppendBytes("session_id", r.SessionID[:])
-	t.AppendUint32("party", uint32(r.Party))
+	t.AppendUint32("party", r.Party)
 	t.AppendBytes("signer_set_hash", r.SignerSetHash)
 	t.AppendBytes("sign_plan_hash", r.SignPlanHash)
 	t.AppendBytes("context_hash", r.ContextHash)
@@ -746,7 +746,7 @@ func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
 	t.AppendUint8("mode", uint8(p.Mode))
 	t.AppendUint8("confidentiality", uint8(p.Confidentiality))
 	t.AppendUint8("broadcast_consistency", uint8(p.BroadcastConsistency))
-	t.AppendUint32List("recipients", transcript.Uint32s(p.Recipients))
+	t.AppendUint32List("recipients", p.Recipients)
 	return t.Sum()
 }
 
@@ -813,11 +813,11 @@ func marshalSignAttemptCertificate(cert *tss.BroadcastCertificate) ([]byte, erro
 		Protocol:       string(cert.Protocol),
 		SessionID:      cert.SessionID[:],
 		Round:          cert.Round,
-		From:           uint32(cert.From),
+		From:           cert.From,
 		PayloadType:    string(cert.PayloadType),
 		PayloadHash:    cert.PayloadHash[:],
 		TranscriptHash: cert.TranscriptHash[:],
-		Recipients:     transcript.Uint32s(cert.Recipients),
+		Recipients:     cert.Recipients,
 		Acks:           signAttemptAcksToWire(cert.Acks),
 	})
 }
@@ -838,9 +838,9 @@ func signAttemptCertificateFromWire(raw []byte) *tss.BroadcastCertificate {
 		Protocol:    tss.ProtocolID(w.Protocol),
 		SessionID:   sessionID,
 		Round:       w.Round,
-		From:        tss.PartyID(w.From),
+		From:        w.From,
 		PayloadType: tss.PayloadType(w.PayloadType),
-		Recipients:  tss.PartySet(tss.Uint32sToPartySet(w.Recipients)),
+		Recipients:  tss.PartySet(w.Recipients),
 		Acks:        signAttemptAcksFromWire(w.Acks),
 	}
 	copy(cert.PayloadHash[:], w.PayloadHash)
