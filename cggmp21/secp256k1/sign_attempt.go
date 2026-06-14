@@ -18,7 +18,7 @@ const (
 	signAttemptRecordVersion       uint16 = 1
 	signAttemptWireType                   = "cggmp21.secp256k1.sign-attempt"
 	signAttemptCertificateWireType        = "cggmp21.secp256k1.sign-attempt.certificate"
-	signAttemptIntentLabel                = "cggmp21-secp256k1-sign-attempt-intent-v2"
+	signAttemptIntentLabel                = "cggmp21-secp256k1-sign-attempt-intent-v1"
 	signAttemptHashLabel                  = "cggmp21-secp256k1-sign-attempt-hash-v1"
 	signAttemptSignerSetLabel             = "cggmp21-secp256k1-sign-attempt-signers-v1"
 	signAttemptDeliveryPolicyLabel        = "cggmp21-secp256k1-sign-attempt-delivery-policy-v1"
