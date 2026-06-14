@@ -15,10 +15,12 @@ PKGS ?= ./...
 # Package-level parallelism controls how many packages `go test` runs at once.
 # Test-level parallelism controls how many tests marked with t.Parallel run
 # concurrently within each package.
+LOGICAL_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 PKG_PARALLEL ?= 8
-TEST_PARALLEL ?= $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
+TEST_PARALLEL ?= $(LOGICAL_CPUS)
 INTEGRATION_PKG_PARALLEL ?= 2
-INTEGRATION_PARALLEL ?= 2
+INTEGRATION_PARALLEL ?= $(shell cpus=$(LOGICAL_CPUS); \
+	if [ "$$cpus" -lt 1 ]; then echo 1; elif [ "$$cpus" -gt 4 ]; then echo 4; else echo "$$cpus"; fi)
 FUZZ_PARALLEL ?= 4
 
 UNIT_TIMEOUT ?= 1m
