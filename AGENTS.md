@@ -18,6 +18,7 @@ For testing rules, required invariants, test tiers, fuzzing, golden vectors, and
 - Never use `math/big.Int.Exp` with a secret exponent. Secret-exponent modular exponentiation must go through `internal/paillier/paillierct`.
 - Secret scalars must use `internal/secret.Scalar`. Do not expose secret scalars through `String()`, variable-length `Bytes()`, `BigInt()`, JSON, logs, panic messages, or formatted errors.
 - Never place private shares, nonces, Paillier private-key material, MtA secrets, presign secrets, or other witness material in `BlameEvidence`, logs, test failure messages, or public error strings.
+- CGGMP21 presigns are one-use objects. A presign must not be reusable across digests, sessions, signer sets, key shares, BIP32 paths, serialization round trips, shallow copies, restarts, or concurrent calls.
 
 ## Minimal Local Checks
 
@@ -61,6 +62,7 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 - `frost/ed25519`: dealerless FROST-style Ed25519 DKG, signing, partial verification, aggregation, refresh, reshare, and non-hardened HD derivation.
 - `cggmp21/secp256k1`: CGGMP21-style threshold ECDSA keygen, presign, online signing, refresh, reshare, non-hardened BIP32 derivation, and evidence verification.
 - `internal/wire`: strict canonical TLV encoding for envelopes, key shares, presign records, MtA messages, Paillier keys, and proof payloads.
+- `internal/transcript`: canonical labeled SHA-256 transcript builder for domain-separated hashing across all protocol packages.
 - `internal/secret`: fixed-length secret scalar representation.
 - `internal/paillier`: Paillier primitives, key generation, encryption, decryption, and homomorphic operations.
 - `internal/paillier/paillierct`: constant-time modular exponentiation for secret-exponent paths.
@@ -75,15 +77,12 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 
 - Keep files focused on one responsibility. Split code when protocol flow, serialization, validation, and storage concerns start mixing.
 - Prefer protocol-local helpers over broad abstractions. Introduce shared helpers only when they centralize an invariant used by multiple packages.
+- Add Go doc comments for every exported identifier. Comments must start with the identifier name. internal comments should explain intent, constraints, assumptions, or edge cases.
+- Comment protocol equations, transcript construction, domain separation, and security-sensitive shortcuts. Avoid comments that merely restate the code.
 - Fail closed on malformed or unexpected input. Wrong session, protocol, version, round, sender, recipient, signer set, threshold, transcript hash, payload type, scalar, point, proof, or encoding must return an error.
 - Reject duplicate, replayed, equivocated, out-of-order, or cross-session messages unless a protocol phase explicitly buffers them. Buffered messages must be revalidated before use.
-- Preserve deterministic `MarshalBinary` / `UnmarshalBinary` behavior for envelopes, key shares, presign records, proof payloads, and blame evidence.
-- Do not add JSON fallback to binary decoders.
 - Do not accept non-canonical wire encodings. Duplicate tags, trailing bytes, non-minimal integers, oversized fields, wrong type IDs, and missing required fields must be rejected.
-- Keep domain separation explicit. Challenges, transcript hashes, commitments, proof statements, and signature shares must bind all relevant context: protocol, version, session, round, sender, recipient when direct, party set, signer set, threshold, public key, BIP32 path, and presign context.
-- CGGMP21 presigns are one-use objects. A presign must not be reusable across digests, sessions, signer sets, key shares, BIP32 paths, serialization round trips, shallow copies, restarts, or concurrent calls.
-- Add Go doc comments for every exported identifier. Comments must start with the identifier name.
-- Comment protocol equations, transcript construction, domain separation, and security-sensitive shortcuts. Avoid comments that merely restate the code.
+- Keep domain separation explicit. Challenges, transcript hashes, commitments, proof statements, and signature shares must bind all relevant context.
 
 ## Documentation Rules
 
