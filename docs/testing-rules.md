@@ -213,25 +213,28 @@ serialization round trips, restarts, or concurrent calls.
 
 Required behavior:
 
-- Concurrent claims permit exactly one successful consumer and at most one
-  emitted partial signature.
-- All losing consumers receive the consumed error category.
+- Concurrent different intents permit exactly one committed winner.
+- Concurrent identical intents return the exact same canonical envelope.
+- All conflicting intents receive the consumed error category.
 - Shallow copies and test-only deep copies cannot create independent claims.
 - Marshal/unmarshal and encrypt/decrypt preserve consumed state.
 - Independently restored copies are still serialized by the same durable
-  `PresignStore`.
+  `SignAttemptStore`.
 - Production code does not expose an API that clones a reusable presign.
 
-A presign is consumed before a partial signature can become externally observable.
-Validation that fails before entering that path must not consume it.
+A presign is bound before a partial signature can become externally observable.
+Validation, construction, self-verification, and encoding failures before the
+durable commit must not consume it.
 
-| Failure point                                                               | Consumed          |
-| --------------------------------------------------------------------------- | ----------------- |
-| Invalid digest, key share, signer set, BIP32 path, or request configuration | no                |
-| Temporary durable-store error before a successful claim                     | no                |
-| Durable store reports already consumed                                      | yes               |
-| Partial signature constructed, emitted, or send outcome is uncertain        | yes               |
-| Crash after partial generation                                              | yes after restart |
+| Failure point                                                               | Consumed         |
+| --------------------------------------------------------------------------- | ---------------- |
+| Invalid digest, key share, signer set, BIP32 path, or request configuration | no               |
+| Ordinary durable load error before commit                                   | no               |
+| Corrupt durable claim, envelope, ciphertext, or completion record           | yes; discard     |
+| Commit succeeds, conflicts, or has an unknown outcome                       | yes              |
+| Candidate partial constructed but not committed                             | no               |
+| Committed envelope emitted or send outcome is uncertain                     | yes              |
+| Crash after durable commit                                                  | yes; resume only |
 
 Bad input must never cause partial signature emission.
 
@@ -256,20 +259,35 @@ Use the shared crash-store harness to inject failures around persistence and
 outbound emission. Cover the points before persist, after persist, before
 outbound, and after outbound when they are meaningful for the phase.
 
-| State at crash                                 | Required state after restart                                |
-| ---------------------------------------------- | ----------------------------------------------------------- |
-| Keygen incomplete or unconfirmed               | No exportable MPC key share                                 |
-| Keygen complete and confirmed                  | Usable key share                                            |
-| Presign incomplete                             | No usable presign                                           |
-| Presign complete, never claimed                | Usable unconsumed presign                                   |
-| Presign claimed or partial possibly observable | Presign remains consumed                                    |
-| Refresh incomplete                             | Old share is the only usable share                          |
-| Refresh complete                               | New share is usable; old/new shares cannot mix              |
-| Reshare incomplete                             | Committees cannot mix; prior valid state remains coherent   |
-| Reshare complete                               | New committee state is usable; removed parties are rejected |
+| State at crash                       | Required state after restart                                               |
+| ------------------------------------ | -------------------------------------------------------------------------- |
+| Keygen incomplete or unconfirmed     | No exportable MPC key share                                                |
+| Keygen complete and confirmed        | Usable key share                                                           |
+| Presign incomplete                   | No usable presign                                                          |
+| Presign complete, never claimed      | Usable unconsumed presign                                                  |
+| Attempt committed or outcome unknown | Resume only the bound attempt and exact envelope while delivery is pending |
+| Delivery certificate durable         | Resume the session without outbound replay                                 |
+| Completion computed but not durable  | Signature remains unavailable; retry persists same result                  |
+| Burn tombstone durable               | Presign cannot start or resume an attempt                                  |
+| Refresh incomplete                   | Old share is the only usable share                                         |
+| Refresh complete                     | New share is usable; old/new shares cannot mix                             |
+| Reshare incomplete                   | Committees cannot mix; prior valid state remains coherent                  |
+| Reshare complete                     | New committee state is usable; removed parties are rejected                |
 
-`PresignStore` is the durability boundary for consumption. Claiming the presign
-must be atomic and durable before any partial signature is emitted.
+`SignAttemptStore` is the durability and outbox boundary. `CommitSignAttempt`
+must be the only StartSign linearization point; StartSign must not pre-read
+`LoadSignAttempt` to decide concurrency. Binding the presign and persisting the
+exact canonical base envelope must be one atomic commit before any partial
+signature is returned or emitted. Tests that instrument stores should distinguish
+`SignAttemptCreated`, `SignAttemptExistingSame`, conflict, burn, and
+same-intent/different-attempt non-determinism.
+
+Delivery state is durable attempt state. Tests must cover ACK idempotency,
+certificate persistence, mismatched payload/transcript/recipient rejection, and
+the rule that `ResumeSign` stops returning outbound replay once delivery is
+complete. Completion must be durable before the final signature becomes
+externally visible; completion timeout or unknown outcome should leave
+`Signature()` unavailable until `RetryCompletion` persists the same result.
 
 ### 8. Blame Evidence
 

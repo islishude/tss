@@ -3,43 +3,44 @@
 package secp256k1
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 )
 
-// TestThresholdECDSA_PresignReuseRejected verifies that a presign cannot be
-// reused: same session re-sign attempt, cross-session reuse, and cross-digest
-// reuse all fail.
-func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
+// TestThresholdECDSA_PresignAttemptBinding verifies that the same intent resumes
+// idempotently while cross-session and cross-digest reuse fail.
+func TestThresholdECDSA_PresignAttemptBinding(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name       string
 		newSession bool // create a new session ID for the reuse attempt
 		newDigest  bool // use a different digest for the reuse attempt
-		wantCode   string
+		wantResume bool
 	}{
 		{
 			name:       "same session same digest",
 			newSession: false,
 			newDigest:  false,
-			wantCode:   tss.ErrCodeConsumed,
+			wantResume: true,
 		},
 		{
 			name:       "different session same digest",
 			newSession: true,
 			newDigest:  false,
-			wantCode:   tss.ErrCodeConsumed,
 		},
 		{
 			name:       "same session different digest",
 			newSession: false,
 			newDigest:  true,
-			wantCode:   tss.ErrCodeConsumed,
 		},
 	}
 
@@ -57,7 +58,9 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if _, _, err := StartSignDigest(shares[1], presign, signID, digest[:]); err != nil {
+			store := newTestSignAttemptStore()
+			_, firstOut, err := StartSignDigestWithStore(shares[1], presign, signID, digest[:], store)
+			if err != nil {
 				t.Fatalf("first StartSignDigest: %v", err)
 			}
 
@@ -75,8 +78,28 @@ func TestThresholdECDSA_PresignReuseRejected(t *testing.T) {
 				reuseDigest = d[:]
 			}
 
-			_, _, err = StartSignDigest(shares[1], presign, reuseSessionID, reuseDigest)
-			_ = testutil.AssertProtocolError(t, err, tc.wantCode)
+			_, resumedOut, err := StartSignDigestWithStore(shares[1], presign, reuseSessionID, reuseDigest, store)
+			if tc.wantResume {
+				if err != nil {
+					t.Fatalf("same attempt did not resume: %v", err)
+				}
+				firstRaw, _ := firstOut[0].MarshalBinary()
+				resumedRaw, _ := resumedOut[0].MarshalBinary()
+				if !bytes.Equal(firstRaw, resumedRaw) {
+					t.Fatal("same attempt returned a different envelope")
+				}
+				return
+			}
+			_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
+			_, recoveredOut, err := StartSignDigestWithStore(shares[1], presign, signID, digest[:], store)
+			if err != nil {
+				t.Fatalf("original attempt was not recoverable after conflict: %v", err)
+			}
+			firstRaw, _ := firstOut[0].MarshalBinary()
+			recoveredRaw, _ := recoveredOut[0].MarshalBinary()
+			if !bytes.Equal(firstRaw, recoveredRaw) {
+				t.Fatal("conflict recovery changed the original envelope")
+			}
 		})
 	}
 }
@@ -133,7 +156,7 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSA_RestoredPresignStoreClaimsOnce(t *testing.T) {
+func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
@@ -150,7 +173,7 @@ func TestThresholdECDSA_RestoredPresignStoreClaimsOnce(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	store := newTestPresignStore()
+	store := newTestSignAttemptStore()
 	digest := sha256.Sum256([]byte("restored store claims once"))
 	startSignDigestWithStoreMustSucceed(t, shares[1], restoredA, digest[:], store)
 	startSignDigestWithStoreMustBeConsumed(t, shares[1], restoredB, digest[:], store)
@@ -159,17 +182,17 @@ func TestThresholdECDSA_RestoredPresignStoreClaimsOnce(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSA_PresignStoreAlreadyConsumedFailClosed(t *testing.T) {
+func TestThresholdECDSA_SignAttemptConflictFailsClosed(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
-	digest := sha256.Sum256([]byte("store already consumed"))
+	digest := sha256.Sum256([]byte("store intent conflict"))
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], fixedErrPresignStore{err: ErrPresignAlreadyConsumed})
+	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], fixedErrSignAttemptStore{err: ErrSignAttemptConflict})
 	if session != nil || out != nil {
 		t.Fatal("already-consumed store returned signing output")
 	}
@@ -179,33 +202,459 @@ func TestThresholdECDSA_PresignStoreAlreadyConsumedFailClosed(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSA_PresignStoreTemporaryErrorRollsBack(t *testing.T) {
+func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
 	digest := sha256.Sum256([]byte("store temporary error"))
-	storeErr := errors.New("temporary store failure")
-	store := &retryPresignStore{err: storeErr}
+	storeErr := errors.New("commit response lost")
+	store := &outcomeUnknownSignAttemptStore{inner: newTestSignAttemptStore(), err: storeErr}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
-	if !errors.Is(err, storeErr) {
-		t.Fatalf("expected temporary store error, got %v", err)
+	if !errors.Is(err, ErrSignAttemptOutcomeUnknown) {
+		t.Fatalf("expected outcome-unknown error, got %v", err)
 	}
 	if session != nil || out != nil {
-		t.Fatal("temporary store error returned signing output")
+		t.Fatal("outcome-unknown commit returned signing output")
 	}
-	if IsPresignConsumed(presigns[1]) {
-		t.Fatal("temporary store error did not roll back local claim")
+	if !IsPresignConsumed(presigns[1]) {
+		t.Fatal("outcome-unknown commit did not retain local binding")
 	}
 
-	startSignDigestWithStoreMustSucceed(t, shares[1], presigns[1], digest[:], store)
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+	if err != nil {
+		t.Fatalf("resume same attempt: %v", err)
+	}
+	if session == nil || len(out) != 1 {
+		t.Fatal("resume same attempt did not return the durable outbox")
+	}
 }
 
-func TestThresholdECDSA_StartSignRequiresPresignStore(t *testing.T) {
+func TestThresholdECDSA_StartSignCommitIsFirstDurableDecision(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	digest := sha256.Sum256([]byte("commit before load"))
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := &loadCountingSignAttemptStore{inner: newTestSignAttemptStore()}
+	if _, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store); err != nil {
+		t.Fatal(err)
+	} else if len(out) != 1 {
+		t.Fatal("StartSign did not return committed outbox")
+	}
+	if store.loadCount() != 0 {
+		t.Fatalf("StartSign called LoadSignAttempt %d time(s) before/after commit", store.loadCount())
+	}
+}
+
+func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	raw, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := loadErrSignAttemptStore{err: ErrSignAttemptCorrupt}
+
+	resumePresign, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	session, out, err := ResumeSign(context.Background(), shares[1], resumePresign, store, guard)
+	if !errors.Is(err, ErrSignAttemptCorrupt) {
+		t.Fatalf("ResumeSign corrupt load error = %v", err)
+	}
+	if session != nil || out != nil {
+		t.Fatal("ResumeSign returned output for a corrupt durable attempt")
+	}
+	if !IsPresignConsumed(resumePresign) {
+		t.Fatal("ResumeSign released the presign after a corrupt durable load")
+	}
+}
+
+func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	rawFresh, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("restart exact outbox"))
+	store := newTestSignAttemptStore()
+	_, firstOut, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawConsumed, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for name, raw := range map[string][]byte{
+		"fresh snapshot":    rawFresh,
+		"consumed snapshot": rawConsumed,
+	} {
+		t.Run(name, func(t *testing.T) {
+			restored, err := UnmarshalPresign(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+			_, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
+			if err != nil {
+				t.Fatal(err)
+			}
+			firstRaw, _ := firstOut[0].MarshalBinary()
+			resumedRaw, _ := resumedOut[0].MarshalBinary()
+			if !bytes.Equal(firstRaw, resumedRaw) {
+				t.Fatal("restart did not replay the exact committed envelope")
+			}
+		})
+	}
+}
+
+func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	rawPresign, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("delivery complete resume"))
+	store := newTestSignAttemptStore()
+	session, out, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 1 {
+		t.Fatal("StartSign did not return outbox")
+	}
+	ack1 := testBroadcastAck(out[0], 1)
+	ack2 := testBroadcastAck(out[0], 2)
+	cert, err := tss.NewBroadcastCertificate(out[0], tss.PartySet{1, 2}, []tss.BroadcastAck{ack1, ack2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := session.UpdateDelivery(context.Background(), nil, cert); err != nil {
+		t.Fatal(err)
+	}
+	restored, err := UnmarshalPresign(rawPresign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed == nil {
+		t.Fatal("ResumeSign returned nil session")
+	}
+	if len(resumedOut) != 0 {
+		t.Fatal("ResumeSign replayed outbox after durable delivery completion")
+	}
+}
+
+func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	rawPresign, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("completion restart"))
+	stores := map[tss.PartyID]*testSignAttemptStore{
+		1: newTestSignAttemptStore(),
+		2: newTestSignAttemptStore(),
+	}
+	sessions := make(map[tss.PartyID]*SignSession, len(signers))
+	out := make(map[tss.PartyID]tss.Envelope, len(signers))
+	for _, id := range signers {
+		session, envelopes, err := StartSignDigestWithStore(shares[id], presigns[id], sessionID, digest[:], stores[id])
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		out[id] = envelopes[0]
+	}
+	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(out[2])); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := sessions[2].HandleSignMessage(testutil.DeliverEnvelope(out[1])); err != nil {
+		t.Fatal(err)
+	}
+	signature, ok := sessions[1].Signature()
+	if !ok {
+		t.Fatal("signature was not completed")
+	}
+
+	restored, err := UnmarshalPresign(rawPresign)
+	if err != nil {
+		t.Fatal(err)
+	}
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, stores[1], guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(resumedOut) != 1 {
+		t.Fatal("completed attempt did not retain the exact replayable outbox")
+	}
+	originalRaw, _ := out[1].MarshalBinary()
+	resumedRaw, _ := resumedOut[0].MarshalBinary()
+	if !bytes.Equal(originalRaw, resumedRaw) {
+		t.Fatal("completed attempt replayed a different envelope")
+	}
+	resumedSignature, ok := resumed.Signature()
+	if !ok || !bytes.Equal(signature.R, resumedSignature.R) || !bytes.Equal(signature.S, resumedSignature.S) {
+		t.Fatal("completed signature did not survive restart")
+	}
+}
+
+func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	signers := []tss.PartyID{1, 2}
+	presigns := secpPresign(t, shares, signers)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("completion visibility"))
+	completionErr := errors.New("completion response lost")
+	store1 := &completionOutcomeUnknownStore{inner: newTestSignAttemptStore(), err: completionErr}
+	store2 := newTestSignAttemptStore()
+	session1, out1, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out2, err := StartSignDigestWithStore(shares[2], presigns[2], sessionID, digest[:], store2)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); !errors.Is(err, completionErr) {
+		t.Fatalf("completion persistence error = %v", err)
+	}
+	if _, ok := session1.Signature(); ok {
+		t.Fatal("signature became visible before durable completion was confirmed")
+	}
+	if err := session1.RetryCompletion(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := session1.Signature(); !ok {
+		t.Fatal("signature unavailable after idempotent completion retry")
+	}
+	if len(out1) != 1 {
+		t.Fatal("initial exact outbox was not returned")
+	}
+}
+
+func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	raw, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newTestSignAttemptStore()
+	if err := BurnPresign(context.Background(), store, presigns[1], "operator discard"); err != nil {
+		t.Fatal(err)
+	}
+	if !IsPresignConsumed(presigns[1]) {
+		t.Fatal("BurnPresign did not mark the local handle consumed")
+	}
+	restored, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("burned presign"))
+	session, out, err := StartSignDigestWithStore(shares[1], restored, sessionID, digest[:], store)
+	if session != nil || out != nil {
+		t.Fatal("burned restored presign produced signing output")
+	}
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
+	if !IsPresignConsumed(restored) {
+		t.Fatal("burned restored presign was not locally consumed")
+	}
+}
+
+func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	raw, err := presigns[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	store := newTestSignAttemptStore()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("commit before burn"))
+	_, firstOut, err := StartSignDigestWithStore(shares[1], presigns[1], sessionID, digest[:], store)
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := UnmarshalPresign(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := BurnPresign(context.Background(), store, restored, "too late"); !errors.Is(err, ErrSignAttemptConflict) {
+		t.Fatalf("burn after commit error = %v", err)
+	}
+	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resumed == nil || len(resumedOut) != 1 {
+		t.Fatal("committed attempt was not resumable after failed burn")
+	}
+	firstRaw, _ := firstOut[0].MarshalBinary()
+	resumedRaw, _ := resumedOut[0].MarshalBinary()
+	if !bytes.Equal(firstRaw, resumedRaw) {
+		t.Fatal("failed burn changed the committed outbox")
+	}
+}
+
+func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	digest := sha256.Sum256([]byte("concurrent same attempt"))
+	store := newTestSignAttemptStore()
+	const workers = 8
+	type result struct {
+		raw []byte
+		err error
+	}
+	var wg sync.WaitGroup
+	results := make(chan result, workers)
+	for range workers {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+			if err != nil {
+				results <- result{err: err}
+				return
+			}
+			raw, err := out[0].MarshalBinary()
+			results <- result{raw: raw, err: err}
+		}()
+	}
+	wg.Wait()
+	close(results)
+	var first []byte
+	for result := range results {
+		if result.err != nil {
+			t.Fatalf("same-intent concurrent start: %v", result.err)
+		}
+		if first == nil {
+			first = result.raw
+			continue
+		}
+		if !bytes.Equal(first, result.raw) {
+			t.Fatal("same-intent concurrent start produced different envelopes")
+		}
+	}
+}
+
+func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3, false)
+	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	store := newTestSignAttemptStore()
+	type attempt struct {
+		session tss.SessionID
+		digest  [sha256.Size]byte
+	}
+	attempts := make([]attempt, 2)
+	for i := range attempts {
+		sessionID, err := tss.NewSessionID(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		attempts[i] = attempt{
+			session: sessionID,
+			digest:  sha256.Sum256([]byte{byte(i + 1)}),
+		}
+	}
+	var wg sync.WaitGroup
+	errs := make(chan error, len(attempts))
+	for _, candidate := range attempts {
+		candidate := candidate
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), candidate.session)
+			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+			errs <- err
+		}()
+	}
+	wg.Wait()
+	close(errs)
+	successes := 0
+	conflicts := 0
+	for err := range errs {
+		if err == nil {
+			successes++
+			continue
+		}
+		var protocolErr *tss.ProtocolError
+		if errors.As(err, &protocolErr) && protocolErr.Code == tss.ErrCodeConsumed {
+			conflicts++
+		} else {
+			t.Fatalf("unexpected concurrent conflict error: %v", err)
+		}
+	}
+	if successes != 1 || conflicts != 1 {
+		t.Fatalf("successes=%d conflicts=%d, want 1 each", successes, conflicts)
+	}
+}
+
+func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
@@ -214,7 +663,7 @@ func TestThresholdECDSA_StartSignRequiresPresignStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
-	session, out, err := StartSign(shares[1], presigns[1], sessionID, SignRequest{
+	session, out, err := StartSign(context.Background(), shares[1], presigns[1], sessionID, SignRequest{
 		Context: testPresignContext(),
 		Message: []byte("missing store"),
 		LowS:    true,
@@ -252,25 +701,150 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	}
 }
 
-type fixedErrPresignStore struct {
+type fixedErrSignAttemptStore struct {
 	err error
 }
 
-func (s fixedErrPresignStore) ClaimPresign([]byte) error {
+type loadErrSignAttemptStore struct {
+	err error
+}
+
+func (s loadErrSignAttemptStore) LoadSignAttempt(context.Context, []byte) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, s.err
+}
+
+func (s loadErrSignAttemptStore) CommitSignAttempt(context.Context, SignAttemptRecord) (SignAttemptCommit, error) {
+	return SignAttemptCommit{}, errors.New("unexpected commit after load error")
+}
+
+func (s loadErrSignAttemptStore) UpdateSignAttemptDelivery(context.Context, SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, errors.New("unexpected delivery update after load error")
+}
+
+func (s loadErrSignAttemptStore) CompleteSignAttempt(context.Context, SignAttemptResult) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, errors.New("unexpected completion after load error")
+}
+
+func (s loadErrSignAttemptStore) BurnPresign(context.Context, SignAttemptBurn) error {
+	return errors.New("unexpected burn after load error")
+}
+
+func (s fixedErrSignAttemptStore) LoadSignAttempt(context.Context, []byte) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, ErrSignAttemptNotFound
+}
+
+func (s fixedErrSignAttemptStore) CommitSignAttempt(context.Context, SignAttemptRecord) (SignAttemptCommit, error) {
+	return SignAttemptCommit{}, s.err
+}
+
+func (s fixedErrSignAttemptStore) UpdateSignAttemptDelivery(context.Context, SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, s.err
+}
+
+func (s fixedErrSignAttemptStore) CompleteSignAttempt(context.Context, SignAttemptResult) (SignAttemptRecord, error) {
+	return SignAttemptRecord{}, s.err
+}
+
+func (s fixedErrSignAttemptStore) BurnPresign(context.Context, SignAttemptBurn) error {
 	return s.err
 }
 
-type retryPresignStore struct {
+type outcomeUnknownSignAttemptStore struct {
+	inner *testSignAttemptStore
 	err   error
-	calls int
+	once  bool
 }
 
-func (s *retryPresignStore) ClaimPresign([]byte) error {
-	s.calls++
-	if s.calls == 1 {
-		return s.err
+type completionOutcomeUnknownStore struct {
+	inner *testSignAttemptStore
+	err   error
+	once  bool
+}
+
+type loadCountingSignAttemptStore struct {
+	inner *testSignAttemptStore
+	loads atomic.Int32
+}
+
+func (s *loadCountingSignAttemptStore) loadCount() int {
+	return int(s.loads.Load())
+}
+
+func (s *loadCountingSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+	s.loads.Add(1)
+	return s.inner.LoadSignAttempt(ctx, presignID)
+}
+
+func (s *loadCountingSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
+	return s.inner.CommitSignAttempt(ctx, candidate)
+}
+
+func (s *loadCountingSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	return s.inner.UpdateSignAttemptDelivery(ctx, update)
+}
+
+func (s *loadCountingSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
+	return s.inner.CompleteSignAttempt(ctx, result)
+}
+
+func (s *loadCountingSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
+	return s.inner.BurnPresign(ctx, burn)
+}
+
+func (s *completionOutcomeUnknownStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+	return s.inner.LoadSignAttempt(ctx, presignID)
+}
+
+func (s *completionOutcomeUnknownStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
+	return s.inner.CommitSignAttempt(ctx, candidate)
+}
+
+func (s *completionOutcomeUnknownStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	return s.inner.UpdateSignAttemptDelivery(ctx, update)
+}
+
+func (s *completionOutcomeUnknownStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
+	record, err := s.inner.CompleteSignAttempt(ctx, result)
+	if err != nil {
+		return SignAttemptRecord{}, err
 	}
-	return nil
+	if !s.once {
+		s.once = true
+		return SignAttemptRecord{}, s.err
+	}
+	return record, nil
+}
+
+func (s *completionOutcomeUnknownStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
+	return s.inner.BurnPresign(ctx, burn)
+}
+
+func (s *outcomeUnknownSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+	return s.inner.LoadSignAttempt(ctx, presignID)
+}
+
+func (s *outcomeUnknownSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
+	commit, err := s.inner.CommitSignAttempt(ctx, candidate)
+	if err != nil {
+		return SignAttemptCommit{}, err
+	}
+	if !s.once {
+		s.once = true
+		return SignAttemptCommit{}, s.err
+	}
+	return commit, nil
+}
+
+func (s *outcomeUnknownSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	return s.inner.UpdateSignAttemptDelivery(ctx, update)
+}
+
+func (s *outcomeUnknownSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
+	return s.inner.CompleteSignAttempt(ctx, result)
+}
+
+func (s *outcomeUnknownSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
+	return s.inner.BurnPresign(ctx, burn)
 }
 
 func startSignDigestMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte) {
@@ -301,7 +875,7 @@ func startSignDigestMustBeConsumed(t *testing.T, share *KeyShare, presign *Presi
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 }
 
-func startSignDigestWithStoreMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store PresignStore) {
+func startSignDigestWithStoreMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store SignAttemptStore) {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -316,7 +890,7 @@ func startSignDigestWithStoreMustSucceed(t *testing.T, share *KeyShare, presign 
 	}
 }
 
-func startSignDigestWithStoreMustBeConsumed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store PresignStore) {
+func startSignDigestWithStoreMustBeConsumed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store SignAttemptStore) {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -489,7 +1063,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				signSession, _, err := StartSignDigestWithStore(shares[tc.signers[0]], restored, sessionID, digest[:], newTestPresignStore())
+				signSession, _, err := StartSignDigestWithStore(shares[tc.signers[0]], restored, sessionID, digest[:], newTestSignAttemptStore())
 				if err != nil {
 					t.Fatalf("StartSignDigest with round-tripped presign: %v", err)
 				}

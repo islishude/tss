@@ -310,6 +310,7 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 
 	p := &Presign{state: &presignState{
 		consumed:      new(atomic.Bool),
+		attempt:       newPresignAttemptBinding(false),
 		kShare:        kShare,
 		chiShare:      chiShare,
 		delta:         delta,

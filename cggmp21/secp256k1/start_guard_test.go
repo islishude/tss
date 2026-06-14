@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"context"
 	"errors"
 	"sync/atomic"
 	"testing"
@@ -20,7 +21,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.state.threshold = 2
 	key.state.parties = []tss.PartyID{1, 2}
 	minimalPresign := func() *Presign {
-		return &Presign{state: &presignState{consumed: new(atomic.Bool)}}
+		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
 	plan := &ResharePlan{state: &resharePlanState{sessionID: sessionID}}
 
@@ -61,7 +62,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			parties: tss.PartySet{1, 2},
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				p := minimalPresign()
-				_, out, err := StartSign(key, p, sessionID, SignRequest{
+				_, out, err := StartSign(context.Background(), key, p, sessionID, SignRequest{
 					Context: testPresignContext(),
 					Message: []byte("guard"),
 					LowS:    true,

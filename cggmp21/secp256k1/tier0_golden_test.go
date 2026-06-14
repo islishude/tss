@@ -104,6 +104,35 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 	}
 }
 
+// TestFast_GoldenSignAttemptRecord verifies the durable attempt/outbox wire
+// contract without running protocol setup.
+func TestFast_GoldenSignAttemptRecord(t *testing.T) {
+	t.Parallel()
+	record := testSignAttemptRecord(t, 0x77)
+	raw, err := record.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignAttemptRecord.golden")
+	testutil.CheckGolden(t, golden, raw)
+
+	decoded, err := UnmarshalSignAttemptRecord(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := decoded.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := UnmarshalSignAttemptRecord(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
 // TestFast_GoldenPresignRound3Payload verifies deterministic wire encoding of
 // presign round 3 payloads. No keygen or crypto is required.
 func TestFast_GoldenPresignRound3Payload(t *testing.T) {

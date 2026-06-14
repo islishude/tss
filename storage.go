@@ -23,6 +23,8 @@ const (
 	recordTypeKeyShare = 0x00
 	// recordTypePresign identifies an encrypted presign record.
 	recordTypePresign = 0x01
+	// recordTypeSignAttempt identifies an encrypted CGGMP21 sign-attempt record.
+	recordTypeSignAttempt = 0x02
 
 	saltLen  = 32
 	nonceLen = 12
@@ -105,6 +107,23 @@ func EncryptPresignWithPassphrase(plaintext, passphrase []byte, keyID string, pa
 // authentication failure.
 func DecryptPresignWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
 	return decrypt(encoded, passphrase, recordTypePresign)
+}
+
+// EncryptSignAttemptWithPassphrase encrypts a sign-attempt record with a
+// passphrase using Argon2id key derivation and ChaCha20-Poly1305. keyID is an
+// optional caller-assigned identifier that is authenticated as AAD.
+//
+// This is a reference/demo implementation. Production deployments should use
+// a KMS or HSM for confidential signing-outbox records.
+func EncryptSignAttemptWithPassphrase(plaintext, passphrase []byte, keyID string, params *PassphraseParams) ([]byte, error) {
+	return encrypt(plaintext, passphrase, recordTypeSignAttempt, keyID, params)
+}
+
+// DecryptSignAttemptWithPassphrase decrypts an encoding produced by
+// [EncryptSignAttemptWithPassphrase]. A wrong passphrase causes AEAD
+// authentication failure.
+func DecryptSignAttemptWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
+	return decrypt(encoded, passphrase, recordTypeSignAttempt)
 }
 
 func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, params *PassphraseParams) ([]byte, error) {

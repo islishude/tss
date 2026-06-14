@@ -40,7 +40,7 @@ func Example_full_lifecycle() {
 		panic(err)
 	}
 
-	store, cleanup, err := newExampleFilePresignStore()
+	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
 		panic(err)
 	}
@@ -49,7 +49,7 @@ func Example_full_lifecycle() {
 		Context:      ctx,
 		Message:      []byte("example full lifecycle"),
 		LowS:         true,
-		PresignStore: store,
+		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)
 	if err != nil {
@@ -73,7 +73,7 @@ func Example_multiParty() {
 	if err != nil {
 		panic(err)
 	}
-	store, cleanup, err := newExampleFilePresignStore()
+	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
 		panic(err)
 	}
@@ -82,7 +82,7 @@ func Example_multiParty() {
 		Context:      ctx,
 		Message:      []byte("multi-party threshold signature"),
 		LowS:         true,
-		PresignStore: store,
+		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, signers, request)
 	if err != nil {
@@ -150,7 +150,7 @@ func ExampleStartRefresh() {
 	if err != nil {
 		panic(err)
 	}
-	store, cleanup, err := newExampleFilePresignStore()
+	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
 		panic(err)
 	}
@@ -159,7 +159,7 @@ func ExampleStartRefresh() {
 		Context:      ctx,
 		Message:      []byte("post-refresh signing"),
 		LowS:         true,
-		PresignStore: store,
+		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(refreshed, presigns, parties, request)
 	if err != nil {
@@ -245,7 +245,7 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	store, cleanup, err := newExampleFilePresignStore()
+	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
 		panic(err)
 	}
@@ -254,7 +254,7 @@ func ExampleStartReshare() {
 		Context:      ctx,
 		Message:      []byte("post-reshare signing"),
 		LowS:         true,
-		PresignStore: store,
+		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(reshared, presigns, newParties, request)
 	if err != nil {
@@ -285,7 +285,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	if err != nil {
 		panic(err)
 	}
-	store, cleanup, err := newExampleFilePresignStore()
+	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
 		panic(err)
 	}
@@ -294,7 +294,7 @@ func ExampleDeriveNonHardenedBIP32() {
 		Context:      ctx,
 		Message:      []byte("bip32 derived signing"),
 		LowS:         true,
-		PresignStore: store,
+		AttemptStore: store,
 	}
 	_, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)
 	if err != nil {

@@ -257,6 +257,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	context.DerivationPath = slices.Clone(context.DerivationPath)
 	s.presign = &Presign{state: &presignState{
 		consumed:             new(atomic.Bool),
+		attempt:              newPresignAttemptBinding(false),
 		version:              tss.Version,
 		party:                s.key.state.party,
 		threshold:            s.key.state.threshold,

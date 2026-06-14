@@ -291,36 +291,74 @@ Set `PresignContext.DerivationPath` before calling `StartPresignWithContext(...,
 
 ## Presign Lifecycle
 
-Presign records are strictly one-use. The security boundary is the local
-in-process claim plus the durable `PresignStore.ClaimPresign` operation.
-`MarshalBinary` includes a consumed snapshot in the wire record, but `Presign`
-does not expose a mutable consumed field:
+Presign records are strictly one-use. The security boundary is durable commit
+or an externally observable send, whichever happens first. The durable record is
+an immutable attempt, not a lease: after a presign is committed, possibly
+committed, or possibly sent, it can only resume the same attempt.
+`MarshalBinary` includes a consumed snapshot in the presign record, but the
+durable attempt record is authoritative after restart:
 
 ```go
 // Check before use:
 if IsPresignConsumed(presign) { /* discard */ }
 
-// StartSign requires request.PresignStore and claims before any outbound message:
-sess, out, err := StartSign(share, presign, sessionID, request, guard)
+// StartSign requires request.AttemptStore and commits before returning out:
+sess, out, err := StartSign(ctx, share, presign, sessionID, request, guard)
 
-// Optionally persist a consumed snapshot for operators:
+// After restart, replay the exact committed envelope while delivery is pending,
+// or load the final signature if completion is durable:
+sess, out, err = ResumeSign(ctx, share, restoredPresign, store, guard)
+
+// Optionally persist a local-only consumed snapshot for operators:
 _ = MarkPresignConsumed(presign)
 rawConsumed, _ := presign.MarshalBinary()
 encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
+
+// Durably discard an unused presign:
+err = BurnPresign(ctx, store, presign, "operator discard")
 ```
 
-`StartSign` claims the presign locally **before** constructing the outbound
-signature envelope, so reuse of the same generated `*Presign` or a shallow copy
-fails before any partial signature leaves the process.
+`StartSign` performs all local validation, partial construction, self-verification,
+and canonical envelope encoding before mutation. It checks `ctx.Err()` and then
+calls `CommitSignAttempt` directly; `LoadSignAttempt` is reserved for
+`ResumeSign` and diagnostics, not StartSign's concurrency decision. The store
+must linearize by presign ID:
 
-`StartSign` then calls `SignRequest.PresignStore.ClaimPresign(presign.ID())`
-before constructing the outbound partial. This method must be an atomic
-conditional write in the caller's durable storage, so serialized copies and
-processes after restart cannot consume the same presign ID twice. Return
-`ErrPresignAlreadyConsumed` for an existing claim; `StartSign` maps it to
-`ErrCodeConsumed` and does not roll back the local claim. Temporary store errors
-produce no outbound partial and roll back the local claim so the caller can
-retry.
+- no record: create the base attempt and encrypted outbox, returning
+  `SignAttemptCreated`;
+- same `IntentHash` and same `AttemptHash`: return `SignAttemptExistingSame`
+  with the stored record;
+- same `IntentHash` but different `AttemptHash`: return
+  `ErrSignAttemptNonDeterminism`;
+- different intent: return `ErrSignAttemptConflict`;
+- burn tombstone: return `ErrSignAttemptBurned`.
+
+Conflict, burn, and non-determinism are mapped to `ErrCodeConsumed`. Any other
+commit error is returned as `ErrSignAttemptOutcomeUnknown`. Commit and automatic
+completion use `context.WithTimeout(context.WithoutCancel(ctx),
+DurableStoreTimeout)` so user cancellation after local validation does not
+unnecessarily abandon a presign whose durable outcome is unknown.
+
+`IntentHash` binds protocol/version, presign ID, session ID, local party, signer
+set hash, context hash, 32-byte digest, digest binding hash, and Low-S setting.
+`AttemptHash` additionally binds the exact canonical base envelope hash, envelope
+transcript hash, payload hash, and delivery policy snapshot. The digest stored
+in the record is the raw 32-byte ECDSA digest; `DigestBindingHash` matches the
+online partial payload's digest hash.
+
+Delivery progress is part of the durable attempt. `UpdateSignAttemptDelivery`
+stores structurally valid ACKs and a final broadcast certificate for the exact
+`AttemptHash`; duplicate ACKs are idempotent and never overwrite the first
+stored ACK for a party. `ResumeSign` returns the exact base envelope only while
+delivery is incomplete. Once the final certificate is durable, `ResumeSign`
+rebuilds the session without returning outbound replay.
+
+Signature completion is persisted through `CompleteSignAttempt` before
+`Signature()` becomes available. If completion persistence fails or times out,
+the session keeps an internal pending-completion state; call `RetryCompletion`
+to persist the same computed signature result idempotently. `BurnPresign` writes
+a durable tombstone only when no attempt exists; `MarkPresignConsumed` is
+local-only protection and is not a durable lifecycle decision.
 
 ## Refresh
 
@@ -703,9 +741,9 @@ context := presign.Context() // includes a copied derivation path
 ### Online Signing
 
 ```go
-request := SignRequest{Context: ctx, Message: message, LowS: true, PresignStore: store}
-// PresignStore must atomically claim presign.ID() before StartSign emits a partial.
-ss, out, err := StartSign(share, presign, sessionID, request, guard)
+request := SignRequest{Context: ctx, Message: message, LowS: true, AttemptStore: store}
+// AttemptStore atomically binds presign.ID() to the exact encrypted outbox.
+ss, out, err := StartSign(context.Background(), share, presign, sessionID, request, guard)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
 ok := VerifySignature(publicKey, request, sig)

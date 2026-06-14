@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"io"
@@ -64,6 +65,7 @@ func clonePresignForTest(p *Presign) *Presign {
 	}
 	return &Presign{state: &presignState{
 		consumed:       p.state.consumed,
+		attempt:        p.state.attempt,
 		version:        p.state.version,
 		party:          p.state.party,
 		threshold:      p.state.threshold,
@@ -115,10 +117,10 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.party, testCGGMP21GuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	if request.PresignStore == nil {
-		request.PresignStore = newTestPresignStore()
+	if request.AttemptStore == nil {
+		request.AttemptStore = newTestSignAttemptStore()
 	}
-	return StartSign(key, presign, sessionID, request, guard)
+	return StartSign(context.Background(), key, presign, sessionID, request, guard)
 }
 
 func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
@@ -210,10 +212,10 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		}
 		return testCGGMP21Guard(key.state.party, tss.PartySet(key.state.parties), sessionID)
 	})
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.state.contextHash, true, newTestPresignStore(), guard)
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, newTestSignAttemptStore(), guard)
 }
 
-func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store PresignStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store SignAttemptStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if presign == nil || presign.state == nil {
 		return nil, nil, errNilPresign
 	}
@@ -226,29 +228,151 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 		}
 		return testCGGMP21Guard(key.state.party, tss.PartySet(key.state.parties), sessionID)
 	})
-	return startSignDigestBound(key, presign, sessionID, digest32, presign.state.contextHash, true, store, guard)
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, store, guard)
 }
 
-type testPresignStore struct {
+type testSignAttemptStore struct {
 	mu       sync.Mutex
-	consumed map[string]struct{}
+	attempts map[string]SignAttemptRecord
+	burns    map[string]struct{}
 }
 
-func newTestPresignStore() *testPresignStore {
-	return &testPresignStore{consumed: make(map[string]struct{})}
-}
-
-func (s *testPresignStore) ClaimPresign(presignID []byte) error {
-	if s == nil {
-		return errors.New("nil test presign store")
+func newTestSignAttemptStore() *testSignAttemptStore {
+	return &testSignAttemptStore{
+		attempts: make(map[string]SignAttemptRecord),
+		burns:    make(map[string]struct{}),
 	}
-	key := string(presignID)
+}
+
+func (s *testSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+	if s == nil {
+		return SignAttemptRecord{}, errors.New("nil test sign attempt store")
+	}
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.consumed[key]; ok {
-		return ErrPresignAlreadyConsumed
+	if _, ok := s.burns[string(presignID)]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
 	}
-	s.consumed[key] = struct{}{}
+	record, ok := s.attempts[string(presignID)]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	return record.Clone(), nil
+}
+
+func (s *testSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
+	if ctx == nil {
+		return SignAttemptCommit{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptCommit{}, err
+	}
+	if err := validateSignAttemptCandidate(candidate); err != nil {
+		return SignAttemptCommit{}, err
+	}
+	key := string(candidate.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptCommit{}, ErrSignAttemptBurned
+	}
+	if existing, ok := s.attempts[key]; ok {
+		if candidate.SameBaseAttempt(existing) {
+			return SignAttemptCommit{Status: SignAttemptExistingSame, Record: existing.Clone()}, nil
+		}
+		if bytes.Equal(existing.IntentHash, candidate.IntentHash) {
+			return SignAttemptCommit{}, ErrSignAttemptNonDeterminism
+		}
+		return SignAttemptCommit{}, ErrSignAttemptConflict
+	}
+	s.attempts[key] = candidate.Clone()
+	return SignAttemptCommit{Status: SignAttemptCreated, Record: candidate.Clone()}, nil
+}
+
+func (s *testSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
+	key := string(update.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
+	}
+	record, ok := s.attempts[key]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	updated, err := applySignAttemptDeliveryUpdate(record, update)
+	if err != nil {
+		return SignAttemptRecord{}, err
+	}
+	s.attempts[key] = updated.Clone()
+	return updated.Clone(), nil
+}
+
+func (s *testSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
+	key := string(result.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
+	}
+	record, ok := s.attempts[key]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	if !bytes.Equal(record.AttemptHash, result.AttemptHash) {
+		return SignAttemptRecord{}, ErrSignAttemptConflict
+	}
+	if record.Completed {
+		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) {
+			return record.Clone(), nil
+		}
+		return SignAttemptRecord{}, ErrSignAttemptConflict
+	}
+	record.Completed = true
+	record.SignatureR = slices.Clone(result.Signature.R)
+	record.SignatureS = slices.Clone(result.Signature.S)
+	s.attempts[key] = record
+	return record.Clone(), nil
+}
+
+func (s *testSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
+	if s == nil {
+		return errors.New("nil test sign attempt store")
+	}
+	if ctx == nil {
+		return errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key := string(burn.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.attempts[key]; ok {
+		return ErrSignAttemptConflict
+	}
+	if s.burns == nil {
+		s.burns = make(map[string]struct{})
+	}
+	s.burns[key] = struct{}{}
 	return nil
 }
 
@@ -326,6 +450,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	}
 	return &Presign{state: &presignState{
 		consumed:             new(atomic.Bool),
+		attempt:              newPresignAttemptBinding(false),
 		version:              tss.Version,
 		party:                1,
 		threshold:            1,

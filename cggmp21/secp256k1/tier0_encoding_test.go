@@ -27,6 +27,13 @@ func TestFast_RejectsWrongWireTypes(t *testing.T) {
 	if _, err := UnmarshalPresign(wrongPresign); err == nil {
 		t.Fatal("wrong presign wire type accepted")
 	}
+	wrongAttempt, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.sign-attempt", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalSignAttemptRecord(wrongAttempt); err == nil {
+		t.Fatal("wrong sign attempt wire type accepted")
+	}
 }
 
 // TestFast_Presign_RejectsOverflowThreshold verifies that UnmarshalPresign
@@ -64,5 +71,14 @@ func TestFast_Presign_RejectsJSONFallback(t *testing.T) {
 	t.Parallel()
 	if _, err := UnmarshalPresign([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON presign encoding accepted")
+	}
+}
+
+// TestFast_SignAttempt_RejectsJSONFallback verifies sign-attempt decoding does
+// not accept JSON.
+func TestFast_SignAttempt_RejectsJSONFallback(t *testing.T) {
+	t.Parallel()
+	if _, err := UnmarshalSignAttemptRecord([]byte(`{"version":1}`)); err == nil {
+		t.Fatal("JSON sign attempt encoding accepted")
 	}
 }

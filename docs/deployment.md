@@ -84,11 +84,16 @@ if secp256k1.IsPresignConsumed(presign) {
 }
 ```
 
-Restored CGGMP21 presigns require a durable atomic claim before signing.
-Provide `SignRequest.PresignStore`; its `ClaimPresign(presign.ID())` operation
-must be a conditional insert or compare-and-swap in the same durable store that
-tracks presign records. Return `secp256k1.ErrPresignAlreadyConsumed` when the
-presign ID was already claimed.
+Restored CGGMP21 presigns require a durable sign-attempt record. Provide
+`SignRequest.AttemptStore`. `CommitSignAttempt` is the only StartSign
+linearization point; `LoadSignAttempt` is for `ResumeSign` and diagnostics.
+The store must atomically bind a presign ID to one intent and one attempt. A
+repeated identical attempt returns `SignAttemptExistingSame`; the same intent
+with a different attempt returns `secp256k1.ErrSignAttemptNonDeterminism`; a
+different intent returns `secp256k1.ErrSignAttemptConflict`; a durable tombstone
+returns `secp256k1.ErrSignAttemptBurned`. These are consumed outcomes. Any
+other commit error has an unknown outcome and must be recovered with the same
+request or `ResumeSign`.
 
 ### 4. Signing
 
@@ -138,7 +143,7 @@ request := secp256k1.SignRequest{
     Context:      ctx,
     Message:      message,
     LowS:         true,
-    PresignStore: store, // required durable one-use claim
+    AttemptStore: store, // required durable intent and encrypted outbox
 }
 signGuard, err := (tss.GuardConfig{
     Self:        keyShare.PartyID(),
@@ -149,14 +154,14 @@ signGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-signSession, out, _ := secp256k1.StartSign(keyShare, presign, sessionID, request, signGuard)
+signSession, out, _ := secp256k1.StartSign(context.Background(), keyShare, presign, sessionID, request, signGuard)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
 secp256k1.VerifySignature(publicKey, request, sig) // true
 ```
 
 After signing, you may persist a consumed snapshot for operational clarity, but
-this is not a replacement for the durable claim performed by `StartSign`:
+this is not a replacement for the durable attempt record:
 
 ```go
 _ = secp256k1.MarkPresignConsumed(presign)
@@ -165,11 +170,29 @@ encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presi
 // Persist updated record so operators can see the consumed snapshot.
 ```
 
-`StartSign` calls `PresignStore.ClaimPresign` after the local in-process claim
-and before it constructs the outbound partial signature. If the store returns
-`ErrPresignAlreadyConsumed`, signing fails closed with `ErrCodeConsumed` and the
-local claim remains consumed. If the store returns a temporary I/O error, no
-partial is emitted and the local claim is rolled back so the caller can retry.
+`StartSign` constructs and self-verifies the candidate partial before mutation,
+checks `ctx.Err()`, then atomically commits the presign binding and exact
+encrypted outbox through `SignAttemptStore`. An identical retry replays the same
+attempt. A conflicting intent, burn tombstone, or same-intent/different-attempt
+non-determinism fails with `ErrCodeConsumed`. Storage timeout, cancellation, or
+I/O error during commit returns `ErrSignAttemptOutcomeUnknown`; never release
+that presign. Retry the same intent or call `ResumeSign`.
+
+`ResumeSign` returns the exact committed envelope only until delivery is
+durably complete. An at-least-once dispatcher should keep replaying it until
+`UpdateSignAttemptDelivery` has persisted acknowledgments from every recipient
+and the required broadcast certificate. After the delivery certificate is
+durable, `ResumeSign` rebuilds the session without returning outbound replay.
+Signature completion alone is not a delivery acknowledgment.
+
+`NewFileSignAttemptStore` is an encrypted append-only reference implementation.
+It fsyncs immutable encrypted objects, creates the presign claim or burn
+tombstone with an atomic hard link, records delivery ACKs/certificates and
+completion as append-only objects, and fsyncs directories. It stores plaintext
+hash metadata separately from randomized ciphertext and authenticates object
+kind/binding data through the passphrase-encryption AAD. Production systems
+should normally implement the interface with a transactional database and
+KMS/HSM encryption.
 
 ### 5. Destruction
 
@@ -289,8 +312,11 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 2. Decrypt with the recovery passphrase.
 3. Load into a new session.
 4. Verify against known group public key.
-5. If presigns exist, check consumed flags — discard consumed presigns.
-6. Configure a durable `PresignStore` before any CGGMP21 online signing call.
+5. If presigns exist, let durable attempts or burn tombstones decide
+   availability: consumed snapshot plus matching attempt resumes; consumed
+   snapshot with no attempt/tombstone is burned; unconsumed snapshot plus an
+   existing attempt resumes that attempt.
+6. Configure a durable `SignAttemptStore` before any CGGMP21 online signing call.
 
 ## Monitoring and Alerting
 
@@ -321,9 +347,9 @@ Before first production deployment, verify:
 
 1. **Transport authentication:** Every `Envelope.From` matches the authenticated transport identity.
 2. **Session ID freshness:** New session IDs are generated for every protocol run using `tss.NewSessionID`.
-3. **Storage encryption:** Key shares and presign records are encrypted at rest using ChaCha20-Poly1305 or a KMS.
+3. **Storage encryption:** Key shares, presigns, and sign-attempt outboxes are encrypted at rest using ChaCha20-Poly1305 or a KMS.
 4. **Secret material logging:** Verify no log output contains `secret.Scalar`, Paillier private keys, nonce values, or share values.
-5. **Presign lifecycle:** Presign consumed flags are persisted and checked on restart.
+5. **Presign lifecycle:** Durable attempts or burn tombstones are authoritative on restart; committed, outcome-unknown, or possibly sent presigns only resume their bound attempt.
 6. **Blame evidence handling:** Protocol errors with `Blame != nil` are surfaced to operators.
 7. **Process isolation:** Key-share processes run with minimal privileges, no core dumps, locked-down crash reporting.
 8. **Network segmentation:** Signing processes are isolated from public-facing services.

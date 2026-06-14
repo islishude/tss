@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -91,13 +92,13 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sid)
-	if _, _, err := startSignDigestBound(shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard); err == nil {
-		t.Fatal("startSignDigestBound without PresignStore succeeded")
+	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard); err == nil {
+		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 	}
 	sid, _ = tss.NewSessionID(nil)
-	_, outbox, err := StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestPresignStore())
+	_, outbox, err := StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestSignAttemptStore())
 	if err != nil {
 		t.Fatalf("StartSignDigest with restored presign failed: %v", err)
 	}

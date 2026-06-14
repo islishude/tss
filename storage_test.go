@@ -98,6 +98,28 @@ func TestEncryptDecryptPresignWithPassphraseWrongPassphrase(t *testing.T) {
 	}
 }
 
+func TestEncryptDecryptSignAttemptWithPassphrase(t *testing.T) {
+	t.Parallel()
+	plaintext := []byte("confidential sign attempt outbox")
+	passphrase := []byte("sign-attempt-passphrase")
+	params := &PassphraseParams{Time: 1, Memory: 1024, Threads: 1}
+
+	encrypted, err := EncryptSignAttemptWithPassphrase(plaintext, passphrase, "attempt-1", params)
+	if err != nil {
+		t.Fatalf("EncryptSignAttemptWithPassphrase: %v", err)
+	}
+	decrypted, err := DecryptSignAttemptWithPassphrase(encrypted, passphrase)
+	if err != nil {
+		t.Fatalf("DecryptSignAttemptWithPassphrase: %v", err)
+	}
+	if !bytes.Equal(decrypted, plaintext) {
+		t.Fatal("sign attempt round trip mismatch")
+	}
+	if _, err := DecryptPresignWithPassphrase(encrypted, passphrase); err == nil {
+		t.Fatal("sign attempt ciphertext accepted as a presign record")
+	}
+}
+
 func TestDecryptWithPassphraseTooShort(t *testing.T) {
 	t.Parallel()
 	_, err := DecryptKeyShareWithPassphrase([]byte("short"), []byte("pw"))

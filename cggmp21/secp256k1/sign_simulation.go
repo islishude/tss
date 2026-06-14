@@ -1,6 +1,8 @@
 package secp256k1
 
 import (
+	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -88,7 +90,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	}
 	signSessions := make(map[tss.PartyID]*SignSession, len(ids))
 	signMessages := make([]tss.Envelope, 0, len(ids))
-	presignStore := newSimulationPresignStore()
+	attemptStore := newSimulationSignAttemptStore()
 	for _, id := range ids {
 		presign, ok := presignSessions[id].Presign()
 		if !ok {
@@ -101,13 +103,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(shares[id], presign, signID, input, presign.state.contextHash, true, presignStore, guard)
+			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, true, attemptStore, guard)
 		} else {
-			session, out, err = StartSign(shares[id], presign, signID, SignRequest{
+			session, out, err = StartSign(context.Background(), shares[id], presign, signID, SignRequest{
 				Context:      ctx,
 				Message:      input,
 				LowS:         true,
-				PresignStore: presignStore,
+				AttemptStore: attemptStore,
 			}, guard)
 		}
 		if err != nil {
@@ -138,28 +140,153 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 	return nil, nil, errors.New("signature not completed")
 }
 
-type simulationPresignStore struct {
-	mu      sync.Mutex
-	claimed map[string]struct{}
+type simulationSignAttemptStore struct {
+	mu       sync.Mutex
+	attempts map[string]SignAttemptRecord
+	burns    map[string]struct{}
 }
 
-func newSimulationPresignStore() *simulationPresignStore {
-	return &simulationPresignStore{claimed: make(map[string]struct{})}
-}
-
-// ClaimPresign atomically claims a presign ID for the current in-memory
-// simulation. It is not durable and must not be used as a production store.
-func (s *simulationPresignStore) ClaimPresign(presignID []byte) error {
-	if s == nil {
-		return errors.New("nil simulation presign store")
+func newSimulationSignAttemptStore() *simulationSignAttemptStore {
+	return &simulationSignAttemptStore{
+		attempts: make(map[string]SignAttemptRecord),
+		burns:    make(map[string]struct{}),
 	}
-	key := string(presignID)
+}
+
+// LoadSignAttempt loads an in-memory simulation attempt.
+func (s *simulationSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+	if s == nil {
+		return SignAttemptRecord{}, errors.New("nil simulation sign attempt store")
+	}
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.claimed[key]; ok {
-		return ErrPresignAlreadyConsumed
+	if _, ok := s.burns[string(presignID)]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
 	}
-	s.claimed[key] = struct{}{}
+	record, ok := s.attempts[string(presignID)]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	return record.Clone(), nil
+}
+
+// CommitSignAttempt commits an in-memory simulation attempt.
+func (s *simulationSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
+	if ctx == nil {
+		return SignAttemptCommit{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptCommit{}, err
+	}
+	if err := validateSignAttemptCandidate(candidate); err != nil {
+		return SignAttemptCommit{}, err
+	}
+	key := string(candidate.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptCommit{}, ErrSignAttemptBurned
+	}
+	if existing, ok := s.attempts[key]; ok {
+		if candidate.SameBaseAttempt(existing) {
+			return SignAttemptCommit{Status: SignAttemptExistingSame, Record: existing.Clone()}, nil
+		}
+		if bytes.Equal(existing.IntentHash, candidate.IntentHash) {
+			return SignAttemptCommit{}, ErrSignAttemptNonDeterminism
+		}
+		return SignAttemptCommit{}, ErrSignAttemptConflict
+	}
+	s.attempts[key] = candidate.Clone()
+	return SignAttemptCommit{Status: SignAttemptCreated, Record: candidate.Clone()}, nil
+}
+
+// UpdateSignAttemptDelivery records in-memory delivery progress.
+func (s *simulationSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
+	key := string(update.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
+	}
+	record, ok := s.attempts[key]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	updated, err := applySignAttemptDeliveryUpdate(record, update)
+	if err != nil {
+		return SignAttemptRecord{}, err
+	}
+	s.attempts[key] = updated.Clone()
+	return updated.Clone(), nil
+}
+
+// CompleteSignAttempt completes an in-memory simulation attempt.
+func (s *simulationSignAttemptStore) CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error) {
+	if ctx == nil {
+		return SignAttemptRecord{}, errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return SignAttemptRecord{}, err
+	}
+	key := string(result.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.burns[key]; ok {
+		return SignAttemptRecord{}, ErrSignAttemptBurned
+	}
+	record, ok := s.attempts[key]
+	if !ok {
+		return SignAttemptRecord{}, ErrSignAttemptNotFound
+	}
+	if !bytes.Equal(record.AttemptHash, result.AttemptHash) {
+		return SignAttemptRecord{}, ErrSignAttemptConflict
+	}
+	if record.Completed {
+		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) {
+			return record.Clone(), nil
+		}
+		return SignAttemptRecord{}, ErrSignAttemptConflict
+	}
+	record.Completed = true
+	record.SignatureR = append([]byte(nil), result.Signature.R...)
+	record.SignatureS = append([]byte(nil), result.Signature.S...)
+	s.attempts[key] = record
+	return record.Clone(), nil
+}
+
+// BurnPresign burns an in-memory simulation presign.
+func (s *simulationSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
+	if s == nil {
+		return errors.New("nil simulation sign attempt store")
+	}
+	if ctx == nil {
+		return errors.New("nil context")
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	key := string(burn.PresignID)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.attempts[key]; ok {
+		return ErrSignAttemptConflict
+	}
+	if s.burns == nil {
+		s.burns = make(map[string]struct{})
+	}
+	s.burns[key] = struct{}{}
 	return nil
 }
 

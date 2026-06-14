@@ -25,7 +25,7 @@ CGGMP21 key shares include Paillier private material, Ring-Pedersen parameters/p
 
 FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature accepted by `crypto/ed25519.Verify`.
 
-CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `StartPresignWithContext` binds key id, chain id, derivation path, policy domain, and message domain before nonce generation. `StartSign` marks a presign consumed before producing any outbound online signing message.
+CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `StartPresignWithContext` binds key id, chain id, derivation path, policy domain, and message domain before nonce generation. `StartSign` constructs and verifies a candidate partial locally, then calls `CommitSignAttempt` as the only durable linearization point before returning the envelope. A committed, outcome-unknown, or possibly sent presign can only resume the same immutable attempt; delivery ACKs/certificates and final signature visibility are persisted as separate durable state on that attempt.
 
 ## Public vs Internal
 

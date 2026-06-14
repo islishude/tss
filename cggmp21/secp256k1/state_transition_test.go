@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
@@ -217,6 +218,23 @@ func TestMarkPresignConsumedMarksInPlace(t *testing.T) {
 	}
 }
 
+func TestMarkPresignConsumedDoesNotReleaseBoundAttempt(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	intent := bytes.Repeat([]byte{1}, 32)
+	if !bindPresignToAttempt(p, intent, false) {
+		t.Fatal("failed to bind test attempt")
+	}
+	if err := MarkPresignConsumed(p); err != nil {
+		t.Fatal(err)
+	}
+	if !bindPresignToAttempt(p, intent, true) {
+		t.Fatal("manual consume canceled the existing attempt")
+	}
+	if bindPresignToAttempt(p, bytes.Repeat([]byte{2}, 32), true) {
+		t.Fatal("manual consume released the presign to another attempt")
+	}
+}
+
 func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
 	p.state.consumed = nil
@@ -230,13 +248,11 @@ func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	if err := p.Validate(); err == nil {
 		t.Fatal("presign without claim state passed validation")
 	}
-	err := ClaimPresign(p)
-	var protocolErr *tss.ProtocolError
-	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeConsumed {
-		t.Fatalf("ClaimPresign error = %v, want ErrCodeConsumed", err)
+	if bindPresignToAttempt(p, bytes.Repeat([]byte{1}, 32), false) {
+		t.Fatal("presign without claim state was bound")
 	}
 	if p.state.consumed != nil {
-		t.Fatal("ClaimPresign lazily initialized missing claim state")
+		t.Fatal("attempt binding lazily initialized missing claim state")
 	}
 	if err := MarkPresignConsumed(p); err == nil {
 		t.Fatal("MarkPresignConsumed accepted missing claim state")
@@ -244,6 +260,24 @@ func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	cp := clonePresignForTest(p)
 	if cp.state.consumed != nil || !IsPresignConsumed(cp) {
 		t.Fatal("test copy revived presign with missing claim state")
+	}
+}
+
+func TestPresignMissingAttemptBindingFailsClosed(t *testing.T) {
+	p := minimalCGGMP21Presign(t)
+	p.state.attempt = nil
+
+	if !IsPresignConsumed(p) {
+		t.Fatal("presign without attempt state was treated as unconsumed")
+	}
+	if err := p.Validate(); err == nil {
+		t.Fatal("presign without attempt state passed validation")
+	}
+	if bindPresignToAttempt(p, bytes.Repeat([]byte{1}, 32), false) {
+		t.Fatal("presign without attempt state was bound")
+	}
+	if err := MarkPresignConsumed(p); err == nil {
+		t.Fatal("MarkPresignConsumed accepted missing attempt state")
 	}
 }
 
@@ -269,11 +303,10 @@ func TestPresignSessionPresignTransfersOwnership(t *testing.T) {
 	}
 }
 
-func TestClaimPresignRejectsNil(t *testing.T) {
+func TestBindPresignToAttemptRejectsNil(t *testing.T) {
 	t.Parallel()
-	err := ClaimPresign(nil)
-	if err == nil {
-		t.Fatal("expected nil presign rejection")
+	if bindPresignToAttempt(nil, bytes.Repeat([]byte{1}, 32), false) {
+		t.Fatal("nil presign was bound")
 	}
 }
 

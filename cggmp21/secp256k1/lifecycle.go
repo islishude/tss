@@ -64,6 +64,9 @@ func (s *SignSession) Destroy() {
 		clear(s.signature.S)
 	}
 	s.signature = nil
+	clear(s.attempt.CanonicalBaseEnvelopeBytes)
+	clear(s.attempt.Digest)
+	s.attempt = SignAttemptRecord{}
 }
 
 func clearBigIntMap(xs map[tss.PartyID]*big.Int) {

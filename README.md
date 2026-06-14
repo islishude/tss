@@ -41,9 +41,12 @@ go test -tags=integration ./cggmp21/secp256k1 \
 
 The integration example uses production policy sets and guards, complete
 broadcast certificates, confidential direct delivery, and an atomic
-file-backed `PresignStore`. A deployment must replace the in-process transport,
-replay cache, identity keys, and temporary claim directory with durable
-application infrastructure. See
+encrypted file-backed `SignAttemptStore`. A deployment must replace the
+in-process transport, replay cache, identity keys, and reference file store with
+durable database/KMS-backed application infrastructure. Keep CGGMP21 presigns
+bound to a durable immutable sign attempt once committed, outcome-unknown, or
+possibly sent. Availability is recovered by `ResumeSign`, not by releasing the
+presign. See
 [`cggmp21/secp256k1/integration_example_test.go`](cggmp21/secp256k1/integration_example_test.go),
 [`example_integration_helpers_test.go`](cggmp21/secp256k1/example_integration_helpers_test.go),
 and the lightweight public-vector examples in

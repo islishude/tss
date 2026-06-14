@@ -3,13 +3,12 @@
 package secp256k1_test
 
 import (
+	"context"
 	stded25519 "crypto/ed25519"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/islishude/tss"
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
@@ -233,7 +232,7 @@ func runExampleCGGMPSign(
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := cggmp.StartSign(shares[id], presigns[id], sessionID, request, guard)
+		session, out, err := cggmp.StartSign(context.Background(), shares[id], presigns[id], sessionID, request, guard)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -254,32 +253,24 @@ func runExampleCGGMPSign(
 	return shares[signers[0]].PublicKeyBytes(), signature, nil
 }
 
-type exampleFilePresignStore struct {
-	directory string
-}
-
-func newExampleFilePresignStore() (*exampleFilePresignStore, func(), error) {
-	directory, err := os.MkdirTemp("", "tss-presign-claims-")
+func newExampleFileSignAttemptStore() (*cggmp.FileSignAttemptStore, func(), error) {
+	directory, err := os.MkdirTemp("", "tss-sign-attempts-")
 	if err != nil {
 		return nil, nil, err
 	}
-	return &exampleFilePresignStore{directory: directory}, func() {
+	store, err := cggmp.NewFileSignAttemptStore(directory, []byte("integration-example-passphrase"), &tss.PassphraseParams{
+		Time:    1,
+		Memory:  1024,
+		Threads: 1,
+	})
+	if err != nil {
+		_ = os.RemoveAll(directory)
+		return nil, nil, err
+	}
+	return store, func() {
+		store.Destroy()
 		_ = os.RemoveAll(directory)
 	}, nil
-}
-
-func (s *exampleFilePresignStore) ClaimPresign(presignID []byte) error {
-	path := filepath.Join(s.directory, hex.EncodeToString(presignID))
-	// The directory is caller-created and the filename is fixed-width hex, so
-	// no untrusted path component can escape the claim directory.
-	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec
-	if errors.Is(err, os.ErrExist) {
-		return cggmp.ErrPresignAlreadyConsumed
-	}
-	if err != nil {
-		return err
-	}
-	return file.Close()
 }
 
 func examplePresignContext() cggmp.PresignContext {

@@ -3,6 +3,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"testing"
@@ -643,7 +644,7 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 	})
 }
 
-func TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound(t *testing.T) {
+func TestCGGMP21SignRejectsBadDigestAndConflictingReuseBeforeOutbound(t *testing.T) {
 	h := newHarness(t, 2, 3)
 	presigns := secpPresign(t, h.shares, []tss.PartyID{1, 2})
 	signID, err := tss.NewSessionID(nil)
@@ -654,10 +655,22 @@ func TestCGGMP21SignRejectsBadDigestAndPresignReuseBeforeOutbound(t *testing.T) 
 		t.Fatalf("bad digest should fail before creating session/outbound message: session=%v out=%d err=%v", session, len(out), err)
 	}
 	digest := sha256.Sum256([]byte("reuse outbound"))
-	if _, _, err := StartSignDigest(h.shares[1], presigns[1], signID, digest[:]); err != nil {
+	store := newTestSignAttemptStore()
+	_, firstOut, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, digest[:], store)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if session, out, err := StartSignDigest(h.shares[1], presigns[1], signID, digest[:]); err == nil || session != nil || out != nil {
-		t.Fatalf("presign reuse should fail before creating session/outbound message: session=%v out=%d err=%v", session, len(out), err)
+	_, resumedOut, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, digest[:], store)
+	if err != nil {
+		t.Fatalf("same attempt did not resume: %v", err)
+	}
+	firstRaw, _ := firstOut[0].MarshalBinary()
+	resumedRaw, _ := resumedOut[0].MarshalBinary()
+	if !bytes.Equal(firstRaw, resumedRaw) {
+		t.Fatal("same attempt resumed with a different envelope")
+	}
+	otherDigest := sha256.Sum256([]byte("conflicting reuse outbound"))
+	if session, out, err := StartSignDigestWithStore(h.shares[1], presigns[1], signID, otherDigest[:], store); err == nil || session != nil || out != nil {
+		t.Fatalf("conflicting reuse should fail before returning an outbound message: session=%v out=%d err=%v", session, len(out), err)
 	}
 }

@@ -299,6 +299,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
 		consumed:             consumed,
+		attempt:              newPresignAttemptBinding(w.Consumed),
 	}}
 	if err := p.Validate(); err != nil {
 		return nil, err

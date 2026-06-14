@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -9,6 +10,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -28,6 +30,10 @@ const (
 	presignIDLabel             = "cggmp21-secp256k1-presign-id-v1"
 	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
+
+	// DefaultSignAttemptStoreTimeout bounds durable sign-attempt store calls
+	// after local validation has completed.
+	DefaultSignAttemptStoreTimeout = 5 * time.Second
 )
 
 // PresignContext binds a presignature to the key, chain, derivation path,
@@ -47,31 +53,55 @@ func (PresignContext) WireType() string { return presignContextWireType }
 // WireVersion returns the wire format version for PresignContext.
 func (PresignContext) WireVersion() uint16 { return tss.Version }
 
-// ErrPresignAlreadyConsumed reports that a durable presign claim already exists.
-var ErrPresignAlreadyConsumed = errors.New("presign already consumed")
+// ErrSignAttemptNotFound reports that no durable attempt exists for a presign.
+var ErrSignAttemptNotFound = errors.New("sign attempt not found")
 
-// PresignStore is the durable one-use boundary for online signing. StartSign
-// calls ClaimPresign with the presign's content-derived identifier ([Presign.ID])
-// after the local in-process claim succeeds and before it constructs any
-// outbound signing partial.
+// ErrSignAttemptConflict reports that a presign is bound to another intent.
+var ErrSignAttemptConflict = errors.New("sign attempt conflict")
+
+// ErrSignAttemptOutcomeUnknown reports that an attempt commit may have succeeded.
+var ErrSignAttemptOutcomeUnknown = errors.New("sign attempt commit outcome unknown")
+
+// ErrSignAttemptNonDeterminism reports that one intent produced another attempt.
+var ErrSignAttemptNonDeterminism = errors.New("sign attempt non-determinism")
+
+// ErrSignAttemptBurned reports that a durable tombstone blocks the presign.
+var ErrSignAttemptBurned = errors.New("sign attempt burned")
+
+// ErrSignAttemptCorrupt reports an invalid or inconsistent durable attempt.
+var ErrSignAttemptCorrupt = errors.New("sign attempt record corrupt")
+
+// SignAttemptStore is the durable one-use and outbox boundary for online
+// signing. CommitSignAttempt must atomically bind one presign ID to one immutable
+// intent and its exact canonical outbound envelope.
 //
-// ClaimPresign must be atomic for each presign identifier. It returns nil only
-// when this caller won the durable claim. It must return
-// [ErrPresignAlreadyConsumed] when the identifier was already claimed, so callers
-// can fail closed with [tss.ErrCodeConsumed]. For temporary storage failures,
-// return any other error; StartSign rolls back the local claim because no
-// outbound signing partial has been constructed yet.
-type PresignStore interface {
-	ClaimPresign(presignID []byte) error
+// CommitSignAttempt accepts an incomplete candidate, creates the attempt, or
+// returns the existing exact attempt. ErrSignAttemptConflict, ErrSignAttemptBurned,
+// and ErrSignAttemptNonDeterminism are consumed outcomes. Any other commit error
+// has an unknown outcome: callers must retain the local binding and retry or
+// resume only the same intent. LoadSignAttempt is for ResumeSign and inspection;
+// it is not part of StartSign's linearization path.
+// CompleteSignAttempt is idempotent and must make the final signature durable
+// before returning success.
+type SignAttemptStore interface {
+	CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error)
+	LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error)
+	UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error)
+	CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error)
+	BurnPresign(ctx context.Context, burn SignAttemptBurn) error
 }
 
 // SignRequest is the context-bound online signing request for a persisted
 // presignature. Message is hashed with the presign context before ECDSA.
 type SignRequest struct {
-	Context      PresignContext `json:"context"`
-	Message      []byte         `json:"message"`
-	LowS         bool           `json:"low_s"`
-	PresignStore PresignStore   `json:"-"` // required durable claim hook
+	Context      PresignContext   `json:"context"`
+	Message      []byte           `json:"message"`
+	LowS         bool             `json:"low_s"`
+	AttemptStore SignAttemptStore `json:"-"` // required durable attempt/outbox store
+
+	// DurableStoreTimeout bounds durable commit/completion work after local
+	// validation. Zero selects DefaultSignAttemptStoreTimeout.
+	DurableStoreTimeout time.Duration `json:"-"`
 }
 
 // Presign contains one local offline signing record and must be consumed once.
@@ -106,6 +136,7 @@ type presignState struct {
 	chiShare             *secret.Scalar
 	delta                *secret.Scalar
 	consumed             *atomic.Bool
+	attempt              *presignAttemptBinding
 }
 
 // Version returns the presign wire version.
@@ -255,7 +286,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 }
 
 // ID returns a content-derived presign identifier suitable for use as an
-// idempotency key in a durable [PresignStore]. The returned hash is computed
+// idempotency key in a durable [SignAttemptStore]. The returned hash is computed
 // from all persisted presign fields, including secret material, and does not
 // depend on the public transcript hash or the local consumed claim. Tampering with any
 // persisted field changes the identifier, so a storage layer cannot alter the
@@ -294,6 +325,9 @@ func (p *Presign) Validate() error {
 	}
 	if p.state.consumed == nil {
 		return errors.New("presign claim state unavailable")
+	}
+	if p.state.attempt == nil {
+		return errors.New("presign attempt state unavailable")
 	}
 	if p.state.version != tss.Version {
 		return fmt.Errorf("unexpected presign version %d", p.state.version)
@@ -382,6 +416,9 @@ func (p *Presign) Destroy() {
 	}
 	if p.state.consumed != nil {
 		p.state.consumed.Store(true)
+	}
+	if p.state.attempt != nil {
+		p.state.attempt.discard()
 	}
 	if p.state.kShare != nil {
 		p.state.kShare.Destroy()
@@ -491,6 +528,10 @@ type SignSession struct {
 	completed bool
 	aborted   bool
 	signature *Signature
+	attempt   SignAttemptRecord
+	store     SignAttemptStore
+	storeCtx  context.Context
+	storeTTL  time.Duration
 }
 
 // abort marks the signing session aborted and clears secret-bearing

@@ -22,6 +22,7 @@ type StateLimits struct {
 	MaxSerializedKeyShareBytes    int
 	MaxSerializedPresignBytes     int
 	MaxSerializedResharePlanBytes int
+	MaxSerializedSignAttemptBytes int
 }
 
 // PayloadLimits caps CGGMP21 payload sizes.
@@ -94,6 +95,7 @@ func DefaultLimits() Limits {
 			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
 			MaxSerializedPresignBytes:     tss.DefaultMaxSerializedPresignBytes,
 			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
+			MaxSerializedSignAttemptBytes: tss.DefaultMaxEnvelopeBytes + 4096,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes: 65536,
@@ -142,6 +144,7 @@ func TestLimits() Limits {
 			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
 			MaxSerializedPresignBytes:     tss.DefaultMaxSerializedPresignBytes,
 			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
+			MaxSerializedSignAttemptBytes: tss.DefaultMaxEnvelopeBytes + 4096,
 		},
 		Payload: PayloadLimits{
 			MaxMessageBytes: 65536,
@@ -211,5 +214,6 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"signprep_verify_share":      l.SignPrep.MaxVerifyShareBytes,
 		"signprep_verify_shares":     l.SignPrep.MaxVerifySharesBytes,
 		"signprep_partial_signature": l.SignPrep.MaxSignPartialPayloadBytes,
+		"envelope":                   tss.DefaultMaxEnvelopeBytes,
 	}
 }
