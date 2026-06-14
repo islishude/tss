@@ -25,11 +25,11 @@ import (
 // equivocation. A mismatch indicates a dishonest participant or compromised
 // transport and requires aborting the key material.
 func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
-	limits := DefaultLimits()
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
+	limits := plan.limits
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
@@ -46,14 +46,14 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 
 	var chainCode []byte
 	var chainCodeCommit []byte
-	if plan.state.enableHD {
+	if plan.enableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
 		}
 		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	}
-	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), plan.state.paillierBits)
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), plan.paillierBits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -111,7 +111,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
 		},
-		enableHD: plan.state.enableHD,
+		enableHD: plan.enableHD,
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},

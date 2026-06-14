@@ -15,7 +15,11 @@ import (
 )
 
 parties := []tss.PartyID{1, 2, 3}
-plan, err := secp256k1.NewKeygenPlan(sessionID, parties, 2, false)
+plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
+    SessionID: sessionID,
+    Parties: parties,
+    Threshold: 2,
+})
 local := tss.LocalConfig{Self: 1}
 guard, err := (tss.GuardConfig{
     Self:        local.Self,

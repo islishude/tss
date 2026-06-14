@@ -76,7 +76,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan, err := NewKeygenPlan(sessionID, parties, 2, false)
+	plan, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

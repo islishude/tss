@@ -21,114 +21,147 @@ const (
 
 var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 
-type keygenPlanState struct {
-	sessionID    tss.SessionID
-	threshold    int
-	parties      []tss.PartyID
-	enableHD     bool
-	paillierBits int
+// KeygenPlanOption configures CGGMP21 keygen plan construction.
+//
+// SessionID, Parties, Threshold, EnableHD, and PaillierBits are shared intent
+// included in the plan digest. Limits is a local fail-closed resource policy
+// and is intentionally excluded from the digest.
+type KeygenPlanOption struct {
+	SessionID    tss.SessionID
+	Parties      []tss.PartyID
+	Threshold    int
+	EnableHD     bool
+	PaillierBits int
+	Limits       *Limits
 }
 
 // KeygenPlan is the shared CGGMP21 keygen intent. All parties must construct the
 // same plan before starting keygen.
 type KeygenPlan struct {
-	state *keygenPlanState
+	sessionID    tss.SessionID
+	threshold    int
+	parties      []tss.PartyID
+	enableHD     bool
+	paillierBits int
+	limits       Limits
 }
 
-// NewKeygenPlan constructs a keygen plan using the default Paillier modulus size.
-func NewKeygenPlan(sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool) (*KeygenPlan, error) {
-	return NewKeygenPlanWithPaillierBits(sessionID, parties, threshold, enableHD, defaultPaillierBits())
-}
-
-// NewKeygenPlanWithPaillierBits constructs a keygen plan with an explicit
-// Paillier modulus size shared by every party.
-func NewKeygenPlanWithPaillierBits(sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool, paillierBits int) (*KeygenPlan, error) {
-	parties, err := validatePlanParties(parties, threshold, DefaultLimits())
+// NewKeygenPlan constructs a canonical keygen plan.
+func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
+	limits := DefaultLimits()
+	if option.Limits != nil {
+		limits = *option.Limits
+	}
+	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
 	}
 	defPaillierBits := defaultPaillierBits()
+	paillierBits := option.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = defPaillierBits
 	}
 	if paillierBits < defPaillierBits {
 		return nil, invalidPlanConfig(0, fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, defPaillierBits))
 	}
-	return &KeygenPlan{state: &keygenPlanState{
-		sessionID:    sessionID,
-		threshold:    threshold,
+	if limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits {
+		return nil, invalidPlanConfig(0, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
+	}
+	return &KeygenPlan{
+		sessionID:    option.SessionID,
+		threshold:    option.Threshold,
 		parties:      parties,
-		enableHD:     enableHD,
+		enableHD:     option.EnableHD,
 		paillierBits: paillierBits,
-	}}, nil
+		limits:       limits,
+	}, nil
 }
 
 // SessionID returns the protocol session ID.
 func (p *KeygenPlan) SessionID() tss.SessionID {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return tss.SessionID{}
 	}
-	return p.state.sessionID
+	return p.sessionID
 }
 
 // Threshold returns the signing threshold for the generated key.
 func (p *KeygenPlan) Threshold() int {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return 0
 	}
-	return p.state.threshold
+	return p.threshold
 }
 
 // Parties returns a copy of the canonical keygen party set.
 func (p *KeygenPlan) Parties() []tss.PartyID {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return nil
 	}
-	return slices.Clone(p.state.parties)
+	return slices.Clone(p.parties)
 }
 
 // EnableHD reports whether keygen will aggregate an HD chain code.
 func (p *KeygenPlan) EnableHD() bool {
-	return p != nil && p.state != nil && p.state.enableHD
+	return p != nil && p.enableHD
 }
 
 // PaillierBits returns the shared Paillier modulus size.
 func (p *KeygenPlan) PaillierBits() int {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return 0
 	}
-	return p.state.paillierBits
+	return p.paillierBits
 }
 
 // Digest returns the canonical keygen plan digest.
 func (p *KeygenPlan) Digest() ([]byte, error) {
-	if p == nil || p.state == nil {
-		return nil, errors.New("nil keygen plan")
+	if err := p.validate(); err != nil {
+		return nil, err
 	}
 	t := transcript.New(keygenPlanDigestLabel)
-	t.AppendBytes("session_id", p.state.sessionID[:])
-	t.AppendUint32("threshold", uint32(p.state.threshold))
-	t.AppendUint32List("parties", transcript.Uint32s(p.state.parties))
-	t.AppendBool("enable_hd", p.state.enableHD)
-	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
+	t.AppendBytes("session_id", p.sessionID[:])
+	t.AppendUint32("threshold", uint32(p.threshold))
+	t.AppendUint32List("parties", transcript.Uint32s(p.parties))
+	t.AppendBool("enable_hd", p.enableHD)
+	t.AppendUint32("paillier_bits", uint32(p.paillierBits))
 	return t.Sum(), nil
 }
 
-func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig, error) {
-	if p == nil || p.state == nil {
-		return tss.ThresholdConfig{}, errors.New("nil keygen plan")
+func (p *KeygenPlan) validate() error {
+	if p == nil {
+		return errors.New("nil keygen plan")
 	}
-	if !tss.ContainsParty(p.state.parties, local.Self) {
+	if !p.sessionID.Valid() {
+		return tss.ErrInvalidSessionID
+	}
+	if _, err := validatePlanParties(p.parties, p.threshold, p.limits); err != nil {
+		return err
+	}
+	if p.paillierBits < defaultPaillierBits() {
+		return fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", p.paillierBits, defaultPaillierBits())
+	}
+	if p.limits.Paillier.MaxModulusBits > 0 && p.paillierBits > p.limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("paillier key size %d exceeds max %d", p.paillierBits, p.limits.Paillier.MaxModulusBits)
+	}
+	return nil
+}
+
+func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig, error) {
+	if err := p.validate(); err != nil {
+		return tss.ThresholdConfig{}, err
+	}
+	if !tss.ContainsParty(p.parties, local.Self) {
 		return tss.ThresholdConfig{}, errors.New("local party is not in keygen plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.threshold,
-		Parties:      slices.Clone(p.state.parties),
+		Threshold:    p.threshold,
+		Parties:      slices.Clone(p.parties),
 		Self:         local.Self,
-		SessionID:    p.state.sessionID,
+		SessionID:    p.sessionID,
 		Rand:         local.Rand,
 		Context:      local.Context,
 		RoundTimeout: local.RoundTimeout,

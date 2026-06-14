@@ -231,7 +231,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 // and signing with production 3072-bit Paillier parameters.
 func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	t.Parallel()
-	shares := slowCryptoKeygenWithOptions(t, 2, 3, KeygenOptions{EnableHD: true})
+	shares := slowCryptoKeygenWithPlanOption(t, 2, 3, KeygenPlanOption{EnableHD: true})
 	signers := []tss.PartyID{1, 2}
 	path := []uint32{0, 17}
 
@@ -289,8 +289,8 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	}
 }
 
-// slowCryptoKeygenWithOptions runs keygen with explicit options and production params.
-func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOptions) map[tss.PartyID]*KeyShare {
+// slowCryptoKeygenWithPlanOption runs keygen with explicit plan options and production params.
+func slowCryptoKeygenWithPlanOption(t *testing.T, threshold, n int, option KeygenPlanOption) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
 	parties := make([]tss.PartyID, n)
@@ -305,12 +305,12 @@ func slowCryptoKeygenWithOptions(t *testing.T, threshold, n int, opts KeygenOpti
 	sessions := make(map[tss.PartyID]*KeygenSession)
 	var pending []tss.Envelope
 	for _, party := range parties {
-		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{
+		kg, out, err := startCGGMP21KeygenWithPlanOption(tss.ThresholdConfig{
 			Threshold: threshold,
 			Parties:   parties,
 			Self:      party,
 			SessionID: sessionID,
-		}, opts)
+		}, option)
 		if err != nil {
 			t.Fatal(err)
 		}

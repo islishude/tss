@@ -19,7 +19,7 @@ func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
 	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID}, KeygenOptions{EnableHD: true})
+		kg, out, err := startCGGMP21KeygenWithPlanOption(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID}, KeygenPlanOption{EnableHD: true})
 		if err != nil {
 			t.Fatal(err)
 		}

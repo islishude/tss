@@ -22,7 +22,11 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	minimalPresign := func() *Presign {
 		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
-	keygenPlan, err := NewKeygenPlan(sessionID, []tss.PartyID{1, 2}, 2, false)
+	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID,
+		Parties:   []tss.PartyID{1, 2},
+		Threshold: 2,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -18,7 +18,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keygenPlan, err := NewKeygenPlan(sessionID, parties, 2, false)
+	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2})
 	if err != nil {
 		t.Fatal(err)
 	}

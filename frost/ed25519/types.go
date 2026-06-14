@@ -434,15 +434,6 @@ func scalarBytes(x *big.Int) ([]byte, error) {
 	return s.Bytes(), nil
 }
 
-// KeygenOptions controls optional DKG behavior.
-type KeygenOptions struct {
-	// EnableHD generates a random 32-byte chain code during keygen for BIP32 derivation.
-	EnableHD bool
-
-	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
-	Limits *Limits
-}
-
 // SignOptions controls optional signing behavior.
 type SignOptions struct {
 	// AdditiveShift is the cumulative HD tweak applied as an additive scalar shift.

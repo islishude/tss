@@ -91,7 +91,7 @@ func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare
 			Self:      id,
 			SessionID: sessionID,
 		}
-		kg, out, err := startFROSTKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
+		kg, out, err := startFROSTKeygenWithPlanOption(cfg, KeygenPlanOption{EnableHD: true})
 		if err != nil {
 			t.Fatal(err)
 		}

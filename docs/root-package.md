@@ -19,7 +19,9 @@ type LocalConfig struct {
 Protocol lifecycle APIs use the plan-first shape:
 
 ```go
-plan, err := secp256k1.NewKeygenPlan(sessionID, parties, threshold, enableHD)
+plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
+    SessionID: sessionID, Parties: parties, Threshold: threshold, EnableHD: enableHD,
+})
 session, out, err := secp256k1.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
 ```
 

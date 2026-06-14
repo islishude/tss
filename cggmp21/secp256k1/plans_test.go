@@ -16,11 +16,15 @@ func TestCGGMP21KeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x41)
 	parties := []tss.PartyID{3, 1, 2}
 	bits := defaultPaillierBits()
-	plan, err := NewKeygenPlanWithPaillierBits(sessionID, parties, 2, false, bits)
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: parties, Threshold: 2, PaillierBits: bits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	same, err := NewKeygenPlanWithPaillierBits(sessionID, []tss.PartyID{1, 2, 3}, 2, false, bits)
+	same, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2, PaillierBits: bits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -35,6 +39,16 @@ func TestCGGMP21KeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	if plan.PaillierBits() != bits {
 		t.Fatalf("PaillierBits() = %d, want %d", plan.PaillierBits(), bits)
 	}
+	localLimits := DefaultLimits()
+	localLimits.Payload.MaxMessageBytes--
+	withLocalLimits, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2,
+		PaillierBits: bits, Limits: &localLimits,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSameCGGMPPlanDigest(t, plan, withLocalLimits)
 
 	for name, other := range map[string]*KeygenPlan{
 		"threshold": mustCGGMPKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3, false, bits),
@@ -44,13 +58,40 @@ func TestCGGMP21KeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	} {
 		assertDifferentCGGMPPlanDigest(t, name, plan, other)
 	}
-	if _, err := NewKeygenPlanWithPaillierBits(sessionID, []tss.PartyID{1, 2}, 3, false, bits); err == nil {
+	if _, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2}, Threshold: 3, PaillierBits: bits,
+	}); err == nil {
 		t.Fatal("keygen plan accepted threshold greater than party count")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 	}
-	if _, err := NewKeygenPlanWithPaillierBits(sessionID, []tss.PartyID{1, 2}, 2, false, bits-1); err == nil {
+	if _, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2}, Threshold: 2, PaillierBits: bits - 1,
+	}); err == nil {
 		t.Fatal("keygen plan accepted undersized Paillier modulus")
+	} else {
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	}
+	strictLimits := DefaultLimits()
+	strictLimits.Threshold.MaxParties = 2
+	if _, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2,
+		PaillierBits: bits, Limits: &strictLimits,
+	}); err == nil {
+		t.Fatal("keygen plan ignored local party limit")
+	} else {
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	}
+}
+
+func TestCGGMP21KeygenPlanZeroValueIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	if _, err := new(KeygenPlan).Digest(); err == nil {
+		t.Fatal("zero-value keygen plan produced a digest")
+	}
+	if _, _, err := StartKeygen(nil, tss.LocalConfig{Self: 1}, nil); err == nil {
+		t.Fatal("nil keygen plan started a session")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 	}
@@ -264,7 +305,13 @@ func assertDifferentCGGMPPlanDigest(t *testing.T, name string, a, b cggmpDigestP
 
 func mustCGGMPKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool, paillierBits int) *KeygenPlan {
 	t.Helper()
-	plan, err := NewKeygenPlanWithPaillierBits(sessionID, parties, threshold, enableHD, paillierBits)
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID:    sessionID,
+		Parties:      parties,
+		Threshold:    threshold,
+		EnableHD:     enableHD,
+		PaillierBits: paillierBits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

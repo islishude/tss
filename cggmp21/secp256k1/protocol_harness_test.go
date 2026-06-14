@@ -42,7 +42,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.P
 			}
 		}()
 		if enableHD {
-			entry.shares = cloneKeyShareMap(secpKeygenWithOptions(t, threshold, n, KeygenOptions{EnableHD: true}))
+			entry.shares = cloneKeyShareMap(secpKeygenWithPlanOption(t, threshold, n, KeygenPlanOption{EnableHD: true}))
 		} else {
 			entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
 		}
@@ -177,7 +177,7 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	return out
 }
 
-func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) map[tss.PartyID]*KeyShare {
+func secpKeygenWithPlanOption(t testing.TB, threshold, n int, option KeygenPlanOption) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	session, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -190,7 +190,7 @@ func secpKeygenWithOptions(t testing.TB, threshold, n int, opts KeygenOptions) m
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		kg, out, err := startCGGMP21KeygenWithOptions(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session}, opts)
+		kg, out, err := startCGGMP21KeygenWithPlanOption(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session}, option)
 		if err != nil {
 			t.Fatal(err)
 		}

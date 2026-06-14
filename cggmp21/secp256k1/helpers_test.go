@@ -97,18 +97,25 @@ func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	plan, err := NewKeygenPlan(config.SessionID, config.Parties, config.Threshold, false)
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: config.SessionID,
+		Parties:   config.Parties,
+		Threshold: config.Threshold,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
-func startCGGMP21KeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+func startCGGMP21KeygenWithPlanOption(config tss.ThresholdConfig, option KeygenPlanOption, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	plan, err := NewKeygenPlanWithPaillierBits(config.SessionID, config.Parties, config.Threshold, opts.EnableHD, opts.PaillierBits)
+	option.SessionID = config.SessionID
+	option.Parties = config.Parties
+	option.Threshold = config.Threshold
+	plan, err := NewKeygenPlan(option)
 	if err != nil {
 		return nil, nil, err
 	}

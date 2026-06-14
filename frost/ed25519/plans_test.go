@@ -14,11 +14,13 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 
 	sessionID := frostPlanTestSession(0x11)
 	parties := []tss.PartyID{3, 1, 2}
-	plan, err := NewKeygenPlan(sessionID, parties, 2, false)
+	plan, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
-	same, err := NewKeygenPlan(sessionID, []tss.PartyID{1, 2, 3}, 2, false)
+	same, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,6 +32,15 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	if !bytes.Equal(partyIDsBytes(plan.Parties()), partyIDsBytes([]tss.PartyID{1, 2, 3})) {
 		t.Fatal("keygen plan party getter or constructor aliases caller memory")
 	}
+	localLimits := DefaultLimits()
+	localLimits.Payload.MaxMessageBytes--
+	withLocalLimits, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2, Limits: &localLimits,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertSamePlanDigest(t, plan, withLocalLimits)
 
 	for name, other := range map[string]*KeygenPlan{
 		"threshold": mustFROSTKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3, false),
@@ -38,8 +49,32 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	} {
 		assertDifferentPlanDigest(t, name, plan, other)
 	}
-	if _, err := NewKeygenPlan(sessionID, []tss.PartyID{1, 2}, 3, false); err == nil {
+	if _, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2}, Threshold: 3,
+	}); err == nil {
 		t.Fatal("keygen plan accepted threshold greater than party count")
+	} else {
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	}
+	strictLimits := DefaultLimits()
+	strictLimits.Threshold.MaxParties = 2
+	if _, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2, Limits: &strictLimits,
+	}); err == nil {
+		t.Fatal("keygen plan ignored local party limit")
+	} else {
+		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
+	}
+}
+
+func TestFROSTKeygenPlanZeroValueIsInvalid(t *testing.T) {
+	t.Parallel()
+
+	if _, err := new(KeygenPlan).Digest(); err == nil {
+		t.Fatal("zero-value keygen plan produced a digest")
+	}
+	if _, _, err := StartKeygen(nil, tss.LocalConfig{Self: 1}, nil); err == nil {
+		t.Fatal("nil keygen plan started a session")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
 	}
@@ -201,7 +236,12 @@ func assertDifferentPlanDigest(t *testing.T, name string, a, b digestPlan) {
 
 func mustFROSTKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool) *KeygenPlan {
 	t.Helper()
-	plan, err := NewKeygenPlan(sessionID, parties, threshold, enableHD)
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: sessionID,
+		Parties:   parties,
+		Threshold: threshold,
+		EnableHD:  enableHD,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

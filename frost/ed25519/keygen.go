@@ -66,11 +66,11 @@ func (keygenSharePayload) MarshalJSON() ([]byte, error) {
 
 // StartKeygen starts dealerless DKG from a shared immutable lifecycle plan.
 func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
-	limits := DefaultLimits()
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
+	limits := plan.limits
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
@@ -95,7 +95,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 	var chainCode []byte
 	var chainCodeCommit []byte
-	if plan.state.enableHD {
+	if plan.enableHD {
 		chainCode = make([]byte, 32)
 		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 			return nil, nil, err
@@ -111,7 +111,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
-		enableHD: plan.state.enableHD,
+		enableHD: plan.enableHD,
 		planHash: append([]byte(nil), planHash...),
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),

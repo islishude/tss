@@ -22,89 +22,117 @@ const (
 
 var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 
-type keygenPlanState struct {
-	sessionID tss.SessionID
-	threshold int
-	parties   []tss.PartyID
-	enableHD  bool
+// KeygenPlanOption configures FROST keygen plan construction.
+//
+// SessionID, Parties, Threshold, and EnableHD are shared intent included in the
+// plan digest. Limits is a local fail-closed resource policy and is
+// intentionally excluded from the digest.
+type KeygenPlanOption struct {
+	SessionID tss.SessionID
+	Parties   []tss.PartyID
+	Threshold int
+	EnableHD  bool
+	Limits    *Limits
 }
 
 // KeygenPlan is the shared FROST keygen intent.
 type KeygenPlan struct {
-	state *keygenPlanState
+	sessionID tss.SessionID
+	threshold int
+	parties   []tss.PartyID
+	enableHD  bool
+	limits    Limits
 }
 
 // NewKeygenPlan constructs a FROST keygen plan.
-func NewKeygenPlan(sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool) (*KeygenPlan, error) {
-	parties, err := validatePlanParties(parties, threshold, DefaultLimits())
+func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
+	limits := DefaultLimits()
+	if option.Limits != nil {
+		limits = *option.Limits
+	}
+	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
 	}
-	return &KeygenPlan{state: &keygenPlanState{
-		sessionID: sessionID,
-		threshold: threshold,
+	return &KeygenPlan{
+		sessionID: option.SessionID,
+		threshold: option.Threshold,
 		parties:   parties,
-		enableHD:  enableHD,
-	}}, nil
+		enableHD:  option.EnableHD,
+		limits:    limits,
+	}, nil
 }
 
 // SessionID returns the keygen session ID.
 func (p *KeygenPlan) SessionID() tss.SessionID {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return tss.SessionID{}
 	}
-	return p.state.sessionID
+	return p.sessionID
 }
 
 // Threshold returns the signing threshold.
 func (p *KeygenPlan) Threshold() int {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return 0
 	}
-	return p.state.threshold
+	return p.threshold
 }
 
 // Parties returns a copy of the canonical party set.
 func (p *KeygenPlan) Parties() []tss.PartyID {
-	if p == nil || p.state == nil {
+	if p == nil {
 		return nil
 	}
-	return slices.Clone(p.state.parties)
+	return slices.Clone(p.parties)
 }
 
 // EnableHD reports whether keygen will aggregate an HD chain code.
 func (p *KeygenPlan) EnableHD() bool {
-	return p != nil && p.state != nil && p.state.enableHD
+	return p != nil && p.enableHD
 }
 
 // Digest returns the canonical keygen plan digest.
 func (p *KeygenPlan) Digest() ([]byte, error) {
-	if p == nil || p.state == nil {
-		return nil, errors.New("nil keygen plan")
+	if err := p.validate(); err != nil {
+		return nil, err
 	}
 	t := transcript.New(keygenPlanDigestLabel)
-	t.AppendBytes("session_id", p.state.sessionID[:])
-	t.AppendUint32("threshold", uint32(p.state.threshold))
-	t.AppendUint32List("parties", transcript.Uint32s(p.state.parties))
-	t.AppendBool("enable_hd", p.state.enableHD)
+	t.AppendBytes("session_id", p.sessionID[:])
+	t.AppendUint32("threshold", uint32(p.threshold))
+	t.AppendUint32List("parties", transcript.Uint32s(p.parties))
+	t.AppendBool("enable_hd", p.enableHD)
 	return t.Sum(), nil
 }
 
-func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig, error) {
-	if p == nil || p.state == nil {
-		return tss.ThresholdConfig{}, errors.New("nil keygen plan")
+func (p *KeygenPlan) validate() error {
+	if p == nil {
+		return errors.New("nil keygen plan")
 	}
-	if !tss.ContainsParty(p.state.parties, local.Self) {
+	if !p.sessionID.Valid() {
+		return tss.ErrInvalidSessionID
+	}
+	if _, err := validatePlanParties(p.parties, p.threshold, p.limits); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig, error) {
+	if err := p.validate(); err != nil {
+		return tss.ThresholdConfig{}, err
+	}
+	if !tss.ContainsParty(p.parties, local.Self) {
 		return tss.ThresholdConfig{}, errors.New("local party is not in keygen plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.threshold,
-		Parties:      slices.Clone(p.state.parties),
+		Threshold:    p.threshold,
+		Parties:      slices.Clone(p.parties),
 		Self:         local.Self,
-		SessionID:    p.state.sessionID,
+		SessionID:    p.sessionID,
 		Rand:         local.Rand,
 		Context:      local.Context,
 		RoundTimeout: local.RoundTimeout,

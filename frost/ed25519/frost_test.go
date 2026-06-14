@@ -37,18 +37,25 @@ func startFROSTKeygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) 
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	plan, err := NewKeygenPlan(config.SessionID, config.Parties, config.Threshold, false)
+	plan, err := NewKeygenPlan(KeygenPlanOption{
+		SessionID: config.SessionID,
+		Parties:   config.Parties,
+		Threshold: config.Threshold,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
 	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
-func startFROSTKeygenWithOptions(config tss.ThresholdConfig, opts KeygenOptions, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
+func startFROSTKeygenWithPlanOption(config tss.ThresholdConfig, option KeygenPlanOption, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
 	})
-	plan, err := NewKeygenPlan(config.SessionID, config.Parties, config.Threshold, opts.EnableHD)
+	option.SessionID = config.SessionID
+	option.Parties = config.Parties
+	option.Threshold = config.Threshold
+	plan, err := NewKeygenPlan(option)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -689,7 +696,7 @@ func frostKeygenHDInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 			Self:      id,
 			SessionID: sessionID,
 		}
-		session, out, err := startFROSTKeygenWithOptions(cfg, KeygenOptions{EnableHD: true})
+		session, out, err := startFROSTKeygenWithPlanOption(cfg, KeygenPlanOption{EnableHD: true})
 		if err != nil {
 			t.Fatal(err)
 		}

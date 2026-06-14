@@ -725,7 +725,11 @@ sequenceDiagram
 ### Keygen
 
 ```go
-plan, err := NewKeygenPlanWithPaillierBits(sessionID, parties, threshold, enableHD, paillierBits)
+option := KeygenPlanOption{
+    SessionID: sessionID, Parties: parties, Threshold: threshold,
+    EnableHD: enableHD, PaillierBits: paillierBits,
+}
+plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.Complete()

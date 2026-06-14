@@ -12,7 +12,7 @@ import (
 // ExampleSign demonstrates production-shaped FROST key generation and signing.
 func ExampleSign() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenOptions{})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +30,7 @@ func ExampleSign() {
 // ExampleSign_multiParty demonstrates signing with a threshold subset.
 func ExampleSign_multiParty() {
 	parties := []tss.PartyID{1, 2, 3}
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenOptions{})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -49,7 +49,7 @@ func ExampleSign_multiParty() {
 // ExampleKeyShare demonstrates the canonical binary persistence format.
 func ExampleKeyShare() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenOptions{})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -78,7 +78,7 @@ func ExampleKeyShare() {
 func ExampleStartRefresh() {
 	parties := []tss.PartyID{1, 2, 3}
 	partySet := tss.PartySet(parties)
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenOptions{})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -142,7 +142,7 @@ func ExampleStartReshare() {
 	newParties := []tss.PartyID{1, 2, 3, 4}
 	oldPartySet := tss.PartySet(oldParties)
 	allParties := mergeExamplePartySets(oldParties, newParties)
-	shares, err := runExampleFROSTKeygen(oldParties, 2, frost.KeygenOptions{})
+	shares, err := runExampleFROSTKeygen(oldParties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -215,7 +215,7 @@ func ExampleStartReshare() {
 // ExampleDeriveNonHardenedBIP32 demonstrates HD derivation and child-key signing.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenOptions{EnableHD: true})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{EnableHD: true})
 	if err != nil {
 		panic(err)
 	}

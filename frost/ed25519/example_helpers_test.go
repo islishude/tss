@@ -120,7 +120,7 @@ func (s *exampleFROSTSecurity) route(
 	return nil
 }
 
-func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, opts frost.KeygenOptions) (map[tss.PartyID]*frost.KeyShare, error) {
+func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, option frost.KeygenPlanOption) (map[tss.PartyID]*frost.KeyShare, error) {
 	partySet := tss.PartySet(parties)
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
@@ -129,7 +129,10 @@ func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, opts frost.Keyg
 	}
 	sessions := make(map[tss.PartyID]*frost.KeygenSession, len(parties))
 	queue := make([]tss.Envelope, 0)
-	plan, err := frost.NewKeygenPlan(sessionID, parties, threshold, opts.EnableHD)
+	option.SessionID = sessionID
+	option.Parties = parties
+	option.Threshold = threshold
+	plan, err := frost.NewKeygenPlan(option)
 	if err != nil {
 		return nil, err
 	}

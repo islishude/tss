@@ -26,15 +26,6 @@ const (
 	keygenAborted
 )
 
-// KeygenOptions controls non-default CGGMP21 keygen parameters.
-type KeygenOptions struct {
-	PaillierBits int
-	EnableHD     bool
-
-	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
-	Limits *Limits
-}
-
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
 	mu sync.Mutex
