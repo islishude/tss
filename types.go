@@ -74,8 +74,8 @@ const (
 )
 
 // MessageSlotKey identifies a unique protocol message slot for equivocation detection.
-// It does NOT include the transcript hash — two different payloads occupying the same
-// slot with different transcript hashes constitute equivocation.
+// It does not include the payload hash: two different payloads occupying the same
+// slot constitute equivocation.
 type MessageSlotKey struct {
 	Protocol    ProtocolID
 	SessionID   SessionID
@@ -87,11 +87,11 @@ type MessageSlotKey struct {
 
 // ReplayCache detects replayed and equivocating protocol messages.
 // CheckAndStore atomically checks whether a message slot has been seen and:
-//   - Stores the transcript hash and returns nil when the slot is new.
-//   - Returns [ErrDuplicateMessage] when the slot exists with the same transcript hash.
-//   - Returns [ErrEquivocation] when the slot exists with a different transcript hash.
+//   - Stores the payload hash and returns nil when the slot is new.
+//   - Returns [ErrDuplicateMessage] when the slot exists with the same payload hash.
+//   - Returns [ErrEquivocation] when the slot exists with a different payload hash.
 type ReplayCache interface {
-	CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error
+	CheckAndStore(slot MessageSlotKey, payloadHash [32]byte) error
 }
 
 // EnvelopeInput carries the caller-provided fields for constructing an Envelope.

@@ -72,12 +72,12 @@ var ErrInvalidBroadcastCertificate = errors.New("invalid broadcast certificate")
 // ErrBroadcastEquivocation is returned when a sender sends different payloads to different parties.
 var ErrBroadcastEquivocation = errors.New("broadcast equivocation detected")
 
-// ErrDuplicateMessage is returned when an identical message (same slot, same transcript hash)
+// ErrDuplicateMessage is returned when an identical message (same slot, same payload hash)
 // is delivered more than once.
 var ErrDuplicateMessage = errors.New("duplicate message")
 
 // ErrEquivocation is returned when a party sends different payloads to different recipients
-// for the same protocol message slot — the slot exists but with a different transcript hash.
+// for the same protocol message slot: the slot exists but with a different payload hash.
 var ErrEquivocation = errors.New("equivocation detected")
 
 // ErrMissingEnvelopeGuard is returned when an envelope arrives without a configured guard.

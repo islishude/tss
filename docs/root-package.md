@@ -62,13 +62,17 @@ type Envelope struct {
     To             PartyID          // recipient; 0 means broadcast
     PayloadType    PayloadType      // identifies the payload schema
     Payload        []byte           // TLV-encoded protocol payload
-    TranscriptHash [32]byte         // SHA-256 of public envelope metadata
 }
 ```
 
+`Envelope.Digest()` computes an `EnvelopeDigest` from the current public envelope
+metadata and payload. The digest is not cached and is not part of the wire
+schema.
+
 ### Construction
 
-Production code must use `NewEnvelope(EnvelopeInput{...})` which validates fields and computes the transcript hash. Direct struct literals are not safe — they bypass transcript hash computation.
+Production code should use `NewEnvelope(EnvelopeInput{...})`, which validates
+fields and copies the payload. Direct struct literals bypass those checks.
 
 ```go
 env, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -81,8 +85,8 @@ env, err := tss.NewEnvelope(tss.EnvelopeInput{
 })
 ```
 
-`OpenEnvelope(raw, receiveInfo, opts...)` decodes wire bytes, recomputes the
-transcript hash, and returns an `InboundEnvelope`. It rejects missing peer
+`OpenEnvelope(raw, receiveInfo, opts...)` decodes wire bytes and returns an
+`InboundEnvelope`. It rejects missing peer
 identity, missing channel protection, and peer/envelope sender mismatch before
 the guard runs.
 
@@ -97,13 +101,14 @@ the guard runs.
 
 See [docs/wire.md](wire.md) for the full canonical encoding specification.
 
-### Transcript Binding
+### Envelope Digest
 
-`DomainSeparatedHash()` uses the canonical labeled SHA-256 transcript encoding
-from [`wire.md`](wire.md). Its domain label is followed by named entries for
+`Digest()` uses the canonical labeled SHA-256 transcript encoding from
+[`wire.md`](wire.md). Its domain label is followed by named entries for
 `protocol`, `version`, `session_id`, `round`, `from`, `to`, `payload_type`, and
-`payload`. The hash is set automatically by `NewEnvelope()` and verified by
-`EnvelopeGuard.Validate()`.
+`payload`. It computes from the current fields on every call and returns the
+distinct `EnvelopeDigest` type. Protocol transcript hashes such as keygen and
+presign transcripts are separate concepts.
 
 ### Transport Semantics
 
@@ -155,17 +160,16 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 1. Protocol match
 2. Session ID match
 3. Version check
-4. Transcript hash integrity
-5. Sender membership in party set
-6. Authenticated transport peer is present
-7. `ReceiveInfo.Peer == Envelope.From`
-8. Channel protection is set
-9. Recipient correctness
-10. Policy lookup (fail-closed for unknown payloads)
-11. Delivery mode enforcement (direct vs broadcast)
-12. Confidentiality enforcement against policy
-13. Broadcast consistency certificate verification with `VerifyFull` (when required)
-14. Replay and equivocation detection via `ReplayCache.CheckAndStore`
+4. Sender membership in party set
+5. Authenticated transport peer is present
+6. `ReceiveInfo.Peer == Envelope.From`
+7. Channel protection is set
+8. Recipient correctness
+9. Policy lookup (fail-closed for unknown payloads)
+10. Delivery mode enforcement (direct vs broadcast)
+11. Confidentiality enforcement against policy
+12. Broadcast consistency certificate verification with `VerifyFull` (when required)
+13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
 Each protocol session must be constructed with an `EnvelopeGuard` passed to its
 `Start*` entry point, and handlers call `Validate(inbound)` as their first step.
@@ -192,7 +196,7 @@ type BroadcastCertificate struct {
     From           PartyID
     PayloadType    PayloadType
     PayloadHash    [32]byte
-    TranscriptHash [32]byte
+    EnvelopeDigest EnvelopeDigest
     Recipients     PartySet
     Acks           []BroadcastAck
 }
@@ -204,17 +208,17 @@ CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare 
 
 ```go
 type ReplayCache interface {
-    CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error
+    CheckAndStore(slot MessageSlotKey, payloadHash [32]byte) error
 }
 ```
 
 `CheckAndStore` atomically checks whether a message slot has been seen and returns:
 
 - `nil` when the slot is new (first use).
-- `ErrDuplicateMessage` when the slot exists with the same transcript hash (harmless duplicate, silently dropped by the guard).
-- `ErrEquivocation` when the slot exists with a different transcript hash (malicious or faulty sender).
+- `ErrDuplicateMessage` when the slot exists with the same payload hash (harmless duplicate, silently dropped by the guard).
+- `ErrEquivocation` when the slot exists with a different payload hash (malicious or faulty sender).
 
-`MessageSlotKey` identifies a unique protocol message slot by `(protocol, sessionID, round, from, to, payloadType)`. Unlike the old `ReplayKey`, it does not include the transcript hash — two different payloads in the same slot with different transcript hashes constitute equivocation.
+`MessageSlotKey` identifies a unique protocol message slot by `(protocol, sessionID, round, from, to, payloadType)`. The payload is excluded from the slot key, so two different payloads in the same slot constitute equivocation.
 
 `SlotKeyFromEnvelope` and `PayloadHashFromEnvelope` construct the arguments for `CheckAndStore` from an envelope.
 
@@ -268,7 +272,7 @@ type Blame struct {
 
 - Protocol, version, session ID.
 - Round, sender, payload type.
-- Payload hash, transcript hash.
+- Payload hash and envelope digest.
 - Evidence kind (see `EvidenceKind` constants) and reason.
 - Selected public input hashes (commitments, Paillier keys, transcript hashes).
 

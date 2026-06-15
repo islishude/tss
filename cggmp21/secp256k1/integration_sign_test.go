@@ -86,7 +86,6 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 		t.Fatal(err)
 	}
 	messages[0].Payload = mutated
-	messages[0] = messages[0].RecomputeTranscriptHash()
 	delivered := false
 	for _, id := range signers {
 		if id == messages[0].From {

@@ -220,7 +220,6 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	}
 	badPartial := partials2[0]
 	badPartial.Payload = badPayload
-	badPartial = badPartial.RecomputeTranscriptHash()
 
 	_, err = session1.HandleSignMessage(testutil.DeliverEnvelope(badPartial))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)

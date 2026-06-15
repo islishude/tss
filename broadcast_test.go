@@ -53,9 +53,9 @@ func TestAckDigestDeterminism(t *testing.T) {
 	t.Parallel()
 	sid := testSessionID(t)
 	ph := sha256.Sum256([]byte("hello"))
-	th := sha256.Sum256([]byte("transcript"))
-	base := AckDigest("test", sid, 1, 2, "payload.type", ph, th)
-	if got := AckDigest("test", sid, 1, 2, "payload.type", ph, th); got != base {
+	envelopeDigest := EnvelopeDigest(sha256.Sum256([]byte("envelope")))
+	base := AckDigest("test", sid, 1, 2, "payload.type", ph, envelopeDigest)
+	if got := AckDigest("test", sid, 1, 2, "payload.type", ph, envelopeDigest); got != base {
 		t.Fatal("AckDigest must be deterministic")
 	}
 
@@ -63,19 +63,19 @@ func TestAckDigestDeterminism(t *testing.T) {
 	otherSID[0] ^= 1
 	otherPH := ph
 	otherPH[0] ^= 1
-	otherTH := th
-	otherTH[0] ^= 1
+	otherEnvelopeDigest := envelopeDigest
+	otherEnvelopeDigest[0] ^= 1
 	tests := []struct {
 		name string
 		got  [32]byte
 	}{
-		{name: "protocol", got: AckDigest("other", sid, 1, 2, "payload.type", ph, th)},
-		{name: "session", got: AckDigest("test", otherSID, 1, 2, "payload.type", ph, th)},
-		{name: "round", got: AckDigest("test", sid, 2, 2, "payload.type", ph, th)},
-		{name: "sender", got: AckDigest("test", sid, 1, 3, "payload.type", ph, th)},
-		{name: "payload type", got: AckDigest("test", sid, 1, 2, "other.type", ph, th)},
-		{name: "payload hash", got: AckDigest("test", sid, 1, 2, "payload.type", otherPH, th)},
-		{name: "transcript hash", got: AckDigest("test", sid, 1, 2, "payload.type", ph, otherTH)},
+		{name: "protocol", got: AckDigest("other", sid, 1, 2, "payload.type", ph, envelopeDigest)},
+		{name: "session", got: AckDigest("test", otherSID, 1, 2, "payload.type", ph, envelopeDigest)},
+		{name: "round", got: AckDigest("test", sid, 2, 2, "payload.type", ph, envelopeDigest)},
+		{name: "sender", got: AckDigest("test", sid, 1, 3, "payload.type", ph, envelopeDigest)},
+		{name: "payload type", got: AckDigest("test", sid, 1, 2, "other.type", ph, envelopeDigest)},
+		{name: "payload hash", got: AckDigest("test", sid, 1, 2, "payload.type", otherPH, envelopeDigest)},
+		{name: "envelope digest", got: AckDigest("test", sid, 1, 2, "payload.type", ph, otherEnvelopeDigest)},
 	}
 	for _, tt := range tests {
 		if tt.got == base {
@@ -91,9 +91,9 @@ func TestNewBroadcastCertificateValid(t *testing.T) {
 	parties := PartySet{1, 2, 3}
 	ph := sha256.Sum256(env.Payload)
 	acks := []BroadcastAck{
-		{Party: 1, PayloadHash: ph, TranscriptHash: env.TranscriptHash},
-		{Party: 2, PayloadHash: ph, TranscriptHash: env.TranscriptHash},
-		{Party: 3, PayloadHash: ph, TranscriptHash: env.TranscriptHash},
+		{Party: 1, PayloadHash: ph, EnvelopeDigest: env.Digest()},
+		{Party: 2, PayloadHash: ph, EnvelopeDigest: env.Digest()},
+		{Party: 3, PayloadHash: ph, EnvelopeDigest: env.Digest()},
 	}
 	cert, err := NewBroadcastCertificate(env, parties, acks)
 	if err != nil {
@@ -112,8 +112,8 @@ func TestNewBroadcastCertificateRejectsMismatchedPayloadHash(t *testing.T) {
 	ph := sha256.Sum256(env.Payload)
 	wrongHash := sha256.Sum256([]byte("wrong"))
 	acks := []BroadcastAck{
-		{Party: 1, PayloadHash: ph, TranscriptHash: env.TranscriptHash},
-		{Party: 2, PayloadHash: wrongHash, TranscriptHash: env.TranscriptHash},
+		{Party: 1, PayloadHash: ph, EnvelopeDigest: env.Digest()},
+		{Party: 2, PayloadHash: wrongHash, EnvelopeDigest: env.Digest()},
 	}
 	_, err := NewBroadcastCertificate(env, parties, acks)
 	if err == nil {
@@ -147,7 +147,6 @@ func TestVerifyBroadcastAckRejectsTamperedEnvelope(t *testing.T) {
 	// Tamper with the envelope payload
 	tampered := env
 	tampered.Payload = []byte("tampered")
-	tampered = tampered.RecomputeTranscriptHash()
 	if err := VerifyBroadcastAck(tampered, ack, verifier); err == nil {
 		t.Fatal("should reject ack for tampered envelope")
 	}
@@ -227,7 +226,6 @@ func TestBroadcastConsistencyDetectsEquivocation(t *testing.T) {
 	env1 := testBroadcastEnvelope(t, sid)
 	env2 := testBroadcastEnvelope(t, sid)
 	env2.Payload = []byte("different payload")
-	env2 = env2.RecomputeTranscriptHash()
 	parties := PartySet{1, 2}
 	_, verifier := setupAckKeys(t, parties)
 
@@ -275,7 +273,7 @@ func TestBroadcastConsistencyRejectsInvalidSignature(t *testing.T) {
 	ack2 := BroadcastAck{
 		Party:          2,
 		PayloadHash:    ack1.PayloadHash,
-		TranscriptHash: ack1.TranscriptHash,
+		EnvelopeDigest: ack1.EnvelopeDigest,
 		Signature:      ack1.Signature, // wrong signer
 	}
 	if err := bc.AddAck(env, ack2); err == nil {
@@ -301,7 +299,6 @@ func TestBroadcastConsistencyRejectsEquivocatingAck(t *testing.T) {
 	// Create a tampered envelope
 	tampered := env
 	tampered.Payload = []byte("equivocating payload")
-	tampered = tampered.RecomputeTranscriptHash()
 
 	ack, err := SignBroadcastAck(tampered, 1, signers[1])
 	if err != nil {
@@ -421,7 +418,7 @@ func TestBroadcastAckCloneReturnsDeepCopy(t *testing.T) {
 	ack := BroadcastAck{
 		Party:          1,
 		PayloadHash:    sha256.Sum256([]byte("ph")),
-		TranscriptHash: sha256.Sum256([]byte("th")),
+		EnvelopeDigest: EnvelopeDigest(sha256.Sum256([]byte("envelope"))),
 		Signature:      []byte{0x01, 0x02, 0x03},
 	}
 	clone := ack.Clone()
@@ -607,14 +604,14 @@ func TestVerifyBroadcastAckRejectsPayloadHashMismatch(t *testing.T) {
 	ack := BroadcastAck{
 		Party:          1,
 		PayloadHash:    sha256.Sum256([]byte("wrong")),
-		TranscriptHash: env.TranscriptHash,
+		EnvelopeDigest: env.Digest(),
 	}
 	if err := VerifyBroadcastAck(env, ack, verifier); err == nil {
 		t.Fatal("should reject payload hash mismatch")
 	}
 }
 
-func TestVerifyBroadcastAckRejectsTranscriptHashMismatch(t *testing.T) {
+func TestVerifyBroadcastAckRejectsEnvelopeDigestMismatch(t *testing.T) {
 	t.Parallel()
 	sid := testSessionID(t)
 	env := testBroadcastEnvelope(t, sid)
@@ -622,9 +619,9 @@ func TestVerifyBroadcastAckRejectsTranscriptHashMismatch(t *testing.T) {
 	ack := BroadcastAck{
 		Party:          1,
 		PayloadHash:    sha256.Sum256(env.Payload),
-		TranscriptHash: sha256.Sum256([]byte("wrong-transcript")),
+		EnvelopeDigest: EnvelopeDigest(sha256.Sum256([]byte("wrong-envelope"))),
 	}
 	if err := VerifyBroadcastAck(env, ack, verifier); err == nil {
-		t.Fatal("should reject transcript hash mismatch")
+		t.Fatal("should reject envelope digest mismatch")
 	}
 }

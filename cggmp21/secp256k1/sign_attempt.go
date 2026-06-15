@@ -135,7 +135,7 @@ type SignAttemptRecord struct {
 
 	CanonicalBaseEnvelopeBytes []byte
 	CanonicalBaseEnvelopeHash  []byte
-	EnvelopeTranscriptHash     []byte
+	EnvelopeDigest             []byte
 	PayloadHash                []byte
 
 	DeliveryPolicy SignAttemptDeliveryPolicy
@@ -165,7 +165,7 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 		LowS:                       r.LowS,
 		CanonicalBaseEnvelopeBytes: slices.Clone(r.CanonicalBaseEnvelopeBytes),
 		CanonicalBaseEnvelopeHash:  slices.Clone(r.CanonicalBaseEnvelopeHash),
-		EnvelopeTranscriptHash:     slices.Clone(r.EnvelopeTranscriptHash),
+		EnvelopeDigest:             slices.Clone(r.EnvelopeDigest),
 		PayloadHash:                slices.Clone(r.PayloadHash),
 		DeliveryPolicy:             r.DeliveryPolicy.Clone(),
 		DeliveryState:              r.DeliveryState.Clone(),
@@ -213,7 +213,7 @@ func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
 		bytes.Equal(r.DigestBindingHash, other.DigestBindingHash) &&
 		bytes.Equal(r.CanonicalBaseEnvelopeBytes, other.CanonicalBaseEnvelopeBytes) &&
 		bytes.Equal(r.CanonicalBaseEnvelopeHash, other.CanonicalBaseEnvelopeHash) &&
-		bytes.Equal(r.EnvelopeTranscriptHash, other.EnvelopeTranscriptHash) &&
+		bytes.Equal(r.EnvelopeDigest, other.EnvelopeDigest) &&
 		bytes.Equal(r.PayloadHash, other.PayloadHash) &&
 		r.DeliveryPolicy.Equal(other.DeliveryPolicy)
 }
@@ -284,7 +284,7 @@ func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttempt
 		LowS:                       w.LowS,
 		CanonicalBaseEnvelopeBytes: w.CanonicalBaseEnvelopeBytes,
 		CanonicalBaseEnvelopeHash:  w.CanonicalBaseEnvelopeHash,
-		EnvelopeTranscriptHash:     w.EnvelopeTranscriptHash,
+		EnvelopeDigest:             w.EnvelopeDigest,
 		PayloadHash:                w.PayloadHash,
 		DeliveryPolicy: SignAttemptDeliveryPolicy{
 			Mode:                 tss.DeliveryMode(w.DeliveryMode),
@@ -347,7 +347,7 @@ type signAttemptWire struct {
 	LowS                       bool        `wire:"14,bool"`
 	CanonicalBaseEnvelopeBytes []byte      `wire:"15,bytes,max_bytes=envelope"`
 	CanonicalBaseEnvelopeHash  []byte      `wire:"16,bytes,len=32"`
-	EnvelopeTranscriptHash     []byte      `wire:"17,bytes,len=32"`
+	EnvelopeDigest             []byte      `wire:"17,bytes,len=32"`
 	PayloadHash                []byte      `wire:"18,bytes,len=32"`
 	DeliveryMode               uint8       `wire:"19,u8"`
 	Confidentiality            uint8       `wire:"20,u8"`
@@ -370,7 +370,7 @@ func (signAttemptWire) WireVersion() uint16 { return tss.Version }
 type ackWire struct {
 	Party          tss.PartyID `wire:"1,u32"`
 	PayloadHash    []byte      `wire:"2,bytes,len=32"`
-	TranscriptHash []byte      `wire:"3,bytes,len=32"`
+	EnvelopeDigest []byte      `wire:"3,bytes,len=32"`
 	Signature      []byte      `wire:"4,bytes"`
 }
 
@@ -381,7 +381,7 @@ type certWire struct {
 	From           uint32    `wire:"4,u32"`
 	PayloadType    string    `wire:"5,string"`
 	PayloadHash    []byte    `wire:"6,bytes,len=32"`
-	TranscriptHash []byte    `wire:"7,bytes,len=32"`
+	EnvelopeDigest []byte    `wire:"7,bytes,len=32"`
 	Recipients     []uint32  `wire:"8,u32list"`
 	Acks           []ackWire `wire:"9,recordlist"`
 }
@@ -410,7 +410,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 		LowS:                       r.LowS,
 		CanonicalBaseEnvelopeBytes: r.CanonicalBaseEnvelopeBytes,
 		CanonicalBaseEnvelopeHash:  r.CanonicalBaseEnvelopeHash,
-		EnvelopeTranscriptHash:     r.EnvelopeTranscriptHash,
+		EnvelopeDigest:             r.EnvelopeDigest,
 		PayloadHash:                r.PayloadHash,
 		DeliveryMode:               uint8(r.DeliveryPolicy.Mode),
 		Confidentiality:            uint8(r.DeliveryPolicy.Confidentiality),
@@ -444,7 +444,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		len(r.SignPlanHash) != sha256.Size ||
 		len(r.ContextHash) != sha256.Size || len(r.Digest) != sha256.Size ||
 		len(r.DigestBindingHash) != sha256.Size || len(r.CanonicalBaseEnvelopeHash) != sha256.Size ||
-		len(r.EnvelopeTranscriptHash) != sha256.Size || len(r.PayloadHash) != sha256.Size {
+		len(r.EnvelopeDigest) != sha256.Size || len(r.PayloadHash) != sha256.Size {
 		return fmt.Errorf("%w: invalid fixed-length field", ErrSignAttemptCorrupt)
 	}
 	if !r.SessionID.Valid() || r.Party == 0 {
@@ -457,9 +457,6 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	if err := tss.VerifyTranscriptHash(env); err != nil {
-		return fmt.Errorf("%w: envelope transcript verification: %w", ErrSignAttemptCorrupt, err)
-	}
 	envelopeHash := sha256.Sum256(r.CanonicalBaseEnvelopeBytes)
 	if !bytes.Equal(r.CanonicalBaseEnvelopeHash, envelopeHash[:]) {
 		return fmt.Errorf("%w: envelope hash mismatch", ErrSignAttemptCorrupt)
@@ -468,8 +465,9 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if !bytes.Equal(r.PayloadHash, payloadHash[:]) {
 		return fmt.Errorf("%w: payload hash mismatch", ErrSignAttemptCorrupt)
 	}
-	if !bytes.Equal(r.EnvelopeTranscriptHash, env.TranscriptHash[:]) {
-		return fmt.Errorf("%w: envelope transcript hash mismatch", ErrSignAttemptCorrupt)
+	envelopeDigest := env.Digest()
+	if !bytes.Equal(r.EnvelopeDigest, envelopeDigest[:]) {
+		return fmt.Errorf("%w: envelope digest mismatch", ErrSignAttemptCorrupt)
 	}
 	if env.Protocol != r.Protocol || env.Version != r.Version || env.SessionID != r.SessionID ||
 		env.Round != 1 || env.From != r.Party || env.To != 0 || env.PayloadType != payloadSignPartial {
@@ -605,7 +603,7 @@ func validateSignAttemptDeliveryAck(ack tss.BroadcastAck, env tss.Envelope, reci
 	if !recipients.Contains(ack.Party) {
 		return fmt.Errorf("%w: delivery ack from non-recipient", ErrSignAttemptCorrupt)
 	}
-	if ack.PayloadHash != tss.PayloadHashFromEnvelope(env) || ack.TranscriptHash != env.TranscriptHash {
+	if ack.PayloadHash != tss.PayloadHashFromEnvelope(env) || ack.EnvelopeDigest != env.Digest() {
 		return fmt.Errorf("%w: delivery ack binding mismatch", ErrSignAttemptCorrupt)
 	}
 	return nil
@@ -754,7 +752,7 @@ func signAttemptHash(r SignAttemptRecord) []byte {
 	t := transcript.New(signAttemptHashLabel)
 	t.AppendBytes("intent_hash", r.IntentHash)
 	t.AppendBytes("canonical_base_envelope_hash", r.CanonicalBaseEnvelopeHash)
-	t.AppendBytes("envelope_transcript_hash", r.EnvelopeTranscriptHash)
+	t.AppendBytes("envelope_digest", r.EnvelopeDigest)
 	t.AppendBytes("payload_hash", r.PayloadHash)
 	t.AppendBytes("delivery_policy_hash", signAttemptDeliveryPolicyHash(r.DeliveryPolicy))
 	return t.Sum()
@@ -782,7 +780,7 @@ func signAttemptAcksToWire(acks []tss.BroadcastAck) []ackWire {
 		out[i] = ackWire{
 			Party:          ack.Party,
 			PayloadHash:    ack.PayloadHash[:],
-			TranscriptHash: ack.TranscriptHash[:],
+			EnvelopeDigest: ack.EnvelopeDigest[:],
 			Signature:      ack.Signature,
 		}
 	}
@@ -811,7 +809,7 @@ func signAttemptAcksFromWire(acks []ackWire) []tss.BroadcastAck {
 			Signature: slices.Clone(ack.Signature),
 		}
 		copy(out[i].PayloadHash[:], ack.PayloadHash)
-		copy(out[i].TranscriptHash[:], ack.TranscriptHash)
+		copy(out[i].EnvelopeDigest[:], ack.EnvelopeDigest)
 	}
 	return out
 }
@@ -835,7 +833,7 @@ func marshalSignAttemptCertificate(cert *tss.BroadcastCertificate) ([]byte, erro
 		From:           cert.From,
 		PayloadType:    string(cert.PayloadType),
 		PayloadHash:    cert.PayloadHash[:],
-		TranscriptHash: cert.TranscriptHash[:],
+		EnvelopeDigest: cert.EnvelopeDigest[:],
 		Recipients:     cert.Recipients,
 		Acks:           signAttemptAcksToWire(cert.Acks),
 	})
@@ -863,14 +861,14 @@ func signAttemptCertificateFromWire(raw []byte) *tss.BroadcastCertificate {
 		Acks:        signAttemptAcksFromWire(w.Acks),
 	}
 	copy(cert.PayloadHash[:], w.PayloadHash)
-	copy(cert.TranscriptHash[:], w.TranscriptHash)
+	copy(cert.EnvelopeDigest[:], w.EnvelopeDigest)
 	return cert
 }
 
 func broadcastAckEqual(a, b tss.BroadcastAck) bool {
 	return a.Party == b.Party &&
 		a.PayloadHash == b.PayloadHash &&
-		a.TranscriptHash == b.TranscriptHash &&
+		a.EnvelopeDigest == b.EnvelopeDigest &&
 		bytes.Equal(a.Signature, b.Signature)
 }
 
@@ -884,7 +882,7 @@ func broadcastCertificateEqual(a, b *tss.BroadcastCertificate) bool {
 		a.From != b.From ||
 		a.PayloadType != b.PayloadType ||
 		a.PayloadHash != b.PayloadHash ||
-		a.TranscriptHash != b.TranscriptHash ||
+		a.EnvelopeDigest != b.EnvelopeDigest ||
 		!slices.Equal(a.Recipients, b.Recipients) ||
 		len(a.Acks) != len(b.Acks) {
 		return false

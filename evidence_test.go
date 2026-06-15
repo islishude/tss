@@ -458,7 +458,7 @@ func buildEvidenceWithField12(t *testing.T, session SessionID, field12Value []by
 		{Tag: 6, Value: wire.Uint32(0)},               // To
 		{Tag: 7, Value: []byte("test.payload")},       // PayloadType
 		{Tag: 8, Value: make([]byte, 32)},             // PayloadHash (32 zero bytes)
-		{Tag: 9, Value: []byte{}},                     // TranscriptHash
+		{Tag: 9, Value: []byte{}},                     // EnvelopeDigest
 		{Tag: 10, Value: []byte("sign_partial")},      // Kind
 		{Tag: 11, Value: []byte("mutation test")},     // Reason
 		{Tag: 12, Value: field12Value},                // PublicInputs (recordlist)

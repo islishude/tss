@@ -195,6 +195,7 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 	}
 	envelopeHash := sha256.Sum256(envelopeBytes)
 	payloadHash := tss.PayloadHashFromEnvelope(env)
+	envelopeDigest := env.Digest()
 	digestBindingHash := digestHash(digest32, contextHash)
 	policy, err := CGGMP21Policies().Match(protocol, env.Round, env.PayloadType)
 	if err != nil {
@@ -215,7 +216,7 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 		LowS:                       lowS,
 		CanonicalBaseEnvelopeBytes: envelopeBytes,
 		CanonicalBaseEnvelopeHash:  envelopeHash[:],
-		EnvelopeTranscriptHash:     env.TranscriptHash[:],
+		EnvelopeDigest:             envelopeDigest[:],
 		PayloadHash:                payloadHash[:],
 		DeliveryPolicy: SignAttemptDeliveryPolicy{
 			Mode:                 policy.Mode,
@@ -482,7 +483,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 	if _, ok := s.partials[base.From]; ok {
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate sign partial"))
 	}
-	payload := env.Payload()
+	payload := base.Payload
 	p, err := unmarshalSignPartialPayloadWithLimits(payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(

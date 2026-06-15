@@ -199,22 +199,12 @@ func TestGuardValidateRejectsInvalidEnvelopeWithoutReplaySideEffect(t *testing.T
 			},
 		},
 		{
-			name:        "tampered transcript",
-			payloadType: "test.direct.plain",
-			to:          1,
-			mutate: func(t *testing.T, _ guardTestEnv, e *Envelope) {
-				t.Helper()
-				e.Payload = []byte("tampered-payload")
-			},
-		},
-		{
 			name:        "unknown sender",
 			payloadType: "test.direct.plain",
 			to:          1,
 			mutate: func(t *testing.T, _ guardTestEnv, e *Envelope) {
 				t.Helper()
 				e.From = 99
-				*e = e.RecomputeTranscriptHash()
 			},
 		},
 		{
@@ -388,12 +378,12 @@ func TestGuardAcceptsBroadcastWithValidCertificate(t *testing.T) {
 		From:           2,
 		PayloadType:    "test.broadcast.cert",
 		PayloadHash:    payloadHash,
-		TranscriptHash: e.TranscriptHash,
+		EnvelopeDigest: e.Digest(),
 		Recipients:     PartySet{1, 2, 3},
 		Acks: []BroadcastAck{
-			{Party: 1, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
-			{Party: 2, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
-			{Party: 3, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
+			{Party: 1, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
+			{Party: 2, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
+			{Party: 3, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
 		},
 	}
 	if err := env.guard.Validate(env.inbound(e, ReceiveInfo{}, cert)); err != nil {
@@ -413,10 +403,10 @@ func TestBroadcastRejectsIncompleteAckSet(t *testing.T) {
 		From:           2,
 		PayloadType:    "test.broadcast.cert",
 		PayloadHash:    payloadHash,
-		TranscriptHash: e.TranscriptHash,
+		EnvelopeDigest: e.Digest(),
 		Recipients:     PartySet{1, 2, 3},
 		Acks: []BroadcastAck{
-			{Party: 1, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
+			{Party: 1, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
 			// Missing party 2 and 3
 		},
 	}
@@ -439,12 +429,12 @@ func TestBroadcastRejectsWrongDigestAck(t *testing.T) {
 		From:           2,
 		PayloadType:    "test.broadcast.cert",
 		PayloadHash:    payloadHash,
-		TranscriptHash: e.TranscriptHash,
+		EnvelopeDigest: e.Digest(),
 		Recipients:     PartySet{1, 2, 3},
 		Acks: []BroadcastAck{
-			{Party: 1, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
-			{Party: 2, PayloadHash: wrongHash, TranscriptHash: e.TranscriptHash}, // wrong digest
-			{Party: 3, PayloadHash: payloadHash, TranscriptHash: e.TranscriptHash},
+			{Party: 1, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
+			{Party: 2, PayloadHash: wrongHash, EnvelopeDigest: e.Digest()}, // wrong payload hash
+			{Party: 3, PayloadHash: payloadHash, EnvelopeDigest: e.Digest()},
 		},
 	}
 	err := env.guard.Validate(env.inbound(e, ReceiveInfo{}, cert))
@@ -527,7 +517,7 @@ func TestValidateEnvelopePolicy(t *testing.T) {
 				protection = ChannelPlaintext
 			}
 			in := InboundEnvelope{
-				env: env.RecomputeTranscriptHash(),
+				env: env,
 				receiveInfo: ReceiveInfo{
 					Peer:       env.From,
 					Protection: protection,
@@ -737,7 +727,7 @@ func TestValidateInboundNilGuard(t *testing.T) {
 	t.Parallel()
 	env := testEnvelope("test-proto", 1, "test.direct.plain", 2, 1)
 	in := InboundEnvelope{
-		env: env.RecomputeTranscriptHash(),
+		env: env,
 		receiveInfo: ReceiveInfo{
 			Peer:       env.From,
 			Protection: ChannelPlaintext,
@@ -831,7 +821,7 @@ func TestInboundEnvelopeAccessorsReturnCopies(t *testing.T) {
 	cert, err := NewBroadcastCertificate(env, PartySet{1}, []BroadcastAck{{
 		Party:          1,
 		PayloadHash:    sha256Sum(env.Payload),
-		TranscriptHash: env.TranscriptHash,
+		EnvelopeDigest: env.Digest(),
 		Signature:      ackSig,
 	}})
 	if err != nil {

@@ -58,12 +58,12 @@ func NewBoundedReplayCache(maxEntries int) *InMemoryReplayCache {
 
 // CheckAndStore implements [ReplayCache]. It atomically checks whether a message slot
 // has been seen and returns nil on first use, [ErrDuplicateMessage] when the same
-// transcript hash is replayed, or [ErrEquivocation] when a different transcript hash
+// payload hash is replayed, or [ErrEquivocation] when a different payload hash
 // occupies the same slot.
 //
 // A nil receiver returns [ErrMissingReplayCache] (fail-closed) — callers must
 // initialize the cache.
-func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, transcriptHash [32]byte) error {
+func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, payloadHash [32]byte) error {
 	if c == nil {
 		return ErrMissingReplayCache
 	}
@@ -88,19 +88,19 @@ func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, transcriptHash 
 			delete(c.seen, oldest)
 			c.order = c.order[1:]
 		}
-		c.seen[sk] = transcriptHash
+		c.seen[sk] = payloadHash
 		c.order = append(c.order, sk)
 		return nil
 	}
-	if existing == transcriptHash {
+	if existing == payloadHash {
 		return ErrDuplicateMessage
 	}
 	return ErrEquivocation
 }
 
-// SlotKeyFromEnvelope constructs a [MessageSlotKey] from the envelope's identifying fields,
-// excluding the transcript hash so that different payloads for the same slot are detected
-// as equivocation.
+// SlotKeyFromEnvelope constructs a [MessageSlotKey] from the envelope's identifying fields.
+// The payload is excluded so that different payloads for the same slot are detected as
+// equivocation.
 func SlotKeyFromEnvelope(env Envelope) MessageSlotKey {
 	return MessageSlotKey{
 		Protocol:    env.Protocol,

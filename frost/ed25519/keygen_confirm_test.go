@@ -151,7 +151,6 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflicting = conflicting.RecomputeTranscriptHash()
 	_, err = sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(conflicting))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting confirmation, got %v", err)

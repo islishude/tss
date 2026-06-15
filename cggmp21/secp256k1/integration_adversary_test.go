@@ -90,7 +90,6 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 				t.Fatal(err)
 			}
 			firstEnv.Payload = mutated
-			firstEnv = firstEnv.RecomputeTranscriptHash()
 
 			assertSignPartialBlamesOnlySender(t, sessions, firstEnv, signers)
 		})
@@ -300,7 +299,6 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 						return
 					}
 					out[i].Payload = mutated
-					out[i] = out[i].RecomputeTranscriptHash()
 				}
 			}
 			messages = append(messages, out...)
@@ -455,7 +453,6 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 	maliciousPartial.Payload = mutated
-	maliciousPartial = maliciousPartial.RecomputeTranscriptHash()
 
 	// Verify S is actually different from original.
 	if p.S.Cmp(originalS) == 0 {

@@ -349,7 +349,7 @@ unnecessarily abandon a presign whose durable outcome is unknown.
 `IntentHash` binds protocol/version, presign ID, session ID, local party, signer
 set hash, context hash, 32-byte digest, digest binding hash, and Low-S setting.
 `AttemptHash` additionally binds the exact canonical base envelope hash, envelope
-transcript hash, payload hash, and delivery policy snapshot. The digest stored
+digest, payload hash, and delivery policy snapshot. The digest stored
 in the record is the raw 32-byte ECDSA digest; `DigestBindingHash` matches the
 online partial payload's digest hash.
 
@@ -458,7 +458,11 @@ CGGMP21 evidence covers every attributable failure point:
 | Refresh         | `refresh_share`       | Refresh share fails commitment verification.                    |
 | Reshare         | `reshare_share`       | Reshare share fails commitment verification.                    |
 
-Evidence records are deterministic binary (canonical TLV) binding protocol context, payload hash, transcript hash, and public input hashes. They **never** contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence` validates evidence against trusted session context (parties, signer set, public key, Paillier public keys, transcript hashes).
+Evidence records are deterministic binary (canonical TLV) binding protocol
+context, payload hash, envelope digest, and public input hashes. They **never**
+contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence`
+validates evidence against trusted session context (parties, signer set, public
+key, Paillier public keys, transcript hashes).
 
 Per-party signpartial evidence includes:
 

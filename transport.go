@@ -309,8 +309,6 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 	} else {
 		tampered.Payload = []byte{0xde, 0xad}
 	}
-	// Recompute transcript hash so structural checks still pass.
-	tampered = tampered.RecomputeTranscriptHash()
 
 	m.inner.mu.RLock()
 	defer m.inner.mu.RUnlock()

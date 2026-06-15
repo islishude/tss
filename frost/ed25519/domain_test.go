@@ -57,7 +57,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			commit2 := out2[0]
 			commit2.Protocol = "wrong-protocol"
-			commit2 = commit2.RecomputeTranscriptHash()
 
 			_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(commit2))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)

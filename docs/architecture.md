@@ -21,10 +21,10 @@ secret-bearing envelopes, reliable ordering, broadcast certificates where
 required by `PolicySet`, and replay protection via `ReplayCache`.
 
 `EnvelopeGuard.Validate` is the first fail-closed boundary after opening. It
-checks protocol name, version, session id, transcript hash, sender membership,
-transport authentication, identity binding, delivery mode, confidentiality
-policy, broadcast consistency, and replay before package-specific state machines
-decode payloads.
+checks protocol name, version, session id, sender membership, transport
+authentication, identity binding, delivery mode, confidentiality policy,
+broadcast consistency, and replay before package-specific state machines decode
+payloads.
 
 ## Key-Share Lifecycle
 

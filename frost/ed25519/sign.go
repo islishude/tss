@@ -247,7 +247,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 	if !tss.ContainsParty(s.signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
-	payload := env.Payload()
+	payload := base.Payload
 	switch base.PayloadType {
 	case payloadSignCommitment:
 		if base.Round != 1 {

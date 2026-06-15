@@ -264,7 +264,6 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	conflicting = conflicting.RecomputeTranscriptHash()
 	_, err = sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(conflicting))
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {

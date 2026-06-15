@@ -124,7 +124,6 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1] = out2[1].RecomputeTranscriptHash()
 	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[1]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
@@ -167,7 +166,6 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[0] = out2[0].RecomputeTranscriptHash()
 	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0]))
 	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
 		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)

@@ -110,43 +110,38 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected version %d", base.Version))
 	}
 
-	// 4. Transcript hash integrity.
-	if err := VerifyTranscriptHash(base); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
-	}
-
-	// 5. Sender membership in the provided party set.
+	// 4. Sender membership in the provided party set.
 	if !parties.Contains(base.From) {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("sender %d is not a participant", base.From))
 	}
 
-	// 6. Transport authentication.
+	// 5. Transport authentication.
 	if info.Peer == 0 {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrUnauthenticatedTransport)
 	}
 
-	// 7. Transport identity must match envelope sender.
+	// 6. Transport identity must match envelope sender.
 	if info.Peer != base.From {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, info.Peer, base.From))
 	}
 
-	// 8. Channel protection must be set.
+	// 7. Channel protection must be set.
 	if info.Protection == ChannelProtectionUnknown {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingChannelProtection)
 	}
 
-	// 9. Recipient check for direct messages.
+	// 8. Recipient check for direct messages.
 	if base.To != 0 && base.To != g.Self {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, base.To))
 	}
 
-	// 10. Policy lookup.
+	// 9. Policy lookup.
 	policy, err := g.Policies.Match(base.Protocol, base.Round, base.PayloadType)
 	if err != nil {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 
-	// 11. Delivery mode enforcement.
+	// 10. Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
 		if base.To == 0 {
@@ -158,7 +153,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		}
 	}
 
-	// 12. Confidentiality enforcement.
+	// 11. Confidentiality enforcement.
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
 		if info.Protection != ChannelConfidential {
@@ -170,7 +165,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		}
 	}
 
-	// 13. Broadcast consistency enforcement against the provided party set.
+	// 12. Broadcast consistency enforcement against the provided party set.
 	if policy.BroadcastConsistency == BroadcastConsistencyRequired {
 		cert := env.BroadcastCertificate()
 		if cert == nil {
@@ -181,7 +176,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		}
 	}
 
-	// 14. Replay and equivocation detection.
+	// 13. Replay and equivocation detection.
 	// Duplicate messages (same slot, same payload hash) return
 	// [ErrDuplicateMessage] so handlers can drop them before parsing
 	// payloads. Equivocation (same slot, different payload hash) is

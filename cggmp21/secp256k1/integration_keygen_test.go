@@ -66,7 +66,6 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	out2[0] = out2[0].RecomputeTranscriptHash()
 	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected keygen Paillier key mismatch rejection")
 	} else {

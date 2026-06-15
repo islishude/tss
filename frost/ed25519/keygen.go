@@ -204,7 +204,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	if base.Round != 1 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
 	}
-	payload := env.Payload()
+	payload := base.Payload
 	switch base.PayloadType {
 	case payloadKeygenCommitments:
 		p, err := unmarshalKeygenCommitmentsPayloadWithLimits(payload, s.limits)

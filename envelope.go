@@ -9,6 +9,9 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+// EnvelopeDigest is the domain-separated digest of one envelope.
+type EnvelopeDigest [32]byte
+
 // Envelope is a transport-neutral protocol wire message.
 type Envelope struct {
 	Protocol    ProtocolID  `wire:"1,string"`
@@ -19,8 +22,6 @@ type Envelope struct {
 	To          PartyID     `wire:"6,u32"` // zero means broadcast
 	PayloadType PayloadType `wire:"7,string"`
 	Payload     []byte      `wire:"8,bytes"`
-
-	TranscriptHash [32]byte `wire:"9,bytes,len=32"`
 }
 
 // ChannelProtection describes the channel protection actually observed by the
@@ -64,15 +65,14 @@ func (Envelope) WireVersion() uint16 { return Version }
 // Clone returns a deep copy of the envelope.
 func (e Envelope) Clone() Envelope {
 	clone := Envelope{
-		Protocol:       e.Protocol,
-		Version:        e.Version,
-		SessionID:      e.SessionID,
-		Round:          e.Round,
-		From:           e.From,
-		To:             e.To,
-		PayloadType:    e.PayloadType,
-		Payload:        append([]byte(nil), e.Payload...),
-		TranscriptHash: e.TranscriptHash,
+		Protocol:    e.Protocol,
+		Version:     e.Version,
+		SessionID:   e.SessionID,
+		Round:       e.Round,
+		From:        e.From,
+		To:          e.To,
+		PayloadType: e.PayloadType,
+		Payload:     append([]byte(nil), e.Payload...),
 	}
 	return clone
 }
@@ -132,9 +132,9 @@ func (in InboundEnvelope) Payload() []byte {
 	return append([]byte(nil), in.env.Payload...)
 }
 
-// TranscriptHash returns the envelope transcript hash.
-func (in InboundEnvelope) TranscriptHash() [32]byte {
-	return in.env.TranscriptHash
+// Digest computes the domain-separated digest of the inbound envelope.
+func (in InboundEnvelope) Digest() EnvelopeDigest {
+	return in.env.Digest()
 }
 
 // cloneBroadcastAcks returns a deep copy of a broadcast ack slice.
@@ -251,8 +251,7 @@ func NewEnvelope(input EnvelopeInput) (Envelope, error) {
 }
 
 // NewEnvelopeWithLimits constructs an envelope from caller-provided fields,
-// enforcing the provided size limits. It validates basic fields, canonical-encodes
-// the payload, and computes the transcript hash.
+// enforcing the provided size limits. It validates basic fields and copies the payload.
 func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope, error) {
 	if input.Protocol == "" {
 		return Envelope{}, errors.New("envelope protocol is empty")
@@ -288,7 +287,6 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 		PayloadType: input.PayloadType,
 		Payload:     append([]byte(nil), input.Payload...),
 	}
-	e.TranscriptHash = e.domainSeparatedHash()
 	return e, nil
 }
 
@@ -317,8 +315,7 @@ func WithEnvelopeLimits(limits EnvelopeLimits) OpenOption {
 }
 
 // OpenEnvelope decodes a wire envelope and binds it to transport-verified receive facts.
-// It recomputes the transcript hash from the wire-decoded fields. Protocol policy
-// checks are performed later by EnvelopeGuard.
+// Protocol policy checks are performed later by EnvelopeGuard.
 func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnvelope, error) {
 	options := openOptions{limits: defaultEnvelopeLimits()}
 	for _, opt := range opts {
@@ -331,8 +328,6 @@ func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnve
 	if err != nil {
 		return InboundEnvelope{}, err
 	}
-	// Recompute transcript hash from wire-decoded fields.
-	env.TranscriptHash = env.domainSeparatedHash()
 	if info.Peer == 0 {
 		return InboundEnvelope{}, ErrUnauthenticatedTransport
 	}
@@ -346,7 +341,7 @@ func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnve
 		info.ReceivedAt = time.Now()
 	}
 	return InboundEnvelope{
-		env:         env.Clone(),
+		env:         env,
 		receiveInfo: info,
 		broadcast:   options.broadcast.Clone(),
 	}, nil
@@ -359,13 +354,8 @@ func OpenEnvelopeWithLimits(raw []byte, info ReceiveInfo, limits EnvelopeLimits,
 	return OpenEnvelope(raw, info, options...)
 }
 
-// DomainSeparatedHash hashes the public envelope metadata and payload.
-func (e Envelope) DomainSeparatedHash() []byte {
-	hash := e.domainSeparatedHash()
-	return hash[:]
-}
-
-func (e Envelope) domainSeparatedHash() [32]byte {
+// Digest computes the domain-separated digest of the envelope metadata and payload.
+func (e Envelope) Digest() EnvelopeDigest {
 	// The protocol/version/session/round tuple keeps transcripts from one
 	// algorithm or session from being replayed into another.
 	t := transcript.New(envelopeHashLabel)
@@ -378,22 +368,6 @@ func (e Envelope) domainSeparatedHash() [32]byte {
 	t.AppendString("payload_type", string(e.PayloadType))
 	t.AppendBytes("payload", e.Payload)
 	return t.Sum32()
-}
-
-// VerifyTranscriptHash recomputes the transcript hash and compares it against the stored value.
-func VerifyTranscriptHash(env Envelope) error {
-	want := env.domainSeparatedHash()
-	if want != env.TranscriptHash {
-		return errors.New("transcript hash mismatch")
-	}
-	return nil
-}
-
-// RecomputeTranscriptHash returns a copy of the envelope with the transcript hash recomputed.
-// This is intended for tests that mutate envelope fields; production code should use NewEnvelope.
-func (e Envelope) RecomputeTranscriptHash() Envelope {
-	e.TranscriptHash = e.domainSeparatedHash()
-	return e
 }
 
 // ValidateEnvelopePolicy checks delivery mode and confidentiality against a PolicySet.

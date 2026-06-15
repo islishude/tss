@@ -27,7 +27,7 @@ Callers must provide:
   every participant must receive identical payloads, verified by
   `BroadcastCertificate` with `VerifyFull`. The guard detects equivocation via
   `ReplayCache.CheckAndStore` when the same message slot carries different
-  transcript hashes. After keygen completes, compare `KeygenTranscriptHash`
+  payload hashes. After keygen completes, compare `KeygenTranscriptHash`
   across parties as an additional defense-in-depth check;
 - replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
@@ -68,10 +68,11 @@ wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
 set `ReceiveInfo.Peer`; `OpenEnvelope` and the guard both check that this peer
 matches `Envelope.From`.
 
-Every inbound envelope must include the transcript hash produced by
-`NewEnvelope`. `EnvelopeGuard.Validate` rejects missing or mismatched
-transcript hashes before payload decoding, so callers should recompute the hash
-after any relay, storage, or framing layer changes an envelope.
+The envelope digest is computed from the protocol, version, session, round,
+sender, recipient, payload type, and payload. It is not carried as a wire field
+or stored as mutable state. Callers use `Envelope.Digest()` or
+`InboundEnvelope.Digest()`, both of which return the distinct `EnvelopeDigest`
+type.
 
 All repository-defined SHA-256 transcripts use labeled entries through
 `internal/transcript`. The domain is the first entry, and every field binds both
@@ -303,4 +304,8 @@ CGGMP21 presigns include nonce-derived local material. Reusing a presign can bre
 
 ## Blame Evidence
 
-When a failure can be attributed, `ProtocolError.Blame` may include `Evidence`. Evidence binds protocol, session, round, sender, payload type, payload hash, transcript hash, reason, and selected public input hashes. Use `secp256k1.VerifyBlameEvidence` to validate CGGMP21 evidence against known public context.
+When a failure can be attributed, `ProtocolError.Blame` may include `Evidence`.
+Evidence binds protocol, session, round, sender, payload type, payload hash,
+envelope digest, reason, and selected public input hashes. Use
+`secp256k1.VerifyBlameEvidence` to validate CGGMP21 evidence against known public
+context.

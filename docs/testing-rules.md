@@ -111,10 +111,10 @@ Unexpected input must:
 Guard-level rejection happens before the protocol handler and does not create
 cryptographic blame. Protocol-level rejection happens before state advancement.
 
-| Boundary | Required reject cases                                                                                                                                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Guard    | Unknown, non-committee, or self sender; wrong protocol, version, session, round, recipient, or transcript; direct/broadcast mismatch; missing confidentiality; missing broadcast certificate; replay. |
-| Protocol | Wrong payload type; malformed payload; payload in the wrong round; lifecycle plan hash mismatch; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature.      |
+| Boundary | Required reject cases                                                                                                                                                                            |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Guard    | Unknown, non-committee, or self sender; wrong protocol, version, session, round, or recipient; direct/broadcast mismatch; missing confidentiality; missing broadcast certificate; replay.        |
+| Protocol | Wrong payload type; malformed payload; payload in the wrong round; lifecycle plan hash mismatch; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature. |
 
 For every rejection, snapshot the relevant public state before delivery and verify
 it is unchanged afterward. Depending on the phase, that includes round, outbound

@@ -295,7 +295,6 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	}
 	bad := out2[1]
 	bad.Payload = badPayload
-	bad = bad.RecomputeTranscriptHash()
 
 	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(bad))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)

@@ -52,7 +52,7 @@ func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 		{"digest_binding", func(r *SignAttemptRecord) { r.DigestBindingHash[0] ^= 1 }},
 		{"envelope", func(r *SignAttemptRecord) { r.CanonicalBaseEnvelopeBytes[len(r.CanonicalBaseEnvelopeBytes)-1] ^= 1 }},
 		{"envelope_hash", func(r *SignAttemptRecord) { r.CanonicalBaseEnvelopeHash[0] ^= 1 }},
-		{"transcript_hash", func(r *SignAttemptRecord) { r.EnvelopeTranscriptHash[0] ^= 1 }},
+		{"envelope_digest", func(r *SignAttemptRecord) { r.EnvelopeDigest[0] ^= 1 }},
 		{"payload_hash", func(r *SignAttemptRecord) { r.PayloadHash[0] ^= 1 }},
 		{"intent", func(r *SignAttemptRecord) { r.IntentHash[0] ^= 1 }},
 		{"attempt", func(r *SignAttemptRecord) { r.AttemptHash[0] ^= 1 }},
@@ -417,6 +417,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	if err != nil {
 		t.Fatal(err)
 	}
+	envelopeDigest := env.Digest()
 	record := SignAttemptRecord{
 		RecordVersion:              signAttemptRecordVersion,
 		Protocol:                   protocol,
@@ -432,7 +433,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		LowS:                       true,
 		CanonicalBaseEnvelopeBytes: envelopeBytes,
 		CanonicalBaseEnvelopeHash:  envelopeHash[:],
-		EnvelopeTranscriptHash:     env.TranscriptHash[:],
+		EnvelopeDigest:             envelopeDigest[:],
 		PayloadHash:                payloadHash[:],
 		DeliveryPolicy: SignAttemptDeliveryPolicy{
 			Mode:                 policy.Mode,
@@ -465,17 +466,17 @@ func sameIntentDifferentAttemptRecord(t testing.TB, record SignAttemptRecord) Si
 	if err != nil {
 		t.Fatal(err)
 	}
-	env = env.RecomputeTranscriptHash()
 	envelopeBytes, err := env.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
 	envelopeHash := sha256.Sum256(envelopeBytes)
 	payloadHash := tss.PayloadHashFromEnvelope(env)
+	envelopeDigest := env.Digest()
 	out := record.Clone()
 	out.CanonicalBaseEnvelopeBytes = envelopeBytes
 	out.CanonicalBaseEnvelopeHash = envelopeHash[:]
-	out.EnvelopeTranscriptHash = env.TranscriptHash[:]
+	out.EnvelopeDigest = envelopeDigest[:]
 	out.PayloadHash = payloadHash[:]
 	out.AttemptHash = signAttemptHash(out)
 	if !bytes.Equal(out.IntentHash, record.IntentHash) {
@@ -490,7 +491,7 @@ func sameIntentDifferentAttemptRecord(t testing.TB, record SignAttemptRecord) Si
 func testBroadcastAck(env tss.Envelope, party tss.PartyID) tss.BroadcastAck {
 	ack := tss.BroadcastAck{Party: party, Signature: []byte{byte(party)}}
 	ack.PayloadHash = tss.PayloadHashFromEnvelope(env)
-	ack.TranscriptHash = env.TranscriptHash
+	ack.EnvelopeDigest = env.Digest()
 	return ack
 }
 

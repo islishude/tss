@@ -262,7 +262,6 @@ func TestFROSTRejectsConflictingCommitment(t *testing.T) {
 	}
 	conflict := out3[0]
 	conflict.From = 2
-	conflict = conflict.RecomputeTranscriptHash()
 	_, err = s1.HandleSignMessage(testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting commitment, got %v", err)
@@ -312,7 +311,6 @@ func TestFROSTRejectsConflictingPartial(t *testing.T) {
 	}
 	conflict := partialFrom3
 	conflict.From = 2
-	conflict = conflict.RecomputeTranscriptHash()
 	_, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(conflict))
 	if !errors.Is(err, tss.ErrEquivocation) {
 		t.Fatalf("expected ErrEquivocation for conflicting partial, got %v", err)
@@ -397,7 +395,6 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 	round2[0].Payload = mutated
-	round2[0] = round2[0].RecomputeTranscriptHash()
 	var delivered bool
 	for _, id := range signers {
 		if id == round2[0].From {
@@ -432,7 +429,6 @@ func TestFROSTKeygenRejectsBroadcastOrNonConfidentialShares(t *testing.T) {
 	t.Run("broadcast", func(t *testing.T) {
 		mutated := share
 		mutated.To = 0
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
 			t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
@@ -479,7 +475,6 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1] = out2[1].RecomputeTranscriptHash()
 	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
@@ -515,7 +510,6 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		env := out[0]
 		env.To = 2
-		env = env.RecomputeTranscriptHash()
 		_, err = keygen.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
@@ -574,7 +568,6 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		}
 		bad := round2[0]
 		bad.Payload = mutated
-		bad = bad.RecomputeTranscriptHash()
 		_, err = sessions[1].HandleSignMessage(testutil.DeliverEnvelope(bad))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		_, err = sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round2[0]))

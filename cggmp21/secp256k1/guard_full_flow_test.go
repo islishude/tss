@@ -333,7 +333,6 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	// Build a certificate for a DIFFERENT payload.
 	wrongEnv := env
 	wrongEnv.Payload = []byte("different-payload")
-	wrongEnv = wrongEnv.RecomputeTranscriptHash()
 	cert := buildBroadcastCertificate(t, wrongEnv, parties, km)
 	// Guard should reject because cert payload hash doesn't match envelope payload.
 	in, err := testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{Peer: env.From, Protection: tss.ChannelPlaintext}, cert)

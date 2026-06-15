@@ -35,8 +35,8 @@ func ExampleEnvelope_roundtrip() {
 	}
 
 	// --- 2. Construct an envelope with the NewEnvelope constructor ---
-	// NewEnvelope validates fields, computes the transcript hash, and
-	// returns a ready-to-send envelope. Always prefer NewEnvelope over
+	// NewEnvelope validates fields, copies the payload, and returns a
+	// ready-to-send envelope. Always prefer NewEnvelope over
 	// constructing the struct directly.
 	envelope, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    "example",
@@ -62,12 +62,6 @@ func ExampleEnvelope_roundtrip() {
 	if err := decoded.UnmarshalBinary(encoded); err != nil {
 		panic(err)
 	}
-
-	// --- 5. Recompute the domain-separated transcript hash ---
-	// The transcript hash commits to the full message chain. After
-	// deserialization, copy it into the envelope so validation can
-	// compare it against the expected chain state.
-	copy(decoded.TranscriptHash[:], decoded.DomainSeparatedHash())
 
 	fmt.Println(string(decoded.Payload))
 	// Output:

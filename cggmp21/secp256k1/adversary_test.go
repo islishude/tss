@@ -35,28 +35,24 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err = kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong protocol", func(t *testing.T) {
 		mutated := commit
 		mutated.Protocol = "wrong-protocol"
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := commit
 		mutated.Round = 2
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := share
 		mutated.To = 3
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrWrongRecipient) {
 			t.Fatalf("expected ErrWrongRecipient, got %v", err)
@@ -65,7 +61,6 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 	t.Run("broadcast secret share", func(t *testing.T) {
 		mutated := share
 		mutated.To = 0
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
 			t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
@@ -73,7 +68,6 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 	})
 	t.Run("non-confidential secret share", func(t *testing.T) {
 		mutated := share
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
@@ -119,7 +113,6 @@ func TestCGGMP21KeygenMalformedCommitmentHasEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	out2[0] = out2[0].RecomputeTranscriptHash()
 	_, err = kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
@@ -144,7 +137,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 	t.Run("sender not signer", func(t *testing.T) {
 		mutated := round1
 		mutated.From = 3
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -154,21 +146,18 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := round1
 		mutated.Round = 2
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := round1
 		mutated.To = 3
-		mutated = mutated.RecomputeTranscriptHash()
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -214,7 +203,6 @@ func TestCGGMP21PresignRound1MalformedEvidence(t *testing.T) {
 				t.Fatal(err)
 			}
 			out2[0].Payload = mutated
-			out2[0] = out2[0].RecomputeTranscriptHash()
 			_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0]))
 			if err == nil {
 				_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[1]))
@@ -324,7 +312,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		}
 		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
 		proof.To = 3
-		proof = proof.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(proof))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -353,7 +340,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 		proof.Payload = mutated
-		proof = proof.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(proof))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 	})
@@ -382,7 +368,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 			t.Fatal(err)
 		}
 		proof.Payload = mutated
-		proof = proof.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(proof))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 	})
@@ -405,7 +390,6 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		}
 		proofFor3 := presignRound1ProofEnvelopeFor(t, out2, 3)
 		proofFor3.To = 1
-		proofFor3 = proofFor3.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(proofFor3))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2, 3}, nil))
 	})
@@ -435,7 +419,6 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 
 		wrongRecipient := out[0]
 		wrongRecipient.To = 2
-		wrongRecipient = wrongRecipient.RecomputeTranscriptHash()
 		if _, err = session.HandleSignMessage(testutil.DeliverEnvelope(wrongRecipient)); err == nil {
 			t.Fatal("completed session accepted wrong-recipient message")
 		}
@@ -464,7 +447,6 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		}
 		bad := out2[0]
 		bad.Payload = mutated
-		bad = bad.RecomputeTranscriptHash()
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0]))
@@ -489,7 +471,6 @@ func TestCGGMP21PresignRound2WrongRecipientRejected(t *testing.T) {
 	_ = deliverPresignMessagesTo(t, s1, 1, out2)
 	round2 := deliverPresignMessagesTo(t, s2, 2, out1)
 	round2[0].To = 3
-	round2[0] = round2[0].RecomputeTranscriptHash()
 	_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(round2[0]))
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 }
@@ -529,7 +510,6 @@ func TestCGGMP21PresignRound3MalformedDeltaEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	round3From2[0].Payload = mutated
-	round3From2[0] = round3From2[0].RecomputeTranscriptHash()
 	_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(round3From2[0]))
 	_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, []tss.PartyID{1, 2}, nil))
 }
@@ -584,7 +564,6 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		}
 		env := out2[0]
 		env.Payload = mutated
-		env = env.RecomputeTranscriptHash()
 		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
@@ -596,7 +575,6 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		}
 		env := out2[0]
 		env.Payload = mutated
-		env = env.RecomputeTranscriptHash()
 		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
@@ -604,7 +582,6 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		session, out2, _ := newSignCase(t)
 		env := out2[0]
 		env.Round = 2
-		env = env.RecomputeTranscriptHash()
 		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})

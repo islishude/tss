@@ -72,7 +72,7 @@ type BlameEvidence struct {
 	To             PartyID         `wire:"6"`
 	PayloadType    PayloadType     `wire:"7,max_bytes=payload_type"`
 	PayloadHash    []byte          `wire:"8,len=32"`
-	TranscriptHash []byte          `wire:"9"`
+	EnvelopeDigest []byte          `wire:"9"`
 	Kind           EvidenceKind    `wire:"10"`
 	Reason         string          `wire:"11,max_bytes=evidence_reason"`
 	PublicInputs   []EvidenceField `wire:"12,max_items=evidence_fields"`
@@ -119,6 +119,7 @@ func evidenceFieldLimits(l EvidenceLimits) wire.FieldLimits {
 // slice ordering.
 func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []EvidenceField) (*BlameEvidence, error) {
 	payloadHash := sha256.Sum256(env.Payload)
+	envelopeDigest := env.Digest()
 	evidence := &BlameEvidence{
 		Version:        Version,
 		Protocol:       env.Protocol,
@@ -128,7 +129,7 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 		To:             env.To,
 		PayloadType:    env.PayloadType,
 		PayloadHash:    payloadHash[:],
-		TranscriptHash: slices.Clone(env.TranscriptHash[:]),
+		EnvelopeDigest: envelopeDigest[:],
 		Kind:           kind,
 		Reason:         reason,
 		PublicInputs:   canonicalEvidenceFields(inputs),
@@ -169,8 +170,8 @@ func (e *BlameEvidence) ValidateWithLimits(l EvidenceLimits) error {
 	if len(e.PayloadHash) != sha256.Size {
 		return errors.New("invalid evidence payload hash")
 	}
-	if len(e.TranscriptHash) != 0 && len(e.TranscriptHash) != sha256.Size {
-		return errors.New("invalid evidence transcript hash")
+	if len(e.EnvelopeDigest) != 0 && len(e.EnvelopeDigest) != sha256.Size {
+		return errors.New("invalid evidence envelope digest")
 	}
 	if e.Kind == "" {
 		return errors.New("missing evidence kind")

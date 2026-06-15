@@ -114,7 +114,6 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			t.Parallel()
 
 			mutated := tc.mutate(tc.base)
-			mutated = mutated.RecomputeTranscriptHash()
 
 			in := testutil.DeliverEnvelope(mutated)
 			if tc.protect != tss.ChannelProtectionUnknown {
@@ -150,7 +149,6 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		}
 
 		dup := commit
-		dup = dup.RecomputeTranscriptHash()
 
 		_, _ = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
 		_, err = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
@@ -259,7 +257,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 			t.Parallel()
 
 			mutated := tc.mutate(tc.env)
-			mutated = mutated.RecomputeTranscriptHash()
 
 			_, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(mutated))
 			if err == nil {
@@ -286,7 +283,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		}
 
 		dup := commit2
-		dup = dup.RecomputeTranscriptHash()
 
 		_, _ = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
 		_, err = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
@@ -422,7 +418,6 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 			t.Parallel()
 
 			mutated := tc.mutate(tc.base)
-			mutated = mutated.RecomputeTranscriptHash()
 
 			_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelope(mutated))
 			if err == nil {
@@ -444,7 +439,6 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 		t.Parallel()
 
 		mutated := share
-		mutated = mutated.RecomputeTranscriptHash()
 
 		_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {

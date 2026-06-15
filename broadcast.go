@@ -26,7 +26,7 @@ type BroadcastAckVerifier interface {
 
 // AckDigest computes the canonical digest that parties sign for a broadcast ack.
 // It binds the ack to the complete broadcast message identity.
-func AckDigest(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, payloadHash, transcriptHash [32]byte) [32]byte {
+func AckDigest(protocol ProtocolID, sessionID SessionID, round uint8, from PartyID, payloadType PayloadType, payloadHash [32]byte, envelopeDigest EnvelopeDigest) [32]byte {
 	t := transcript.New(broadcastAckDigestLabel)
 	t.AppendString("protocol", string(protocol))
 	t.AppendBytes("session_id", sessionID[:])
@@ -34,7 +34,7 @@ func AckDigest(protocol ProtocolID, sessionID SessionID, round uint8, from Party
 	t.AppendUint32("from", from)
 	t.AppendString("payload_type", string(payloadType))
 	t.AppendBytes("payload_hash", payloadHash[:])
-	t.AppendBytes("transcript_hash", transcriptHash[:])
+	t.AppendBytes("envelope_digest", envelopeDigest[:])
 	return t.Sum32()
 }
 
@@ -52,6 +52,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 		return nil, fmt.Errorf("ack count %d does not match recipient count %d", len(acks), len(recipients))
 	}
 	payloadHash := PayloadHashFromEnvelope(env)
+	envelopeDigest := env.Digest()
 	cert := &BroadcastCertificate{
 		Protocol:       env.Protocol,
 		SessionID:      env.SessionID,
@@ -59,7 +60,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 		From:           env.From,
 		PayloadType:    env.PayloadType,
 		PayloadHash:    payloadHash,
-		TranscriptHash: env.TranscriptHash,
+		EnvelopeDigest: envelopeDigest,
 		Recipients:     recipients.Clone(),
 		Acks:           cloneBroadcastAcks(acks),
 	}
@@ -77,8 +78,8 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 		if ack.PayloadHash != payloadHash {
 			return nil, fmt.Errorf("ack from party %d has mismatched payload hash", ack.Party)
 		}
-		if ack.TranscriptHash != env.TranscriptHash {
-			return nil, fmt.Errorf("ack from party %d has mismatched transcript hash", ack.Party)
+		if ack.EnvelopeDigest != envelopeDigest {
+			return nil, fmt.Errorf("ack from party %d has mismatched envelope digest", ack.Party)
 		}
 	}
 	return cert, nil
@@ -88,7 +89,8 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 // The caller must provide a signer bound to the party's identity key.
 func SignBroadcastAck(env Envelope, party PartyID, signer BroadcastAckSigner) (BroadcastAck, error) {
 	payloadHash := PayloadHashFromEnvelope(env)
-	digest := AckDigest(env.Protocol, env.SessionID, env.Round, env.From, env.PayloadType, payloadHash, env.TranscriptHash)
+	envelopeDigest := env.Digest()
+	digest := AckDigest(env.Protocol, env.SessionID, env.Round, env.From, env.PayloadType, payloadHash, envelopeDigest)
 	sig, err := signer.SignAck(digest)
 	if err != nil {
 		return BroadcastAck{}, fmt.Errorf("sign broadcast ack for party %d: %w", party, err)
@@ -96,7 +98,7 @@ func SignBroadcastAck(env Envelope, party PartyID, signer BroadcastAckSigner) (B
 	return BroadcastAck{
 		Party:          party,
 		PayloadHash:    payloadHash,
-		TranscriptHash: env.TranscriptHash,
+		EnvelopeDigest: envelopeDigest,
 		Signature:      sig,
 	}, nil
 }
@@ -110,10 +112,11 @@ func VerifyBroadcastAck(env Envelope, ack BroadcastAck, verifier BroadcastAckVer
 	if ack.PayloadHash != payloadHash {
 		return errors.New("ack payload hash mismatch")
 	}
-	if ack.TranscriptHash != env.TranscriptHash {
-		return errors.New("ack transcript hash mismatch")
+	envelopeDigest := env.Digest()
+	if ack.EnvelopeDigest != envelopeDigest {
+		return errors.New("ack envelope digest mismatch")
 	}
-	digest := AckDigest(env.Protocol, env.SessionID, env.Round, env.From, env.PayloadType, payloadHash, env.TranscriptHash)
+	digest := AckDigest(env.Protocol, env.SessionID, env.Round, env.From, env.PayloadType, payloadHash, envelopeDigest)
 	return verifier.VerifyAck(ack.Party, digest, ack.Signature)
 }
 
@@ -160,7 +163,7 @@ type BroadcastConsistency struct {
 
 	// canonical digest for the broadcast that has been committed to
 	payloadHash    [32]byte
-	transcriptHash [32]byte
+	envelopeDigest EnvelopeDigest
 	committed      bool
 
 	recipients PartySet
@@ -198,16 +201,16 @@ func (bc *BroadcastConsistency) Commit(env Envelope) (bool, error) {
 	defer bc.mu.Unlock()
 
 	ph := PayloadHashFromEnvelope(env)
-	th := env.TranscriptHash
+	digest := env.Digest()
 
 	if !bc.committed {
 		bc.payloadHash = ph
-		bc.transcriptHash = th
+		bc.envelopeDigest = digest
 		bc.committed = true
 		return true, nil
 	}
 
-	if bc.payloadHash != ph || bc.transcriptHash != th {
+	if bc.payloadHash != ph || bc.envelopeDigest != digest {
 		return false, fmt.Errorf("%w: protocol=%s session=%s round=%d from=%d payloadType=%s",
 			ErrBroadcastEquivocation, bc.protocol, bc.sessionID, bc.round, bc.from, bc.payloadType)
 	}
@@ -233,10 +236,10 @@ func (bc *BroadcastConsistency) AddAck(env Envelope, ack BroadcastAck) error {
 
 	// Verify the ack signature against our canonical digest.
 	ph := PayloadHashFromEnvelope(env)
-	th := env.TranscriptHash
+	digest := env.Digest()
 
 	if bc.committed {
-		if ph != bc.payloadHash || th != bc.transcriptHash {
+		if ph != bc.payloadHash || digest != bc.envelopeDigest {
 			return fmt.Errorf("%w: party %d submitted ack for different digest",
 				ErrBroadcastEquivocation, ack.Party)
 		}
@@ -283,7 +286,7 @@ func (bc *BroadcastConsistency) Certificate() (*BroadcastCertificate, error) {
 		From:           bc.from,
 		PayloadType:    bc.payloadType,
 		PayloadHash:    bc.payloadHash,
-		TranscriptHash: bc.transcriptHash,
+		EnvelopeDigest: bc.envelopeDigest,
 		Recipients:     bc.recipients.Clone(),
 		Acks:           acks,
 	}, nil
@@ -336,7 +339,7 @@ type BroadcastAck struct {
 	Party PartyID
 
 	PayloadHash    [32]byte
-	TranscriptHash [32]byte
+	EnvelopeDigest EnvelopeDigest
 
 	Signature []byte
 }
@@ -346,7 +349,7 @@ func (a BroadcastAck) Clone() BroadcastAck {
 	return BroadcastAck{
 		Party:          a.Party,
 		PayloadHash:    a.PayloadHash,
-		TranscriptHash: a.TranscriptHash,
+		EnvelopeDigest: a.EnvelopeDigest,
 		Signature:      slices.Clone(a.Signature),
 	}
 }
@@ -360,7 +363,7 @@ type BroadcastCertificate struct {
 	PayloadType PayloadType
 
 	PayloadHash    [32]byte
-	TranscriptHash [32]byte
+	EnvelopeDigest EnvelopeDigest
 
 	Recipients PartySet
 	Acks       []BroadcastAck
@@ -402,7 +405,7 @@ func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) e
 	if c.PayloadHash != PayloadHashFromEnvelope(env) {
 		return ErrInvalidBroadcastCertificate
 	}
-	if c.TranscriptHash != env.TranscriptHash {
+	if c.EnvelopeDigest != env.Digest() {
 		return ErrInvalidBroadcastCertificate
 	}
 	if len(c.Recipients) != len(parties) {
@@ -428,7 +431,7 @@ func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) e
 		if ack.PayloadHash != c.PayloadHash {
 			return ErrInvalidBroadcastCertificate
 		}
-		if ack.TranscriptHash != c.TranscriptHash {
+		if ack.EnvelopeDigest != c.EnvelopeDigest {
 			return ErrInvalidBroadcastCertificate
 		}
 	}
