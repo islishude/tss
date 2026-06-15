@@ -18,7 +18,7 @@ PKGS ?= ./...
 LOGICAL_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 PKG_PARALLEL ?= 8
 TEST_PARALLEL ?= $(LOGICAL_CPUS)
-INTEGRATION_PKG_PARALLEL ?= 2
+INTEGRATION_PKG_PARALLEL ?= 3
 INTEGRATION_PARALLEL ?= $(shell cpus=$(LOGICAL_CPUS); \
 	if [ "$$cpus" -lt 1 ]; then echo 1; elif [ "$$cpus" -gt 4 ]; then echo 4; else echo "$$cpus"; fi)
 FUZZ_PARALLEL ?= 4
@@ -80,7 +80,7 @@ test-security: ## Focused security-invariant packages for protocol boundary chan
 
 .PHONY: test-slowcrypto
 test-slowcrypto: ## Tier 3: production-parameter Paillier/ZK smoke tests.
-	$(GO) test -tags='slowcrypto' -p 1 -parallel 1 -timeout $(SLOWCRYPTO_TIMEOUT) $(PKGS)
+	$(GO) test -tags='slowcrypto' -p 3 -parallel 2 -timeout $(SLOWCRYPTO_TIMEOUT) $(PKGS)
 
 .PHONY: test-race
 test-race: ## Race detector for integration-level protocol flows.
