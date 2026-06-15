@@ -290,13 +290,21 @@ Transport responsibilities:
 
 All Paillier public operations (`Decrypt`, `AddCiphertexts`, `AddPlaintext`, `MulPlaintext`) validate ciphertext membership in `Z*_{n²}` before acting on inputs. Unchecked variants (`AddCiphertextsUnchecked`, `AddPlaintextUnchecked`, `MulPlaintextUnchecked`) skip the expensive gcd check but still enforce basic range and nil guards. Callers must ensure ciphertexts passed to unchecked helpers have been validated through upstream proof checks.
 
-Caller responsibilities (not provided by this library):
+Caller integration responsibilities:
 
 - network transport with peer authentication and encryption;
 - storage encryption for key shares and presign records (the built-in `EncryptKeyShareWithPassphrase`/`EncryptPresignWithPassphrase` helpers are Argon2id-based reference/demo implementations — production deployments should integrate a KMS or HSM);
-- proactive refresh scheduling (`RefreshScheduler` provides periodic key rotation with configurable interval and transport interface);
+- distributed refresh coordination: every participant must use the same externally coordinated, unique session ID for one run;
+- atomic key-share replacement: `RefreshScheduler` drives FROST or CGGMP21 refresh, but `CommitKeyShare` must persist and install the new share only if the loaded previous share is still current;
 - SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1);
 - authenticated keygen message delivery through the confirmation round before any presign/sign operation.
+
+`RefreshScheduler` requires an explicit replay cache and broadcast ACK verifier,
+serializes local refresh runs, and exits on the first protocol, transport, or
+commit error. It does not provide cross-node transactions, automatic retries,
+or session-ID agreement. A commit error wrapping
+`ErrRefreshCommitOutcomeUnknown` transfers recovery responsibility for the new
+share to the caller because durable replacement may already have succeeded.
 
 ## One-Time Presigns
 

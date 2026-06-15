@@ -105,6 +105,15 @@ var ErrMissingReplayCache = errors.New("missing replay cache")
 // ErrInvalidSessionID is returned when a session is created with a zero or invalid session ID.
 var ErrInvalidSessionID = errors.New("invalid session id")
 
+// ErrRefreshSchedulerRunning is returned when Run or RunOnce is called while
+// another scheduler run is active.
+var ErrRefreshSchedulerRunning = errors.New("refresh scheduler is already running")
+
+// ErrRefreshCommitOutcomeUnknown marks a CommitKeyShare error whose durable
+// outcome cannot be determined. When this error is wrapped, the callback keeps
+// ownership of the refreshed key share for recovery and reconciliation.
+var ErrRefreshCommitOutcomeUnknown = errors.New("refresh key-share commit outcome unknown")
+
 // ProtocolError is the stable error shape returned by protocol state machines.
 type ProtocolError struct {
 	Code  string

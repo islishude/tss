@@ -291,6 +291,52 @@ func routeMessages(session Session, transport Transport) error {
 }
 ```
 
+## Proactive Refresh Scheduling
+
+The root `tss.RefreshScheduler` drives the transport loop for both protocol
+packages. Select the algorithm-specific runner and provide a durable replay
+cache, broadcast ACK verifier, externally coordinated session-ID source, and an
+atomic key-share commit:
+
+```go
+runner := frost.NewRefreshRunner(frost.RefreshRunnerOptions{})
+scheduler, err := tss.NewRefreshScheduler(tss.RefreshSchedulerOptions[*frost.KeyShare]{
+    Interval:    24 * time.Hour,
+    Transport:   transport,
+    Runner:      runner,
+    ReplayCache: replayCache,
+    AckVerifier: ackVerifier,
+    LoadKeyShare: func(ctx context.Context) (*frost.KeyShare, error) {
+        return store.LoadCurrent(ctx)
+    },
+    SessionIDSource: func(ctx context.Context, current *frost.KeyShare) (tss.SessionID, error) {
+        return coordinator.NextRefreshSession(ctx, current.PublicKeyBytes())
+    },
+    CommitKeyShare: func(ctx context.Context, previous, refreshed *frost.KeyShare) error {
+        return store.CompareAndSwap(ctx, previous, refreshed)
+    },
+})
+if err != nil {
+    return err
+}
+return scheduler.Run(ctx)
+```
+
+Use `secp256k1.NewRefreshRunner` for CGGMP21 and configure its Paillier limits
+and security profile when required. All participants in one refresh must receive
+the same session ID, and every later run must use a new ID.
+
+`CommitKeyShare` is the linearization point. It must atomically persist and
+install `refreshed` only while `previous` remains current. Normal commit errors
+cause the scheduler to destroy the candidate share. If storage cannot determine
+whether the commit succeeded, wrap `tss.ErrRefreshCommitOutcomeUnknown` and
+retain the candidate for reconciliation.
+
+`Run` waits one interval before the first refresh; `RunOnce` starts immediately.
+Only one call may be active per scheduler. The scheduler exits on the first
+protocol, transport, or commit failure and does not retry or coordinate restart
+across participants.
+
 ## Persistence Encryption
 
 ### Recommended Pattern (ChaCha20-Poly1305)
