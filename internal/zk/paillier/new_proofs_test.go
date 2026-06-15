@@ -187,12 +187,12 @@ func fastProofParams() SecurityParams {
 	return SecurityParams{Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 512}
 }
 
-func signedPowerOfTwo(bits uint) *big.Int {
-	return new(big.Int).Lsh(big.NewInt(1), bits)
+func signedPowerOfTwo(bits uint32) *big.Int {
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits))
 }
 
-func multRangeOutside(n *big.Int, bits uint) *big.Int {
-	out := new(big.Int).Lsh(big.NewInt(1), bits)
+func multRangeOutside(n *big.Int, bits uint32) *big.Int {
+	out := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	out.Mul(out, n)
 	return out
 }

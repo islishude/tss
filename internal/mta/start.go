@@ -103,7 +103,7 @@ func (o *StartOpening) GoString() string {
 }
 
 // ProveStartForVerifier proves an MtA start ciphertext for one verifier.
-func ProveStartForVerifier(reader io.Reader, domain []byte, opening *StartOpening, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams) ([]byte, error) {
+func ProveStartForVerifier(params zkpai.SecurityParams, reader io.Reader, domain []byte, opening *StartOpening, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams) ([]byte, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -122,7 +122,7 @@ func ProveStartForVerifier(reader io.Reader, domain []byte, opening *StartOpenin
 		K:   opening.k,
 		Rho: opening.rho,
 	}
-	proof, err := zkpai.ProveEnc(zkpai.ActiveSecurityParams(), domain, stmt, witness, reader)
+	proof, err := zkpai.ProveEnc(params, domain, stmt, witness, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +130,7 @@ func ProveStartForVerifier(reader io.Reader, domain []byte, opening *StartOpenin
 }
 
 // VerifyStart checks a verifier-specific Πenc proof for an MtA start message.
-func VerifyStart(domain []byte, msg StartMessage, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams, proofBytes []byte) error {
+func VerifyStart(params zkpai.SecurityParams, domain []byte, msg StartMessage, proverPK *pai.PublicKey, verifierAux zkpai.RingPedersenParams, proofBytes []byte) error {
 	if len(proofBytes) == 0 {
 		return errors.New("missing MtA start proof")
 	}
@@ -146,7 +146,7 @@ func VerifyStart(domain []byte, msg StartMessage, proverPK *pai.PublicKey, verif
 		CiphertextK:     new(big.Int).SetBytes(msg.Ciphertext),
 		VerifierAux:     verifierAux,
 	}
-	if err := zkpai.VerifyEnc(zkpai.ActiveSecurityParams(), domain, stmt, proof); err != nil {
+	if err := zkpai.VerifyEnc(params, domain, stmt, proof); err != nil {
 		return fmt.Errorf("invalid MtA start proof: %w", err)
 	}
 	return nil

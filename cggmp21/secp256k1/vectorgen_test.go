@@ -38,7 +38,7 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 		pk1 := shares[tss.PartyID(v.Parties[0])]
 		v.GroupPublicKey = hex.EncodeToString(pk1.PublicKeyBytes())
 		for _, pid := range v.Parties {
-			raw, _ := shares[tss.PartyID(pid)].MarshalBinary()
+			raw, _ := shares[tss.PartyID(pid)].MarshalBinaryWithLimits(testLimits())
 			v.KeygenShares = append(v.KeygenShares, hex.EncodeToString(raw))
 		}
 		signerCount := 2
@@ -53,7 +53,7 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 		}
 		presigns := secpPresign(t, shares, signers)
 		for _, pid := range signers {
-			raw, _ := presigns[pid].MarshalBinary()
+			raw, _ := presigns[pid].MarshalBinaryWithLimits(testLimits())
 			v.Presigns = append(v.Presigns, hex.EncodeToString(raw))
 		}
 		digest, err := hex.DecodeString(v.Digest)

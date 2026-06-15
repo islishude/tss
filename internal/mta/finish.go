@@ -16,7 +16,7 @@ import (
 //   - skA: initiator's Paillier private key
 //   - pkB: responder's Paillier public key (Ni in Πaff-g)
 //   - verifierAux: initiator's own Ring-Pedersen parameters
-func Finish(responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
+func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
 	}
@@ -35,7 +35,6 @@ func Finish(responseDomain []byte, start StartMessage, response ResponseMessage,
 		return nil, fmt.Errorf("invalid b commitment: %w", err)
 	}
 
-	params := zkpai.ActiveSecurityParams()
 	stmt := zkpai.AffGStatement{
 		ReceiverPaillierN: &skA.PublicKey,
 		ProverPaillierN:   pkB,

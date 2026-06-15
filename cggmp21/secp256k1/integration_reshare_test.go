@@ -20,7 +20,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2)
+	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,7 +72,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := []tss.PartyID{1, 2}
-	plan, err := NewResharePlan(shares[1], sessionID, parties, parties, 2)
+	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +133,7 @@ func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
 		t.Fatalf("got reshare plan hash length %d, want %d", len(share.ResharePlanHashBytes()), sha256.Size)
 	}
 	share.state.resharePlanHash[0] ^= 1
-	if err := share.Validate(); err == nil {
+	if err := share.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("Validate accepted reshare key share with tampered plan hash")
 	}
 }
@@ -146,7 +146,7 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 	}
 	dealers := []tss.PartyID{1, 2}
 	newParties := []tss.PartyID{3, 4}
-	plan, err := NewResharePlan(shares[1], sessionID, dealers, newParties, 2)
+	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: dealers, NewParties: newParties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
 	}

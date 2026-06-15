@@ -22,19 +22,28 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signPlan, err := NewSignPlan(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("guard"), nil)
+	limits := testLimits()
+	signPlan, err := NewSignPlan(SignPlanOption{
+		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2},
+		Message: []byte("guard"), Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	refreshPlan, err := NewRefreshPlan(shares[1], sessionID)
+	refreshPlan, err := NewRefreshPlan(RefreshPlanOption{OldKey: shares[1], SessionID: sessionID, Limits: &limits})
 	if err != nil {
 		t.Fatal(err)
 	}
-	resharePlan, err := NewResharePlan(shares[1], sessionID, newParties, 2)
+	resharePlan, err := NewResharePlan(ResharePlanOption{
+		OldKey: shares[1], SessionID: sessionID, NewParties: newParties, NewThreshold: 2, Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipientPlan, err := NewResharePlanFromPublic(shares[1].state.publicKey, nil, parties, sessionID, newParties, 2)
+	recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
+		OldPublicKey: shares[1].state.publicKey, OldParties: parties, SessionID: sessionID,
+		NewParties: newParties, NewThreshold: 2, Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

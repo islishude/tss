@@ -83,58 +83,58 @@ func DecodePositive(b []byte) (*big.Int, error) {
 }
 
 // InSignedPowerOfTwo reports whether x is in the range [-2^bits, 2^bits].
-func InSignedPowerOfTwo(x *big.Int, bits uint) bool {
+func InSignedPowerOfTwo(x *big.Int, bits uint32) bool {
 	if x == nil {
 		return false // nil is not a valid signed integer
 	}
-	bound := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
 	negBound := new(big.Int).Neg(bound)
 	return x.Cmp(negBound) >= 0 && x.Cmp(bound) <= 0
 }
 
 // InUnsignedPowerOfTwo reports whether x is in [0, 2^bits).
-func InUnsignedPowerOfTwo(x *big.Int, bits uint) bool {
+func InUnsignedPowerOfTwo(x *big.Int, bits uint32) bool {
 	if x == nil || x.Sign() < 0 {
 		return false
 	}
-	bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	return x.Cmp(bound) < 0
 }
 
 // BoundSignedPowerOfTwo returns 2^bits (the upper bound for the signed range).
-func BoundSignedPowerOfTwo(bits uint) *big.Int {
-	return new(big.Int).Lsh(big.NewInt(1), bits)
+func BoundSignedPowerOfTwo(bits uint32) *big.Int {
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits))
 }
 
 // BoundUnsignedPowerOfTwo returns 2^bits (the upper bound for the unsigned range).
-func BoundUnsignedPowerOfTwo(bits uint) *big.Int {
-	return new(big.Int).Lsh(big.NewInt(1), bits)
+func BoundUnsignedPowerOfTwo(bits uint32) *big.Int {
+	return new(big.Int).Lsh(big.NewInt(1), uint(bits))
 }
 
 // SampleSignedPowerOfTwo samples a uniformly random integer from [-2^bits, 2^bits].
-func SampleSignedPowerOfTwo(rng io.Reader, bits uint) (*big.Int, error) {
+func SampleSignedPowerOfTwo(rng io.Reader, bits uint32) (*big.Int, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
 	// Range size is 2*2^bits + 1 = 2^(bits+1) + 1
 	// Sample from [0, 2^(bits+1)+1), then shift by -2^bits.
-	rangeSize := new(big.Int).Lsh(big.NewInt(1), bits+1) // 2^(bits+1)
-	rangeSize.Add(rangeSize, big.NewInt(1))              // 2^(bits+1) + 1
+	rangeSize := new(big.Int).Lsh(big.NewInt(1), uint(bits+1)) // 2^(bits+1)
+	rangeSize.Add(rangeSize, big.NewInt(1))                    // 2^(bits+1) + 1
 
 	v, err := rand.Int(rng, rangeSize)
 	if err != nil {
 		return nil, err
 	}
-	offset := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
+	offset := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
 	return v.Sub(v, offset), nil
 }
 
 // SampleUnsignedPowerOfTwo samples a uniformly random integer from [0, 2^bits).
-func SampleUnsignedPowerOfTwo(rng io.Reader, bits uint) (*big.Int, error) {
+func SampleUnsignedPowerOfTwo(rng io.Reader, bits uint32) (*big.Int, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
-	bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	return rand.Int(rng, bound)
 }
 
@@ -164,12 +164,12 @@ func SampleZNStar(rng io.Reader, n *big.Int) (*big.Int, error) {
 // SampleMultRange samples a random integer from ±(bound * N) where bound is
 // a power-of-two bound and N is the modulus. This is used for Ring-Pedersen
 // commitment nonces (mu, gamma, m, delta).
-func SampleMultRange(rng io.Reader, boundBits uint, n *big.Int) (*big.Int, error) {
+func SampleMultRange(rng io.Reader, boundBits uint32, n *big.Int) (*big.Int, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
-	bound := new(big.Int).Lsh(big.NewInt(1), boundBits) // 2^boundBits
-	rangeSize := new(big.Int).Mul(bound, n)             // N * 2^boundBits
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(boundBits)) // 2^boundBits
+	rangeSize := new(big.Int).Mul(bound, n)                   // N * 2^boundBits
 	// Double for signed range: ±(N * 2^boundBits)
 	twice := new(big.Int).Lsh(rangeSize, 1) // 2 * N * 2^boundBits
 	twice.Add(twice, big.NewInt(1))         // 2*N*2^boundBits + 1
@@ -182,22 +182,22 @@ func SampleMultRange(rng io.Reader, boundBits uint, n *big.Int) (*big.Int, error
 }
 
 // inMultRange checks whether x is in ±(N * 2^bits).
-func inMultRange(x, n *big.Int, bits uint) bool {
-	bound := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
-	bound.Mul(bound, n)                            // N * 2^bits
+func inMultRange(x, n *big.Int, bits uint32) bool {
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
+	bound.Mul(bound, n)                                  // N * 2^bits
 	negBound := new(big.Int).Neg(bound)
 	return x.Cmp(negBound) >= 0 && x.Cmp(bound) <= 0
 }
 
-func signedPowerOfTwoBytes(bits uint) int {
+func signedPowerOfTwoBytes(bits uint32) int {
 	return int((bits + 8) / 8)
 }
 
-func multRangeBytes(n *big.Int, bits uint) int {
+func multRangeBytes(n *big.Int, bits uint32) int {
 	if n == nil || n.Sign() <= 0 {
 		return 0
 	}
-	bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	bound.Mul(bound, n)
 	return (bound.BitLen() + 7) / 8
 }

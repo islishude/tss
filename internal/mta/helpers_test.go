@@ -11,11 +11,18 @@ import (
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
+func testSecurityParams() zkpai.SecurityParams {
+	return zkpai.SecurityParams{
+		Ell:             256,
+		EllPrime:        512,
+		Epsilon:         64,
+		ChallengeBits:   128,
+		MinPaillierBits: 768,
+	}
+}
+
 // setupTestEnv creates fresh Paillier keys and Ring-Pedersen parameters with
 // reduced security parameters for Tier 1 tests.
-//
-// Security parameters are set once in TestMain; do not call
-// SetSecurityParamsForTesting from this helper.
 func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.RingPedersenParams) {
 	tb.Helper()
 	var err error
@@ -51,11 +58,12 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	startProof, err := ProveStartForVerifier(nil, []byte("start"), start, &skA.PublicKey, *rpB)
+	params := testSecurityParams()
+	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, &skA.PublicKey, *rpB)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(nil, []byte("start"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 	if err != nil {
 		tb.Fatal(err)
 	}

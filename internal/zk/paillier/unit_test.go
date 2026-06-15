@@ -256,7 +256,7 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 	if challenge.Sign() <= 0 || !InUnsignedPowerOfTwo(challenge, 128) {
 		t.Fatal("challenge outside requested bit range")
 	}
-	for _, bits := range []uint{0, 257} {
+	for _, bits := range []uint32{0, 257} {
 		if _, err := t1.ChallengeSigned(bits); err == nil {
 			t.Fatalf("ChallengeSigned accepted invalid bit length %d", bits)
 		}

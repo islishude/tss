@@ -197,6 +197,16 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.Ke
 	option.SessionID = sessionID
 	option.Parties = parties
 	option.Threshold = threshold
+	if option.SecurityParams == nil {
+		params := cggmp.SecurityParams{
+			Ell:             256,
+			EllPrime:        512,
+			Epsilon:         64,
+			ChallengeBits:   128,
+			MinPaillierBits: 768,
+		}
+		option.SecurityParams = &params
+	}
 	plan, err := cggmp.NewKeygenPlan(option)
 	if err != nil {
 		return nil, err
@@ -260,7 +270,7 @@ func runExampleCGGMPPresign(
 		}
 		// NewPresignPlan binds the key, exact signer set, session, and caller
 		// context before any presign messages are exchanged.
-		plan, err := cggmp.NewPresignPlan(shares[id], sessionID, signers, ctx)
+		plan, err := cggmp.NewPresignPlan(cggmp.PresignPlanOption{Key: shares[id], SessionID: sessionID, Signers: signers, Context: ctx})
 		if err != nil {
 			return nil, err
 		}
@@ -323,7 +333,7 @@ func runExampleCGGMPSign(
 		// Every signer builds the same logical plan from its matching share and
 		// presign. The plan binds the digest and all request context before any
 		// partial signature can be emitted.
-		plan, err := cggmp.NewSignPlan(shares[id], presigns[id], sessionID, request)
+		plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{Key: shares[id], Presign: presigns[id], SessionID: sessionID, Request: request})
 		if err != nil {
 			return nil, nil, err
 		}

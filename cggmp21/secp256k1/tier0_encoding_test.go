@@ -42,7 +42,7 @@ func TestFast_RejectsWrongWireTypes(t *testing.T) {
 func TestFast_Presign_RejectsOverflowThreshold(t *testing.T) {
 	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
-	raw, err := presign.MarshalBinary()
+	raw, err := presign.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

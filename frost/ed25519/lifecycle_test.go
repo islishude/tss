@@ -189,25 +189,23 @@ func TestFROSTKeygenCompletionClearsIntermediateSecrets(t *testing.T) {
 	}
 }
 
-func TestFROSTTestLimitsAllowsOneOfOne(t *testing.T) {
+func TestFROSTExplicitLimitsAllowOneOfOne(t *testing.T) {
 	t.Parallel()
-	limits := TestLimits()
+	limits := testLimits()
 	if !limits.Threshold.AllowOneOfOne {
-		t.Fatal("TestLimits must allow 1-of-1")
+		t.Fatal("test limits must allow 1-of-1")
 	}
 	if limits.Threshold.MinProductionThreshold != 1 {
-		t.Fatal("TestLimits MinProductionThreshold must be 1")
+		t.Fatal("test limits MinProductionThreshold must be 1")
 	}
 	if !limits.Threshold.AllowOversizedSignerSet {
-		t.Fatal("TestLimits must allow oversized signer sets")
+		t.Fatal("test limits must allow oversized signer sets")
 	}
 }
 
 func TestFROSTThresholdLimitsIsAccessor(t *testing.T) {
 	t.Parallel()
-	// Note: DefaultLimits() returns TestLimits() in tests because TestMain sets
-	// testDefaultLimits. Test the accessor regardless of which limits are active.
-	limits := TestLimits()
+	limits := testLimits()
 	tl := limits.ThresholdLimits()
 	if tl.MaxParties != limits.Threshold.MaxParties {
 		t.Fatal("ThresholdLimits() does not match Threshold field")
@@ -219,7 +217,7 @@ func TestFROSTThresholdLimitsIsAccessor(t *testing.T) {
 
 func TestFROSTLimitsFieldBounds(t *testing.T) {
 	t.Parallel()
-	limits := TestLimits()
+	limits := testLimits()
 	if limits.Curve.MaxScalarBytes != 32 {
 		t.Fatalf("MaxScalarBytes = %d, want 32", limits.Curve.MaxScalarBytes)
 	}
@@ -227,7 +225,7 @@ func TestFROSTLimitsFieldBounds(t *testing.T) {
 		t.Fatalf("MaxPointBytes = %d, want 32", limits.Curve.MaxPointBytes)
 	}
 	if limits.Threshold.MaxParties > 8 {
-		t.Fatalf("TestLimits MaxParties = %d, want <= 8", limits.Threshold.MaxParties)
+		t.Fatalf("test limits MaxParties = %d, want <= 8", limits.Threshold.MaxParties)
 	}
 	if limits.State.MaxSerializedKeyShareBytes <= 0 {
 		t.Fatal("MaxSerializedKeyShareBytes must be positive")

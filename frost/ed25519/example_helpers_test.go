@@ -198,7 +198,10 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 		if err != nil {
 			return nil, nil, err
 		}
-		plan, err := frost.NewSignPlan(shares[id], sessionID, signers, message, opts.AdditiveShift)
+		plan, err := frost.NewSignPlan(frost.SignPlanOption{
+			Key: shares[id], SessionID: sessionID, Signers: signers, Message: message,
+			AdditiveShift: opts.AdditiveShift, Limits: opts.Limits,
+		})
 		if err != nil {
 			return nil, nil, err
 		}

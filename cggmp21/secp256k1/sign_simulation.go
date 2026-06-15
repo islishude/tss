@@ -14,7 +14,7 @@ import (
 
 // Sign runs an in-memory presign and signing exchange for a context-bound message.
 func Sign(message []byte, signers []*KeyShare, ctx PresignContext) ([]byte, *Signature, error) {
-	return signWithDigest(message, signers, ctx, false)
+	return signWithDigest(message, signers, ctx, false, DefaultLimits())
 }
 
 // SignDigestInteractive runs a full interactive signing exchange for a raw
@@ -24,17 +24,17 @@ func SignDigestInteractive(digest32 []byte, signers []*KeyShare, ctx PresignCont
 	if len(digest32) != sha256.Size {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
-	return signWithDigest(digest32, signers, ctx, true)
+	return signWithDigest(digest32, signers, ctx, true, DefaultLimits())
 }
 
-func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDigest bool) ([]byte, *Signature, error) {
+func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDigest bool, limits Limits) ([]byte, *Signature, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
 	ids := make([]tss.PartyID, len(signers))
 	shares := make(map[tss.PartyID]*KeyShare, len(signers))
 	for i, share := range signers {
-		if err := share.requireMPCMaterial(); err != nil {
+		if err := share.requireMPCMaterial(limits); err != nil {
 			return nil, nil, err
 		}
 		ids[i] = share.state.party
@@ -56,7 +56,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		if err != nil {
 			return nil, nil, err
 		}
-		plan, err := NewPresignPlan(shares[id], presignID, ids, ctx)
+		plan, err := NewPresignPlan(PresignPlanOption{
+			Key:       shares[id],
+			SessionID: presignID,
+			Signers:   ids,
+			Context:   ctx,
+			Limits:    &limits,
+		})
 		if err != nil {
 			return nil, nil, err
 		}
@@ -104,7 +110,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, true, attemptStore, guard)
+			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, true, attemptStore, guard, limits)
 		} else {
 			request := SignRequest{
 				Context:      ctx,
@@ -112,7 +118,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 				LowS:         true,
 				AttemptStore: attemptStore,
 			}
-			plan, planErr := NewSignPlan(shares[id], presign, signID, request)
+			plan, planErr := NewSignPlan(SignPlanOption{
+				Key:       shares[id],
+				Presign:   presign,
+				SessionID: signID,
+				Request:   request,
+				Limits:    &limits,
+			})
 			if planErr != nil {
 				return nil, nil, planErr
 			}

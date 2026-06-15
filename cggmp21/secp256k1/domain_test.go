@@ -15,7 +15,7 @@ import (
 
 func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	t.Parallel()
-	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{PaillierBits: defaultPaillierBits()})
+	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{})
 	share := shares[1]
 	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKeyBytes())
 	if err != nil {
@@ -54,7 +54,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 
 func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	t.Parallel()
-	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{PaillierBits: defaultPaillierBits()})
+	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{})
 	signers := []tss.PartyID{1, 2}
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -80,28 +80,28 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	startFrom2 := mta.StartMessage{
 		Ciphertext: round1From2.EncK,
 	}
-	pk2, err := shares[1].paillierPublicFor(2)
+	pk2, err := shares[1].paillierPublicFor(2, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	rp1, err := shares[1].ringPedersenPublicFor(1)
+	rp1, err := shares[1].ringPedersenPublicFor(1, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err != nil {
+	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err != nil {
 		t.Fatal("MtA start proof did not verify")
 	}
 	mutatedKey := cloneKeyShareValue(shares[1])
 	mutatedKey.state.keygenTranscriptHash[0] ^= 1
-	if err := mta.VerifyStart(mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
+	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
-	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
+	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated signer set")
 	}
 	wrongContextHash := slices.Clone(s1.contextHash)
 	wrongContextHash[0] ^= 1
-	if err := mta.VerifyStart(mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, wrongContextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
+	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, wrongContextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
@@ -130,20 +130,20 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	responseDomain := mtaDeltaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, s1.key.PaillierPublicKeyBytes(), s1.contextHash, s1.planHash)
 
-	responderPK, err := s1.key.paillierPublicFor(2)
+	responderPK, err := s1.key.paillierPublicFor(2, s1.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	selfRP, err := s1.key.ringPedersenPublicFor(s1.key.PartyID())
+	selfRP, err := s1.key.ringPedersenPublicFor(s1.key.PartyID(), s1.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if _, err := mta.Finish(responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
+	if _, err := mta.Finish(s1.securityParams, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
 	wrongResponseDomain := mtaSigmaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, s1.key.PaillierPublicKeyBytes(), s1.contextHash, s1.planHash)
-	if _, err := mta.Finish(wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
+	if _, err := mta.Finish(s1.securityParams, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}
 }

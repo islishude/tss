@@ -20,7 +20,8 @@ const resharePlanDigestLabel = "cggmp21-secp256k1-reshare-plan-v1"
 // receivers. Its fields are opaque; collection accessors return caller-owned
 // deep copies.
 type ResharePlan struct {
-	state *resharePlanState
+	state  *resharePlanState
+	limits Limits
 }
 
 type resharePlanState struct {
@@ -36,6 +37,7 @@ type resharePlanState struct {
 	newThreshold          int
 	chainCode             []byte
 	paillierBits          int
+	securityParams        SecurityParams
 }
 
 // SessionID returns the reshare session identifier.
@@ -201,14 +203,22 @@ type ReshareReceiverSession = ReshareSession
 // ReshareOverlapSession is a session for a party that is both old dealer and new receiver.
 type ReshareOverlapSession = ReshareSession
 
-// NewResharePlan constructs a canonical plan from authenticated old key metadata.
-func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int) (*ResharePlan, error) {
-	return NewResharePlanWithPaillierBits(oldKey, sessionID, dealerParties, newParties, newThreshold, defaultPaillierBits())
+// ResharePlanOption configures CGGMP21 reshare plan construction.
+type ResharePlanOption struct {
+	OldKey         *KeyShare
+	SessionID      tss.SessionID
+	DealerParties  []tss.PartyID
+	NewParties     []tss.PartyID
+	NewThreshold   int
+	PaillierBits   int
+	Limits         *Limits
+	SecurityParams *SecurityParams
 }
 
-// NewResharePlanWithPaillierBits constructs a canonical reshare plan with an
-// explicit Paillier modulus size shared by every new receiver.
-func NewResharePlanWithPaillierBits(oldKey *KeyShare, sessionID tss.SessionID, dealerParties, newParties []tss.PartyID, newThreshold int, paillierBits int) (*ResharePlan, error) {
+// NewResharePlan constructs a canonical plan from authenticated old key metadata.
+func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
+	oldKey := option.OldKey
+	limits := limitsOrDefault(option.Limits)
 	if oldKey == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
@@ -216,38 +226,46 @@ func NewResharePlanWithPaillierBits(oldKey *KeyShare, sessionID tss.SessionID, d
 	if oldKey.state != nil {
 		party = oldKey.state.party
 	}
-	if err := oldKey.Validate(); err != nil {
+	if err := oldKey.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old key share: %w", err))
 	}
-	defPaillierBits := defaultPaillierBits()
-	if paillierBits == 0 {
-		paillierBits = defPaillierBits
+	securityParams := securityParamsForArtifact(oldKey.state.securityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(oldKey.state.securityParams) && oldKey.state.securityParams != *option.SecurityParams {
+		return nil, invalidPlanConfig(party, errors.New("security params mismatch with old key share"))
 	}
-	if paillierBits < defPaillierBits {
-		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, defPaillierBits))
+	if err := securityParams.Validate(); err != nil {
+		return nil, invalidPlanConfig(party, err)
+	}
+	paillierBits := option.PaillierBits
+	if paillierBits == 0 {
+		paillierBits = int(securityParams.MinPaillierBits)
+	}
+	if paillierBits < int(securityParams.MinPaillierBits) {
+		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
 	}
 	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.verificationShares))
 	for _, vs := range oldKey.state.verificationShares {
 		verificationShares[vs.Party] = append([]byte(nil), vs.PublicKey...)
 	}
 	plan := &ResharePlan{state: &resharePlanState{
-		sessionID:             sessionID,
+		sessionID:             option.SessionID,
 		curveID:               reshareCurveID,
 		oldGroupPublicKey:     append([]byte(nil), oldKey.state.publicKey...),
 		oldGroupCommitments:   wireutil.CloneByteSlices(oldKey.state.groupCommitments),
 		oldVerificationShares: verificationShares,
 		oldParties:            tss.SortParties(oldKey.state.parties),
 		oldThreshold:          oldKey.state.threshold,
-		dealerParties:         tss.SortParties(dealerParties),
-		newParties:            tss.SortParties(newParties),
-		newThreshold:          newThreshold,
+		dealerParties:         tss.SortParties(option.DealerParties),
+		newParties:            tss.SortParties(option.NewParties),
+		newThreshold:          option.NewThreshold,
 		chainCode:             append([]byte(nil), oldKey.state.chainCode...),
 		paillierBits:          paillierBits,
-	}}
+		securityParams:        securityParams,
+	}, limits: limits}
 	if len(plan.state.dealerParties) == 0 {
 		plan.state.dealerParties = append([]tss.PartyID(nil), plan.state.oldParties...)
 	}
-	if err := plan.Validate(); err != nil {
+	if err := plan.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, err)
 	}
 	return plan, nil
@@ -256,6 +274,12 @@ func NewResharePlanWithPaillierBits(oldKey *KeyShare, sessionID tss.SessionID, d
 // Validate checks that a reshare plan is canonical and internally consistent
 // against production limits.
 func (p *ResharePlan) Validate() error {
+	if p == nil || p.state == nil {
+		return errors.New("nil reshare plan")
+	}
+	if !isProductionSecurityParams(p.state.securityParams) {
+		return errors.New("reshare plan uses non-production security params")
+	}
 	return p.ValidateWithLimits(DefaultLimits())
 }
 
@@ -266,6 +290,9 @@ func (p *ResharePlan) Validate() error {
 func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil reshare plan")
+	}
+	if err := p.state.securityParams.Validate(); err != nil {
+		return fmt.Errorf("invalid security params: %w", err)
 	}
 	if p.state.sessionID == (tss.SessionID{}) {
 		return errors.New("reshare plan session id must not be zero")
@@ -357,8 +384,8 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if len(p.state.chainCode) != 0 && len(p.state.chainCode) != 32 {
 		return errors.New("chain code must be empty or 32 bytes")
 	}
-	if p.state.paillierBits < defaultPaillierBits() {
-		return fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", p.state.paillierBits, defaultPaillierBits())
+	if p.state.paillierBits < int(p.state.securityParams.MinPaillierBits) {
+		return fmt.Errorf("paillier key size %d is below security parameter minimum %d", p.state.paillierBits, p.state.securityParams.MinPaillierBits)
 	}
 	if limits.Paillier.MaxModulusBits > 0 && p.state.paillierBits > limits.Paillier.MaxModulusBits {
 		return fmt.Errorf("paillier key size %d exceeds max %d", p.state.paillierBits, limits.Paillier.MaxModulusBits)
@@ -368,7 +395,10 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 
 // Digest returns a canonical hash of the complete public reshare plan.
 func (p *ResharePlan) Digest() ([]byte, error) {
-	if err := p.Validate(); err != nil {
+	if p == nil {
+		return nil, errors.New("nil reshare plan")
+	}
+	if err := p.ValidateWithLimits(p.limits); err != nil {
 		return nil, err
 	}
 	t := transcript.New(resharePlanDigestLabel)
@@ -385,6 +415,7 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
+	appendSecurityParamsTranscript(t, p.state.securityParams)
 	for _, id := range p.state.oldParties {
 		t.AppendUint32("old_party", id)
 		t.AppendBytes("old_verification_share", p.state.oldVerificationShares[id])

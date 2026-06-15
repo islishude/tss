@@ -29,10 +29,10 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	if err := key.requireMPCMaterial(); err != nil {
+	if err := key.requireMPCMaterial(plan.limits); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	limits := DefaultLimits()
+	limits := plan.limits
 	if err := plan.validateKey(key, local); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
@@ -142,11 +142,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		PaillierPublicKey: slices.Clone(key.state.paillierPublicKey),
 		PlanHash:          slices.Clone(planHash),
 	}
-	payload, err := marshalPresignRound1Payload(presignPayload)
+	payload, err := marshalPresignRound1PayloadWithLimits(presignPayload, limits)
 	if err != nil {
 		return nil, nil, err
 	}
-	publicHash, err := presignRound1PublicHash(presignPayload)
+	publicHash, err := presignRound1PublicHash(presignPayload, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -160,6 +160,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		config:               config,
 		log:                  config.Logger(),
 		limits:               limits,
+		securityParams:       plan.securityParams,
 		signers:              signers,
 		context:              ctx,
 		contextHash:          contextHash,
@@ -197,20 +198,20 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if peer == key.state.party {
 			continue
 		}
-		peerRP, err := key.ringPedersenPublicFor(peer)
+		peerRP, err := key.ringPedersenPublicFor(peer, limits)
 		if err != nil {
 			return nil, nil, err
 		}
 		proofDomain := mtaStartProofDomain(key, sessionID, signers, key.state.party, peer, key.state.paillierPublicKey, contextHash, planHash)
-		proofBytes, err := mta.ProveStartForVerifier(config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
+		proofBytes, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}
-		proofPayload, err := marshalPresignRound1ProofPayload(presignRound1ProofPayload{
+		proofPayload, err := marshalPresignRound1ProofPayloadWithLimits(presignRound1ProofPayload{
 			PublicRound1Hash: publicHash,
 			EncKProof:        proofBytes,
 			PlanHash:         slices.Clone(planHash),
-		})
+		}, s.limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -247,7 +248,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound1Payload(env.Payload)
+	p, err := unmarshalPresignRound1PayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(
@@ -302,7 +303,7 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound1ProofPayload(env.Payload)
+	p, err := unmarshalPresignRound1ProofPayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(
@@ -346,14 +347,14 @@ func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envel
 
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-	publicHash, _ := presignRound1PublicHash(p)
+	publicHash, _ := presignRound1PublicHash(p, s.limits)
 	fields = append(fields,
 		hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		rawEvidenceField("round1_public_hash", publicHash),
 		hashEvidenceField("gamma_hash", p.Gamma),
 		hashEvidenceField("enc_k_hash", p.EncK),
 	)
-	if expected, err := s.key.paillierPublicFor(from); err == nil {
+	if expected, err := s.key.paillierPublicFor(from, s.limits); err == nil {
 		if encoded, err := expected.MarshalBinary(); err == nil {
 			fields = append(fields, hashEvidenceField(evidenceFieldExpectedPaillierKeyHash, encoded))
 		}
@@ -373,7 +374,7 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return fmt.Errorf("invalid gamma: %w", err)
 	}
-	expectedPK, err := s.key.paillierPublicFor(from)
+	expectedPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
 		return err
 	}
@@ -412,28 +413,28 @@ func (s *PresignSession) maybeValidateRound1Proof(from tss.PartyID) error {
 }
 
 func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRound1Payload, proof presignRound1ProofPayload) error {
-	publicHash, err := presignRound1PublicHash(public)
+	publicHash, err := presignRound1PublicHash(public, s.limits)
 	if err != nil {
 		return err
 	}
 	if !bytes.Equal(publicHash, proof.PublicRound1Hash) {
 		return errors.New("presign round1 proof public hash mismatch")
 	}
-	proverPK, err := s.key.paillierPublicFor(from)
+	proverPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
 		return err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
 	if err != nil {
 		return err
 	}
 	start := mta.StartMessage{Ciphertext: public.EncK}
 	domain := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.party, public.PaillierPublicKey, s.contextHash, s.planHash)
-	return mta.VerifyStart(domain, start, proverPK, localRP, proof.EncKProof)
+	return mta.VerifyStart(s.securityParams, domain, start, proverPK, localRP, proof.EncKProof)
 }
 
-func presignRound1PublicHash(p presignRound1Payload) ([]byte, error) {
-	payload, err := marshalPresignRound1Payload(p)
+func presignRound1PublicHash(p presignRound1Payload, limits Limits) ([]byte, error) {
+	payload, err := marshalPresignRound1PayloadWithLimits(p, limits)
 	if err != nil {
 		return nil, err
 	}

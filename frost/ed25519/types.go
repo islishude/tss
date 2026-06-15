@@ -219,7 +219,12 @@ func (k KeyShare) redactedString() string {
 
 // UnmarshalKeyShare decodes a canonical FROST key-share record with size caps.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	limits := DefaultLimits()
+	return UnmarshalKeyShareWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalKeyShareWithLimits decodes a canonical FROST key-share record using
+// explicit local resource limits.
+func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty key share")
 	}

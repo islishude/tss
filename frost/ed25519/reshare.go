@@ -137,7 +137,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	limits := DefaultLimits()
+	limits := plan.limits
 	if local.Self == 0 {
 		local.Self = oldKey.state.party
 	}
@@ -206,7 +206,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash})
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -221,7 +221,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		}
 		share := evalScalarPolynomial(poly, id)
 		shareBytes := share.Bytes()
-		payload, err := marshalReshareSharePayload(reshareSharePayload{Share: shareBytes, PlanHash: planHash})
+		payload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -241,7 +241,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 // config.Self is the recipient ID. The function validates membership against
 // newParties and validates incoming dealer messages against oldParties.
 func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, error) {
-	limits := DefaultLimits()
+	limits := plan.limits
 	config, err := plan.receiverConfig(local)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
@@ -296,7 +296,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	limits := DefaultLimits()
+	limits := plan.limits
 	if local.Self == 0 {
 		local.Self = oldKey.state.party
 	}
@@ -352,7 +352,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayload(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash})
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -367,7 +367,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		}
 		share := evalScalarPolynomial(poly, id)
 		shareBytes := share.Bytes()
-		payload, err := marshalReshareSharePayload(reshareSharePayload{Share: shareBytes, PlanHash: planHash})
+		payload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -414,7 +414,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 	payload := env.Payload()
 	switch base.PayloadType {
 	case payloadReshareCommitments:
-		p, err := unmarshalReshareCommitmentsPayload(payload)
+		p, err := unmarshalReshareCommitmentsPayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -432,7 +432,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 		}
 		s.commits[base.From] = p.Commitments
 	case payloadReshareShare:
-		p, err := unmarshalReshareSharePayload(payload)
+		p, err := unmarshalReshareSharePayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}

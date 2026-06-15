@@ -100,7 +100,7 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
 	s.newShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
-	if err := s.newShare.Validate(); err != nil {
+	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}

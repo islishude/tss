@@ -53,7 +53,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		}
 		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	}
-	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), plan.paillierBits)
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(plan.securityParams.MinPaillierBits))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,12 +99,13 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		commitments[i] = enc
 	}
 	s := &KeygenSession{
-		cfg:      config,
-		log:      config.Logger(),
-		limits:   limits,
-		planHash: append([]byte(nil), planHash...),
-		commits:  map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:   map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
+		cfg:            config,
+		log:            config.Logger(),
+		limits:         limits,
+		securityParams: plan.securityParams,
+		planHash:       append([]byte(nil), planHash...),
+		commits:        map[tss.PartyID][][]byte{config.Self: commitments},
+		shares:         map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
@@ -124,7 +125,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		guard:         guard,
 	}
 	out := make([]tss.Envelope, 0, len(config.Parties))
-	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{
+	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
 		Commitments:        commitments,
 		PaillierPublicKey:  paillierPubBytes,
 		PaillierProof:      modProofBytes,
@@ -132,7 +133,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		RingPedersenParams: ringPedersenParamsBytes,
 		RingPedersenProof:  ringPedersenProofBytes,
 		PlanHash:           planHash,
-	})
+	}, s.limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,7 +147,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: share, PlanHash: planHash})
+		payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{Share: share, PlanHash: planHash}, s.limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -169,7 +170,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 // Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
+	p, err := unmarshalKeygenCommitmentsPayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -226,7 +227,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 		)
 	}
-	if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
+	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return nil, verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -323,7 +324,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 // Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalKeygenSharePayload(env.Payload)
+	p, err := unmarshalKeygenSharePayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

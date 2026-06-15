@@ -101,6 +101,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	localProofShare := &KeyShare{state: &keyShareState{
+		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
 		parties:                s.cfg.Parties,
@@ -126,6 +127,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	share := &KeyShare{state: &keyShareState{
 		version:                tss.Version,
+		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
 		parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
@@ -173,7 +175,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		X:   new(big.Int).Set(secret),
 		Rho: new(big.Int).Set(logRandomness),
 	}
-	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
+	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return nil, err
 	}
@@ -185,10 +187,10 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	share.state.logProof = logProofBytes
 	// Carry the local chain code into the confirmation for commit-reveal.
 	share.state.chainCode = append([]byte(nil), s.chainCodes[s.cfg.Self]...)
-	if err := share.validateWithoutConfirmations(); err != nil {
+	if err := share.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
-	confirmation, err := share.KeygenConfirmation()
+	confirmation, err := share.KeygenConfirmationWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}

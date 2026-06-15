@@ -68,7 +68,6 @@ func TestExamplesUseOnlyPublicAPI(t *testing.T) {
 	forbiddenIdentifiers := map[string]struct{}{
 		"NewTestEnvelopeGuard": {},
 		"TestGuardConfig":      {},
-		"TestLimits":           {},
 	}
 	fset := token.NewFileSet()
 	if err := filepath.WalkDir(".", func(path string, entry fs.DirEntry, err error) error {

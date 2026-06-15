@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/islishude/tss"
@@ -23,6 +24,7 @@ type resharePlanWire struct {
 	NewThreshold          int                            `wire:"10,u32"`
 	ChainCode             []byte                         `wire:"11,bytes,max_bytes=scalar"`
 	PaillierBits          int                            `wire:"12,u32"`
+	SecurityParams        SecurityParams                 `wire:"13,record"`
 }
 
 // WireType returns the canonical wire type identifier for resharePlanWire.
@@ -33,7 +35,10 @@ func (resharePlanWire) WireVersion() uint16 { return tss.Version }
 
 // MarshalBinary returns the canonical wire encoding of p.
 func (p *ResharePlan) MarshalBinary() ([]byte, error) {
-	limits := DefaultLimits()
+	if p == nil {
+		return nil, errors.New("nil reshare plan")
+	}
+	limits := p.limits
 	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
@@ -57,6 +62,7 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 		NewThreshold:          p.state.newThreshold,
 		ChainCode:             p.state.chainCode,
 		PaillierBits:          p.state.paillierBits,
+		SecurityParams:        p.state.securityParams,
 	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	if err != nil {
 		return nil, err
@@ -70,6 +76,12 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 // UnmarshalResharePlan decodes and validates a canonical reshare plan.
 func UnmarshalResharePlan(in []byte) (*ResharePlan, error) {
 	return unmarshalResharePlanWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalResharePlanWithLimits decodes and validates a canonical reshare plan
+// using explicit local resource limits.
+func UnmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, error) {
+	return unmarshalResharePlanWithLimits(in, limits)
 }
 
 func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, error) {
@@ -119,7 +131,8 @@ func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, err
 		newThreshold:          w.NewThreshold,
 		chainCode:             w.ChainCode,
 		paillierBits:          w.PaillierBits,
-	}}
+		securityParams:        w.SecurityParams,
+	}, limits: limits}
 	if err := plan.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}

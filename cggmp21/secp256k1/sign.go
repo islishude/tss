@@ -119,6 +119,7 @@ type Presign struct {
 
 type presignState struct {
 	version              uint16
+	securityParams       SecurityParams
 	party                tss.PartyID
 	threshold            int
 	signers              []tss.PartyID
@@ -262,6 +263,14 @@ func (p *Presign) VerifyShares() []SignVerifyShare {
 	return cloneSignVerifyShares(p.state.verifyShares)
 }
 
+// SecurityParams returns the cryptographic profile persisted with the presign.
+func (p *Presign) SecurityParams() SecurityParams {
+	if p == nil || p.state == nil {
+		return SecurityParams{}
+	}
+	return p.state.securityParams
+}
+
 // MarshalJSON rejects default JSON encoding of secret-bearing presign records.
 func (p Presign) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 presign contains secret material; use MarshalBinary")
@@ -269,7 +278,12 @@ func (p Presign) MarshalJSON() ([]byte, error) {
 
 // MarshalBinary encodes the presign record using the object-level wire codec.
 func (p *Presign) MarshalBinary() ([]byte, error) {
-	if err := p.Validate(); err != nil {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the presign using explicit local limits.
+func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
 	consumed := IsPresignConsumed(p)
@@ -292,7 +306,8 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 		KeygenTranscriptHash: p.state.keygenTranscriptHash,
 		PartiesHash:          p.state.partiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
-	}, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+		SecurityParams:       p.state.securityParams,
+	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // ID returns a content-derived presign identifier suitable for use as an
@@ -307,6 +322,7 @@ func (p *Presign) ID() []byte {
 	}
 
 	t := transcript.New(presignIDLabel)
+	appendSecurityParamsTranscript(t, p.state.securityParams)
 	t.AppendBytes("context_hash", p.state.contextHash)
 	t.AppendBytes("additive_shift", p.state.additiveShift)
 	t.AppendBytes("plan_hash", p.state.planHash)
@@ -334,6 +350,21 @@ func (p *Presign) Validate() error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
+	if !isProductionSecurityParams(p.state.securityParams) {
+		return errors.New("presign uses non-production security params")
+	}
+	return p.ValidateWithLimits(DefaultLimits())
+}
+
+// ValidateWithLimits validates a presign using explicit local limits and the
+// security profile persisted in the artifact.
+func (p *Presign) ValidateWithLimits(limits Limits) error {
+	if p == nil || p.state == nil {
+		return errors.New("nil presign")
+	}
+	if err := p.state.securityParams.Validate(); err != nil {
+		return fmt.Errorf("invalid presign security params: %w", err)
+	}
 	if p.state.consumed == nil {
 		return errors.New("presign claim state unavailable")
 	}
@@ -345,6 +376,12 @@ func (p *Presign) Validate() error {
 	}
 	if p.state.threshold <= 0 || p.state.threshold > len(p.state.signers) {
 		return errors.New("invalid presign threshold")
+	}
+	if len(p.state.signers) > limits.Threshold.MaxSigners {
+		return fmt.Errorf("too many presign signers: %d > %d", len(p.state.signers), limits.Threshold.MaxSigners)
+	}
+	if err := limits.Threshold.ValidateThreshold(p.state.threshold, len(p.state.signers)); err != nil {
+		return err
 	}
 	if err := wire.ValidateStrictSortedIDs(p.state.signers); err != nil {
 		return err
@@ -396,7 +433,7 @@ func (p *Presign) Validate() error {
 	if !bytes.Equal(presignContextHash(p.state.context), p.state.contextHash) {
 		return errors.New("presign context hash mismatch")
 	}
-	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares); err != nil {
+	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares, limits); err != nil {
 		return fmt.Errorf("invalid presign verify shares: %w", err)
 	}
 	return nil
@@ -409,10 +446,16 @@ func (p *Presign) Validate() error {
 // be caught by transcript mismatch. This method catches malformed proofs or
 // invalid point encodings that may have resulted from storage corruption.
 func (p *Presign) VerifySignMaterial() error {
+	return p.VerifySignMaterialWithLimits(DefaultLimits())
+}
+
+// VerifySignMaterialWithLimits checks persisted signing verification material
+// using explicit local resource limits.
+func (p *Presign) VerifySignMaterialWithLimits(limits Limits) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
-	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares); err != nil {
+	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares, limits); err != nil {
 		return err
 	}
 	for _, share := range p.state.verifyShares {
@@ -451,18 +494,19 @@ func (p *Presign) Destroy() {
 type PresignSession struct {
 	mu sync.Mutex
 
-	key           *KeyShare
-	sessionID     tss.SessionID
-	config        tss.ThresholdConfig
-	log           tss.Logger
-	limits        Limits
-	signers       []tss.PartyID
-	context       PresignContext
-	contextHash   []byte
-	additiveShift []byte
-	planHash      []byte
-	paillier      *pai.PrivateKey
-	guard         *tss.EnvelopeGuard
+	key            *KeyShare
+	sessionID      tss.SessionID
+	config         tss.ThresholdConfig
+	log            tss.Logger
+	limits         Limits
+	securityParams SecurityParams
+	signers        []tss.PartyID
+	context        PresignContext
+	contextHash    []byte
+	additiveShift  []byte
+	planHash       []byte
+	paillier       *pai.PrivateKey
+	guard          *tss.EnvelopeGuard
 
 	kShare    *secret.Scalar
 	gamma     *secret.Scalar

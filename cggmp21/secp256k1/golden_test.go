@@ -154,7 +154,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 		if !ok {
 			t.Fatal("keygen not complete")
 		}
-		raw, err := share.MarshalBinary()
+		raw, err := share.MarshalBinaryWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -181,7 +181,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := decoded.MarshalBinary()
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +200,7 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		shares := CachedKeygenShares(t, 1, 1, false)
 		presigns := secpPresign(t, shares, []tss.PartyID{1})
-		raw, err := presigns[1].MarshalBinary()
+		raw, err := presigns[1].MarshalBinaryWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -220,18 +220,18 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalPresign(raw)
+	decoded, err := UnmarshalPresignWithLimits(raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := decoded.MarshalBinary()
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalPresign(append(raw, 0)); err == nil {
+	if _, err := UnmarshalPresignWithLimits(append(raw, 0), testLimits()); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

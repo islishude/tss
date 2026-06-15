@@ -76,14 +76,14 @@ func (t *Transcript) AppendUint16(label string, v uint16) {
 // ChallengeSigned derives a Fiat-Shamir challenge as a signed integer in
 // [0, 2^bits). The challenge is NOT reduced modulo a curve order — it is used
 // as a full integer for Paillier-range proofs.
-func (t *Transcript) ChallengeSigned(bits uint) (*big.Int, error) {
+func (t *Transcript) ChallengeSigned(bits uint32) (*big.Int, error) {
 	if bits == 0 || bits > 256 {
 		return nil, fmt.Errorf("challenge bits must be in [1, 256], got %d", bits)
 	}
 	digest := t.builder.Sum()
 	challenge := new(big.Int).SetBytes(digest)
 	// Reduce to the target bit length.
-	mask := new(big.Int).Lsh(big.NewInt(1), bits)
+	mask := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 	mask.Sub(mask, big.NewInt(1))
 	challenge.And(challenge, mask)
 	if challenge.Sign() == 0 {

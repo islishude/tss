@@ -17,7 +17,7 @@ import (
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound2(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound2Payload(env.Payload)
+	p, err := unmarshalPresignRound2PayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(
@@ -78,11 +78,11 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 	}
 	out := make([]tss.Envelope, 0, len(s.signers)-1)
-	selfPK, err := s.key.paillierPublic()
+	selfPK, err := s.key.paillierPublic(s.limits)
 	if err != nil {
 		return nil, err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -100,11 +100,11 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if peer == s.key.state.party {
 			continue
 		}
-		peerPK, err := s.key.paillierPublicFor(peer)
+		peerPK, err := s.key.paillierPublicFor(peer, s.limits)
 		if err != nil {
 			return nil, err
 		}
-		peerRP, err := s.key.ringPedersenPublicFor(peer)
+		peerRP, err := s.key.ringPedersenPublicFor(peer, s.limits)
 		if err != nil {
 			return nil, err
 		}
@@ -113,6 +113,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		startProof := s.round1Proofs[peer].EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
+			s.securityParams,
 			nil,
 			startProofDomain,
 			mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
@@ -131,6 +132,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		// The sigma MtA instance creates additive shares of k_i*x_j, where x_j
 		// is already adjusted by the signer-set Lagrange coefficient.
 		sigmaResp, betaSigma, err := mta.Respond(
+			s.securityParams,
 			nil,
 			startProofDomain,
 			mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
@@ -148,12 +150,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 		s.betaDelta[peer] = betaDelta
 		s.betaSigma[peer] = betaSigma
-		payload, err := marshalPresignRound2Payload(presignRound2Payload{
+		payload, err := marshalPresignRound2PayloadWithLimits(presignRound2Payload{
 			Delta:      *deltaResp,
 			Sigma:      *sigmaResp,
 			Round1Echo: s.round1Echo(),
 			PlanHash:   s.planHash,
-		})
+		}, s.limits)
 		if err != nil {
 			return nil, err
 		}
@@ -175,17 +177,18 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	gammaCommit := s.round1[from].Gamma
 
 	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
-	responderPK, err := s.key.paillierPublicFor(from)
+	responderPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
 		return err
 	}
 	// Initiator's own Ring-Pedersen params (the verifier's auxiliary input).
-	selfRP, err := s.key.ringPedersenPublicFor(s.key.state.party)
+	selfRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
 	if err != nil {
 		return err
 	}
 
 	alphaDelta, err := mta.Finish(
+		s.securityParams,
 		mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
 		start,
 		p.Delta,
@@ -202,6 +205,7 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 	alphaSigma, err := mta.Finish(
+		s.securityParams,
 		mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
 		start,
 		p.Sigma,

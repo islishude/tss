@@ -33,6 +33,14 @@ func TestGenerateKeyCustomReaderSafety(t *testing.T) {
 	}
 }
 
+func TestGenerateKeyForTestRejectsNonTestProcess(t *testing.T) {
+	t.Parallel()
+
+	if _, err := generateKeyForTest(context.Background(), nil, MinModulusBits, false); err == nil {
+		t.Fatal("generateKeyForTest accepted a non-test process")
+	}
+}
+
 func TestSameReaderHandlesNonComparableValues(t *testing.T) {
 	t.Parallel()
 

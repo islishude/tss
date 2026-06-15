@@ -280,7 +280,10 @@ Only non-hardened indices (`i < 2^31`) are supported since hardened derivation r
 Bind the cumulative additive shift into a signing plan before starting:
 
 ```go
-plan, err := NewSignPlan(share, sessionID, signers, message, additiveShift)
+plan, err := NewSignPlan(SignPlanOption{
+    Key: share, SessionID: sessionID, Signers: signers,
+    Message: message, AdditiveShift: additiveShift,
+})
 sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID()}, guard)
 ```
 
@@ -541,7 +544,10 @@ parties := share.Parties()
 ### Signing
 
 ```go
-plan, err := NewSignPlan(share, sessionID, signers, message, additiveShift)
+plan, err := NewSignPlan(SignPlanOption{
+    Key: share, SessionID: sessionID, Signers: signers,
+    Message: message, AdditiveShift: additiveShift,
+})
 sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: nonceReader}, guard)
 out, err := sess.HandleSignMessage(env)
 sig, ok := sess.Signature()
@@ -550,11 +556,17 @@ sig, ok := sess.Signature()
 ### Resharing
 
 ```go
-plan, err := NewResharePlan(oldShare, sessionID, newParties, newThreshold)
+plan, err := NewResharePlan(ResharePlanOption{
+    OldKey: oldShare, SessionID: sessionID,
+    NewParties: newParties, NewThreshold: newThreshold,
+})
 sess, out, err := StartReshare(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-recipientPlan, err := NewResharePlanFromPublic(oldPublicKey, oldChainCode, oldParties, sessionID, newParties, newThreshold)
+recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
+    OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties,
+    SessionID: sessionID, NewParties: newParties, NewThreshold: newThreshold,
+})
 recipient, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: self}, guard)
-refreshPlan, err := NewRefreshPlan(oldShare, sessionID)
+refreshPlan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldShare, SessionID: sessionID})
 refresh, out, err := StartRefresh(oldShare, refreshPlan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 out, err := sess.HandleReshareMessage(env)
 newShare, ok := sess.KeyShare()

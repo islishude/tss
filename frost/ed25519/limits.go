@@ -28,7 +28,8 @@ type CurveLimits struct {
 	MaxScalarBytes int
 }
 
-// Limits defines finite caps for FROST Ed25519 protocol parameters.
+// Limits defines local fail-closed resource and policy bounds for FROST.
+// Limits are not shared protocol intent and are not included in plan digests.
 type Limits struct {
 	Threshold tss.ThresholdLimits
 	State     StateLimits
@@ -37,16 +38,9 @@ type Limits struct {
 	TLV       tss.TLVLimits
 }
 
-// testDefaultLimits allows TestMain to apply relaxed limits to all tests
-// without global mutable state. Set by TestMain; nil means use production defaults.
-var testDefaultLimits *Limits
-
 // DefaultLimits returns fail-closed production limits for FROST Ed25519.
 // It rejects 1-of-1, oversized signer sets, and thresholds below 2.
 func DefaultLimits() Limits {
-	if testDefaultLimits != nil {
-		return *testDefaultLimits
-	}
 	return Limits{
 		Threshold: tss.ThresholdLimits{
 			MaxParties:              maxFROSTParties,
@@ -73,34 +67,11 @@ func DefaultLimits() Limits {
 	}
 }
 
-// TestLimits returns relaxed limits for FROST Ed25519 test code only.
-// 1-of-1 and oversized signer sets are allowed. NEVER use these limits in
-// production entry points.
-func TestLimits() Limits {
-	return Limits{
-		Threshold: tss.ThresholdLimits{
-			MaxParties:              8,
-			MaxThreshold:            8,
-			MaxSigners:              8,
-			MinProductionThreshold:  1,
-			AllowOneOfOne:           true,
-			AllowOversizedSignerSet: true,
-		},
-		State: StateLimits{
-			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
-		},
-		Payload: PayloadLimits{
-			MaxMessageBytes: 65536,
-		},
-		Curve: CurveLimits{
-			MaxPointBytes:  32,
-			MaxScalarBytes: 32,
-		},
-		TLV: tss.TLVLimits{
-			MaxFields:     tss.DefaultMaxWireFields,
-			MaxFieldBytes: tss.DefaultMaxWireFieldBytes,
-		},
+func limitsOrDefault(limits *Limits) Limits {
+	if limits == nil {
+		return DefaultLimits()
 	}
+	return *limits
 }
 
 // ThresholdLimits returns the threshold portion of the limits for use with

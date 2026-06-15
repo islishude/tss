@@ -23,34 +23,35 @@ var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 
 // KeygenPlanOption configures CGGMP21 keygen plan construction.
 //
-// SessionID, Parties, Threshold, EnableHD, and PaillierBits are shared intent
+// SessionID, Parties, Threshold, EnableHD, and SecurityParams are shared intent
 // included in the plan digest. Limits is a local fail-closed resource policy
 // and is intentionally excluded from the digest.
 type KeygenPlanOption struct {
-	SessionID    tss.SessionID
-	Parties      []tss.PartyID
-	Threshold    int
-	EnableHD     bool
-	PaillierBits int
-	Limits       *Limits
+	SessionID      tss.SessionID
+	Parties        []tss.PartyID
+	Threshold      int
+	EnableHD       bool
+	Limits         *Limits
+	SecurityParams *SecurityParams
 }
 
 // KeygenPlan is the shared CGGMP21 keygen intent. All parties must construct the
 // same plan before starting keygen.
 type KeygenPlan struct {
-	sessionID    tss.SessionID
-	threshold    int
-	parties      []tss.PartyID
-	enableHD     bool
-	paillierBits int
-	limits       Limits
+	sessionID      tss.SessionID
+	threshold      int
+	parties        []tss.PartyID
+	enableHD       bool
+	limits         Limits
+	securityParams SecurityParams
 }
 
 // NewKeygenPlan constructs a canonical keygen plan.
 func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
-	limits := DefaultLimits()
-	if option.Limits != nil {
-		limits = *option.Limits
+	limits := limitsOrDefault(option.Limits)
+	securityParams := securityParamsOrDefault(option.SecurityParams)
+	if err := securityParams.Validate(); err != nil {
+		return nil, invalidPlanConfig(0, err)
 	}
 	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
 	if err != nil {
@@ -59,24 +60,16 @@ func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
 	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
 	}
-	defPaillierBits := defaultPaillierBits()
-	paillierBits := option.PaillierBits
-	if paillierBits == 0 {
-		paillierBits = defPaillierBits
-	}
-	if paillierBits < defPaillierBits {
-		return nil, invalidPlanConfig(0, fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, defPaillierBits))
-	}
-	if limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits {
-		return nil, invalidPlanConfig(0, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
+	if limits.Paillier.MaxModulusBits > 0 && int(securityParams.MinPaillierBits) > limits.Paillier.MaxModulusBits {
+		return nil, invalidPlanConfig(0, fmt.Errorf("security parameter Paillier minimum %d exceeds max %d", securityParams.MinPaillierBits, limits.Paillier.MaxModulusBits))
 	}
 	return &KeygenPlan{
-		sessionID:    option.SessionID,
-		threshold:    option.Threshold,
-		parties:      parties,
-		enableHD:     option.EnableHD,
-		paillierBits: paillierBits,
-		limits:       limits,
+		sessionID:      option.SessionID,
+		threshold:      option.Threshold,
+		parties:        parties,
+		enableHD:       option.EnableHD,
+		limits:         limits,
+		securityParams: securityParams,
 	}, nil
 }
 
@@ -109,14 +102,6 @@ func (p *KeygenPlan) EnableHD() bool {
 	return p != nil && p.enableHD
 }
 
-// PaillierBits returns the shared Paillier modulus size.
-func (p *KeygenPlan) PaillierBits() int {
-	if p == nil {
-		return 0
-	}
-	return p.paillierBits
-}
-
 // Digest returns the canonical keygen plan digest.
 func (p *KeygenPlan) Digest() ([]byte, error) {
 	if err := p.validate(); err != nil {
@@ -127,7 +112,7 @@ func (p *KeygenPlan) Digest() ([]byte, error) {
 	t.AppendUint32("threshold", uint32(p.threshold))
 	t.AppendUint32List("parties", p.parties)
 	t.AppendBool("enable_hd", p.enableHD)
-	t.AppendUint32("paillier_bits", uint32(p.paillierBits))
+	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
 
@@ -141,11 +126,11 @@ func (p *KeygenPlan) validate() error {
 	if _, err := validatePlanParties(p.parties, p.threshold, p.limits); err != nil {
 		return err
 	}
-	if p.paillierBits < defaultPaillierBits() {
-		return fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", p.paillierBits, defaultPaillierBits())
+	if err := p.securityParams.Validate(); err != nil {
+		return err
 	}
-	if p.limits.Paillier.MaxModulusBits > 0 && p.paillierBits > p.limits.Paillier.MaxModulusBits {
-		return fmt.Errorf("paillier key size %d exceeds max %d", p.paillierBits, p.limits.Paillier.MaxModulusBits)
+	if p.limits.Paillier.MaxModulusBits > 0 && int(p.securityParams.MinPaillierBits) > p.limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("security parameter Paillier minimum %d exceeds max %d", p.securityParams.MinPaillierBits, p.limits.Paillier.MaxModulusBits)
 	}
 	return nil
 }
@@ -181,41 +166,58 @@ type refreshPlanState struct {
 // RefreshPlan is the shared CGGMP21 refresh intent. It fixes the old key
 // metadata and the new session ID before any refresh messages are accepted.
 type RefreshPlan struct {
-	state *refreshPlanState
+	state          *refreshPlanState
+	limits         Limits
+	securityParams SecurityParams
 }
 
-// NewRefreshPlan constructs a refresh plan using the default Paillier modulus size.
-func NewRefreshPlan(oldKey *KeyShare, sessionID tss.SessionID) (*RefreshPlan, error) {
-	return NewRefreshPlanWithPaillierBits(oldKey, sessionID, defaultPaillierBits())
+// RefreshPlanOption configures CGGMP21 refresh plan construction.
+type RefreshPlanOption struct {
+	OldKey         *KeyShare
+	SessionID      tss.SessionID
+	PaillierBits   int
+	Limits         *Limits
+	SecurityParams *SecurityParams
 }
 
-// NewRefreshPlanWithPaillierBits constructs a refresh plan with an explicit
-// Paillier modulus size shared by every party.
-func NewRefreshPlanWithPaillierBits(oldKey *KeyShare, sessionID tss.SessionID, paillierBits int) (*RefreshPlan, error) {
+// NewRefreshPlan constructs a refresh plan.
+func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
+	oldKey := option.OldKey
+	limits := limitsOrDefault(option.Limits)
 	if oldKey == nil || oldKey.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(oldKey.state.party, tss.ErrInvalidSessionID)
 	}
-	if err := oldKey.requireMPCMaterial(); err != nil {
+	if err := oldKey.requireMPCMaterial(limits); err != nil {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
-	defPaillierBits := defaultPaillierBits()
-	if paillierBits == 0 {
-		paillierBits = defPaillierBits
+	securityParams := securityParamsForArtifact(oldKey.state.securityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(oldKey.state.securityParams) && oldKey.state.securityParams != *option.SecurityParams {
+		return nil, invalidPlanConfig(oldKey.state.party, errors.New("security params mismatch with old key share"))
 	}
-	if paillierBits < defPaillierBits {
-		return nil, invalidPlanConfig(oldKey.state.party, fmt.Errorf("paillier key size %d is below the CGGMP21 minimum of %d", paillierBits, defPaillierBits))
+	if err := securityParams.Validate(); err != nil {
+		return nil, invalidPlanConfig(oldKey.state.party, err)
+	}
+	paillierBits := option.PaillierBits
+	if paillierBits == 0 {
+		paillierBits = int(securityParams.MinPaillierBits)
+	}
+	if paillierBits < int(securityParams.MinPaillierBits) {
+		return nil, invalidPlanConfig(oldKey.state.party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
+	}
+	if limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits {
+		return nil, invalidPlanConfig(oldKey.state.party, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
 	}
 	return &RefreshPlan{state: &refreshPlanState{
-		sessionID:    sessionID,
+		sessionID:    option.SessionID,
 		threshold:    oldKey.state.threshold,
 		parties:      slices.Clone(oldKey.state.parties),
 		publicKey:    slices.Clone(oldKey.state.publicKey),
 		chainCode:    slices.Clone(oldKey.state.chainCode),
 		paillierBits: paillierBits,
-	}}, nil
+	}, limits: limits, securityParams: securityParams}, nil
 }
 
 // SessionID returns the refresh session ID.
@@ -278,6 +280,7 @@ func (p *RefreshPlan) Digest() ([]byte, error) {
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
+	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
 
@@ -314,30 +317,51 @@ type presignPlanState struct {
 
 // PresignPlan is the shared CGGMP21 presign intent.
 type PresignPlan struct {
-	state *presignPlanState
+	state          *presignPlanState
+	limits         Limits
+	securityParams SecurityParams
+}
+
+// PresignPlanOption configures CGGMP21 presign plan construction.
+type PresignPlanOption struct {
+	Key            *KeyShare
+	SessionID      tss.SessionID
+	Signers        []tss.PartyID
+	Context        PresignContext
+	Limits         *Limits
+	SecurityParams *SecurityParams
 }
 
 // NewPresignPlan constructs a context-bound presign plan for a key and signer set.
-func NewPresignPlan(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, ctx PresignContext) (*PresignPlan, error) {
+func NewPresignPlan(option PresignPlanOption) (*PresignPlan, error) {
+	key := option.Key
+	limits := limitsOrDefault(option.Limits)
 	if key == nil || key.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
 	}
-	if err := key.requireMPCMaterial(); err != nil {
+	if err := key.requireMPCMaterial(limits); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	signers = tss.SortParties(signers)
-	if err := validateSignerSet(key, signers, DefaultLimits()); err != nil {
+	securityParams := securityParamsForArtifact(key.state.securityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(key.state.securityParams) && key.state.securityParams != *option.SecurityParams {
+		return nil, invalidPlanConfig(key.state.party, errors.New("security params mismatch with key share"))
+	}
+	if err := securityParams.Validate(); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	ctx, contextHash, additiveShift, err := preparePresignContext(key, ctx)
+	signers := tss.SortParties(option.Signers)
+	if err := validateSignerSet(key, signers, limits); err != nil {
+		return nil, invalidPlanConfig(key.state.party, err)
+	}
+	ctx, contextHash, additiveShift, err := preparePresignContext(key, option.Context)
 	if err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
 	return &PresignPlan{state: &presignPlanState{
-		sessionID:     sessionID,
+		sessionID:     option.SessionID,
 		threshold:     key.state.threshold,
 		parties:       slices.Clone(key.state.parties),
 		publicKey:     slices.Clone(key.state.publicKey),
@@ -346,7 +370,7 @@ func NewPresignPlan(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 		context:       clonePresignContext(ctx),
 		contextHash:   slices.Clone(contextHash),
 		additiveShift: slices.Clone(additiveShift),
-	}}, nil
+	}, limits: limits, securityParams: securityParams}, nil
 }
 
 // SessionID returns the presign session ID.
@@ -436,6 +460,7 @@ func (p *PresignPlan) Digest() ([]byte, error) {
 	t.AppendUint32List("signers", p.state.signers)
 	t.AppendBytes("context_hash", p.state.contextHash)
 	t.AppendBytes("additive_shift", p.state.additiveShift)
+	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
 
@@ -458,6 +483,9 @@ func (p *PresignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 		!bytes.Equal(p.state.keygenHash, key.state.keygenTranscriptHash) {
 		return errors.New("presign plan does not match key share")
 	}
+	if validSecurityParams(key.state.securityParams) && p.securityParams != key.state.securityParams {
+		return errors.New("presign plan security params do not match key share")
+	}
 	return nil
 }
 
@@ -472,25 +500,49 @@ type signPlanState struct {
 
 // SignPlan is the shared CGGMP21 online signing intent.
 type SignPlan struct {
-	state *signPlanState
+	state  *signPlanState
+	limits Limits
+}
+
+// SignPlanOption configures CGGMP21 online signing plan construction.
+type SignPlanOption struct {
+	Key       *KeyShare
+	Presign   *Presign
+	SessionID tss.SessionID
+	Request   SignRequest
+	Limits    *Limits
 }
 
 // NewSignPlan constructs a sign plan for a key, presign, and request.
-func NewSignPlan(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest) (*SignPlan, error) {
+func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
+	key := option.Key
+	presign := option.Presign
+	request := option.Request
+	limits := limitsOrDefault(option.Limits)
 	if key == nil || key.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
 	if presign == nil || presign.state == nil {
 		return nil, invalidPlanConfig(key.state.party, errors.New("nil presign"))
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
 	}
 	if request.AttemptStore == nil {
 		return nil, invalidPlanConfig(key.state.party, errors.New("sign request attempt store is required"))
 	}
-	if err := validatePresign(key, presign); err != nil {
+	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
+	}
+	if validSecurityParams(key.state.securityParams) && validSecurityParams(presign.state.securityParams) &&
+		key.state.securityParams != presign.state.securityParams {
+		return nil, invalidPlanConfig(key.state.party, errors.New("security params mismatch between key share and presign"))
+	}
+	if limits.Payload.MaxMessageBytes <= 0 {
+		return nil, invalidPlanConfig(key.state.party, errors.New("max message bytes must be positive"))
+	}
+	if len(request.Message) > limits.Payload.MaxMessageBytes {
+		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(request.Message), limits.Payload.MaxMessageBytes))
 	}
 	_, contextHash, additiveShift, err := preparePresignContext(key, request.Context)
 	if err != nil {
@@ -505,13 +557,13 @@ func NewSignPlan(key *KeyShare, presign *Presign, sessionID tss.SessionID, reque
 	req := cloneSignRequest(request)
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
 	return &SignPlan{state: &signPlanState{
-		sessionID:         sessionID,
+		sessionID:         option.SessionID,
 		presignID:         presign.ID(),
 		presignTranscript: slices.Clone(presign.state.transcriptHash),
 		contextHash:       slices.Clone(contextHash),
 		digest:            slices.Clone(digest),
 		request:           req,
-	}}, nil
+	}, limits: limits}, nil
 }
 
 // SessionID returns the signing session ID.
@@ -602,7 +654,7 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	if !bytes.Equal(p.state.contextHash, presign.state.contextHash) {
 		return errors.New("sign plan context mismatch")
 	}
-	return validatePresign(key, presign)
+	return validatePresign(key, presign, p.limits)
 }
 
 func validatePlanParties(parties []tss.PartyID, threshold int, limits Limits) ([]tss.PartyID, error) {

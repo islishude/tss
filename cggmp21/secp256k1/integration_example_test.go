@@ -115,7 +115,7 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		plan, err := cggmp.NewRefreshPlan(shares[id], sessionID)
+		plan, err := cggmp.NewRefreshPlan(cggmp.RefreshPlanOption{OldKey: shares[id], SessionID: sessionID})
 		if err != nil {
 			panic(err)
 		}
@@ -187,7 +187,7 @@ func ExampleStartReshareDealer() {
 	if err != nil {
 		panic(err)
 	}
-	plan, err := cggmp.NewResharePlan(shares[1], sessionID, oldParties, newParties, 2)
+	plan, err := cggmp.NewResharePlan(cggmp.ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: oldParties, NewParties: newParties, NewThreshold: 2})
 	if err != nil {
 		panic(err)
 	}

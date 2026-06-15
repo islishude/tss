@@ -10,7 +10,6 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 const protocol = tss.ProtocolCGGMP21Secp256k1
@@ -27,12 +26,6 @@ const (
 	payloadRefreshCommitments tss.PayloadType = "cggmp21.secp256k1.refresh.commitments"
 	payloadRefreshShare       tss.PayloadType = "cggmp21.secp256k1.refresh.share"
 )
-
-// defaultPaillierBits returns the Paillier modulus size to use for key
-// generation, derived from the active CGGMP security parameters.
-func defaultPaillierBits() int {
-	return zkpai.ActiveSecurityParams().MinPaillierBits
-}
 
 // generatePaillierKey creates a Paillier key using the production GenerateKey
 // when bits meet the production floor, or GenerateKeyForTest when running with
@@ -131,6 +124,7 @@ type KeyShare struct {
 
 type keyShareState struct {
 	version                uint16
+	securityParams         SecurityParams
 	party                  tss.PartyID
 	threshold              int
 	parties                []tss.PartyID
@@ -160,7 +154,7 @@ type keyShareState struct {
 // validateSignVerifyShares checks that the verify shares set matches the signer
 // set: one entry per signer, no extras, no duplicates, canonical point encodings,
 // and non-empty proofs within size limits.
-func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare) error {
+func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare, limits Limits) error {
 	if len(shares) != len(signers) {
 		return fmt.Errorf("verify shares count %d != signers %d", len(shares), len(signers))
 	}
@@ -182,7 +176,6 @@ func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare) e
 		if len(share.Proof) == 0 {
 			return fmt.Errorf("verify share party %d: empty proof", share.Party)
 		}
-		limits := DefaultLimits()
 		if len(share.Proof) > limits.SignPrep.MaxProofBytes {
 			return fmt.Errorf("verify share party %d: proof too large: %d > %d", share.Party, len(share.Proof), limits.SignPrep.MaxProofBytes)
 		}

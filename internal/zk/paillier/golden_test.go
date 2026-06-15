@@ -17,6 +17,17 @@ func TestGoldenProofPayloads(t *testing.T) {
 		roundTrip func(t *testing.T, raw []byte)
 	}{
 		{
+			name: "SecurityParams",
+			marshal: func(t *testing.T) []byte {
+				t.Helper()
+				return mustMarshalBinary(t, DefaultSecurityParams())
+			},
+			roundTrip: func(t *testing.T, raw []byte) {
+				t.Helper()
+				assertBinaryProofWireRoundTrip(t, raw, UnmarshalSecurityParams)
+			},
+		},
+		{
 			name: "ModulusProof",
 			marshal: func(t *testing.T) []byte {
 				t.Helper()

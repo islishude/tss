@@ -12,8 +12,8 @@ wire/v1/                          — binary golden vectors (wire format stabili
   cggmp21/    8 files              — KeyShare, KeygenSharePayload, Presign,
                                      Presign.fast, PresignRound3Payload,
                                      ResharePlan, SignAttemptRecord, SignPartialPayload
-  zk/         10 files             — ModulusProof, RingPedersenParams, RingPedersenProof,
-                                     EncryptionProof, MTAResponseProof, LogProof,
+  zk/         11 files             — SecurityParams, ModulusProof, RingPedersenParams,
+                                     RingPedersenProof, EncryptionProof, MTAResponseProof, LogProof,
                                      EncProof, AffGProof, LogStarProof, SchnorrProof
 
 protocol/                           — JSON cross-implementation vectors (protocol flows)
@@ -21,7 +21,7 @@ protocol/                           — JSON cross-implementation vectors (proto
   cggmp21-secp256k1/   1 file      — cggmp21_secp256k1_vectors.json
 ```
 
-**Total: 24 binary wire vectors + 2 JSON protocol vectors = 26 files.**
+**Total: 25 binary wire vectors + 2 JSON protocol vectors = 27 files.**
 
 ## Golden Files (`wire/v1/`)
 

@@ -99,7 +99,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if !tss.ContainsParty(signers, local.Self) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("local party is not in signer set"))
 	}
-	limits := DefaultLimits()
+	limits := plan.limits
 	if limits.Payload.MaxMessageBytes <= 0 {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("max message bytes must be positive"))
 	}
@@ -158,7 +158,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 
 	dPoint := fed.NewIdentityPoint().ScalarBaseMult(d)
 	ePoint := fed.NewIdentityPoint().ScalarBaseMult(e)
-	payload, err := marshalNonceCommitmentPayload(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: planHash})
+	payload, err := marshalNonceCommitmentPayloadWithLimits(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: planHash}, limits)
 	if err != nil {
 		clear(dBytes)
 		clear(eBytes)
@@ -253,7 +253,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if base.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("commitment must be round 1"))
 		}
-		p, err := unmarshalNonceCommitmentPayload(payload)
+		p, err := unmarshalNonceCommitmentPayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -272,7 +272,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if base.Round != 2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("partial signature must be round 2"))
 		}
-		p, err := unmarshalSignPartialPayload(payload)
+		p, err := unmarshalSignPartialPayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -412,7 +412,14 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
 		guard := newInProcessGuard(id, tss.PartySet(shares[id].state.parties), sessionID)
-		plan, err := NewSignPlan(shares[id], sessionID, ids, message, opts.AdditiveShift)
+		plan, err := NewSignPlan(SignPlanOption{
+			Key:           shares[id],
+			SessionID:     sessionID,
+			Signers:       ids,
+			Message:       message,
+			AdditiveShift: opts.AdditiveShift,
+			Limits:        opts.Limits,
+		})
 		if err != nil {
 			return nil, nil, err
 		}

@@ -210,9 +210,22 @@ func (k *KeyShare) KeygenConfirmations() [][]byte {
 	return wireutil.CloneByteSlices(k.state.keygenConfirmations)
 }
 
+// SecurityParams returns the cryptographic profile persisted with the share.
+func (k *KeyShare) SecurityParams() SecurityParams {
+	if k == nil || k.state == nil {
+		return SecurityParams{}
+	}
+	return k.state.securityParams
+}
+
 // MarshalBinary encodes the share using canonical TLV wire format.
 func (k *KeyShare) MarshalBinary() ([]byte, error) {
-	return marshalKeyShare(k)
+	return k.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the share using explicit local limits.
+func (k *KeyShare) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalKeyShare(k, limits)
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
@@ -274,7 +287,12 @@ func (k KeyShare) redactedString() string {
 
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record with size caps.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	limits := DefaultLimits()
+	return UnmarshalKeyShareWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalKeyShareWithLimits decodes a canonical key-share record using
+// explicit local resource limits.
+func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty key share")
 	}
@@ -284,12 +302,15 @@ func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
 	return unmarshalKeyShareWithLimits(in, limits)
 }
 
-func (k *KeyShare) validateWithoutConfirmations() error {
+func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if k == nil || k.state == nil {
 		return errors.New("nil key share")
 	}
 	if k.state.version != tss.Version {
 		return fmt.Errorf("unexpected key share version %d", k.state.version)
+	}
+	if err := k.state.securityParams.Validate(); err != nil {
+		return fmt.Errorf("invalid security params: %w", err)
 	}
 	if k.state.threshold <= 0 || k.state.threshold > len(k.state.parties) {
 		return errors.New("invalid threshold")
@@ -385,7 +406,6 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if len(k.state.logProof) == 0 {
 		return errors.New("missing log proof")
 	}
-	limits := DefaultLimits()
 	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(k.state.paillierPublicKey, limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return fmt.Errorf("invalid paillier public key: %w", err)
@@ -405,7 +425,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if err != nil {
 		return fmt.Errorf("invalid paillier proof: %w", err)
 	}
-	if err := checkPaillierModulusBounds(pk, limits); err != nil {
+	if err := checkPaillierModulusBounds(pk, limits, k.state.securityParams); err != nil {
 		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
 	}
 	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, k.state.party, modProof) {
@@ -458,7 +478,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		if err != nil {
 			return err
 		}
-		if err := checkPaillierModulusBounds(peerPK, limits); err != nil {
+		if err := checkPaillierModulusBounds(peerPK, limits, k.state.securityParams); err != nil {
 			return fmt.Errorf("paillier modulus for party %d does not meet security requirements: %w", item.Party, err)
 		}
 		if !zkpai.VerifyModulus(proofDomain, peerPK, item.Party, peerProof) {
@@ -502,7 +522,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if err := pk.ValidateCiphertext(ciphertext); err != nil {
 		return fmt.Errorf("invalid log ciphertext: %w", err)
 	}
-	rp, err := k.ringPedersenPublicFor(k.state.party)
+	rp, err := k.ringPedersenPublicFor(k.state.party, limits)
 	if err != nil {
 		return fmt.Errorf("missing RP params for log proof: %w", err)
 	}
@@ -518,7 +538,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
 		VerifierAux: rp,
 	}
-	if err := zkpai.VerifyLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logProof); err != nil {
+	if err := zkpai.VerifyLogStar(k.state.securityParams, logDomain, logStmt, logProof); err != nil {
 		return fmt.Errorf("invalid log proof: %w", err)
 	}
 	return nil
@@ -527,6 +547,12 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 // Validate checks share structure, canonical secp256k1/Paillier material, and
 // the complete keygen confirmation evidence set against production limits.
 func (k *KeyShare) Validate() error {
+	if k == nil || k.state == nil {
+		return errors.New("nil key share")
+	}
+	if !isProductionSecurityParams(k.state.securityParams) {
+		return errors.New("key share uses non-production security params")
+	}
 	return k.ValidateWithLimits(DefaultLimits())
 }
 
@@ -535,7 +561,7 @@ func (k *KeyShare) Validate() error {
 // It enforces hard caps on party count and threshold, and rejects configurations
 // below the production minimum threshold unless explicitly allowed by the limits.
 func (k *KeyShare) ValidateWithLimits(limits Limits) error {
-	if err := k.validateWithoutConfirmations(); err != nil {
+	if err := k.validateWithoutConfirmations(limits); err != nil {
 		return err
 	}
 	if len(k.state.parties) > limits.Threshold.MaxParties {
@@ -582,14 +608,14 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	}
 }
 
-func checkPaillierModulusBounds(pk *pai.PublicKey, limits Limits) error {
+func checkPaillierModulusBounds(pk *pai.PublicKey, limits Limits, params SecurityParams) error {
 	if pk == nil || pk.N == nil {
 		return errors.New("nil paillier public key")
 	}
 	if limits.Paillier.MaxModulusBits > 0 && pk.N.BitLen() > limits.Paillier.MaxModulusBits {
 		return fmt.Errorf("paillier modulus has %d bits, max %d", pk.N.BitLen(), limits.Paillier.MaxModulusBits)
 	}
-	return zkpai.ActiveSecurityParams().CheckPaillierModulus(pk)
+	return params.CheckPaillierModulus(pk)
 }
 
 // Destroy zeros the local secret scalar, Paillier private-key bytes, and chain
@@ -623,20 +649,19 @@ func (k *KeyShare) secretBig() (*big.Int, error) {
 	return secpSecretBig(k.state.secret)
 }
 
-func (k *KeyShare) requireMPCMaterial() error {
-	if err := k.Validate(); err != nil {
+func (k *KeyShare) requireMPCMaterial(limits Limits) error {
+	if err := k.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	for _, id := range k.state.parties {
-		if _, err := k.paillierPublicFor(id); err != nil {
+		if _, err := k.paillierPublicFor(id, limits); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func (k *KeyShare) paillierPublic() (*pai.PublicKey, error) {
-	limits := DefaultLimits()
+func (k *KeyShare) paillierPublic(limits Limits) (*pai.PublicKey, error) {
 	return pai.UnmarshalPublicKeyWithMaxModulusBits(k.state.paillierPublicKey, limits.Paillier.MaxModulusBits)
 }
 
@@ -644,13 +669,12 @@ func (k *KeyShare) paillierPrivate() (*pai.PrivateKey, error) {
 	return pai.UnmarshalPrivateKey(k.state.paillierPrivateKey)
 }
 
-func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
+func (k *KeyShare) paillierPublicFor(id tss.PartyID, limits Limits) (*pai.PublicKey, error) {
 	if id == k.state.party {
-		return k.paillierPublic()
+		return k.paillierPublic(limits)
 	}
 	for _, item := range k.state.paillierPublicKeys {
 		if item.Party == id {
-			limits := DefaultLimits()
 			return pai.UnmarshalPublicKeyWithMaxModulusBits(item.PublicKey, limits.Paillier.MaxModulusBits)
 		}
 	}
@@ -658,8 +682,7 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID) (*pai.PublicKey, error) {
 }
 
 // ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
-func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID) (zkpai.RingPedersenParams, error) {
-	limits := DefaultLimits()
+func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID, limits Limits) (zkpai.RingPedersenParams, error) {
 	if id == k.state.party {
 		params, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.state.ringPedersenParams, limits.Paillier.MaxModulusBits)
 		if err != nil {
@@ -694,6 +717,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 	}
 	return &KeyShare{state: &keyShareState{
 		version:                k.state.version,
+		securityParams:         k.state.securityParams,
 		party:                  k.state.party,
 		threshold:              k.state.threshold,
 		parties:                slices.Clone(k.state.parties),

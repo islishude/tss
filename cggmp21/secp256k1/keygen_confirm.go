@@ -43,7 +43,13 @@ func (KeygenConfirmation) WireVersion() uint16 { return keygenConfirmationWireVe
 
 // KeygenConfirmation constructs a confirmation message from the local key share.
 func (k *KeyShare) KeygenConfirmation() (*KeygenConfirmation, error) {
-	if err := k.validateWithoutConfirmations(); err != nil {
+	return k.KeygenConfirmationWithLimits(DefaultLimits())
+}
+
+// KeygenConfirmationWithLimits constructs a confirmation using explicit local
+// validation limits.
+func (k *KeyShare) KeygenConfirmationWithLimits(limits Limits) (*KeygenConfirmation, error) {
+	if err := k.validateWithoutConfirmations(limits); err != nil {
 		return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
 	}
 	return k.keygenConfirmationReferenceUnchecked()
@@ -291,11 +297,11 @@ func verifyKeygenConfirmationForPreservedChainCode(local *KeyShare, c *KeygenCon
 	return nil
 }
 
-func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirmation) error {
+func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirmation, limits Limits) error {
 	if local == nil {
 		return errors.New("nil local key share")
 	}
-	if err := local.validateWithoutConfirmations(); err != nil {
+	if err := local.validateWithoutConfirmations(limits); err != nil {
 		return fmt.Errorf("invalid local key share: %w", err)
 	}
 	if len(confirmations) != len(local.state.parties) {
@@ -444,7 +450,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	// transcript hash that binds them.
 	finalShare.state.keygenTranscriptHash = s.keygenTranscriptHash(finalShare.state.groupCommitments)
 	finalShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
-	if err := finalShare.Validate(); err != nil {
+	if err := finalShare.ValidateWithLimits(s.limits); err != nil {
 		finalShare.Destroy()
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)

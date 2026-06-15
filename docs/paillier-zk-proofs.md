@@ -13,8 +13,8 @@ implementation.
 - Legacy v1 types (<code>EncryptionProof</code>, <code>MTAResponseProof</code>,
   <code>LogProof</code>) remain in <code>proofs.go</code> for compatibility
   tests and deletion tracking; production presign code does not consume them.
-- All proofs use <code>SecurityParams</code> (Ell, EllPrime, Epsilon, ChallengeBits,
-  MinPaillierBits) configured via <code>ActiveSecurityParams()</code>.
+- All proofs receive explicit <code>SecurityParams</code> (Ell, EllPrime,
+  Epsilon, ChallengeBits, MinPaillierBits) from the CGGMP21 plan/session.
 - Integer responses use canonical signed-magnitude encoding; verifier range
   checks precede all algebraic equation checks.
 - All proofs use Ring-Pedersen commitments to hide integer witnesses.
@@ -134,7 +134,7 @@ commitments with different challenges via distinct domain labels.
 - Statistical hiding analysis: ~358 bits with production params
 - ChallengeBits ≤ 256 (SHA-256 output limit)
 - Every new proof transcript binds all SecurityParams fields
-- FastSecurityParams are strictly weaker than production
+- Package-local test security parameters are strictly weaker than production
 
 ### Phase 5: Witness-Statement Relation Completeness
 

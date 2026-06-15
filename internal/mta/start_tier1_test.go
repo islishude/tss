@@ -63,9 +63,10 @@ func TestStartBoundaryValues(t *testing.T) {
 func TestProveStartForVerifierErrors(t *testing.T) {
 	t.Parallel()
 	skA, _, _, rpB := setupTestEnv(t)
+	params := testSecurityParams()
 
 	t.Run("nil opening", func(t *testing.T) {
-		_, err := ProveStartForVerifier(nil, nil, nil, &skA.PublicKey, *rpB)
+		_, err := ProveStartForVerifier(params, nil, nil, nil, &skA.PublicKey, *rpB)
 		if err == nil {
 			t.Fatal("expected error for nil opening")
 		}
@@ -80,7 +81,7 @@ func TestProveStartForVerifierErrors(t *testing.T) {
 			k:       big.NewInt(13),
 			rho:     big.NewInt(37),
 		}
-		_, err := ProveStartForVerifier(nil, nil, opening, &skA.PublicKey, *rpB)
+		_, err := ProveStartForVerifier(params, nil, nil, opening, &skA.PublicKey, *rpB)
 		if err == nil {
 			t.Fatal("expected error for opening with invalid message")
 		}
@@ -90,26 +91,27 @@ func TestProveStartForVerifierErrors(t *testing.T) {
 func TestVerifyStartErrors(t *testing.T) {
 	t.Parallel()
 	skA, _, _, rpB := setupTestEnv(t)
+	params := testSecurityParams()
 
 	a := big.NewInt(42)
 	opening, err := Start(nil, a, &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := ProveStartForVerifier(nil, []byte("domain"), opening, &skA.PublicKey, *rpB)
+	proof, err := ProveStartForVerifier(params, nil, []byte("domain"), opening, &skA.PublicKey, *rpB)
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	t.Run("empty proof", func(t *testing.T) {
-		err := VerifyStart([]byte("domain"), opening.Message, &skA.PublicKey, *rpB, nil)
+		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, nil)
 		if err == nil {
 			t.Fatal("expected error for empty proof")
 		}
 	})
 
 	t.Run("truncated proof", func(t *testing.T) {
-		err := VerifyStart([]byte("domain"), opening.Message, &skA.PublicKey, *rpB, proof[:4])
+		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, proof[:4])
 		if err == nil {
 			t.Fatal("expected error for truncated proof")
 		}
@@ -121,14 +123,14 @@ func TestVerifyStartErrors(t *testing.T) {
 		for i := range garbled {
 			garbled[i] ^= 0xFF
 		}
-		err := VerifyStart([]byte("domain"), opening.Message, &skA.PublicKey, *rpB, garbled)
+		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, garbled)
 		if err == nil {
 			t.Fatal("expected error for garbled proof")
 		}
 	})
 
 	t.Run("wrong domain", func(t *testing.T) {
-		err := VerifyStart([]byte("other-domain"), opening.Message, &skA.PublicKey, *rpB, proof)
+		err := VerifyStart(params, []byte("other-domain"), opening.Message, &skA.PublicKey, *rpB, proof)
 		if err == nil {
 			t.Fatal("expected error for wrong domain")
 		}

@@ -57,7 +57,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	}
 	s.partials[s.key.state.party] = z
 	zBytes := z.Bytes()
-	payload, err := marshalSignPartialPayload(signPartialPayload{Z: zBytes, PlanHash: s.planHash})
+	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zBytes, PlanHash: s.planHash}, s.limits)
 	if err != nil {
 		s.clearNonceBytes()
 		return nil, err

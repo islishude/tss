@@ -230,15 +230,26 @@ func (r *SignAttemptRecord) UnmarshalJSON([]byte) error {
 
 // MarshalBinary encodes the sign-attempt record using canonical TLV.
 func (r SignAttemptRecord) MarshalBinary() ([]byte, error) {
-	if err := validateSignAttemptRecord(r); err != nil {
+	return r.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the sign-attempt record using explicit local
+// resource limits.
+func (r SignAttemptRecord) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	if err := validateSignAttemptRecordWithLimits(r, limits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(signAttemptWireFromRecord(r), wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+	return wire.Marshal(signAttemptWireFromRecord(r), wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // UnmarshalSignAttemptRecord decodes and validates a canonical sign-attempt record.
 func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
-	limits := DefaultLimits()
+	return UnmarshalSignAttemptRecordWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalSignAttemptRecordWithLimits decodes a canonical sign-attempt record
+// using explicit local resource limits.
+func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttemptRecord, error) {
 	if len(in) == 0 {
 		return SignAttemptRecord{}, errors.New("empty sign attempt")
 	}
@@ -290,7 +301,7 @@ func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
 		SignatureR: w.SignatureR,
 		SignatureS: w.SignatureS,
 	}
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	return record, nil
@@ -415,6 +426,10 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 }
 
 func validateSignAttemptRecord(r SignAttemptRecord) error {
+	return validateSignAttemptRecordWithLimits(r, DefaultLimits())
+}
+
+func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) error {
 	if r.RecordVersion != signAttemptRecordVersion {
 		return fmt.Errorf("%w: unexpected sign attempt record version %d", ErrSignAttemptCorrupt, r.RecordVersion)
 	}
@@ -438,7 +453,7 @@ func validateSignAttemptRecord(r SignAttemptRecord) error {
 	if len(r.CanonicalBaseEnvelopeBytes) == 0 || len(r.CanonicalBaseEnvelopeBytes) > tss.DefaultMaxEnvelopeBytes {
 		return fmt.Errorf("%w: invalid envelope length", ErrSignAttemptCorrupt)
 	}
-	env, err := decodeSignAttemptEnvelope(r.CanonicalBaseEnvelopeBytes)
+	env, err := decodeSignAttemptEnvelopeWithLimits(r.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -460,7 +475,7 @@ func validateSignAttemptRecord(r SignAttemptRecord) error {
 		env.Round != 1 || env.From != r.Party || env.To != 0 || env.PayloadType != payloadSignPartial {
 		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
 	}
-	payload, err := unmarshalSignPartialPayload(env.Payload)
+	payload, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -697,6 +712,10 @@ func scalarBytesStrict(in []byte) ([]byte, error) {
 }
 
 func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, error) {
+	return decodeSignAttemptEnvelopeWithLimits(raw, DefaultLimits())
+}
+
+func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelope, error) {
 	var env tss.Envelope
 	if err := env.UnmarshalBinary(raw); err != nil {
 		return tss.Envelope{}, err
@@ -708,7 +727,7 @@ func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, error) {
 	if !bytes.Equal(raw, canonical) {
 		return tss.Envelope{}, errors.New("non-canonical envelope")
 	}
-	if _, err := unmarshalSignPartialPayload(env.Payload); err != nil {
+	if _, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits); err != nil {
 		return tss.Envelope{}, err
 	}
 	return env, nil

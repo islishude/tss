@@ -68,11 +68,11 @@ func (m ResponseMessage) Validate() error {
 //   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
-func Respond(reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
+func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
-	if err := VerifyStart(startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
+	if err := VerifyStart(params, startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
 		return nil, nil, err
 	}
 	if b == nil || b.Sign() <= 0 || b.Cmp(secp.Order()) >= 0 {
@@ -115,7 +115,6 @@ func Respond(reader io.Reader, startProofDomain, responseDomain []byte, start St
 	// Curve commitment X = b * G.
 	X := secp.ScalarBaseMult(secp.ScalarFromBigInt(b))
 
-	params := zkpai.ActiveSecurityParams()
 	stmt := zkpai.AffGStatement{
 		ReceiverPaillierN: pkA,
 		ProverPaillierN:   pkB,

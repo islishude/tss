@@ -133,7 +133,10 @@ func (s *RefreshScheduler) runRefresh(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("new guard: %w", err)
 	}
-	plan, err := NewRefreshPlan(keyShare, sessionID)
+	plan, err := NewRefreshPlan(RefreshPlanOption{
+		OldKey:    keyShare,
+		SessionID: sessionID,
+	})
 	if err != nil {
 		return fmt.Errorf("build refresh plan: %w", err)
 	}

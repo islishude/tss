@@ -11,22 +11,10 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
-// useProductionLimits temporarily clears testDefaultLimits so that
-// DefaultLimits returns the production fail-closed defaults for the
-// duration of the test. Callers must not use t.Parallel because
-// testDefaultLimits is a package-level variable.
-func useProductionLimits(t *testing.T) {
-	t.Helper()
-	saved := testDefaultLimits
-	testDefaultLimits = nil
-	t.Cleanup(func() { testDefaultLimits = saved })
-}
-
 // slowFrostKeygen runs a fresh FROST DKG with production limits and no
 // fixture cache. It returns the confirmed key shares.
 func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	useProductionLimits(t)
 
 	parties := make([]tss.PartyID, n)
 	for i := range parties {
@@ -71,7 +59,6 @@ func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 // limits and no fixture cache.
 func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	useProductionLimits(t)
 
 	parties := make([]tss.PartyID, n)
 	for i := range parties {
@@ -130,7 +117,6 @@ func TestSlowCrypto_Keygen3of5(t *testing.T) {
 
 // TestSlowCrypto_Sign3of5 verifies 3-of-5 sign with production limits.
 func TestSlowCrypto_Sign3of5(t *testing.T) {
-	useProductionLimits(t)
 	shares := slowFrostKeygen(t, 3, 5)
 	signers := []tss.PartyID{1, 3, 5}
 
@@ -151,7 +137,6 @@ func TestSlowCrypto_Sign3of5(t *testing.T) {
 // TestSlowCrypto_Refresh2of3 verifies a 2-of-3 refresh cycle with
 // production limits, then signs with the refreshed shares.
 func TestSlowCrypto_Refresh2of3(t *testing.T) {
-	useProductionLimits(t)
 	shares := slowFrostKeygen(t, 2, 3)
 	parties := []tss.PartyID{1, 2, 3}
 
@@ -228,7 +213,6 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 // TestSlowCrypto_Reshare3of4 verifies a reshare that adds a party
 // (2-of-3 → 2-of-4) with production limits.
 func TestSlowCrypto_Reshare3of4(t *testing.T) {
-	useProductionLimits(t)
 	oldShares := slowFrostKeygen(t, 2, 3)
 	oldParties := []tss.PartyID{1, 2, 3}
 	newParties := []tss.PartyID{1, 2, 3, 4}
@@ -293,7 +277,6 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 // TestSlowCrypto_HDDeriveAndSign verifies BIP32 HD derivation and
 // signing with production limits.
 func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
-	useProductionLimits(t)
 	shares := slowFrostKeygenHD(t, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	path := []uint32{0, 17}

@@ -34,6 +34,7 @@ type RefreshSession struct {
 	cfg             tss.ThresholdConfig
 	log             tss.Logger
 	limits          Limits
+	securityParams  SecurityParams
 	planHash        []byte
 	commits         map[tss.PartyID][][]byte
 	shares          map[tss.PartyID]*big.Int
@@ -70,7 +71,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		!slices.Equal(plan.state.parties, oldKey.state.parties) {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("refresh plan does not match old key share"))
 	}
-	limits := DefaultLimits()
+	limits := plan.limits
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
@@ -81,7 +82,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := oldKey.requireMPCMaterial(); err != nil {
+	if err := oldKey.requireMPCMaterial(limits); err != nil {
 		return nil, nil, err
 	}
 	// Generate a new Paillier keypair for key rotation.
@@ -142,6 +143,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		cfg:             config,
 		log:             config.Logger(),
 		limits:          limits,
+		securityParams:  plan.securityParams,
 		planHash:        append([]byte(nil), planHash...),
 		commits:         map[tss.PartyID][][]byte{oldKey.state.party: commitments},
 		shares:          map[tss.PartyID]*big.Int{oldKey.state.party: shamir.Eval(poly, oldKey.state.party, secp.Order())},
@@ -157,14 +159,14 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		},
 		guard: guard,
 	}
-	commitPayload, err := marshalRefreshCommitmentsPayload(refreshCommitmentsPayload{
+	commitPayload, err := marshalRefreshCommitmentsPayloadWithLimits(refreshCommitmentsPayload{
 		Commitments:        commitments,
 		PaillierPublicKey:  newPaillierPubBytes,
 		PaillierProof:      modProofBytes,
 		RingPedersenParams: ringPedersenParamsBytes,
 		RingPedersenProof:  ringPedersenProofBytes,
 		PlanHash:           planHash,
-	})
+	}, s.limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -178,7 +180,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 			continue
 		}
 		share := shamir.Eval(poly, id, secp.Order())
-		payload, err := marshalRefreshSharePayload(refreshSharePayload{Share: share, PlanHash: planHash})
+		payload, err := marshalRefreshSharePayloadWithLimits(refreshSharePayload{Share: share, PlanHash: planHash}, s.limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -245,7 +247,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh commitments"))
 		}
-		p, err := unmarshalRefreshCommitmentsPayload(env.Payload)
+		p, err := unmarshalRefreshCommitmentsPayloadWithLimits(env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -263,7 +265,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
-		if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
+		if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,
@@ -340,7 +342,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if _, ok := s.shares[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
 		}
-		p, err := unmarshalRefreshSharePayload(env.Payload)
+		p, err := unmarshalRefreshSharePayloadWithLimits(env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}

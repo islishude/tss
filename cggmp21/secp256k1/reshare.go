@@ -46,17 +46,18 @@ type ReshareSession struct {
 	isDealer      bool
 	isReceiver    bool
 
-	cfg           tss.ThresholdConfig
-	log           tss.Logger
-	limits        Limits
-	planHash      []byte
-	commits       map[tss.PartyID][][]byte
-	shares        map[tss.PartyID]*big.Int
-	completed     bool
-	aborted       bool
-	newShare      *KeyShare
-	confirmations map[tss.PartyID][]byte
-	ownPoly       []*big.Int
+	cfg            tss.ThresholdConfig
+	log            tss.Logger
+	limits         Limits
+	securityParams SecurityParams
+	planHash       []byte
+	commits        map[tss.PartyID][][]byte
+	shares         map[tss.PartyID]*big.Int
+	completed      bool
+	aborted        bool
+	newShare       *KeyShare
+	confirmations  map[tss.PartyID][]byte
+	ownPoly        []*big.Int
 
 	newPaillier     *pai.PrivateKey
 	newPaillierPubs map[tss.PartyID]PaillierPublicShare
@@ -161,7 +162,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, localParty); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
-	if err := plan.Validate(); err != nil {
+	if err := plan.ValidateWithLimits(plan.limits); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	planHash, err := plan.Digest()
@@ -181,7 +182,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		if err := validateOldKeyMatchesResharePlan(oldKey, plan); err != nil {
 			return nil, nil, invalidPlanConfig(localParty, err)
 		}
-		if err := oldKey.requireMPCMaterial(); err != nil {
+		if err := oldKey.requireMPCMaterial(plan.limits); err != nil {
 			return nil, nil, err
 		}
 	}
@@ -215,7 +216,8 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		isReceiver:      receiver,
 		cfg:             config,
 		log:             config.Logger(),
-		limits:          DefaultLimits(),
+		limits:          plan.limits,
+		securityParams:  plan.state.securityParams,
 		planHash:        append([]byte(nil), planHash...),
 		commits:         make(map[tss.PartyID][][]byte),
 		shares:          make(map[tss.PartyID]*big.Int),
@@ -229,13 +231,13 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		if err := s.initReceiverMaterial(); err != nil {
 			return nil, nil, err
 		}
-		payload, err := marshalReshareReceiverMaterialPayload(reshareReceiverMaterialPayload{
+		payload, err := marshalReshareReceiverMaterialPayloadWithLimits(reshareReceiverMaterialPayload{
 			PaillierPublicKey:  s.newPaillierPubs[s.selfID].PublicKey,
 			PaillierProof:      s.newPaillierPubs[s.selfID].Proof,
 			RingPedersenParams: s.newRingPedersen[s.selfID].Params,
 			RingPedersenProof:  s.newRingPedersen[s.selfID].Proof,
 			PlanHash:           s.planHash,
-		})
+		}, s.limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -320,7 +322,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if _, ok := s.commits[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
 		}
-		p, err := unmarshalReshareDealerCommitmentsPayload(env.Payload)
+		p, err := unmarshalReshareDealerCommitmentsPayloadWithLimits(env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -341,7 +343,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if !s.isReceiver {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
 		}
-		p, err := unmarshalReshareSharePayload(env.Payload)
+		p, err := unmarshalReshareSharePayloadWithLimits(env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -368,7 +370,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if _, ok := s.newPaillierPubs[env.From]; ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
 		}
-		p, err := unmarshalReshareReceiverMaterialPayload(env.Payload)
+		p, err := unmarshalReshareReceiverMaterialPayloadWithLimits(env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -468,7 +470,8 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 		newThreshold:        in.state.newThreshold,
 		chainCode:           append([]byte(nil), in.state.chainCode...),
 		paillierBits:        in.state.paillierBits,
-	}}
+		securityParams:      in.state.securityParams,
+	}, limits: in.limits}
 	out.state.oldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.oldVerificationShares))
 	for id, share := range in.state.oldVerificationShares {
 		out.state.oldVerificationShares[id] = append([]byte(nil), share...)

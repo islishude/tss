@@ -340,7 +340,15 @@ func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeySh
 		t.Fatal(err)
 	}
 	dealerParties = tss.SortParties(dealerParties)
-	plan, err := NewResharePlan(reference, sessionID, dealerParties, newParties, newThreshold)
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey:         reference,
+		SessionID:      sessionID,
+		DealerParties:  dealerParties,
+		NewParties:     newParties,
+		NewThreshold:   newThreshold,
+		Limits:         testLimitsPtr(),
+		SecurityParams: testSecurityParamsPtr(),
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -405,7 +413,7 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 func validateCGGMP21Shares(t testing.TB, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID) {
 	t.Helper()
 	for _, id := range parties {
-		if err := shares[id].Validate(); err != nil {
+		if err := shares[id].ValidateWithLimits(testLimits()); err != nil {
 			t.Fatalf("validate new share %d: %v", id, err)
 		}
 	}

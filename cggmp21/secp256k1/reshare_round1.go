@@ -67,10 +67,10 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if s.isReceiver {
 		s.shares[s.selfID] = shamir.Eval(poly, s.selfID, order)
 	}
-	payload, err := marshalReshareDealerCommitmentsPayload(reshareDealerCommitmentsPayload{
+	payload, err := marshalReshareDealerCommitmentsPayloadWithLimits(reshareDealerCommitmentsPayload{
 		Commitments: commitments,
 		PlanHash:    s.planHash,
-	})
+	}, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -86,13 +86,13 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 			continue
 		}
 		share := shamir.Eval(s.ownPoly, id, order)
-		sharePayload, err := marshalReshareSharePayload(reshareSharePayload{
+		sharePayload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
 			Share:                share,
 			DealerCommitmentHash: commitmentsHash,
 			PlanHash:             s.planHash,
-		})
+		}, s.limits)
 		if err != nil {
 			return nil, err
 		}
@@ -159,7 +159,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if err := checkPaillierModulusBounds(pk, s.limits); err != nil {
+	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,

@@ -46,10 +46,7 @@ type KeygenPlan struct {
 
 // NewKeygenPlan constructs a FROST keygen plan.
 func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
-	limits := DefaultLimits()
-	if option.Limits != nil {
-		limits = *option.Limits
-	}
+	limits := limitsOrDefault(option.Limits)
 	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
@@ -150,27 +147,40 @@ type refreshPlanState struct {
 
 // RefreshPlan is the shared FROST same-party refresh intent.
 type RefreshPlan struct {
-	state *refreshPlanState
+	state  *refreshPlanState
+	limits Limits
+}
+
+// RefreshPlanOption configures FROST refresh plan construction.
+type RefreshPlanOption struct {
+	OldKey    *KeyShare
+	SessionID tss.SessionID
+	Limits    *Limits
 }
 
 // NewRefreshPlan constructs a refresh plan from an existing key share.
-func NewRefreshPlan(oldKey *KeyShare, sessionID tss.SessionID) (*RefreshPlan, error) {
+func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
+	oldKey := option.OldKey
+	limits := limitsOrDefault(option.Limits)
 	if oldKey == nil || oldKey.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(oldKey.state.party, tss.ErrInvalidSessionID)
 	}
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
+	if _, err := validatePlanParties(oldKey.state.parties, oldKey.state.threshold, limits); err != nil {
+		return nil, invalidPlanConfig(oldKey.state.party, err)
+	}
 	return &RefreshPlan{state: &refreshPlanState{
-		sessionID: sessionID,
+		sessionID: option.SessionID,
 		threshold: oldKey.state.threshold,
 		parties:   slices.Clone(oldKey.state.parties),
 		publicKey: slices.Clone(oldKey.state.publicKey),
 		chainCode: slices.Clone(oldKey.state.chainCode),
-	}}, nil
+	}, limits: limits}, nil
 }
 
 // SessionID returns the refresh session ID.
@@ -257,49 +267,79 @@ type resharePlanState struct {
 
 // ResharePlan is the shared FROST reshare intent.
 type ResharePlan struct {
-	state *resharePlanState
+	state  *resharePlanState
+	limits Limits
+}
+
+// ResharePlanOption configures FROST reshare plan construction from a key share.
+type ResharePlanOption struct {
+	OldKey       *KeyShare
+	SessionID    tss.SessionID
+	NewParties   []tss.PartyID
+	NewThreshold int
+	Limits       *Limits
+}
+
+// PublicResharePlanOption configures a public-only FROST reshare plan.
+type PublicResharePlanOption struct {
+	OldPublicKey []byte
+	OldChainCode []byte
+	OldParties   []tss.PartyID
+	SessionID    tss.SessionID
+	NewParties   []tss.PartyID
+	NewThreshold int
+	Limits       *Limits
 }
 
 // NewResharePlan constructs a FROST reshare plan from an old key share.
-func NewResharePlan(oldKey *KeyShare, sessionID tss.SessionID, newParties []tss.PartyID, newThreshold int) (*ResharePlan, error) {
+func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
+	oldKey := option.OldKey
 	if oldKey == nil || oldKey.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
-	return NewResharePlanFromPublic(oldKey.state.publicKey, oldKey.state.chainCode, oldKey.state.parties, sessionID, newParties, newThreshold)
+	return NewPublicResharePlan(PublicResharePlanOption{
+		OldPublicKey: oldKey.state.publicKey,
+		OldChainCode: oldKey.state.chainCode,
+		OldParties:   oldKey.state.parties,
+		SessionID:    option.SessionID,
+		NewParties:   option.NewParties,
+		NewThreshold: option.NewThreshold,
+		Limits:       option.Limits,
+	})
 }
 
-// NewResharePlanFromPublic constructs a FROST reshare plan for new-only
-// recipients that do not hold an old key share.
-func NewResharePlanFromPublic(oldPublicKey, oldChainCode []byte, oldParties []tss.PartyID, sessionID tss.SessionID, newParties []tss.PartyID, newThreshold int) (*ResharePlan, error) {
-	if !sessionID.Valid() {
+// NewPublicResharePlan constructs a FROST reshare plan for new-only recipients
+// that do not hold an old key share.
+func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) {
+	limits := limitsOrDefault(option.Limits)
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
 	}
-	if _, err := edcurve.PointFromBytes(oldPublicKey); err != nil {
+	if _, err := edcurve.PointFromBytes(option.OldPublicKey); err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old public key: %w", err))
 	}
-	if len(oldChainCode) != 0 && len(oldChainCode) != 32 {
+	if len(option.OldChainCode) != 0 && len(option.OldChainCode) != 32 {
 		return nil, invalidPlanConfig(0, errors.New("old chain code must be empty or 32 bytes"))
 	}
-	limits := DefaultLimits()
-	oldParties, err := validatePlanPartySet(oldParties, limits)
+	oldParties, err := validatePlanPartySet(option.OldParties, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old participant set: %w", err))
 	}
-	newParties, err = validatePlanParties(newParties, newThreshold, limits)
+	newParties, err := validatePlanParties(option.NewParties, option.NewThreshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
 	}
 	return &ResharePlan{state: &resharePlanState{
-		sessionID:    sessionID,
-		oldPublicKey: slices.Clone(oldPublicKey),
-		oldChainCode: slices.Clone(oldChainCode),
+		sessionID:    option.SessionID,
+		oldPublicKey: slices.Clone(option.OldPublicKey),
+		oldChainCode: slices.Clone(option.OldChainCode),
 		oldParties:   oldParties,
 		newParties:   newParties,
-		newThreshold: newThreshold,
-	}}, nil
+		newThreshold: option.NewThreshold,
+	}, limits: limits}, nil
 }
 
 // SessionID returns the reshare session ID.
@@ -427,43 +467,59 @@ type signPlanState struct {
 
 // SignPlan is the shared FROST signing intent.
 type SignPlan struct {
-	state *signPlanState
+	state  *signPlanState
+	limits Limits
+}
+
+// SignPlanOption configures FROST signing plan construction.
+type SignPlanOption struct {
+	Key           *KeyShare
+	SessionID     tss.SessionID
+	Signers       []tss.PartyID
+	Message       []byte
+	AdditiveShift []byte
+	Limits        *Limits
 }
 
 // NewSignPlan constructs a signing plan for the supplied key and signer set.
-func NewSignPlan(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, message []byte, additiveShift []byte) (*SignPlan, error) {
+func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
+	key := option.Key
+	limits := limitsOrDefault(option.Limits)
 	if key == nil || key.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
-	if !sessionID.Valid() {
+	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
 	}
 	if err := key.ValidateConsistency(); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	signers = tss.SortParties(signers)
-	if err := validateSignerSet(key, signers, DefaultLimits()); err != nil {
+	signers := tss.SortParties(option.Signers)
+	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	if len(additiveShift) > 0 {
-		if _, err := edcurve.ScalarFromCanonical(additiveShift); err != nil {
+	if len(option.AdditiveShift) > 0 {
+		if _, err := edcurve.ScalarFromCanonical(option.AdditiveShift); err != nil {
 			return nil, invalidPlanConfig(key.state.party, fmt.Errorf("invalid additive shift: %w", err))
 		}
 	}
-	if len(message) > DefaultLimits().Payload.MaxMessageBytes {
-		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(message), DefaultLimits().Payload.MaxMessageBytes))
+	if limits.Payload.MaxMessageBytes <= 0 {
+		return nil, invalidPlanConfig(key.state.party, errors.New("max message bytes must be positive"))
+	}
+	if len(option.Message) > limits.Payload.MaxMessageBytes {
+		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(option.Message), limits.Payload.MaxMessageBytes))
 	}
 	return &SignPlan{state: &signPlanState{
-		sessionID:     sessionID,
+		sessionID:     option.SessionID,
 		threshold:     key.state.threshold,
 		parties:       slices.Clone(key.state.parties),
 		publicKey:     slices.Clone(key.state.publicKey),
 		chainCode:     slices.Clone(key.state.chainCode),
 		keygenHash:    slices.Clone(key.state.keygenTranscriptHash),
 		signers:       signers,
-		message:       slices.Clone(message),
-		additiveShift: slices.Clone(additiveShift),
-	}}, nil
+		message:       slices.Clone(option.Message),
+		additiveShift: slices.Clone(option.AdditiveShift),
+	}, limits: limits}, nil
 }
 
 // SessionID returns the signing session ID.

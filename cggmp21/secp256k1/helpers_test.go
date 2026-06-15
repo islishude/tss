@@ -67,6 +67,7 @@ func clonePresignForTest(p *Presign) *Presign {
 		consumed:       p.state.consumed,
 		attempt:        p.state.attempt,
 		version:        p.state.version,
+		securityParams: p.state.securityParams,
 		party:          p.state.party,
 		threshold:      p.state.threshold,
 		signers:        slices.Clone(p.state.signers),
@@ -98,9 +99,11 @@ func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard
 		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(config.Parties, config.Self), config.SessionID)
 	})
 	plan, err := NewKeygenPlan(KeygenPlanOption{
-		SessionID: config.SessionID,
-		Parties:   config.Parties,
-		Threshold: config.Threshold,
+		SessionID:      config.SessionID,
+		Parties:        config.Parties,
+		Threshold:      config.Threshold,
+		Limits:         testLimitsPtr(),
+		SecurityParams: testSecurityParamsPtr(),
 	})
 	if err != nil {
 		return nil, nil, err
@@ -115,6 +118,12 @@ func startCGGMP21KeygenWithPlanOption(config tss.ThresholdConfig, option KeygenP
 	option.SessionID = config.SessionID
 	option.Parties = config.Parties
 	option.Threshold = config.Threshold
+	if option.Limits == nil {
+		option.Limits = testLimitsPtr()
+	}
+	if option.SecurityParams == nil {
+		option.SecurityParams = testSecurityParamsPtr()
+	}
 	plan, err := NewKeygenPlan(option)
 	if err != nil {
 		return nil, nil, err
@@ -126,7 +135,14 @@ func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, sign
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.party, testCGGMP21GuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	plan, err := NewPresignPlan(key, sessionID, signers, ctx)
+	plan, err := NewPresignPlan(PresignPlanOption{
+		Key:            key,
+		SessionID:      sessionID,
+		Signers:        signers,
+		Context:        ctx,
+		Limits:         testLimitsPtr(),
+		SecurityParams: testSecurityParamsPtr(),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -140,7 +156,13 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	if request.AttemptStore == nil {
 		request.AttemptStore = newTestSignAttemptStore()
 	}
-	plan, err := NewSignPlan(key, presign, sessionID, request)
+	plan, err := NewSignPlan(SignPlanOption{
+		Key:       key,
+		Presign:   presign,
+		SessionID: sessionID,
+		Request:   request,
+		Limits:    testLimitsPtr(),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -151,7 +173,12 @@ func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ..
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(oldKey.state.parties, config.Self), config.SessionID)
 	})
-	plan, err := NewRefreshPlan(oldKey, config.SessionID)
+	plan, err := NewRefreshPlan(RefreshPlanOption{
+		OldKey:         oldKey,
+		SessionID:      config.SessionID,
+		Limits:         testLimitsPtr(),
+		SecurityParams: testSecurityParamsPtr(),
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -243,7 +270,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		}
 		return testCGGMP21Guard(key.state.party, tss.PartySet(key.state.parties), sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, newTestSignAttemptStore(), guard)
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, newTestSignAttemptStore(), guard, testLimits())
 }
 
 func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store SignAttemptStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
@@ -259,7 +286,7 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 		}
 		return testCGGMP21Guard(key.state.party, tss.PartySet(key.state.parties), sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, store, guard)
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, store, guard, testLimits())
 }
 
 type testSignAttemptStore struct {
@@ -416,7 +443,10 @@ func (errNilPresignError) Error() string { return "nil presign" }
 
 // SignDigest is a convenience wrapper around SignDigestInteractive for tests.
 func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error) {
-	return SignDigestInteractive(digest32, signers, testPresignContext())
+	if len(digest32) != sha256.Size {
+		return nil, nil, errors.New("digest must be 32 bytes")
+	}
+	return signWithDigest(digest32, signers, testPresignContext(), true, testLimits())
 }
 
 func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties []tss.PartyID, messages []tss.Envelope) {
@@ -477,6 +507,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		consumed:             new(atomic.Bool),
 		attempt:              newPresignAttemptBinding(false),
 		version:              tss.Version,
+		securityParams:       testSecurityParams(),
 		party:                1,
 		threshold:            1,
 		signers:              []tss.PartyID{1},
@@ -499,6 +530,16 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		chiShare: chiShare,
 		delta:    delta,
 	}}
+}
+
+func testLimitsPtr() *Limits {
+	limits := testLimits()
+	return &limits
+}
+
+func testSecurityParamsPtr() *SecurityParams {
+	params := testSecurityParams()
+	return &params
 }
 
 func mustMinimalSignPrepProofForTest(tb testing.TB) []byte {

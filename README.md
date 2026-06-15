@@ -13,6 +13,12 @@ Go threshold-signature building blocks.
 
 `cggmp21/secp256k1` implements dealerless DKG, offline presigning, single-round online signing, proactive refresh, resharing, BIP32 HD derivation, and blame attribution. Paillier proof layer uses CGGMP24 Πmod and Ring-Pedersen Πprm semantics.
 
+`DefaultLimits` always returns production fail-closed local policy. Tests that
+need relaxed bounds pass explicit `Limits` through plan options or `WithLimits`
+APIs. CGGMP21 `DefaultSecurityParams` is the production cryptographic profile;
+explicit non-production profiles are shared protocol intent, included in plan
+digests, and persisted with key shares, presigns, and reshare plans.
+
 ## Quick Start
 
 ### Ed25519 (FROST)

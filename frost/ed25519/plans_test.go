@@ -86,11 +86,16 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	signers := []tss.PartyID{2, 1}
 	message := []byte("plan-bound message")
 
-	plan, err := NewSignPlan(shares[1], sessionID, signers, message, nil)
+	limits := testLimits()
+	plan, err := NewSignPlan(SignPlanOption{
+		Key: shares[1], SessionID: sessionID, Signers: signers, Message: message, Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	same, err := NewSignPlan(shares[2], sessionID, []tss.PartyID{1, 2}, message, nil)
+	same, err := NewSignPlan(SignPlanOption{
+		Key: shares[2], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: message, Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,14 +114,18 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 		t.Fatal("sign plan message getter or constructor aliases caller memory")
 	}
 
-	otherMessage, err := NewSignPlan(shares[1], sessionID, []tss.PartyID{1, 2}, []byte("other message"), nil)
+	otherMessage, err := NewSignPlan(SignPlanOption{
+		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: []byte("other message"), Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertDifferentPlanDigest(t, "message", plan, otherMessage)
 
 	hdShares := frostKeygenHD(t, 2, 3)
-	otherKey, err := NewSignPlan(hdShares[1], sessionID, []tss.PartyID{1, 2}, []byte("plan-bound message"), nil)
+	otherKey, err := NewSignPlan(SignPlanOption{
+		Key: hdShares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: []byte("plan-bound message"), Limits: &limits,
+	})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -226,7 +226,7 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 	}
 
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
-	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 	if err != nil {
 		t.Fatalf("resume same attempt: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 		go func() {
 			defer wg.Done()
 			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
-			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			if err != nil {
 				results <- result{err: err}
 				return
@@ -629,7 +629,7 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 		go func() {
 			defer wg.Done()
 			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), candidate.session)
-			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], presigns[1].ContextHashBytes(), true, store, guard)
+			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			errs <- err
 		}()
 	}
@@ -663,10 +663,16 @@ func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 		t.Fatal(err)
 	}
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
-	plan, err := NewSignPlan(shares[1], presigns[1], sessionID, SignRequest{
-		Context: testPresignContext(),
-		Message: []byte("missing store"),
-		LowS:    true,
+	plan, err := NewSignPlan(SignPlanOption{
+		Key:       shares[1],
+		Presign:   presigns[1],
+		SessionID: sessionID,
+		Request: SignRequest{
+			Context: testPresignContext(),
+			Message: []byte("missing store"),
+			LowS:    true,
+		},
+		Limits: testLimitsPtr(),
 	})
 	var session *SignSession
 	var out []tss.Envelope
@@ -1040,11 +1046,11 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 				}
 			}
 
-			raw, err := presign.MarshalBinary()
+			raw, err := presign.MarshalBinaryWithLimits(testLimits())
 			if err != nil {
 				t.Fatalf("Presign MarshalBinary: %v", err)
 			}
-			restored, err := UnmarshalPresign(raw)
+			restored, err := UnmarshalPresignWithLimits(raw, testLimits())
 			if err != nil {
 				t.Fatalf("UnmarshalPresign: %v", err)
 			}

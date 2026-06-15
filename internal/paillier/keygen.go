@@ -3,6 +3,7 @@ package paillier
 import (
 	"context"
 	"crypto/rand"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -21,9 +22,9 @@ import (
 // smaller sizes.
 const MinProductionModulusBits = 3072
 
-// minKeyBits is the absolute minimum Paillier modulus size — a structural
-// floor, not a security recommendation.
-const minKeyBits = 512
+// MinModulusBits is the absolute minimum Paillier modulus size. It is a
+// structural floor, not a security recommendation.
+const MinModulusBits = 512
 
 // GenerateKey creates a Paillier key using safe primes (Sophie Germain primes)
 // where p = 2p' + 1, q = 2q' + 1 with p', q' also prime, and the g=n+1 variant.
@@ -48,15 +49,19 @@ func GenerateKey(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, 
 // for testing. The minimum is 512 bits. This function must not be used in
 // production code.
 //
-// GenerateKeyForTest panics if called outside of tests (i.e. when
-// [testing.Testing] returns false). Production code must use [GenerateKey]
+// GenerateKeyForTest returns an error outside of tests (i.e. when
+// [testing.Testing] returns false). Production code must use [GenerateKey],
 // which enforces the 3072-bit production floor.
 func GenerateKeyForTest(ctx context.Context, reader io.Reader, bits int) (*PrivateKey, error) {
-	if !testing.Testing() {
-		panic("GenerateKeyForTest called outside of tests — production code must use GenerateKey")
+	return generateKeyForTest(ctx, reader, bits, testing.Testing())
+}
+
+func generateKeyForTest(ctx context.Context, reader io.Reader, bits int, testProcess bool) (*PrivateKey, error) {
+	if !testProcess {
+		return nil, errors.New("paillier test key generation is unavailable outside tests")
 	}
-	if bits < minKeyBits {
-		return nil, fmt.Errorf("paillier modulus must be at least %d bits", minKeyBits)
+	if bits < MinModulusBits {
+		return nil, fmt.Errorf("paillier modulus must be at least %d bits", MinModulusBits)
 	}
 	return generateKeyInner(ctx, reader, bits)
 }

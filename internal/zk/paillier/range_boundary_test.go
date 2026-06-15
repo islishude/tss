@@ -13,8 +13,8 @@ import (
 // soundness.
 func TestSignedPowerOfTwoBoundary(t *testing.T) {
 	t.Parallel()
-	for _, bits := range []uint{1, 8, 64, 128, 256, 384, 486} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
+	for _, bits := range []uint32{1, 8, 64, 128, 256, 384, 486} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
 		negBound := new(big.Int).Neg(bound)
 		above := new(big.Int).Add(bound, big.NewInt(1))
 		below := new(big.Int).Sub(negBound, big.NewInt(1))
@@ -42,8 +42,8 @@ func TestSignedPowerOfTwoBoundary(t *testing.T) {
 // and rejects at 2^bits.
 func TestUnsignedPowerOfTwoBoundary(t *testing.T) {
 	t.Parallel()
-	for _, bits := range []uint{1, 8, 64, 128, 256} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	for _, bits := range []uint32{1, 8, 64, 128, 256} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 		below := new(big.Int).Sub(bound, big.NewInt(1))
 
 		if !InUnsignedPowerOfTwo(big.NewInt(0), bits) {
@@ -69,9 +69,9 @@ func TestMultRangeBoundary(t *testing.T) {
 	t.Parallel()
 	n := big.NewInt(100003) // small prime for testing
 
-	for _, bits := range []uint{1, 8, 64, 128, 256} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits) // 2^bits
-		bound.Mul(bound, n)                            // N·2^bits
+	for _, bits := range []uint32{1, 8, 64, 128, 256} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
+		bound.Mul(bound, n)                                  // N·2^bits
 
 		posBound := new(big.Int).Set(bound)
 		negBound := new(big.Int).Neg(bound)
@@ -140,8 +140,8 @@ func TestZKRangeBound(t *testing.T) {
 // produces values in the correct range [−2^bits, 2^bits].
 func TestSampleSignedPowerOfTwoDistribution(t *testing.T) {
 	t.Parallel()
-	for _, bits := range []uint{1, 8, 64} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	for _, bits := range []uint32{1, 8, 64} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 		for range 500 {
 			x, err := SampleSignedPowerOfTwo(nil, bits)
 			if err != nil {
@@ -159,8 +159,8 @@ func TestSampleSignedPowerOfTwoDistribution(t *testing.T) {
 func TestSampleMultRangeDistribution(t *testing.T) {
 	t.Parallel()
 	n := big.NewInt(100003)
-	for _, bits := range []uint{1, 8, 64} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	for _, bits := range []uint32{1, 8, 64} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 		bound.Mul(bound, n)
 		for range 500 {
 			x, err := SampleMultRange(nil, bits, n)

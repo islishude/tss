@@ -149,21 +149,14 @@ func TestStartReshareRejectsProductionOneOfOneTarget(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	saved := testDefaultLimits
-	testDefaultLimits = nil
-	defer func() { testDefaultLimits = saved }()
-
-	session, out, err := startFROSTReshare(shares[1], []tss.PartyID{1}, 1, tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   []tss.PartyID{1, 2},
-		Self:      1,
-		SessionID: sessionID,
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: shares[1], SessionID: sessionID, NewParties: []tss.PartyID{1}, NewThreshold: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "below production minimum") {
 		t.Fatalf("expected production threshold rejection, got %v", err)
 	}
-	if session != nil || out != nil {
-		t.Fatal("invalid production reshare target produced session or outbound messages")
+	if plan != nil {
+		t.Fatal("invalid production reshare target produced a plan")
 	}
 }
 

@@ -73,8 +73,8 @@ func TestNewProofChallengeSignedRejectsZero(t *testing.T) {
 func TestChallengeBitsMatchClaim(t *testing.T) {
 	t.Parallel()
 	// For bits ≥ 64, probability of zero is ≤ 2^-64 — negligible.
-	for _, bits := range []uint{64, 128} {
-		bound := new(big.Int).Lsh(big.NewInt(1), bits)
+	for _, bits := range []uint32{64, 128} {
+		bound := new(big.Int).Lsh(big.NewInt(1), uint(bits))
 		for i := range 100 {
 			transcript := NewTranscript("challenge-range-test")
 			transcript.AppendBytes("index", []byte{byte(i), byte(i >> 8)})

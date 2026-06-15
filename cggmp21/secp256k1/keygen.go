@@ -33,6 +33,7 @@ type KeygenSession struct {
 	cfg            tss.ThresholdConfig
 	log            tss.Logger
 	limits         Limits
+	securityParams SecurityParams
 	planHash       []byte
 	commits        map[tss.PartyID][][]byte
 	shares         map[tss.PartyID]*big.Int

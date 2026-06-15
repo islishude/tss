@@ -20,10 +20,10 @@ func TestCheckPaillierModulus(t *testing.T) {
 		t.Error("DefaultSecurityParams should reject 1024-bit modulus (MinPaillierBits=3072)")
 	}
 
-	// FastSecurityParams should accept 1024-bit
-	fast := FastSecurityParams()
+	// Explicit reduced parameters should accept 1024-bit.
+	fast := fastSecurityParams()
 	if err := fast.CheckPaillierModulus(&sk1024.PublicKey); err != nil {
-		t.Errorf("FastSecurityParams rejected 1024-bit modulus: %v", err)
+		t.Errorf("test security params rejected 1024-bit modulus: %v", err)
 	}
 }
 

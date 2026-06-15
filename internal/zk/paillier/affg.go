@@ -610,10 +610,10 @@ func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("aff-g"))
 	t.AppendUint16("version", 1)
-	t.AppendUint32("ell", uint32(params.Ell))
-	t.AppendUint32("ell_prime", uint32(params.EllPrime))
-	t.AppendUint32("epsilon", uint32(params.Epsilon))
-	t.AppendUint32("challenge_bits", uint32(params.ChallengeBits))
+	t.AppendUint32("ell", params.Ell)
+	t.AppendUint32("ell_prime", params.EllPrime)
+	t.AppendUint32("epsilon", params.Epsilon)
+	t.AppendUint32("challenge_bits", params.ChallengeBits)
 	t.AppendBytes("state", state)
 
 	// Statement.

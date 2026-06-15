@@ -19,6 +19,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.state.party = 1
 	key.state.threshold = 2
 	key.state.parties = []tss.PartyID{1, 2}
+	key.state.securityParams = DefaultSecurityParams()
 	minimalPresign := func() *Presign {
 		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
@@ -30,16 +31,16 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presignPlan := &PresignPlan{state: &presignPlanState{sessionID: sessionID}}
-	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID}}
+	presignPlan := &PresignPlan{state: &presignPlanState{sessionID: sessionID}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
+	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID}, limits: DefaultLimits()}
 	refreshPlan := &RefreshPlan{state: &refreshPlanState{
 		sessionID:    sessionID,
 		threshold:    2,
 		parties:      []tss.PartyID{1, 2},
 		publicKey:    key.state.publicKey,
 		chainCode:    key.state.chainCode,
-		paillierBits: defaultPaillierBits(),
-	}}
+		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
+	}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
 	plan := &ResharePlan{state: &resharePlanState{
 		sessionID:             sessionID,
 		curveID:               reshareCurveID,
@@ -48,12 +49,13 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		dealerParties:         []tss.PartyID{1, 2},
 		newParties:            []tss.PartyID{1, 2, 3},
 		newThreshold:          2,
-		paillierBits:          defaultPaillierBits(),
+		paillierBits:          int(DefaultSecurityParams().MinPaillierBits),
 		chainCode:             nil,
 		oldGroupPublicKey:     nil,
 		oldGroupCommitments:   nil,
 		oldVerificationShares: map[tss.PartyID][]byte{},
-	}}
+		securityParams:        DefaultSecurityParams(),
+	}, limits: DefaultLimits()}
 
 	type startCase struct {
 		name    string

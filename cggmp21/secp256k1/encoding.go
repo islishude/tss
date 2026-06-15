@@ -43,6 +43,7 @@ type keyShareWire struct {
 	KeygenConfirmations    [][]byte                          `wire:"22,byteslist,max_bytes=zk_proof"`
 	ResharePlanHash        []byte                            `wire:"23,bytes"`
 	PlanHash               []byte                            `wire:"24,bytes,len=32"`
+	SecurityParams         SecurityParams                    `wire:"25,record"`
 }
 
 // WireType returns the canonical wire type identifier for keyShareWire.
@@ -89,18 +90,19 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 		KeygenConfirmations:    k.state.keygenConfirmations,
 		ResharePlanHash:        k.state.resharePlanHash,
 		PlanHash:               k.state.planHash,
+		SecurityParams:         k.state.securityParams,
 	}, nil
 }
 
-func marshalKeyShare(k *KeyShare) ([]byte, error) {
-	if err := k.Validate(); err != nil {
+func marshalKeyShare(k *KeyShare, limits Limits) ([]byte, error) {
+	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
 	w, err := k.toWire()
 	if err != nil {
 		return nil, err
 	}
-	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
@@ -184,6 +186,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	}
 	k := &KeyShare{state: &keyShareState{
 		version:                tss.Version,
+		securityParams:         w.SecurityParams,
 		party:                  w.Party,
 		threshold:              w.Threshold,
 		parties:                w.Parties,
@@ -209,7 +212,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		resharePlanHash:        w.ResharePlanHash,
 		planHash:               w.PlanHash,
 	}}
-	if err := k.Validate(); err != nil {
+	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
 	return k, nil
@@ -217,7 +220,12 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 
 // UnmarshalPresign decodes a canonical CGGMP21 presign record with size caps.
 func UnmarshalPresign(in []byte) (*Presign, error) {
-	limits := DefaultLimits()
+	return UnmarshalPresignWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalPresignWithLimits decodes a canonical presign record using explicit
+// local resource limits.
+func UnmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	if len(in) == 0 {
 		return nil, errors.New("empty presign")
 	}
@@ -247,6 +255,7 @@ type presignWire struct {
 	PartiesHash          []byte         `wire:"16,bytes"`
 	VerifyShares         []byte         `wire:"17,bytes,max_bytes=signprep_verify_shares"`
 	PlanHash             []byte         `wire:"18,bytes,len=32"`
+	SecurityParams       SecurityParams `wire:"19,record"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -286,6 +295,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	consumed.Store(w.Consumed)
 	p := &Presign{state: &presignState{
 		version:              tss.Version,
+		securityParams:       w.SecurityParams,
 		party:                w.Party,
 		threshold:            w.Threshold,
 		signers:              w.Signers,
@@ -306,7 +316,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		consumed:             consumed,
 		attempt:              newPresignAttemptBinding(w.Consumed),
 	}}
-	if err := p.Validate(); err != nil {
+	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
 	return p, nil

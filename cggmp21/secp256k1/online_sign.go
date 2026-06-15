@@ -34,7 +34,7 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	if err := key.Validate(); err != nil {
+	if err := key.ValidateWithLimits(plan.limits); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	if err := plan.validate(key, presign, local); err != nil {
@@ -45,18 +45,18 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	request := cloneSignRequest(plan.state.request)
-	return startSignDigestBoundWithTimeout(local.Ctx(), key, presign, plan.state.sessionID, plan.state.digest, plan.state.contextHash, planHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout))
+	return startSignDigestBoundWithTimeout(local.Ctx(), key, presign, plan.state.sessionID, plan.state.digest, plan.state.contextHash, planHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout), plan.limits)
 }
 
-func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	var planHash []byte
 	if presign != nil && presign.state != nil {
 		planHash = presign.state.planHash
 	}
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, store, guard, DefaultSignAttemptStoreTimeout)
+	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, store, guard, DefaultSignAttemptStoreTimeout, limits)
 }
 
-func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
@@ -69,13 +69,13 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
 		return nil, nil, err
 	}
-	if err := key.requireMPCMaterial(); err != nil {
+	if err := key.requireMPCMaterial(limits); err != nil {
 		return nil, nil, err
 	}
-	if err := validatePresign(key, presign); err != nil {
+	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, nil, err
 	}
-	if err := presign.VerifySignMaterial(); err != nil {
+	if err := presign.VerifySignMaterialWithLimits(limits); err != nil {
 		return nil, nil, err
 	}
 	if len(digest32) != 32 {
@@ -91,7 +91,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
 	}
 
-	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, planHash, lowS, guard)
+	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, planHash, lowS, guard, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -114,7 +114,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if commit.Status != SignAttemptCreated && commit.Status != SignAttemptExistingSame {
 		return nil, nil, fmt.Errorf("%w: invalid commit status", ErrSignAttemptCorrupt)
 	}
-	return resumeMatchingSignAttempt(ctx, key, presign, candidate, commit.Record, store, guard, storeTTL)
+	return resumeMatchingSignAttempt(ctx, key, presign, candidate, commit.Record, store, guard, storeTTL, limits)
 }
 
 func durableStoreTimeout(timeout time.Duration) time.Duration {
@@ -137,7 +137,7 @@ func signAttemptConsumedError(err error) bool {
 		errors.Is(err, ErrSignAttemptNonDeterminism)
 }
 
-func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard) (SignAttemptRecord, error) {
+func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
 	kShare, err := secpScalarFromSecret(presign.state.kShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -173,7 +173,7 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 			localVS.KPoint, localVS.ChiPoint,
 		),
 	}
-	payloadBytes, err := marshalSignPartialPayload(payload)
+	payloadBytes, err := marshalSignPartialPayloadWithLimits(payload, limits)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
@@ -226,10 +226,10 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 	}
 	record.IntentHash = signAttemptIntentHash(record)
 	record.AttemptHash = signAttemptHash(record)
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	validationSession, _, err := signSessionFromAttempt(context.Background(), key, presign, record, nil, guard, DefaultSignAttemptStoreTimeout)
+	validationSession, _, err := signSessionFromAttempt(context.Background(), key, presign, record, nil, guard, DefaultSignAttemptStoreTimeout, limits)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("local sign partial self-verification failed: %w", err)
 	}
@@ -239,6 +239,12 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 
 // ResumeSign loads and resumes the only durable attempt bound to presign.
 func ResumeSign(ctx context.Context, key *KeyShare, presign *Presign, store SignAttemptStore, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+	return ResumeSignWithLimits(ctx, key, presign, store, guard, DefaultLimits())
+}
+
+// ResumeSignWithLimits resumes a durable sign attempt using explicit local
+// validation and decoding limits.
+func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
@@ -251,10 +257,10 @@ func ResumeSign(ctx context.Context, key *KeyShare, presign *Presign, store Sign
 	if store == nil {
 		return nil, nil, errors.New("nil sign attempt store")
 	}
-	if err := key.requireMPCMaterial(); err != nil {
+	if err := key.requireMPCMaterial(limits); err != nil {
 		return nil, nil, err
 	}
-	if err := validatePresign(key, presign); err != nil {
+	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, nil, err
 	}
 	record, err := store.LoadSignAttempt(ctx, presign.ID())
@@ -264,7 +270,7 @@ func ResumeSign(ctx context.Context, key *KeyShare, presign *Presign, store Sign
 		}
 		return nil, nil, err
 	}
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		_ = MarkPresignConsumed(presign)
 		return nil, nil, err
 	}
@@ -274,11 +280,11 @@ func ResumeSign(ctx context.Context, key *KeyShare, presign *Presign, store Sign
 	if !bindPresignToAttempt(presign, record.IntentHash, true) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign is bound to another attempt or was manually discarded"))
 	}
-	return signSessionFromAttempt(ctx, key, presign, record, store, guard, DefaultSignAttemptStoreTimeout)
+	return signSessionFromAttempt(ctx, key, presign, record, store, guard, DefaultSignAttemptStoreTimeout, limits)
 }
 
-func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Presign, candidate, durable SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration) (*SignSession, []tss.Envelope, error) {
-	if err := validateSignAttemptRecord(durable); err != nil {
+func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Presign, candidate, durable SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
+	if err := validateSignAttemptRecordWithLimits(durable, limits); err != nil {
 		_ = MarkPresignConsumed(presign)
 		return nil, nil, err
 	}
@@ -291,18 +297,18 @@ func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Pres
 	if !bindPresignToAttempt(presign, durable.IntentHash, true) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign is bound to another attempt or was manually discarded"))
 	}
-	return signSessionFromAttempt(ctx, key, presign, durable, store, guard, storeTTL)
+	return signSessionFromAttempt(ctx, key, presign, durable, store, guard, storeTTL, limits)
 }
 
-func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign, record SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration) (*SignSession, []tss.Envelope, error) {
-	if err := validateSignAttemptBindings(key, presign, record); err != nil {
+func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign, record SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
+	if err := validateSignAttemptBindings(key, presign, record, limits); err != nil {
 		return nil, nil, err
 	}
-	env, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	env, err := decodeSignAttemptEnvelopeWithLimits(record.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	payload, err := unmarshalSignPartialPayload(env.Payload)
+	payload, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -318,7 +324,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		presign:   presign,
 		sessionID: record.SessionID,
 		log:       tss.NopLogger(),
-		limits:    DefaultLimits(),
+		limits:    limits,
 		digest:    slices.Clone(record.Digest),
 		lowS:      record.LowS,
 		planHash:  slices.Clone(record.SignPlanHash),
@@ -364,8 +370,8 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	return s, []tss.Envelope{env}, nil
 }
 
-func validateSignAttemptBindings(key *KeyShare, presign *Presign, record SignAttemptRecord) error {
-	if err := validateSignAttemptRecord(record); err != nil {
+func validateSignAttemptBindings(key *KeyShare, presign *Presign, record SignAttemptRecord, limits Limits) error {
+	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return err
 	}
 	if !bytes.Equal(record.PresignID, presign.ID()) ||
@@ -477,7 +483,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate sign partial"))
 	}
 	payload := env.Payload()
-	p, err := unmarshalSignPartialPayload(payload)
+	p, err := unmarshalSignPartialPayloadWithLimits(payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -623,7 +629,7 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 		!bytes.Equal(completed.SignatureS, signature.S) {
 		return fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
 	}
-	if err := validateSignAttemptRecord(completed); err != nil {
+	if err := validateSignAttemptRecordWithLimits(completed, s.limits); err != nil {
 		return err
 	}
 	s.attempt = completed.Clone()
@@ -666,8 +672,8 @@ func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool
 	return VerifyDigest(publicKey, digest, sig)
 }
 
-func validatePresign(key *KeyShare, presign *Presign) error {
-	if err := presign.Validate(); err != nil {
+func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
+	if err := presign.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	if presign.state.party != key.state.party {

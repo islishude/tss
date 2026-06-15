@@ -57,19 +57,19 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 		{
 			name:    "nil VerifyShares",
 			mutate:  func(p *Presign) { p.state.verifyShares = nil },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "nil VerifyShares",
 		},
 		{
 			name:    "empty VerifyShares",
 			mutate:  func(p *Presign) { p.state.verifyShares = []SignVerifyShare{} },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "empty VerifyShares",
 		},
 		{
 			name:    "mismatched signer count",
 			mutate:  func(p *Presign) { p.state.signers = []tss.PartyID{1, 2} },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "mismatched signer/verify share count",
 		},
 		{
@@ -79,7 +79,9 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 				p.state.signers = []tss.PartyID{1, 1}
 				p.state.verifyShares = []SignVerifyShare{vs, vs}
 			},
-			check:   func(p *Presign) error { return validateSignVerifyShares(p.state.signers, p.state.verifyShares) },
+			check: func(p *Presign) error {
+				return validateSignVerifyShares(p.state.signers, p.state.verifyShares, testLimits())
+			},
 			wantMsg: "duplicate verify share",
 		},
 		{
@@ -89,34 +91,36 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 				vs.Party = 999
 				p.state.verifyShares = []SignVerifyShare{vs}
 			},
-			check:   func(p *Presign) error { return validateSignVerifyShares(p.state.signers, p.state.verifyShares) },
+			check: func(p *Presign) error {
+				return validateSignVerifyShares(p.state.signers, p.state.verifyShares, testLimits())
+			},
 			wantMsg: "non-signer party in verify share",
 		},
 		{
 			name:    "non-canonical KPoint",
 			mutate:  func(p *Presign) { p.state.verifyShares[0].KPoint = []byte{0xFF} },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical KPoint",
 		},
 		{
 			name:    "non-canonical ChiPoint",
 			mutate:  func(p *Presign) { p.state.verifyShares[0].ChiPoint = []byte{0xFF} },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical ChiPoint",
 		},
 		{
 			name:    "empty proof",
 			mutate:  func(p *Presign) { p.state.verifyShares[0].Proof = nil },
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "empty proof",
 		},
 		{
 			name: "oversize proof",
 			mutate: func(p *Presign) {
-				limits := TestLimits()
+				limits := testLimits()
 				p.state.verifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
 			},
-			check:   func(p *Presign) error { return p.Validate() },
+			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "oversize proof",
 		},
 	}

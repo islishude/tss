@@ -96,7 +96,7 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
-		plan, err := frost.NewRefreshPlan(shares[id], sessionID)
+		plan, err := frost.NewRefreshPlan(frost.RefreshPlanOption{OldKey: shares[id], SessionID: sessionID})
 		if err != nil {
 			panic(err)
 		}
@@ -160,7 +160,9 @@ func ExampleStartReshare() {
 		if err != nil {
 			panic(err)
 		}
-		plan, err := frost.NewResharePlan(shares[id], sessionID, newParties, 2)
+		plan, err := frost.NewResharePlan(frost.ResharePlanOption{
+			OldKey: shares[id], SessionID: sessionID, NewParties: newParties, NewThreshold: 2,
+		})
 		if err != nil {
 			panic(err)
 		}
@@ -175,7 +177,10 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	recipientPlan, err := frost.NewResharePlanFromPublic(oldPublicKey, nil, oldParties, sessionID, newParties, 2)
+	recipientPlan, err := frost.NewPublicResharePlan(frost.PublicResharePlanOption{
+		OldPublicKey: oldPublicKey, OldParties: oldParties, SessionID: sessionID,
+		NewParties: newParties, NewThreshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}

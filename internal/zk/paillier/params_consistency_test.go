@@ -2,7 +2,19 @@ package paillier
 
 import (
 	"testing"
+
+	pai "github.com/islishude/tss/internal/paillier"
 )
+
+func fastSecurityParams() SecurityParams {
+	return SecurityParams{
+		Ell:             256,
+		EllPrime:        512,
+		Epsilon:         64,
+		ChallengeBits:   128,
+		MinPaillierBits: 768,
+	}
+}
 
 // TestDefaultSecurityParamsValues verifies that the production
 // DefaultSecurityParams match their documented values. Any drift here
@@ -102,41 +114,41 @@ func TestChallengeBitsDoNotExceedHashOutput(t *testing.T) {
 		t.Fatalf("ChallengeBits = %d exceeds SHA-256 output (256 bits)", sp.ChallengeBits)
 	}
 
-	fast := FastSecurityParams()
+	fast := fastSecurityParams()
 	if fast.ChallengeBits > 256 {
-		t.Fatalf("FastSecurityParams.ChallengeBits = %d exceeds SHA-256 output", fast.ChallengeBits)
+		t.Fatalf("test security params.ChallengeBits = %d exceeds SHA-256 output", fast.ChallengeBits)
 	}
 }
 
-// TestFastSecurityParamsSanity verifies FastSecurityParams uses reduced
+// TestReducedSecurityParamsSanity verifies fastSecurityParams uses reduced
 // parameters that are suitable for tests but NOT for production.
-func TestFastSecurityParamsSanity(t *testing.T) {
+func TestReducedSecurityParamsSanity(t *testing.T) {
 	t.Parallel()
-	fast := FastSecurityParams()
+	fast := fastSecurityParams()
 	def := DefaultSecurityParams()
 
 	if fast.Ell != 256 {
-		t.Errorf("FastSecurityParams.Ell = %d, want 256 (should match curve)", fast.Ell)
+		t.Errorf("test security params.Ell = %d, want 256 (should match curve)", fast.Ell)
 	}
 	if fast.EllPrime != 512 {
-		t.Errorf("FastSecurityParams.EllPrime = %d, want 512", fast.EllPrime)
+		t.Errorf("test security params.EllPrime = %d, want 512", fast.EllPrime)
 	}
 	if fast.Epsilon != 64 {
-		t.Errorf("FastSecurityParams.Epsilon = %d, want 64", fast.Epsilon)
+		t.Errorf("test security params.Epsilon = %d, want 64", fast.Epsilon)
 	}
 	if fast.ChallengeBits != 128 {
-		t.Errorf("FastSecurityParams.ChallengeBits = %d, want 128", fast.ChallengeBits)
+		t.Errorf("test security params.ChallengeBits = %d, want 128", fast.ChallengeBits)
 	}
 	if fast.MinPaillierBits != 768 {
-		t.Errorf("FastSecurityParams.MinPaillierBits = %d, want 768", fast.MinPaillierBits)
+		t.Errorf("test security params.MinPaillierBits = %d, want 768", fast.MinPaillierBits)
 	}
 
 	// Fast params must be weaker than default (faster tests)
 	if fast.MinPaillierBits >= def.MinPaillierBits {
-		t.Error("FastSecurityParams.MinPaillierBits must be < DefaultSecurityParams.MinPaillierBits")
+		t.Error("test security params.MinPaillierBits must be < DefaultSecurityParams.MinPaillierBits")
 	}
 	if fast.Epsilon >= def.Epsilon {
-		t.Error("FastSecurityParams.Epsilon must be < DefaultSecurityParams.Epsilon")
+		t.Error("test security params.Epsilon must be < DefaultSecurityParams.Epsilon")
 	}
 }
 
@@ -150,13 +162,18 @@ func TestSecurityParamsValidate(t *testing.T) {
 		ok     bool
 	}{
 		{"default", DefaultSecurityParams(), true},
-		{"fast", FastSecurityParams(), true},
+		{"fast", fastSecurityParams(), true},
 		{"zero Ell", SecurityParams{Ell: 0, EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: 1}, false},
 		{"zero EllPrime", SecurityParams{Ell: 1, EllPrime: 0, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: 1}, false},
 		{"zero Epsilon", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 0, ChallengeBits: 1, MinPaillierBits: 1}, false},
 		{"zero ChallengeBits", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 0, MinPaillierBits: 1}, false},
 		{"ChallengeBits > 256", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 257, MinPaillierBits: 1}, false},
 		{"zero MinPaillierBits", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 128, MinPaillierBits: 0}, false},
+		{"MinPaillierBits below structural floor", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 128, MinPaillierBits: pai.MinModulusBits - 1}, false},
+		{"MinPaillierBits above hard limit", SecurityParams{Ell: 1, EllPrime: 1, Epsilon: 1, ChallengeBits: 128, MinPaillierBits: maxSecurityParameterBits + 1}, false},
+		{"encryption range above hard limit", SecurityParams{Ell: maxSecurityParameterBits, EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
+		{"affine range above hard limit", SecurityParams{Ell: 1, EllPrime: maxSecurityParameterBits, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
+		{"overflowing encryption range", SecurityParams{Ell: ^uint32(0), EllPrime: 1, Epsilon: 1, ChallengeBits: 1, MinPaillierBits: pai.MinModulusBits}, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -168,6 +185,24 @@ func TestSecurityParamsValidate(t *testing.T) {
 				t.Error("Validate() = nil, want error")
 			}
 		})
+	}
+}
+
+func TestSecurityParamsRangesDoNotOverflow(t *testing.T) {
+	t.Parallel()
+
+	params := SecurityParams{
+		Ell:             ^uint32(0),
+		EllPrime:        ^uint32(0),
+		Epsilon:         ^uint32(0),
+		ChallengeBits:   1,
+		MinPaillierBits: pai.MinModulusBits,
+	}
+	if got := params.EncRange(); got != maxSecurityParameterBits {
+		t.Fatalf("EncRange() = %d, want bounded value %d", got, maxSecurityParameterBits)
+	}
+	if got := params.AffGRange(); got != maxSecurityParameterBits {
+		t.Fatalf("AffGRange() = %d, want bounded value %d", got, maxSecurityParameterBits)
 	}
 }
 
@@ -183,32 +218,8 @@ func TestEllPrimeExceedsEll(t *testing.T) {
 		t.Logf("EllPrime = %d — verify this matches CGGMP paper Table 1", sp.EllPrime)
 	}
 
-	fast := FastSecurityParams()
+	fast := fastSecurityParams()
 	if fast.EllPrime <= fast.Ell {
-		t.Errorf("FastSecurityParams.EllPrime (%d) must be strictly greater than Ell (%d)", fast.EllPrime, fast.Ell)
-	}
-}
-
-// TestActiveSecurityParamsRespectsOverride verifies the test override mechanism.
-func TestActiveSecurityParamsRespectsOverride(t *testing.T) {
-	def := ActiveSecurityParams()
-	custom := SecurityParams{Ell: 256, EllPrime: 1024, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 768}
-
-	restore := SetSecurityParamsForTesting(custom)
-	defer restore()
-
-	active := ActiveSecurityParams()
-	if active.EllPrime != 1024 {
-		t.Errorf("ActiveSecurityParams.EllPrime = %d, want 1024", active.EllPrime)
-	}
-	if active.Epsilon != 64 {
-		t.Errorf("ActiveSecurityParams.Epsilon = %d, want 64", active.Epsilon)
-	}
-
-	// After restore, should return to default
-	restore()
-	restored := ActiveSecurityParams()
-	if restored.EllPrime != def.EllPrime {
-		t.Error("ActiveSecurityParams did not restore to default")
+		t.Errorf("test security params.EllPrime (%d) must be strictly greater than Ell (%d)", fast.EllPrime, fast.Ell)
 	}
 }

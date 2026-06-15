@@ -44,7 +44,7 @@ func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 		pubKey := ""
 		for i := range n {
 			parties[i] = i + 1
-			raw, err := shares[tss.PartyID(i+1)].MarshalBinary()
+			raw, err := shares[tss.PartyID(i+1)].MarshalBinaryWithLimits(testLimits())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -55,7 +55,7 @@ func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 		presignMap := secpPresign(t, shares, signerIDs)
 		presigns := make([]string, len(signerIDs))
 		for j, pid := range signerIDs {
-			raw, err := presignMap[pid].MarshalBinary()
+			raw, err := presignMap[pid].MarshalBinaryWithLimits(testLimits())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -125,18 +125,18 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				share, err := UnmarshalKeyShare(raw)
+				share, err := UnmarshalKeyShareWithLimits(raw, testLimits())
 				if err != nil {
 					t.Fatalf("UnmarshalKeyShare for party %d: %v", pid, err)
 				}
-				if err := share.Validate(); err != nil {
+				if err := share.ValidateWithLimits(testLimits()); err != nil {
 					t.Fatalf("key share %d validation: %v", pid, err)
 				}
 				if hex.EncodeToString(share.PublicKeyBytes()) != v.GroupPublicKey {
 					t.Fatalf("party %d public key does not match group public key in vector", pid)
 				}
 				// Verify round-trip encoding is stable.
-				reEncoded, err := share.MarshalBinary()
+				reEncoded, err := share.MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -150,14 +150,14 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				presign, err := UnmarshalPresign(raw)
+				presign, err := UnmarshalPresignWithLimits(raw, testLimits())
 				if err != nil {
 					t.Fatalf("UnmarshalPresign %d: %v", i, err)
 				}
-				if err := presign.Validate(); err != nil {
+				if err := presign.ValidateWithLimits(testLimits()); err != nil {
 					t.Fatalf("presign %d validation: %v", i, err)
 				}
-				reEncoded, err := presign.MarshalBinary()
+				reEncoded, err := presign.MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -180,7 +180,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			for j := range signerIDs {
 				signerIDs[j] = tss.PartyID(v.Parties[j])
 				raw, _ := hex.DecodeString(v.KeygenShares[j])
-				signerShares[j], _ = UnmarshalKeyShare(raw)
+				signerShares[j], _ = UnmarshalKeyShareWithLimits(raw, testLimits())
 			}
 			pubKey, _ := hex.DecodeString(v.GroupPublicKey)
 			_, sig, err := SignDigest(digest, signerShares)

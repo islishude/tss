@@ -15,7 +15,7 @@ import (
 func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	t.Parallel()
 	presign := minimalCGGMP21Presign(t)
-	raw, err := presign.MarshalBinary()
+	raw, err := presign.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -24,18 +24,18 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	testutil.CheckGolden(t, golden, raw)
 
 	// Round-trip: unmarshal → marshal must produce identical bytes.
-	decoded, err := UnmarshalPresign(raw)
+	decoded, err := UnmarshalPresignWithLimits(raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := decoded.MarshalBinary()
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalPresign(append(raw, 0)); err == nil {
+	if _, err := UnmarshalPresignWithLimits(append(raw, 0), testLimits()); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

@@ -65,7 +65,8 @@ General rules:
   information to reproduce failures.
 - User-facing `Example*` functions must use an external test package and only
   public APIs. They must not import `internal/*` packages or call test-only
-  helpers such as `NewTestEnvelopeGuard`, `TestGuardConfig`, or `TestLimits`.
+  helpers such as `NewTestEnvelopeGuard`, `TestGuardConfig`, or package-local
+  test limit/profile factories.
   Full cryptographic lifecycle examples must retain the build tag for their
   corresponding test tier.
 - Reject-path tests must assert the error category and all relevant negative side
@@ -74,15 +75,19 @@ General rules:
   nonces, witnesses, Paillier private material, MtA secrets, or presign secrets.
 - Use table-driven tests when cases share setup and assertions. Keep tests in the
   file that owns the invariant rather than creating broad catch-all files.
+- Tests must not alter package-level default limits or cryptographic security
+  parameters. Tests that need 1-of-1 thresholds, oversized signer sets, reduced
+  Paillier moduli, or fast ZK parameters must pass explicit test `Limits` and
+  `SecurityParams` through plan options or `WithLimits` APIs.
 
 ### Parallelism
 
 Use `t.Parallel()` only for deterministic, state-isolated tests.
 
 Do not parallelize tests that mutate package globals, process-wide environment,
-working directories, fixed paths or ports, shared mutable fixtures, test limits,
-or execution-order state. Give each parallel test its own deterministic reader
-and mutable objects.
+working directories, fixed paths or ports, shared mutable fixtures, or
+execution-order state. Give each parallel test its own deterministic reader,
+limits, security parameters, and mutable objects.
 
 Crypto-heavy integration flows must use controlled concurrency. When changing
 parallelism or fixture sharing, run the affected package repeatedly and use the

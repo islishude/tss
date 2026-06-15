@@ -122,7 +122,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := marshalKeygenCommitmentsPayload(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit, PlanHash: planHash})
+	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -137,7 +137,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		}
 		share := evalScalarPolynomial(poly, id)
 		shareBytes := share.Bytes()
-		payload, err := marshalKeygenSharePayload(keygenSharePayload{Share: shareBytes, PlanHash: planHash})
+		payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -207,7 +207,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	payload := env.Payload()
 	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		p, err := unmarshalKeygenCommitmentsPayload(payload)
+		p, err := unmarshalKeygenCommitmentsPayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -229,7 +229,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		}
 		s.chainCodeComms[base.From] = append([]byte(nil), p.ChainCodeCommit...)
 	case payloadKeygenShare:
-		p, err := unmarshalKeygenSharePayload(payload)
+		p, err := unmarshalKeygenSharePayloadWithLimits(payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}

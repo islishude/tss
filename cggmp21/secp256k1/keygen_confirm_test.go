@@ -14,7 +14,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	share := shares[1]
-	c, err := share.KeygenConfirmation()
+	c, err := share.KeygenConfirmationWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,19 +43,19 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
-		c, err := shares[id].KeygenConfirmation()
+		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
 		confirmations = append(confirmations, c)
 	}
-	if err := applyKeygenConfirmationSet(shares[1], confirmations); err != nil {
+	if err := applyKeygenConfirmationSet(shares[1], confirmations, testLimits()); err != nil {
 		t.Fatal(err)
 	}
 	if len(shares[1].KeygenConfirmations()) != len(confirmations) {
 		t.Fatal("confirmation evidence not stored after successful verification")
 	}
-	if err := shares[1].Validate(); err != nil {
+	if err := shares[1].ValidateWithLimits(testLimits()); err != nil {
 		t.Fatalf("confirmed share did not validate: %v", err)
 	}
 }
@@ -67,7 +67,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var baseConfirmations []*KeygenConfirmation
 	for _, id := range []tss.PartyID{1, 2, 3} {
-		c, err := shares[id].KeygenConfirmation()
+		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -108,7 +108,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 				confirmations[i] = &clone
 			}
 			tc.mutate(confirmations[tc.tamperAt])
-			if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
+			if err := applyKeygenConfirmationSet(shares[1], confirmations, testLimits()); err == nil {
 				t.Fatalf("expected rejection for %s", tc.name)
 			}
 		})
@@ -128,26 +128,26 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 		{
 			name: "duplicate sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmation()
-				c2, _ := shares[2].KeygenConfirmation()
-				c3dup, _ := shares[2].KeygenConfirmation()
+				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
+				c3dup, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1, c2, c3dup}
 			},
 		},
 		{
 			name: "missing sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmation()
-				c2, _ := shares[2].KeygenConfirmation()
+				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1, c2}
 			},
 		},
 		{
 			name: "unknown sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmation()
-				c2, _ := shares[2].KeygenConfirmation()
-				c3, _ := shares[3].KeygenConfirmation()
+				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
+				c3, _ := shares[3].KeygenConfirmationWithLimits(testLimits())
 				c3.Sender = 99
 				return []*KeygenConfirmation{c1, c2, c3}
 			},
@@ -155,7 +155,7 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 		{
 			name: "wrong count",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmation()
+				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1}
 			},
 		},
@@ -165,7 +165,7 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			confirmations := tc.confirmations(t)
-			if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
+			if err := applyKeygenConfirmationSet(shares[1], confirmations, testLimits()); err == nil {
 				t.Fatalf("expected rejection for %s", tc.name)
 			}
 		})
@@ -176,7 +176,7 @@ func TestUnconfirmedKeyShareRejectedByRequireMPC(t *testing.T) {
 	t.Parallel()
 	shares := secpKeygenWithoutConfirmation(t, 2, 3)
 	// Shares from secpKeygenWithoutConfirmation are NOT confirmed.
-	if err := shares[1].requireMPCMaterial(); err == nil {
+	if err := shares[1].requireMPCMaterial(testLimits()); err == nil {
 		t.Fatal("expected requireMPCMaterial to reject unconfirmed share")
 	}
 }
@@ -184,7 +184,7 @@ func TestUnconfirmedKeyShareRejectedByRequireMPC(t *testing.T) {
 func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
 	t.Parallel()
 	shares := secpKeygenWithoutConfirmation(t, 2, 3)
-	if err := shares[1].Validate(); err == nil {
+	if err := shares[1].ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("expected Validate to reject unconfirmed share")
 	}
 	if _, err := shares[1].MarshalBinary(); err == nil {
@@ -195,7 +195,7 @@ func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
 func TestConfirmedKeyShareAcceptedByRequireMPC(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	if err := shares[1].requireMPCMaterial(); err != nil {
+	if err := shares[1].requireMPCMaterial(testLimits()); err != nil {
 		t.Fatalf("requireMPCMaterial rejected confirmed share: %v", err)
 	}
 }

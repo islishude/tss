@@ -22,7 +22,7 @@ import (
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound3Payload(env.Payload)
+	p, err := unmarshalPresignRound3PayloadWithLimits(env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(
@@ -242,13 +242,13 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		return nil, err
 	}
 
-	payload, err := marshalPresignRound3Payload(presignRound3Payload{
+	payload, err := marshalPresignRound3PayloadWithLimits(presignRound3Payload{
 		Delta:    deltaShare,
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proofBytes,
 		PlanHash: s.planHash,
-	})
+	}, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -265,6 +265,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		consumed:             new(atomic.Bool),
 		attempt:              newPresignAttemptBinding(false),
 		version:              tss.Version,
+		securityParams:       s.securityParams,
 		party:                s.key.state.party,
 		threshold:            s.key.state.threshold,
 		signers:              append([]tss.PartyID(nil), s.signers...),

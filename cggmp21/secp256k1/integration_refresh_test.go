@@ -70,7 +70,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	if !ok {
 		t.Fatal("refresh did not complete")
 	}
-	if err := newShare.Validate(); err != nil {
+	if err := newShare.ValidateWithLimits(testLimits()); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(oldPub, newShare.PublicKeyBytes()) {
@@ -187,7 +187,7 @@ func TestThresholdECDSARefreshValidationBindsPreservedChainCode(t *testing.T) {
 		t.Fatal("refresh did not produce party 1 key share")
 	}
 	share.state.chainCode[0] ^= 1
-	if err := share.Validate(); err == nil {
+	if err := share.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("Validate accepted refreshed share with tampered preserved chain code")
 	}
 }
@@ -242,7 +242,7 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 				}
 			}
 			for _, id := range parties {
-				if err := newShares[id].Validate(); err != nil {
+				if err := newShares[id].ValidateWithLimits(testLimits()); err != nil {
 					t.Fatal(err)
 				}
 			}

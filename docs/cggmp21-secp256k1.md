@@ -307,7 +307,9 @@ durable attempt record is authoritative after restart:
 if IsPresignConsumed(presign) { /* discard */ }
 
 // NewSignPlan/StartSign require request.AttemptStore and commit before returning out:
-plan, err := NewSignPlan(share, presign, sessionID, request)
+plan, err := NewSignPlan(SignPlanOption{
+    Key: share, Presign: presign, SessionID: sessionID, Request: request,
+})
 sess, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: ctx}, guard)
 
 // After restart, replay the exact committed envelope while delivery is pending,
@@ -727,7 +729,7 @@ sequenceDiagram
 ```go
 option := KeygenPlanOption{
     SessionID: sessionID, Parties: parties, Threshold: threshold,
-    EnableHD: enableHD, PaillierBits: paillierBits,
+    EnableHD: enableHD, SecurityParams: &securityParams,
 }
 plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
@@ -735,11 +737,20 @@ out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.Complete()
 ```
 
+`SecurityParams` is a small value object and supports canonical persistence:
+
+```go
+raw, err := securityParams.MarshalBinary()
+securityParams, err = UnmarshalSecurityParams(raw)
+```
+
 ### Presign
 
 ```go
 ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
-plan, err := NewPresignPlan(share, sessionID, signers, ctx)
+plan, err := NewPresignPlan(PresignPlanOption{
+    Key: share, SessionID: sessionID, Signers: signers, Context: ctx,
+})
 ps, out, err := StartPresign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: rng}, guard)
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
@@ -753,7 +764,9 @@ context := presign.Context() // includes a copied derivation path
 ```go
 request := SignRequest{Context: ctx, Message: message, LowS: true, AttemptStore: store}
 // AttemptStore atomically binds presign.ID() to the exact encrypted outbox.
-plan, err := NewSignPlan(share, presign, sessionID, request)
+plan, err := NewSignPlan(SignPlanOption{
+    Key: share, Presign: presign, SessionID: sessionID, Request: request,
+})
 ss, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: context.Background()}, guard)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
@@ -763,7 +776,7 @@ ok := VerifySignature(publicKey, request, sig)
 ### Refresh
 
 ```go
-plan, err := NewRefreshPlan(oldShare, sessionID)
+plan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldShare, SessionID: sessionID})
 rs, out, err := StartRefresh(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 out, err := rs.HandleRefreshMessage(env)
 newShare, ok := rs.KeyShare()
@@ -772,7 +785,10 @@ newShare, ok := rs.KeyShare()
 ### Reshare
 
 ```go
-plan, err := NewResharePlan(oldShare, sessionID, dealerParties, newParties, newThreshold)
+plan, err := NewResharePlan(ResharePlanOption{
+    OldKey: oldShare, SessionID: sessionID, DealerParties: dealerParties,
+    NewParties: newParties, NewThreshold: newThreshold,
+})
 rawPlan, err := plan.MarshalBinary()
 plan, err = UnmarshalResharePlan(rawPlan)
 dealer, out, err := StartReshareDealer(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)

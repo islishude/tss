@@ -374,9 +374,9 @@ func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarSta
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("logstar"))
 	t.AppendUint16("version", 1)
-	t.AppendUint32("ell", uint32(params.Ell))
-	t.AppendUint32("epsilon", uint32(params.Epsilon))
-	t.AppendUint32("challenge_bits", uint32(params.ChallengeBits))
+	t.AppendUint32("ell", params.Ell)
+	t.AppendUint32("epsilon", params.Epsilon)
+	t.AppendUint32("challenge_bits", params.ChallengeBits)
 	t.AppendBytes("state", state)
 
 	// Statement.

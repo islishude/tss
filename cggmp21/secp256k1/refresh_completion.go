@@ -125,6 +125,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	// Construct a temporary share for domain-separated Paillier proof binding.
 	localProofShare := &KeyShare{state: &keyShareState{
+		securityParams:         s.securityParams,
 		party:                  s.oldKey.state.party,
 		threshold:              s.cfg.Threshold,
 		parties:                s.oldKey.state.parties,
@@ -149,6 +150,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
 		version:                tss.Version,
+		securityParams:         s.securityParams,
 		party:                  s.oldKey.state.party,
 		threshold:              s.cfg.Threshold,
 		parties:                append([]tss.PartyID(nil), s.oldKey.state.parties...),
@@ -196,7 +198,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		X:   new(big.Int).Set(newSecret),
 		Rho: new(big.Int).Set(logRandomness),
 	}
-	logProof, err := zkpai.ProveLogStar(zkpai.ActiveSecurityParams(), logDomain, logStmt, logWitness, s.cfg.Reader())
+	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return nil, err
 	}
@@ -206,10 +208,10 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	s.newShare.state.logCiphertext = logCiphertext.Bytes()
 	s.newShare.state.logProof = logProofBytes
-	if err := s.newShare.validateWithoutConfirmations(); err != nil {
+	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
-	confirmation, err := s.newShare.KeygenConfirmation()
+	confirmation, err := s.newShare.KeygenConfirmationWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}

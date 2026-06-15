@@ -37,10 +37,12 @@ func startFROSTKeygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) 
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
 	})
+	limits := testLimits()
 	plan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: config.SessionID,
 		Parties:   config.Parties,
 		Threshold: config.Threshold,
+		Limits:    &limits,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -55,6 +57,10 @@ func startFROSTKeygenWithPlanOption(config tss.ThresholdConfig, option KeygenPla
 	option.SessionID = config.SessionID
 	option.Parties = config.Parties
 	option.Threshold = config.Threshold
+	if option.Limits == nil {
+		limits := testLimits()
+		option.Limits = &limits
+	}
 	plan, err := NewKeygenPlan(option)
 	if err != nil {
 		return nil, nil, err
@@ -66,7 +72,10 @@ func startFROSTSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	plan, err := NewSignPlan(key, sessionID, signers, message, nil)
+	limits := testLimits()
+	plan, err := NewSignPlan(SignPlanOption{
+		Key: key, SessionID: sessionID, Signers: signers, Message: message, Limits: &limits,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -77,7 +86,14 @@ func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers [
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(key.state.party, testFROSTGuardParties(key.state.parties, key.state.party), sessionID)
 	})
-	plan, err := NewSignPlan(key, sessionID, signers, message, opts.AdditiveShift)
+	limits := testLimits()
+	if opts.Limits != nil {
+		limits = *opts.Limits
+	}
+	plan, err := NewSignPlan(SignPlanOption{
+		Key: key, SessionID: sessionID, Signers: signers, Message: message,
+		AdditiveShift: opts.AdditiveShift, Limits: &limits,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -88,7 +104,8 @@ func startFROSTRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(oldKey.state.parties, config.Self), config.SessionID)
 	})
-	plan, err := NewRefreshPlan(oldKey, config.SessionID)
+	limits := testLimits()
+	plan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldKey, SessionID: config.SessionID, Limits: &limits})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -99,7 +116,11 @@ func startFROSTReshare(oldKey *KeyShare, newParties []tss.PartyID, newThreshold 
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldKey.state.parties, newParties)), config.Self), config.SessionID)
 	})
-	plan, err := NewResharePlan(oldKey, config.SessionID, newParties, newThreshold)
+	limits := testLimits()
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: oldKey, SessionID: config.SessionID, NewParties: newParties,
+		NewThreshold: newThreshold, Limits: &limits,
+	})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -110,7 +131,12 @@ func startFROSTReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, n
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties([]tss.PartyID(reshareGuardParties(oldParties, newParties)), config.Self), config.SessionID)
 	})
-	plan, err := NewResharePlanFromPublic(oldPublicKey, oldChainCode, oldParties, config.SessionID, newParties, newThreshold)
+	limits := testLimits()
+	plan, err := NewPublicResharePlan(PublicResharePlanOption{
+		OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties,
+		SessionID: config.SessionID, NewParties: newParties, NewThreshold: newThreshold,
+		Limits: &limits,
+	})
 	if err != nil {
 		return nil, err
 	}

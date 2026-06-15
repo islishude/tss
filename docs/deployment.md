@@ -110,7 +110,9 @@ signGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-signPlan, err := ed25519.NewSignPlan(share, sessionID, signers, message, nil)
+signPlan, err := ed25519.NewSignPlan(ed25519.SignPlanOption{
+    Key: share, SessionID: sessionID, Signers: signers, Message: message,
+})
 signSession, out, err := ed25519.StartSign(share, signPlan, tss.LocalConfig{Self: share.PartyID()}, signGuard)
 // Route out (round 1 commitments) to other signers.
 // Handle round 1 responses; obtain round 2 partials.
@@ -132,7 +134,9 @@ presignGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-presignPlan, err := secp256k1.NewPresignPlan(keyShare, sessionID, signers, ctx)
+presignPlan, err := secp256k1.NewPresignPlan(secp256k1.PresignPlanOption{
+    Key: keyShare, SessionID: sessionID, Signers: signers, Context: ctx,
+})
 presignSession, out, err := secp256k1.StartPresign(keyShare, presignPlan, tss.LocalConfig{Self: keyShare.PartyID()}, presignGuard)
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
@@ -157,7 +161,9 @@ signGuard, err := (tss.GuardConfig{
     Cache:       replayCache,
     AckVerifier: ackVerifier,
 }).BuildGuard()
-signPlan, _ := secp256k1.NewSignPlan(keyShare, presign, sessionID, request)
+signPlan, _ := secp256k1.NewSignPlan(secp256k1.SignPlanOption{
+    Key: keyShare, Presign: presign, SessionID: sessionID, Request: request,
+})
 signSession, out, _ := secp256k1.StartSign(keyShare, presign, signPlan, tss.LocalConfig{Self: keyShare.PartyID(), Context: context.Background()}, signGuard)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()

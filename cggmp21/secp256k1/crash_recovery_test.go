@@ -49,7 +49,7 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 		t.Error("PaillierPublicKey mismatch after round-trip")
 	}
 
-	if err := restored.Validate(); err != nil {
+	if err := restored.ValidateWithLimits(testLimits()); err != nil {
 		t.Fatalf("Validate failed on restored share: %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
 	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sid)
-	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard); err == nil {
+	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard, testLimits()); err == nil {
 		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
