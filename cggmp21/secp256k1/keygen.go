@@ -91,24 +91,25 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *KeygenSession) validateInbound(env tss.Envelope) error {
+func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
 // It dispatches to per-round/per-phase handlers that each follow the template:
 // parse → policy validate → cryptographic verify → mutate state → emit.
-func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, completedSessionError(env.Round, env.From)
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, abortedSessionError(env.Round, env.From)
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {
@@ -123,31 +124,31 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 	}
 
 	// Round 2 (confirmation) dispatch.
-	if env.PayloadType == payloadKeygenConfirmation {
-		if env.Round != keygenConfirmationRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
+	if base.PayloadType == payloadKeygenConfirmation {
+		if base.Round != keygenConfirmationRound {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen confirmation in wrong round"))
 		}
-		return s.handleKeygenConfirmation(env)
+		return s.handleKeygenConfirmation(base)
 	}
 
 	// Round 1 dispatch.
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen only accepts round 1 messages"))
+	if base.Round != 1 {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages"))
 	}
-	switch env.PayloadType {
+	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		if _, ok := s.commits[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
+		if _, ok := s.commits[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate commitments"))
 		}
-		return s.handleKeygenCommitments(env)
+		return s.handleKeygenCommitments(base)
 
 	case payloadKeygenShare:
-		if _, ok := s.shares[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
+		if _, ok := s.shares[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate share"))
 		}
-		return s.handleKeygenShare(env)
+		return s.handleKeygenShare(base)
 
 	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 }

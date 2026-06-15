@@ -3,16 +3,17 @@
 //
 // The root package intentionally does not provide a network transport, durable
 // storage, or secret-at-rest encryption. Callers are responsible for authenticated
-// delivery of envelopes and must set [Envelope.Security] via the transport
-// receive path. Confidentiality requirements are defined per payload type by
-// the protocol [PolicySet] and enforced by [EnvelopeGuard].
+// delivery of envelopes and must construct [InboundEnvelope] values with
+// [OpenEnvelope] and transport-verified [ReceiveInfo]. Confidentiality
+// requirements are defined per payload type by the protocol [PolicySet] and
+// enforced by [EnvelopeGuard].
 //
 // # Security Model
 //
 // Every protocol session must receive an [EnvelopeGuard] at its Start* entry
 // point before it can emit or process protocol envelopes. The guard enforces:
-//   - transport authentication ([SecurityContext.Authenticated])
-//   - sender identity binding (AuthenticatedParty == Envelope.From)
+//   - transport authentication ([ReceiveInfo.Peer])
+//   - sender identity binding (ReceiveInfo.Peer == Envelope.From)
 //   - confidentiality per protocol policy ([DeliveryPolicy.Confidentiality])
 //   - broadcast consistency via [BroadcastCertificate] where required
 //   - replay detection via [ReplayCache]

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/islishude/tss"
 )
@@ -64,10 +65,6 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		presignSessions[id] = session
-		for i := range out {
-			out[i].Security.Authenticated = true
-			out[i].Security.AuthenticatedParty = out[i].From
-		}
 		presignQueue = append(presignQueue, out...)
 	}
 	for len(presignQueue) > 0 {
@@ -77,13 +74,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := presignSessions[id].HandlePresignMessage(env)
+			inbound, err := openSimulationInbound(env)
 			if err != nil {
 				return nil, nil, err
 			}
-			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
+			out, err := presignSessions[id].HandlePresignMessage(inbound)
+			if err != nil {
+				return nil, nil, err
 			}
 			presignQueue = append(presignQueue, out...)
 		}
@@ -125,10 +122,6 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		signSessions[id] = session
-		for i := range out {
-			out[i].Security.Authenticated = true
-			out[i].Security.AuthenticatedParty = out[i].From
-		}
 		signMessages = append(signMessages, out...)
 	}
 	for _, env := range signMessages {
@@ -136,7 +129,11 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			if id == env.From {
 				continue
 			}
-			if _, err := signSessions[id].HandleSignMessage(env); err != nil {
+			inbound, err := openSimulationInbound(env)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := signSessions[id].HandleSignMessage(inbound); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -147,6 +144,20 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 	}
 	return nil, nil, errors.New("signature not completed")
+}
+
+func openSimulationInbound(env tss.Envelope) (tss.InboundEnvelope, error) {
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		return tss.InboundEnvelope{}, err
+	}
+	return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: tss.ChannelConfidential,
+		ChannelID:  "simulation",
+		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		ReceivedAt: time.Now(),
+	})
 }
 
 type simulationSignAttemptStore struct {

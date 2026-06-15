@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // makeSessionID creates a random session ID for tests.
@@ -61,11 +62,9 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitEnv.Security.Authenticated = true
-	commitEnv.Security.AuthenticatedParty = 12
 	// Deliberately omit BroadcastCertificate even though policy requires it.
 
-	_, err = session.HandleKeygenMessage(commitEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrMissingBroadcastCertificate) {
 		t.Fatalf("expected ErrMissingBroadcastCertificate, got %v", err)
 	}
@@ -97,11 +96,9 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareEnv.Security.Authenticated = true
-	shareEnv.Security.AuthenticatedParty = 22
 	// Confidential is deliberately left false.
 
-	_, err = session.HandleKeygenMessage(shareEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}
@@ -132,12 +129,12 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitEnv.Security.Authenticated = false // unauthenticated
 
-	_, err = session.HandleKeygenMessage(commitEnv)
+	_, err = testutil.OpenInboundEnvelope(commitEnv, tss.ReceiveInfo{Protection: tss.ChannelPlaintext}, nil)
 	if !errors.Is(err, tss.ErrUnauthenticatedTransport) {
 		t.Fatalf("expected ErrUnauthenticatedTransport, got %v", err)
 	}
+	_ = session
 }
 
 // TestCGGMP21KeygenRejectsSenderSpoofing verifies that identity mismatch is caught.
@@ -164,13 +161,15 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = 43 // transport says 43, but envelope says 42
 
-	_, err = session.HandleKeygenMessage(env)
+	_, err = testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{
+		Peer:       43,
+		Protection: tss.ChannelPlaintext,
+	}, nil)
 	if !errors.Is(err, tss.ErrSenderIdentityMismatch) {
 		t.Fatalf("expected ErrSenderIdentityMismatch, got %v", err)
 	}
+	_ = session
 }
 
 // TestCGGMP21KeygenRejectsReplay verifies that replayed keygen messages are detected.
@@ -198,14 +197,12 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitEnv.Security.Authenticated = true
-	commitEnv.Security.AuthenticatedParty = 52
 
 	// First delivery: may fail (invalid payload) but should NOT fail with ErrDuplicateMessage.
-	_, _ = session.HandleKeygenMessage(commitEnv)
+	_, _ = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
 
 	// Second delivery: must fail with ErrDuplicateMessage if it passed the guard the first time.
-	_, err = session.HandleKeygenMessage(commitEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrDuplicateMessage) {
 		// If it wasn't ErrDuplicateMessage, ensure it's some other valid error (not nil).
 		if err == nil {
@@ -242,11 +239,7 @@ func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = 62
-	env.Security.Confidential = true
-
-	_, err = session.HandleKeygenMessage(env)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if !errors.Is(err, tss.ErrUnknownPayloadPolicy) {
 		t.Fatalf("expected ErrUnknownPayloadPolicy, got %v", err)
 	}

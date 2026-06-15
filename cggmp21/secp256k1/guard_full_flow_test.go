@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // ed25519Signer implements tss.BroadcastAckSigner for a test party.
@@ -88,41 +89,37 @@ func buildBroadcastCertificate(t *testing.T, env tss.Envelope, parties tss.Party
 	return cert
 }
 
-// deliverAuthenticated delivers an envelope through simulated authenticated
-// transport. For direct (point-to-point) messages, Confidential is set based
-// on the policy. For broadcast messages with BroadcastConsistencyRequired,
-// a BroadcastCertificate is built and attached.
-func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, parties tss.PartySet, km *keyMaterial) tss.Envelope {
+// deliverWithCertificate opens an envelope through simulated authenticated
+// transport and attaches a BroadcastCertificate when the policy requires one.
+func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, parties tss.PartySet, km *keyMaterial) tss.InboundEnvelope {
 	t.Helper()
-	delivered := env.Clone()
-	delivered.Security.Authenticated = true
-	delivered.Security.AuthenticatedParty = env.From
-	// Set confidentiality based on policy.
+	protection := tss.ChannelPlaintext
+	var cert *tss.BroadcastCertificate
 	for _, p := range CGGMP21Policies().Entries() {
 		if p.Protocol == protocol && p.Round == env.Round && p.PayloadType == env.PayloadType {
 			if p.Confidentiality == tss.ConfidentialityRequired {
-				delivered.Security.Confidential = true
+				protection = tss.ChannelConfidential
+			}
+			if env.To != 0 {
+				protection = tss.ChannelConfidential
+			}
+			if env.To == 0 && p.BroadcastConsistency == tss.BroadcastConsistencyRequired {
+				cert = buildBroadcastCertificate(t, env, parties, km)
 			}
 			break
 		}
 	}
-	// Also set confidential for any direct (point-to-point) message.
-	if env.To != 0 {
-		delivered.Security.Confidential = true
-	}
-	if env.To == 0 {
-		// Broadcast: attach certificate for consistency-required payloads.
-		for _, p := range CGGMP21Policies().Entries() {
-			if p.Protocol == protocol && p.Round == env.Round && p.PayloadType == env.PayloadType {
-				if p.BroadcastConsistency == tss.BroadcastConsistencyRequired {
-					delivered.Broadcast = buildBroadcastCertificate(t, env, parties, km)
-				}
-				break
-			}
-		}
-	}
 	_ = to
-	return delivered
+	in, err := testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: protection,
+		ChannelID:  "test",
+		PeerKeyID:  "party",
+	}, cert)
+	if err != nil {
+		t.Fatalf("open inbound envelope: %v", err)
+	}
+	return in
 }
 
 // TestCGGMP21FullGuardProtectedKeygenSign runs a complete 2-of-3 keygen→presign→sign
@@ -332,18 +329,18 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = 72
 
 	// Build a certificate for a DIFFERENT payload.
 	wrongEnv := env
 	wrongEnv.Payload = []byte("different-payload")
 	wrongEnv = wrongEnv.RecomputeTranscriptHash()
 	cert := buildBroadcastCertificate(t, wrongEnv, parties, km)
-	env.Broadcast = cert
-
 	// Guard should reject because cert payload hash doesn't match envelope payload.
-	_, err = session.HandleKeygenMessage(env)
+	in, err := testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{Peer: env.From, Protection: tss.ChannelPlaintext}, cert)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = session.HandleKeygenMessage(in)
 	if !errors.Is(err, tss.ErrInvalidBroadcastCertificate) {
 		t.Fatalf("expected ErrInvalidBroadcastCertificate for mismatched cert, got %v", err)
 	}

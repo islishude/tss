@@ -29,10 +29,6 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 	}
 	commit := out2[0]
 	share := out2[1]
-	// Pre-authenticate the base envelopes for sub-tests that use them directly.
-	commit.Security.Authenticated = true
-	commit.Security.AuthenticatedParty = commit.From
-
 	t.Run("wrong session", func(t *testing.T) {
 		mutated := commit
 		mutated.SessionID, err = tss.NewSessionID(nil)
@@ -40,36 +36,28 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err = kg1.HandleKeygenMessage(mutated)
+		_, err = kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong protocol", func(t *testing.T) {
 		mutated := commit
 		mutated.Protocol = "wrong-protocol"
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err := kg1.HandleKeygenMessage(mutated)
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		mutated := commit
 		mutated.Round = 2
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err := kg1.HandleKeygenMessage(mutated)
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("wrong recipient", func(t *testing.T) {
 		mutated := share
 		mutated.To = 3
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err := kg1.HandleKeygenMessage(mutated)
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrWrongRecipient) {
 			t.Fatalf("expected ErrWrongRecipient, got %v", err)
 		}
@@ -78,29 +66,23 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		mutated := share
 		mutated.To = 0
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err := kg1.HandleKeygenMessage(mutated)
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		if !errors.Is(err, tss.ErrExpectedDirectMessage) {
 			t.Fatalf("expected ErrExpectedDirectMessage, got %v", err)
 		}
 	})
 	t.Run("non-confidential secret share", func(t *testing.T) {
 		mutated := share
-		mutated.Security.Confidential = false
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
-		_, err := kg1.HandleKeygenMessage(mutated)
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
 		}
 	})
-	t.Run("missing transcript", func(t *testing.T) {
+	t.Run("malformed payload", func(t *testing.T) {
 		mutated := commit
-		mutated.TranscriptHash = [32]byte{}
-		_, err := kg1.HandleKeygenMessage(mutated)
-		// Transcript hash integrity check (step 4) catches this before auth check.
+		mutated.Payload = []byte("malformed")
+		_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate commitment", func(t *testing.T) {
@@ -108,10 +90,10 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := kg.HandleKeygenMessage(commit); err != nil {
+		if _, err := kg.HandleKeygenMessage(testutil.DeliverEnvelope(commit)); err != nil {
 			t.Fatal(err)
 		}
-		_, err = kg.HandleKeygenMessage(commit)
+		_, err = kg.HandleKeygenMessage(testutil.DeliverEnvelope(commit))
 		if !errors.Is(err, tss.ErrDuplicateMessage) {
 			t.Fatalf("expected ErrDuplicateMessage, got %v", err)
 		}
@@ -163,8 +145,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated := round1
 		mutated.From = 3
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -175,8 +155,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 			t.Fatal(err)
 		}
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -184,8 +162,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated := round1
 		mutated.Round = 2
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -193,8 +169,6 @@ func TestCGGMP21PresignEnvelopeFailClosed(t *testing.T) {
 		mutated := round1
 		mutated.To = 3
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
 		_, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(mutated))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -454,7 +428,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 			t.Fatal("signing did not complete")
 		}
 		duplicate := out[0]
-		if _, err = session.HandleSignMessage(duplicate); err == nil {
+		if _, err = session.HandleSignMessage(testutil.DeliverEnvelope(duplicate)); err == nil {
 			t.Fatal("completed session accepted duplicate message")
 		}
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
@@ -462,7 +436,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		wrongRecipient := out[0]
 		wrongRecipient.To = 2
 		wrongRecipient = wrongRecipient.RecomputeTranscriptHash()
-		if _, err = session.HandleSignMessage(wrongRecipient); err == nil {
+		if _, err = session.HandleSignMessage(testutil.DeliverEnvelope(wrongRecipient)); err == nil {
 			t.Fatal("completed session accepted wrong-recipient message")
 		}
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
@@ -608,10 +582,10 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := testutil.DeliverEnvelope(out2[0])
+		env := out2[0]
 		env.Payload = mutated
 		env = env.RecomputeTranscriptHash()
-		_, err = session.HandleSignMessage(env)
+		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("malformed scalar", func(t *testing.T) {
@@ -620,18 +594,18 @@ func TestCGGMP21SignFailClosedAndEvidence(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		env := testutil.DeliverEnvelope(out2[0])
+		env := out2[0]
 		env.Payload = mutated
 		env = env.RecomputeTranscriptHash()
-		_, err = session.HandleSignMessage(env)
+		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertBlameEvidence(t, err, h.evidenceContext(signID, 1, signers, presigns[1]))
 	})
 	t.Run("wrong round", func(t *testing.T) {
 		session, out2, _ := newSignCase(t)
-		env := testutil.DeliverEnvelope(out2[0])
+		env := out2[0]
 		env.Round = 2
 		env = env.RecomputeTranscriptHash()
-		_, err = session.HandleSignMessage(env)
+		_, err = session.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidMessage)
 	})
 	t.Run("duplicate partial", func(t *testing.T) {

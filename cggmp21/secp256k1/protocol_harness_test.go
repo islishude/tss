@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // fixtureKey identifies a cached keygen fixture by its essential parameters.
@@ -121,10 +122,7 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
-			if _, err := sessions[id].HandleKeygenMessage(delivered); err != nil {
+			if _, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env)); err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
 		}
@@ -227,10 +225,6 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 			t.Fatal(err)
 		}
 		presignSessions[id] = session
-		for i := range out {
-			out[i].Security.Authenticated = true
-			out[i].Security.AuthenticatedParty = out[i].From
-		}
 		messages = append(messages, out...)
 	}
 	for len(messages) > 0 {
@@ -240,13 +234,9 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := presignSessions[id].HandlePresignMessage(env)
+			out, err := presignSessions[id].HandlePresignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
-			}
-			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			messages = append(messages, out...)
 		}
@@ -403,16 +393,9 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
-			out, err := session.HandleReshareMessage(delivered)
+			out, err := session.HandleReshareMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
-			}
-			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			queue = append(queue, out...)
 		}

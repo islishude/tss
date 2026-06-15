@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // TestCGGMP21ConcurrentKeygenWithMutex verifies keygen works correctly when
@@ -49,16 +50,13 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 			wg.Add(1)
 			go func(env tss.Envelope) {
 				defer wg.Done()
-				delivered := env
-				delivered.Security.Authenticated = true
-				delivered.Security.AuthenticatedParty = env.From
 				for _, id := range parties {
 					if id == env.From || (env.To != 0 && env.To != id) {
 						continue
 					}
 					s := sessions[id]
 					s.mu.Lock()
-					out, err := s.HandleKeygenMessage(delivered)
+					out, err := s.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 					s.mu.Unlock()
 					if err != nil {
 						t.Errorf("concurrent keygen delivery from %d to %d: %v", env.From, id, err)
@@ -126,9 +124,6 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 			rng.Shuffle(len(msgs), func(i, j int) { msgs[i], msgs[j] = msgs[j], msgs[i] })
 			var nextRound []tss.Envelope
 			for _, env := range msgs {
-				delivered := env
-				delivered.Security.Authenticated = true
-				delivered.Security.AuthenticatedParty = env.From
 				for _, id := range signers {
 					if id == env.From {
 						continue
@@ -136,7 +131,7 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 					if env.To != 0 && env.To != id {
 						continue
 					}
-					out, _ := sess[id].HandlePresignMessage(delivered)
+					out, _ := sess[id].HandlePresignMessage(testutil.DeliverEnvelope(env))
 					nextRound = append(nextRound, out...)
 				}
 			}
@@ -174,14 +169,11 @@ func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 		}
 		rng.Shuffle(len(sigMessages), func(i, j int) { sigMessages[i], sigMessages[j] = sigMessages[j], sigMessages[i] })
 		for _, env := range sigMessages {
-			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
 			for _, id := range signers {
 				if id == env.From {
 					continue
 				}
-				_, _ = signSessions[id].HandleSignMessage(delivered)
+				_, _ = signSessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			}
 		}
 		for _, id := range signers {

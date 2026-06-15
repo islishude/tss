@@ -416,15 +416,15 @@ func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) e
 	if len(c.Acks) != len(parties) {
 		return ErrInvalidBroadcastCertificate
 	}
-	seen := make(map[PartyID]bool, len(c.Acks))
+	seen := make(map[PartyID]struct{}, len(c.Acks))
 	for _, ack := range c.Acks {
 		if !parties.Contains(ack.Party) {
 			return ErrInvalidBroadcastCertificate
 		}
-		if seen[ack.Party] {
+		if _, ok := seen[ack.Party]; ok {
 			return ErrInvalidBroadcastCertificate
 		}
-		seen[ack.Party] = true
+		seen[ack.Party] = struct{}{}
 		if ack.PayloadHash != c.PayloadHash {
 			return ErrInvalidBroadcastCertificate
 		}

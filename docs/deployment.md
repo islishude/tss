@@ -227,12 +227,16 @@ raw, err := env.MarshalBinary()
 // Transmit `raw` bytes.
 
 // On the receiving side:
-var received tss.Envelope
-err := received.UnmarshalBinary(data)
-// Transport adapter must set received.Security from authenticated channel:
-received.Security.Authenticated = true
-received.Security.AuthenticatedParty = peerID
-received.Security.Confidential = isEncrypted
+protection := tss.ChannelPlaintext
+if isEncrypted {
+    protection = tss.ChannelConfidential
+}
+received, err := tss.OpenEnvelope(data, tss.ReceiveInfo{
+    Peer:       peerID,
+    Protection: protection,
+    ChannelID:  channelID,
+    PeerKeyID:  peerKeyID,
+})
 ```
 
 ### Recommended Transport Patterns
@@ -241,11 +245,11 @@ received.Security.Confidential = isEncrypted
 
 - Broadcast messages (`To == 0`) must reach all participants.
 - Secret-bearing point-to-point messages must have `To` set to the receiver;
-  the transport must set `Security.Confidential = true` and the `EnvelopeGuard`
-  enforces confidentiality per the protocol `PolicySet`.
-- `Security.Confidential` is a transport-verified fact set by the receive path;
+  the transport must report `ChannelConfidential` in `ReceiveInfo` and the
+  `EnvelopeGuard` enforces confidentiality per the protocol `PolicySet`.
+- `ReceiveInfo.Protection` is a transport-verified fact set by the receive path;
   it is not encryption. Sending those payloads through a plaintext broker,
-  relay, log, or WebSocket is unsafe even when the flag is set.
+  relay, log, or WebSocket is unsafe even if the adapter misreports protection.
 - Within a round, messages can be delivered in any order.
 - Across rounds, messages must be processed sequentially — round N must complete before round N+1.
 

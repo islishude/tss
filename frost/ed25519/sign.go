@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"slices"
 	"sync"
+	"time"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
@@ -214,22 +215,23 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *SignSession) validateInbound(env tss.Envelope) error {
+func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.state.parties, s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
-func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, completedSessionError(env.Round, env.From)
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, abortedSessionError(env.Round, env.From)
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {
@@ -242,58 +244,59 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.signers, env.From) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	if !tss.ContainsParty(s.signers, base.From) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
-	switch env.PayloadType {
+	payload := env.Payload()
+	switch base.PayloadType {
 	case payloadSignCommitment:
-		if env.Round != 1 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("commitment must be round 1"))
+		if base.Round != 1 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("commitment must be round 1"))
 		}
-		p, err := unmarshalNonceCommitmentPayload(env.Payload)
+		p, err := unmarshalNonceCommitmentPayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if existing, ok := s.commitments[env.From]; ok {
+		if existing, ok := s.commitments[base.From]; ok {
 			if bytes.Equal(existing.D, p.D) && bytes.Equal(existing.E, p.E) && bytes.Equal(existing.PlanHash, p.PlanHash) {
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting nonce commitment"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting nonce commitment"))
 		}
-		s.commitments[env.From] = p
+		s.commitments[base.From] = p
 		return s.tryEmitPartial()
 	case payloadSignPartial:
-		if env.Round != 2 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("partial signature must be round 2"))
+		if base.Round != 2 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("partial signature must be round 2"))
 		}
-		p, err := unmarshalSignPartialPayload(env.Payload)
+		p, err := unmarshalSignPartialPayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		partial, err := edcurve.ScalarFromCanonical(p.Z)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
-		if existing, ok := s.partials[env.From]; ok {
+		if existing, ok := s.partials[base.From]; ok {
 			if existing.Equal(partial) == 1 {
-				if _, ok := s.partialEnvelopes[env.From]; !ok {
-					s.partialEnvelopes[env.From] = env.Clone()
+				if _, ok := s.partialEnvelopes[base.From]; !ok {
+					s.partialEnvelopes[base.From] = base.Clone()
 				}
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting partial signature"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting partial signature"))
 		}
-		s.partials[env.From] = partial
-		s.partialEnvelopes[env.From] = env.Clone()
+		s.partials[base.From] = partial
+		s.partialEnvelopes[base.From] = base.Clone()
 		return nil, s.tryAggregate()
 	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 }
 
@@ -419,8 +422,6 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		}
 		sessions[id] = session
 		for _, env := range out {
-			env.Security.Authenticated = true
-			env.Security.AuthenticatedParty = env.From
 			if env.Round == 1 {
 				round1 = append(round1, env)
 			} else {
@@ -433,13 +434,13 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			if id == env.From {
 				continue
 			}
-			out, err := sessions[id].HandleSignMessage(env)
+			inbound, err := openInProcessInbound(env)
 			if err != nil {
 				return nil, nil, err
 			}
-			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
+			out, err := sessions[id].HandleSignMessage(inbound)
+			if err != nil {
+				return nil, nil, err
 			}
 			round2 = append(round2, out...)
 		}
@@ -449,7 +450,11 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			if id == env.From {
 				continue
 			}
-			if _, err := sessions[id].HandleSignMessage(env); err != nil {
+			inbound, err := openInProcessInbound(env)
+			if err != nil {
+				return nil, nil, err
+			}
+			if _, err := sessions[id].HandleSignMessage(inbound); err != nil {
 				return nil, nil, err
 			}
 		}
@@ -460,4 +465,18 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	}
 	// Return the actual verification key — shifted when HD additive shift is in use.
 	return sessions[ids[0]].VerifyKey(), sig, nil
+}
+
+func openInProcessInbound(env tss.Envelope) (tss.InboundEnvelope, error) {
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		return tss.InboundEnvelope{}, err
+	}
+	return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: tss.ChannelConfidential,
+		ChannelID:  "inprocess",
+		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		ReceivedAt: time.Now(),
+	})
 }

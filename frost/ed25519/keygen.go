@@ -126,7 +126,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -142,7 +142,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			return nil, nil, err
 		}
 		// Shamir shares are secret-bearing and must be delivered over a confidential transport.
-		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true)
+		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -169,22 +169,23 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *KeygenSession) validateInbound(env tss.Envelope) error {
+func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one DKG envelope.
-func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil keygen session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, completedSessionError(env.Round, env.From)
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, abortedSessionError(env.Round, env.From)
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {
@@ -197,56 +198,57 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.Envelope) (out []tss.Envelop
 		}
 		return nil, err
 	}
-	if env.PayloadType == payloadKeygenConfirmation {
-		return s.handleKeygenConfirmation(env)
+	if base.PayloadType == payloadKeygenConfirmation {
+		return s.handleKeygenConfirmation(base)
 	}
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
+	if base.Round != 1 {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
 	}
-	switch env.PayloadType {
+	payload := env.Payload()
+	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		p, err := unmarshalKeygenCommitmentsPayload(env.Payload)
+		p, err := unmarshalKeygenCommitmentsPayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if existing, ok := s.commits[env.From]; ok {
-			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodeComms[env.From], p.ChainCodeCommit) {
+		if existing, ok := s.commits[base.From]; ok {
+			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodeComms[base.From], p.ChainCodeCommit) {
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting commitments"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
 		}
-		s.commits[env.From] = p.Commitments
+		s.commits[base.From] = p.Commitments
 		if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}
-		s.chainCodeComms[env.From] = append([]byte(nil), p.ChainCodeCommit...)
+		s.chainCodeComms[base.From] = append([]byte(nil), p.ChainCodeCommit...)
 	case payloadKeygenShare:
-		p, err := unmarshalKeygenSharePayload(env.Payload)
+		p, err := unmarshalKeygenSharePayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		scalar, err := edcurve.ScalarFromCanonical(p.Share)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
-		if existing, ok := s.shares[env.From]; ok {
+		if existing, ok := s.shares[base.From]; ok {
 			if existing.Equal(scalar) == 1 {
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting share"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting share"))
 		}
-		s.shares[env.From] = scalar
+		s.shares[base.From] = scalar
 	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 	return s.tryComplete()
 }
@@ -278,8 +280,8 @@ func (s *KeygenSession) abort() {
 	s.clearIntermediateSecrets()
 }
 
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte, confidential bool) (tss.Envelope, error) {
-	e, err := tss.NewEnvelope(tss.EnvelopeInput{
+func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
+	return tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
 		SessionID:   config.SessionID,
@@ -289,13 +291,6 @@ func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, pay
 		PayloadType: payloadType,
 		Payload:     payload,
 	})
-	if err != nil {
-		return tss.Envelope{}, err
-	}
-	if confidential {
-		e.Security.Confidential = true
-	}
-	return e, nil
 }
 
 const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"

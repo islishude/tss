@@ -122,7 +122,7 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // The allowedParties parameter selects which participants are accepted as senders
 // for this round (e.g. old parties for dealer messages, new parties for receiver messages).
-func (s *ReshareSession) validateInbound(env tss.Envelope, allowedParties []tss.PartyID) error {
+func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties []tss.PartyID) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
 }
 
@@ -239,7 +239,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		if err != nil {
 			return nil, nil, err
 		}
-		receiverEnv, err := envelope(s.receiverConfig(), 1, s.selfID, 0, payloadReshareReceiverMaterial, payload, false)
+		receiverEnv, err := envelope(s.receiverConfig(), 1, s.selfID, 0, payloadReshareReceiverMaterial, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -268,7 +268,8 @@ func (s *ReshareSession) receiverConfig() tss.ThresholdConfig {
 }
 
 // HandleReshareMessage validates and applies one reshare envelope.
-func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	env := in.Envelope()
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
@@ -290,7 +291,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	}()
 
 	if env.PayloadType == payloadKeygenConfirmation {
-		if err := s.validateInbound(env, s.newParties); err != nil {
+		if err := s.validateInbound(in, s.newParties); err != nil {
 			if errors.Is(err, tss.ErrDuplicateMessage) {
 				return nil, tss.ErrDuplicateMessage
 			}
@@ -304,7 +305,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 	if env.PayloadType == payloadReshareReceiverMaterial {
 		allowedParties = s.newParties
 	}
-	if err := s.validateInbound(env, allowedParties); err != nil {
+	if err := s.validateInbound(in, allowedParties); err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}

@@ -44,20 +44,17 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 	if commit.PayloadType != payloadKeygenCommitments {
 		t.Fatalf("expected payloadKeygenCommitments, got %q", commit.PayloadType)
 	}
-	commit.Security.Authenticated = true
-	commit.Security.AuthenticatedParty = commit.From
 
 	share := out2[1]
 	if share.PayloadType != payloadKeygenShare {
 		t.Fatalf("expected payloadKeygenShare, got %q", share.PayloadType)
 	}
-	share.Security.Authenticated = true
-	share.Security.AuthenticatedParty = share.From
 
 	tests := []struct {
 		name     string
 		base     tss.Envelope
 		mutate   func(tss.Envelope) tss.Envelope
+		protect  tss.ChannelProtection
 		wantErr  error  // sentinel error (checked with errors.Is)
 		wantCode string // protocol error code (checked with assertFROSTProtocolCode)
 	}{
@@ -105,9 +102,9 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		{
 			name: "non-confidential share", base: share,
 			mutate: func(env tss.Envelope) tss.Envelope {
-				env.Security.Confidential = false
 				return env
 			},
+			protect: tss.ChannelPlaintext,
 			wantErr: tss.ErrMissingConfidentiality,
 		},
 	}
@@ -118,10 +115,12 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 
 			mutated := tc.mutate(tc.base)
 			mutated = mutated.RecomputeTranscriptHash()
-			mutated.Security.Authenticated = true
-			mutated.Security.AuthenticatedParty = mutated.From
 
-			_, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(mutated))
+			in := testutil.DeliverEnvelope(mutated)
+			if tc.protect != tss.ChannelProtectionUnknown {
+				in = testutil.DeliverEnvelopeWithProtection(mutated, tc.protect)
+			}
+			_, err := kg1.HandleKeygenMessage(in)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -151,11 +150,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		}
 
 		dup := commit
-		dup.Security.Authenticated = true
-		dup.Security.AuthenticatedParty = dup.From
 		dup = dup.RecomputeTranscriptHash()
-		dup.Security.Authenticated = true
-		dup.Security.AuthenticatedParty = dup.From
 
 		_, _ = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
 		_, err = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
@@ -193,8 +188,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 	if commit2.PayloadType != payloadSignCommitment {
 		t.Fatalf("expected payloadSignCommitment, got %q", commit2.PayloadType)
 	}
-	commit2.Security.Authenticated = true
-	commit2.Security.AuthenticatedParty = commit2.From
 
 	// Start party 3 (not a signer) to get a commitment from outside the signer set.
 	// Use a separate signer set that includes party 3.
@@ -204,8 +197,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	commit3 := out3[0]
-	commit3.Security.Authenticated = true
-	commit3.Security.AuthenticatedParty = commit3.From
 
 	// Get a partial signature by completing a sign flow.
 	_, partials := frostSigningRound2(t, 2, 3, signers, message)
@@ -213,8 +204,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		t.Fatal("expected partial signatures")
 	}
 	partial := partials[0]
-	partial.Security.Authenticated = true
-	partial.Security.AuthenticatedParty = partial.From
 
 	tests := []struct {
 		name     string
@@ -271,8 +260,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 			mutated := tc.mutate(tc.env)
 			mutated = mutated.RecomputeTranscriptHash()
-			mutated.Security.Authenticated = true
-			mutated.Security.AuthenticatedParty = mutated.From
 
 			_, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(mutated))
 			if err == nil {
@@ -299,11 +286,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		}
 
 		dup := commit2
-		dup.Security.Authenticated = true
-		dup.Security.AuthenticatedParty = dup.From
 		dup = dup.RecomputeTranscriptHash()
-		dup.Security.Authenticated = true
-		dup.Security.AuthenticatedParty = dup.From
 
 		_, _ = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
 		_, err = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
@@ -333,8 +316,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 		// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 		cb := out2[0]
-		cb.Security.Authenticated = true
-		cb.Security.AuthenticatedParty = cb.From
 		_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(cb))
 		if err != nil {
 			t.Fatal(err)
@@ -342,8 +323,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 		// Deliver party 1's commitment to party 2 → party 2 emits its partial.
 		ca := out1[0]
-		ca.Security.Authenticated = true
-		ca.Security.AuthenticatedParty = ca.From
 		party2Partials, err := sess2.HandleSignMessage(testutil.DeliverEnvelope(ca))
 		if err != nil {
 			t.Fatal(err)
@@ -352,8 +331,6 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 			t.Fatal("expected party 2 to emit partial after receiving commitment")
 		}
 		party2Partial := party2Partials[0]
-		party2Partial.Security.Authenticated = true
-		party2Partial.Security.AuthenticatedParty = party2Partial.From
 
 		// First delivery of party 2's partial to party 1 triggers aggregation → session completes.
 		_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(party2Partial))
@@ -403,12 +380,8 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 
 	// out2[0] = broadcast reshare commitments, out2[1] = direct share to party 1.
 	commit := out2[0]
-	commit.Security.Authenticated = true
-	commit.Security.AuthenticatedParty = commit.From
 
 	share := out2[1]
-	share.Security.Authenticated = true
-	share.Security.AuthenticatedParty = share.From
 
 	tests := []struct {
 		name     string
@@ -450,8 +423,6 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 
 			mutated := tc.mutate(tc.base)
 			mutated = mutated.RecomputeTranscriptHash()
-			mutated.Security.Authenticated = true
-			mutated.Security.AuthenticatedParty = mutated.From
 
 			_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelope(mutated))
 			if err == nil {
@@ -473,12 +444,9 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 		t.Parallel()
 
 		mutated := share
-		mutated.Security.Confidential = false
 		mutated = mutated.RecomputeTranscriptHash()
-		mutated.Security.Authenticated = true
-		mutated.Security.AuthenticatedParty = mutated.From
 
-		_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelope(mutated))
+		_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
 		}

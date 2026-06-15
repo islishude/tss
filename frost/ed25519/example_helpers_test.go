@@ -53,51 +53,65 @@ func (s *exampleFROSTSecurity) guard(self tss.PartyID, parties tss.PartySet, ses
 	}).BuildGuard()
 }
 
-func (s *exampleFROSTSecurity) receive(env tss.Envelope, certificateParties tss.PartySet) (tss.Envelope, error) {
+func (s *exampleFROSTSecurity) receive(env tss.Envelope, certificateParties tss.PartySet) (tss.InboundEnvelope, error) {
 	policy, err := frost.FROSTPolicies().Match(env.Protocol, env.Round, env.PayloadType)
 	if err != nil {
-		return tss.Envelope{}, err
+		return tss.InboundEnvelope{}, err
 	}
-	received := env.Clone()
-	received.Security = tss.SecurityContext{
-		Authenticated:      true,
-		AuthenticatedParty: env.From,
-		Confidential:       policy.Confidentiality == tss.ConfidentialityRequired,
-		ChannelID:          "example-mtls",
-		PeerKeyID:          fmt.Sprintf("party-%d", env.From),
+	protection := tss.ChannelPlaintext
+	if policy.Confidentiality == tss.ConfidentialityRequired {
+		protection = tss.ChannelConfidential
 	}
+	var certificate *tss.BroadcastCertificate
 	if policy.BroadcastConsistency != tss.BroadcastConsistencyRequired {
-		return received, nil
+		raw, err := env.MarshalBinary()
+		if err != nil {
+			return tss.InboundEnvelope{}, err
+		}
+		return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+			Peer:       env.From,
+			Protection: protection,
+			ChannelID:  "example-mtls",
+			PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		})
 	}
 
 	acks := make([]tss.BroadcastAck, 0, len(certificateParties))
 	for _, id := range certificateParties {
 		privateKey, ok := s.private[id]
 		if !ok {
-			return tss.Envelope{}, fmt.Errorf("missing broadcast key for party %d", id)
+			return tss.InboundEnvelope{}, fmt.Errorf("missing broadcast key for party %d", id)
 		}
 		signer := tss.NewInMemoryAckSigner(id, func(digest [32]byte) ([]byte, error) {
 			return stded25519.Sign(privateKey, digest[:]), nil
 		})
 		ack, err := tss.SignBroadcastAck(env, id, signer)
 		if err != nil {
-			return tss.Envelope{}, err
+			return tss.InboundEnvelope{}, err
 		}
 		acks = append(acks, ack)
 	}
-	certificate, err := tss.NewBroadcastCertificate(env, certificateParties, acks)
+	certificate, err = tss.NewBroadcastCertificate(env, certificateParties, acks)
 	if err != nil {
-		return tss.Envelope{}, err
+		return tss.InboundEnvelope{}, err
 	}
-	received.Broadcast = certificate
-	return received, nil
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		return tss.InboundEnvelope{}, err
+	}
+	return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: protection,
+		ChannelID:  "example-mtls",
+		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+	}, tss.WithBroadcastCertificate(certificate))
 }
 
 func (s *exampleFROSTSecurity) route(
 	queue []tss.Envelope,
 	recipients tss.PartySet,
 	certificateParties func(tss.Envelope) tss.PartySet,
-	handle func(tss.PartyID, tss.Envelope) ([]tss.Envelope, error),
+	handle func(tss.PartyID, tss.InboundEnvelope) ([]tss.Envelope, error),
 ) error {
 	for len(queue) > 0 {
 		env := queue[0]
@@ -110,7 +124,7 @@ func (s *exampleFROSTSecurity) route(
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := handle(id, received.Clone())
+			out, err := handle(id, received)
 			if err != nil {
 				return fmt.Errorf("deliver %s from %d to %d: %w", env.PayloadType, env.From, id, err)
 			}
@@ -150,7 +164,7 @@ func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, option frost.Ke
 	}
 	if err := security.route(queue, partySet, func(tss.Envelope) tss.PartySet {
 		return partySet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleKeygenMessage(env)
 	}); err != nil {
 		return nil, err
@@ -197,7 +211,7 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 	}
 	if err := security.route(queue, tss.PartySet(signers), func(tss.Envelope) tss.PartySet {
 		return partySet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleSignMessage(env)
 	}); err != nil {
 		return nil, nil, err

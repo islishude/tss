@@ -435,14 +435,7 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			// Simulate authenticated, optionally confidential transport delivery.
-			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
-			if env.To != 0 {
-				delivered.Security.Confidential = true
-			}
-			out, err := sessions[id].HandleKeygenMessage(delivered)
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}

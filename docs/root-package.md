@@ -47,7 +47,10 @@ It supports `MarshalText`/`UnmarshalText` (hex), `Bytes()` (copy), and `String()
 
 ## Envelope
 
-All protocol state machines communicate through `tss.Envelope`. It is the **only** message type exchanged between parties.
+Protocol state machines emit `tss.Envelope` values. `Envelope` is only the
+canonical wire/protocol message; it does not carry receive-side transport facts.
+Inbound handlers accept `tss.InboundEnvelope`, which is created by opening raw
+wire bytes with transport-verified `ReceiveInfo`.
 
 ```go
 type Envelope struct {
@@ -60,8 +63,6 @@ type Envelope struct {
     PayloadType    PayloadType      // identifies the payload schema
     Payload        []byte           // TLV-encoded protocol payload
     TranscriptHash [32]byte         // SHA-256 of public envelope metadata
-    Security       SecurityContext  // transport-verified facts
-    Broadcast      *BroadcastCertificate // consistency proof for broadcast messages
 }
 ```
 
@@ -80,7 +81,10 @@ env, err := tss.NewEnvelope(tss.EnvelopeInput{
 })
 ```
 
-`OpenEnvelope(raw, security, broadcast)` decodes wire bytes and attaches transport-verified security context.
+`OpenEnvelope(raw, receiveInfo, opts...)` decodes wire bytes, recomputes the
+transcript hash, and returns an `InboundEnvelope`. It rejects missing peer
+identity, missing channel protection, and peer/envelope sender mismatch before
+the guard runs.
 
 ### Encoding
 
@@ -101,22 +105,31 @@ from [`wire.md`](wire.md). Its domain label is followed by named entries for
 `payload`. The hash is set automatically by `NewEnvelope()` and verified by
 `EnvelopeGuard.Validate()`.
 
-### Transport Semantics (SecurityContext)
+### Transport Semantics
 
-Transport security is no longer self-declared by the envelope. The transport adapter must set `Envelope.Security` on received messages:
+Transport security is not self-declared by the envelope. The receive adapter must
+authenticate the peer, classify the actual channel protection, and call
+`OpenEnvelope`:
 
 ```go
-type SecurityContext struct {
-    Authenticated      bool    // message arrived over authenticated transport
-    Confidential       bool    // message arrived over confidential channel
-    AuthenticatedParty PartyID // transport-verified sender identity
-    ChannelID          string  // audit: TLS/Noise session identifier
-    PeerKeyID          string  // audit: peer certificate/key identifier
-    ReceivedAtUnix     int64  // receive timestamp for replay/cache decisions
+type ReceiveInfo struct {
+    Peer       PartyID
+    Protection ChannelProtection // Unknown, Plaintext, or Confidential
+    ChannelID  string
+    PeerKeyID  string
+    ReceivedAt time.Time
 }
+
+in, err := tss.OpenEnvelope(raw, tss.ReceiveInfo{
+    Peer:       peerID,
+    Protection: tss.ChannelConfidential,
+})
 ```
 
-Delivery requirements (confidentiality, broadcast consistency) are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`. There is no `ConfidentialRequired` flag — the guard checks `Security.Confidential` against the policy.
+Delivery requirements (confidentiality, broadcast consistency) are defined per
+payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`.
+`PolicySet` describes what the protocol requires; `ReceiveInfo` describes what
+the transport actually observed.
 
 ### DeliveryPolicy & PolicySet
 
@@ -137,27 +150,39 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 
 ### EnvelopeGuard
 
-`EnvelopeGuard` performs centralized security validation before any protocol handler processes an envelope. It enforces 13 checks in order:
+`EnvelopeGuard` performs centralized security validation before any protocol handler processes an inbound envelope. It enforces these checks in order:
 
 1. Protocol match
-2. Version check
-3. Transcript hash integrity
-4. Sender membership in party set
-5. Transport authentication (`Security.Authenticated`)
-6. AuthenticatedParty is non-zero (transport identity must be set)
-7. Identity binding (`AuthenticatedParty == From`)
-8. Recipient correctness
-9. Policy lookup (fail-closed for unknown payloads)
-10. Delivery mode enforcement (direct vs broadcast)
-11. Confidentiality enforcement against policy
-12. Broadcast consistency certificate verification with `VerifyFull` (when required)
-13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
+2. Session ID match
+3. Version check
+4. Transcript hash integrity
+5. Sender membership in party set
+6. Authenticated transport peer is present
+7. `ReceiveInfo.Peer == Envelope.From`
+8. Channel protection is set
+9. Recipient correctness
+10. Policy lookup (fail-closed for unknown payloads)
+11. Delivery mode enforcement (direct vs broadcast)
+12. Confidentiality enforcement against policy
+13. Broadcast consistency certificate verification with `VerifyFull` (when required)
+14. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
-Each protocol session must be constructed with an `EnvelopeGuard` passed to its `Start*` entry point, and handlers call `Validate(env)` as their first step. A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when not running under `go test` to prevent accidental production use. Sessions expose `Guard()` as a read-only accessor for transport adapters.
+Each protocol session must be constructed with an `EnvelopeGuard` passed to its
+`Start*` entry point, and handlers call `Validate(inbound)` as their first step.
+A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use
+`GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when
+not running under `go test` to prevent accidental production use. Sessions expose
+`Guard()` as a read-only accessor for transport adapters.
 
 ### BroadcastCertificate
 
-When a policy requires `BroadcastConsistencyRequired`, the transport must supply a `BroadcastCertificate` proving all parties received the same payload. Use `BroadcastCertificate.VerifyFull` for production validation — it requires a `BroadcastAckVerifier` to verify individual ack signatures. `VerifyStructure` performs structural checks only and is intended for test code and low-level parsing.
+When a policy requires `BroadcastConsistencyRequired`, the transport must supply
+a `BroadcastCertificate` to `OpenEnvelope` via `WithBroadcastCertificate`,
+proving all parties received the same payload. Use
+`BroadcastCertificate.VerifyFull` for production validation — it requires a
+`BroadcastAckVerifier` to verify individual ack signatures. `VerifyStructure`
+performs structural checks only and is intended for test code and low-level
+parsing.
 
 ```go
 type BroadcastCertificate struct {

@@ -109,7 +109,7 @@ func ExampleStartRefresh() {
 	}
 	if err := security.route(queue, partySet, func(tss.Envelope) tss.PartySet {
 		return partySet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleReshareMessage(env)
 	}); err != nil {
 		panic(err)
@@ -185,7 +185,7 @@ func ExampleStartReshare() {
 	}
 	if err := security.route(queue, allParties, func(tss.Envelope) tss.PartySet {
 		return oldPartySet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleReshareMessage(env)
 	}); err != nil {
 		panic(err)

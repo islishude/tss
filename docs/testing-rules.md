@@ -145,8 +145,9 @@ Canonical vectors and generation instructions live in
 
 ### 3. Guard, Identity, and State Machines
 
-The authenticated transport party, `Envelope.From`, recipient, payload identity,
-proof identity, committee, and signer set must agree before processing.
+The authenticated transport party (`ReceiveInfo.Peer`), `Envelope.From`,
+recipient, payload identity, proof identity, committee, and signer set must
+agree before processing.
 
 Required behavior:
 

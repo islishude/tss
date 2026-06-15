@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // This file tests state machine invariants across presign and sign sessions.
@@ -31,7 +32,7 @@ func TestPresignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadPresignRound1,
 		Payload:     []byte{},
 	}
-	_, err = s.HandlePresignMessage(env)
+	_, err = s.HandlePresignMessage(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -54,7 +55,7 @@ func TestSignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadSignPartial,
 		Payload:     []byte{},
 	}
-	_, err = s.HandleSignMessage(env)
+	_, err = s.HandleSignMessage(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -77,7 +78,7 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadKeygenCommitments,
 		Payload:     []byte{},
 	}
-	_, err = s.HandleKeygenMessage(env)
+	_, err = s.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil keygen session rejection")
 	}

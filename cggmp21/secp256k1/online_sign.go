@@ -342,7 +342,6 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		}
 		s.signature = sig
 		s.completed = true
-		env.Security.Confidential = true
 		if record.DeliveryState.DeliveryComplete {
 			return s, nil, nil
 		}
@@ -353,14 +352,12 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 			return nil, nil, err
 		}
 		if s.completed {
-			env.Security.Confidential = true
 			if s.attempt.DeliveryState.DeliveryComplete {
 				return s, nil, nil
 			}
 			return s, []tss.Envelope{env}, nil
 		}
 	}
-	env.Security.Confidential = true
 	if record.DeliveryState.DeliveryComplete {
 		return s, nil, nil
 	}
@@ -437,24 +434,25 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *SignSession) validateInbound(env tss.Envelope) error {
+func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.presign.state.signers), s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
 //
 // Follows the handler template (see doc.go).
-func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, completedSessionError(env.Round, env.From)
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, abortedSessionError(env.Round, env.From)
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {
@@ -467,46 +465,47 @@ func (s *SignSession) HandleSignMessage(env tss.Envelope) (out []tss.Envelope, e
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.presign.state.signers, env.From) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	if !tss.ContainsParty(s.presign.state.signers, base.From) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
 
 	// ---- 1 & 2. PARSE + POLICY VALIDATE ----
-	if env.Round != 1 || env.PayloadType != payloadSignPartial {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("expected round 1 sign partial"))
+	if base.Round != 1 || base.PayloadType != payloadSignPartial {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("expected round 1 sign partial"))
 	}
-	if _, ok := s.partials[env.From]; ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate sign partial"))
+	if _, ok := s.partials[base.From]; ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate sign partial"))
 	}
-	p, err := unmarshalSignPartialPayload(env.Payload)
+	payload := env.Payload()
+	p, err := unmarshalSignPartialPayload(payload)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
-			env,
+			base,
 			tss.EvidenceKindSignPartial,
 			"malformed sign partial payload",
-			[]tss.PartyID{env.From},
+			[]tss.PartyID{base.From},
 			err,
-			s.signPartialContextEvidenceFields(env.Payload)...,
+			s.signPartialContextEvidenceFields(payload)...,
 		)
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	partial, err := s.verifySignPartial(env.From, p)
+	partial, err := s.verifySignPartial(base.From, p)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeVerification,
-			env,
+			base,
 			tss.EvidenceKindSignPartial,
 			"sign partial verification failed",
-			[]tss.PartyID{env.From},
+			[]tss.PartyID{base.From},
 			err,
-			s.signPartialEvidenceFields(env.From, p)...,
+			s.signPartialEvidenceFields(base.From, p)...,
 		)
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.partials[env.From] = partial
+	s.partials[base.From] = partial
 
 	// ---- 5. EMIT ----
 	return nil, s.tryCompleteSign(s.storeCtx)

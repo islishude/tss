@@ -79,31 +79,37 @@ func (s *exampleCGGMPSecurity) guard(self tss.PartyID, parties tss.PartySet, ses
 	}).BuildGuard()
 }
 
-// receive adapts a protocol-produced envelope into the form that an authenticated
-// transport would deliver to an application. Protocol sessions intentionally do
-// not invent authentication, confidentiality, or broadcast-consistency claims;
-// those properties must come from the caller's transport integration.
-func (s *exampleCGGMPSecurity) receive(env tss.Envelope, certificateParties tss.PartySet) (tss.Envelope, error) {
+// receive adapts a protocol-produced envelope into an authenticated inbound
+// envelope. Protocol sessions intentionally do not invent authentication,
+// confidentiality, or broadcast-consistency claims; those properties must come
+// from the caller's transport integration.
+func (s *exampleCGGMPSecurity) receive(env tss.Envelope, certificateParties tss.PartySet) (tss.InboundEnvelope, error) {
 	// Consult the same public policy table used by EnvelopeGuard so the
 	// simulated transport marks confidentiality and broadcast requirements
 	// consistently with the protocol round and payload type.
 	policy, err := cggmp.CGGMP21Policies().Match(env.Protocol, env.Round, env.PayloadType)
 	if err != nil {
-		return tss.Envelope{}, err
+		return tss.InboundEnvelope{}, err
 	}
-	// Clone before attaching receiver-side metadata. The outbound envelope is
-	// protocol output and may be delivered to several recipients; mutating it
-	// in place would incorrectly share transport state between deliveries.
-	received := env.Clone()
-	received.Security = tss.SecurityContext{
-		Authenticated:      true,
-		AuthenticatedParty: env.From,
-		Confidential:       policy.Confidentiality == tss.ConfidentialityRequired,
-		ChannelID:          "example-mtls",
-		PeerKeyID:          fmt.Sprintf("party-%d", env.From),
+	protection := tss.ChannelPlaintext
+	if policy.Confidentiality == tss.ConfidentialityRequired {
+		protection = tss.ChannelConfidential
+	}
+	var certificate *tss.BroadcastCertificate
+	open := func() (tss.InboundEnvelope, error) {
+		raw, err := env.MarshalBinary()
+		if err != nil {
+			return tss.InboundEnvelope{}, err
+		}
+		return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+			Peer:       env.From,
+			Protection: protection,
+			ChannelID:  "example-mtls",
+			PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		}, tss.WithBroadcastCertificate(certificate))
 	}
 	if policy.BroadcastConsistency != tss.BroadcastConsistencyRequired {
-		return received, nil
+		return open()
 	}
 
 	// Broadcast rounds require evidence that every expected participant saw
@@ -113,25 +119,24 @@ func (s *exampleCGGMPSecurity) receive(env tss.Envelope, certificateParties tss.
 	for _, id := range certificateParties {
 		privateKey, ok := s.private[id]
 		if !ok {
-			return tss.Envelope{}, fmt.Errorf("missing broadcast key for party %d", id)
+			return tss.InboundEnvelope{}, fmt.Errorf("missing broadcast key for party %d", id)
 		}
 		signer := tss.NewInMemoryAckSigner(id, func(digest [32]byte) ([]byte, error) {
 			return stded25519.Sign(privateKey, digest[:]), nil
 		})
 		ack, err := tss.SignBroadcastAck(env, id, signer)
 		if err != nil {
-			return tss.Envelope{}, err
+			return tss.InboundEnvelope{}, err
 		}
 		acks = append(acks, ack)
 	}
 	// NewBroadcastCertificate validates membership, acknowledgment uniqueness,
 	// and signatures before the certificate is attached for guard validation.
-	certificate, err := tss.NewBroadcastCertificate(env, certificateParties, acks)
+	certificate, err = tss.NewBroadcastCertificate(env, certificateParties, acks)
 	if err != nil {
-		return tss.Envelope{}, err
+		return tss.InboundEnvelope{}, err
 	}
-	received.Broadcast = certificate
-	return received, nil
+	return open()
 }
 
 // route drains all protocol output and delivers each envelope to its intended
@@ -146,7 +151,7 @@ func (s *exampleCGGMPSecurity) route(
 	queue []tss.Envelope,
 	recipients tss.PartySet,
 	certificateParties func(tss.Envelope) tss.PartySet,
-	handle func(tss.PartyID, tss.Envelope) ([]tss.Envelope, error),
+	handle func(tss.PartyID, tss.InboundEnvelope) ([]tss.Envelope, error),
 ) error {
 	for len(queue) > 0 {
 		// Pop one envelope before handling it so newly emitted messages are
@@ -164,9 +169,7 @@ func (s *exampleCGGMPSecurity) route(
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			// Give every recipient an independent envelope value. Guards and
-			// handlers may record receiver-local state while processing it.
-			out, err := handle(id, received.Clone())
+			out, err := handle(id, received)
 			if err != nil {
 				return fmt.Errorf("deliver %s from %d to %d: %w", env.PayloadType, env.From, id, err)
 			}
@@ -213,7 +216,7 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.Ke
 	// Keygen broadcasts are certified by the complete keygen committee.
 	if err := security.route(queue, parties, func(tss.Envelope) tss.PartySet {
 		return parties
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleKeygenMessage(env)
 	}); err != nil {
 		return nil, err
@@ -272,7 +275,7 @@ func runExampleCGGMPPresign(
 	// set for broadcasts emitted during this lifecycle.
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandlePresignMessage(env)
 	}); err != nil {
 		return nil, err
@@ -335,7 +338,7 @@ func runExampleCGGMPSign(
 	// required acknowledgment set for broadcast-consistent rounds.
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
-	}, func(id tss.PartyID, env tss.Envelope) ([]tss.Envelope, error) {
+	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleSignMessage(env)
 	}); err != nil {
 		return nil, nil, err

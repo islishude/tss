@@ -494,7 +494,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
 
-	t.Run("missing transcript rejected", func(t *testing.T) {
+	t.Run("malformed payload rejected", func(t *testing.T) {
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
 			t.Fatal(err)
@@ -509,7 +509,7 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 			t.Fatal(err)
 		}
 		env := out2[0]
-		env.TranscriptHash = [32]byte{}
+		env.Payload = []byte("malformed")
 		_, err = sign.HandleSignMessage(testutil.DeliverEnvelope(env))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 	})
@@ -749,8 +749,6 @@ func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions ma
 				continue
 			}
 			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
 			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
@@ -778,8 +776,6 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, m
 
 		sessions[id] = session
 		for _, env := range out {
-			env.Security.Authenticated = true
-			env.Security.AuthenticatedParty = env.From
 			if env.Round == 1 {
 				round1 = append(round1, env)
 			} else {
@@ -795,10 +791,6 @@ func frostSigningRound2(t *testing.T, threshold, n int, signers []tss.PartyID, m
 			out, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
-			}
-			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
 			}
 			round2 = append(round2, out...)
 		}
@@ -1023,8 +1015,6 @@ func deliverReshareMessages(t *testing.T, receivers []tss.PartyID, messages []ts
 				continue
 			}
 			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
 			_, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)

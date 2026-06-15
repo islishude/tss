@@ -284,7 +284,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if err := s.tryComplete(); err != nil {
 		return nil, err
 	}
-	env, err := envelope(s.config, 3, s.key.state.party, 0, payloadPresignRound3, payload, false)
+	env, err := envelope(s.config, 3, s.key.state.party, 0, payloadPresignRound3, payload)
 	if err != nil {
 		return nil, err
 	}

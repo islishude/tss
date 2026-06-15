@@ -4,8 +4,19 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 )
+
+func inboundForTransportTest(env Envelope, protection ChannelProtection) InboundEnvelope {
+	return InboundEnvelope{
+		env: env.Clone(),
+		receiveInfo: ReceiveInfo{
+			Peer:       env.From,
+			Protection: protection,
+			ChannelID:  "test",
+			PeerKeyID:  "party",
+		},
+	}
+}
 
 func TestInMemoryTransportSendAndReceive(t *testing.T) {
 	t.Parallel()
@@ -42,11 +53,12 @@ func TestInMemoryTransportSendAndReceive(t *testing.T) {
 		t.Fatalf("receive: %v", err)
 	}
 
-	if !received.Security.Authenticated {
-		t.Fatal("received envelope must have Authenticated=true")
+	info := received.ReceiveInfo()
+	if info.Peer != 1 {
+		t.Fatalf("ReceiveInfo.Peer must be 1, got %d", info.Peer)
 	}
-	if received.Security.AuthenticatedParty != 1 {
-		t.Fatalf("AuthenticatedParty must be 1, got %d", received.Security.AuthenticatedParty)
+	if got := received.Envelope().From; got != 1 {
+		t.Fatalf("Envelope.From must be 1, got %d", got)
 	}
 }
 
@@ -84,8 +96,8 @@ func TestInMemoryTransportConfidentialityFlag(t *testing.T) {
 		t.Fatalf("receive: %v", err)
 	}
 
-	if !received.Security.Confidential {
-		t.Fatal("confidential-required message must have Confidential=true")
+	if got := received.ReceiveInfo().Protection; got != ChannelConfidential {
+		t.Fatalf("confidential-required message must report ChannelConfidential, got %d", got)
 	}
 }
 
@@ -94,7 +106,7 @@ func TestMaliciousTransportSenderSpoof(t *testing.T) {
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	inner := NewInMemoryTransport(1, PartySet{1, 2}, policies)
-	inner.ConnectOutbox(2, make(chan Envelope, 1)) // discard output
+	inner.ConnectOutbox(2, make(chan InboundEnvelope, 1)) // discard output
 	mal := NewMaliciousTransport(inner, AttackSenderSpoof)
 
 	env, err := NewEnvelope(EnvelopeInput{
@@ -110,17 +122,10 @@ func TestMaliciousTransportSenderSpoof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Pre-set authenticated context (simulating transport normally setting it)
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = 1
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-
-	// Send will apply the spoof attack
-	_ = mal.Send(ctx, env)
-	// The spoofed envelope is in the outbox (discarded in this test)
-	// In a real scenario, the receiver's guard would catch it
+	err = mal.Send(context.Background(), env)
+	if !errors.Is(err, ErrSenderIdentityMismatch) {
+		t.Fatalf("expected ErrSenderIdentityMismatch, got %v", err)
+	}
 }
 
 func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
@@ -128,7 +133,8 @@ func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
 	sid := testSessionID(t)
 	policies := testPolicySet()
 	inner := NewInMemoryTransport(1, PartySet{1, 2}, policies)
-	inner.ConnectOutbox(2, make(chan Envelope, 1))
+	outbox := make(chan InboundEnvelope, 1)
+	inner.ConnectOutbox(2, outbox)
 	mal := NewMaliciousTransport(inner, AttackPlaintextConfidential)
 
 	env, _ := NewEnvelope(EnvelopeInput{
@@ -141,13 +147,13 @@ func TestMaliciousTransportPlaintextConfidential(t *testing.T) {
 		PayloadType: "test.direct.confidential",
 		Payload:     []byte("secret"),
 	})
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = 1
-	env.Security.Confidential = true
-
-	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-	defer cancel()
-	_ = mal.Send(ctx, env)
+	if err := mal.Send(context.Background(), env); err != nil {
+		t.Fatalf("send: %v", err)
+	}
+	received := <-outbox
+	if got := received.ReceiveInfo().Protection; got != ChannelPlaintext {
+		t.Fatalf("expected ChannelPlaintext, got %d", got)
+	}
 }
 
 // TestTransportSecurityIntegration verifies that every MaliciousTransport attack
@@ -167,8 +173,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
 			Payload: []byte("hello"),
 		})
-		env.Security = SecurityContext{Authenticated: true, AuthenticatedParty: 2}
-		if err := guard.Validate(env); err != nil {
+		if err := guard.Validate(inboundForTransportTest(env, ChannelPlaintext)); err != nil {
 			t.Fatalf("valid message should pass: %v", err)
 		}
 	})
@@ -181,8 +186,8 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
 			Payload: []byte("hello"),
 		})
-		env.Security = SecurityContext{Authenticated: false}
-		if !errors.Is(guard.Validate(env), ErrUnauthenticatedTransport) {
+		in := InboundEnvelope{env: env.Clone(), receiveInfo: ReceiveInfo{Protection: ChannelPlaintext}}
+		if !errors.Is(guard.Validate(in), ErrUnauthenticatedTransport) {
 			t.Fatal("should reject unauthenticated transport")
 		}
 	})
@@ -195,8 +200,8 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
 			Payload: []byte("hello"),
 		})
-		env.Security = SecurityContext{Authenticated: true, AuthenticatedParty: 3} // 3 != 2
-		if !errors.Is(guard.Validate(env), ErrSenderIdentityMismatch) {
+		in := InboundEnvelope{env: env.Clone(), receiveInfo: ReceiveInfo{Peer: 3, Protection: ChannelPlaintext}}
+		if !errors.Is(guard.Validate(in), ErrSenderIdentityMismatch) {
 			t.Fatal("should reject sender spoofing")
 		}
 	})
@@ -209,8 +214,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.confidential",
 			Payload: []byte("secret"),
 		})
-		env.Security = SecurityContext{Authenticated: true, AuthenticatedParty: 2, Confidential: false}
-		if !errors.Is(guard.Validate(env), ErrMissingConfidentiality) {
+		if !errors.Is(guard.Validate(inboundForTransportTest(env, ChannelPlaintext)), ErrMissingConfidentiality) {
 			t.Fatal("should reject plaintext confidential")
 		}
 	})
@@ -223,11 +227,11 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 1, PayloadType: "test.direct.plain",
 			Payload: []byte("hello"),
 		})
-		env.Security = SecurityContext{Authenticated: true, AuthenticatedParty: 2}
-		if err := guard.Validate(env); err != nil {
+		in := inboundForTransportTest(env, ChannelPlaintext)
+		if err := guard.Validate(in); err != nil {
 			t.Fatalf("first pass: %v", err)
 		}
-		if err := guard.Validate(env); !errors.Is(err, ErrDuplicateMessage) {
+		if err := guard.Validate(in); !errors.Is(err, ErrDuplicateMessage) {
 			t.Fatalf("duplicate should return ErrDuplicateMessage, got %v", err)
 		}
 	})
@@ -240,8 +244,7 @@ func TestTransportSecurityIntegration(t *testing.T) {
 			Round: 1, From: 2, To: 3, PayloadType: "test.direct.plain",
 			Payload: []byte("hello"),
 		})
-		env.Security = SecurityContext{Authenticated: true, AuthenticatedParty: 2}
-		if !errors.Is(guard.Validate(env), ErrWrongRecipient) {
+		if !errors.Is(guard.Validate(inboundForTransportTest(env, ChannelPlaintext)), ErrWrongRecipient) {
 			t.Fatal("should reject wrong recipient")
 		}
 	})

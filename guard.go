@@ -25,8 +25,11 @@ type EnvelopeGuard struct {
 }
 
 // NewEnvelopeGuard constructs a guard with the required security configuration.
-// It returns an error if Self is not in Parties or if the SessionID is invalid.
+// It returns an error if parties is empty, Self is not in Parties, or if the SessionID is invalid.
 func NewEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, sessionID SessionID, policies PolicySet, cache ReplayCache) (*EnvelopeGuard, error) {
+	if len(parties) == 0 {
+		return nil, errors.New("guard parties must not be empty")
+	}
 	if !parties.Contains(self) {
 		return nil, errors.New("guard self is not in parties")
 	}
@@ -79,7 +82,7 @@ func (noopAckVerifier) VerifyAck(party PartyID, digest [32]byte, signature []byt
 // Validate executes the full security validation sequence on an incoming envelope
 // against the guard's configured party set. It returns nil only when the envelope
 // passes all checks.
-func (g *EnvelopeGuard) Validate(env Envelope) error {
+func (g *EnvelopeGuard) Validate(env InboundEnvelope) error {
 	return g.ValidateWithParties(env, g.Parties)
 }
 
@@ -87,89 +90,94 @@ func (g *EnvelopeGuard) Validate(env Envelope) error {
 // broadcast certificates against the provided party set instead of the guard's
 // configured set. This is used by sessions (e.g. reshare) that accept messages
 // from different participant subsets depending on payload type.
-func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) error {
+func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySet) error {
+	base := env.Envelope()
+	info := env.ReceiveInfo()
+
 	// 1. Protocol match.
-	if env.Protocol != g.Protocol {
-		s := fmt.Sprintf("unexpected protocol %q", env.Protocol)
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, errors.New(s))
+	if base.Protocol != g.Protocol {
+		s := fmt.Sprintf("unexpected protocol %q", base.Protocol)
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, errors.New(s))
 	}
 
 	// 2. Session ID match.
-	if env.SessionID != g.SessionID {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, errors.New("session mismatch"))
+	if base.SessionID != g.SessionID {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, errors.New("session mismatch"))
 	}
 
 	// 3. Version check.
-	if env.Version != Version {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected version %d", env.Version))
+	if base.Version != Version {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected version %d", base.Version))
 	}
 
 	// 4. Transcript hash integrity.
-	if err := VerifyTranscriptHash(env); err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+	if err := VerifyTranscriptHash(base); err != nil {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 
 	// 5. Sender membership in the provided party set.
-	if !parties.Contains(env.From) {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("sender %d is not a participant", env.From))
+	if !parties.Contains(base.From) {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("sender %d is not a participant", base.From))
 	}
 
 	// 6. Transport authentication.
-	if !env.Security.Authenticated {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, ErrUnauthenticatedTransport)
+	if info.Peer == 0 {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrUnauthenticatedTransport)
 	}
 
-	// 7. Transport identity must be set.
-	if env.Security.AuthenticatedParty == 0 {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: authenticated party is zero (unset)", ErrUnauthenticatedTransport))
+	// 7. Transport identity must match envelope sender.
+	if info.Peer != base.From {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, info.Peer, base.From))
 	}
-	// 8. Transport identity must match envelope sender.
-	if env.Security.AuthenticatedParty != env.From {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, env.Security.AuthenticatedParty, env.From))
+
+	// 8. Channel protection must be set.
+	if info.Protection == ChannelProtectionUnknown {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingChannelProtection)
 	}
 
 	// 9. Recipient check for direct messages.
-	if env.To != 0 && env.To != g.Self {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, env.To))
+	if base.To != 0 && base.To != g.Self {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, base.To))
 	}
 
 	// 10. Policy lookup.
-	policy, err := g.Policies.Match(env.Protocol, env.Round, env.PayloadType)
+	policy, err := g.Policies.Match(base.Protocol, base.Round, base.PayloadType)
 	if err != nil {
-		return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, err)
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 
 	// 11. Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
-		if env.To == 0 {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType))
+		if base.To == 0 {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, base.PayloadType))
 		}
 	case DeliveryBroadcast:
-		if env.To != 0 {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType))
+		if base.To != 0 {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, base.PayloadType))
 		}
 	}
 
 	// 12. Confidentiality enforcement.
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
-		if !env.Security.Confidential {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType))
+		if info.Protection != ChannelConfidential {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrMissingConfidentiality, base.PayloadType))
 		}
 	case ConfidentialityForbidden:
-		if env.Security.Confidential {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType))
+		if info.Protection == ChannelConfidential {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, base.PayloadType))
 		}
 	}
 
 	// 13. Broadcast consistency enforcement against the provided party set.
 	if policy.BroadcastConsistency == BroadcastConsistencyRequired {
-		if env.Broadcast == nil {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, env.PayloadType))
+		cert := env.BroadcastCertificate()
+		if cert == nil {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrMissingBroadcastCertificate, base.PayloadType))
 		}
-		if err := env.Broadcast.VerifyFull(env, parties, g.AckVerifier); err != nil {
-			return NewProtocolError(ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err))
+		if err := cert.VerifyFull(base, parties, g.AckVerifier); err != nil {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %w", ErrInvalidBroadcastCertificate, err))
 		}
 	}
 
@@ -179,13 +187,13 @@ func (g *EnvelopeGuard) ValidateWithParties(env Envelope, parties PartySet) erro
 	// payloads. Equivocation (same slot, different payload hash) is
 	// always a verification error because it indicates a malicious or
 	// faulty sender.
-	slot := SlotKeyFromEnvelope(env)
-	payloadHash := PayloadHashFromEnvelope(env)
+	slot := SlotKeyFromEnvelope(base)
+	payloadHash := PayloadHashFromEnvelope(base)
 	if err := g.ReplayCache.CheckAndStore(slot, payloadHash); err != nil {
 		if errors.Is(err, ErrDuplicateMessage) {
 			return ErrDuplicateMessage
 		}
-		return NewProtocolError(ErrCodeVerification, env.Round, env.From, err)
+		return NewProtocolError(ErrCodeVerification, base.Round, base.From, err)
 	}
 
 	return nil
@@ -229,7 +237,7 @@ func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, exp
 // universe changes between rounds (e.g. reshare with old and new party
 // subsets), this design avoids coupling the guard's construction-time party set
 // to per-message validation.
-func ValidateInbound(guard *EnvelopeGuard, env Envelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
+func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
 	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
 		return err
 	}

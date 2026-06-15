@@ -11,11 +11,11 @@ import (
 
 type testRefreshTransport struct {
 	send func([]tss.Envelope) error
-	recv func(ctx context.Context) (tss.Envelope, error)
+	recv func(ctx context.Context) (tss.InboundEnvelope, error)
 }
 
 func (t *testRefreshTransport) Send(envs []tss.Envelope) error { return t.send(envs) }
-func (t *testRefreshTransport) Recv(ctx context.Context) (tss.Envelope, error) {
+func (t *testRefreshTransport) Recv(ctx context.Context) (tss.InboundEnvelope, error) {
 	return t.recv(ctx)
 }
 

@@ -39,9 +39,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-
-			commitA.Security.Authenticated = true
-			commitA.Security.AuthenticatedParty = commitA.From
 			_, err = sess1B.HandleSignMessage(testutil.DeliverEnvelope(commitA))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
 		}},
@@ -61,8 +58,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			commit2 := out2[0]
 			commit2.Protocol = "wrong-protocol"
 			commit2 = commit2.RecomputeTranscriptHash()
-			commit2.Security.Authenticated = true
-			commit2.Security.AuthenticatedParty = commit2.From
 
 			_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(commit2))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeInvalidMessage)
@@ -85,8 +80,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 			cb := out2[0]
-			cb.Security.Authenticated = true
-			cb.Security.AuthenticatedParty = cb.From
 			partials1, err := sess1.HandleSignMessage(testutil.DeliverEnvelope(cb))
 			if err != nil {
 				t.Fatal(err)
@@ -95,13 +88,9 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 				t.Fatal("expected party 1 to emit partial")
 			}
 			party1Partial := partials1[0]
-			party1Partial.Security.Authenticated = true
-			party1Partial.Security.AuthenticatedParty = party1Partial.From
 
 			// Deliver party 1's commitment to party 2 → party 2 emits its partial.
 			ca := out1[0]
-			ca.Security.Authenticated = true
-			ca.Security.AuthenticatedParty = ca.From
 			_, err = sess2.HandleSignMessage(testutil.DeliverEnvelope(ca))
 			if err != nil {
 				t.Fatal(err)
@@ -148,8 +137,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 party 2's message-A commitment → party 1 emits its partial.
 			cbA := out2A[0]
-			cbA.Security.Authenticated = true
-			cbA.Security.AuthenticatedParty = cbA.From
 			_, err = sess1A.HandleSignMessage(testutil.DeliverEnvelope(cbA))
 			if err != nil {
 				t.Fatal(err)
@@ -159,8 +146,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// The lifecycle plan hash rejects the cross-message intent before a
 			// partial is emitted.
 			ca := out1A[0]
-			ca.Security.Authenticated = true
-			ca.Security.AuthenticatedParty = ca.From
 			_, err = sess2B.HandleSignMessage(testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
@@ -197,8 +182,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 (2-signer) party 2's 2-signer commitment → party 1 emits partial.
 			cb2 := out2_2[0]
-			cb2.Security.Authenticated = true
-			cb2.Security.AuthenticatedParty = cb2.From
 			_, err = sess1_2.HandleSignMessage(testutil.DeliverEnvelope(cb2))
 			if err != nil {
 				t.Fatal(err)
@@ -207,8 +190,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// Give party 2 (3-signer) party 1's 2-signer commitment. The plan
 			// hash rejects the cross-signer-set intent before a partial is emitted.
 			ca := out1[0]
-			ca.Security.Authenticated = true
-			ca.Security.AuthenticatedParty = ca.From
 			_, err = sess2_3.HandleSignMessage(testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},
@@ -255,8 +236,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Give party 1 party 2's shift1 commitment → party 1 emits partial.
 			cb1 := out2_s1[0]
-			cb1.Security.Authenticated = true
-			cb1.Security.AuthenticatedParty = cb1.From
 			_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(cb1))
 			if err != nil {
 				t.Fatal(err)
@@ -265,8 +244,6 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			// Give party 2 (shift2) party 1's shift1 commitment. The plan hash
 			// rejects the cross-HD-path intent before a partial is emitted.
 			ca := out1[0]
-			ca.Security.Authenticated = true
-			ca.Security.AuthenticatedParty = ca.From
 			_, err = sess2_s2.HandleSignMessage(testutil.DeliverEnvelope(ca))
 			_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 		}},

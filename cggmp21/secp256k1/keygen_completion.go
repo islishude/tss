@@ -201,7 +201,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
 	s.pending = &pendingKeyShare{share: share}
 	s.state = keygenConfirming
-	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 // commitments. Callers are responsible for logging the failure with the
 // appropriate path-specific context (eager or deferred).
 func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
-	evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil, true)
+	evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil)
 	if evErr != nil {
 		return nil, evErr
 	}

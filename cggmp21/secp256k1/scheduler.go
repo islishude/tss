@@ -14,7 +14,7 @@ import (
 // The caller provides message delivery; the scheduler drives the protocol.
 type RefreshTransport interface {
 	Send(envs []tss.Envelope) error
-	Recv(ctx context.Context) (tss.Envelope, error)
+	Recv(ctx context.Context) (tss.InboundEnvelope, error)
 }
 
 // RefreshSchedulerOptions configures the proactive refresh scheduler.

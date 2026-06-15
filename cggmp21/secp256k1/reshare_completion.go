@@ -60,7 +60,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], s.selfID, secp.ScalarFromBigInt(share)); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil, true)
+			evidenceEnv, evErr := envelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
@@ -215,7 +215,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.confirmations[s.selfID] = append([]byte(nil), encodedConfirmation...)
-	confirmationEnv, err := envelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	confirmationEnv, err := envelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, 0, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}

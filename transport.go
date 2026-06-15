@@ -8,10 +8,8 @@ import (
 )
 
 // Transport abstracts the network layer used to deliver protocol envelopes.
-// Implementations must:
-//   - Set SecurityContext on received envelopes (authenticated identity, confidentiality).
-//   - Attach BroadcastCertificates when the protocol policy requires consistency.
-//   - Respect the protocol policy table for delivery mode and confidentiality.
+// Implementations receive raw wire bytes, authenticate the peer, classify the
+// actual channel protection, and return an InboundEnvelope opened with ReceiveInfo.
 type Transport interface {
 	// Send delivers a direct (point-to-point) envelope to its recipient.
 	Send(ctx context.Context, env Envelope) error
@@ -20,26 +18,24 @@ type Transport interface {
 	Broadcast(ctx context.Context, env Envelope) error
 
 	// Receive blocks until the next envelope is available and returns it
-	// with SecurityContext populated from the transport layer.
-	Receive(ctx context.Context) (Envelope, error)
+	// with transport-verified receive facts bound to the wire envelope.
+	Receive(ctx context.Context) (InboundEnvelope, error)
 }
 
 // InMemoryTransport is a reference implementation of Transport that uses
 // Go channels for in-process message delivery. Each party gets its own
-// transport instance. Messages are delivered with full SecurityContext.
+// transport instance. Messages are opened with authenticated ReceiveInfo.
 //
 // Direct messages are delivered only to the addressed recipient. Broadcast
 // messages are delivered to all parties.
 //
-// Broadcast certificates are NOT generated automatically — the caller must
-// use BroadcastConsistency externally and attach the certificate to the
-// envelope before passing it to protocol handlers.
+// Broadcast certificates are NOT generated automatically.
 type InMemoryTransport struct {
 	self     PartyID
 	parties  PartySet
 	policies PolicySet
-	inbox    chan Envelope
-	outboxes map[PartyID]chan<- Envelope
+	inbox    chan InboundEnvelope
+	outboxes map[PartyID]chan<- InboundEnvelope
 	mu       sync.RWMutex
 }
 
@@ -49,21 +45,21 @@ func NewInMemoryTransport(self PartyID, parties PartySet, policies PolicySet) *I
 		self:     self,
 		parties:  parties.Clone(),
 		policies: policies,
-		inbox:    make(chan Envelope, 256),
-		outboxes: make(map[PartyID]chan<- Envelope),
+		inbox:    make(chan InboundEnvelope, 256),
+		outboxes: make(map[PartyID]chan<- InboundEnvelope),
 	}
 }
 
 // ConnectOutbox registers the outbox channel for a remote party.
 // In a real deployment this would be a network connection.
-func (t *InMemoryTransport) ConnectOutbox(party PartyID, outbox chan<- Envelope) {
+func (t *InMemoryTransport) ConnectOutbox(party PartyID, outbox chan<- InboundEnvelope) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.outboxes[party] = outbox
 }
 
 // Inbox returns the receive channel for this transport.
-func (t *InMemoryTransport) Inbox() <-chan Envelope {
+func (t *InMemoryTransport) Inbox() <-chan InboundEnvelope {
 	return t.inbox
 }
 
@@ -72,8 +68,7 @@ func (t *InMemoryTransport) Parties() PartySet {
 	return t.parties.Clone()
 }
 
-// Send delivers a direct envelope to the addressed recipient with full
-// SecurityContext.
+// Send delivers a direct envelope to the addressed recipient.
 func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
 	if env.To == 0 {
 		return fmt.Errorf("%w: cannot Send to broadcast address", ErrExpectedDirectMessage)
@@ -94,25 +89,20 @@ func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
 		return fmt.Errorf("no route to party %d", env.To)
 	}
 
-	secured := env.Clone()
-	secured.Security = SecurityContext{
-		Authenticated:      true,
-		Confidential:       policy.Confidentiality == ConfidentialityRequired,
-		AuthenticatedParty: env.From,
-		ChannelID:          "inmemory",
-		PeerKeyID:          fmt.Sprintf("party-%d", env.From),
-		ReceivedAtUnix:     time.Now().Unix(),
+	inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory", nil)
+	if err != nil {
+		return err
 	}
 
 	select {
-	case outbox <- secured:
+	case outbox <- inbound:
 		return nil
 	default:
 		return fmt.Errorf("outbox full for party %d", env.To)
 	}
 }
 
-// Broadcast delivers an envelope to all parties with full SecurityContext.
+// Broadcast delivers an envelope to all parties.
 func (t *InMemoryTransport) Broadcast(_ context.Context, env Envelope) error {
 	if env.To != 0 {
 		return fmt.Errorf("%w: cannot Broadcast to direct address", ErrExpectedBroadcastMessage)
@@ -137,17 +127,12 @@ func (t *InMemoryTransport) Broadcast(_ context.Context, env Envelope) error {
 		if !ok {
 			return fmt.Errorf("no route to party %d", id)
 		}
-		secured := env.Clone()
-		secured.Security = SecurityContext{
-			Authenticated:      true,
-			Confidential:       policy.Confidentiality == ConfidentialityRequired,
-			AuthenticatedParty: env.From,
-			ChannelID:          "inmemory",
-			PeerKeyID:          fmt.Sprintf("party-%d", env.From),
-			ReceivedAtUnix:     time.Now().Unix(),
+		inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory", nil)
+		if err != nil {
+			return err
 		}
 		select {
-		case outbox <- secured:
+		case outbox <- inbound:
 		default:
 			return fmt.Errorf("outbox full for party %d", id)
 		}
@@ -156,22 +141,43 @@ func (t *InMemoryTransport) Broadcast(_ context.Context, env Envelope) error {
 }
 
 // Receive returns the next envelope from the inbox.
-func (t *InMemoryTransport) Receive(ctx context.Context) (Envelope, error) {
+func (t *InMemoryTransport) Receive(ctx context.Context) (InboundEnvelope, error) {
 	select {
 	case env := <-t.inbox:
 		return env, nil
 	case <-ctx.Done():
-		return Envelope{}, ctx.Err()
+		return InboundEnvelope{}, ctx.Err()
 	}
+}
+
+func protectionFromPolicy(policy DeliveryPolicy) ChannelProtection {
+	if policy.Confidentiality == ConfidentialityRequired {
+		return ChannelConfidential
+	}
+	return ChannelPlaintext
+}
+
+func openInMemoryEnvelope(env Envelope, peer PartyID, protection ChannelProtection, channelID string, cert *BroadcastCertificate) (InboundEnvelope, error) {
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		return InboundEnvelope{}, err
+	}
+	return OpenEnvelope(raw, ReceiveInfo{
+		Peer:       peer,
+		Protection: protection,
+		ChannelID:  channelID,
+		PeerKeyID:  fmt.Sprintf("party-%d", peer),
+		ReceivedAt: time.Now(),
+	}, WithBroadcastCertificate(cert))
 }
 
 // AttackMode specifies a type of transport-layer attack for testing.
 type AttackMode uint8
 
 const (
-	// AttackSenderSpoof sets AuthenticatedParty different from Envelope.From.
+	// AttackSenderSpoof opens an envelope with ReceiveInfo.Peer different from Envelope.From.
 	AttackSenderSpoof AttackMode = iota
-	// AttackPlaintextConfidential strips the Confidential flag on confidential-required messages.
+	// AttackPlaintextConfidential reports plaintext delivery for confidential-required messages.
 	AttackPlaintextConfidential
 	// AttackReplay sends the same envelope twice.
 	AttackReplay
@@ -205,9 +211,9 @@ func (m *MaliciousTransport) Send(ctx context.Context, env Envelope) error {
 	modified := env.Clone()
 	switch m.mode {
 	case AttackSenderSpoof:
-		modified.Security.AuthenticatedParty = 999 // mismatch
+		return m.sendWithReceiveFacts(modified, 999, ChannelConfidential, "inmemory-spoof")
 	case AttackPlaintextConfidential:
-		modified.Security.Confidential = false // strip confidentiality
+		return m.sendWithReceiveFacts(modified, modified.From, ChannelPlaintext, "inmemory-plaintext")
 	case AttackReplay:
 		m.mu.Lock()
 		if m.replay != nil {
@@ -227,6 +233,35 @@ func (m *MaliciousTransport) Send(ctx context.Context, env Envelope) error {
 		modified.To = 999
 	}
 	return m.inner.Send(ctx, modified)
+}
+
+func (m *MaliciousTransport) sendWithReceiveFacts(env Envelope, peer PartyID, protection ChannelProtection, channelID string) error {
+	if env.To == 0 {
+		return fmt.Errorf("%w: cannot Send to broadcast address", ErrExpectedDirectMessage)
+	}
+	policy, err := m.inner.policies.Match(env.Protocol, env.Round, env.PayloadType)
+	if err != nil {
+		return err
+	}
+	if policy.Mode != DeliveryDirect {
+		return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType)
+	}
+	m.inner.mu.RLock()
+	outbox, ok := m.inner.outboxes[env.To]
+	m.inner.mu.RUnlock()
+	if !ok {
+		return fmt.Errorf("no route to party %d", env.To)
+	}
+	inbound, err := openInMemoryEnvelope(env, peer, protection, channelID, nil)
+	if err != nil {
+		return err
+	}
+	select {
+	case outbox <- inbound:
+		return nil
+	default:
+		return fmt.Errorf("outbox full for party %d", env.To)
+	}
 }
 
 // Broadcast applies the attack mode and delegates to the inner transport.
@@ -277,10 +312,6 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 	// Recompute transcript hash so structural checks still pass.
 	tampered = tampered.RecomputeTranscriptHash()
 
-	// Pre-compute values so we don't repeat work while holding the lock.
-	confidential := policy.Confidentiality == ConfidentialityRequired
-	peerKeyID, timeNow := fmt.Sprintf("party-%d", env.From), time.Now().Unix()
-
 	m.inner.mu.RLock()
 	defer m.inner.mu.RUnlock()
 
@@ -293,23 +324,19 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 		if !ok {
 			return fmt.Errorf("no route to party %d", id)
 		}
-		var secured Envelope
+		var delivered Envelope
 		if !firstSent {
-			secured = env.Clone()
+			delivered = env.Clone()
 			firstSent = true
 		} else {
-			secured = tampered.Clone()
+			delivered = tampered.Clone()
 		}
-		secured.Security = SecurityContext{
-			Authenticated:      true,
-			Confidential:       confidential,
-			AuthenticatedParty: env.From,
-			ChannelID:          "inmemory-equivocation",
-			PeerKeyID:          peerKeyID,
-			ReceivedAtUnix:     timeNow,
+		inbound, err := openInMemoryEnvelope(delivered, env.From, protectionFromPolicy(policy), "inmemory-equivocation", nil)
+		if err != nil {
+			return err
 		}
 		select {
-		case outbox <- secured:
+		case outbox <- inbound:
 		default:
 			return fmt.Errorf("outbox full for party %d", id)
 		}
@@ -318,6 +345,6 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 }
 
 // Receive delegates to the inner transport.
-func (m *MaliciousTransport) Receive(ctx context.Context) (Envelope, error) {
+func (m *MaliciousTransport) Receive(ctx context.Context) (InboundEnvelope, error) {
 	return m.inner.Receive(ctx)
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 func deliverPresignMessagesTo(t testing.TB, session *PresignSession, receiver tss.PartyID, messages []tss.Envelope) []tss.Envelope {
@@ -15,16 +16,9 @@ func deliverPresignMessagesTo(t testing.TB, session *PresignSession, receiver ts
 		if env.From == receiver || (env.To != 0 && env.To != receiver) {
 			continue
 		}
-		delivered := env
-		delivered.Security.Authenticated = true
-		delivered.Security.AuthenticatedParty = env.From
-		next, err := session.HandlePresignMessage(delivered)
+		next, err := session.HandlePresignMessage(testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatal(err)
-		}
-		for i := range next {
-			next[i].Security.Authenticated = true
-			next[i].Security.AuthenticatedParty = next[i].From
 		}
 		out = append(out, next...)
 	}

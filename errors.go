@@ -53,6 +53,10 @@ var ErrUnauthenticatedTransport = errors.New("unauthenticated transport")
 // ErrSenderIdentityMismatch is returned when the transport-authenticated party differs from Envelope.From.
 var ErrSenderIdentityMismatch = errors.New("sender identity mismatch")
 
+// ErrMissingChannelProtection is returned when the receive path does not report
+// whether an envelope arrived over plaintext or confidential transport.
+var ErrMissingChannelProtection = errors.New("missing channel protection")
+
 // ErrMissingConfidentiality is returned when a confidential-required payload arrives over plaintext.
 var ErrMissingConfidentiality = errors.New("missing transport confidentiality")
 

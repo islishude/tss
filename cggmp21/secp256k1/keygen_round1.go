@@ -136,7 +136,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -150,7 +150,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload, true)
+		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -639,24 +639,25 @@ func (s *PresignSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *PresignSession) validateInbound(env tss.Envelope) error {
+func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.signers), s.key.state.party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
 // It dispatches to per-round handlers that each follow the template:
 // parse → policy validate → cryptographic verify → mutate state → emit.
-func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil presign session")
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, completedSessionError(env.Round, env.From)
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, abortedSessionError(env.Round, env.From)
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {
@@ -669,52 +670,52 @@ func (s *PresignSession) HandlePresignMessage(env tss.Envelope) (out []tss.Envel
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.signers, env.From) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	if !tss.ContainsParty(s.signers, base.From) {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
 
-	switch env.PayloadType {
+	switch base.PayloadType {
 	case payloadPresignRound1:
-		if env.Round != 1 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 payload in wrong round"))
+		if base.Round != 1 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
 		}
-		if _, ok := s.round1[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1"))
+		if _, ok := s.round1[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1"))
 		}
-		return s.handlePresignRound1(env)
+		return s.handlePresignRound1(base)
 
 	case payloadPresignRound1Proof:
-		if env.Round != 1 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round1 proof payload in wrong round"))
+		if base.Round != 1 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 proof payload in wrong round"))
 		}
-		if env.From == s.key.state.party {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("self presign round1 proof is not expected"))
+		if base.From == s.key.state.party {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("self presign round1 proof is not expected"))
 		}
-		if _, ok := s.round1Proofs[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round1 proof"))
+		if _, ok := s.round1Proofs[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1 proof"))
 		}
-		return s.handlePresignRound1Proof(env)
+		return s.handlePresignRound1Proof(base)
 
 	case payloadPresignRound2:
-		if env.Round != 2 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round2 payload in wrong round"))
+		if base.Round != 2 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
 		}
-		if _, ok := s.round2[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate presign round2"))
+		if _, ok := s.round2[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round2"))
 		}
-		return s.handlePresignRound2(env)
+		return s.handlePresignRound2(base)
 
 	case payloadPresignRound3:
-		if env.Round != 3 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("round3 payload in wrong round"))
+		if base.Round != 3 {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
 		}
-		if _, ok := s.deltas[env.From]; ok {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate delta share"))
+		if _, ok := s.deltas[base.From]; ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate delta share"))
 		}
-		return s.handlePresignRound3(env)
+		return s.handlePresignRound3(base)
 
 	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 }
 

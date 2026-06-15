@@ -146,11 +146,9 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	if !ok {
 		t.Fatal("missing keygen share from party 2 to party 1")
 	}
-	env.Security = tss.SecurityContext{Authenticated: true, AuthenticatedParty: env.From, Confidential: true}
-
 	beforeShares := len(s1.shares)
 	beforeCommits := len(s1.commits)
-	out, err := s1.HandleKeygenMessage(env)
+	out, err := s1.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}

@@ -33,17 +33,6 @@ const (
 	AlgorithmFROSTEd25519 Algorithm = "frost-ed25519"
 )
 
-// SecurityContext records transport-layer facts verified by the receiving adapter.
-// It must NOT be set by protocol callers; only the transport receive path sets it.
-type SecurityContext struct {
-	Authenticated      bool
-	Confidential       bool
-	AuthenticatedParty PartyID
-	ChannelID          string
-	PeerKeyID          string
-	ReceivedAtUnix     int64
-}
-
 // DeliveryMode classifies an envelope delivery path.
 type DeliveryMode uint8
 

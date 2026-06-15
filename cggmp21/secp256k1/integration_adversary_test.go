@@ -267,10 +267,6 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 			t.Fatal(err)
 		}
 		presignSessions[id] = session
-		for i := range out {
-			out[i].Security.Authenticated = true
-			out[i].Security.AuthenticatedParty = out[i].From
-		}
 		messages = append(messages, out...)
 	}
 
@@ -283,7 +279,7 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := presignSessions[id].HandlePresignMessage(env)
+			out, err := presignSessions[id].HandlePresignMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				if tampered {
 					assertPresignRound3Blame(t, err, env.From)
@@ -292,8 +288,6 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 				t.Fatal(err)
 			}
 			for i := range out {
-				out[i].Security.Authenticated = true
-				out[i].Security.AuthenticatedParty = out[i].From
 				if out[i].PayloadType == payloadPresignRound3 && !tampered {
 					tampered = true
 					p, err := unmarshalPresignRound3Payload(out[i].Payload)

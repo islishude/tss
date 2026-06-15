@@ -80,7 +80,7 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *ReshareSession) validateInbound(env tss.Envelope) error {
+func (s *ReshareSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
 }
 
@@ -210,7 +210,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -225,7 +225,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload, true)
+		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -356,7 +356,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,7 +371,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload, true)
+		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -384,7 +384,8 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 }
 
 // HandleReshareMessage validates and applies one reshare envelope.
-func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil reshare session")
 	}
@@ -407,49 +408,50 @@ func (s *ReshareSession) HandleReshareMessage(env tss.Envelope) (out []tss.Envel
 		}
 		return nil, err
 	}
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
+	if base.Round != 1 {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare only accepts round 1 messages"))
 	}
-	switch env.PayloadType {
+	payload := env.Payload()
+	switch base.PayloadType {
 	case payloadReshareCommitments:
-		p, err := unmarshalReshareCommitmentsPayload(env.Payload)
+		p, err := unmarshalReshareCommitmentsPayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		if err := validateReshareCommitments(p.Commitments, s.newThreshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if existing, ok := s.commits[env.From]; ok {
+		if existing, ok := s.commits[base.From]; ok {
 			if equalByteSlices(existing, p.Commitments) {
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting reshare commitments"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare commitments"))
 		}
-		s.commits[env.From] = p.Commitments
+		s.commits[base.From] = p.Commitments
 	case payloadReshareShare:
-		p, err := unmarshalReshareSharePayload(env.Payload)
+		p, err := unmarshalReshareSharePayload(payload)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		scalar, err := edcurve.ScalarFromCanonical(p.Share)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
-		if existing, ok := s.shares[env.From]; ok {
+		if existing, ok := s.shares[base.From]; ok {
 			if existing.Equal(scalar) == 1 {
 				return nil, nil
 			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, errors.New("conflicting reshare share"))
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare share"))
 		}
-		s.shares[env.From] = scalar
+		s.shares[base.From] = scalar
 	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
 	return nil, s.tryComplete()
 }

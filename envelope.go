@@ -3,12 +3,13 @@ package tss
 import (
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
 
-// Envelope is a transport-neutral protocol message with transport-verified security context.
+// Envelope is a transport-neutral protocol wire message.
 type Envelope struct {
 	Protocol    ProtocolID  `wire:"1,string"`
 	Version     uint16      `wire:"2,u16"`
@@ -20,9 +21,38 @@ type Envelope struct {
 	Payload     []byte      `wire:"8,bytes"`
 
 	TranscriptHash [32]byte `wire:"9,bytes,len=32"`
+}
 
-	Security  SecurityContext       `wire:"-"`
-	Broadcast *BroadcastCertificate `wire:"-"`
+// ChannelProtection describes the channel protection actually observed by the
+// receive transport. The zero value is invalid and fails closed.
+type ChannelProtection uint8
+
+const (
+	// ChannelProtectionUnknown means the receive path did not report channel protection.
+	ChannelProtectionUnknown ChannelProtection = iota
+	// ChannelPlaintext means the receive path explicitly observed plaintext delivery.
+	ChannelPlaintext
+	// ChannelConfidential means the receive path explicitly observed confidential delivery.
+	ChannelConfidential
+)
+
+// ReceiveInfo records transport-verified facts for a received envelope.
+type ReceiveInfo struct {
+	Peer       PartyID
+	Protection ChannelProtection
+	ChannelID  string
+	PeerKeyID  string
+	ReceivedAt time.Time
+}
+
+// InboundEnvelope is a received envelope bound to transport-verified facts.
+//
+// Its fields are intentionally unexported so callers cannot mutate wire data or
+// receive facts after opening and validation.
+type InboundEnvelope struct {
+	env         Envelope
+	receiveInfo ReceiveInfo
+	broadcast   *BroadcastCertificate
 }
 
 // WireType returns the canonical wire type identifier for Envelope.
@@ -43,10 +73,68 @@ func (e Envelope) Clone() Envelope {
 		PayloadType:    e.PayloadType,
 		Payload:        append([]byte(nil), e.Payload...),
 		TranscriptHash: e.TranscriptHash,
-		Security:       e.Security,
-		Broadcast:      e.Broadcast.Clone(),
 	}
 	return clone
+}
+
+// Envelope returns a deep copy of the inbound wire envelope.
+func (in InboundEnvelope) Envelope() Envelope {
+	return in.env.Clone()
+}
+
+// ReceiveInfo returns a copy of the transport receive facts.
+func (in InboundEnvelope) ReceiveInfo() ReceiveInfo {
+	return in.receiveInfo
+}
+
+// BroadcastCertificate returns a deep copy of the attached broadcast certificate.
+func (in InboundEnvelope) BroadcastCertificate() *BroadcastCertificate {
+	return in.broadcast.Clone()
+}
+
+// Protocol returns the envelope protocol identifier.
+func (in InboundEnvelope) Protocol() ProtocolID {
+	return in.env.Protocol
+}
+
+// Version returns the envelope wire version.
+func (in InboundEnvelope) Version() uint16 {
+	return in.env.Version
+}
+
+// SessionID returns the envelope session ID.
+func (in InboundEnvelope) SessionID() SessionID {
+	return in.env.SessionID
+}
+
+// Round returns the protocol round.
+func (in InboundEnvelope) Round() uint8 {
+	return in.env.Round
+}
+
+// From returns the sender party ID from the wire envelope.
+func (in InboundEnvelope) From() PartyID {
+	return in.env.From
+}
+
+// To returns the recipient party ID from the wire envelope, or zero for broadcast.
+func (in InboundEnvelope) To() PartyID {
+	return in.env.To
+}
+
+// PayloadType returns the payload type name.
+func (in InboundEnvelope) PayloadType() PayloadType {
+	return in.env.PayloadType
+}
+
+// Payload returns a copy of the envelope payload bytes.
+func (in InboundEnvelope) Payload() []byte {
+	return append([]byte(nil), in.env.Payload...)
+}
+
+// TranscriptHash returns the envelope transcript hash.
+func (in InboundEnvelope) TranscriptHash() [32]byte {
+	return in.env.TranscriptHash
 }
 
 // cloneBroadcastAcks returns a deep copy of a broadcast ack slice.
@@ -204,25 +292,71 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 	return e, nil
 }
 
-// OpenEnvelope decodes a wire envelope and attaches transport-verified security context.
-// It recomputes the transcript hash from the wire bytes and stores the provided
-// SecurityContext and BroadcastCertificate. No protocol policy checks are performed.
-func OpenEnvelope(raw []byte, security SecurityContext, broadcast *BroadcastCertificate) (Envelope, error) {
-	return OpenEnvelopeWithLimits(raw, security, broadcast, defaultEnvelopeLimits())
+type openOptions struct {
+	limits    EnvelopeLimits
+	broadcast *BroadcastCertificate
 }
 
-// OpenEnvelopeWithLimits decodes a wire envelope with explicit limits and attaches
-// transport-verified security context.
-func OpenEnvelopeWithLimits(raw []byte, security SecurityContext, broadcast *BroadcastCertificate, limits EnvelopeLimits) (Envelope, error) {
-	env, err := UnmarshalEnvelopeWithLimits(raw, limits)
+// OpenOption configures OpenEnvelope.
+type OpenOption func(*openOptions)
+
+// WithBroadcastCertificate attaches a transport-collected broadcast certificate
+// to the opened inbound envelope. OpenEnvelope deep-clones the certificate before
+// storing it, so the caller retains ownership of the original.
+func WithBroadcastCertificate(cert *BroadcastCertificate) OpenOption {
+	return func(opts *openOptions) {
+		opts.broadcast = cert
+	}
+}
+
+// WithEnvelopeLimits configures explicit envelope size limits while opening.
+func WithEnvelopeLimits(limits EnvelopeLimits) OpenOption {
+	return func(opts *openOptions) {
+		opts.limits = limits
+	}
+}
+
+// OpenEnvelope decodes a wire envelope and binds it to transport-verified receive facts.
+// It recomputes the transcript hash from the wire-decoded fields. Protocol policy
+// checks are performed later by EnvelopeGuard.
+func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnvelope, error) {
+	options := openOptions{limits: defaultEnvelopeLimits()}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
+	env, err := UnmarshalEnvelopeWithLimits(raw, options.limits)
 	if err != nil {
-		return Envelope{}, err
+		return InboundEnvelope{}, err
 	}
 	// Recompute transcript hash from wire-decoded fields.
 	env.TranscriptHash = env.domainSeparatedHash()
-	env.Security = security
-	env.Broadcast = broadcast
-	return env, nil
+	if info.Peer == 0 {
+		return InboundEnvelope{}, ErrUnauthenticatedTransport
+	}
+	if info.Protection == ChannelProtectionUnknown {
+		return InboundEnvelope{}, ErrMissingChannelProtection
+	}
+	if info.Peer != env.From {
+		return InboundEnvelope{}, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, info.Peer, env.From)
+	}
+	if info.ReceivedAt.IsZero() {
+		info.ReceivedAt = time.Now()
+	}
+	return InboundEnvelope{
+		env:         env.Clone(),
+		receiveInfo: info,
+		broadcast:   options.broadcast.Clone(),
+	}, nil
+}
+
+// OpenEnvelopeWithLimits decodes a wire envelope with explicit limits and binds
+// it to transport-verified receive facts.
+func OpenEnvelopeWithLimits(raw []byte, info ReceiveInfo, limits EnvelopeLimits, opts ...OpenOption) (InboundEnvelope, error) {
+	options := append([]OpenOption{WithEnvelopeLimits(limits)}, opts...)
+	return OpenEnvelope(raw, info, options...)
 }
 
 // DomainSeparatedHash hashes the public envelope metadata and payload.
@@ -266,8 +400,10 @@ func (e Envelope) RecomputeTranscriptHash() Envelope {
 // It is a lightweight complement for the test fallback path (when no EnvelopeGuard
 // is set and the transport is unauthenticated). It does NOT check broadcast
 // consistency or replay — those require guard infrastructure.
-func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) error {
-	policy, err := policies.Match(env.Protocol, env.Round, env.PayloadType)
+func ValidateEnvelopePolicy(env InboundEnvelope, self PartyID, policies PolicySet) error {
+	protocol := env.Protocol()
+	pt := env.PayloadType()
+	policy, err := policies.Match(protocol, env.Round(), pt)
 	if err != nil {
 		return err
 	}
@@ -275,31 +411,28 @@ func ValidateEnvelopePolicy(env Envelope, self PartyID, policies PolicySet) erro
 	// Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
-		if env.To == 0 {
-			return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, env.PayloadType)
-		}
-		if env.To != self {
-			return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, self, env.To)
+		if to := env.To(); to == 0 {
+			return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, pt)
+		} else if to != self {
+			return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, self, to)
 		}
 	case DeliveryBroadcast:
-		if env.To != 0 {
-			return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, env.PayloadType)
+		if env.To() != 0 {
+			return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, pt)
 		}
 	}
 
 	// Confidentiality enforcement.
-	// Both ConfidentialityRequired and ConfidentialityForbidden are always
-	// checked regardless of the Authenticated flag. The guard path and this
-	// fallback path must be consistent: a confidential-forbidden payload
-	// arriving over a confidential channel is always a policy violation.
+	// Both ConfidentialityRequired and ConfidentialityForbidden are checked
+	// against the channel protection reported by the receive path.
 	switch policy.Confidentiality {
 	case ConfidentialityRequired:
-		if !env.Security.Confidential {
-			return fmt.Errorf("%w: %s", ErrMissingConfidentiality, env.PayloadType)
+		if env.ReceiveInfo().Protection != ChannelConfidential {
+			return fmt.Errorf("%w: %s", ErrMissingConfidentiality, pt)
 		}
 	case ConfidentialityForbidden:
-		if env.Security.Confidential {
-			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, env.PayloadType)
+		if env.ReceiveInfo().Protection == ChannelConfidential {
+			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, pt)
 		}
 	}
 

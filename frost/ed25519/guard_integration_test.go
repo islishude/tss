@@ -9,6 +9,7 @@ import (
 	stded25519 "crypto/ed25519"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
 // testFROSTGuard and testFROSTPolicies are defined in frost_test.go.
@@ -46,10 +47,7 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := env
-			delivered.Security.Authenticated = true
-			delivered.Security.AuthenticatedParty = env.From
-			out, err := sessions[id].HandleKeygenMessage(delivered)
+			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("DKG delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -99,10 +97,8 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitEnv.Security.Authenticated = true
-	commitEnv.Security.AuthenticatedParty = 12
 
-	_, err = session.HandleKeygenMessage(commitEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrMissingBroadcastCertificate) {
 		t.Fatalf("expected ErrMissingBroadcastCertificate, got %v", err)
 	}
@@ -141,10 +137,8 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareEnv.Security.Authenticated = true
-	shareEnv.Security.AuthenticatedParty = 22
 
-	_, err = session.HandleKeygenMessage(shareEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}
@@ -180,13 +174,15 @@ func TestFROSTRejectsSenderSpoofing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitEnv.Security.Authenticated = true
-	commitEnv.Security.AuthenticatedParty = 33 // transport says 33, envelope says 32
 
-	_, err = signSession.HandleSignMessage(commitEnv)
+	_, err = testutil.OpenInboundEnvelope(commitEnv, tss.ReceiveInfo{
+		Peer:       33,
+		Protection: tss.ChannelConfidential,
+	}, nil)
 	if !errors.Is(err, tss.ErrSenderIdentityMismatch) {
 		t.Fatalf("expected ErrSenderIdentityMismatch, got %v", err)
 	}
+	_ = signSession
 }
 
 // TestFROSTKeygenRejectsReplay verifies replay detection in FROST keygen.
@@ -222,14 +218,12 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	confirmEnv.Security.Authenticated = true
-	confirmEnv.Security.AuthenticatedParty = 42
 
 	// First pass — may fail with non-replay error.
-	_, _ = session.HandleKeygenMessage(confirmEnv)
+	_, _ = session.HandleKeygenMessage(testutil.DeliverEnvelope(confirmEnv))
 
 	// Second pass — must fail with ErrDuplicateMessage.
-	_, err = session.HandleKeygenMessage(confirmEnv)
+	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(confirmEnv))
 	if !errors.Is(err, tss.ErrDuplicateMessage) {
 		if err == nil {
 			t.Error("expected ErrDuplicateMessage or other error on second delivery, got nil")
@@ -281,11 +275,9 @@ func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareEnv.Security.Authenticated = true
-	shareEnv.Security.AuthenticatedParty = 52
 	// Confidential is deliberately left false.
 
-	_, err = reshareSession.HandleReshareMessage(shareEnv)
+	_, err = reshareSession.HandleReshareMessage(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}

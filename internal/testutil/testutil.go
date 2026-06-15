@@ -17,6 +17,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/islishude/tss"
 )
@@ -124,33 +125,6 @@ func MustPartySet(n int) []tss.PartyID {
 	return parties
 }
 
-// MustDeliverAll fans out envelopes to the session map using the provided
-// handler. Outbound envelopes produced by each handle call are queued and
-// processed in FIFO order until the queue drains. Fatal on error.
-func MustDeliverAll[S any](
-	tb testing.TB,
-	sessions map[tss.PartyID]S,
-	envelopes []tss.Envelope,
-	handler func(S, tss.Envelope) ([]tss.Envelope, error),
-) {
-	queue := make([]tss.Envelope, len(envelopes))
-	copy(queue, envelopes)
-	for len(queue) > 0 {
-		env := queue[0]
-		queue = queue[1:]
-
-		session, ok := sessions[env.To]
-		if !ok {
-			tb.Fatalf("no session for party %d", env.To)
-		}
-		out, err := handler(session, env)
-		if err != nil {
-			tb.Fatalf("handle message from %d to %d: %v", env.From, env.To, err)
-		}
-		queue = append(queue, out...)
-	}
-}
-
 // MutateBytes returns a copy of in with bit 0 of the first byte flipped.
 // If the input is empty, the output is empty.
 func MutateBytes(in []byte) []byte {
@@ -244,13 +218,46 @@ func AssertMapCleared[M ~map[K]V, K comparable, V any](tb testing.TB, m M) {
 	}
 }
 
-// DeliverEnvelope returns a copy of env with transport authentication set for
-// guard validation. The authenticated party is set to env.From, simulating a
-// delivery where the transport layer vouches for the sender identity.
-func DeliverEnvelope(env tss.Envelope) tss.Envelope {
-	env.Security.Authenticated = true
-	env.Security.AuthenticatedParty = env.From
-	return env
+// DeliverEnvelope opens env as an authenticated inbound envelope for guard validation.
+// It defaults to confidential delivery so secret-bearing test messages satisfy
+// protocol policies unless a test explicitly overrides the receive facts.
+func DeliverEnvelope(env tss.Envelope) tss.InboundEnvelope {
+	in, err := OpenInboundEnvelope(env, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: tss.ChannelConfidential,
+		ChannelID:  "test",
+		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		ReceivedAt: time.Unix(1, 0),
+	}, nil)
+	if err != nil {
+		panic(fmt.Sprintf("deliver envelope: %v", err))
+	}
+	return in
+}
+
+// DeliverEnvelopeWithProtection opens env with the requested channel protection.
+func DeliverEnvelopeWithProtection(env tss.Envelope, protection tss.ChannelProtection) tss.InboundEnvelope {
+	in, err := OpenInboundEnvelope(env, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: protection,
+		ChannelID:  "test",
+		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
+		ReceivedAt: time.Unix(1, 0),
+	}, nil)
+	if err != nil {
+		panic(fmt.Sprintf("deliver envelope: %v", err))
+	}
+	return in
+}
+
+// OpenInboundEnvelope opens env with explicit receive facts and an optional
+// broadcast certificate.
+func OpenInboundEnvelope(env tss.Envelope, info tss.ReceiveInfo, cert *tss.BroadcastCertificate) (tss.InboundEnvelope, error) {
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		return tss.InboundEnvelope{}, err
+	}
+	return tss.OpenEnvelope(raw, info, tss.WithBroadcastCertificate(cert))
 }
 
 // CheckGolden compares raw bytes against a golden file. When the environment

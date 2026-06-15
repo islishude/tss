@@ -168,7 +168,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadRefreshCommitments, commitPayload, false)
+	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadRefreshCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -182,7 +182,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadRefreshShare, payload, true)
+		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadRefreshShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -205,12 +205,13 @@ func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
 }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
-func (s *RefreshSession) validateInbound(env tss.Envelope) error {
+func (s *RefreshSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleRefreshMessage validates and applies one refresh envelope.
-func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envelope, err error) {
+func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+	env := in.Envelope()
 	if s == nil {
 		return nil, errors.New("nil refresh session")
 	}
@@ -227,7 +228,7 @@ func (s *RefreshSession) HandleRefreshMessage(env tss.Envelope) (out []tss.Envel
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
+	if err := s.validateInbound(in); err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}

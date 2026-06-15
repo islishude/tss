@@ -113,7 +113,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
 	s.pending = share
-	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation, false)
+	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}

@@ -31,7 +31,7 @@ func frostMarshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string
 
 // frostKeygenBlame builds Blame evidence for an invalid FROST DKG share.
 func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitments [][]byte) *tss.Blame {
-	evidenceEnv, err := envelope(config, 1, dealer, config.Self, payloadKeygenShare, nil, true)
+	evidenceEnv, err := envelope(config, 1, dealer, config.Self, payloadKeygenShare, nil)
 	if err != nil {
 		// Envelope construction with nil payload is infallible under normal
 		// operation; only a corrupted limits config could trigger this path.
@@ -55,7 +55,7 @@ func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitment
 
 // frostReshareBlame builds Blame evidence for an invalid FROST reshare share.
 func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitments [][]byte) *tss.Blame {
-	evidenceEnv, err := envelope(config, 1, dealer, config.Self, payloadReshareShare, nil, true)
+	evidenceEnv, err := envelope(config, 1, dealer, config.Self, payloadReshareShare, nil)
 	if err != nil {
 		// Envelope construction with nil payload is infallible under normal
 		// operation; only a corrupted limits config could trigger this path.

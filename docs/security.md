@@ -1,6 +1,13 @@
 # Security Notes
 
-**Hard precondition**: The transport layer must set `SecurityContext` (authenticated identity, confidentiality) on every received envelope. `EnvelopeGuard` enforces confidentiality requirements per payload type via the protocol `PolicySet`. This library does **not** seal or open transport ciphertexts — it validates `Security.Confidential` at the guard boundary. Unencrypted transport of secret-bearing envelopes will expose keygen shares, nonce material, and MtA responses to any observer on the message path.
+**Hard precondition**: The transport layer must authenticate the sender, classify
+the actual channel protection, and call `OpenEnvelope(raw, ReceiveInfo, ...)` for
+every received envelope. `EnvelopeGuard` enforces confidentiality requirements
+per payload type via the protocol `PolicySet`. This library does **not** seal or
+open transport ciphertexts — it compares `ReceiveInfo.Protection` with the
+policy at the guard boundary. Unencrypted transport of secret-bearing envelopes
+will expose keygen shares, nonce material, and MtA responses to any observer on
+the message path.
 
 This repository is not a production-audited TSS stack.
 
@@ -14,8 +21,8 @@ The library does not protect against a transport that lies about sender identity
 
 Callers must provide:
 
-- authenticated peer identity for every envelope, set via `Envelope.Security.AuthenticatedParty` and `Authenticated`;
-- encryption for secret-bearing envelopes, signalled by `Envelope.Security.Confidential`. Confidentiality requirements are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`;
+- authenticated peer identity for every inbound envelope, recorded as `ReceiveInfo.Peer`;
+- encryption for secret-bearing envelopes, reported as `ReceiveInfo.Protection = ChannelConfidential`. Confidentiality requirements are defined per payload type by protocol `PolicySet` and enforced by `EnvelopeGuard`;
 - **equivocation-resistant broadcast** for all broadcast-mode protocol messages:
   every participant must receive identical payloads, verified by
   `BroadcastCertificate` with `VerifyFull`. The guard detects equivocation via
@@ -56,10 +63,10 @@ nil-guard fail-closed check for defense in depth.
 Production `GuardConfig.BuildGuard` requires a non-nil `AckVerifier`
 (`BroadcastAckVerifier`) for broadcast ack signature verification.
 
-Before passing an inbound envelope to any state machine, the caller must verify
-that the authenticated transport identity for the peer exactly matches
-`Envelope.From`. The guard checks that `Envelope.From` is a participant and that
-`Security.AuthenticatedParty == Envelope.From`, rejecting identity mismatches.
+Before passing an inbound envelope to any state machine, the caller must open raw
+wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
+set `ReceiveInfo.Peer`; `OpenEnvelope` and the guard both check that this peer
+matches `Envelope.From`.
 
 Every inbound envelope must include the transcript hash produced by
 `NewEnvelope`. `EnvelopeGuard.Validate` rejects missing or mismatched
@@ -123,7 +130,7 @@ partials, shifted verification keys, and any remaining session-owned material.
 
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point
-messages, setting `Security.Confidential` so the guard enforces the policy. New HD reshare recipients must be provisioned
+messages, reporting `ChannelConfidential` in `ReceiveInfo` so the guard enforces the policy. New HD reshare recipients must be provisioned
 with the old 32-byte chain code through an authorized metadata channel; the
 chain code is not a signing secret, but losing or substituting it changes child
 key derivation.
@@ -269,12 +276,12 @@ reshare transcript and group-key preservation checks.
 
 Transport responsibilities:
 
-- bind every envelope to an authenticated sender identity, set `Envelope.Security.AuthenticatedParty` and `Authenticated`;
+- bind every inbound envelope to an authenticated sender identity via `ReceiveInfo.Peer`;
 - never let a payload field override the transport-authenticated sender;
 - fan out broadcast envelopes to every party;
-- protect confidential share envelopes with point-to-point encryption or equivalent controls, set `Envelope.Security.Confidential`;
-- supply `BroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (all broadcast-mode messages in CGGMP21 and FROST policy sets);
-- treat `SecurityContext` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;
+- protect confidential share envelopes with point-to-point encryption or equivalent controls, and report `ChannelConfidential`;
+- supply `BroadcastCertificate` through `WithBroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (all broadcast-mode messages in CGGMP21 and FROST policy sets);
+- treat `ReceiveInfo` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;
 - treat two different confirmations from one sender in one session as equivocation;
 - never persist or use keygen material before the completion accessor returns a confirmed `KeyShare`.
 
