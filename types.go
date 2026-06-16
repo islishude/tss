@@ -111,6 +111,8 @@ type KeyShare interface {
 	Algorithm() Algorithm
 	PartyID() PartyID
 	PublicKeyBytes() []byte
+	ChainCodeBytes() []byte
+	Derive(path DerivationPath, opts ...DeriveOption) (*DerivationResult, error)
 	MarshalBinary() ([]byte, error)
 	Destroy()
 }

@@ -1,6 +1,8 @@
 package bip32util
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestIsKnownVersion(t *testing.T) {
 	t.Parallel()
@@ -31,9 +33,6 @@ func TestIsKnownVersion(t *testing.T) {
 func TestBIP32Constants(t *testing.T) {
 	t.Parallel()
 
-	if HardenedKeyStart != 1<<31 {
-		t.Fatalf("HardenedKeyStart = %d, want %d", HardenedKeyStart, 1<<31)
-	}
 	if XPubVersion == TPubVersion {
 		t.Fatal("XPubVersion and TPubVersion must be distinct")
 	}

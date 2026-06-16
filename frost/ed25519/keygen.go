@@ -17,23 +17,22 @@ import (
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
 	mu             sync.Mutex
-	cfg            tss.ThresholdConfig
-	log            tss.Logger
-	limits         Limits
-	commits        map[tss.PartyID][][]byte
-	shares         map[tss.PartyID]*fed.Scalar
-	chainCodes     map[tss.PartyID][]byte
-	chainCodeComms map[tss.PartyID][]byte
-	enableHD       bool
-	planHash       []byte
-	completed      bool
-	aborted        bool
-	pending        *KeyShare
-	confirmations  map[tss.PartyID][]byte
-	keyShare       *KeyShare
-	ownPoly        []*fed.Scalar
-	ownMessages    []tss.Envelope
-	guard          *tss.EnvelopeGuard
+	cfg            tss.ThresholdConfig         // Local threshold runtime view fixed by the keygen plan.
+	log            tss.Logger                  // Optional protocol logger.
+	limits         Limits                      // Local fail-closed resource policy.
+	commits        map[tss.PartyID][][]byte    // Public polynomial commitments by sender.
+	shares         map[tss.PartyID]*fed.Scalar // Secret Shamir shares received for the local party.
+	chainCodes     map[tss.PartyID][]byte      // Per-party chain-code contributions; secret until aggregation.
+	chainCodeComms map[tss.PartyID][]byte      // Commitments used to bind chain-code contributions.
+	planHash       []byte                      // Digest every keygen payload must echo.
+	completed      bool                        // Terminal success flag after the key share is confirmed.
+	aborted        bool                        // Terminal failure/destruction flag.
+	pending        *KeyShare                   // Completed but not yet confirmed key share.
+	confirmations  map[tss.PartyID][]byte      // Keygen confirmation payloads by participant.
+	keyShare       *KeyShare                   // Confirmed key share retained by the session.
+	ownPoly        []*fed.Scalar               // Local random polynomial coefficients; secret-bearing.
+	ownMessages    []tss.Envelope              // Secret outbound share envelopes retained until completion.
+	guard          *tss.EnvelopeGuard          // Transport replay, identity, and policy guard.
 }
 
 type keygenCommitmentsPayload struct {
@@ -93,15 +92,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
 		commitments[i] = point.Bytes()
 	}
-	var chainCode []byte
-	var chainCodeCommit []byte
-	if plan.enableHD {
-		chainCode = make([]byte, 32)
-		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
-			return nil, nil, err
-		}
-		chainCodeCommit = chainCodeCommitment(config.SessionID, config.Self, chainCode)
+	chainCode := make([]byte, 32)
+	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+		return nil, nil, err
 	}
+	chainCodeCommit := chainCodeCommitment(config.SessionID, config.Self, chainCode)
 	s := &KeygenSession{
 		cfg:     config,
 		log:     config.Logger(),
@@ -111,7 +106,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
-		enableHD: plan.enableHD,
 		planHash: append([]byte(nil), planHash...),
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
@@ -224,7 +218,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
 		}
 		s.commits[base.From] = p.Commitments
-		if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
+		if len(p.ChainCodeCommit) != sha256.Size {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}
 		s.chainCodeComms[base.From] = append([]byte(nil), p.ChainCodeCommit...)
@@ -299,9 +293,6 @@ const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"
 // The chain code is revealed in round 2 (keygen confirmation) and verified
 // against this commitment to prevent last-sender bias.
 func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
-	if len(chainCode) == 0 {
-		return nil
-	}
 	t := transcript.New(chainCodeCommitLabel)
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("party_id", partyID)
@@ -311,9 +302,6 @@ func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode
 
 // verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func verifyChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) == 0 {
-		return len(chainCode) == 0
-	}
 	if len(commit) != sha256.Size || len(chainCode) != 32 {
 		return false
 	}

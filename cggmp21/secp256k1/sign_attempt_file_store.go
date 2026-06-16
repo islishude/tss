@@ -203,7 +203,7 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 		return SignAttemptRecord{}, ErrSignAttemptConflict
 	}
 	if record.Completed {
-		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) {
+		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) && record.SignatureRecoveryID == result.Signature.RecoveryID {
 			return record, nil
 		}
 		return SignAttemptRecord{}, ErrSignAttemptConflict
@@ -212,6 +212,7 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	completed.Completed = true
 	completed.SignatureR = slices.Clone(result.Signature.R)
 	completed.SignatureS = slices.Clone(result.Signature.S)
+	completed.SignatureRecoveryID = result.Signature.RecoveryID
 	if err := validateSignAttemptRecord(completed); err != nil {
 		return SignAttemptRecord{}, err
 	}
@@ -230,7 +231,8 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 			if existing.Completed &&
 				bytes.Equal(existing.AttemptHash, result.AttemptHash) &&
 				bytes.Equal(existing.SignatureR, result.Signature.R) &&
-				bytes.Equal(existing.SignatureS, result.Signature.S) {
+				bytes.Equal(existing.SignatureS, result.Signature.S) &&
+				existing.SignatureRecoveryID == result.Signature.RecoveryID {
 				return existing, nil
 			}
 			return SignAttemptRecord{}, ErrSignAttemptConflict
@@ -364,6 +366,7 @@ func (s *FileSignAttemptStore) mergeCompletion(record *SignAttemptRecord, presig
 	record.Completed = true
 	record.SignatureR = slices.Clone(completed.SignatureR)
 	record.SignatureS = slices.Clone(completed.SignatureS)
+	record.SignatureRecoveryID = completed.SignatureRecoveryID
 	return nil
 }
 
@@ -375,6 +378,7 @@ func (s *FileSignAttemptStore) persistDeliveryAck(ctx context.Context, base Sign
 	ackRecord.Completed = false
 	ackRecord.SignatureR = nil
 	ackRecord.SignatureS = nil
+	ackRecord.SignatureRecoveryID = 0
 	ackRecord.DeliveryState = SignAttemptDeliveryState{Acks: []tss.BroadcastAck{ack.Clone()}}
 	if err := validateSignAttemptRecord(ackRecord); err != nil {
 		return err
@@ -405,6 +409,7 @@ func (s *FileSignAttemptStore) persistDeliveryCertificate(ctx context.Context, b
 	certRecord.Completed = false
 	certRecord.SignatureR = nil
 	certRecord.SignatureS = nil
+	certRecord.SignatureRecoveryID = 0
 	certRecord.DeliveryState = SignAttemptDeliveryState{
 		Acks:             cloneSignAttemptAcks(cert.Acks),
 		Certificate:      cert.Clone(),

@@ -6,7 +6,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
@@ -19,8 +19,8 @@ func TestDeriveNonHardenedBIP32InvalidChildErrorMode(t *testing.T) {
 
 	hmacSHA512 = fakeHMACForInvalidChild(make([]byte, 32))
 	_, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0})
-	if !errors.Is(err, bip32util.ErrInvalidChild) {
-		t.Errorf("expected bip32util.ErrInvalidChild for IL==0, got %v", err)
+	if !errors.Is(err, tss.ErrInvalidChild) {
+		t.Errorf("expected tss.ErrInvalidChild for IL==0, got %v", err)
 	}
 
 	orderBytes := secp.Order().Bytes()
@@ -29,8 +29,8 @@ func TestDeriveNonHardenedBIP32InvalidChildErrorMode(t *testing.T) {
 	hmacSHA512 = fakeHMACForInvalidChild(ilOrder)
 
 	_, err = DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0})
-	if !errors.Is(err, bip32util.ErrInvalidChild) {
-		t.Errorf("expected bip32util.ErrInvalidChild for IL>=order, got %v", err)
+	if !errors.Is(err, tss.ErrInvalidChild) {
+		t.Errorf("expected tss.ErrInvalidChild for IL>=order, got %v", err)
 	}
 }
 
@@ -54,9 +54,9 @@ func TestDeriveNonHardenedBIP32InvalidChildSkipMode(t *testing.T) {
 	}
 
 	result, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0},
-		bip32util.WithInvalidChildMode(bip32util.SkipInvalidChild))
+		tss.WithInvalidChildMode(tss.SkipInvalidChild))
 	if err != nil {
-		t.Fatalf("bip32util.SkipInvalidChild: %v", err)
+		t.Fatalf("tss.SkipInvalidChild: %v", err)
 	}
 	if len(result.ResolvedPath) != 1 || result.ResolvedPath[0] != 1 {
 		t.Errorf("expected resolved path [1], got %v", result.ResolvedPath)
@@ -78,8 +78,8 @@ func TestDeriveNonHardenedBIP32InvalidChildSkipModeStopsBeforeHardenedRange(t *t
 
 	hmacSHA512 = fakeHMACForInvalidChild(make([]byte, 32))
 	_, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0x7FFFFFFF},
-		bip32util.WithInvalidChildMode(bip32util.SkipInvalidChild))
-	if !errors.Is(err, bip32util.ErrHardenedDerivationUnsupported) {
-		t.Errorf("expected bip32util.ErrHardenedDerivationUnsupported, got %v", err)
+		tss.WithInvalidChildMode(tss.SkipInvalidChild))
+	if !errors.Is(err, tss.ErrHardenedDerivationUnsupported) {
+		t.Errorf("expected tss.ErrHardenedDerivationUnsupported, got %v", err)
 	}
 }

@@ -44,15 +44,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
 	config.Parties = config.SortedParties()
 
-	var chainCode []byte
-	var chainCodeCommit []byte
-	if plan.enableHD {
-		chainCode = make([]byte, 32)
-		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
-			return nil, nil, err
-		}
-		chainCodeCommit = cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
+	chainCode := make([]byte, 32)
+	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+		return nil, nil, err
 	}
+	chainCodeCommit := cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
 	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(plan.securityParams.MinPaillierBits))
 	if err != nil {
 		return nil, nil, err
@@ -112,7 +108,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
 		},
-		enableHD: plan.enableHD,
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
 			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
@@ -308,7 +303,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 
 	// ---- 4. MUTATE STATE ----
 	s.commits[env.From] = p.Commitments
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
+	if len(p.ChainCodeCommit) != sha256.Size {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be %d bytes, got %d", sha256.Size, len(p.ChainCodeCommit)))
 	}
 	s.chainCodeComms[env.From] = append([]byte(nil), p.ChainCodeCommit...)

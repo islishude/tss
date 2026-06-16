@@ -190,17 +190,24 @@ func TestFast_FileSignAttemptStoreCompletionIsIdempotent(t *testing.T) {
 		PresignID:   bytes.Clone(record.PresignID),
 		AttemptHash: bytes.Clone(record.AttemptHash),
 		Signature: Signature{
-			R: bytes.Repeat([]byte{1}, 32),
-			S: bytes.Repeat([]byte{2}, 32),
+			R:          bytes.Repeat([]byte{1}, 32),
+			S:          bytes.Repeat([]byte{2}, 32),
+			RecoveryID: 3,
 		},
 	}
 	completed, err := store.CompleteSignAttempt(ctx, result)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if completed.SignatureRecoveryID != 3 {
+		t.Fatalf("expected RecoveryID 3, got %d", completed.SignatureRecoveryID)
+	}
 	repeated, err := store.CompleteSignAttempt(ctx, result)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if repeated.SignatureRecoveryID != 3 {
+		t.Fatalf("expected RecoveryID 3 on repeat, got %d", repeated.SignatureRecoveryID)
 	}
 	if !completed.Completed || !bytes.Equal(completed.SignatureR, repeated.SignatureR) {
 		t.Fatal("completion was not idempotent")

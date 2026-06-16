@@ -37,12 +37,14 @@ func (s *SignSession) abort() {
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
 	}
+	if s.derivation != nil {
+		s.derivation.Destroy()
+		s.derivation = nil
+	}
 	clearScalarMap(s.partials)
 	s.partialEnvelopes = nil
 	clear(s.message)
 	s.message = nil
-	clear(s.verifyKey)
-	s.verifyKey = nil
 	clear(s.signature)
 	s.signature = nil
 }

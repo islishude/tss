@@ -8,6 +8,7 @@ import (
 	"math"
 	"slices"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
@@ -32,35 +33,35 @@ var hmacSHA512 = func(key, data []byte) (il, ir []byte) {
 //
 // Use DeriveNonHardenedBIP32Extended for the full DerivationResult including
 // resolved path, depth, fingerprint, and child number.
-func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...bip32util.DeriveOption) (*bip32util.DerivationResult, error) {
+func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	return deriveNonHardenedBIP32(publicKey, chainCode, path, opts...)
 }
 
 // DeriveNonHardenedBIP32Extended performs non-hardened BIP32 public derivation
 // and returns the full [DerivationResult] including resolved path, depth,
 // parent fingerprint, and child number.
-func DeriveNonHardenedBIP32Extended(publicKey, chainCode []byte, path []uint32, opts ...bip32util.DeriveOption) (*bip32util.DerivationResult, error) {
+func DeriveNonHardenedBIP32Extended(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	return deriveNonHardenedBIP32(publicKey, chainCode, path, opts...)
 }
 
-func deriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...bip32util.DeriveOption) (*bip32util.DerivationResult, error) {
+func deriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if len(chainCode) == 0 {
-		return nil, bip32util.ErrChainCodeRequired
+		return nil, tss.ErrChainCodeRequired
 	}
 	if len(chainCode) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes", bip32util.ErrInvalidChainCodeLength, len(chainCode))
+		return nil, fmt.Errorf("%w: got %d bytes", tss.ErrInvalidChainCodeLength, len(chainCode))
 	}
 	if _, err := secp.PointFromBytes(publicKey); err != nil {
-		return nil, fmt.Errorf("%w: %w", bip32util.ErrInvalidPublicKey, err)
+		return nil, fmt.Errorf("%w: %w", tss.ErrInvalidPublicKey, err)
 	}
 
-	requestedPath := slices.Clone(path)
-	cfg := bip32util.ResolveDeriveConfig(opts)
+	cfg := tss.ResolveDeriveConfig(opts)
 
 	// Empty path: return parent node.
 	if len(path) == 0 {
 		zeroShift := secp.ScalarZero().Bytes()
-		return &bip32util.DerivationResult{
+		return &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: slices.Clone(publicKey),
 			AdditiveShift:  slices.Clone(zeroShift),
 			ChildChainCode: slices.Clone(chainCode),
@@ -73,25 +74,25 @@ func deriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 
 	// depth uses uint8 in BIP32 serialization.
 	if len(path) > math.MaxUint8 {
-		return nil, fmt.Errorf("%w: path has %d indices (max 255)", bip32util.ErrDerivationDepthOverflow, len(path))
+		return nil, fmt.Errorf("%w: path has %d indices (max 255)", tss.ErrDerivationDepthOverflow, len(path))
 	}
 
 	parentPub := slices.Clone(publicKey)
 	parentChain := slices.Clone(chainCode)
 	cumShift := secp.ScalarZero()
-	resolvedPath := make([]uint32, 0, len(path))
+	resolvedPath := make(tss.DerivationPath, 0, len(path))
 	var parentFingerprint [4]byte
 	finalChildNumber := uint32(0)
 
 	for i, idx := range path {
-		if idx >= bip32util.HardenedKeyStart {
-			return nil, fmt.Errorf("%w: index %d at path element", bip32util.ErrHardenedDerivationUnsupported, idx)
+		if idx >= tss.HardenedKeyStart {
+			return nil, fmt.Errorf("%w: index %d at path element", tss.ErrHardenedDerivationUnsupported, idx)
 		}
 
 		origIdx := idx
 		childPub, tweak, childChain, fp, usedIdx, err := deriveChild(parentPub, parentChain, idx, cfg)
 		if err != nil {
-			return nil, fmt.Errorf("%w at path segment %d (index %d): %w", bip32util.ErrInvalidChild, i, origIdx, err)
+			return nil, fmt.Errorf("%w at path segment %d (index %d): %w", tss.ErrInvalidChild, i, origIdx, err)
 		}
 		cumShift = secp.ScalarAdd(cumShift, tweak)
 		parentFingerprint = fp
@@ -101,11 +102,12 @@ func deriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 		parentChain = childChain
 	}
 
-	return &bip32util.DerivationResult{
+	return &tss.DerivationResult{
+		Scheme:            tss.DerivationSchemeBIP32Secp256k1,
 		ChildPublicKey:    parentPub,
 		AdditiveShift:     cumShift.Bytes(),
 		ChildChainCode:    parentChain,
-		RequestedPath:     requestedPath,
+		RequestedPath:     path.Clone(),
 		ResolvedPath:      resolvedPath,
 		Depth:             uint8(len(resolvedPath)),
 		ParentFingerprint: parentFingerprint,
@@ -116,7 +118,7 @@ func deriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 // deriveChild performs a single non-hardened BIP32 CKDpub step.
 // It returns the child public key, the tweak scalar, the child chain code,
 // the parent fingerprint, and the actual index used.
-func deriveChild(parentPub, parentChain []byte, idx uint32, cfg bip32util.DeriveConfig) (
+func deriveChild(parentPub, parentChain []byte, idx uint32, cfg tss.DeriveConfig) (
 	childPub []byte,
 	tweak secp.Scalar,
 	childChain []byte,
@@ -126,10 +128,15 @@ func deriveChild(parentPub, parentChain []byte, idx uint32, cfg bip32util.Derive
 ) {
 	fp := bip32util.ComputeFingerprint(parentPub)
 
+	parentPubPoint, err := secp.PointFromBytes(parentPub)
+	if err != nil {
+		return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf("%w: invalid parent public key: %w", tss.ErrInvalidPublicKey, err)
+	}
+
 	for {
-		if idx >= bip32util.HardenedKeyStart {
+		if idx >= tss.HardenedKeyStart {
 			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf(
-				"%w: attempted hardened index %d during skip", bip32util.ErrHardenedDerivationUnsupported, idx,
+				"%w: attempted hardened index %d during skip", tss.ErrHardenedDerivationUnsupported, idx,
 			)
 		}
 
@@ -141,29 +148,24 @@ func deriveChild(parentPub, parentChain []byte, idx uint32, cfg bip32util.Derive
 
 		tweak, err := secp.ScalarFromBytes(iL)
 		if err != nil || tweak.IsZero() {
-			if cfg.InvalidChildMode == bip32util.SkipInvalidChild {
+			if cfg.InvalidChildMode == tss.SkipInvalidChild {
 				idx++
 				continue
 			}
 			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf(
-				"%w: zero or out-of-range scalar at index %d", bip32util.ErrInvalidChild, idx,
+				"%w: zero or out-of-range scalar at index %d", tss.ErrInvalidChild, idx,
 			)
 		}
 
-		parentPubScalar, err := secp.PointFromBytes(parentPub)
-		if err != nil {
-			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf("%w: invalid parent public key: %w", bip32util.ErrInvalidPublicKey, err)
-		}
-
 		// childPub = parentPub + tweak*G
-		childPoint := secp.Add(parentPubScalar, secp.ScalarBaseMult(tweak))
+		childPoint := secp.Add(parentPubPoint, secp.ScalarBaseMult(tweak))
 		if childPoint.Inf != 0 {
-			if cfg.InvalidChildMode == bip32util.SkipInvalidChild {
+			if cfg.InvalidChildMode == tss.SkipInvalidChild {
 				idx++
 				continue
 			}
 			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf(
-				"%w: child point at infinity at index %d", bip32util.ErrInvalidChild, idx,
+				"%w: child point at infinity at index %d", tss.ErrInvalidChild, idx,
 			)
 		}
 
@@ -201,18 +203,18 @@ type ExtendedPublicKey struct {
 // valid curve point, and consistent metadata.
 func (x ExtendedPublicKey) Validate() error {
 	if !bip32util.IsKnownVersion(x.Version) {
-		return fmt.Errorf("%w: unknown version 0x%08X", bip32util.ErrInvalidExtendedPublicKey,
+		return fmt.Errorf("%w: unknown version 0x%08X", tss.ErrInvalidExtendedPublicKey,
 			binary.BigEndian.Uint32(x.Version[:]))
 	}
 	if len(x.PublicKey) != 33 {
-		return fmt.Errorf("%w: public key must be 33 bytes, got %d", bip32util.ErrInvalidExtendedPublicKey,
+		return fmt.Errorf("%w: public key must be 33 bytes, got %d", tss.ErrInvalidExtendedPublicKey,
 			len(x.PublicKey))
 	}
 	if _, err := secp.PointFromBytes(x.PublicKey); err != nil {
-		return fmt.Errorf("%w: %w", bip32util.ErrInvalidExtendedPublicKey, err)
+		return fmt.Errorf("%w: %w", tss.ErrInvalidExtendedPublicKey, err)
 	}
 	if len(x.ChainCode) != 32 {
-		return fmt.Errorf("%w: chain code must be 32 bytes", bip32util.ErrInvalidExtendedPublicKey)
+		return fmt.Errorf("%w: chain code must be 32 bytes", tss.ErrInvalidExtendedPublicKey)
 	}
 	return nil
 }
@@ -255,10 +257,10 @@ func (x ExtendedPublicKey) String() (string, error) {
 func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 	payload, err := bip32util.Base58CheckDecode(s)
 	if err != nil {
-		return nil, fmt.Errorf("%w: %w", bip32util.ErrInvalidExtendedPublicKey, err)
+		return nil, fmt.Errorf("%w: %w", tss.ErrInvalidExtendedPublicKey, err)
 	}
 	if len(payload) != 78 {
-		return nil, fmt.Errorf("%w: payload must be 78 bytes, got %d", bip32util.ErrInvalidExtendedPublicKey, len(payload))
+		return nil, fmt.Errorf("%w: payload must be 78 bytes, got %d", tss.ErrInvalidExtendedPublicKey, len(payload))
 	}
 
 	var x ExtendedPublicKey
@@ -281,7 +283,7 @@ func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 // additive shift from this key to the child key.
 //
 // Hardened indices are rejected.
-func (x ExtendedPublicKey) Derive(path []uint32, opts ...bip32util.DeriveOption) (*ExtendedPublicKey, []byte, error) {
+func (x ExtendedPublicKey) Derive(path []uint32, opts ...tss.DeriveOption) (*ExtendedPublicKey, []byte, error) {
 	if err := x.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -291,7 +293,7 @@ func (x ExtendedPublicKey) Derive(path []uint32, opts ...bip32util.DeriveOption)
 		return &child, secp.ScalarZero().Bytes(), nil
 	}
 	if int(x.Depth)+len(path) > math.MaxUint8 {
-		return nil, nil, fmt.Errorf("%w: parent depth %d plus path length %d exceeds 255", bip32util.ErrDerivationDepthOverflow, x.Depth, len(path))
+		return nil, nil, fmt.Errorf("%w: parent depth %d plus path length %d exceeds 255", tss.ErrDerivationDepthOverflow, x.Depth, len(path))
 	}
 
 	result, err := deriveNonHardenedBIP32(x.PublicKey, x.ChainCode[:], path, opts...)
@@ -299,7 +301,7 @@ func (x ExtendedPublicKey) Derive(path []uint32, opts ...bip32util.DeriveOption)
 		return nil, nil, err
 	}
 	if int(x.Depth)+int(result.Depth) > math.MaxUint8 {
-		return nil, nil, fmt.Errorf("%w: parent depth %d plus resolved path length %d exceeds 255", bip32util.ErrDerivationDepthOverflow, x.Depth, result.Depth)
+		return nil, nil, fmt.Errorf("%w: parent depth %d plus resolved path length %d exceeds 255", tss.ErrDerivationDepthOverflow, x.Depth, result.Depth)
 	}
 
 	child := &ExtendedPublicKey{

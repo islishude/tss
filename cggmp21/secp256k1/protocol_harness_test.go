@@ -15,7 +15,6 @@ import (
 type fixtureKey struct {
 	threshold int
 	n         int
-	enableHD  bool
 }
 
 type keygenFixtureEntry struct {
@@ -24,16 +23,16 @@ type keygenFixtureEntry struct {
 }
 
 // keygenFixtureCache avoids repeated full-DKG executions for identical
-// (threshold, n, enableHD) tuples across integration tests. Each call returns
+// (threshold, n) tuples across integration tests. Each call returns
 // independent clones, so callers may mutate their copy freely.
 var keygenFixtureCache sync.Map // map[fixtureKey]*keygenFixtureEntry
 
 // CachedKeygenShares returns a clone of a previously-generated keygen fixture
 // for (threshold, n), or generates a fresh one and caches clones on first use.
-// When enableHD is true, HD-enabled keygen is used.
 func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	key := fixtureKey{threshold: threshold, n: n, enableHD: enableHD}
+	_ = enableHD
+	key := fixtureKey{threshold: threshold, n: n}
 	actual, _ := keygenFixtureCache.LoadOrStore(key, &keygenFixtureEntry{})
 	entry := actual.(*keygenFixtureEntry)
 	entry.once.Do(func() {
@@ -42,11 +41,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.P
 				keygenFixtureCache.Delete(key)
 			}
 		}()
-		if enableHD {
-			entry.shares = cloneKeyShareMap(secpKeygenWithPlanOption(t, threshold, n, KeygenPlanOption{EnableHD: true}))
-		} else {
-			entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
-		}
+		entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
 	})
 	if entry.shares == nil {
 		t.Fatal("cached keygen fixture was not initialized")

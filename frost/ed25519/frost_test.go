@@ -33,6 +33,23 @@ func chooseFROSTGuard(guards []*tss.EnvelopeGuard, fallback func() *tss.Envelope
 	return fallback()
 }
 
+func testFROSTSigningContext(paths ...[]uint32) tss.SigningContext {
+	var path tss.DerivationPath
+	if len(paths) > 0 {
+		path = tss.DerivationPath(paths[0]).Clone()
+	}
+	return tss.SigningContext{
+		KeyID:   "test-key",
+		ChainID: "test-chain",
+		Derivation: tss.DerivationRequest{
+			Scheme: tss.DerivationSchemeEd25519KhovratovichLaw,
+			Path:   path,
+		},
+		PolicyDomain:  "test-policy",
+		MessageDomain: "test-message",
+	}
+}
+
 func startFROSTKeygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
@@ -74,7 +91,7 @@ func startFROSTSign(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyI
 	})
 	limits := testLimits()
 	plan, err := NewSignPlan(SignPlanOption{
-		Key: key, SessionID: sessionID, Signers: signers, Message: message, Limits: &limits,
+		Key: key, SessionID: sessionID, Signers: signers, Context: testFROSTSigningContext(), Message: message, Limits: &limits,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -90,9 +107,12 @@ func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers [
 	if opts.Limits != nil {
 		limits = *opts.Limits
 	}
+	ctx := opts.Context
+	if ctx.Derivation.Scheme == "" {
+		ctx = testFROSTSigningContext()
+	}
 	plan, err := NewSignPlan(SignPlanOption{
-		Key: key, SessionID: sessionID, Signers: signers, Message: message,
-		AdditiveShift: opts.AdditiveShift, Limits: &limits,
+		Key: key, SessionID: sessionID, Signers: signers, Context: ctx, Message: message, Limits: &limits,
 	})
 	if err != nil {
 		return nil, nil, err
@@ -186,7 +206,7 @@ func TestFROSTSignScenarios(t *testing.T) {
 			for _, id := range tc.signers {
 				selected = append(selected, shares[id])
 			}
-			pub, sig, err := Sign([]byte("hello frost"), selected)
+			pub, sig, err := Sign([]byte("hello frost"), selected, testFROSTSigningContext())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -597,7 +617,6 @@ func assertFROSTProtocolCode(t testing.TB, err error, code string) *tss.Protocol
 type frostFixtureKey struct {
 	threshold int
 	n         int
-	hd        bool
 }
 
 type frostFixtureEntry struct {
@@ -608,8 +627,10 @@ type frostFixtureEntry struct {
 var frostKeygenFixtureCache sync.Map // map[frostFixtureKey]*frostFixtureEntry
 
 // cachedFrostKeygen returns deep-cloned key shares from the fixture cache,
-// generating a fresh DKG on first use per (threshold, n, hd) tuple.
-func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]*KeyShare {
+// generating a fresh DKG on first use per (threshold, n) tuple. The hd
+// parameter is retained for older test helpers; all keygen now produces chain
+// code.
+func cachedFrostKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
 	limits := DefaultLimits()
@@ -618,7 +639,7 @@ func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]
 			threshold, n, limits.Threshold.MinProductionThreshold, limits.Threshold.AllowOneOfOne)
 	}
 
-	key := frostFixtureKey{threshold: threshold, n: n, hd: hd}
+	key := frostFixtureKey{threshold: threshold, n: n}
 	actual, _ := frostKeygenFixtureCache.LoadOrStore(key, &frostFixtureEntry{})
 	entry := actual.(*frostFixtureEntry)
 	entry.once.Do(func() {
@@ -627,11 +648,7 @@ func cachedFrostKeygen(t testing.TB, threshold, n int, hd bool) map[tss.PartyID]
 				frostKeygenFixtureCache.Delete(key)
 			}
 		}()
-		if hd {
-			entry.shares = cloneFrostKeyShareMap(frostKeygenHDInner(t, threshold, n))
-		} else {
-			entry.shares = cloneFrostKeyShareMap(frostKeygenInner(t, threshold, n))
-		}
+		entry.shares = cloneFrostKeyShareMap(frostKeygenInner(t, threshold, n))
 	})
 	if entry.shares == nil {
 		t.Fatal("cached FROST keygen fixture was not initialized")
@@ -649,7 +666,7 @@ func cloneFrostKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*Ke
 
 func frostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	return cachedFrostKeygen(t, threshold, n, false)
+	return cachedFrostKeygen(t, threshold, n)
 }
 
 // frostKeygenInner performs the actual DKG without caching.
@@ -689,66 +706,6 @@ func frostKeygenInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare 
 		out[id] = share
 	}
 	return out
-}
-
-// frostKeygenHDInner performs the actual HD-enabled DKG without caching.
-func frostKeygenHDInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
-	t.Helper()
-	parties := make([]tss.PartyID, n)
-	for i := range n {
-		parties[i] = tss.PartyID(i + 1)
-	}
-	parties = tss.SortParties(parties)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	type sessionState struct {
-		session   *KeygenSession
-		envelopes []tss.Envelope
-	}
-	sessions := make(map[tss.PartyID]*sessionState, n)
-	for _, id := range parties {
-		cfg := tss.ThresholdConfig{
-			Threshold: threshold,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
-		}
-		session, out, err := startFROSTKeygenWithPlanOption(cfg, KeygenPlanOption{EnableHD: true})
-		if err != nil {
-			t.Fatal(err)
-		}
-		sessions[id] = &sessionState{session: session, envelopes: out}
-	}
-	queue := make([]tss.Envelope, 0)
-	for _, id := range parties {
-		queue = append(queue, sessions[id].envelopes...)
-	}
-	for len(queue) > 0 {
-		env := queue[0]
-		queue = queue[1:]
-		for _, receiver := range parties {
-			if receiver == env.From || (env.To != 0 && env.To != receiver) {
-				continue
-			}
-			delivered := testutil.DeliverEnvelope(env)
-			out, err := sessions[receiver].session.HandleKeygenMessage(delivered)
-			if err != nil {
-				t.Fatal(err)
-			}
-			queue = append(queue, out...)
-		}
-	}
-	shares := make(map[tss.PartyID]*KeyShare, n)
-	for _, id := range parties {
-		share, ok := sessions[id].session.KeyShare()
-		if !ok {
-			t.Fatalf("party %d did not complete keygen", id)
-		}
-		shares[id] = share
-	}
-	return shares
 }
 
 func deliverFROSTKeygenMessages(t testing.TB, parties []tss.PartyID, sessions map[tss.PartyID]*KeygenSession, messages []tss.Envelope) {
@@ -840,7 +797,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			messages = append(messages, out...)
 		}
 		// Recipient-only: party 4 has no old KeyShare.
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldShares[1].state.chainCode, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -850,7 +807,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		// All 4 new parties can sign.
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("add party test"), []*KeyShare{newShares[1], newShares[2]})
+		pub, sig, err := Sign([]byte("add party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -887,7 +844,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		newShares := collectReshareShares(t, newParties, reshareSessions)
 		// Party 3 is removed from the new participant set.
 		_ = oldShares[3]
-		pub, sig, err := Sign([]byte("remove party test"), []*KeyShare{newShares[1], newShares[2]})
+		pub, sig, err := Sign([]byte("remove party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -918,7 +875,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldShares[1].state.chainCode, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
 			Parties: newParties, Self: 4, SessionID: sessionID,
 		})
 		if err != nil {
@@ -930,7 +887,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		newShares := collectReshareShares(t, newParties, reshareSessions)
 
 		// 3-of-4: need 3 signers.
-		pub, sig, err := Sign([]byte("threshold increase"), []*KeyShare{newShares[1], newShares[2], newShares[4]})
+		pub, sig, err := Sign([]byte("threshold increase"), []*KeyShare{newShares[1], newShares[2], newShares[4]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -961,7 +918,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, nil, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
+		recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldShares[1].state.chainCode, []tss.PartyID{1, 2, 3}, newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
 			Parties:   newParties,
 			Self:      4,
@@ -974,7 +931,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		deliverReshareMessages(t, []tss.PartyID{1, 2, 3, 4}, messages, reshareSessions)
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("replace party"), []*KeyShare{newShares[2], newShares[4]})
+		pub, sig, err := Sign([]byte("replace party"), []*KeyShare{newShares[2], newShares[4]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1011,7 +968,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		deliverReshareMessages(t, newParties, messages, reshareSessions)
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("threshold decrease"), []*KeyShare{newShares[1], newShares[2]})
+		pub, sig, err := Sign([]byte("threshold decrease"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1151,7 +1108,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 			for _, id := range parties[:tc.threshold] {
 				signers = append(signers, newShares[id])
 			}
-			pub, sig, err := Sign([]byte("refresh test"), signers)
+			pub, sig, err := Sign([]byte("refresh test"), signers, testFROSTSigningContext())
 			if err != nil {
 				t.Fatal(err)
 			}

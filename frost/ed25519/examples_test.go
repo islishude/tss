@@ -147,6 +147,7 @@ func ExampleStartReshare() {
 		panic(err)
 	}
 	oldPublicKey := shares[1].PublicKeyBytes()
+	oldChainCode := shares[1].ChainCodeBytes()
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -178,7 +179,7 @@ func ExampleStartReshare() {
 		panic(err)
 	}
 	recipientPlan, err := frost.NewPublicResharePlan(frost.PublicResharePlanOption{
-		OldPublicKey: oldPublicKey, OldParties: oldParties, SessionID: sessionID,
+		OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties, SessionID: sessionID,
 		NewParties: newParties, NewThreshold: 2,
 	})
 	if err != nil {
@@ -220,7 +221,7 @@ func ExampleStartReshare() {
 // ExampleDeriveNonHardenedBIP32 demonstrates HD derivation and child-key signing.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{EnableHD: true})
+	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -231,7 +232,7 @@ func ExampleDeriveNonHardenedBIP32() {
 
 	message := []byte("bip32 derived signing")
 	_, signature, err := runExampleFROSTSign(shares, parties, message, frost.SignOptions{
-		AdditiveShift: derived.AdditiveShift,
+		Context: exampleFROSTSigningContext([]uint32{0, 1}),
 	})
 	if err != nil {
 		panic(err)

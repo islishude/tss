@@ -80,7 +80,7 @@ func TestRFC9591EndToEndSignature(t *testing.T) {
 
 	// Sign with signers P1, P3 (matching the RFC test vector).
 	signers := []*KeyShare{key1, key3}
-	pub, sig, err := Sign(message, signers)
+	pub, sig, err := Sign(message, signers, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,8 +126,10 @@ func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
 	}
 
 	session := &SignSession{
-		message:     v.message,
-		verifyKey:   v.groupPublicKey,
+		message: v.message,
+		derivation: &tss.DerivationResult{
+			ChildPublicKey: v.groupPublicKey,
+		},
 		signers:     v.signers,
 		commitments: commitments,
 	}
@@ -225,7 +227,7 @@ func TestRFC9591ThresholdCombinations(t *testing.T) {
 			for i, id := range tt.signers {
 				signerShares[i] = shares[id]
 			}
-			pub, sig, err := Sign(message, signerShares)
+			pub, sig, err := Sign(message, signerShares, testFROSTSigningContext())
 			if err != nil {
 				t.Fatalf("signing failed: %v", err)
 			}
@@ -324,6 +326,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		threshold:            2,
 		parties:              parties,
 		publicKey:            append([]byte(nil), v.groupPublicKey...),
+		chainCode:            bytes.Repeat([]byte{0x96}, 32),
 		secret:               secretScalar,
 		groupCommitments:     groupCommitments,
 		verificationShares:   verificationShares,

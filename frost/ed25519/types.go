@@ -48,19 +48,19 @@ type KeyShare struct {
 }
 
 type keyShareState struct {
-	version              uint16
-	party                tss.PartyID
-	threshold            int
-	parties              []tss.PartyID
-	publicKey            []byte
-	chainCode            []byte
-	secret               *secret.Scalar
-	groupCommitments     [][]byte
-	verificationShares   []VerificationShare
-	keygenSessionID      tss.SessionID
-	keygenTranscriptHash []byte
-	planHash             []byte
-	keygenConfirmations  [][]byte
+	version              uint16              // Canonical private wire version of this key-share record.
+	party                tss.PartyID         // Local owner of the secret signing share.
+	threshold            int                 // Number of signers required for FROST signing.
+	parties              []tss.PartyID       // Canonical full participant set for the group key.
+	publicKey            []byte              // Parent group public key before request-time derivation.
+	chainCode            []byte              // HD chain code paired with publicKey for non-hardened derivation.
+	secret               *secret.Scalar      // Local Ed25519 signing share; never exposed through accessors.
+	groupCommitments     [][]byte            // Public polynomial commitments from keygen/reshare.
+	verificationShares   []VerificationShare // Per-party public verification shares derived from commitments.
+	keygenSessionID      tss.SessionID       // Session that produced this key share.
+	keygenTranscriptHash []byte              // Transcript hash of completed keygen/reshare confirmation.
+	planHash             []byte              // Lifecycle plan digest that authorized this key share.
+	keygenConfirmations  [][]byte            // Canonical confirmation payloads proving every party accepted the keygen.
 }
 
 // Algorithm returns the common algorithm identifier.
@@ -116,6 +116,14 @@ func (k *KeyShare) ChainCodeBytes() []byte {
 		return nil
 	}
 	return slices.Clone(k.state.chainCode)
+}
+
+// Derive resolves a non-hardened Ed25519-BIP32 derivation path from this key share.
+func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
+	if k == nil || k.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	return DeriveNonHardenedBIP32(k.state.publicKey, k.state.chainCode, path.Clone(), opts...)
 }
 
 // GroupCommitments returns a deep copy of the public polynomial commitments.
@@ -253,8 +261,8 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if _, err := edcurve.PointFromBytes(k.state.publicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
 	}
-	if len(k.state.chainCode) != 0 && len(k.state.chainCode) != 32 {
-		return errors.New("chain code must be empty or 32 bytes")
+	if len(k.state.chainCode) != 32 {
+		return errors.New("chain code must be 32 bytes")
 	}
 	if len(k.state.keygenTranscriptHash) == 0 {
 		return errors.New("key share has no keygen transcript hash")
@@ -441,10 +449,9 @@ func scalarBytes(x *big.Int) ([]byte, error) {
 
 // SignOptions controls optional signing behavior.
 type SignOptions struct {
-	// AdditiveShift is the cumulative HD tweak applied as an additive scalar shift.
-	// Each signer adds lambda_i * c * AdditiveShift to their partial, and the
-	// group public key is effectively A' = A + AdditiveShift * B.
-	AdditiveShift []byte
+	// Context binds signing to a key, chain, derivation path, policy domain,
+	// and message domain.
+	Context tss.SigningContext
 
 	// NonceReader supplies fresh randomness for FROST signing nonces. If nil,
 	// crypto/rand.Reader is used.

@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"reflect"
 	"sync/atomic"
 	"testing"
@@ -60,26 +61,31 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	p := minimalCGGMP21Presign(t)
-	p.state.context.DerivationPath = []uint32{1, 2}
-	p.state.additiveShift = []byte{9}
+	p.state.context.Derivation.Path = tss.DerivationPath([]uint32{1, 2}).Clone()
+	p.state.derivation.RequestedPath = tss.DerivationPath{1, 2}
+	p.state.derivation.ResolvedPath = tss.DerivationPath{1, 2}
+	p.state.derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
 
 	signers := p.Signers()
 	signers[0] = 99
 	context := p.Context()
-	context.DerivationPath[0] = 99
+	context.Derivation.Path[0] = 99
 	verifyShares := p.VerifyShares()
 	verifyShares[0].KPoint[0] ^= 1
 	verifyShares[0].ChiPoint[0] ^= 1
 	verifyShares[0].Proof[0] ^= 1
-	shift := p.AdditiveShiftBytes()
-	shift[0] = 99
+	derivation := p.Derivation()
+	derivation.AdditiveShift[0] = 99
+	verificationKey := p.VerificationKeyBytes()
+	verificationKey[0] ^= 1
 
 	if p.state.signers[0] != 1 ||
-		p.state.context.DerivationPath[0] != 1 ||
+		p.state.context.Derivation.Path[0] != 1 ||
 		p.state.verifyShares[0].KPoint[0] == verifyShares[0].KPoint[0] ||
 		p.state.verifyShares[0].ChiPoint[0] == verifyShares[0].ChiPoint[0] ||
 		p.state.verifyShares[0].Proof[0] == verifyShares[0].Proof[0] ||
-		p.state.additiveShift[0] != 9 {
+		p.state.derivation.AdditiveShift[0] != 9 ||
+		p.state.derivation.ChildPublicKey[0] == verificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")
 	}
 }

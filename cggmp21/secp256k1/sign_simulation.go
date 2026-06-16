@@ -286,7 +286,7 @@ func (s *simulationSignAttemptStore) CompleteSignAttempt(ctx context.Context, re
 		return SignAttemptRecord{}, ErrSignAttemptConflict
 	}
 	if record.Completed {
-		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) {
+		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) && record.SignatureRecoveryID == result.Signature.RecoveryID {
 			return record.Clone(), nil
 		}
 		return SignAttemptRecord{}, ErrSignAttemptConflict
@@ -294,6 +294,7 @@ func (s *simulationSignAttemptStore) CompleteSignAttempt(ctx context.Context, re
 	record.Completed = true
 	record.SignatureR = append([]byte(nil), result.Signature.R...)
 	record.SignatureS = append([]byte(nil), result.Signature.S...)
+	record.SignatureRecoveryID = result.Signature.RecoveryID
 	s.attempts[key] = record
 	return record.Clone(), nil
 }

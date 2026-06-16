@@ -244,7 +244,7 @@ Current presign wire shapes are:
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
 - `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (signprep proof bytes).
-- `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext` (32 bytes), `DigestHash` (32 bytes), and `PartialEquationHash` (32 bytes).
+- `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
 Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
 

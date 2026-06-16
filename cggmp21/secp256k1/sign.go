@@ -36,22 +36,8 @@ const (
 	DefaultSignAttemptStoreTimeout = 5 * time.Second
 )
 
-// PresignContext binds a presignature to the key, chain, derivation path,
-// policy, and message domain where it may be consumed. An empty DerivationPath
-// is the canonical master-key path; non-empty paths are non-hardened BIP32.
-type PresignContext struct {
-	KeyID          string   `json:"key_id" wire:"1,string"`
-	ChainID        string   `json:"chain_id" wire:"2,string"`
-	DerivationPath []uint32 `json:"derivation_path" wire:"3,u32list"`
-	PolicyDomain   string   `json:"policy_domain" wire:"4,string"`
-	MessageDomain  string   `json:"message_domain" wire:"5,string"`
-}
-
-// WireType returns the canonical wire type identifier for PresignContext.
-func (PresignContext) WireType() string { return presignContextWireType }
-
-// WireVersion returns the wire format version for PresignContext.
-func (PresignContext) WireVersion() uint16 { return tss.Version }
+// PresignContext binds a presignature to the signing context where it may be consumed.
+type PresignContext = tss.SigningContext
 
 // ErrSignAttemptNotFound reports that no durable attempt exists for a presign.
 var ErrSignAttemptNotFound = errors.New("sign attempt not found")
@@ -104,6 +90,19 @@ type SignRequest struct {
 	DurableStoreTimeout time.Duration `json:"-"`
 }
 
+// Clone returns a caller-owned copy of the sign request. The AttemptStore
+// interface value is preserved by reference because it is an execution
+// dependency, not mutable data.
+func (r SignRequest) Clone() SignRequest {
+	return SignRequest{
+		Context:             r.Context.Clone(),
+		Message:             slices.Clone(r.Message),
+		LowS:                r.LowS,
+		AttemptStore:        r.AttemptStore,
+		DurableStoreTimeout: r.DurableStoreTimeout,
+	}
+}
+
 // Presign contains one local offline signing record and must be consumed once.
 // MarshalBinary maps it to the canonical private wire record, including a
 // consumed snapshot from the internal claim. JSON encoding is intentionally
@@ -118,27 +117,27 @@ type Presign struct {
 }
 
 type presignState struct {
-	version              uint16
-	securityParams       SecurityParams
-	party                tss.PartyID
-	threshold            int
-	signers              []tss.PartyID
-	r                    []byte
-	littleR              []byte
-	transcriptHash       []byte
-	context              PresignContext
-	contextHash          []byte
-	additiveShift        []byte
-	planHash             []byte
-	publicKey            []byte
-	keygenTranscriptHash []byte
-	partiesHash          []byte
-	verifyShares         []SignVerifyShare
-	kShare               *secret.Scalar
-	chiShare             *secret.Scalar
-	delta                *secret.Scalar
-	consumed             *atomic.Bool
-	attempt              *presignAttemptBinding
+	version              uint16                 // Canonical private wire version of this presign record.
+	securityParams       SecurityParams         // Cryptographic profile inherited from the key share.
+	party                tss.PartyID            // Local owner of this presign share.
+	threshold            int                    // Number of signer partials required to complete ECDSA signing.
+	signers              []tss.PartyID          // Canonical signer set authorized for this presign.
+	r                    []byte                 // Aggregate nonce point R encoded for ECDSA.
+	littleR              []byte                 // ECDSA r scalar derived from R.
+	transcriptHash       []byte                 // Cross-party presign transcript hash.
+	context              PresignContext         // Normalized context bound before online signing.
+	contextHash          []byte                 // Hash of context, used to reject cross-context reuse.
+	derivation           *tss.DerivationResult  // Resolved child key/path; ChildPublicKey is the verification key.
+	planHash             []byte                 // Digest of the presign lifecycle plan accepted by all signers.
+	publicKey            []byte                 // Parent group public key before request-time HD derivation.
+	keygenTranscriptHash []byte                 // Transcript hash of the keygen that produced publicKey.
+	partiesHash          []byte                 // Hash of the full key-share participant set.
+	verifyShares         []SignVerifyShare      // Per-signer public verification material for online partials.
+	kShare               *secret.Scalar         // Local nonce-share secret used once during online signing.
+	chiShare             *secret.Scalar         // Local chi-share secret used once during online signing.
+	delta                *secret.Scalar         // Local aggregate-delta share from presign completion.
+	consumed             *atomic.Bool           // Shared in-process one-use marker across shallow copies.
+	attempt              *presignAttemptBinding // Durable attempt binding/outbox state for one-use signing.
 }
 
 // Version returns the presign wire version.
@@ -202,9 +201,7 @@ func (p *Presign) Context() PresignContext {
 	if p == nil || p.state == nil {
 		return PresignContext{}
 	}
-	out := p.state.context
-	out.DerivationPath = slices.Clone(out.DerivationPath)
-	return out
+	return p.state.context.Clone()
 }
 
 // ContextHashBytes returns a copy of the bound context hash.
@@ -215,12 +212,20 @@ func (p *Presign) ContextHashBytes() []byte {
 	return slices.Clone(p.state.contextHash)
 }
 
-// AdditiveShiftBytes returns a copy of the bound HD additive shift.
-func (p *Presign) AdditiveShiftBytes() []byte {
+// Derivation returns a copy of the bound HD derivation result.
+func (p *Presign) Derivation() *tss.DerivationResult {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return slices.Clone(p.state.additiveShift)
+	return p.state.derivation.Clone()
+}
+
+// VerificationKeyBytes returns a copy of the child public key used for signature verification.
+func (p *Presign) VerificationKeyBytes() []byte {
+	if p == nil || p.state == nil || p.state.derivation == nil {
+		return nil
+	}
+	return p.state.derivation.VerificationKeyBytes()
 }
 
 // PlanHashBytes returns a copy of the presign lifecycle plan hash.
@@ -299,7 +304,6 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 		TranscriptHash:       p.state.transcriptHash,
 		Context:              p.state.context,
 		ContextHash:          p.state.contextHash,
-		AdditiveShift:        p.state.additiveShift,
 		PlanHash:             p.state.planHash,
 		Consumed:             consumed,
 		PublicKey:            p.state.publicKey,
@@ -307,6 +311,7 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 		PartiesHash:          p.state.partiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
 		SecurityParams:       p.state.securityParams,
+		Derivation:           p.state.derivation,
 	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
@@ -324,7 +329,7 @@ func (p *Presign) ID() []byte {
 	t := transcript.New(presignIDLabel)
 	appendSecurityParamsTranscript(t, p.state.securityParams)
 	t.AppendBytes("context_hash", p.state.contextHash)
-	t.AppendBytes("additive_shift", p.state.additiveShift)
+	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("plan_hash", p.state.planHash)
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
@@ -413,8 +418,11 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if len(p.state.contextHash) != 32 {
 		return errors.New("invalid presign context hash")
 	}
-	if len(p.state.additiveShift) > 0 {
-		if _, err := secp.ScalarFromBytes(p.state.additiveShift); err != nil {
+	if err := validateDerivationResult(p.state.derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
+		return fmt.Errorf("invalid presign derivation: %w", err)
+	}
+	if len(p.state.derivation.AdditiveShift) > 0 {
+		if _, err := secp.ScalarFromBytesAllowZero(p.state.derivation.AdditiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
 	}
@@ -423,6 +431,9 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	}
 	if _, err := secp.PointFromBytes(p.state.publicKey); err != nil {
 		return fmt.Errorf("invalid presign public key binding: %w", err)
+	}
+	if _, err := secp.PointFromBytes(p.state.derivation.ChildPublicKey); err != nil {
+		return fmt.Errorf("invalid presign verification key binding: %w", err)
 	}
 	if len(p.state.keygenTranscriptHash) != sha256.Size {
 		return errors.New("invalid presign keygen transcript hash binding")
@@ -486,7 +497,9 @@ func (p *Presign) Destroy() {
 	if p.state.delta != nil {
 		p.state.delta.Destroy()
 	}
-	clear(p.state.additiveShift)
+	if p.state.derivation != nil {
+		p.state.derivation.Destroy()
+	}
 	clear(p.state.planHash)
 }
 
@@ -494,46 +507,46 @@ func (p *Presign) Destroy() {
 type PresignSession struct {
 	mu sync.Mutex
 
-	key            *KeyShare
-	sessionID      tss.SessionID
-	config         tss.ThresholdConfig
-	log            tss.Logger
-	limits         Limits
-	securityParams SecurityParams
-	signers        []tss.PartyID
-	context        PresignContext
-	contextHash    []byte
-	additiveShift  []byte
-	planHash       []byte
-	paillier       *pai.PrivateKey
-	guard          *tss.EnvelopeGuard
+	key            *KeyShare             // Caller-owned long-lived key share used to start presign.
+	sessionID      tss.SessionID         // Presign session ID bound into envelopes and planHash.
+	config         tss.ThresholdConfig   // Local threshold runtime view for signer membership and transport.
+	log            tss.Logger            // Optional protocol logger.
+	limits         Limits                // Local fail-closed resource policy.
+	securityParams SecurityParams        // Cryptographic profile inherited from the key share.
+	signers        []tss.PartyID         // Canonical signer set participating in this presign.
+	context        PresignContext        // Normalized context bound to the resulting presign.
+	contextHash    []byte                // Hash of context; echoed through presign/sign validation.
+	derivation     *tss.DerivationResult // Resolved child key/path; destroyed if the session aborts.
+	planHash       []byte                // Digest every presign round payload must echo.
+	paillier       *pai.PrivateKey       // Local Paillier private key used for MtA decryption.
+	guard          *tss.EnvelopeGuard    // Transport replay, identity, and policy guard.
 
-	kShare    *secret.Scalar
-	gamma     *secret.Scalar
-	xBar      *secret.Scalar
-	gammaComm []byte
-	xBarComm  []byte
+	kShare    *secret.Scalar // Local nonce share k, secret-bearing until presign completes or aborts.
+	gamma     *secret.Scalar // Local gamma nonce share, secret-bearing until presign completes or aborts.
+	xBar      *secret.Scalar // Local additive signing share adjusted for HD derivation.
+	gammaComm []byte         // Public commitment to gamma used in round-1 proof binding.
+	xBarComm  []byte         // Public commitment to xBar used in round-3 proof binding.
 
-	round1               map[tss.PartyID]presignRound1Payload
-	round1Proofs         map[tss.PartyID]presignRound1ProofPayload
-	round1ProofEnvelopes map[tss.PartyID]tss.Envelope
-	round1Verified       map[tss.PartyID]bool
-	round2               map[tss.PartyID]presignRound2Payload
-	deltas               map[tss.PartyID]*big.Int
-	verifyShares         map[tss.PartyID]SignVerifyShare
-	startOpening         *mta.StartOpening
+	round1               map[tss.PartyID]presignRound1Payload      // Validated round-1 public/MtA start payloads by sender.
+	round1Proofs         map[tss.PartyID]presignRound1ProofPayload // Validated proofs for round-1 public payloads by sender.
+	round1ProofEnvelopes map[tss.PartyID]tss.Envelope              // Original proof envelopes retained for blame evidence.
+	round1Verified       map[tss.PartyID]bool                      // Senders whose round-1 proof has been checked.
+	round2               map[tss.PartyID]presignRound2Payload      // MtA response payloads by sender; contains secret-derived ciphertexts.
+	deltas               map[tss.PartyID]*big.Int                  // Delta shares collected for aggregate nonce computation.
+	verifyShares         map[tss.PartyID]SignVerifyShare           // Round-3 public verification shares by signer.
+	startOpening         *mta.StartOpening                         // Local MtA opening material; secret-bearing until round 2 completes.
 
-	alphaDelta map[tss.PartyID]*big.Int
-	betaDelta  map[tss.PartyID]*big.Int
-	alphaSigma map[tss.PartyID]*big.Int
-	betaSigma  map[tss.PartyID]*big.Int
+	alphaDelta map[tss.PartyID]*big.Int // Local MtA alpha terms for delta, keyed by peer.
+	betaDelta  map[tss.PartyID]*big.Int // Local MtA beta terms for delta, keyed by peer.
+	alphaSigma map[tss.PartyID]*big.Int // Local MtA alpha terms for sigma, keyed by peer.
+	betaSigma  map[tss.PartyID]*big.Int // Local MtA beta terms for sigma, keyed by peer.
 
-	round2Sent      bool
-	round3Sent      bool
-	completed       bool
-	aborted         bool
-	presign         *Presign
-	presignReturned bool
+	round2Sent      bool     // Whether this party already emitted round-2 MtA responses.
+	round3Sent      bool     // Whether this party already emitted round-3 verification material.
+	completed       bool     // Terminal success flag; presign is available once true.
+	aborted         bool     // Terminal failure/destruction flag.
+	presign         *Presign // Completed local presign record, destroyed if the session aborts.
+	presignReturned bool     // Tracks whether the completed presign has been handed to the caller.
 }
 
 // abort marks the presign session aborted and clears all secret-bearing
@@ -561,6 +574,10 @@ func (s *PresignSession) abort() {
 	clearBigIntMap(s.betaSigma)
 	clearPresignRound1Map(s.round1)
 	clearPresignRound2Map(s.round2)
+	if s.derivation != nil {
+		s.derivation.Destroy()
+		s.derivation = nil
+	}
 	if s.startOpening != nil {
 		s.startOpening.Destroy()
 		s.startOpening = nil
@@ -575,24 +592,24 @@ func (s *PresignSession) abort() {
 type SignSession struct {
 	mu sync.Mutex
 
-	key       *KeyShare
-	presign   *Presign
-	sessionID tss.SessionID
-	guard     *tss.EnvelopeGuard
-	log       tss.Logger
-	limits    Limits
-	digest    []byte
-	lowS      bool
-	planHash  []byte
-	publicKey []byte
-	partials  map[tss.PartyID]*big.Int
-	completed bool
-	aborted   bool
-	signature *Signature
-	attempt   SignAttemptRecord
-	store     SignAttemptStore
-	storeCtx  context.Context
-	storeTTL  time.Duration
+	key       *KeyShare                // Caller-owned key share used to validate local ownership.
+	presign   *Presign                 // One-use presign handle bound by the durable attempt store.
+	sessionID tss.SessionID            // Online signing session ID for partial-signature envelopes.
+	guard     *tss.EnvelopeGuard       // Transport replay, identity, and policy guard.
+	log       tss.Logger               // Optional protocol logger.
+	limits    Limits                   // Local fail-closed resource policy.
+	digest    []byte                   // Context-bound message digest signed by ECDSA.
+	lowS      bool                     // Whether final signatures must be normalized to low-S form.
+	planHash  []byte                   // Digest every sign partial must echo.
+	publicKey []byte                   // Verification key used for final ECDSA self-checking.
+	partials  map[tss.PartyID]*big.Int // Validated ECDSA partial scalars keyed by signer.
+	completed bool                     // Terminal success flag; signature is available once true.
+	aborted   bool                     // Terminal failure/destruction flag.
+	signature *Signature               // Final aggregated signature, cleared by Destroy.
+	attempt   SignAttemptRecord        // Durable one-use attempt/outbox record.
+	store     SignAttemptStore         // Durable boundary for presign consumption and completion.
+	storeCtx  context.Context          // Context used for durable store operations.
+	storeTTL  time.Duration            // Timeout applied to durable store calls.
 }
 
 // abort marks the signing session aborted and clears secret-bearing

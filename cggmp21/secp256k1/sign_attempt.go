@@ -141,9 +141,10 @@ type SignAttemptRecord struct {
 	DeliveryPolicy SignAttemptDeliveryPolicy
 	DeliveryState  SignAttemptDeliveryState
 
-	Completed  bool
-	SignatureR []byte
-	SignatureS []byte
+	Completed           bool
+	SignatureR          []byte
+	SignatureS          []byte
+	SignatureRecoveryID uint8
 }
 
 // Clone returns an independent copy of the sign-attempt record.
@@ -172,6 +173,7 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 		Completed:                  r.Completed,
 		SignatureR:                 slices.Clone(r.SignatureR),
 		SignatureS:                 slices.Clone(r.SignatureS),
+		SignatureRecoveryID:        r.SignatureRecoveryID,
 	}
 }
 
@@ -183,7 +185,8 @@ func (r SignAttemptRecord) Equal(other SignAttemptRecord) bool {
 		r.DeliveryState.Equal(other.DeliveryState) &&
 		r.Completed == other.Completed &&
 		bytes.Equal(r.SignatureR, other.SignatureR) &&
-		bytes.Equal(r.SignatureS, other.SignatureS)
+		bytes.Equal(r.SignatureS, other.SignatureS) &&
+		r.SignatureRecoveryID == other.SignatureRecoveryID
 }
 
 // SameAttempt reports whether r and other identify the same committed attempt.
@@ -297,9 +300,10 @@ func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttempt
 			Certificate:      signAttemptCertificateFromWire(w.Certificate),
 			DeliveryComplete: w.DeliveryComplete,
 		},
-		Completed:  w.Completed,
-		SignatureR: w.SignatureR,
-		SignatureS: w.SignatureS,
+		Completed:           w.Completed,
+		SignatureR:          w.SignatureR,
+		SignatureS:          w.SignatureS,
+		SignatureRecoveryID: w.SignatureRecoveryID,
 	}
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return SignAttemptRecord{}, err
@@ -326,6 +330,9 @@ func (r SignAttemptResult) validate() error {
 	}
 	if _, err := scalarBytesStrict(r.Signature.S); err != nil {
 		return fmt.Errorf("invalid result signature s: %w", err)
+	}
+	if r.Signature.RecoveryID > 3 {
+		return errors.New("invalid result signature recovery id")
 	}
 	return nil
 }
@@ -359,6 +366,7 @@ type signAttemptWire struct {
 	Completed                  bool        `wire:"26,bool"`
 	SignatureR                 []byte      `wire:"27,bytes,max_bytes=scalar"`
 	SignatureS                 []byte      `wire:"28,bytes,max_bytes=scalar"`
+	SignatureRecoveryID        uint8       `wire:"29,u8"`
 }
 
 // WireType returns the canonical sign-attempt wire type.
@@ -422,6 +430,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 		Completed:                  r.Completed,
 		SignatureR:                 r.SignatureR,
 		SignatureS:                 r.SignatureS,
+		SignatureRecoveryID:        r.SignatureRecoveryID,
 	}
 }
 
@@ -508,7 +517,10 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		if _, err := scalarBytesStrict(r.SignatureS); err != nil {
 			return fmt.Errorf("%w: invalid signature s", ErrSignAttemptCorrupt)
 		}
-	} else if len(r.SignatureR) != 0 || len(r.SignatureS) != 0 {
+		if r.SignatureRecoveryID > 3 {
+			return fmt.Errorf("%w: invalid signature recovery id", ErrSignAttemptCorrupt)
+		}
+	} else if len(r.SignatureR) != 0 || len(r.SignatureS) != 0 || r.SignatureRecoveryID != 0 {
 		return fmt.Errorf("%w: incomplete record contains signature", ErrSignAttemptCorrupt)
 	}
 	return nil

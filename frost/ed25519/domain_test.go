@@ -195,7 +195,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 		{name: "wrong-public-key-HD", fn: func(t *testing.T) {
 			t.Parallel()
 
-			hdShares := cachedFrostKeygen(t, 2, 2, true)
+			hdShares := cachedFrostKeygen(t, 2, 2)
 
 			child1, err := DeriveNonHardenedBIP32(hdShares[1].state.publicKey, hdShares[1].state.chainCode, []uint32{1})
 			if err != nil {
@@ -214,21 +214,21 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// Party 1 with shift1.
 			sess1, out1, err := startFROSTSignWithOptions(hdShares[1], sid, signers, messageA,
-				SignOptions{AdditiveShift: child1.AdditiveShift})
+				SignOptions{Context: testFROSTSigningContext([]uint32{1})})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 2 with shift1 — commitment only (for party 1).
 			_, out2_s1, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
-				SignOptions{AdditiveShift: child1.AdditiveShift})
+				SignOptions{Context: testFROSTSigningContext([]uint32{1})})
 			if err != nil {
 				t.Fatal(err)
 			}
 
 			// Party 2 with shift2.
 			sess2_s2, _, err := startFROSTSignWithOptions(hdShares[2], sid, signers, messageA,
-				SignOptions{AdditiveShift: child2.AdditiveShift})
+				SignOptions{Context: testFROSTSigningContext([]uint32{2})})
 			if err != nil {
 				t.Fatal(err)
 			}

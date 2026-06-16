@@ -6,7 +6,7 @@ import (
 	"crypto/sha512"
 	"testing"
 
-	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss"
 )
 
 const (
@@ -34,7 +34,7 @@ func mustParseXPub(t testing.TB, raw string) *ExtendedPublicKey {
 	return xpub
 }
 
-func assertDerivationMatchesXPub(t testing.TB, got *bip32util.DerivationResult, want *ExtendedPublicKey) {
+func assertDerivationMatchesXPub(t testing.TB, got *tss.DerivationResult, want *ExtendedPublicKey) {
 	t.Helper()
 
 	if !bytes.Equal(got.ChildPublicKey, want.PublicKey) {
@@ -45,7 +45,7 @@ func assertDerivationMatchesXPub(t testing.TB, got *bip32util.DerivationResult, 
 	}
 }
 
-func assertAdditiveShiftDerivesChild(t testing.TB, parent *ExtendedPublicKey, got *bip32util.DerivationResult) {
+func assertAdditiveShiftDerivesChild(t testing.TB, parent *ExtendedPublicKey, got *tss.DerivationResult) {
 	t.Helper()
 
 	derivedPub, err := DerivePublicKey(parent.PublicKey, got.AdditiveShift)

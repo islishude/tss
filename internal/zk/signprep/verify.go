@@ -77,11 +77,13 @@ func Verify(stmt Statement, proof *Proof) error {
 	}
 	combinedBase := xBarPoint
 	if len(stmt.AdditiveShift) > 0 {
-		shift, err := secp.ScalarFromBytes(stmt.AdditiveShift)
+		shift, err := secp.ScalarFromBytesAllowZero(stmt.AdditiveShift)
 		if err != nil {
 			return err
 		}
-		combinedBase = secp.Add(combinedBase, secp.ScalarBaseMult(shift))
+		if !shift.IsZero() {
+			combinedBase = secp.Add(combinedBase, secp.ScalarBaseMult(shift))
+		}
 	}
 
 	challenge, err := transcript(stmt, proof.KCommitment, proof.MCommitment, proof.DLEQA1, proof.DLEQA2, proof.MPoint)

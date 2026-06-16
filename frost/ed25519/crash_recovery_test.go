@@ -53,7 +53,7 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	}
 
 	// Verify signing still works with the restored share.
-	pub, sig, err := Sign([]byte("crash recovery test"), []*KeyShare{restored, shares[2]})
+	pub, sig, err := Sign([]byte("crash recovery test"), []*KeyShare{restored, shares[2]}, testFROSTSigningContext())
 	if err != nil {
 		t.Fatalf("Sign with restored share failed: %v", err)
 	}
@@ -71,7 +71,7 @@ func TestFROSTKeyShareDestroyPersistence(t *testing.T) {
 	share := cloneKeyShareValue(shares[1])
 
 	// Before destroy, signing works.
-	pub, sig, err := Sign([]byte("pre-destroy"), []*KeyShare{share, shares[2]})
+	pub, sig, err := Sign([]byte("pre-destroy"), []*KeyShare{share, shares[2]}, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -83,7 +83,7 @@ func TestFROSTKeyShareDestroyPersistence(t *testing.T) {
 	share.Destroy()
 
 	// After destroy, Sign should fail.
-	_, _, err = Sign([]byte("post-destroy"), []*KeyShare{share, shares[2]})
+	_, _, err = Sign([]byte("post-destroy"), []*KeyShare{share, shares[2]}, testFROSTSigningContext())
 	if err == nil {
 		t.Fatal("expected Sign to fail with destroyed share")
 	}

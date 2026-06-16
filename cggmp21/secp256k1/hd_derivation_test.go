@@ -6,7 +6,7 @@ import (
 	"slices"
 	"testing"
 
-	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -109,70 +109,70 @@ func TestDeriveNonHardenedBIP32RejectsInvalidInputs(t *testing.T) {
 			pub:     valid.PublicKey,
 			chain:   nil,
 			path:    []uint32{0},
-			wantErr: bip32util.ErrChainCodeRequired,
+			wantErr: tss.ErrChainCodeRequired,
 		},
 		{
 			name:    "empty chain code",
 			pub:     valid.PublicKey,
 			chain:   []byte{},
 			path:    []uint32{0},
-			wantErr: bip32util.ErrChainCodeRequired,
+			wantErr: tss.ErrChainCodeRequired,
 		},
 		{
 			name:    "short chain code",
 			pub:     valid.PublicKey,
 			chain:   make([]byte, 31),
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidChainCodeLength,
+			wantErr: tss.ErrInvalidChainCodeLength,
 		},
 		{
 			name:    "long chain code",
 			pub:     valid.PublicKey,
 			chain:   make([]byte, 33),
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidChainCodeLength,
+			wantErr: tss.ErrInvalidChainCodeLength,
 		},
 		{
 			name:    "path too long",
 			pub:     valid.PublicKey,
 			chain:   valid.ChainCode[:],
 			path:    makeSequentialPath(256),
-			wantErr: bip32util.ErrDerivationDepthOverflow,
+			wantErr: tss.ErrDerivationDepthOverflow,
 		},
 		{
 			name:    "hardened index in path",
 			pub:     valid.PublicKey,
 			chain:   valid.ChainCode[:],
-			path:    []uint32{0, bip32util.HardenedKeyStart},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			path:    []uint32{0, tss.HardenedKeyStart},
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name:    "hardened first index",
 			pub:     valid.PublicKey,
 			chain:   valid.ChainCode[:],
-			path:    []uint32{bip32util.HardenedKeyStart + 1},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			path:    []uint32{tss.HardenedKeyStart + 1},
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name:    "invalid public key prefix",
 			pub:     invalidPublicKeyPrefix(valid.PublicKey),
 			chain:   valid.ChainCode[:],
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidPublicKey,
+			wantErr: tss.ErrInvalidPublicKey,
 		},
 		{
 			name:    "wrong public key length",
 			pub:     make([]byte, 32),
 			chain:   valid.ChainCode[:],
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidPublicKey,
+			wantErr: tss.ErrInvalidPublicKey,
 		},
 		{
 			name:    "all-zero public key",
 			pub:     make([]byte, 33),
 			chain:   slices.Clone(valid.ChainCode[:]),
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidPublicKey,
+			wantErr: tss.ErrInvalidPublicKey,
 		},
 	}
 

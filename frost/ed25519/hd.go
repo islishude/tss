@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"slices"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
@@ -28,24 +29,24 @@ func hmacSHA512(key, data []byte) []byte {
 //
 // Only non-hardened indices (i < 2^31) are supported. If path is nil or empty,
 // the parent key is returned unchanged with a zero additive shift.
-func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...bip32util.DeriveOption) (*bip32util.DerivationResult, error) {
+func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	if len(chainCode) == 0 {
-		return nil, bip32util.ErrChainCodeRequired
+		return nil, tss.ErrChainCodeRequired
 	}
 	if len(chainCode) != 32 {
-		return nil, fmt.Errorf("%w: got %d bytes", bip32util.ErrInvalidChainCodeLength, len(chainCode))
+		return nil, fmt.Errorf("%w: got %d bytes", tss.ErrInvalidChainCodeLength, len(chainCode))
 	}
 	if _, err := edcurve.PointFromBytes(publicKey); err != nil {
-		return nil, fmt.Errorf("%w: %w", bip32util.ErrInvalidPublicKey, err)
+		return nil, fmt.Errorf("%w: %w", tss.ErrInvalidPublicKey, err)
 	}
 
-	requestedPath := slices.Clone(path)
-	cfg := bip32util.ResolveDeriveConfig(opts)
+	cfg := tss.ResolveDeriveConfig(opts)
 
 	// Empty path: return parent node.
 	if len(path) == 0 {
 		zeroShift := make([]byte, 32)
-		return &bip32util.DerivationResult{
+		return &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeEd25519KhovratovichLaw,
 			ChildPublicKey: slices.Clone(publicKey),
 			AdditiveShift:  zeroShift,
 			ChildChainCode: slices.Clone(chainCode),
@@ -58,20 +59,20 @@ func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 
 	// depth uses uint8 in BIP32 serialization.
 	if len(path) > math.MaxUint8 {
-		return nil, bip32util.ErrDerivationDepthOverflow
+		return nil, tss.ErrDerivationDepthOverflow
 	}
 
 	parentChain := slices.Clone(chainCode)
 	cumShift := new(big.Int)
 	order := edcurve.Order()
-	resolvedPath := make([]uint32, 0, len(path))
+	resolvedPath := make(tss.DerivationPath, 0, len(path))
 	var parentFingerprint [4]byte
 	var finalChildNumber uint32
 
 	for i, idx := range path {
-		if idx >= bip32util.HardenedKeyStart {
+		if idx >= tss.HardenedKeyStart {
 			return nil, fmt.Errorf("%w at path segment %d: index %d",
-				bip32util.ErrHardenedDerivationUnsupported, i, idx)
+				tss.ErrHardenedDerivationUnsupported, i, idx)
 		}
 
 		// Compute the current intermediate parent public key.
@@ -91,7 +92,7 @@ func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 		_, tweak, childChain, usedIdx, err := deriveChildEd25519(intermediatePub, parentChain, idx, cfg)
 		if err != nil {
 			return nil, fmt.Errorf("%w at path segment %d (index %d): %w",
-				bip32util.ErrInvalidChild, i, origIdx, err)
+				tss.ErrInvalidChild, i, origIdx, err)
 		}
 		cumShift.Add(cumShift, tweak)
 		cumShift.Mod(cumShift, order)
@@ -111,11 +112,12 @@ func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 		return nil, err
 	}
 
-	return &bip32util.DerivationResult{
+	return &tss.DerivationResult{
+		Scheme:            tss.DerivationSchemeEd25519KhovratovichLaw,
 		ChildPublicKey:    childPub,
 		AdditiveShift:     shiftBytes,
 		ChildChainCode:    parentChain,
-		RequestedPath:     requestedPath,
+		RequestedPath:     path.Clone(),
 		ResolvedPath:      resolvedPath,
 		Depth:             uint8(len(resolvedPath)),
 		ParentFingerprint: parentFingerprint,
@@ -126,7 +128,7 @@ func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path []uint32, opts ...
 // deriveChildEd25519 performs a single non-hardened BIP32-Ed25519 CKDpub step.
 // It returns childPub = nil for the caller to compute via cumulative shift
 // (additive derivation: rootPub + cumShift·B equals the final child).
-func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg bip32util.DeriveConfig) (
+func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg tss.DeriveConfig) (
 	childPub []byte,
 	tweak *big.Int,
 	childChain []byte,
@@ -136,10 +138,10 @@ func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg bip32util
 	order := edcurve.Order()
 
 	for {
-		if idx >= bip32util.HardenedKeyStart {
+		if idx >= tss.HardenedKeyStart {
 			return nil, nil, nil, idx, fmt.Errorf(
 				"%w: attempted hardened index %d during skip",
-				bip32util.ErrHardenedDerivationUnsupported, idx,
+				tss.ErrHardenedDerivationUnsupported, idx,
 			)
 		}
 
@@ -154,12 +156,12 @@ func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg bip32util
 		zL.Mul(zL, big.NewInt(8))
 		zL.Mod(zL, order)
 		if zL.Sign() == 0 {
-			if cfg.InvalidChildMode == bip32util.SkipInvalidChild {
+			if cfg.InvalidChildMode == tss.SkipInvalidChild {
 				idx++
 				continue
 			}
 			return nil, nil, nil, idx, fmt.Errorf(
-				"%w: zero scalar at index %d", bip32util.ErrInvalidChild, idx,
+				"%w: zero scalar at index %d", tss.ErrInvalidChild, idx,
 			)
 		}
 

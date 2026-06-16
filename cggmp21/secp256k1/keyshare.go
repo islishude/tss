@@ -73,6 +73,14 @@ func (k *KeyShare) ChainCodeBytes() []byte {
 	return slices.Clone(k.state.chainCode)
 }
 
+// Derive resolves a non-hardened BIP32 derivation path from this key share.
+func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
+	if k == nil || k.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	return DeriveNonHardenedBIP32Extended(k.state.publicKey, k.state.chainCode, path.Clone(), opts...)
+}
+
 // GroupCommitments returns a deep copy of the per-degree group commitments.
 func (k *KeyShare) GroupCommitments() [][]byte {
 	if k == nil || k.state == nil {
@@ -324,7 +332,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if _, err := secp.PointFromBytes(k.state.publicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
 	}
-	if len(k.state.chainCode) != 0 && len(k.state.chainCode) != 32 {
+	if len(k.state.chainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
 	}
 	if _, err := secpScalarFromSecret(k.state.secret); err != nil {

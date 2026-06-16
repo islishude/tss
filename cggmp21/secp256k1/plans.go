@@ -23,14 +23,13 @@ var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 
 // KeygenPlanOption configures CGGMP21 keygen plan construction.
 //
-// SessionID, Parties, Threshold, EnableHD, and SecurityParams are shared intent
-// included in the plan digest. Limits is a local fail-closed resource policy
-// and is intentionally excluded from the digest.
+// SessionID, Parties, Threshold, and SecurityParams are shared intent included
+// in the plan digest. Limits is a local fail-closed resource policy and is
+// intentionally excluded from the digest.
 type KeygenPlanOption struct {
 	SessionID      tss.SessionID
 	Parties        []tss.PartyID
 	Threshold      int
-	EnableHD       bool
 	Limits         *Limits
 	SecurityParams *SecurityParams
 }
@@ -41,7 +40,6 @@ type KeygenPlan struct {
 	sessionID      tss.SessionID
 	threshold      int
 	parties        []tss.PartyID
-	enableHD       bool
 	limits         Limits
 	securityParams SecurityParams
 }
@@ -67,7 +65,6 @@ func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
 		sessionID:      option.SessionID,
 		threshold:      option.Threshold,
 		parties:        parties,
-		enableHD:       option.EnableHD,
 		limits:         limits,
 		securityParams: securityParams,
 	}, nil
@@ -97,11 +94,6 @@ func (p *KeygenPlan) Parties() []tss.PartyID {
 	return slices.Clone(p.parties)
 }
 
-// EnableHD reports whether keygen will aggregate an HD chain code.
-func (p *KeygenPlan) EnableHD() bool {
-	return p != nil && p.enableHD
-}
-
 // Digest returns the canonical keygen plan digest.
 func (p *KeygenPlan) Digest() ([]byte, error) {
 	if err := p.validate(); err != nil {
@@ -111,7 +103,6 @@ func (p *KeygenPlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.threshold))
 	t.AppendUint32List("parties", p.parties)
-	t.AppendBool("enable_hd", p.enableHD)
 	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
@@ -155,12 +146,12 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type refreshPlanState struct {
-	sessionID    tss.SessionID
-	threshold    int
-	parties      []tss.PartyID
-	publicKey    []byte
-	chainCode    []byte
-	paillierBits int
+	sessionID    tss.SessionID // Refresh protocol session; every refresh message must echo this through the envelope.
+	threshold    int           // Existing signing threshold preserved by same-party refresh.
+	parties      []tss.PartyID // Canonical participant set preserved by same-party refresh.
+	publicKey    []byte        // Parent group public key that must remain unchanged after refresh.
+	chainCode    []byte        // HD chain code that must remain unchanged after refresh.
+	paillierBits int           // Shared modulus size for the fresh Paillier keys generated during refresh.
 }
 
 // RefreshPlan is the shared CGGMP21 refresh intent. It fixes the old key
@@ -304,15 +295,15 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 }
 
 type presignPlanState struct {
-	sessionID     tss.SessionID
-	threshold     int
-	parties       []tss.PartyID
-	publicKey     []byte
-	keygenHash    []byte
-	signers       []tss.PartyID
-	context       PresignContext
-	contextHash   []byte
-	additiveShift []byte
+	sessionID   tss.SessionID         // Presign protocol session; every presign envelope is scoped to it.
+	threshold   int                   // Signing threshold inherited from the key share.
+	parties     []tss.PartyID         // Canonical key-share participant set, not just the active signer set.
+	publicKey   []byte                // Parent group public key before request-time HD derivation.
+	keygenHash  []byte                // Transcript hash of the keygen that produced publicKey and parties.
+	signers     []tss.PartyID         // Canonical subset allowed to contribute to this presign.
+	context     PresignContext        // Normalized signing context after path resolution.
+	contextHash []byte                // Canonical hash of context, used to bind the presign across phases.
+	derivation  *tss.DerivationResult // Resolved child key/path; ChildPublicKey is the verification key.
 }
 
 // PresignPlan is the shared CGGMP21 presign intent.
@@ -356,20 +347,20 @@ func NewPresignPlan(option PresignPlanOption) (*PresignPlan, error) {
 	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	ctx, contextHash, additiveShift, err := preparePresignContext(key, option.Context)
+	ctx, contextHash, derivation, err := preparePresignContext(key, option.Context)
 	if err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
 	return &PresignPlan{state: &presignPlanState{
-		sessionID:     option.SessionID,
-		threshold:     key.state.threshold,
-		parties:       slices.Clone(key.state.parties),
-		publicKey:     slices.Clone(key.state.publicKey),
-		keygenHash:    slices.Clone(key.state.keygenTranscriptHash),
-		signers:       signers,
-		context:       clonePresignContext(ctx),
-		contextHash:   slices.Clone(contextHash),
-		additiveShift: slices.Clone(additiveShift),
+		sessionID:   option.SessionID,
+		threshold:   key.state.threshold,
+		parties:     slices.Clone(key.state.parties),
+		publicKey:   slices.Clone(key.state.publicKey),
+		keygenHash:  slices.Clone(key.state.keygenTranscriptHash),
+		signers:     signers,
+		context:     ctx.Clone(),
+		contextHash: slices.Clone(contextHash),
+		derivation:  derivation.Clone(),
 	}, limits: limits, securityParams: securityParams}, nil
 }
 
@@ -427,7 +418,7 @@ func (p *PresignPlan) Context() PresignContext {
 	if p == nil || p.state == nil {
 		return PresignContext{}
 	}
-	return clonePresignContext(p.state.context)
+	return p.state.context.Clone()
 }
 
 // ContextHashBytes returns a copy of the presign context hash.
@@ -438,12 +429,20 @@ func (p *PresignPlan) ContextHashBytes() []byte {
 	return slices.Clone(p.state.contextHash)
 }
 
-// AdditiveShiftBytes returns a copy of the BIP32 additive shift bound by the plan.
-func (p *PresignPlan) AdditiveShiftBytes() []byte {
+// Derivation returns a copy of the HD derivation result bound by the plan.
+func (p *PresignPlan) Derivation() *tss.DerivationResult {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return slices.Clone(p.state.additiveShift)
+	return p.state.derivation.Clone()
+}
+
+// VerificationKeyBytes returns a copy of the child public key bound by the plan.
+func (p *PresignPlan) VerificationKeyBytes() []byte {
+	if p == nil || p.state == nil || p.state.derivation == nil {
+		return nil
+	}
+	return p.state.derivation.VerificationKeyBytes()
 }
 
 // Digest returns the canonical presign plan digest.
@@ -459,7 +458,7 @@ func (p *PresignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenHash)
 	t.AppendUint32List("signers", p.state.signers)
 	t.AppendBytes("context_hash", p.state.contextHash)
-	t.AppendBytes("additive_shift", p.state.additiveShift)
+	appendDerivationResultTranscript(t, p.state.derivation)
 	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
@@ -490,12 +489,13 @@ func (p *PresignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 }
 
 type signPlanState struct {
-	sessionID         tss.SessionID
-	presignID         []byte
-	presignTranscript []byte
-	contextHash       []byte
-	digest            []byte
-	request           SignRequest
+	sessionID         tss.SessionID         // Online signing session; partial-signature envelopes are scoped to it.
+	presignID         []byte                // Durable one-use identifier for the consumed presign.
+	presignTranscript []byte                // Presign transcript hash carried into partial verification.
+	contextHash       []byte                // Hash of the context already bound when the presign was created.
+	derivation        *tss.DerivationResult // Resolved child key/path that must match the presign.
+	digest            []byte                // Context-bound message digest signed by ECDSA.
+	request           SignRequest           // Caller request snapshot; AttemptStore is kept by reference.
 }
 
 // SignPlan is the shared CGGMP21 online signing intent.
@@ -544,23 +544,33 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	if len(request.Message) > limits.Payload.MaxMessageBytes {
 		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(request.Message), limits.Payload.MaxMessageBytes))
 	}
-	_, contextHash, additiveShift, err := preparePresignContext(key, request.Context)
+	normalizedContext, contextHash, derivation, err := preparePresignContext(key, request.Context)
 	if err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
 	if !bytes.Equal(contextHash, presign.state.contextHash) {
 		return nil, invalidPlanConfig(key.state.party, errors.New("presign context mismatch"))
 	}
-	if !bytes.Equal(additiveShift, presign.state.additiveShift) {
-		return nil, invalidPlanConfig(key.state.party, errors.New("presign additive shift mismatch"))
+	if !derivation.Equal(presign.state.derivation) {
+		return nil, invalidPlanConfig(key.state.party, errors.New("presign derivation mismatch"))
 	}
-	req := cloneSignRequest(request)
+	if !slices.Equal(derivation.ResolvedPath, presign.state.derivation.ResolvedPath) {
+		return nil, invalidPlanConfig(key.state.party, errors.New("presign resolved path mismatch"))
+	}
+	req := SignRequest{
+		Context:             normalizedContext.Clone(),
+		Message:             slices.Clone(request.Message),
+		LowS:                request.LowS,
+		AttemptStore:        request.AttemptStore,
+		DurableStoreTimeout: request.DurableStoreTimeout,
+	}
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
 	return &SignPlan{state: &signPlanState{
 		sessionID:         option.SessionID,
 		presignID:         presign.ID(),
 		presignTranscript: slices.Clone(presign.state.transcriptHash),
 		contextHash:       slices.Clone(contextHash),
+		derivation:        derivation.Clone(),
 		digest:            slices.Clone(digest),
 		request:           req,
 	}, limits: limits}, nil
@@ -613,7 +623,7 @@ func (p *SignPlan) Request() SignRequest {
 	if p == nil || p.state == nil {
 		return SignRequest{}
 	}
-	return cloneSignRequest(p.state.request)
+	return p.state.request.Clone()
 }
 
 // Digest returns the canonical sign plan digest.
@@ -625,6 +635,7 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendBytes("presign_transcript_hash", p.state.presignTranscript)
 	t.AppendBytes("context_hash", p.state.contextHash)
+	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("message_digest", p.state.digest)
 	t.AppendBool("low_s", p.state.request.LowS)
 	t.AppendBool("has_attempt_store", p.state.request.AttemptStore != nil)
@@ -653,6 +664,9 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	}
 	if !bytes.Equal(p.state.contextHash, presign.state.contextHash) {
 		return errors.New("sign plan context mismatch")
+	}
+	if !p.state.derivation.Equal(presign.state.derivation) {
+		return errors.New("sign plan derivation mismatch")
 	}
 	return validatePresign(key, presign, p.limits)
 }
@@ -702,15 +716,4 @@ func invalidPlanConfig(party tss.PartyID, err error) error {
 		return err
 	}
 	return tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, party, err)
-}
-
-func clonePresignContext(ctx PresignContext) PresignContext {
-	ctx.DerivationPath = slices.Clone(ctx.DerivationPath)
-	return ctx
-}
-
-func cloneSignRequest(request SignRequest) SignRequest {
-	request.Context = clonePresignContext(request.Context)
-	request.Message = slices.Clone(request.Message)
-	return request
 }

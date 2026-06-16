@@ -64,25 +64,19 @@ func clonePresignForTest(p *Presign) *Presign {
 		return nil
 	}
 	return &Presign{state: &presignState{
-		consumed:       p.state.consumed,
-		attempt:        p.state.attempt,
-		version:        p.state.version,
-		securityParams: p.state.securityParams,
-		party:          p.state.party,
-		threshold:      p.state.threshold,
-		signers:        slices.Clone(p.state.signers),
-		r:              slices.Clone(p.state.r),
-		littleR:        slices.Clone(p.state.littleR),
-		transcriptHash: slices.Clone(p.state.transcriptHash),
-		context: PresignContext{
-			KeyID:          p.state.context.KeyID,
-			ChainID:        p.state.context.ChainID,
-			DerivationPath: slices.Clone(p.state.context.DerivationPath),
-			PolicyDomain:   p.state.context.PolicyDomain,
-			MessageDomain:  p.state.context.MessageDomain,
-		},
+		consumed:             p.state.consumed,
+		attempt:              p.state.attempt,
+		version:              p.state.version,
+		securityParams:       p.state.securityParams,
+		party:                p.state.party,
+		threshold:            p.state.threshold,
+		signers:              slices.Clone(p.state.signers),
+		r:                    slices.Clone(p.state.r),
+		littleR:              slices.Clone(p.state.littleR),
+		transcriptHash:       slices.Clone(p.state.transcriptHash),
+		context:              p.state.context.Clone(),
 		contextHash:          slices.Clone(p.state.contextHash),
-		additiveShift:        slices.Clone(p.state.additiveShift),
+		derivation:           p.state.derivation.Clone(),
 		planHash:             slices.Clone(p.state.planHash),
 		publicKey:            slices.Clone(p.state.publicKey),
 		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
@@ -235,8 +229,11 @@ func testCGGMP21ReshareParties(a, b []tss.PartyID) tss.PartySet {
 
 func testPresignContext() PresignContext {
 	return PresignContext{
-		KeyID:         "test-key",
-		ChainID:       "test-chain",
+		KeyID:   "test-key",
+		ChainID: "test-chain",
+		Derivation: tss.DerivationRequest{
+			Scheme: tss.DerivationSchemeBIP32Secp256k1,
+		},
 		PolicyDomain:  "test-policy",
 		MessageDomain: "test-message",
 	}
@@ -399,7 +396,7 @@ func (s *testSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 		return SignAttemptRecord{}, ErrSignAttemptConflict
 	}
 	if record.Completed {
-		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) {
+		if bytes.Equal(record.SignatureR, result.Signature.R) && bytes.Equal(record.SignatureS, result.Signature.S) && record.SignatureRecoveryID == result.Signature.RecoveryID {
 			return record.Clone(), nil
 		}
 		return SignAttemptRecord{}, ErrSignAttemptConflict
@@ -407,6 +404,7 @@ func (s *testSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	record.Completed = true
 	record.SignatureR = slices.Clone(result.Signature.R)
 	record.SignatureS = slices.Clone(result.Signature.S)
+	record.SignatureRecoveryID = result.Signature.RecoveryID
 	s.attempts[key] = record
 	return record.Clone(), nil
 }
@@ -491,6 +489,8 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	planHash := sha256.Sum256([]byte("minimal presign plan"))
 	ctx := testPresignContext()
 	contextHash := presignContextHash(ctx)
+	zeroShift := secp.ScalarZero().Bytes()
+	childChainCode := bytes.Repeat([]byte{0x42}, 32)
 	kShare, err := secpSecretScalarFromBig(one)
 	if err != nil {
 		tb.Fatal("k share: " + err.Error())
@@ -504,18 +504,24 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{state: &presignState{
-		consumed:             new(atomic.Bool),
-		attempt:              newPresignAttemptBinding(false),
-		version:              tss.Version,
-		securityParams:       testSecurityParams(),
-		party:                1,
-		threshold:            1,
-		signers:              []tss.PartyID{1},
-		r:                    R,
-		littleR:              scalarBytes(littleR),
-		transcriptHash:       transcript[:],
-		context:              ctx,
-		contextHash:          contextHash,
+		consumed:       new(atomic.Bool),
+		attempt:        newPresignAttemptBinding(false),
+		version:        tss.Version,
+		securityParams: testSecurityParams(),
+		party:          1,
+		threshold:      1,
+		signers:        []tss.PartyID{1},
+		r:              R,
+		littleR:        scalarBytes(littleR),
+		transcriptHash: transcript[:],
+		context:        ctx,
+		contextHash:    contextHash,
+		derivation: &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey: slices.Clone(R),
+			ChildChainCode: slices.Clone(childChainCode),
+			AdditiveShift:  slices.Clone(zeroShift),
+		},
 		planHash:             planHash[:],
 		publicKey:            R,
 		keygenTranscriptHash: transcript[:],

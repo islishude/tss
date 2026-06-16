@@ -186,7 +186,7 @@ z_i = d_i + ρ_i·e_i + λ_i·c·(x_i + δ)   mod q
 
 The signing session clears `d_i` and `e_i` immediately after the partial
 payload is constructed. Call `SignSession.Destroy()` when the session is no
-longer needed to clear message copies, partials, shifted verification keys, and
+longer needed to clear message copies, partials, additive-shift scalars, and
 remaining session-owned material on a best-effort basis.
 
 ### Aggregation and Verification
@@ -215,10 +215,18 @@ This is verified with `crypto/ed25519.Verify(PK, message, sig)`. A failed final 
 
 ### In-Memory Sign Helper
 
-For tests and simple integrations, `Sign(message, shares)` runs the full two-round exchange in-process:
+For tests and simple integrations, `Sign(message, shares, ctx)` runs the full two-round exchange in-process. The `tss.SigningContext` binds the key, chain, derivation path, policy domain, and message domain without changing the message bytes:
 
 ```go
-pub, sig, err := ed25519.Sign(message, []*KeyShare{share1, share2})
+ctx := tss.SigningContext{
+    KeyID: "key-1", ChainID: "chain-1",
+    Derivation: tss.DerivationRequest{
+        Scheme: tss.DerivationSchemeEd25519KhovratovichLaw,
+        Path: tss.MustParseDerivationPath("m/0/1"),
+    },
+    PolicyDomain: "policy", MessageDomain: "app",
+}
+pub, sig, err := ed25519.Sign(message, []*KeyShare{share1, share2}, ctx)
 ```
 
 ## Resharing
@@ -253,7 +261,7 @@ binds old and new party sets, the old public key, chain code, refresh mode, all
 dealer commitments, new commitments, and verification shares. `StartRefresh`
 requires `config.Self` to match the supplied old key's party id. A new recipient
 that does not hold an old `KeyShare` must receive the old 32-byte chain code out
-of band and pass it to `StartReshareRecipient`; use `nil` for non-HD keys.
+of band and pass it to `StartReshareRecipient`.
 
 ## BIP32 HD Derivation
 
@@ -261,9 +269,9 @@ The package implements non-hardened BIP32-Ed25519 derivation following the [Khov
 
 ### Derivation
 
-```go
-childPub, additiveShift, childChain, err := DeriveBIP32(pubKey, chainCode, []uint32{0, 1, 2})
-```
+Use `KeyShare.Derive(path)` or `DeriveNonHardenedBIP32(pubKey, chainCode, path)`
+to resolve a path into a `tss.DerivationResult` containing the child public key,
+child chain code, resolved path, and internal additive shift.
 
 For each path index `i`:
 
@@ -277,20 +285,28 @@ Only non-hardened indices (`i < 2^31`) are supported since hardened derivation r
 
 ### Signing with HD
 
-Bind the cumulative additive shift into a signing plan before starting:
+Bind the derivation path into the signing context before constructing the signing plan:
 
 ```go
+ctx := tss.SigningContext{
+    KeyID: "key-1", ChainID: "chain-1",
+    Derivation: tss.DerivationRequest{
+        Scheme: tss.DerivationSchemeEd25519KhovratovichLaw,
+        Path: tss.MustParseDerivationPath("m/0/1/2"),
+    },
+    PolicyDomain: "policy", MessageDomain: "app",
+}
 plan, err := NewSignPlan(SignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers,
-    Message: message, AdditiveShift: additiveShift,
+    Context: ctx, Message: message,
 })
 sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID()}, guard)
 ```
 
-Each signer adds `λ_i·c·δ` to their partial. The resulting signature verifies against the child public key:
+Each signer derives the same child key from the context path and adds the internal shift during partial generation. The resulting signature verifies against the child public key:
 
 ```go
-crypto/ed25519.Verify(childPub, message, sig) // true
+crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 ```
 
 ## RFC 9591 Alignment
@@ -500,7 +516,7 @@ sequenceDiagram
 
 ### BIP32 HD Derivation (Local)
 
-Non-hardened Khovratovich-Law child key derivation. Performed locally without network rounds; each signer applies the additive shift during partial signature generation.
+Non-hardened Khovratovich-Law child key derivation. Performed locally without network rounds; each signer resolves the same `tss.SigningContext` path and applies the resulting internal shift during partial signature generation.
 
 ```mermaid
 sequenceDiagram
@@ -509,7 +525,7 @@ sequenceDiagram
 
     Note over Caller,HD: For each path index i
 
-    Caller->>HD: DeriveBIP32(pubKey, chainCode, [0,1,2])
+    Caller->>HD: KeyShare.Derive(m/0/1/2)
 
     loop For each index i in path
         HD->>HD: Z=F(c_par, 0x02‖A_par‖ser₃₂(i))
@@ -519,9 +535,9 @@ sequenceDiagram
         HD->>HD: childChain=F(c_par, 0x03‖A_par‖ser₃₂(i))[32:64]
     end
 
-    HD-->>Caller: (childPub, additiveShift, childChain)
+    HD-->>Caller: DerivationResult(childPub, resolvedPath, childChain)
 
-    Note over Caller: Signing: each party adds λᵢ·c·shift to partial
+    Note over Caller: Signing context binds requested and resolved path
     Note over Caller: Verify against childPub with Ed25519.Verify
 ```
 
@@ -531,7 +547,7 @@ sequenceDiagram
 
 ```go
 option := KeygenPlanOption{
-    SessionID: sessionID, Parties: parties, Threshold: threshold, EnableHD: enableHD,
+    SessionID: sessionID, Parties: parties, Threshold: threshold,
 }
 plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
@@ -546,7 +562,7 @@ parties := share.Parties()
 ```go
 plan, err := NewSignPlan(SignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers,
-    Message: message, AdditiveShift: additiveShift,
+    Context: ctx, Message: message,
 })
 sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: nonceReader}, guard)
 out, err := sess.HandleSignMessage(env)
@@ -581,15 +597,17 @@ refresh uses `StartRefresh`, which preserves the participant set and threshold.
 ### BIP32 HD
 
 ```go
-childPub, shift, childChain, err := DeriveBIP32(pubKey, chainCode, path)
-shiftedPub, err := DerivePublicKey(pubKey, additiveShift)
+path := tss.MustParseDerivationPath("m/0/1/2")
+result, err := share.Derive(path)
+childPub := result.ChildPublicKey
+childChain := result.ChildChainCode
 ```
 
 ### Convenience
 
 ```go
-pub, sig, err := Sign(message, shares)
-pub, sig, err := SignWithOptions(message, shares, opts)
+pub, sig, err := Sign(message, shares, ctx)
+pub, sig, err := SignWithOptions(message, shares, SignOptions{Context: ctx})
 share, err := UnmarshalKeyShare(raw)
 ```
 

@@ -30,26 +30,25 @@ const (
 type KeygenSession struct {
 	mu sync.Mutex
 
-	cfg            tss.ThresholdConfig
-	log            tss.Logger
-	limits         Limits
-	securityParams SecurityParams
-	planHash       []byte
-	commits        map[tss.PartyID][][]byte
-	shares         map[tss.PartyID]*big.Int
-	chainCodes     map[tss.PartyID][]byte
-	chainCodeComms map[tss.PartyID][]byte
-	enableHD       bool
-	paillier       *pai.PrivateKey
-	paillierPubs   map[tss.PartyID]PaillierPublicShare
-	ringPedersen   map[tss.PartyID]RingPedersenPublicShare
-	completed      bool
-	aborted        bool
-	state          keygenState
-	pending        *pendingKeyShare
-	confirmations  map[tss.PartyID][]byte
-	keyShare       *KeyShare
-	guard          *tss.EnvelopeGuard
+	cfg            tss.ThresholdConfig                     // Local threshold runtime view fixed by the keygen plan.
+	log            tss.Logger                              // Optional protocol logger.
+	limits         Limits                                  // Local fail-closed resource policy.
+	securityParams SecurityParams                          // Cryptographic profile for Paillier and proof material.
+	planHash       []byte                                  // Digest every keygen payload must echo.
+	commits        map[tss.PartyID][][]byte                // Public polynomial commitments by sender.
+	shares         map[tss.PartyID]*big.Int                // Secret Shamir shares received for the local party.
+	chainCodes     map[tss.PartyID][]byte                  // Per-party chain-code contributions; secret until aggregation.
+	chainCodeComms map[tss.PartyID][]byte                  // Commitments used to bind chain-code contributions.
+	paillier       *pai.PrivateKey                         // Local Paillier private key generated for the key share.
+	paillierPubs   map[tss.PartyID]PaillierPublicShare     // Validated Paillier public material by participant.
+	ringPedersen   map[tss.PartyID]RingPedersenPublicShare // Validated Ring-Pedersen public material by participant.
+	completed      bool                                    // Terminal success flag after the key share is confirmed.
+	aborted        bool                                    // Terminal failure/destruction flag.
+	state          keygenState                             // Phase marker for collect, local-complete, and confirmation states.
+	pending        *pendingKeyShare                        // Completed but not yet confirmed key share.
+	confirmations  map[tss.PartyID][]byte                  // Keygen confirmation payloads by participant.
+	keyShare       *KeyShare                               // Confirmed key share retained by the session.
+	guard          *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
 }
 
 type pendingKeyShare struct {

@@ -11,6 +11,15 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 )
 
+func assertFROSTDerivationPathCleared(t *testing.T, name string, path tss.DerivationPath) {
+	t.Helper()
+	for i, v := range path {
+		if v != 0 {
+			t.Fatalf("%s element %d not cleared: %d", name, i, v)
+		}
+	}
+}
+
 func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 1, 1)
@@ -139,6 +148,19 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if len(sign.partials) == 0 {
 		t.Fatal("sign session did not retain expected local partial material")
 	}
+	childPublicKey := []byte{0x01, 0x02, 0x03}
+	childChainCode := []byte{0x04, 0x05, 0x06}
+	requestedPath := tss.DerivationPath{1, 2}
+	resolvedPath := tss.DerivationPath{1, 2}
+	additiveShift := []byte{0x07, 0x08, 0x09}
+	sign.derivation = &tss.DerivationResult{
+		Scheme:         tss.DerivationSchemeEd25519KhovratovichLaw,
+		ChildPublicKey: childPublicKey,
+		ChildChainCode: childChainCode,
+		RequestedPath:  requestedPath,
+		ResolvedPath:   resolvedPath,
+		AdditiveShift:  additiveShift,
+	}
 	sign.Destroy()
 	if sign.dNonce != nil || sign.eNonce != nil {
 		t.Fatal("signing nonces were not released")
@@ -149,6 +171,14 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if sign.message != nil {
 		t.Fatal("signed message copy was not released")
 	}
+	if sign.derivation != nil {
+		t.Fatal("derivation result was not released")
+	}
+	testutil.AssertBytesCleared(t, childPublicKey)
+	testutil.AssertBytesCleared(t, childChainCode)
+	testutil.AssertBytesCleared(t, additiveShift)
+	assertFROSTDerivationPathCleared(t, "requested path", requestedPath)
+	assertFROSTDerivationPathCleared(t, "resolved path", resolvedPath)
 	if len(sign.signers) != 2 || sign.signers[0] != 1 || sign.signers[1] != 2 {
 		t.Fatal("signer metadata changed")
 	}

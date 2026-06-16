@@ -176,7 +176,7 @@ func ExampleStartReshareDealer() {
 	newParties := []tss.PartyID{3, 4}
 	oldPartySet := tss.PartySet(oldParties)
 	newPartySet := tss.PartySet(newParties)
-	allParties := mergeExampleCGGMPPartySets(oldParties, newParties)
+	allParties := tss.MergePartySet(oldParties, newParties)
 	shares, err := runExampleCGGMPKeygen(oldParties, 2, cggmp.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
@@ -268,7 +268,7 @@ func ExampleStartReshareDealer() {
 // ExampleDeriveNonHardenedBIP32 demonstrates child-key threshold signing.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{EnableHD: true})
+	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
 	if err != nil {
 		panic(err)
 	}
@@ -279,7 +279,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	}
 
 	ctx := examplePresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns, err := runExampleCGGMPPresign(shares, parties, ctx)
 	if err != nil {
 		panic(err)

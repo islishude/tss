@@ -201,7 +201,7 @@ func flattenSecurityParamsRecordForTest(t *testing.T, raw []byte, wireType strin
 	}
 	out := make([]wire.Field, 0, len(fields)+4)
 	for _, field := range fields {
-		if field.Tag != recordTag {
+		if field.Tag < recordTag || field.Tag > recordTag+4 {
 			out = append(out, field)
 		}
 	}

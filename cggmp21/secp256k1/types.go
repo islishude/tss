@@ -123,32 +123,32 @@ type KeyShare struct {
 }
 
 type keyShareState struct {
-	version                uint16
-	securityParams         SecurityParams
-	party                  tss.PartyID
-	threshold              int
-	parties                []tss.PartyID
-	publicKey              []byte
-	chainCode              []byte
-	secret                 *secret.Scalar
-	groupCommitments       [][]byte
-	verificationShares     []VerificationShare
-	paillierPublicKey      []byte
-	paillierPrivateKey     []byte
-	paillierProof          []byte
-	paillierPublicKeys     []PaillierPublicShare
-	ringPedersenParams     []byte
-	ringPedersenProof      []byte
-	ringPedersenPublic     []RingPedersenPublicShare
-	paillierProofSessionID tss.SessionID
-	paillierProofDomain    string
-	resharePlanHash        []byte
-	shareProof             []byte
-	planHash               []byte
-	keygenTranscriptHash   []byte
-	logCiphertext          []byte
-	logProof               []byte
-	keygenConfirmations    [][]byte
+	version                uint16                    // Canonical private wire version of this key-share record.
+	securityParams         SecurityParams            // Cryptographic profile used to create this share.
+	party                  tss.PartyID               // Local owner of the secret signing share.
+	threshold              int                       // Number of signers required for CGGMP21 signing.
+	parties                []tss.PartyID             // Canonical full participant set for the group key.
+	publicKey              []byte                    // Parent group public key before request-time derivation.
+	chainCode              []byte                    // HD chain code paired with publicKey for non-hardened derivation.
+	secret                 *secret.Scalar            // Local ECDSA signing share; never exposed through accessors.
+	groupCommitments       [][]byte                  // Public polynomial commitments from keygen/reshare.
+	verificationShares     []VerificationShare       // Per-party public verification shares derived from commitments.
+	paillierPublicKey      []byte                    // Local Paillier public key used by peers in MtA.
+	paillierPrivateKey     []byte                    // Serialized local Paillier private key; secret-bearing.
+	paillierProof          []byte                    // Proof that paillierPublicKey satisfies the configured security profile.
+	paillierPublicKeys     []PaillierPublicShare     // Canonical public Paillier material for every participant.
+	ringPedersenParams     []byte                    // Local Ring-Pedersen parameters paired with Paillier material.
+	ringPedersenProof      []byte                    // Proof for local Ring-Pedersen parameter generation.
+	ringPedersenPublic     []RingPedersenPublicShare // Canonical Ring-Pedersen material for every participant.
+	paillierProofSessionID tss.SessionID             // Session ID bound into local Paillier proof transcripts.
+	paillierProofDomain    string                    // Domain label bound into local Paillier proof transcripts.
+	resharePlanHash        []byte                    // Reshare plan digest when this share came from reshare.
+	shareProof             []byte                    // Public proof binding a reshare receiver's share to commitments.
+	planHash               []byte                    // Lifecycle plan digest that authorized this key share.
+	keygenTranscriptHash   []byte                    // Transcript hash of the completed keygen or reshare confirmation.
+	logCiphertext          []byte                    // Public ciphertext used by auxiliary logarithm proofs.
+	logProof               []byte                    // Public proof for the auxiliary logarithm statement.
+	keygenConfirmations    [][]byte                  // Canonical confirmation payloads proving every party accepted the keygen.
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer
@@ -184,7 +184,10 @@ func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare, l
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
+// RecoveryID is the compact recovery id in [0,3]. Chain-specific encodings
+// such as Ethereum v/yParity should be derived outside this library.
 type Signature struct {
-	R []byte `json:"r"`
-	S []byte `json:"s"`
+	R          []byte `json:"r"`
+	S          []byte `json:"s"`
+	RecoveryID uint8  `json:"recovery_id"`
 }

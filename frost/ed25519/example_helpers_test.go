@@ -15,6 +15,23 @@ type exampleFROSTSecurity struct {
 	verifier tss.BroadcastAckVerifier
 }
 
+func exampleFROSTSigningContext(paths ...[]uint32) tss.SigningContext {
+	var path tss.DerivationPath
+	if len(paths) > 0 {
+		path = tss.DerivationPath(paths[0]).Clone()
+	}
+	return tss.SigningContext{
+		KeyID:   "example-key",
+		ChainID: "example-chain",
+		Derivation: tss.DerivationRequest{
+			Scheme: tss.DerivationSchemeEd25519KhovratovichLaw,
+			Path:   path,
+		},
+		PolicyDomain:  "example-policy",
+		MessageDomain: "example-message",
+	}
+}
+
 func newExampleFROSTSecurity(parties tss.PartySet) *exampleFROSTSecurity {
 	privateKeys := make(map[tss.PartyID]stded25519.PrivateKey, len(parties))
 	publicKeys := make(map[tss.PartyID]stded25519.PublicKey, len(parties))
@@ -198,9 +215,13 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 		if err != nil {
 			return nil, nil, err
 		}
+		ctx := opts.Context
+		if ctx.Derivation.Scheme == "" {
+			ctx = exampleFROSTSigningContext()
+		}
 		plan, err := frost.NewSignPlan(frost.SignPlanOption{
-			Key: shares[id], SessionID: sessionID, Signers: signers, Message: message,
-			AdditiveShift: opts.AdditiveShift, Limits: opts.Limits,
+			Key: shares[id], SessionID: sessionID, Signers: signers, Context: ctx, Message: message,
+			Limits: opts.Limits,
 		})
 		if err != nil {
 			return nil, nil, err

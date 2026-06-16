@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	keyShareWireType       = "cggmp21.secp256k1.keyshare"
-	presignWireType        = "cggmp21.secp256k1.presign"
-	presignContextWireType = "cggmp21.secp256k1.presign.context"
+	keyShareWireType = "cggmp21.secp256k1.keyshare"
+	presignWireType  = "cggmp21.secp256k1.presign"
 )
 
 // keyShareWire is the wire DTO for KeyShare.
@@ -237,25 +236,25 @@ func UnmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 
 // presignWire is the wire DTO for Presign.
 type presignWire struct {
-	Party                tss.PartyID    `wire:"1,u32"`
-	Threshold            int            `wire:"2,u32"`
-	Signers              []tss.PartyID  `wire:"3,u32list"`
-	R                    []byte         `wire:"4,bytes,max_bytes=point"`
-	LittleR              []byte         `wire:"5,bytes,max_bytes=point"`
-	KShare               *secret.Scalar `wire:"6,custom,len=32"`
-	ChiShare             *secret.Scalar `wire:"7,custom,len=32"`
-	Delta                *secret.Scalar `wire:"8,custom,len=32"`
-	TranscriptHash       []byte         `wire:"9,bytes"`
-	Context              PresignContext `wire:"10,nested"`
-	ContextHash          []byte         `wire:"11,bytes"`
-	AdditiveShift        []byte         `wire:"12,bytes"`
-	Consumed             bool           `wire:"13,bool"`
-	PublicKey            []byte         `wire:"14,bytes,max_bytes=point"`
-	KeygenTranscriptHash []byte         `wire:"15,bytes"`
-	PartiesHash          []byte         `wire:"16,bytes"`
-	VerifyShares         []byte         `wire:"17,bytes,max_bytes=signprep_verify_shares"`
-	PlanHash             []byte         `wire:"18,bytes,len=32"`
-	SecurityParams       SecurityParams `wire:"19,record"`
+	Party                tss.PartyID           `wire:"1,u32"`
+	Threshold            int                   `wire:"2,u32"`
+	Signers              []tss.PartyID         `wire:"3,u32list"`
+	R                    []byte                `wire:"4,bytes,max_bytes=point"`
+	LittleR              []byte                `wire:"5,bytes,max_bytes=point"`
+	KShare               *secret.Scalar        `wire:"6,custom,len=32"`
+	ChiShare             *secret.Scalar        `wire:"7,custom,len=32"`
+	Delta                *secret.Scalar        `wire:"8,custom,len=32"`
+	TranscriptHash       []byte                `wire:"9,bytes"`
+	Context              PresignContext        `wire:"10,nested"`
+	ContextHash          []byte                `wire:"11,bytes"`
+	Consumed             bool                  `wire:"12,bool"`
+	PublicKey            []byte                `wire:"13,bytes,max_bytes=point"`
+	KeygenTranscriptHash []byte                `wire:"14,bytes"`
+	PartiesHash          []byte                `wire:"15,bytes"`
+	VerifyShares         []byte                `wire:"16,bytes,max_bytes=signprep_verify_shares"`
+	PlanHash             []byte                `wire:"17,bytes,len=32"`
+	SecurityParams       SecurityParams        `wire:"18,record"`
+	Derivation           *tss.DerivationResult `wire:"19,record"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -293,6 +292,13 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	}
 	consumed := new(atomic.Bool)
 	consumed.Store(w.Consumed)
+	derivation := w.Derivation
+	if derivation == nil {
+		return nil, errors.New("missing presign derivation")
+	}
+	if err := validateDerivationResult(derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
+		return nil, fmt.Errorf("presign derivation result: %w", err)
+	}
 	p := &Presign{state: &presignState{
 		version:              tss.Version,
 		securityParams:       w.SecurityParams,
@@ -304,7 +310,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		transcriptHash:       w.TranscriptHash,
 		context:              w.Context,
 		contextHash:          w.ContextHash,
-		additiveShift:        w.AdditiveShift,
+		derivation:           derivation,
 		planHash:             w.PlanHash,
 		publicKey:            w.PublicKey,
 		keygenTranscriptHash: w.KeygenTranscriptHash,

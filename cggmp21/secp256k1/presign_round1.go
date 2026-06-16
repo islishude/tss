@@ -42,9 +42,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	}
 	sessionID := plan.state.sessionID
 	signers := slices.Clone(plan.state.signers)
-	ctx := clonePresignContext(plan.state.context)
+	// Snapshot the normalized context and derivation once. The resulting
+	// Presign stores derivation.ChildPublicKey as the verification key.
+	ctx := plan.state.context.Clone()
 	contextHash := slices.Clone(plan.state.contextHash)
-	additiveShift := slices.Clone(plan.state.additiveShift)
+	derivation := plan.state.derivation.Clone()
 	paillierKey, err := key.paillierPrivate()
 	if err != nil {
 		return nil, nil, err
@@ -164,7 +166,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		signers:              signers,
 		context:              ctx,
 		contextHash:          contextHash,
-		additiveShift:        additiveShift,
+		derivation:           derivation,
 		planHash:             slices.Clone(planHash),
 		paillier:             paillierKey,
 		kShare:               kShareSecret,

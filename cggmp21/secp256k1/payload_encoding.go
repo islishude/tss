@@ -45,7 +45,7 @@ func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limit
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return nil, err
 	}
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
+	if len(p.ChainCodeCommit) != 32 {
 		return nil, errors.New("chain code must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -74,7 +74,7 @@ func unmarshalKeygenCommitmentsPayloadWithLimits(in []byte, limits Limits) (keyg
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
+	if len(p.ChainCodeCommit) != 32 {
 		return keygenCommitmentsPayload{}, errors.New("chain code must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {

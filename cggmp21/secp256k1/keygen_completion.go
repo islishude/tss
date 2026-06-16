@@ -331,9 +331,6 @@ const cggmpChainCodeCommitLabel = "cggmp21-secp256k1-chain-code-commit-v1"
 // cggmpChainCodeCommit produces a hash commitment for a party's HD chain code.
 // The chain code is revealed in round 2 (keygen confirmation) to prevent last-sender bias.
 func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
-	if len(chainCode) == 0 {
-		return nil
-	}
 	t := transcript.New(cggmpChainCodeCommitLabel)
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("party_id", partyID)
@@ -343,9 +340,6 @@ func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCod
 
 // verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func verifyCGGMPChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) == 0 {
-		return len(chainCode) == 0
-	}
 	if len(commit) != sha256.Size || len(chainCode) != 32 {
 		return false
 	}

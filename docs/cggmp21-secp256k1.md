@@ -275,7 +275,7 @@ Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the `SignVer
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 
-Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and additive shift as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all `SignVerifyShare` entries (valid point encodings, non-empty proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
+Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and derivation result (including the child verification key) as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all `SignVerifyShare` entries (valid point encodings, non-empty proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
 
 No private key share, nonce share, or Paillier secret material leaves the process.
 
@@ -285,13 +285,13 @@ No private key share, nonce share, or Paillier secret material leaves the proces
 s = Σ_i s_i  mod q
 ```
 
-Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the group public key before being returned.
+Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the bound verification key, including the derived child public key when a derivation path is set, before being returned.
 
 Since every partial is independently verified before aggregation, a failure at this stage is an **implementation invariant violation** (`ErrCodeInvariant`), not a protocol-level blame event. It carries no blame parties. This replaces the previous behavior where aggregate verification failure blamed all signers as a suspect set.
 
 ### HD Derivation
 
-Set `PresignContext.DerivationPath` before constructing `NewPresignPlan(...)`. The BIP32 additive shift is derived and bound into the presign plan; online signing rejects a different key id, chain id, path, policy domain, message domain, presign, or sign plan. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
+Set `PresignContext`/`tss.SigningContext.Derivation.Path` before constructing `NewPresignPlan(...)`. The BIP32 child public key, child chain code, requested path, resolved path, and internal additive shift are derived and bound into the presign plan; online signing rejects a different key id, chain id, path, policy domain, message domain, presign, or sign plan. In-memory signing helpers return the actual verification key, including the derived child public key when a derivation path is set.
 
 ## Presign Lifecycle
 
@@ -439,7 +439,7 @@ The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commit
 
 ## BIP32 HD Derivation
 
-HD derivation is implemented via `DeriveBIP32` and `DerivePublicKey` (same API shape as the frost/ed25519 package). Set `PresignContext.DerivationPath` before presign generation; the derived additive shift is stored in the presign and cannot be changed during online signing.
+HD derivation is implemented via `KeyShare.Derive(path)`, `DeriveNonHardenedBIP32`, and `DerivePublicKey`. Set `PresignContext`/`tss.SigningContext.Derivation.Path` before presign generation; the derived child key, resolved path, child chain code, and internal additive shift are stored in the presign and cannot be changed during online signing.
 
 ## Blame Evidence
 
@@ -733,7 +733,7 @@ sequenceDiagram
 ```go
 option := KeygenPlanOption{
     SessionID: sessionID, Parties: parties, Threshold: threshold,
-    EnableHD: enableHD, SecurityParams: &securityParams,
+    SecurityParams: &securityParams,
 }
 plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
@@ -751,7 +751,14 @@ securityParams, err = UnmarshalSecurityParams(raw)
 ### Presign
 
 ```go
-ctx := PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
+ctx := PresignContext{
+    KeyID: "key-1", ChainID: "chain-1",
+    Derivation: tss.DerivationRequest{
+        Scheme: tss.DerivationSchemeBIP32Secp256k1,
+        Path: tss.MustParseDerivationPath("m/0/1"),
+    },
+    PolicyDomain: "policy", MessageDomain: "app",
+}
 plan, err := NewPresignPlan(PresignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers, Context: ctx,
 })

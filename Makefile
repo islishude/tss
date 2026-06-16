@@ -88,7 +88,7 @@ test-race: ## Race detector for integration-level protocol flows.
 
 .PHONY: test-stress
 test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
-	$(GO) test -race -tags='integration slowcrypto stress' -p 1 -parallel 1 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
+	$(GO) test -race -tags='integration slowcrypto stress' -p 3 -parallel 2 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
 
 .PHONY: test-budget
 test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
@@ -159,6 +159,51 @@ coverage-check: ## Enforce per-area coverage thresholds; exits non-zero on viola
 	echo "internal/secret: $$SECRET_COV% (threshold 75%)"; \
 	if [ "$$(echo "$$SECRET_COV < 75" | bc -l 2>/dev/null || echo 0)" = "1" ]; then echo "FAIL: internal/secret coverage $$SECRET_COV% below 75%"; exit 1; fi
 	@echo "=== coverage-check: all thresholds passed ==="
+
+# -----------------------------------------------------------------------------
+# Benchmarks
+# -----------------------------------------------------------------------------
+
+BENCHTIME ?= 10s
+BENCHCOUNT ?= 1
+BENCH_PARALLEL ?= $(LOGICAL_CPUS)
+BENCH_TIMEOUT ?= 1h
+
+.PHONY: bench
+bench: ## Run integration-level benchmarks
+	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) -tags='tier1 integration' ./...
+
+# -----------------------------------------------------------------------------
+# Golden files & test vectors
+# -----------------------------------------------------------------------------
+
+GOLDEN_TIMEOUT ?= 30m
+
+.PHONY: golden-update
+golden-update: ## Regenerate all binary wire-format golden vectors.
+	UPDATE_GOLDEN=1 $(GO) test -run 'TestGolden' -count=1 -timeout $(GOLDEN_TIMEOUT) . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
+	UPDATE_GOLDEN=1 $(GO) test -run 'TestFast_Golden' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+	UPDATE_GOLDEN=1 $(GO) test -run 'TestGolden' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+
+.PHONY: golden-update-protocol
+golden-update-protocol: ## Regenerate JSON protocol cross-implementation vectors.
+	$(GO) test -run 'TestGenerateVectors$$' -tags='vectorgen' -count=1 -timeout $(GOLDEN_TIMEOUT) ./frost/ed25519 ./cggmp21/secp256k1
+
+.PHONY: golden-update-all
+golden-update-all: golden-update golden-update-protocol ## Regenerate all golden and protocol vectors.
+
+.PHONY: golden-verify
+golden-verify: ## Verify binary golden vectors match current wire format.
+	$(GO) test -run 'TestGolden' -count=1 -timeout $(GOLDEN_TIMEOUT) ./...
+	$(GO) test -run 'TestGolden' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+
+.PHONY: golden-verify-protocol
+golden-verify-protocol: ## Verify JSON protocol vectors against library implementation.
+	$(GO) test -run 'CrossImplementation' -count=1 -timeout $(GOLDEN_TIMEOUT) ./frost/ed25519
+	$(GO) test -run 'CrossImplementation' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+
+.PHONY: golden-verify-all
+golden-verify-all: golden-verify golden-verify-protocol ## Verify all golden and protocol vectors.
 
 # -----------------------------------------------------------------------------
 # Static checks, fixes, and formatting
