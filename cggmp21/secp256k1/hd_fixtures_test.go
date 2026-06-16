@@ -2,11 +2,10 @@ package secp256k1
 
 import (
 	"bytes"
-	"crypto/hmac"
-	"crypto/sha512"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 )
 
 const (
@@ -58,18 +57,12 @@ func assertAdditiveShiftDerivesChild(t testing.TB, parent *ExtendedPublicKey, go
 }
 
 // fakeHMACForInvalidChild forces IL to be a specific value to trigger
-// invalid-child conditions for testing.
-func fakeHMACForInvalidChild(ilValue []byte) func(key, data []byte) ([]byte, []byte) {
-	return func(key, data []byte) ([]byte, []byte) {
-		il := make([]byte, 32)
-		copy(il, ilValue)
-		ir := make([]byte, 32)
-
-		// Use a deterministic IR from the real HMAC for chain-code continuity.
-		mac := hmac.New(sha512.New, key)
-		mac.Write(data)
-		I := mac.Sum(nil)
-		copy(ir, I[32:])
-		return il, ir
+// invalid-child conditions for testing. It returns a full 64-byte HMAC
+// with the first 32 bytes overridden by ilValue.
+func fakeHMACForInvalidChild(ilValue []byte) func(key, data []byte) []byte {
+	return func(key, data []byte) []byte {
+		I := bip32util.HMACSHA512(key, data)
+		copy(I[:32], ilValue)
+		return I
 	}
 }

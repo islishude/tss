@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/binary"
 	"fmt"
@@ -13,14 +12,6 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
-
-// hmacSHA512 implements single-round HMAC-SHA512, matching the Cardano
-// ED25519-BIP32 reference implementation.
-func hmacSHA512(key, data []byte) []byte {
-	mac := hmac.New(sha512.New, key)
-	mac.Write(data)
-	return mac.Sum(nil)
-}
 
 // DeriveNonHardenedBIP32 performs non-hardened BIP32-Ed25519 child key
 // derivation following the Khovratovich-Law / Cardano ED25519-BIP32 scheme.
@@ -43,7 +34,7 @@ func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath
 	cfg := tss.ResolveDeriveConfig(opts)
 
 	// Empty path: return parent node.
-	if len(path) == 0 {
+	if path.IsMaster() {
 		zeroShift := make([]byte, 32)
 		return &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeEd25519KhovratovichLaw,
@@ -137,6 +128,11 @@ func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg tss.Deriv
 ) {
 	order := edcurve.Order()
 
+	hmacFn := bip32util.HMACSHA512
+	if cfg.HMACFunc != nil {
+		hmacFn = cfg.HMACFunc
+	}
+
 	for {
 		if idx >= tss.HardenedKeyStart {
 			return nil, nil, nil, idx, fmt.Errorf(
@@ -149,7 +145,10 @@ func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg tss.Deriv
 		binary.LittleEndian.PutUint32(idxBytes[:], idx)
 
 		// Z = HMAC-SHA512(key=c_par, data=0x02 || A_par || ser32LE(i))
-		z := hmacSHA512(parentChain, append(append([]byte{0x02}, parentPub...), idxBytes[:]...))
+		z := hmacFn(parentChain, append(append([]byte{0x02}, parentPub...), idxBytes[:]...))
+		if len(z) != sha512.Size {
+			return nil, nil, nil, idx, fmt.Errorf("HMACFunc: got %d bytes, want 64", len(z))
+		}
 
 		// zL = 8 * LE_OS2IP(Z[0:28]) — cofactor clearing via *8
 		zL := leBytesToBig(z[:28])
@@ -166,7 +165,10 @@ func deriveChildEd25519(parentPub, parentChain []byte, idx uint32, cfg tss.Deriv
 		}
 
 		// child chain: HMAC-SHA512(key=c_par, data=0x03 || A_par || ser32LE(i))[32:64]
-		cc := hmacSHA512(parentChain, append(append([]byte{0x03}, parentPub...), idxBytes[:]...))
+		cc := hmacFn(parentChain, append(append([]byte{0x03}, parentPub...), idxBytes[:]...))
+		if len(cc) != sha512.Size {
+			return nil, nil, nil, idx, fmt.Errorf("HMACFunc: got %d bytes, want 64", len(cc))
+		}
 		childChain = slices.Clone(cc[32:])
 
 		return nil, zL, childChain, idx, nil

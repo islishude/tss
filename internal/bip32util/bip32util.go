@@ -1,6 +1,8 @@
 package bip32util
 
 import (
+	"crypto/hmac"
+	"crypto/sha512"
 	"fmt"
 
 	"github.com/islishude/tss"
@@ -20,4 +22,12 @@ func AggregateChainCode(parties []tss.PartyID, chainCodes map[tss.PartyID][]byte
 		}
 	}
 	return out, nil
+}
+
+// HMACSHA512 computes HMAC-SHA512(key, data) and returns the full 64-byte tag.
+// This is the standard BIP32 HMAC primitive shared by all derivation schemes.
+func HMACSHA512(key, data []byte) []byte {
+	mac := hmac.New(sha512.New, key)
+	_, _ = mac.Write(data)
+	return mac.Sum(nil)
 }

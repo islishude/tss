@@ -148,6 +148,10 @@ type DeriveOption interface {
 // DeriveConfig is the resolved configuration for HD public derivation.
 type DeriveConfig struct {
 	InvalidChildMode InvalidChildMode
+	// HMACFunc is an optional custom HMAC-SHA512 function. When nil (the default),
+	// the normal crypto/hmac-based SHA512 implementation is used.
+	// The function must return exactly 64 bytes.
+	HMACFunc func(key, data []byte) []byte
 }
 
 type invalidChildOption struct{ mode InvalidChildMode }
@@ -159,6 +163,19 @@ func (o invalidChildOption) applyDeriveOption(cfg *DeriveConfig) {
 // WithInvalidChildMode sets the invalid child handling strategy.
 func WithInvalidChildMode(mode InvalidChildMode) DeriveOption {
 	return invalidChildOption{mode: mode}
+}
+
+type hmacFuncOption struct{ fn func(key, data []byte) []byte }
+
+func (o hmacFuncOption) applyDeriveOption(cfg *DeriveConfig) {
+	cfg.HMACFunc = o.fn
+}
+
+// WithHMACFunc sets a custom HMAC-SHA512 function for BIP32 public derivation.
+// When fn is nil or the option is not passed, the default crypto/hmac-based
+// SHA512 implementation is used.
+func WithHMACFunc(fn func(key, data []byte) []byte) DeriveOption {
+	return hmacFuncOption{fn: fn}
 }
 
 // ResolveDeriveConfig resolves derivation options into a concrete config.

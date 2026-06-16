@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"crypto/hmac"
 	"crypto/sha512"
 	"encoding/binary"
 	"fmt"
@@ -12,16 +11,6 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
-
-// hmacSHA512 is the HMAC-SHA512 function used for BIP32 derivation. It is
-// exposed as a package-level variable so that tests can inject a fake HMAC
-// to trigger invalid-child conditions.
-var hmacSHA512 = func(key, data []byte) (il, ir []byte) {
-	mac := hmac.New(sha512.New, key)
-	mac.Write(data)
-	I := mac.Sum(nil)
-	return I[:32], I[32:]
-}
 
 // DeriveNonHardenedBIP32 performs non-hardened BIP32 public derivation for
 // threshold ECDSA keys. It returns the child public key, the cumulative
@@ -133,6 +122,11 @@ func deriveChild(parentPub, parentChain []byte, idx uint32, cfg tss.DeriveConfig
 		return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf("%w: invalid parent public key: %w", tss.ErrInvalidPublicKey, err)
 	}
 
+	hmacFn := bip32util.HMACSHA512
+	if cfg.HMACFunc != nil {
+		hmacFn = cfg.HMACFunc
+	}
+
 	for {
 		if idx >= tss.HardenedKeyStart {
 			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf(
@@ -144,7 +138,11 @@ func deriveChild(parentPub, parentChain []byte, idx uint32, cfg tss.DeriveConfig
 		binary.BigEndian.PutUint32(idxBytes[:], idx)
 
 		// I = HMAC-SHA512(key=parentChain, data=serP(parentPub) || ser32(idx))
-		iL, iR := hmacSHA512(parentChain, append(parentPub, idxBytes[:]...))
+		I := hmacFn(parentChain, append(parentPub, idxBytes[:]...))
+		if len(I) != sha512.Size {
+			return nil, secp.Scalar{}, nil, fp, idx, fmt.Errorf("HMACFunc: got %d bytes, want 64", len(I))
+		}
+		iL, iR := I[:32], I[32:]
 
 		tweak, err := secp.ScalarFromBytes(iL)
 		if err != nil || tweak.IsZero() {
@@ -232,7 +230,7 @@ func (x ExtendedPublicKey) Serialize() ([]byte, error) {
 	if err := x.Validate(); err != nil {
 		return nil, err
 	}
-	buf := make([]byte, 0, 78)
+	buf := make([]byte, 0, bip32util.BIP32ExtendedKeyPayloadLen)
 	buf = append(buf, x.Version[:]...)
 	buf = append(buf, x.Depth)
 	buf = append(buf, x.ParentFingerprint[:]...)
@@ -259,8 +257,8 @@ func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: %w", tss.ErrInvalidExtendedPublicKey, err)
 	}
-	if len(payload) != 78 {
-		return nil, fmt.Errorf("%w: payload must be 78 bytes, got %d", tss.ErrInvalidExtendedPublicKey, len(payload))
+	if len(payload) != bip32util.BIP32ExtendedKeyPayloadLen {
+		return nil, fmt.Errorf("%w: payload must be %d bytes, got %d", tss.ErrInvalidExtendedPublicKey, bip32util.BIP32ExtendedKeyPayloadLen, len(payload))
 	}
 
 	var x ExtendedPublicKey
@@ -270,7 +268,7 @@ func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 	x.ChildNumber = binary.BigEndian.Uint32(payload[9:13])
 	copy(x.ChainCode[:], payload[13:45])
 	x.PublicKey = make([]byte, 33)
-	copy(x.PublicKey, payload[45:78])
+	copy(x.PublicKey, payload[45:])
 
 	if err := x.Validate(); err != nil {
 		return nil, err
@@ -283,11 +281,11 @@ func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 // additive shift from this key to the child key.
 //
 // Hardened indices are rejected.
-func (x ExtendedPublicKey) Derive(path []uint32, opts ...tss.DeriveOption) (*ExtendedPublicKey, []byte, error) {
+func (x ExtendedPublicKey) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*ExtendedPublicKey, []byte, error) {
 	if err := x.Validate(); err != nil {
 		return nil, nil, err
 	}
-	if len(path) == 0 {
+	if path.IsMaster() {
 		child := x
 		child.PublicKey = slices.Clone(x.PublicKey)
 		return &child, secp.ScalarZero().Bytes(), nil
