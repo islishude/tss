@@ -276,11 +276,7 @@ func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
 	out := make([]PaillierPublicShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		item := s.paillierPubs[id]
-		out = append(out, PaillierPublicShare{
-			Party:     item.Party,
-			PublicKey: append([]byte(nil), item.PublicKey...),
-			Proof:     append([]byte(nil), item.Proof...),
-		})
+		out = append(out, item.Clone())
 	}
 	return out
 }
@@ -289,11 +285,7 @@ func (s *KeygenSession) sortedRingPedersenPublic() []RingPedersenPublicShare {
 	out := make([]RingPedersenPublicShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		item := s.ringPedersen[id]
-		out = append(out, RingPedersenPublicShare{
-			Party:  item.Party,
-			Params: append([]byte(nil), item.Params...),
-			Proof:  append([]byte(nil), item.Proof...),
-		})
+		out = append(out, item.Clone())
 	}
 	return out
 }
