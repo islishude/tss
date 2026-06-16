@@ -91,8 +91,8 @@ func (c KeygenConfirmation) Validate() error {
 	if len(c.CommitmentsHash) != sha256.Size {
 		return errors.New("keygen confirmation: invalid commitments hash length")
 	}
-	if len(c.ChainCode) != 0 && len(c.ChainCode) != 32 {
-		return errors.New("keygen confirmation: chain code must be empty or 32 bytes")
+	if len(c.ChainCode) != 32 {
+		return errors.New("keygen confirmation: chain code must be 32 bytes")
 	}
 	if len(c.PlanHash) != sha256.Size {
 		return errors.New("keygen confirmation: invalid plan hash length")
@@ -205,20 +205,12 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 		}
 	}
 	if enforceChainCode {
-		if len(local.state.chainCode) == 0 {
-			for _, id := range local.state.parties {
-				if len(chainCodes[id]) != 0 {
-					return fmt.Errorf("keygen confirmation from party %d has unexpected chain code", id)
-				}
-			}
-		} else {
-			aggregate, err := bip32util.AggregateChainCode(local.state.parties, chainCodes)
-			if err != nil {
-				return fmt.Errorf("keygen confirmation chain code set: %w", err)
-			}
-			if !bytes.Equal(aggregate, local.state.chainCode) {
-				return errors.New("keygen confirmation aggregate chain code mismatch")
-			}
+		aggregate, err := bip32util.AggregateChainCode(local.state.parties, chainCodes)
+		if err != nil {
+			return fmt.Errorf("keygen confirmation chain code set: %w", err)
+		}
+		if !bytes.Equal(aggregate, local.state.chainCode) {
+			return errors.New("keygen confirmation aggregate chain code mismatch")
 		}
 	}
 
@@ -384,17 +376,26 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	// Aggregate chain codes from all revealed confirmations.
-	var chainCode []byte
-	if s.enableHD {
-		cc, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodes)
-		if err != nil {
-			s.abort()
-			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
-		}
-		chainCode = cc
+	chainCode, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodes)
+	if err != nil {
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	finalShare := cloneKeyShareValue(s.pending)
 	finalShare.state.chainCode = chainCode
+	// Recompute transcript hash now that confirmations carry the final chain
+	// codes (matching the CGGMP21 pattern at keygen_confirm.go:437-439).
+	chainCodeCommitAggregate, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodeComms)
+	if err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	finalShare.state.keygenTranscriptHash = frostKeygenTranscriptHash(
+		s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties,
+		chainCodeCommitAggregate, s.planHash, s.commits,
+		finalShare.state.groupCommitments, finalShare.state.verificationShares,
+	)
 	finalShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
 	if err := finalShare.ValidateConsistency(); err != nil {
 		finalShare.Destroy()

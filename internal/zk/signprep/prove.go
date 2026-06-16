@@ -3,6 +3,7 @@ package signprep
 import (
 	"crypto/rand"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 
@@ -90,11 +91,13 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 	}
 	combinedBase := xBarPoint
 	if len(stmt.AdditiveShift) > 0 {
-		shift, err := secp.ScalarFromBytes(stmt.AdditiveShift)
+		shift, err := secp.ScalarFromBytesAllowZero(stmt.AdditiveShift)
 		if err != nil {
 			return nil, err
 		}
-		combinedBase = secp.Add(combinedBase, secp.ScalarBaseMult(shift))
+		if !shift.IsZero() {
+			combinedBase = secp.Add(combinedBase, secp.ScalarBaseMult(shift))
+		}
 	}
 	dleqA2, err := secp.PointBytes(secp.ScalarMult(combinedBase, dleqNonce))
 	if err != nil {
@@ -122,15 +125,23 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 		mResponse = mr.Bytes()
 	}
 
+	kRespScalar, err := newProofScalar(kResponse.Bytes())
+	if err != nil {
+		return nil, err
+	}
+	dleqRespScalar, err := newProofScalar(dleqResponse.Bytes())
+	if err != nil {
+		return nil, err
+	}
 	return &Proof{
 		MPoint:       mPoint,
 		KCommitment:  kCommit,
 		MCommitment:  mCommit,
 		DLEQA1:       dleqA1,
 		DLEQA2:       dleqA2,
-		KResponse:    mustNewSecretScalar(kResponse.Bytes()),
+		KResponse:    kRespScalar,
 		MResponse:    mResponse,
-		DLEQResponse: mustNewSecretScalar(dleqResponse.Bytes()),
+		DLEQResponse: dleqRespScalar,
 	}, nil
 }
 
@@ -200,10 +211,10 @@ func scalarFixedBytes(x *big.Int) []byte {
 	return secp.ScalarFromBigInt(x).Bytes()
 }
 
-func mustNewSecretScalar(data []byte) *secret.Scalar {
+func newProofScalar(data []byte) (*secret.Scalar, error) {
 	s, err := secret.NewScalar(data, secp.ScalarSize)
 	if err != nil {
-		panic("signprep: invalid scalar: " + err.Error())
+		return nil, fmt.Errorf("signprep: invalid proof scalar: %w", err)
 	}
-	return s
+	return s, nil
 }

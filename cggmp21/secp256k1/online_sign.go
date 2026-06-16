@@ -44,7 +44,7 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 	if err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	request := cloneSignRequest(plan.state.request)
+	request := plan.state.request.Clone()
 	return startSignDigestBoundWithTimeout(local.Ctx(), key, presign, plan.state.sessionID, plan.state.digest, plan.state.contextHash, planHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout), plan.limits)
 }
 
@@ -313,13 +313,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	verifyKey := append([]byte(nil), key.state.publicKey...)
-	if len(presign.state.additiveShift) > 0 {
-		verifyKey, err = DerivePublicKey(key.state.publicKey, presign.state.additiveShift)
-		if err != nil {
-			return nil, nil, err
-		}
-	}
+	verifyKey := slices.Clone(presign.state.verificationKey)
 	s := &SignSession{
 		key:       key,
 		presign:   presign,
@@ -673,6 +667,35 @@ func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool
 	return VerifyDigest(publicKey, digest, sig)
 }
 
+// VerificationKeyForContext derives the child verification key for ctx from key.
+func VerificationKeyForContext(key *KeyShare, ctx tss.SigningContext) ([]byte, error) {
+	normalized, _, derivation, err := preparePresignContext(key, ctx)
+	if err != nil {
+		return nil, err
+	}
+	_ = normalized
+	return slices.Clone(derivation.ChildPublicKey), nil
+}
+
+// VerifySignatureForContext verifies a context-bound signature against the child key derived from parentPublicKey and chainCode.
+func VerifySignatureForContext(parentPublicKey []byte, chainCode []byte, ctx tss.SigningContext, request SignRequest, sig *Signature) bool {
+	if err := validatePresignContext(ctx); err != nil {
+		return false
+	}
+	derivation, err := DeriveNonHardenedBIP32Extended(parentPublicKey, chainCode, ctx.Derivation.Path, tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode))
+	if err != nil {
+		return false
+	}
+	if len(ctx.Derivation.ResolvedPath) > 0 && !slices.Equal(ctx.Derivation.ResolvedPath, derivation.ResolvedPath) {
+		return false
+	}
+	normalized := ctx.Clone()
+	normalized.Derivation.Path = derivation.RequestedPath.Clone()
+	normalized.Derivation.ResolvedPath = derivation.ResolvedPath.Clone()
+	request.Context = normalized
+	return VerifySignature(derivation.ChildPublicKey, request, sig)
+}
+
 func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	if err := presign.ValidateWithLimits(limits); err != nil {
 		return err
@@ -691,6 +714,19 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	}
 	if !bytes.Equal(presign.state.partiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)) {
 		return errors.New("presign participant set binding mismatch")
+	}
+	_, contextHash, derivation, err := preparePresignContext(key, presign.state.context)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(contextHash, presign.state.contextHash) {
+		return errors.New("presign context hash mismatch")
+	}
+	if !derivation.Equal(presign.state.derivation) {
+		return errors.New("presign derivation binding mismatch")
+	}
+	if !bytes.Equal(presign.state.verificationKey, derivation.ChildPublicKey) {
+		return errors.New("presign verification key binding mismatch")
 	}
 	if len(presign.state.signers) < key.state.threshold || !tss.ContainsParty(presign.state.signers, key.state.party) {
 		return errors.New("invalid presign signer set")

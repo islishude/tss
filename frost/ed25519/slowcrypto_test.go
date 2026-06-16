@@ -78,7 +78,7 @@ func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare
 			Self:      id,
 			SessionID: sessionID,
 		}
-		kg, out, err := startFROSTKeygenWithPlanOption(cfg, KeygenPlanOption{EnableHD: true})
+		kg, out, err := startFROSTKeygenWithPlanOption(cfg, KeygenPlanOption{})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -125,7 +125,7 @@ func TestSlowCrypto_Sign3of5(t *testing.T) {
 		selected = append(selected, shares[id])
 	}
 	msg := []byte("slowcrypto frost 3-of-5 production")
-	pub, sig, err := Sign(msg, selected)
+	pub, sig, err := Sign(msg, selected, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -201,7 +201,7 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 	// Sign with refreshed shares.
 	msg := []byte("slowcrypto frost refresh production")
 	signers := []*KeyShare{refreshed[1], refreshed[2]}
-	pub, sig, err := Sign(msg, signers)
+	pub, sig, err := Sign(msg, signers, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -244,7 +244,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	}
 
 	// Party 4 is a recipient-only.
-	recipient, err := startFROSTReshareRecipient(oldPublicKey, nil, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldPublicKey, oldShares[1].state.chainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   newParties,
 		Self:      4,
@@ -265,7 +265,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 
 	// All 4 new parties can sign (need 2-of-4).
 	msg := []byte("slowcrypto frost reshare production")
-	pub, sig, err := Sign(msg, []*KeyShare{newShares[1], newShares[4]})
+	pub, sig, err := Sign(msg, []*KeyShare{newShares[1], newShares[4]}, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -294,7 +294,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 		selected = append(selected, shares[id])
 	}
 	msg := []byte("slowcrypto frost hd production")
-	pub, sig, err := SignWithOptions(msg, selected, SignOptions{AdditiveShift: result.AdditiveShift})
+	pub, sig, err := SignWithOptions(msg, selected, SignOptions{Context: testFROSTSigningContext(path)})
 	if err != nil {
 		t.Fatal(err)
 	}

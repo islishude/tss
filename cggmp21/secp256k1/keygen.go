@@ -39,7 +39,6 @@ type KeygenSession struct {
 	shares         map[tss.PartyID]*big.Int
 	chainCodes     map[tss.PartyID][]byte
 	chainCodeComms map[tss.PartyID][]byte
-	enableHD       bool
 	paillier       *pai.PrivateKey
 	paillierPubs   map[tss.PartyID]PaillierPublicShare
 	ringPedersen   map[tss.PartyID]RingPedersenPublicShare

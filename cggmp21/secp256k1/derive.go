@@ -15,9 +15,12 @@ func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
 	if len(additiveShift) == 0 {
 		return secp.PointBytes(base)
 	}
-	shift, err := secp.ScalarFromBytes(additiveShift)
+	shift, err := secp.ScalarFromBytesAllowZero(additiveShift)
 	if err != nil {
 		return nil, fmt.Errorf("invalid additive shift: %w", err)
+	}
+	if shift.IsZero() {
+		return secp.PointBytes(base)
 	}
 	return secp.PointBytes(secp.Add(base, secp.ScalarBaseMult(shift)))
 }

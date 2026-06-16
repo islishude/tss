@@ -67,7 +67,11 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := keygenCommitmentsPayload{Commitments: [][]byte{point.Bytes()}, PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	payload := keygenCommitmentsPayload{
+		Commitments:     [][]byte{point.Bytes()},
+		ChainCodeCommit: bytes.Repeat([]byte{0x91}, 32),
+		PlanHash:        bytes.Repeat([]byte{0x90}, 32),
+	}
 	raw, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {
 		t.Fatal(err)

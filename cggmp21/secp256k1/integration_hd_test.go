@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -21,7 +20,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	}
 	derived := result.ChildPublicKey
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	request := SignRequest{Context: ctx, Message: []byte("hd additive shift"), LowS: true}
 	signID, err := tss.NewSessionID(nil)
@@ -70,7 +69,7 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	}
 	derived := result.ChildPublicKey
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	request := SignRequest{Context: ctx, Message: []byte("interactive hd"), LowS: true}
 	pub, sig, err := Sign(request.Message, signers, ctx)
 	if err != nil {
@@ -160,7 +159,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	childPub := result.ChildPublicKey
 	signers := []tss.PartyID{1, 2}
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	request := SignRequest{Context: ctx, Message: []byte("bip32 derived signing"), LowS: true}
 	signID, err := tss.NewSessionID(nil)
@@ -201,11 +200,11 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 
 func TestBIP32RejectsHardened(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	_, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{bip32util.HardenedKeyStart})
+	_, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{tss.HardenedKeyStart})
 	if err == nil {
 		t.Fatal("expected error for hardened index")
 	}
-	_, err = DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{0, bip32util.HardenedKeyStart + 1})
+	_, err = DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{0, tss.HardenedKeyStart + 1})
 	if err == nil {
 		t.Fatal("expected error for hardened index in path")
 	}
@@ -227,7 +226,7 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 	signers := []tss.PartyID{1}
 	ctx := testPresignContext()
 	// Empty derivation path: the public key should be the parent key.
-	ctx.DerivationPath = nil
+	ctx.Derivation.Path = tss.DerivationPath(nil).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	request := SignRequest{Context: ctx, Message: []byte("empty path signing"), LowS: true}
 	signID, err := tss.NewSessionID(nil)
@@ -260,7 +259,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	request := SignRequest{Context: ctx, Message: []byte("child key verify"), LowS: true}
 	signID, _ := tss.NewSessionID(nil)
@@ -289,13 +288,13 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 
 	// Create presign for path A.
 	ctxA := testPresignContext()
-	ctxA.DerivationPath = []uint32{0}
+	ctxA.Derivation.Path = tss.DerivationPath([]uint32{0}).Clone()
 	presignsA := secpPresignWithContext(t, shares, signers, ctxA)
 	presignA := presignsA[1]
 
 	// Attempt to sign with path B using presign from path A.
 	ctxB := testPresignContext()
-	ctxB.DerivationPath = []uint32{1}
+	ctxB.Derivation.Path = tss.DerivationPath([]uint32{1}).Clone()
 	requestB := SignRequest{Context: ctxB, Message: []byte("cross path"), LowS: true}
 	signID, _ := tss.NewSessionID(nil)
 	cloned := clonePresignForTest(presignA)
@@ -310,15 +309,16 @@ func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
 	signers := []tss.PartyID{1}
 	path := []uint32{0, 5}
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 
 	// Verify the presign has a non-zero additive shift.
 	presign := presigns[1]
-	if len(presign.AdditiveShiftBytes()) != 32 {
+	derivation := presign.Derivation()
+	if derivation == nil || len(derivation.AdditiveShift) != 32 {
 		t.Fatal("expected 32-byte additive shift in presign")
 	}
-	if testutil.IsZeroBytes(presign.AdditiveShiftBytes()) {
+	if testutil.IsZeroBytes(derivation.AdditiveShift) {
 		t.Fatal("additive shift should be non-zero for non-empty path")
 	}
 	// The context hash embeds the derivation path.

@@ -66,6 +66,28 @@ func ScalarFromBytes(in []byte) (Scalar, error) {
 	return out, nil
 }
 
+// ScalarFromBytesAllowZero parses a canonical 32-byte big-endian scalar,
+// accepting the zero scalar (unlike [ScalarFromBytes] which rejects it).
+// Callers must decide whether zero is semantically valid in their context.
+func ScalarFromBytesAllowZero(in []byte) (Scalar, error) {
+	if len(in) != ScalarSize {
+		return Scalar{}, errors.New("secp256k1 scalar must be 32 bytes")
+	}
+	var be = [ScalarSize]byte(in)
+	if be == [ScalarSize]byte{} {
+		return ScalarZero(), nil
+	}
+	if !lt32BE(be, scalarModulus) {
+		return Scalar{}, errors.New("secp256k1 scalar out of range")
+	}
+	slices.Reverse(be[:])
+	var nonMont fiatscalar.NonMontgomeryDomainFieldElement
+	fiatscalar.FromBytes((*[4]uint64)(&nonMont), &be)
+	var out Scalar
+	fiatscalar.ToMontgomery(&out.mont, &nonMont)
+	return out, nil
+}
+
 // Bytes returns s as a fixed-width canonical big-endian scalar.
 func (s Scalar) Bytes() []byte {
 	var nonMont fiatscalar.NonMontgomeryDomainFieldElement

@@ -18,8 +18,8 @@ const (
 )
 
 func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
-		return nil, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(p.ChainCodeCommit))
+	if len(p.ChainCodeCommit) != 32 {
+		return nil, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
 	if len(p.PlanHash) != sha256.Size {
 		return nil, fmt.Errorf("keygen commitments plan hash must be 32 bytes")
@@ -32,8 +32,8 @@ func unmarshalKeygenCommitmentsPayloadWithLimits(in []byte, limits Limits) (keyg
 	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
 		return keygenCommitmentsPayload{}, err
 	}
-	if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != 32 {
-		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be empty or 32 bytes, got %d", len(p.ChainCodeCommit))
+	if len(p.ChainCodeCommit) != 32 {
+		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
 	if len(p.PlanHash) != sha256.Size {
 		return keygenCommitmentsPayload{}, fmt.Errorf("keygen commitments plan hash must be 32 bytes")

@@ -12,9 +12,8 @@ import (
 )
 
 const (
-	keyShareWireType       = "cggmp21.secp256k1.keyshare"
-	presignWireType        = "cggmp21.secp256k1.presign"
-	presignContextWireType = "cggmp21.secp256k1.presign.context"
+	keyShareWireType = "cggmp21.secp256k1.keyshare"
+	presignWireType  = "cggmp21.secp256k1.presign"
 )
 
 // keyShareWire is the wire DTO for KeyShare.
@@ -256,6 +255,15 @@ type presignWire struct {
 	VerifyShares         []byte         `wire:"17,bytes,max_bytes=signprep_verify_shares"`
 	PlanHash             []byte         `wire:"18,bytes,len=32"`
 	SecurityParams       SecurityParams `wire:"19,record"`
+	DerivationScheme     string         `wire:"20,string"`
+	ChildPublicKey       []byte         `wire:"21,bytes,max_bytes=point"`
+	ChildChainCode       []byte         `wire:"22,bytes"`
+	RequestedPath        []uint32       `wire:"23,u32list"`
+	ResolvedPath         []uint32       `wire:"24,u32list"`
+	DerivationDepth      uint8          `wire:"25,u8"`
+	ParentFingerprint    []byte         `wire:"26,bytes,len=4"`
+	ChildNumber          uint32         `wire:"27,u32"`
+	VerificationKey      []byte         `wire:"28,bytes,max_bytes=point"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -293,6 +301,20 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	}
 	consumed := new(atomic.Bool)
 	consumed.Store(w.Consumed)
+	derivation, err := derivationResultFromWire(
+		tss.DerivationScheme(w.DerivationScheme),
+		w.ChildPublicKey,
+		w.ChildChainCode,
+		w.RequestedPath,
+		w.ResolvedPath,
+		w.DerivationDepth,
+		w.ParentFingerprint,
+		w.ChildNumber,
+		w.AdditiveShift,
+	)
+	if err != nil {
+		return nil, err
+	}
 	p := &Presign{state: &presignState{
 		version:              tss.Version,
 		securityParams:       w.SecurityParams,
@@ -304,7 +326,9 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		transcriptHash:       w.TranscriptHash,
 		context:              w.Context,
 		contextHash:          w.ContextHash,
+		derivation:           derivation,
 		additiveShift:        w.AdditiveShift,
+		verificationKey:      w.VerificationKey,
 		planHash:             w.PlanHash,
 		publicKey:            w.PublicKey,
 		keygenTranscriptHash: w.KeygenTranscriptHash,

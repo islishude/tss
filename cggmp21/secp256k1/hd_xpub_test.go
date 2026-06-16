@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -104,7 +105,7 @@ func TestExtendedPublicKeyRejectsInvalidInputs(t *testing.T) {
 				_, err := bad.String()
 				return err
 			},
-			wantErr: bip32util.ErrInvalidExtendedPublicKey,
+			wantErr: tss.ErrInvalidExtendedPublicKey,
 		},
 		{
 			name: "invalid curve point",
@@ -120,15 +121,15 @@ func TestExtendedPublicKeyRejectsInvalidInputs(t *testing.T) {
 				_, err := badXPub.String()
 				return err
 			},
-			wantErr: bip32util.ErrInvalidExtendedPublicKey,
+			wantErr: tss.ErrInvalidExtendedPublicKey,
 		},
 		{
 			name: "hardened derive",
 			run: func() error {
-				_, _, err := known.Derive([]uint32{bip32util.HardenedKeyStart})
+				_, _, err := known.Derive([]uint32{tss.HardenedKeyStart})
 				return err
 			},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name: "depth overflow",
@@ -138,7 +139,7 @@ func TestExtendedPublicKeyRejectsInvalidInputs(t *testing.T) {
 				_, _, err := parent.Derive([]uint32{0})
 				return err
 			},
-			wantErr: bip32util.ErrDerivationDepthOverflow,
+			wantErr: tss.ErrDerivationDepthOverflow,
 		},
 	}
 

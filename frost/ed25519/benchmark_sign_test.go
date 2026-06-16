@@ -11,7 +11,7 @@ import (
 // Online latency: interactive signing.
 
 func BenchmarkFROSTSign2of3(b *testing.B) {
-	shares := cachedFrostKeygen(b, 2, 3, false)
+	shares := cachedFrostKeygen(b, 2, 3)
 	signers := []tss.PartyID{1, 2}
 	message := sha256.Sum256([]byte("benchmark frost sign"))
 

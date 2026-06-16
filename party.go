@@ -24,6 +24,23 @@ func (ps PartySet) Clone() PartySet {
 	return slices.Clone(ps)
 }
 
+// MergePartySet takes a set slice and returns a new sorted set containing elements which are in either or both of this set and the given set
+func MergePartySet(sets ...PartySet) PartySet {
+	var merged []PartyID
+	seen := make(map[PartyID]struct{})
+	for _, set := range sets {
+		for _, id := range set {
+			if _, ok := seen[id]; ok {
+				continue
+			}
+			seen[id] = struct{}{}
+			merged = append(merged, id)
+		}
+	}
+	slices.Sort(merged)
+	return merged
+}
+
 // ContainsParty reports whether id appears in parties.
 func ContainsParty(parties []PartyID, id PartyID) bool {
 	return slices.Contains(parties, id)

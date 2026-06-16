@@ -13,9 +13,20 @@ type exampleRefreshShare struct {
 	generation int
 }
 
-func (*exampleRefreshShare) Algorithm() tss.Algorithm       { return tss.AlgorithmFROSTEd25519 }
-func (*exampleRefreshShare) PartyID() tss.PartyID           { return 1 }
-func (*exampleRefreshShare) PublicKeyBytes() []byte         { return []byte("group-public-key") }
+func (*exampleRefreshShare) Algorithm() tss.Algorithm { return tss.AlgorithmFROSTEd25519 }
+func (*exampleRefreshShare) PartyID() tss.PartyID     { return 1 }
+func (*exampleRefreshShare) PublicKeyBytes() []byte   { return []byte("group-public-key") }
+func (*exampleRefreshShare) ChainCodeBytes() []byte   { return make([]byte, 32) }
+func (*exampleRefreshShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
+	return &tss.DerivationResult{
+		Scheme:         tss.DerivationSchemeEd25519KhovratovichLaw,
+		ChildPublicKey: []byte("group-public-key"),
+		ChildChainCode: make([]byte, 32),
+		RequestedPath:  path.Clone(),
+		ResolvedPath:   path.Clone(),
+		AdditiveShift:  make([]byte, 32),
+	}, nil
+}
 func (*exampleRefreshShare) MarshalBinary() ([]byte, error) { return []byte("example-share"), nil }
 func (*exampleRefreshShare) Destroy()                       {}
 

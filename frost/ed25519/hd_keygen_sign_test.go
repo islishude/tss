@@ -41,13 +41,13 @@ func TestHDKeygenScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("non-HD omits chain code", func(t *testing.T) {
+	t.Run("default keygen produces chain code", func(t *testing.T) {
 		t.Parallel()
 
 		shares := frostKeygen(t, 1, 1)
 		for _, share := range shares {
-			if len(share.state.chainCode) != 0 {
-				t.Fatalf("non-HD keygen should produce nil chain code, got %d bytes", len(share.state.chainCode))
+			if len(share.state.chainCode) != 32 {
+				t.Fatalf("default keygen should produce 32-byte chain code, got %d bytes", len(share.state.chainCode))
 			}
 		}
 	})
@@ -68,7 +68,7 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{AdditiveShift: result.AdditiveShift})
+		pub, sig, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext([]uint32{0})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -97,7 +97,7 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := SignWithOptions(msg, []*KeyShare{key1, key2}, SignOptions{AdditiveShift: result.AdditiveShift})
+		pub, sig, err := SignWithOptions(msg, []*KeyShare{key1, key2}, SignOptions{Context: testFROSTSigningContext([]uint32{5})})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -116,12 +116,11 @@ func TestHDSignScenarios(t *testing.T) {
 		share := shares[1]
 		msg := []byte("zero shift test")
 
-		zeroShift := make([]byte, 32)
-		pub1, sig1, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{AdditiveShift: zeroShift})
+		pub1, sig1, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		pub2, sig2, err := Sign(msg, []*KeyShare{share})
+		pub2, sig2, err := Sign(msg, []*KeyShare{share}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}

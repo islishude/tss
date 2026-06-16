@@ -161,13 +161,15 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	mtaSum := new(big.Int).Sub(chiShare, new(big.Int).Mul(kShare, xBar))
 	mtaSum.Mod(mtaSum, order)
 	if len(s.additiveShift) > 0 {
-		shift, err := secp.ScalarFromBytes(s.additiveShift)
+		shift, err := secp.ScalarFromBytesAllowZero(s.additiveShift)
 		if err != nil {
 			return nil, err
 		}
-		shiftTerm := new(big.Int).Mul(kShare, shift.BigInt())
-		chiShare.Add(chiShare, shiftTerm)
-		chiShare.Mod(chiShare, order)
+		if !shift.IsZero() {
+			shiftTerm := new(big.Int).Mul(kShare, shift.BigInt())
+			chiShare.Add(chiShare, shiftTerm)
+			chiShare.Mod(chiShare, order)
+		}
 	}
 	s.deltas[s.key.state.party] = deltaShare
 
@@ -259,8 +261,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		ChiPoint: chiPoint,
 		Proof:    proofBytes,
 	}
-	context := s.context
-	context.DerivationPath = slices.Clone(context.DerivationPath)
+	context := s.context.Clone()
 	s.presign = &Presign{state: &presignState{
 		consumed:             new(atomic.Bool),
 		attempt:              newPresignAttemptBinding(false),
@@ -271,7 +272,9 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		signers:              append([]tss.PartyID(nil), s.signers...),
 		context:              context,
 		contextHash:          append([]byte(nil), s.contextHash...),
+		derivation:           s.derivation.Clone(),
 		additiveShift:        append([]byte(nil), s.additiveShift...),
+		verificationKey:      append([]byte(nil), s.verificationKey...),
 		planHash:             append([]byte(nil), s.planHash...),
 		publicKey:            append([]byte(nil), s.key.state.publicKey...),
 		keygenTranscriptHash: append([]byte(nil), s.key.state.keygenTranscriptHash...),

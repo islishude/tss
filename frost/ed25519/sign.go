@@ -22,6 +22,9 @@ type SignSession struct {
 	limits           Limits
 	message          []byte
 	signers          []tss.PartyID
+	context          tss.SigningContext
+	contextHash      []byte
+	derivation       *tss.DerivationResult
 	planHash         []byte
 	commitments      map[tss.PartyID]nonceCommitment
 	partials         map[tss.PartyID]*fed.Scalar
@@ -114,18 +117,14 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	verifyKey := key.PublicKeyBytes()
+	verifyKey := slices.Clone(plan.state.verificationKey)
 	var deltaScalar *fed.Scalar
-	if len(plan.state.additiveShift) > 0 {
-		shift, err := edcurve.ScalarFromCanonical(plan.state.additiveShift)
+	if len(plan.state.derivation.AdditiveShift) > 0 {
+		shift, err := edcurve.ScalarFromCanonical(plan.state.derivation.AdditiveShift)
 		if err != nil {
 			return nil, nil, fmt.Errorf("invalid additive shift: %w", err)
 		}
 		deltaScalar = shift
-		verifyKey, err = DerivePublicKey(key.state.publicKey, plan.state.additiveShift)
-		if err != nil {
-			return nil, nil, err
-		}
 	}
 	x, err := key.secretScalar()
 	if err != nil {
@@ -185,6 +184,9 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		limits:           limits,
 		message:          append([]byte(nil), message...),
 		signers:          signers,
+		context:          plan.state.context.Clone(),
+		contextHash:      slices.Clone(plan.state.contextHash),
+		derivation:       plan.state.derivation.Clone(),
 		planHash:         slices.Clone(planHash),
 		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: {D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: slices.Clone(planHash)}},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
@@ -317,12 +319,37 @@ func (s *SignSession) Signature() ([]byte, bool) {
 // When HD additive shift is in use, this is the derived (shifted) child key;
 // otherwise it is the original group public key.
 func (s *SignSession) VerifyKey() []byte {
+	return s.VerificationKeyBytes()
+}
+
+// VerificationKeyBytes returns the Ed25519 public key used for signature verification.
+func (s *SignSession) VerificationKeyBytes() []byte {
 	if s == nil {
 		return nil
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return append([]byte(nil), s.verifyKey...)
+}
+
+// Context returns a copy of the signing context bound by the session.
+func (s *SignSession) Context() tss.SigningContext {
+	if s == nil {
+		return tss.SigningContext{}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.context.Clone()
+}
+
+// Derivation returns a copy of the HD derivation result bound by the session.
+func (s *SignSession) Derivation() *tss.DerivationResult {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.derivation.Clone()
 }
 
 func (s *SignSession) clearNonceBytes() {
@@ -383,12 +410,12 @@ func inProcessPolicies() tss.PolicySet {
 	return ps
 }
 
-// Sign runs an in-memory FROST signing exchange and returns the public key and signature.
-func Sign(message []byte, signers []*KeyShare) ([]byte, []byte, error) {
-	return SignWithOptions(message, signers, SignOptions{})
+// Sign runs an in-memory FROST signing exchange and returns the child public key and signature.
+func Sign(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, []byte, error) {
+	return SignWithOptions(message, signers, SignOptions{Context: ctx})
 }
 
-// SignWithOptions runs an in-memory FROST signing exchange with optional HD additive shift.
+// SignWithOptions runs an in-memory FROST signing exchange with context-bound HD derivation.
 func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
@@ -413,12 +440,12 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	for _, id := range ids {
 		guard := newInProcessGuard(id, tss.PartySet(shares[id].state.parties), sessionID)
 		plan, err := NewSignPlan(SignPlanOption{
-			Key:           shares[id],
-			SessionID:     sessionID,
-			Signers:       ids,
-			Message:       message,
-			AdditiveShift: opts.AdditiveShift,
-			Limits:        opts.Limits,
+			Key:       shares[id],
+			SessionID: sessionID,
+			Signers:   ids,
+			Context:   opts.Context,
+			Message:   message,
+			Limits:    opts.Limits,
 		})
 		if err != nil {
 			return nil, nil, err
@@ -471,7 +498,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		return nil, nil, errors.New("signature not completed")
 	}
 	// Return the actual verification key — shifted when HD additive shift is in use.
-	return sessions[ids[0]].VerifyKey(), sig, nil
+	return sessions[ids[0]].VerificationKeyBytes(), sig, nil
 }
 
 func openInProcessInbound(env tss.Envelope) (tss.InboundEnvelope, error) {

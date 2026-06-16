@@ -123,7 +123,7 @@ func TestFROSTCrossImplementationVectors(t *testing.T) {
 				signerShares[j] = shares[pid-1]
 			}
 			limits := testLimits()
-			pub, sig, err := SignWithOptions(msg, signerShares, SignOptions{Limits: &limits})
+			pub, sig, err := SignWithOptions(msg, signerShares, SignOptions{Context: testFROSTSigningContext(), Limits: &limits})
 			if err != nil {
 				t.Fatalf("Sign: %v", err)
 			}

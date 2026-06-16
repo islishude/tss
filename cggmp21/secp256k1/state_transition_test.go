@@ -329,29 +329,32 @@ func TestPresignContextValidation(t *testing.T) {
 	}{
 		{
 			name:    "empty key id",
-			ctx:     PresignContext{ChainID: "c", PolicyDomain: "p", MessageDomain: "m"},
+			ctx:     PresignContext{ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
 			wantErr: "key id",
 		},
 		{
 			name:    "empty chain id",
-			ctx:     PresignContext{KeyID: "k", PolicyDomain: "p", MessageDomain: "m"},
+			ctx:     PresignContext{KeyID: "k", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
 			wantErr: "chain id",
 		},
 		{
 			name:    "empty policy domain",
-			ctx:     PresignContext{KeyID: "k", ChainID: "c", MessageDomain: "m"},
+			ctx:     PresignContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, MessageDomain: "m"},
 			wantErr: "policy domain",
 		},
 		{
 			name:    "empty message domain",
-			ctx:     PresignContext{KeyID: "k", ChainID: "c", PolicyDomain: "p"},
+			ctx:     PresignContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p"},
 			wantErr: "message domain",
 		},
 		{
 			name: "hardened derivation",
 			ctx: PresignContext{
 				KeyID: "k", ChainID: "c", PolicyDomain: "p", MessageDomain: "m",
-				DerivationPath: []uint32{0x80000000},
+				Derivation: tss.DerivationRequest{
+					Scheme: tss.DerivationSchemeBIP32Secp256k1,
+					Path:   tss.DerivationPath{0x80000000},
+				},
 			},
 			wantErr: "hardened",
 		},
@@ -359,6 +362,7 @@ func TestPresignContextValidation(t *testing.T) {
 			name: "valid",
 			ctx: PresignContext{
 				KeyID: "k", ChainID: "c", PolicyDomain: "p", MessageDomain: "m",
+				Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1},
 			},
 		},
 	}

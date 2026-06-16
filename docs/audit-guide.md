@@ -30,7 +30,7 @@ Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta),
 - Verifier range checks (z1 ∈ ±2^(EncRange+1), z3 ∈ ±(N · 2^(EncRange+1)), etc.)
   must precede algebraic equation checks.
 - secp256k1 points must be compressed canonical points and never infinity.
-- Presigns are bound to `PresignContext` and cannot be consumed under a different
+- Presigns are bound to `tss.SigningContext`/`PresignContext` and cannot be consumed under a different
   key id, chain id, derivation path, policy domain, or message domain.
 - Reshare receiver Paillier/Ring-Pedersen proofs and final reshare key-share
   proofs bind the canonical `ResharePlan.Digest()` so receiver material cannot

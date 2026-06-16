@@ -12,11 +12,14 @@ import (
 func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x61)
 	parties := []tss.PartyID{1, 2, 3}
-	plan1, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2})
+	plan1Security := testSecurityParams()
+	plan1, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, SecurityParams: &plan1Security})
 	if err != nil {
 		t.Fatal(err)
 	}
-	plan2, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, EnableHD: true})
+	plan2Security := testSecurityParams()
+	plan2Security.MinPaillierBits = 1024
+	plan2, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, SecurityParams: &plan2Security})
 	if err != nil {
 		t.Fatal(err)
 	}

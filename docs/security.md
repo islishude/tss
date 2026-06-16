@@ -235,7 +235,7 @@ encoding.
 
 ## CGGMP21 Status
 
-`cggmp21/secp256k1` implements CGGMP21-style threshold ECDSA with Paillier MtA/ZK proofs. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports caller-provided additive public-key shifts and BIP32 HD derivation, and encodes all payloads as canonical binary TLV records.
+`cggmp21/secp256k1` implements CGGMP21-style threshold ECDSA with Paillier MtA/ZK proofs. It avoids transmitting or reconstructing private shares and nonce shares during signing, checks that presign participants share the same round-1 broadcast view, supports path-first BIP32 HD derivation through `tss.SigningContext`, and encodes all payloads as canonical binary TLV records.
 
 The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible constructions:
 
@@ -296,7 +296,7 @@ Caller integration responsibilities:
 - storage encryption for key shares and presign records (the built-in `EncryptKeyShareWithPassphrase`/`EncryptPresignWithPassphrase` helpers are Argon2id-based reference/demo implementations — production deployments should integrate a KMS or HSM);
 - distributed refresh coordination: every participant must use the same externally coordinated, unique session ID for one run;
 - atomic key-share replacement: `RefreshScheduler` drives FROST or CGGMP21 refresh, but `CommitKeyShare` must persist and install the new share only if the loaded previous share is still current;
-- SLIP10 path derivation (BIP32 HD derivation is implemented for secp256k1);
+- hardened/private-key path derivation (online signing supports non-hardened BIP32-style public derivation);
 - authenticated keygen message delivery through the confirmation round before any presign/sign operation.
 
 `RefreshScheduler` requires an explicit replay cache and broadcast ACK verifier,
@@ -308,7 +308,7 @@ share to the caller because durable replacement may already have succeeded.
 
 ## One-Time Presigns
 
-CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` validates all bindings, constructs and self-verifies a candidate partial, and canonical-encodes its envelope before consuming the presign. It then atomically commits the immutable intent and exact envelope through `SignRequest.AttemptStore`. Only a committed envelope may be returned or transmitted. A commit error has an unknown outcome: the presign remains bound and callers may only retry or `ResumeSign` the same attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt record is the restart and outbox boundary. Presigns remain bound to the key share and all `PresignContext` fields.
+CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` validates all bindings, constructs and self-verifies a candidate partial, and canonical-encodes its envelope before consuming the presign. It then atomically commits the immutable intent and exact envelope through `SignRequest.AttemptStore`. Only a committed envelope may be returned or transmitted. A commit error has an unknown outcome: the presign remains bound and callers may only retry or `ResumeSign` the same attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt record is the restart and outbox boundary. Presigns remain bound to the key share and all `tss.SigningContext` fields, including requested and resolved derivation paths.
 
 ## Blame Evidence
 

@@ -24,14 +24,13 @@ var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 
 // KeygenPlanOption configures FROST keygen plan construction.
 //
-// SessionID, Parties, Threshold, and EnableHD are shared intent included in the
-// plan digest. Limits is a local fail-closed resource policy and is
-// intentionally excluded from the digest.
+// SessionID, Parties, and Threshold are shared intent included in the plan
+// digest. Limits is a local fail-closed resource policy and is intentionally
+// excluded from the digest.
 type KeygenPlanOption struct {
 	SessionID tss.SessionID
 	Parties   []tss.PartyID
 	Threshold int
-	EnableHD  bool
 	Limits    *Limits
 }
 
@@ -40,7 +39,6 @@ type KeygenPlan struct {
 	sessionID tss.SessionID
 	threshold int
 	parties   []tss.PartyID
-	enableHD  bool
 	limits    Limits
 }
 
@@ -58,7 +56,6 @@ func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
 		sessionID: option.SessionID,
 		threshold: option.Threshold,
 		parties:   parties,
-		enableHD:  option.EnableHD,
 		limits:    limits,
 	}, nil
 }
@@ -87,11 +84,6 @@ func (p *KeygenPlan) Parties() []tss.PartyID {
 	return slices.Clone(p.parties)
 }
 
-// EnableHD reports whether keygen will aggregate an HD chain code.
-func (p *KeygenPlan) EnableHD() bool {
-	return p != nil && p.enableHD
-}
-
 // Digest returns the canonical keygen plan digest.
 func (p *KeygenPlan) Digest() ([]byte, error) {
 	if err := p.validate(); err != nil {
@@ -101,7 +93,6 @@ func (p *KeygenPlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.threshold))
 	t.AppendUint32List("parties", p.parties)
-	t.AppendBool("enable_hd", p.enableHD)
 	return t.Sum(), nil
 }
 
@@ -321,8 +312,8 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 	if _, err := edcurve.PointFromBytes(option.OldPublicKey); err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old public key: %w", err))
 	}
-	if len(option.OldChainCode) != 0 && len(option.OldChainCode) != 32 {
-		return nil, invalidPlanConfig(0, errors.New("old chain code must be empty or 32 bytes"))
+	if len(option.OldChainCode) != 32 {
+		return nil, invalidPlanConfig(0, errors.New("old chain code must be 32 bytes"))
 	}
 	oldParties, err := validatePlanPartySet(option.OldParties, limits)
 	if err != nil {
@@ -454,15 +445,18 @@ func (p *ResharePlan) receiverConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type signPlanState struct {
-	sessionID     tss.SessionID
-	threshold     int
-	parties       []tss.PartyID
-	publicKey     []byte
-	chainCode     []byte
-	keygenHash    []byte
-	signers       []tss.PartyID
-	message       []byte
-	additiveShift []byte
+	sessionID       tss.SessionID
+	threshold       int
+	parties         []tss.PartyID
+	publicKey       []byte
+	chainCode       []byte
+	keygenHash      []byte
+	signers         []tss.PartyID
+	context         tss.SigningContext
+	contextHash     []byte
+	derivation      *tss.DerivationResult
+	verificationKey []byte
+	message         []byte
 }
 
 // SignPlan is the shared FROST signing intent.
@@ -473,12 +467,12 @@ type SignPlan struct {
 
 // SignPlanOption configures FROST signing plan construction.
 type SignPlanOption struct {
-	Key           *KeyShare
-	SessionID     tss.SessionID
-	Signers       []tss.PartyID
-	Message       []byte
-	AdditiveShift []byte
-	Limits        *Limits
+	Key       *KeyShare
+	SessionID tss.SessionID
+	Signers   []tss.PartyID
+	Context   tss.SigningContext
+	Message   []byte
+	Limits    *Limits
 }
 
 // NewSignPlan constructs a signing plan for the supplied key and signer set.
@@ -498,10 +492,9 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	if err := validateSignerSet(key, signers, limits); err != nil {
 		return nil, invalidPlanConfig(key.state.party, err)
 	}
-	if len(option.AdditiveShift) > 0 {
-		if _, err := edcurve.ScalarFromCanonical(option.AdditiveShift); err != nil {
-			return nil, invalidPlanConfig(key.state.party, fmt.Errorf("invalid additive shift: %w", err))
-		}
+	context, contextHash, derivation, err := prepareSignContext(key, option.Context)
+	if err != nil {
+		return nil, invalidPlanConfig(key.state.party, err)
 	}
 	if limits.Payload.MaxMessageBytes <= 0 {
 		return nil, invalidPlanConfig(key.state.party, errors.New("max message bytes must be positive"))
@@ -510,15 +503,18 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(option.Message), limits.Payload.MaxMessageBytes))
 	}
 	return &SignPlan{state: &signPlanState{
-		sessionID:     option.SessionID,
-		threshold:     key.state.threshold,
-		parties:       slices.Clone(key.state.parties),
-		publicKey:     slices.Clone(key.state.publicKey),
-		chainCode:     slices.Clone(key.state.chainCode),
-		keygenHash:    slices.Clone(key.state.keygenTranscriptHash),
-		signers:       signers,
-		message:       slices.Clone(option.Message),
-		additiveShift: slices.Clone(option.AdditiveShift),
+		sessionID:       option.SessionID,
+		threshold:       key.state.threshold,
+		parties:         slices.Clone(key.state.parties),
+		publicKey:       slices.Clone(key.state.publicKey),
+		chainCode:       slices.Clone(key.state.chainCode),
+		keygenHash:      slices.Clone(key.state.keygenTranscriptHash),
+		signers:         signers,
+		context:         context, // already cloned in prepareSignContext
+		contextHash:     slices.Clone(contextHash),
+		derivation:      derivation.Clone(),
+		verificationKey: slices.Clone(derivation.ChildPublicKey),
+		message:         slices.Clone(option.Message),
 	}, limits: limits}, nil
 }
 
@@ -546,12 +542,28 @@ func (p *SignPlan) Message() []byte {
 	return slices.Clone(p.state.message)
 }
 
-// AdditiveShift returns a copy of the optional non-hardened HD additive shift.
-func (p *SignPlan) AdditiveShift() []byte {
+// Context returns a copy of the signing context bound by the plan.
+func (p *SignPlan) Context() tss.SigningContext {
+	if p == nil || p.state == nil {
+		return tss.SigningContext{}
+	}
+	return p.state.context.Clone()
+}
+
+// Derivation returns a copy of the derivation result bound by the plan.
+func (p *SignPlan) Derivation() *tss.DerivationResult {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return slices.Clone(p.state.additiveShift)
+	return p.state.derivation.Clone()
+}
+
+// VerificationKeyBytes returns the Ed25519 public key used for signature verification.
+func (p *SignPlan) VerificationKeyBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.verificationKey)
 }
 
 // Digest returns the canonical sign plan digest.
@@ -567,8 +579,10 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenHash)
 	t.AppendUint32List("signers", p.state.signers)
+	t.AppendBytes("context_hash", p.state.contextHash)
+	appendDerivationResultTranscript(t, p.state.derivation)
+	t.AppendBytes("verification_key", p.state.verificationKey)
 	t.AppendBytes("message", p.state.message)
-	t.AppendBytes("additive_shift", p.state.additiveShift)
 	return t.Sum(), nil
 }
 
@@ -591,6 +605,19 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 		!bytes.Equal(p.state.chainCode, key.state.chainCode) ||
 		!bytes.Equal(p.state.keygenHash, key.state.keygenTranscriptHash) {
 		return errors.New("sign plan does not match key share")
+	}
+	_, contextHash, derivation, err := prepareSignContext(key, p.state.context)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(contextHash, p.state.contextHash) {
+		return errors.New("sign plan context hash mismatch")
+	}
+	if !derivation.Equal(p.state.derivation) {
+		return errors.New("sign plan derivation mismatch")
+	}
+	if !bytes.Equal(p.state.verificationKey, derivation.ChildPublicKey) {
+		return errors.New("sign plan verification key mismatch")
 	}
 	return nil
 }

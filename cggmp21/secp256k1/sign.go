@@ -36,22 +36,8 @@ const (
 	DefaultSignAttemptStoreTimeout = 5 * time.Second
 )
 
-// PresignContext binds a presignature to the key, chain, derivation path,
-// policy, and message domain where it may be consumed. An empty DerivationPath
-// is the canonical master-key path; non-empty paths are non-hardened BIP32.
-type PresignContext struct {
-	KeyID          string   `json:"key_id" wire:"1,string"`
-	ChainID        string   `json:"chain_id" wire:"2,string"`
-	DerivationPath []uint32 `json:"derivation_path" wire:"3,u32list"`
-	PolicyDomain   string   `json:"policy_domain" wire:"4,string"`
-	MessageDomain  string   `json:"message_domain" wire:"5,string"`
-}
-
-// WireType returns the canonical wire type identifier for PresignContext.
-func (PresignContext) WireType() string { return presignContextWireType }
-
-// WireVersion returns the wire format version for PresignContext.
-func (PresignContext) WireVersion() uint16 { return tss.Version }
+// PresignContext binds a presignature to the signing context where it may be consumed.
+type PresignContext = tss.SigningContext
 
 // ErrSignAttemptNotFound reports that no durable attempt exists for a presign.
 var ErrSignAttemptNotFound = errors.New("sign attempt not found")
@@ -104,6 +90,19 @@ type SignRequest struct {
 	DurableStoreTimeout time.Duration `json:"-"`
 }
 
+// Clone returns a caller-owned copy of the sign request. The AttemptStore
+// interface value is preserved by reference because it is an execution
+// dependency, not mutable data.
+func (r SignRequest) Clone() SignRequest {
+	return SignRequest{
+		Context:             r.Context.Clone(),
+		Message:             slices.Clone(r.Message),
+		LowS:                r.LowS,
+		AttemptStore:        r.AttemptStore,
+		DurableStoreTimeout: r.DurableStoreTimeout,
+	}
+}
+
 // Presign contains one local offline signing record and must be consumed once.
 // MarshalBinary maps it to the canonical private wire record, including a
 // consumed snapshot from the internal claim. JSON encoding is intentionally
@@ -128,7 +127,9 @@ type presignState struct {
 	transcriptHash       []byte
 	context              PresignContext
 	contextHash          []byte
+	derivation           *tss.DerivationResult
 	additiveShift        []byte
+	verificationKey      []byte
 	planHash             []byte
 	publicKey            []byte
 	keygenTranscriptHash []byte
@@ -202,9 +203,7 @@ func (p *Presign) Context() PresignContext {
 	if p == nil || p.state == nil {
 		return PresignContext{}
 	}
-	out := p.state.context
-	out.DerivationPath = slices.Clone(out.DerivationPath)
-	return out
+	return p.state.context.Clone()
 }
 
 // ContextHashBytes returns a copy of the bound context hash.
@@ -215,12 +214,20 @@ func (p *Presign) ContextHashBytes() []byte {
 	return slices.Clone(p.state.contextHash)
 }
 
-// AdditiveShiftBytes returns a copy of the bound HD additive shift.
-func (p *Presign) AdditiveShiftBytes() []byte {
+// Derivation returns a copy of the bound HD derivation result.
+func (p *Presign) Derivation() *tss.DerivationResult {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return slices.Clone(p.state.additiveShift)
+	return p.state.derivation.Clone()
+}
+
+// VerificationKeyBytes returns a copy of the child public key used for signature verification.
+func (p *Presign) VerificationKeyBytes() []byte {
+	if p == nil || p.state == nil {
+		return nil
+	}
+	return slices.Clone(p.state.verificationKey)
 }
 
 // PlanHashBytes returns a copy of the presign lifecycle plan hash.
@@ -307,6 +314,15 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 		PartiesHash:          p.state.partiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
 		SecurityParams:       p.state.securityParams,
+		DerivationScheme:     string(p.state.derivation.Scheme),
+		ChildPublicKey:       p.state.derivation.ChildPublicKey,
+		ChildChainCode:       p.state.derivation.ChildChainCode,
+		RequestedPath:        p.state.derivation.RequestedPath,
+		ResolvedPath:         p.state.derivation.ResolvedPath,
+		DerivationDepth:      p.state.derivation.Depth,
+		ParentFingerprint:    p.state.derivation.ParentFingerprint[:],
+		ChildNumber:          p.state.derivation.ChildNumber,
+		VerificationKey:      p.state.verificationKey,
 	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
@@ -324,6 +340,8 @@ func (p *Presign) ID() []byte {
 	t := transcript.New(presignIDLabel)
 	appendSecurityParamsTranscript(t, p.state.securityParams)
 	t.AppendBytes("context_hash", p.state.contextHash)
+	appendDerivationResultTranscript(t, p.state.derivation)
+	t.AppendBytes("verification_key", p.state.verificationKey)
 	t.AppendBytes("additive_shift", p.state.additiveShift)
 	t.AppendBytes("plan_hash", p.state.planHash)
 	t.AppendBytes("public_key", p.state.publicKey)
@@ -413,16 +431,28 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if len(p.state.contextHash) != 32 {
 		return errors.New("invalid presign context hash")
 	}
+	if err := validateDerivationResult(p.state.derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
+		return fmt.Errorf("invalid presign derivation: %w", err)
+	}
 	if len(p.state.additiveShift) > 0 {
-		if _, err := secp.ScalarFromBytes(p.state.additiveShift); err != nil {
+		if _, err := secp.ScalarFromBytesAllowZero(p.state.additiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
+	}
+	if !bytes.Equal(p.state.additiveShift, p.state.derivation.AdditiveShift) {
+		return errors.New("presign additive shift does not match derivation")
+	}
+	if !bytes.Equal(p.state.verificationKey, p.state.derivation.ChildPublicKey) {
+		return errors.New("presign verification key does not match derivation")
 	}
 	if len(p.state.planHash) != sha256.Size {
 		return errors.New("invalid presign plan hash")
 	}
 	if _, err := secp.PointFromBytes(p.state.publicKey); err != nil {
 		return fmt.Errorf("invalid presign public key binding: %w", err)
+	}
+	if _, err := secp.PointFromBytes(p.state.verificationKey); err != nil {
+		return fmt.Errorf("invalid presign verification key binding: %w", err)
 	}
 	if len(p.state.keygenTranscriptHash) != sha256.Size {
 		return errors.New("invalid presign keygen transcript hash binding")
@@ -494,19 +524,21 @@ func (p *Presign) Destroy() {
 type PresignSession struct {
 	mu sync.Mutex
 
-	key            *KeyShare
-	sessionID      tss.SessionID
-	config         tss.ThresholdConfig
-	log            tss.Logger
-	limits         Limits
-	securityParams SecurityParams
-	signers        []tss.PartyID
-	context        PresignContext
-	contextHash    []byte
-	additiveShift  []byte
-	planHash       []byte
-	paillier       *pai.PrivateKey
-	guard          *tss.EnvelopeGuard
+	key             *KeyShare
+	sessionID       tss.SessionID
+	config          tss.ThresholdConfig
+	log             tss.Logger
+	limits          Limits
+	securityParams  SecurityParams
+	signers         []tss.PartyID
+	context         PresignContext
+	contextHash     []byte
+	derivation      *tss.DerivationResult
+	additiveShift   []byte
+	verificationKey []byte
+	planHash        []byte
+	paillier        *pai.PrivateKey
+	guard           *tss.EnvelopeGuard
 
 	kShare    *secret.Scalar
 	gamma     *secret.Scalar

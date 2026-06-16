@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -39,7 +38,7 @@ func frostHDVectorChainCode(t testing.TB) []byte {
 	return testutil.MustDecodeHex(t, frostHDVectorChainCodeHex)
 }
 
-func assertFROSTHDDerivesChild(t testing.TB, parentPub []byte, result *bip32util.DerivationResult) {
+func assertFROSTHDDerivesChild(t testing.TB, parentPub []byte, result *tss.DerivationResult) {
 	t.Helper()
 	if len(result.AdditiveShift) != 32 {
 		t.Fatalf("additive shift must be 32 bytes")
@@ -55,5 +54,5 @@ func assertFROSTHDDerivesChild(t testing.TB, parentPub []byte, result *bip32util
 
 func frostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	return cachedFrostKeygen(t, threshold, n, true)
+	return cachedFrostKeygen(t, threshold, n)
 }

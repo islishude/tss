@@ -12,7 +12,7 @@ func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
 	signers := []tss.PartyID{1}
 	ctx := testPresignContext()
-	ctx.DerivationPath = []uint32{0}
+	ctx.Derivation.Path = tss.DerivationPath([]uint32{0}).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
 	presign := presigns[1]
 
@@ -22,13 +22,12 @@ func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 	}{
 		{name: "key id", mutate: func(c *PresignContext) { c.KeyID = "other-key" }},
 		{name: "chain id", mutate: func(c *PresignContext) { c.ChainID = "other-chain" }},
-		{name: "derivation path", mutate: func(c *PresignContext) { c.DerivationPath = []uint32{1} }},
+		{name: "derivation path", mutate: func(c *PresignContext) { c.Derivation.Path = tss.DerivationPath{1} }},
 		{name: "policy domain", mutate: func(c *PresignContext) { c.PolicyDomain = "other-policy" }},
 		{name: "message domain", mutate: func(c *PresignContext) { c.MessageDomain = "other-message" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			requestCtx := ctx
-			requestCtx.DerivationPath = append([]uint32(nil), ctx.DerivationPath...)
+			requestCtx := ctx.Clone()
 			tc.mutate(&requestCtx)
 			signID, err := tss.NewSessionID(nil)
 			if err != nil {

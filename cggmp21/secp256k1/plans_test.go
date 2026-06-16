@@ -47,9 +47,8 @@ func TestCGGMP21KeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	assertSameCGGMPPlanDigest(t, plan, withLocalLimits)
 
 	for name, other := range map[string]*KeygenPlan{
-		"threshold": mustCGGMPKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3, false),
-		"hd":        mustCGGMPKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 2, true),
-		"session":   mustCGGMPKeygenPlan(t, cggmpPlanTestSession(0x42), []tss.PartyID{1, 2, 3}, 2, false),
+		"threshold": mustCGGMPKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3),
+		"session":   mustCGGMPKeygenPlan(t, cggmpPlanTestSession(0x42), []tss.PartyID{1, 2, 3}, 2),
 	} {
 		assertDifferentCGGMPPlanDigest(t, name, plan, other)
 	}
@@ -152,6 +151,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		PublicKey:       []byte{0x02},
 		TranscriptHash:  bytes.Repeat([]byte{0x72}, 32),
 		CommitmentsHash: bytes.Repeat([]byte{0x73}, 32),
+		ChainCode:       bytes.Repeat([]byte{0x75}, 32),
 		PlanHash:        bytes.Repeat([]byte{0x74}, 32),
 	}
 	payload, err := confirmation.MarshalBinary()
@@ -204,15 +204,28 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	}
 
 	presign := &PresignPlan{state: &presignPlanState{
-		sessionID:     cggmpPlanTestSession(0x52),
-		threshold:     2,
-		parties:       []tss.PartyID{1, 2, 3},
-		publicKey:     []byte{0x02, 0x02},
-		keygenHash:    []byte{0x10, 0x11},
-		signers:       []tss.PartyID{1, 2},
-		context:       PresignContext{KeyID: "key", ChainID: "chain", PolicyDomain: "policy", MessageDomain: "message", DerivationPath: []uint32{1, 2}},
-		contextHash:   []byte{0x20, 0x21},
-		additiveShift: []byte{0x30, 0x31},
+		sessionID:  cggmpPlanTestSession(0x52),
+		threshold:  2,
+		parties:    []tss.PartyID{1, 2, 3},
+		publicKey:  []byte{0x02, 0x02},
+		keygenHash: []byte{0x10, 0x11},
+		signers:    []tss.PartyID{1, 2},
+		context: PresignContext{KeyID: "key", ChainID: "chain", Derivation: tss.DerivationRequest{
+			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
+			Path:         tss.DerivationPath{1, 2},
+			ResolvedPath: tss.DerivationPath{1, 2},
+		}, PolicyDomain: "policy", MessageDomain: "message"},
+		contextHash: []byte{0x20, 0x21},
+		derivation: &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+			RequestedPath:  tss.DerivationPath{1, 2},
+			ResolvedPath:   tss.DerivationPath{1, 2},
+			AdditiveShift:  []byte{0x30, 0x31},
+			ChildPublicKey: []byte{0x02, 0x03},
+			ChildChainCode: []byte{0x04},
+		},
+		additiveShift:   []byte{0x30, 0x31},
+		verificationKey: []byte{0x02, 0x03},
 	}}
 	presignParties := presign.Parties()
 	presignParties[0] = 99
@@ -223,18 +236,21 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	presignSigners := presign.Signers()
 	presignSigners[0] = 99
 	presignContext := presign.Context()
-	presignContext.DerivationPath[0] = 99
+	presignContext.Derivation.Path[0] = 99
 	presignContextHash := presign.ContextHashBytes()
 	presignContextHash[0] ^= 0xff
-	presignShift := presign.AdditiveShiftBytes()
-	presignShift[0] ^= 0xff
+	presignDerivation := presign.Derivation()
+	presignDerivation.AdditiveShift[0] ^= 0xff
+	presignVerificationKey := presign.VerificationKeyBytes()
+	presignVerificationKey[0] ^= 0xff
 	if presign.state.parties[0] != 1 ||
 		presign.state.publicKey[0] != 0x02 ||
 		presign.state.keygenHash[0] != 0x10 ||
 		presign.state.signers[0] != 1 ||
-		presign.state.context.DerivationPath[0] != 1 ||
+		presign.state.context.Derivation.Path[0] != 1 ||
 		presign.state.contextHash[0] != 0x20 ||
-		presign.state.additiveShift[0] != 0x30 {
+		presign.state.derivation.AdditiveShift[0] != 0x30 ||
+		presign.state.verificationKey[0] != 0x02 {
 		t.Fatal("presign plan getter aliases internal state")
 	}
 
@@ -244,7 +260,11 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presignTranscript: []byte{0x45, 0x46},
 		contextHash:       []byte{0x50, 0x51},
 		digest:            []byte{0x60, 0x61},
-		request:           SignRequest{Context: PresignContext{DerivationPath: []uint32{3, 4}}, Message: []byte("message")},
+		request: SignRequest{Context: PresignContext{Derivation: tss.DerivationRequest{
+			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
+			Path:         tss.DerivationPath{3, 4},
+			ResolvedPath: tss.DerivationPath{3, 4},
+		}}, Message: []byte("message")},
 	}}
 	presignID := sign.PresignIDBytes()
 	presignID[0] ^= 0xff
@@ -256,13 +276,13 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	digest[0] ^= 0xff
 	request := sign.Request()
 	request.Message[0] ^= 0xff
-	request.Context.DerivationPath[0] = 99
+	request.Context.Derivation.Path[0] = 99
 	if sign.state.presignID[0] != 0x40 ||
 		sign.state.presignTranscript[0] != 0x45 ||
 		sign.state.contextHash[0] != 0x50 ||
 		sign.state.digest[0] != 0x60 ||
 		sign.state.request.Message[0] != 'm' ||
-		sign.state.request.Context.DerivationPath[0] != 3 {
+		sign.state.request.Context.Derivation.Path[0] != 3 {
 		t.Fatal("sign plan getter aliases internal state")
 	}
 }
@@ -301,13 +321,12 @@ func assertDifferentCGGMPPlanDigest(t *testing.T, name string, a, b cggmpDigestP
 	}
 }
 
-func mustCGGMPKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool) *KeygenPlan {
+func mustCGGMPKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int) *KeygenPlan {
 	t.Helper()
 	plan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
 		Parties:   parties,
 		Threshold: threshold,
-		EnableHD:  enableHD,
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -24,7 +24,6 @@ type KeygenSession struct {
 	shares         map[tss.PartyID]*fed.Scalar
 	chainCodes     map[tss.PartyID][]byte
 	chainCodeComms map[tss.PartyID][]byte
-	enableHD       bool
 	planHash       []byte
 	completed      bool
 	aborted        bool
@@ -93,15 +92,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
 		commitments[i] = point.Bytes()
 	}
-	var chainCode []byte
-	var chainCodeCommit []byte
-	if plan.enableHD {
-		chainCode = make([]byte, 32)
-		if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
-			return nil, nil, err
-		}
-		chainCodeCommit = chainCodeCommitment(config.SessionID, config.Self, chainCode)
+	chainCode := make([]byte, 32)
+	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+		return nil, nil, err
 	}
+	chainCodeCommit := chainCodeCommitment(config.SessionID, config.Self, chainCode)
 	s := &KeygenSession{
 		cfg:     config,
 		log:     config.Logger(),
@@ -111,7 +106,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		chainCodes: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCode...),
 		},
-		enableHD: plan.enableHD,
 		planHash: append([]byte(nil), planHash...),
 		chainCodeComms: map[tss.PartyID][]byte{
 			config.Self: append([]byte(nil), chainCodeCommit...),
@@ -224,7 +218,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
 		}
 		s.commits[base.From] = p.Commitments
-		if len(p.ChainCodeCommit) != 0 && len(p.ChainCodeCommit) != sha256.Size {
+		if len(p.ChainCodeCommit) != sha256.Size {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}
 		s.chainCodeComms[base.From] = append([]byte(nil), p.ChainCodeCommit...)
@@ -299,9 +293,6 @@ const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"
 // The chain code is revealed in round 2 (keygen confirmation) and verified
 // against this commitment to prevent last-sender bias.
 func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
-	if len(chainCode) == 0 {
-		return nil
-	}
 	t := transcript.New(chainCodeCommitLabel)
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("party_id", partyID)
@@ -311,9 +302,6 @@ func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode
 
 // verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func verifyChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) == 0 {
-		return len(chainCode) == 0
-	}
 	if len(commit) != sha256.Size || len(chainCode) != 32 {
 		return false
 	}

@@ -43,9 +43,8 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	assertSamePlanDigest(t, plan, withLocalLimits)
 
 	for name, other := range map[string]*KeygenPlan{
-		"threshold": mustFROSTKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3, false),
-		"hd":        mustFROSTKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 2, true),
-		"session":   mustFROSTKeygenPlan(t, frostPlanTestSession(0x12), []tss.PartyID{1, 2, 3}, 2, false),
+		"threshold": mustFROSTKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3),
+		"session":   mustFROSTKeygenPlan(t, frostPlanTestSession(0x12), []tss.PartyID{1, 2, 3}, 2),
 	} {
 		assertDifferentPlanDigest(t, name, plan, other)
 	}
@@ -88,13 +87,13 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 
 	limits := testLimits()
 	plan, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: signers, Message: message, Limits: &limits,
+		Key: shares[1], SessionID: sessionID, Signers: signers, Context: testFROSTSigningContext(), Message: message, Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	same, err := NewSignPlan(SignPlanOption{
-		Key: shares[2], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: message, Limits: &limits,
+		Key: shares[2], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: message, Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -115,16 +114,16 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	}
 
 	otherMessage, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: []byte("other message"), Limits: &limits,
+		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: []byte("other message"), Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertDifferentPlanDigest(t, "message", plan, otherMessage)
 
-	hdShares := frostKeygenHD(t, 2, 3)
+	otherShares := frostKeygen(t, 2, 4)
 	otherKey, err := NewSignPlan(SignPlanOption{
-		Key: hdShares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Message: []byte("plan-bound message"), Limits: &limits,
+		Key: otherShares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: []byte("plan-bound message"), Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -139,8 +138,8 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	parties := []tss.PartyID{1, 2, 3}
 	guard1 := testFROSTGuard(1, parties, sessionID)
 	guard2 := testFROSTGuard(2, parties, sessionID)
-	plan1 := mustFROSTKeygenPlan(t, sessionID, parties, 2, false)
-	plan2 := mustFROSTKeygenPlan(t, sessionID, parties, 2, true)
+	plan1 := mustFROSTKeygenPlan(t, sessionID, parties, 2)
+	plan2 := mustFROSTKeygenPlan(t, sessionID, parties, 3)
 
 	s1, _, err := StartKeygen(plan1, tss.LocalConfig{Self: 1}, guard1)
 	if err != nil {
@@ -241,13 +240,12 @@ func assertDifferentPlanDigest(t *testing.T, name string, a, b digestPlan) {
 	}
 }
 
-func mustFROSTKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int, enableHD bool) *KeygenPlan {
+func mustFROSTKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int) *KeygenPlan {
 	t.Helper()
 	plan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
 		Parties:   parties,
 		Threshold: threshold,
-		EnableHD:  enableHD,
 	})
 	if err != nil {
 		t.Fatal(err)

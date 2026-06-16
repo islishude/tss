@@ -31,7 +31,7 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("non-HD key share round trip", func(t *testing.T) {
+	t.Run("default key share round trip", func(t *testing.T) {
 		t.Parallel()
 
 		shares := frostKeygen(t, 1, 1)
@@ -43,8 +43,8 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(decoded.state.chainCode) != 0 {
-			t.Fatal("non-HD key share should have empty chain code")
+		if len(decoded.state.chainCode) != 32 {
+			t.Fatal("default key share should have a 32-byte chain code")
 		}
 	})
 

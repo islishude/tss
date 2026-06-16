@@ -7,7 +7,17 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 )
+
+// mustNewSecretScalar is a test helper that panics on invalid test data.
+func mustNewSecretScalar(data []byte) *secret.Scalar {
+	s, err := newProofScalar(data)
+	if err != nil {
+		panic("signprep test: invalid scalar: " + err.Error())
+	}
+	return s
+}
 
 // TestSignPrepProofZeroKnowledge verifies that two proofs generated with the
 // same witness but different nonces produce different encodings, confirming

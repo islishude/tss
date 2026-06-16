@@ -1,9 +1,5 @@
 package bip32util
 
-// HardenedKeyStart is the first index reserved for hardened BIP32 derivation.
-// Non-hardened indices are in [0, HardenedKeyStart).
-const HardenedKeyStart = 1 << 31
-
 // Extended public key version bytes (mainnet / testnet xpub).
 var (
 	// XPubVersion is the BIP32 mainnet extended public key version.

@@ -4,7 +4,7 @@ The `github.com/islishude/tss` root package provides shared types used by both `
 
 ## LocalConfig
 
-`LocalConfig` carries only party-local runtime dependencies. Lifecycle-wide intent such as the session ID, threshold, participant set, signer set, HD mode, and message context belongs in the protocol-specific immutable plan.
+`LocalConfig` carries only party-local runtime dependencies. Lifecycle-wide intent such as the session ID, threshold, participant set, signer set, derivation path, and message context belongs in the protocol-specific immutable plan.
 
 ```go
 type LocalConfig struct {
@@ -20,7 +20,7 @@ Protocol lifecycle APIs use the plan-first shape:
 
 ```go
 plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
-    SessionID: sessionID, Parties: parties, Threshold: threshold, EnableHD: enableHD,
+    SessionID: sessionID, Parties: parties, Threshold: threshold,
 })
 session, out, err := secp256k1.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
 ```

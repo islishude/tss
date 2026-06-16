@@ -17,9 +17,20 @@ type refreshTestShare struct {
 	destroyed atomic.Bool
 }
 
-func (*refreshTestShare) Algorithm() Algorithm           { return AlgorithmFROSTEd25519 }
-func (*refreshTestShare) PartyID() PartyID               { return 1 }
-func (*refreshTestShare) PublicKeyBytes() []byte         { return []byte("public") }
+func (*refreshTestShare) Algorithm() Algorithm   { return AlgorithmFROSTEd25519 }
+func (*refreshTestShare) PartyID() PartyID       { return 1 }
+func (*refreshTestShare) PublicKeyBytes() []byte { return []byte("public") }
+func (*refreshTestShare) ChainCodeBytes() []byte { return make([]byte, 32) }
+func (*refreshTestShare) Derive(path DerivationPath, opts ...DeriveOption) (*DerivationResult, error) {
+	return &DerivationResult{
+		Scheme:         DerivationSchemeEd25519KhovratovichLaw,
+		ChildPublicKey: []byte("public"),
+		ChildChainCode: make([]byte, 32),
+		RequestedPath:  path.Clone(),
+		ResolvedPath:   path.Clone(),
+		AdditiveShift:  make([]byte, 32),
+	}, nil
+}
 func (*refreshTestShare) MarshalBinary() ([]byte, error) { return []byte("share"), nil }
 func (s *refreshTestShare) Destroy()                     { s.destroyed.Store(true) }
 func (s *refreshTestShare) wasDestroyed() bool           { return s.destroyed.Load() }

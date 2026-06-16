@@ -6,14 +6,14 @@ import "testing"
 
 func BenchmarkFROSTKeygen2of3(b *testing.B) {
 	for b.Loop() {
-		shares := cachedFrostKeygen(b, 2, 3, false)
+		shares := cachedFrostKeygen(b, 2, 3)
 		_ = shares
 	}
 }
 
 func BenchmarkFROSTKeygen3of5(b *testing.B) {
 	for b.Loop() {
-		shares := cachedFrostKeygen(b, 3, 5, false)
+		shares := cachedFrostKeygen(b, 3, 5)
 		_ = shares
 	}
 }

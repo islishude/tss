@@ -124,7 +124,14 @@ sig, ok := signSession.Signature()
 
 ```go
 // Offline presign (can be done in advance):
-ctx := secp256k1.PresignContext{KeyID: "key-1", ChainID: "chain-1", PolicyDomain: "policy", MessageDomain: "app"}
+ctx := secp256k1.PresignContext{
+    KeyID: "key-1", ChainID: "chain-1",
+    Derivation: tss.DerivationRequest{
+        Scheme: tss.DerivationSchemeBIP32Secp256k1,
+        Path: tss.MustParseDerivationPath("m/0/1"),
+    },
+    PolicyDomain: "policy", MessageDomain: "app",
+}
 presignGuard, err := (tss.GuardConfig{
     Self:        keyShare.PartyID(),
     Parties:     tss.PartySet(signers),

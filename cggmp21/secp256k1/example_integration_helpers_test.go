@@ -388,22 +388,8 @@ func examplePresignContext() cggmp.PresignContext {
 	return cggmp.PresignContext{
 		KeyID:         "example-key",
 		ChainID:       "example-chain",
+		Derivation:    tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1},
 		PolicyDomain:  "example-policy",
 		MessageDomain: "example-message",
 	}
-}
-
-func mergeExampleCGGMPPartySets(sets ...[]tss.PartyID) tss.PartySet {
-	seen := make(map[tss.PartyID]struct{})
-	var merged []tss.PartyID
-	for _, set := range sets {
-		for _, id := range set {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			merged = append(merged, id)
-		}
-	}
-	return tss.PartySet(tss.SortParties(merged))
 }

@@ -381,8 +381,8 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 			return fmt.Errorf("old verification share mismatch for party %d", id)
 		}
 	}
-	if len(p.state.chainCode) != 0 && len(p.state.chainCode) != 32 {
-		return errors.New("chain code must be empty or 32 bytes")
+	if len(p.state.chainCode) != 32 {
+		return errors.New("chain code must be 32 bytes")
 	}
 	if p.state.paillierBits < int(p.state.securityParams.MinPaillierBits) {
 		return fmt.Errorf("paillier key size %d is below security parameter minimum %d", p.state.paillierBits, p.state.securityParams.MinPaillierBits)

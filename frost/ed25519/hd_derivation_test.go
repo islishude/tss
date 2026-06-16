@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	fed "filippo.io/edwards25519"
-	"github.com/islishude/tss/internal/bip32util"
+	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -186,49 +186,49 @@ func TestDeriveNonHardenedBIP32RejectsInvalidInputs(t *testing.T) {
 			pub:     hdPub,
 			chain:   hdChain,
 			path:    makeFROSTHDPath(256, 0),
-			wantErr: bip32util.ErrDerivationDepthOverflow,
+			wantErr: tss.ErrDerivationDepthOverflow,
 		},
 		{
 			name:    "hardened first index",
 			pub:     hdPub,
 			chain:   hdChain,
-			path:    []uint32{bip32util.HardenedKeyStart},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			path:    []uint32{tss.HardenedKeyStart},
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name:    "hardened index above start",
 			pub:     hdPub,
 			chain:   hdChain,
-			path:    []uint32{bip32util.HardenedKeyStart + 1},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			path:    []uint32{tss.HardenedKeyStart + 1},
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name:    "hardened index later in path",
 			pub:     hdPub,
 			chain:   hdChain,
-			path:    []uint32{0, bip32util.HardenedKeyStart},
-			wantErr: bip32util.ErrHardenedDerivationUnsupported,
+			path:    []uint32{0, tss.HardenedKeyStart},
+			wantErr: tss.ErrHardenedDerivationUnsupported,
 		},
 		{
 			name:    "nil chain code",
 			pub:     nonHDPub,
 			chain:   nil,
 			path:    []uint32{0},
-			wantErr: bip32util.ErrChainCodeRequired,
+			wantErr: tss.ErrChainCodeRequired,
 		},
 		{
 			name:    "empty chain code",
 			pub:     nonHDPub,
 			chain:   []byte{},
 			path:    []uint32{0},
-			wantErr: bip32util.ErrChainCodeRequired,
+			wantErr: tss.ErrChainCodeRequired,
 		},
 		{
 			name:    "invalid public key",
 			pub:     make([]byte, 31),
 			chain:   makeFROSTHDChainCode(),
 			path:    []uint32{0},
-			wantErr: bip32util.ErrInvalidPublicKey,
+			wantErr: tss.ErrInvalidPublicKey,
 		},
 	}
 

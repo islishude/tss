@@ -231,7 +231,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 // and signing with production 3072-bit Paillier parameters.
 func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	t.Parallel()
-	shares := slowCryptoKeygenWithPlanOption(t, 2, 3, KeygenPlanOption{EnableHD: true})
+	shares := slowCryptoKeygenWithPlanOption(t, 2, 3, KeygenPlanOption{})
 	signers := []tss.PartyID{1, 2}
 	path := []uint32{0, 17}
 
@@ -243,7 +243,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	derivedPub := result.ChildPublicKey
 
 	ctx := testPresignContext()
-	ctx.DerivationPath = path
+	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := slowCryptoPresignWithContext(t, shares, signers, ctx)
 
 	request := SignRequest{Context: ctx, Message: []byte("slowcrypto bip32 production"), LowS: true}

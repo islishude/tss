@@ -285,6 +285,7 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 		dealerParties:  []tss.PartyID{1, 2},
 		newParties:     []tss.PartyID{2, 3},
 		newThreshold:   2,
+		chainCode:      bytes.Repeat([]byte{0x44}, 32),
 		paillierBits:   testResharePlanPaillierBits,
 		securityParams: DefaultSecurityParams(),
 	}, limits: DefaultLimits()}
