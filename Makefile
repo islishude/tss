@@ -88,7 +88,7 @@ test-race: ## Race detector for integration-level protocol flows.
 
 .PHONY: test-stress
 test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
-	$(GO) test -race -tags='integration slowcrypto stress' -p 1 -parallel 1 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
+	$(GO) test -race -tags='integration slowcrypto stress' -p 3 -parallel 2 -count=10 -timeout $(STRESS_TIMEOUT) $(PKGS)
 
 .PHONY: test-budget
 test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
