@@ -26,19 +26,19 @@ const (
 )
 
 type proofDomainContext struct {
-	label              string
-	sessionID          tss.SessionID
-	threshold          int
-	parties            []tss.PartyID
-	signers            []tss.PartyID
-	sender             tss.PartyID
-	receiver           tss.PartyID
-	statementPublicKey []byte
-	keyTranscriptHash  []byte
-	paillierPublicKey  []byte
-	ringPedersenParams []byte
-	presignContextHash []byte
-	lifecyclePlanHash  []byte
+	label                string        // Domain label identifying the protocol phase for domain separation.
+	sessionID            tss.SessionID // Protocol session binding the proof to a single run.
+	threshold            int           // Signing threshold; part of the proof statement.
+	parties              []tss.PartyID // Canonical full participant set.
+	signers              []tss.PartyID // Signing subset for presign/sign-phase proofs.
+	sender               tss.PartyID   // Party that created (or will verify) the proof.
+	receiver             tss.PartyID   // Counterparty in interactive (MtA) proofs.
+	statementPublicKey   []byte        // Group public key bound into the proof statement.
+	keygenTranscriptHash []byte        // Transcript hash of the keygen that produced the key share.
+	paillierPublicKey    []byte        // Serialized Paillier public key of the prover.
+	ringPedersenParams   []byte        // Serialized Ring-Pedersen parameters of the prover.
+	presignContextHash   []byte        // Presign context hash binding the proof to a specific presign session.
+	lifecyclePlanHash    []byte        // Lifecycle plan digest binding the proof to a keygen/refresh/reshare plan.
 }
 
 func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey, planHash []byte) []byte {
@@ -70,14 +70,14 @@ func keySharePaillierProofDomain(key *KeyShare) []byte {
 		return nil
 	}
 	return proofDomain(proofDomainContext{
-		label:              domainLabelKeySharePaillier,
-		threshold:          key.state.threshold,
-		parties:            key.state.parties,
-		sender:             key.state.party,
-		statementPublicKey: key.state.publicKey,
-		keyTranscriptHash:  key.state.keygenTranscriptHash,
-		paillierPublicKey:  key.state.paillierPublicKey,
-		lifecyclePlanHash:  key.state.planHash,
+		label:                domainLabelKeySharePaillier,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		sender:               key.state.party,
+		statementPublicKey:   key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
+		paillierPublicKey:    key.state.paillierPublicKey,
+		lifecyclePlanHash:    key.state.planHash,
 	})
 }
 
@@ -105,18 +105,18 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []
 
 func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, prover, verifier tss.PartyID, proverPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:              domainLabelPresignMTAStartProof,
-		sessionID:          sessionID,
-		threshold:          key.state.threshold,
-		parties:            key.state.parties,
-		signers:            signers,
-		sender:             prover,
-		receiver:           verifier,
-		statementPublicKey: key.state.publicKey,
-		keyTranscriptHash:  key.state.keygenTranscriptHash,
-		paillierPublicKey:  proverPaillierPublicKey,
-		presignContextHash: presignContextHash,
-		lifecyclePlanHash:  planHash,
+		label:                domainLabelPresignMTAStartProof,
+		sessionID:            sessionID,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		signers:              signers,
+		sender:               prover,
+		receiver:             verifier,
+		statementPublicKey:   key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
+		paillierPublicKey:    proverPaillierPublicKey,
+		presignContextHash:   presignContextHash,
+		lifecyclePlanHash:    planHash,
 	})
 }
 
@@ -178,18 +178,18 @@ func mtaSigmaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []ts
 
 func mtaResponseDomain(label string, key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
-		label:              label,
-		sessionID:          sessionID,
-		threshold:          key.state.threshold,
-		parties:            key.state.parties,
-		signers:            signers,
-		sender:             responder,
-		receiver:           initiator,
-		statementPublicKey: key.state.publicKey,
-		keyTranscriptHash:  key.state.keygenTranscriptHash,
-		paillierPublicKey:  initiatorPaillierPublicKey,
-		presignContextHash: presignContextHash,
-		lifecyclePlanHash:  planHash,
+		label:                label,
+		sessionID:            sessionID,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		signers:              signers,
+		sender:               responder,
+		receiver:             initiator,
+		statementPublicKey:   key.state.publicKey,
+		keygenTranscriptHash: key.state.keygenTranscriptHash,
+		paillierPublicKey:    initiatorPaillierPublicKey,
+		presignContextHash:   presignContextHash,
+		lifecyclePlanHash:    planHash,
 	})
 }
 
@@ -208,15 +208,15 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 	// callers must ensure pk passes pai.UnmarshalPublicKey or pai.GenerateKey first.
 	pkBytes, _ := pk.MarshalBinary()
 	return proofDomain(proofDomainContext{
-		label:              label,
-		sessionID:          key.state.paillierProofSessionID,
-		threshold:          key.state.threshold,
-		parties:            key.state.parties,
-		sender:             key.state.party,
-		statementPublicKey: verificationShare,
-		keyTranscriptHash:  transcriptHash,
-		paillierPublicKey:  pkBytes,
-		lifecyclePlanHash:  key.state.planHash,
+		label:                label,
+		sessionID:            key.state.paillierProofSessionID,
+		threshold:            key.state.threshold,
+		parties:              key.state.parties,
+		sender:               key.state.party,
+		statementPublicKey:   verificationShare,
+		keygenTranscriptHash: transcriptHash,
+		paillierPublicKey:    pkBytes,
+		lifecyclePlanHash:    key.state.planHash,
 	})
 }
 
@@ -232,7 +232,7 @@ func proofDomain(ctx proofDomainContext) []byte {
 	t.AppendUint32("sender", ctx.sender)
 	t.AppendUint32("receiver", ctx.receiver)
 	t.AppendBytes("public_key", ctx.statementPublicKey)
-	t.AppendBytes("keygen_transcript_hash", ctx.keyTranscriptHash)
+	t.AppendBytes("keygen_transcript_hash", ctx.keygenTranscriptHash)
 	t.AppendBytes("paillier_public_key", ctx.paillierPublicKey)
 	t.AppendBytes("ring_pedersen_params", ctx.ringPedersenParams)
 	t.AppendBytes("presign_context_hash", ctx.presignContextHash)

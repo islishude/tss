@@ -101,6 +101,17 @@ type reshareSharePayload struct {
 	PlanHash             []byte      `wire:"5,bytes,len=32"`
 }
 
+// Clone returns a deep copy of reshareSharePayload
+func (p reshareSharePayload) Clone() reshareSharePayload {
+	return reshareSharePayload{
+		Dealer:               p.Dealer,
+		Receiver:             p.Receiver,
+		Share:                new(big.Int).Set(p.Share),
+		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
+		PlanHash:             append([]byte(nil), p.PlanHash...),
+	}
+}
+
 // WireType returns the canonical wire type identifier for reshareSharePayload.
 func (reshareSharePayload) WireType() string { return reshareSharePayloadWireType }
 
@@ -358,7 +369,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		}
 		if _, ok := s.commits[env.From]; !ok {
 			s.pendingShares[env.From] = pendingReshareShare{
-				payload: cloneReshareSharePayload(p),
+				payload: p.Clone(),
 				raw:     append([]byte(nil), env.Payload...),
 			}
 			return nil, nil
@@ -393,16 +404,6 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 	}
 	out = append(out, completionOut...)
 	return out, nil
-}
-
-func cloneReshareSharePayload(p reshareSharePayload) reshareSharePayload {
-	return reshareSharePayload{
-		Dealer:               p.Dealer,
-		Receiver:             p.Receiver,
-		Share:                new(big.Int).Set(p.Share),
-		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
-		PlanHash:             append([]byte(nil), p.PlanHash...),
-	}
 }
 
 // KeyShare returns the new key share when this session is a new receiver and resharing completes.

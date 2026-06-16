@@ -137,18 +137,6 @@ func (in InboundEnvelope) Digest() EnvelopeDigest {
 	return in.env.Digest()
 }
 
-// cloneBroadcastAcks returns a deep copy of a broadcast ack slice.
-func cloneBroadcastAcks(acks []BroadcastAck) []BroadcastAck {
-	if acks == nil {
-		return nil
-	}
-	out := make([]BroadcastAck, len(acks))
-	for i, ack := range acks {
-		out[i] = ack.Clone()
-	}
-	return out
-}
-
 // defaultEnvelopeLimits returns conservative envelope limits suitable for
 // production use. Callers that need different limits should use
 // MarshalEnvelopeWithLimits / UnmarshalEnvelopeWithLimits directly.

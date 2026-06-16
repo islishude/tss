@@ -44,6 +44,14 @@ type VerificationShare struct {
 	PublicKey []byte      `json:"public_key"`
 }
 
+// Clone returns a deep copy of VerificationShare
+func (v VerificationShare) Clone() VerificationShare {
+	return VerificationShare{
+		Party:     v.Party,
+		PublicKey: slices.Clone(v.PublicKey),
+	}
+}
+
 // PaillierPublicShare is a caller-owned snapshot of a participant Paillier
 // public key and proof.
 type PaillierPublicShare struct {
@@ -79,18 +87,6 @@ func (s SignVerifyShare) Clone() SignVerifyShare {
 		ChiPoint: slices.Clone(s.ChiPoint),
 		Proof:    slices.Clone(s.Proof),
 	}
-}
-
-// cloneSignVerifyShares returns a deep copy of a SignVerifyShare slice.
-func cloneSignVerifyShares(in []SignVerifyShare) []SignVerifyShare {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]SignVerifyShare, len(in))
-	for i, share := range in {
-		out[i] = share.Clone()
-	}
-	return out
 }
 
 // RingPedersenPublicShare is a caller-owned snapshot of a participant

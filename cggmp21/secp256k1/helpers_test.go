@@ -81,7 +81,7 @@ func clonePresignForTest(p *Presign) *Presign {
 		publicKey:            slices.Clone(p.state.publicKey),
 		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
 		partiesHash:          slices.Clone(p.state.partiesHash),
-		verifyShares:         cloneSignVerifyShares(p.state.verifyShares),
+		verifyShares:         tss.CloneSlices(p.state.verifyShares),
 		kShare:               p.state.kShare.Clone(),
 		chiShare:             p.state.chiShare.Clone(),
 		delta:                p.state.delta.Clone(),

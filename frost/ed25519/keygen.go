@@ -142,10 +142,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		}
 		out = append(out, shareEnv)
 	}
-	s.ownMessages = make([]tss.Envelope, len(out))
-	for i := range out {
-		s.ownMessages[i] = out[i].Clone()
-	}
+	s.ownMessages = tss.CloneSlices(out)
 	completionOut, err := s.tryComplete()
 	if err != nil {
 		return nil, nil, err

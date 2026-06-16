@@ -265,7 +265,7 @@ func (p *Presign) VerifyShares() []SignVerifyShare {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return cloneSignVerifyShares(p.state.verifyShares)
+	return tss.CloneSlices(p.state.verifyShares)
 }
 
 // SecurityParams returns the cryptographic profile persisted with the presign.

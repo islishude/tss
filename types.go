@@ -132,3 +132,20 @@ type Blame struct {
 	Parties  []PartyID `json:"parties"`
 	Evidence []byte    `json:"evidence,omitempty"`
 }
+
+// Cloneable is an interface for types that have a Clone() T method.
+type Cloneable[T any] interface {
+	Clone() T
+}
+
+// CloneSlices returns a deep copy of a Cloneable slice.
+func CloneSlices[T Cloneable[T]](in []T) []T {
+	if len(in) == 0 {
+		return nil
+	}
+	out := make([]T, len(in))
+	for i, share := range in {
+		out[i] = share.Clone()
+	}
+	return out
+}

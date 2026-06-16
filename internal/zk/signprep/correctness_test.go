@@ -132,7 +132,7 @@ func TestSignPrepProofRejectsStatementMutation(t *testing.T) {
 				t.Fatalf("Verify original statement: %v", err)
 			}
 
-			tampered := cloneSignPrepStatement(fx.stmt)
+			tampered := fx.stmt.Clone()
 			tc.mutate(&tampered)
 			if err := Verify(tampered, fx.proof); err == nil {
 				t.Fatal("expected mutated statement to reject")
@@ -284,8 +284,7 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 		opt(&stmt, &wit)
 	}
 
-	stmt = cloneSignPrepStatement(stmt)
-	wit = cloneSignPrepWitness(wit)
+	stmt, wit = stmt.Clone(), wit.Clone()
 	proof, err := Prove(testutil.DeterministicReader(seed), stmt, wit)
 	if err != nil {
 		t.Fatalf("Prove: %v", err)
@@ -312,34 +311,6 @@ func withSignPrepAdditiveShift() signPrepFixtureOption {
 		stmt.ChiPoint = signPrepPointBytes(five)
 		wit.MTASum = new(big.Int).Set(three)
 		wit.ChiShare = new(big.Int).Set(five)
-	}
-}
-
-func cloneSignPrepStatement(stmt Statement) Statement {
-	stmt.Signers = append([]tss.PartyID(nil), stmt.Signers...)
-	stmt.ContextHash = bytes.Clone(stmt.ContextHash)
-	stmt.AdditiveShift = bytes.Clone(stmt.AdditiveShift)
-	stmt.PublicKey = bytes.Clone(stmt.PublicKey)
-	stmt.KeygenTranscriptHash = bytes.Clone(stmt.KeygenTranscriptHash)
-	stmt.PartiesHash = bytes.Clone(stmt.PartiesHash)
-	stmt.EncK = bytes.Clone(stmt.EncK)
-	stmt.PaillierPublicKey = bytes.Clone(stmt.PaillierPublicKey)
-	stmt.Round1Echo = bytes.Clone(stmt.Round1Echo)
-	stmt.Gamma = bytes.Clone(stmt.Gamma)
-	stmt.Delta = bytes.Clone(stmt.Delta)
-	stmt.LittleR = bytes.Clone(stmt.LittleR)
-	stmt.R = bytes.Clone(stmt.R)
-	stmt.KPoint = bytes.Clone(stmt.KPoint)
-	stmt.ChiPoint = bytes.Clone(stmt.ChiPoint)
-	stmt.XBarPoint = bytes.Clone(stmt.XBarPoint)
-	return stmt
-}
-
-func cloneSignPrepWitness(wit Witness) Witness {
-	return Witness{
-		KShare:   new(big.Int).Set(wit.KShare),
-		MTASum:   new(big.Int).Set(wit.MTASum),
-		ChiShare: new(big.Int).Set(wit.ChiShare),
 	}
 }
 

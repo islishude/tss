@@ -94,7 +94,7 @@ func (k *KeyShare) VerificationShares() []VerificationShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return cloneVerificationShares(k.state.verificationShares)
+	return tss.CloneSlices(k.state.verificationShares)
 }
 
 // PaillierPublicKeyBytes returns a copy of the local Paillier public key.
@@ -118,7 +118,7 @@ func (k *KeyShare) PaillierPublicKeys() []PaillierPublicShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return clonePaillierPublicShares(k.state.paillierPublicKeys)
+	return tss.CloneSlices(k.state.paillierPublicKeys)
 }
 
 // RingPedersenParamsBytes returns a copy of the local Ring-Pedersen parameters.
@@ -142,7 +142,7 @@ func (k *KeyShare) RingPedersenPublic() []RingPedersenPublicShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return cloneRingPedersenPublicShares(k.state.ringPedersenPublic)
+	return tss.CloneSlices(k.state.ringPedersenPublic)
 }
 
 // PaillierProofSessionID returns the session bound into the Paillier proof.
@@ -733,14 +733,14 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		chainCode:              slices.Clone(k.state.chainCode),
 		secret:                 k.state.secret.Clone(),
 		groupCommitments:       wireutil.CloneByteSlices(k.state.groupCommitments),
-		verificationShares:     cloneVerificationShares(k.state.verificationShares),
+		verificationShares:     tss.CloneSlices(k.state.verificationShares),
 		paillierPublicKey:      slices.Clone(k.state.paillierPublicKey),
 		paillierPrivateKey:     slices.Clone(k.state.paillierPrivateKey),
 		paillierProof:          slices.Clone(k.state.paillierProof),
-		paillierPublicKeys:     clonePaillierPublicShares(k.state.paillierPublicKeys),
+		paillierPublicKeys:     tss.CloneSlices(k.state.paillierPublicKeys),
 		ringPedersenParams:     slices.Clone(k.state.ringPedersenParams),
 		ringPedersenProof:      slices.Clone(k.state.ringPedersenProof),
-		ringPedersenPublic:     cloneRingPedersenPublicShares(k.state.ringPedersenPublic),
+		ringPedersenPublic:     tss.CloneSlices(k.state.ringPedersenPublic),
 		paillierProofSessionID: k.state.paillierProofSessionID,
 		paillierProofDomain:    k.state.paillierProofDomain,
 		resharePlanHash:        slices.Clone(k.state.resharePlanHash),
@@ -751,18 +751,4 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		logProof:               slices.Clone(k.state.logProof),
 		keygenConfirmations:    wireutil.CloneByteSlices(k.state.keygenConfirmations),
 	}}
-}
-
-func cloneVerificationShares(in []VerificationShare) []VerificationShare {
-	if in == nil {
-		return nil
-	}
-	out := make([]VerificationShare, len(in))
-	for i := range out {
-		out[i] = VerificationShare{
-			Party:     in[i].Party,
-			PublicKey: slices.Clone(in[i].PublicKey),
-		}
-	}
-	return out
 }

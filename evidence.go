@@ -294,11 +294,7 @@ func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
 	if len(fields) == 0 {
 		return nil
 	}
-	// make a copy
-	sorted := make([]EvidenceField, len(fields))
-	for i, field := range fields {
-		sorted[i] = field.Clone()
-	}
+	sorted := CloneSlices(fields)
 	slices.SortFunc(sorted, func(a, b EvidenceField) int {
 		if a.Key < b.Key {
 			return -1

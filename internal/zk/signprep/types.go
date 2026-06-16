@@ -1,7 +1,9 @@
 package signprep
 
 import (
+	"bytes"
 	"math/big"
+	"slices"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
@@ -31,11 +33,42 @@ type Statement struct {
 	XBarPoint            []byte
 }
 
+// Clone returns a deep copy of Statement
+func (stmt Statement) Clone() Statement {
+	stmt.Signers = slices.Clone(stmt.Signers)
+	stmt.PlanHash = bytes.Clone(stmt.PlanHash)
+	stmt.ContextHash = bytes.Clone(stmt.ContextHash)
+	stmt.AdditiveShift = bytes.Clone(stmt.AdditiveShift)
+	stmt.PublicKey = bytes.Clone(stmt.PublicKey)
+	stmt.KeygenTranscriptHash = bytes.Clone(stmt.KeygenTranscriptHash)
+	stmt.PartiesHash = bytes.Clone(stmt.PartiesHash)
+	stmt.EncK = bytes.Clone(stmt.EncK)
+	stmt.PaillierPublicKey = bytes.Clone(stmt.PaillierPublicKey)
+	stmt.Round1Echo = bytes.Clone(stmt.Round1Echo)
+	stmt.Gamma = bytes.Clone(stmt.Gamma)
+	stmt.Delta = bytes.Clone(stmt.Delta)
+	stmt.LittleR = bytes.Clone(stmt.LittleR)
+	stmt.R = bytes.Clone(stmt.R)
+	stmt.KPoint = bytes.Clone(stmt.KPoint)
+	stmt.ChiPoint = bytes.Clone(stmt.ChiPoint)
+	stmt.XBarPoint = bytes.Clone(stmt.XBarPoint)
+	return stmt
+}
+
 // Witness is the secret input for a signprep proof.
 type Witness struct {
 	KShare   *big.Int
 	MTASum   *big.Int
 	ChiShare *big.Int
+}
+
+// Clone returns a deep copy of Witness
+func (w Witness) Clone() Witness {
+	return Witness{
+		KShare:   new(big.Int).Set(w.KShare),
+		MTASum:   new(big.Int).Set(w.MTASum),
+		ChiShare: new(big.Int).Set(w.ChiShare),
+	}
 }
 
 // Proof is a CGGMP21 signprep proof.

@@ -189,7 +189,7 @@ func hashBytes(value []byte) []byte {
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	t := transcript.New(paillierPublicSharesHashLabel)
-	sorted := clonePaillierPublicShares(shares)
+	sorted := tss.CloneSlices(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return int(a.Party) - int(b.Party)
 	})
@@ -199,28 +199,6 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 		t.AppendBytes("proof", share.Proof)
 	}
 	return t.Sum()
-}
-
-func clonePaillierPublicShares(in []PaillierPublicShare) []PaillierPublicShare {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]PaillierPublicShare, len(in))
-	for i, share := range in {
-		out[i] = share.Clone()
-	}
-	return out
-}
-
-func cloneRingPedersenPublicShares(in []RingPedersenPublicShare) []RingPedersenPublicShare {
-	if len(in) == 0 {
-		return nil
-	}
-	out := make([]RingPedersenPublicShare, len(in))
-	for i, share := range in {
-		out[i] = share.Clone()
-	}
-	return out
 }
 
 func paillierPublicShareFor(shares []PaillierPublicShare, id tss.PartyID) (PaillierPublicShare, bool) {

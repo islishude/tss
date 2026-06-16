@@ -79,7 +79,7 @@ type SignAttemptDeliveryState struct {
 // Clone returns an independent copy of the delivery state.
 func (s SignAttemptDeliveryState) Clone() SignAttemptDeliveryState {
 	return SignAttemptDeliveryState{
-		Acks:             cloneSignAttemptAcks(s.Acks),
+		Acks:             tss.CloneSlices(s.Acks),
 		Certificate:      s.Certificate.Clone(),
 		DeliveryComplete: s.DeliveryComplete,
 	}
@@ -795,17 +795,6 @@ func signAttemptAcksToWire(acks []tss.BroadcastAck) []ackWire {
 			EnvelopeDigest: ack.EnvelopeDigest[:],
 			Signature:      ack.Signature,
 		}
-	}
-	return out
-}
-
-func cloneSignAttemptAcks(acks []tss.BroadcastAck) []tss.BroadcastAck {
-	if acks == nil {
-		return nil
-	}
-	out := make([]tss.BroadcastAck, len(acks))
-	for i, ack := range acks {
-		out[i] = ack.Clone()
 	}
 	return out
 }

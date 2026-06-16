@@ -62,7 +62,7 @@ func NewBroadcastCertificate(env Envelope, recipients PartySet, acks []Broadcast
 		PayloadHash:    payloadHash,
 		EnvelopeDigest: envelopeDigest,
 		Recipients:     recipients.Clone(),
-		Acks:           cloneBroadcastAcks(acks),
+		Acks:           CloneSlices(acks),
 	}
 
 	// Verify internal consistency: every ack covers the same digest and recipient set.
@@ -376,7 +376,7 @@ func (c *BroadcastCertificate) Clone() *BroadcastCertificate {
 	}
 	clone := *c
 	clone.Recipients = c.Recipients.Clone()
-	clone.Acks = cloneBroadcastAcks(c.Acks)
+	clone.Acks = CloneSlices(c.Acks)
 	return &clone
 }
 

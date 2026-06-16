@@ -35,6 +35,14 @@ type VerificationShare struct {
 	PublicKey []byte      `json:"public_key"`
 }
 
+// Clone returns a deep copy of VerificationShare
+func (v VerificationShare) Clone() VerificationShare {
+	return VerificationShare{
+		Party:     v.Party,
+		PublicKey: slices.Clone(v.PublicKey),
+	}
+}
+
 // KeyShare is one local FROST Ed25519 signing share.
 //
 // Its fields are intentionally opaque. Accessors that return slices or nested
@@ -139,7 +147,7 @@ func (k *KeyShare) VerificationShares() []VerificationShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return cloneVerificationShares(k.state.verificationShares)
+	return tss.CloneSlices(k.state.verificationShares)
 }
 
 // KeygenSessionID returns the DKG or resharing session that produced the share.
@@ -420,23 +428,12 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		chainCode:            slices.Clone(k.state.chainCode),
 		secret:               k.state.secret.Clone(),
 		groupCommitments:     wireutil.CloneByteSlices(k.state.groupCommitments),
-		verificationShares:   cloneVerificationShares(k.state.verificationShares),
+		verificationShares:   tss.CloneSlices(k.state.verificationShares),
 		keygenSessionID:      k.state.keygenSessionID,
 		keygenTranscriptHash: slices.Clone(k.state.keygenTranscriptHash),
 		planHash:             slices.Clone(k.state.planHash),
 		keygenConfirmations:  wireutil.CloneByteSlices(k.state.keygenConfirmations),
 	}}
-}
-
-func cloneVerificationShares(in []VerificationShare) []VerificationShare {
-	if in == nil {
-		return nil
-	}
-	out := slices.Clone(in)
-	for i := range out {
-		out[i].PublicKey = slices.Clone(out[i].PublicKey)
-	}
-	return out
 }
 
 func scalarBytes(x *big.Int) ([]byte, error) {
