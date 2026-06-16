@@ -25,19 +25,19 @@ type ResharePlan struct {
 }
 
 type resharePlanState struct {
-	sessionID             tss.SessionID
-	curveID               string
-	oldGroupPublicKey     []byte
-	oldGroupCommitments   [][]byte
-	oldVerificationShares map[tss.PartyID][]byte
-	oldParties            []tss.PartyID
-	oldThreshold          int
-	dealerParties         []tss.PartyID
-	newParties            []tss.PartyID
-	newThreshold          int
-	chainCode             []byte
-	paillierBits          int
-	securityParams        SecurityParams
+	sessionID             tss.SessionID          // Reshare protocol session; all dealer and receiver messages are scoped to it.
+	curveID               string                 // Canonical curve identifier bound into the plan digest.
+	oldGroupPublicKey     []byte                 // Existing parent group public key that resharing must preserve.
+	oldGroupCommitments   [][]byte               // Existing public polynomial commitments for old shares.
+	oldVerificationShares map[tss.PartyID][]byte // Existing per-party public verification shares keyed by old party.
+	oldParties            []tss.PartyID          // Canonical old key-holder set.
+	oldThreshold          int                    // Signing threshold of the old key.
+	dealerParties         []tss.PartyID          // Old parties selected to contribute weighted dealer polynomials.
+	newParties            []tss.PartyID          // Canonical target key-holder set.
+	newThreshold          int                    // Signing threshold for the reshared key.
+	chainCode             []byte                 // HD chain code preserved across reshare.
+	paillierBits          int                    // Shared modulus size for new receiver auxiliary material.
+	securityParams        SecurityParams         // Cryptographic profile required for new auxiliary material.
 }
 
 // SessionID returns the reshare session identifier.

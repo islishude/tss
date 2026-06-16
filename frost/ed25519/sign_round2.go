@@ -22,7 +22,8 @@ func (s *SignSession) tryAggregate() error {
 		return err
 	}
 	RBytes := R.Bytes()
-	c, _ := edcurve.Ed25519Challenge(RBytes, s.verifyKey, s.message)
+	verifyKey := s.derivation.VerificationKeyBytes()
+	c, _ := edcurve.Ed25519Challenge(RBytes, verifyKey, s.message)
 	z := fed.NewScalar()
 	for _, id := range s.signers {
 		partial := s.partials[id]
@@ -33,7 +34,7 @@ func (s *SignSession) tryAggregate() error {
 				Code:  tss.ErrCodeVerification,
 				Round: 2,
 				Party: id,
-				Blame: frostSignBlame(blameEnv, s.signers, s.verifyKey),
+				Blame: frostSignBlame(blameEnv, s.signers, verifyKey),
 				Err:   err,
 			}
 		}
@@ -41,11 +42,11 @@ func (s *SignSession) tryAggregate() error {
 	}
 	zBytes := z.Bytes()
 	sig := append(append([]byte(nil), RBytes...), zBytes...)
-	if !stded25519.Verify(stded25519.PublicKey(s.verifyKey), s.message, sig) {
+	if !stded25519.Verify(stded25519.PublicKey(verifyKey), s.message, sig) {
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: 2,
-			Blame: frostAggregateBlame(s.sessionID, s.signers, s.verifyKey, s.message, sig),
+			Blame: frostAggregateBlame(s.sessionID, s.signers, verifyKey, s.message, sig),
 			Err:   errors.New("aggregated Ed25519 signature failed verification"),
 		}
 	}
@@ -159,8 +160,9 @@ func (s *SignSession) bindingFactors() (map[tss.PartyID]*fed.Scalar, error) {
 
 	// Bind the actual verification key (shifted for HD, original otherwise)
 	// so that every rho is tied to the key the verifier will use.
-	prefix := make([]byte, 0, len(s.verifyKey)+len(msgHash)+len(commitmentHash)+32)
-	prefix = append(prefix, s.verifyKey...)
+	verifyKey := s.derivation.VerificationKeyBytes()
+	prefix := make([]byte, 0, len(verifyKey)+len(msgHash)+len(commitmentHash)+32)
+	prefix = append(prefix, verifyKey...)
 	prefix = append(prefix, msgHash...)
 	prefix = append(prefix, commitmentHash...)
 

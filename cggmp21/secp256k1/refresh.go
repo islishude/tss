@@ -30,24 +30,24 @@ const (
 type RefreshSession struct {
 	mu sync.Mutex
 
-	oldKey          *KeyShare
-	cfg             tss.ThresholdConfig
-	log             tss.Logger
-	limits          Limits
-	securityParams  SecurityParams
-	planHash        []byte
-	commits         map[tss.PartyID][][]byte
-	shares          map[tss.PartyID]*big.Int
-	completed       bool
-	aborted         bool
-	guard           *tss.EnvelopeGuard
-	newShare        *KeyShare
-	confirmations   map[tss.PartyID][]byte
-	ownPoly         []*big.Int
-	newPaillier     *pai.PrivateKey
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare
-	newPaillierPriv []byte
-	newRingPedersen map[tss.PartyID]RingPedersenPublicShare
+	oldKey          *KeyShare                               // Caller-owned share being refreshed; not destroyed with the session.
+	cfg             tss.ThresholdConfig                     // Local threshold runtime view fixed by the refresh plan.
+	log             tss.Logger                              // Optional protocol logger.
+	limits          Limits                                  // Local fail-closed resource policy.
+	securityParams  SecurityParams                          // Cryptographic profile inherited from oldKey.
+	planHash        []byte                                  // Digest every refresh payload must echo.
+	commits         map[tss.PartyID][][]byte                // Public zero-constant polynomial commitments by sender.
+	shares          map[tss.PartyID]*big.Int                // Secret refresh shares received for the local party.
+	completed       bool                                    // Terminal success flag after newShare is confirmed.
+	aborted         bool                                    // Terminal failure/destruction flag.
+	guard           *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
+	newShare        *KeyShare                               // Refreshed key share produced on completion.
+	confirmations   map[tss.PartyID][]byte                  // Refresh confirmation payloads by participant.
+	ownPoly         []*big.Int                              // Local zero-constant polynomial coefficients; secret-bearing.
+	newPaillier     *pai.PrivateKey                         // Fresh local Paillier private key for rotated auxiliary material.
+	newPaillierPubs map[tss.PartyID]PaillierPublicShare     // Validated fresh Paillier public material by participant.
+	newPaillierPriv []byte                                  // Serialized fresh Paillier private key persisted into newShare.
+	newRingPedersen map[tss.PartyID]RingPedersenPublicShare // Validated fresh Ring-Pedersen material by participant.
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.

@@ -224,7 +224,6 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 			ChildPublicKey: []byte{0x02, 0x03},
 			ChildChainCode: []byte{0x04},
 		},
-		verificationKey: []byte{0x02, 0x03},
 	}}
 	presignParties := presign.Parties()
 	presignParties[0] = 99
@@ -249,7 +248,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presign.state.context.Derivation.Path[0] != 1 ||
 		presign.state.contextHash[0] != 0x20 ||
 		presign.state.derivation.AdditiveShift[0] != 0x30 ||
-		presign.state.verificationKey[0] != 0x02 {
+		presign.state.derivation.ChildPublicKey[0] != 0x02 {
 		t.Fatal("presign plan getter aliases internal state")
 	}
 

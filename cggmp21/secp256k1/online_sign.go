@@ -91,6 +91,8 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
 	}
 
+	// Build and locally verify the exact outbound partial before touching the
+	// durable store. A malformed candidate must not consume the presign.
 	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, planHash, lowS, guard, limits)
 	if err != nil {
 		return nil, nil, err
@@ -99,9 +101,13 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 		return nil, nil, err
 	}
 
+	// The in-memory binding prevents concurrent goroutines in this process from
+	// racing multiple intents into the durable store for the same presign.
 	if !bindPresignToAttempt(presign, candidate.IntentHash, false) {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign already consumed or bound to another attempt"))
 	}
+	// CommitSignAttempt is the cross-process linearization point. After this
+	// call returns or its outcome is unknown, the presign is treated as consumed.
 	commitCtx, cancel := durableStoreContext(ctx, storeTTL)
 	defer cancel()
 	commit, err := store.CommitSignAttempt(commitCtx, candidate)
@@ -313,7 +319,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	verifyKey := slices.Clone(presign.state.verificationKey)
+	verifyKey := presign.VerificationKeyBytes()
 	s := &SignSession{
 		key:       key,
 		presign:   presign,
@@ -724,9 +730,6 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	}
 	if !derivation.Equal(presign.state.derivation) {
 		return errors.New("presign derivation binding mismatch")
-	}
-	if !bytes.Equal(presign.state.verificationKey, derivation.ChildPublicKey) {
-		return errors.New("presign verification key binding mismatch")
 	}
 	if len(presign.state.signers) < key.state.threshold || !tss.ContainsParty(presign.state.signers, key.state.party) {
 		return errors.New("invalid presign signer set")

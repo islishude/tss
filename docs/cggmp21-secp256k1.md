@@ -275,7 +275,7 @@ Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the `SignVer
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 
-Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, derivation result, and verification key as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all `SignVerifyShare` entries (valid point encodings, non-empty proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
+Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and derivation result (including the child verification key) as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all `SignVerifyShare` entries (valid point encodings, non-empty proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
 
 No private key share, nonce share, or Paillier secret material leaves the process.
 
@@ -285,7 +285,7 @@ No private key share, nonce share, or Paillier secret material leaves the proces
 s = Σ_i s_i  mod q
 ```
 
-Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the group public key before being returned.
+Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the bound verification key, including the derived child public key when a derivation path is set, before being returned.
 
 Since every partial is independently verified before aggregation, a failure at this stage is an **implementation invariant violation** (`ErrCodeInvariant`), not a protocol-level blame event. It carries no blame parties. This replaces the previous behavior where aggregate verification failure blamed all signers as a suspect set.
 

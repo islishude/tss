@@ -129,11 +129,11 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type refreshPlanState struct {
-	sessionID tss.SessionID
-	threshold int
-	parties   []tss.PartyID
-	publicKey []byte
-	chainCode []byte
+	sessionID tss.SessionID // Refresh protocol session; every refresh envelope is scoped to it.
+	threshold int           // Existing signing threshold preserved by same-party refresh.
+	parties   []tss.PartyID // Canonical participant set preserved by same-party refresh.
+	publicKey []byte        // Parent group public key that must remain unchanged after refresh.
+	chainCode []byte        // HD chain code that must remain unchanged after refresh.
 }
 
 // RefreshPlan is the shared FROST same-party refresh intent.
@@ -248,12 +248,12 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 }
 
 type resharePlanState struct {
-	sessionID    tss.SessionID
-	oldPublicKey []byte
-	oldChainCode []byte
-	oldParties   []tss.PartyID
-	newParties   []tss.PartyID
-	newThreshold int
+	sessionID    tss.SessionID // Reshare protocol session; all reshare envelopes are scoped to it.
+	oldPublicKey []byte        // Existing parent group public key that resharing must preserve.
+	oldChainCode []byte        // Existing HD chain code preserved across reshare.
+	oldParties   []tss.PartyID // Canonical old dealer set.
+	newParties   []tss.PartyID // Canonical target key-holder set.
+	newThreshold int           // Target signing threshold for the reshared key.
 }
 
 // ResharePlan is the shared FROST reshare intent.
@@ -445,18 +445,17 @@ func (p *ResharePlan) receiverConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type signPlanState struct {
-	sessionID       tss.SessionID
-	threshold       int
-	parties         []tss.PartyID
-	publicKey       []byte
-	chainCode       []byte
-	keygenHash      []byte
-	signers         []tss.PartyID
-	context         tss.SigningContext
-	contextHash     []byte
-	derivation      *tss.DerivationResult
-	verificationKey []byte
-	message         []byte
+	sessionID   tss.SessionID         // Signing session; commitment and partial envelopes are scoped to it.
+	threshold   int                   // Signing threshold inherited from the key share.
+	parties     []tss.PartyID         // Canonical full key-share participant set.
+	publicKey   []byte                // Parent group public key before request-time HD derivation.
+	chainCode   []byte                // HD chain code paired with publicKey for path derivation.
+	keygenHash  []byte                // Transcript hash of the keygen/reshare that produced publicKey.
+	signers     []tss.PartyID         // Canonical signer subset participating in this signature.
+	context     tss.SigningContext    // Normalized signing context after path resolution.
+	contextHash []byte                // Canonical hash binding context to nonce and partial transcripts.
+	derivation  *tss.DerivationResult // Resolved child key/path; ChildPublicKey is the verification key.
+	message     []byte                // Caller message copied into the plan and hashed by the signing flow.
 }
 
 // SignPlan is the shared FROST signing intent.
@@ -503,18 +502,17 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(option.Message), limits.Payload.MaxMessageBytes))
 	}
 	return &SignPlan{state: &signPlanState{
-		sessionID:       option.SessionID,
-		threshold:       key.state.threshold,
-		parties:         slices.Clone(key.state.parties),
-		publicKey:       slices.Clone(key.state.publicKey),
-		chainCode:       slices.Clone(key.state.chainCode),
-		keygenHash:      slices.Clone(key.state.keygenTranscriptHash),
-		signers:         signers,
-		context:         context, // already cloned in prepareSignContext
-		contextHash:     slices.Clone(contextHash),
-		derivation:      derivation.Clone(),
-		verificationKey: slices.Clone(derivation.ChildPublicKey),
-		message:         slices.Clone(option.Message),
+		sessionID:   option.SessionID,
+		threshold:   key.state.threshold,
+		parties:     slices.Clone(key.state.parties),
+		publicKey:   slices.Clone(key.state.publicKey),
+		chainCode:   slices.Clone(key.state.chainCode),
+		keygenHash:  slices.Clone(key.state.keygenTranscriptHash),
+		signers:     signers,
+		context:     context, // already cloned in prepareSignContext
+		contextHash: slices.Clone(contextHash),
+		derivation:  derivation.Clone(),
+		message:     slices.Clone(option.Message),
 	}, limits: limits}, nil
 }
 
@@ -560,10 +558,10 @@ func (p *SignPlan) Derivation() *tss.DerivationResult {
 
 // VerificationKeyBytes returns the Ed25519 public key used for signature verification.
 func (p *SignPlan) VerificationKeyBytes() []byte {
-	if p == nil || p.state == nil {
+	if p == nil || p.state == nil || p.state.derivation == nil {
 		return nil
 	}
-	return slices.Clone(p.state.verificationKey)
+	return p.state.derivation.VerificationKeyBytes()
 }
 
 // Digest returns the canonical sign plan digest.
@@ -581,7 +579,6 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendUint32List("signers", p.state.signers)
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
-	t.AppendBytes("verification_key", p.state.verificationKey)
 	t.AppendBytes("message", p.state.message)
 	return t.Sum(), nil
 }
@@ -615,9 +612,6 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	}
 	if !derivation.Equal(p.state.derivation) {
 		return errors.New("sign plan derivation mismatch")
-	}
-	if !bytes.Equal(p.state.verificationKey, derivation.ChildPublicKey) {
-		return errors.New("sign plan verification key mismatch")
 	}
 	return nil
 }

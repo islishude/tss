@@ -30,7 +30,8 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		s.clearNonceBytes()
 		return nil, err
 	}
-	c, _ := edcurve.Ed25519Challenge(R.Bytes(), s.verifyKey, s.message)
+	verifyKey := s.derivation.VerificationKeyBytes()
+	c, _ := edcurve.Ed25519Challenge(R.Bytes(), verifyKey, s.message)
 
 	lambda, err := lagrangeCoefficientScalar(s.key.state.party, s.signers)
 	if err != nil {

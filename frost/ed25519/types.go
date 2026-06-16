@@ -48,19 +48,19 @@ type KeyShare struct {
 }
 
 type keyShareState struct {
-	version              uint16
-	party                tss.PartyID
-	threshold            int
-	parties              []tss.PartyID
-	publicKey            []byte
-	chainCode            []byte
-	secret               *secret.Scalar
-	groupCommitments     [][]byte
-	verificationShares   []VerificationShare
-	keygenSessionID      tss.SessionID
-	keygenTranscriptHash []byte
-	planHash             []byte
-	keygenConfirmations  [][]byte
+	version              uint16              // Canonical private wire version of this key-share record.
+	party                tss.PartyID         // Local owner of the secret signing share.
+	threshold            int                 // Number of signers required for FROST signing.
+	parties              []tss.PartyID       // Canonical full participant set for the group key.
+	publicKey            []byte              // Parent group public key before request-time derivation.
+	chainCode            []byte              // HD chain code paired with publicKey for non-hardened derivation.
+	secret               *secret.Scalar      // Local Ed25519 signing share; never exposed through accessors.
+	groupCommitments     [][]byte            // Public polynomial commitments from keygen/reshare.
+	verificationShares   []VerificationShare // Per-party public verification shares derived from commitments.
+	keygenSessionID      tss.SessionID       // Session that produced this key share.
+	keygenTranscriptHash []byte              // Transcript hash of completed keygen/reshare confirmation.
+	planHash             []byte              // Lifecycle plan digest that authorized this key share.
+	keygenConfirmations  [][]byte            // Canonical confirmation payloads proving every party accepted the keygen.
 }
 
 // Algorithm returns the common algorithm identifier.

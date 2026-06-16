@@ -16,29 +16,28 @@ import (
 // SignSession tracks a two-round FROST signing exchange for one local party.
 type SignSession struct {
 	mu               sync.Mutex
-	key              *KeyShare
-	sessionID        tss.SessionID
-	log              tss.Logger
-	limits           Limits
-	message          []byte
-	signers          []tss.PartyID
-	context          tss.SigningContext
-	contextHash      []byte
-	derivation       *tss.DerivationResult
-	planHash         []byte
-	commitments      map[tss.PartyID]nonceCommitment
-	partials         map[tss.PartyID]*fed.Scalar
-	partialEnvelopes map[tss.PartyID]tss.Envelope
-	dNonce           []byte
-	eNonce           []byte
-	deltaScalar      *fed.Scalar
-	verifyKey        []byte
-	partialSent      bool
-	completed        bool
-	aborted          bool
-	signature        []byte
-	commitMessage    tss.Envelope
-	guard            *tss.EnvelopeGuard
+	key              *KeyShare                       // Caller-owned long-lived key share used to sign.
+	sessionID        tss.SessionID                   // Signing session ID bound into envelopes and planHash.
+	log              tss.Logger                      // Optional protocol logger.
+	limits           Limits                          // Local fail-closed resource policy.
+	message          []byte                          // Caller message copied into the session and released on abort.
+	signers          []tss.PartyID                   // Canonical signer set participating in this signature.
+	context          tss.SigningContext              // Normalized signing context after path resolution.
+	contextHash      []byte                          // Hash binding context to nonce and partial transcripts.
+	derivation       *tss.DerivationResult           // Resolved child key/path; destroyed if the session aborts.
+	planHash         []byte                          // Digest every signing payload must echo.
+	commitments      map[tss.PartyID]nonceCommitment // Round-1 nonce commitments by signer.
+	partials         map[tss.PartyID]*fed.Scalar     // Validated partial signature scalars by signer.
+	partialEnvelopes map[tss.PartyID]tss.Envelope    // Original partial envelopes retained for blame evidence.
+	dNonce           []byte                          // Local hiding nonce bytes; secret until partial generation.
+	eNonce           []byte                          // Local binding nonce bytes; secret until partial generation.
+	deltaScalar      *fed.Scalar                     // Additive HD shift applied to the local signing share.
+	partialSent      bool                            // Whether this party already emitted its partial signature.
+	completed        bool                            // Terminal success flag after signature aggregation.
+	aborted          bool                            // Terminal failure/destruction flag.
+	signature        []byte                          // Final aggregate Ed25519 signature.
+	commitMessage    tss.Envelope                    // Local round-1 commitment envelope for replay to callers.
+	guard            *tss.EnvelopeGuard              // Transport replay, identity, and policy guard.
 }
 
 type nonceCommitment struct {
@@ -92,6 +91,8 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
+	// Validate the local key against the immutable plan before deriving nonce
+	// material; wrong signer sets or paths must fail without mutating state.
 	signers := slices.Clone(plan.state.signers)
 	if err := plan.validateKey(key, local); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
@@ -117,8 +118,9 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	verifyKey := slices.Clone(plan.state.verificationKey)
 	var deltaScalar *fed.Scalar
+	// The additive shift is the path-derived adjustment to the local secret
+	// share. The public verification key remains derivation.ChildPublicKey.
 	if len(plan.state.derivation.AdditiveShift) > 0 {
 		shift, err := edcurve.ScalarFromCanonical(plan.state.derivation.AdditiveShift)
 		if err != nil {
@@ -194,7 +196,6 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		dNonce:           dBytes,
 		eNonce:           eBytes,
 		deltaScalar:      deltaScalar,
-		verifyKey:        verifyKey,
 		commitMessage:    env,
 		guard:            guard,
 	}
@@ -329,7 +330,7 @@ func (s *SignSession) VerificationKeyBytes() []byte {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return append([]byte(nil), s.verifyKey...)
+	return s.derivation.VerificationKeyBytes()
 }
 
 // Context returns a copy of the signing context bound by the session.

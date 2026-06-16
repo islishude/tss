@@ -165,6 +165,64 @@ func TestDerivationResultEqual(t *testing.T) {
 	}
 }
 
+func TestDerivationResultDestroyClearsBuffers(t *testing.T) {
+	t.Parallel()
+
+	childPublicKey := []byte{1, 2, 3}
+	childChainCode := bytes.Repeat([]byte{4}, 32)
+	requestedPath := DerivationPath{5, 6}
+	resolvedPath := DerivationPath{7, 8}
+	additiveShift := bytes.Repeat([]byte{9}, 32)
+	r := &DerivationResult{
+		Scheme:            DerivationSchemeBIP32Secp256k1,
+		ChildPublicKey:    childPublicKey,
+		ChildChainCode:    childChainCode,
+		RequestedPath:     requestedPath,
+		ResolvedPath:      resolvedPath,
+		Depth:             2,
+		ParentFingerprint: [4]byte{0xaa, 0xbb, 0xcc, 0xdd},
+		ChildNumber:       8,
+		AdditiveShift:     additiveShift,
+	}
+
+	r.Destroy()
+
+	for name, b := range map[string][]byte{
+		"child public key": childPublicKey,
+		"child chain code": childChainCode,
+		"additive shift":   additiveShift,
+	} {
+		for i, v := range b {
+			if v != 0 {
+				t.Fatalf("%s byte %d not cleared: 0x%02x", name, i, v)
+			}
+		}
+	}
+	for name, path := range map[string]DerivationPath{
+		"requested path": requestedPath,
+		"resolved path":  resolvedPath,
+	} {
+		for i, v := range path {
+			if v != 0 {
+				t.Fatalf("%s element %d not cleared: %d", name, i, v)
+			}
+		}
+	}
+	if r.Scheme != "" ||
+		r.ChildPublicKey != nil ||
+		r.ChildChainCode != nil ||
+		r.RequestedPath != nil ||
+		r.ResolvedPath != nil ||
+		r.Depth != 0 ||
+		r.ChildNumber != 0 ||
+		r.AdditiveShift != nil {
+		t.Fatalf("Destroy did not reset result metadata: %#v", r)
+	}
+	if r.ParentFingerprint != ([4]byte{}) {
+		t.Fatalf("Destroy did not reset parent fingerprint: %#v", r.ParentFingerprint)
+	}
+}
+
 func TestDerivationResultWireRoundTrip(t *testing.T) {
 	t.Parallel()
 

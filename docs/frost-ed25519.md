@@ -186,7 +186,7 @@ z_i = d_i + ρ_i·e_i + λ_i·c·(x_i + δ)   mod q
 
 The signing session clears `d_i` and `e_i` immediately after the partial
 payload is constructed. Call `SignSession.Destroy()` when the session is no
-longer needed to clear message copies, partials, shifted verification keys, and
+longer needed to clear message copies, partials, additive-shift scalars, and
 remaining session-owned material on a best-effort basis.
 
 ### Aggregation and Verification

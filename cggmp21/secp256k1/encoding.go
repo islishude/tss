@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"sync/atomic"
@@ -256,7 +255,6 @@ type presignWire struct {
 	PlanHash             []byte                `wire:"17,bytes,len=32"`
 	SecurityParams       SecurityParams        `wire:"18,record"`
 	Derivation           *tss.DerivationResult `wire:"19,record"`
-	VerificationKey      []byte                `wire:"20,bytes,max_bytes=point"`
 }
 
 // WireType returns the canonical wire type identifier for presignWire.
@@ -301,9 +299,6 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	if err := validateDerivationResult(derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
 		return nil, fmt.Errorf("presign derivation result: %w", err)
 	}
-	if !bytes.Equal(w.VerificationKey, derivation.ChildPublicKey) {
-		return nil, errors.New("presign verification key does not match derivation")
-	}
 	p := &Presign{state: &presignState{
 		version:              tss.Version,
 		securityParams:       w.SecurityParams,
@@ -316,7 +311,6 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		context:              w.Context,
 		contextHash:          w.ContextHash,
 		derivation:           derivation,
-		verificationKey:      w.VerificationKey,
 		planHash:             w.PlanHash,
 		publicKey:            w.PublicKey,
 		keygenTranscriptHash: w.KeygenTranscriptHash,

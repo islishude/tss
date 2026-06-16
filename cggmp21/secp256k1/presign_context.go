@@ -6,6 +6,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/transcript"
 )
@@ -90,6 +91,9 @@ func validateDerivationResult(result *tss.DerivationResult, scheme tss.Derivatio
 	}
 	if len(result.AdditiveShift) != 32 {
 		return errors.New("additive shift must be 32 bytes")
+	}
+	if _, err := secp.PointFromBytes(result.ChildPublicKey); err != nil {
+		return fmt.Errorf("invalid child public key: %w", err)
 	}
 	return nil
 }

@@ -127,7 +127,7 @@ the local secret-share scalar encoding. A `SignSession` stores nonce bytes only
 until its round-2 partial payload is constructed; successful partial generation
 and attributable signing failures clear those bytes immediately. `Destroy`
 should still be called after completion or abort to clear message copies,
-partials, shifted verification keys, and any remaining session-owned material.
+partials, additive-shift scalars, and any remaining session-owned material.
 
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point

@@ -34,38 +34,38 @@ var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: thresh
 type ReshareSession struct {
 	mu sync.Mutex
 
-	plan          *ResharePlan
-	oldKey        *KeyShare
-	oldPublicKey  []byte
-	oldChainCode  []byte
-	oldParties    []tss.PartyID
-	dealerParties []tss.PartyID
-	newParties    []tss.PartyID
-	newThreshold  int
-	selfID        tss.PartyID
-	isDealer      bool
-	isReceiver    bool
+	plan          *ResharePlan  // Shared public reshare intent agreed by dealers and receivers.
+	oldKey        *KeyShare     // Caller-owned old share for dealers; nil for receiver-only parties.
+	oldPublicKey  []byte        // Existing parent group public key that must be preserved.
+	oldChainCode  []byte        // Existing HD chain code that must be preserved.
+	oldParties    []tss.PartyID // Canonical old key-holder set.
+	dealerParties []tss.PartyID // Old parties selected to send weighted share contributions.
+	newParties    []tss.PartyID // Canonical target key-holder set.
+	newThreshold  int           // Target signing threshold.
+	selfID        tss.PartyID   // Local party ID for envelope recipient/sender checks.
+	isDealer      bool          // Whether this party sends weighted dealer contributions.
+	isReceiver    bool          // Whether this party receives and assembles a new share.
 
-	cfg            tss.ThresholdConfig
-	log            tss.Logger
-	limits         Limits
-	securityParams SecurityParams
-	planHash       []byte
-	commits        map[tss.PartyID][][]byte
-	shares         map[tss.PartyID]*big.Int
-	completed      bool
-	aborted        bool
-	newShare       *KeyShare
-	confirmations  map[tss.PartyID][]byte
-	ownPoly        []*big.Int
+	cfg            tss.ThresholdConfig      // Local threshold runtime view for the current role.
+	log            tss.Logger               // Optional protocol logger.
+	limits         Limits                   // Local fail-closed resource policy.
+	securityParams SecurityParams           // Cryptographic profile for new auxiliary material.
+	planHash       []byte                   // Digest every reshare payload must echo.
+	commits        map[tss.PartyID][][]byte // Public dealer polynomial commitments by dealer.
+	shares         map[tss.PartyID]*big.Int // Secret dealer contributions received by this receiver.
+	completed      bool                     // Terminal success flag after newShare is confirmed.
+	aborted        bool                     // Terminal failure/destruction flag.
+	newShare       *KeyShare                // New key share produced for receiver participants.
+	confirmations  map[tss.PartyID][]byte   // Reshare confirmation payloads by participant.
+	ownPoly        []*big.Int               // Local weighted dealer polynomial coefficients; secret-bearing.
 
-	newPaillier     *pai.PrivateKey
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare
-	newPaillierPriv []byte
-	newRingPedersen map[tss.PartyID]RingPedersenPublicShare
-	dealerSent      bool
-	pendingShares   map[tss.PartyID]pendingReshareShare
-	guard           *tss.EnvelopeGuard
+	newPaillier     *pai.PrivateKey                         // Fresh local Paillier private key for receiver auxiliary material.
+	newPaillierPubs map[tss.PartyID]PaillierPublicShare     // Validated fresh Paillier public material by new receiver.
+	newPaillierPriv []byte                                  // Serialized fresh Paillier private key persisted into newShare.
+	newRingPedersen map[tss.PartyID]RingPedersenPublicShare // Validated fresh Ring-Pedersen material by new receiver.
+	dealerSent      bool                                    // Whether this dealer has already emitted commitments and shares.
+	pendingShares   map[tss.PartyID]pendingReshareShare     // Early dealer shares buffered until commitments are available.
+	guard           *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
 }
 
 type reshareDealerCommitmentsPayload struct {

@@ -214,6 +214,27 @@ func (r *DerivationResult) Clone() *DerivationResult {
 	return &out
 }
 
+// Destroy clears derivation result buffers and resets metadata in place.
+func (r *DerivationResult) Destroy() {
+	if r == nil {
+		return
+	}
+	clear(r.ChildPublicKey)
+	clear(r.ChildChainCode)
+	clear(r.RequestedPath)
+	clear(r.ResolvedPath)
+	clear(r.AdditiveShift)
+	r.Scheme = ""
+	r.ChildPublicKey = nil
+	r.ChildChainCode = nil
+	r.RequestedPath = nil
+	r.ResolvedPath = nil
+	r.Depth = 0
+	r.ParentFingerprint = [4]byte{}
+	r.ChildNumber = 0
+	r.AdditiveShift = nil
+}
+
 // Equal reports whether r and other are the same derivation result.
 // Both nil receivers compare equal. A nil receiver and a non-nil other
 // are not equal.
@@ -276,6 +297,14 @@ func (r *DerivationResult) MarshalBinary() ([]byte, error) {
 		return nil, errors.New("nil derivation result")
 	}
 	return wire.Marshal(r)
+}
+
+// VerificationKeyBytes returns a copy of ChildPublicKey.
+func (r *DerivationResult) VerificationKeyBytes() []byte {
+	if r == nil {
+		return nil
+	}
+	return slices.Clone(r.ChildPublicKey)
 }
 
 // UnmarshalDerivationResult decodes a canonical derivation result record.

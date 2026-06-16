@@ -21,27 +21,27 @@ const (
 // The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
 	mu           sync.Mutex
-	oldKey       *KeyShare // nil for recipient-only participants
-	oldPublicKey []byte    // original group public key, required for preservation checks
-	chainCode    []byte
-	oldParties   []tss.PartyID // sorted, the dealer set (old key holders)
-	newParties   []tss.PartyID // sorted, the target participant set
-	newThreshold int
-	isRecipient  bool        // true when this participant receives a new share
-	selfID       tss.PartyID // local party ID (for To checks)
-	refreshMode  bool        // true when using zero-constant-term refresh
-	planHash     []byte
+	oldKey       *KeyShare     // Caller-owned old share for dealers; nil for recipient-only participants.
+	oldPublicKey []byte        // Existing parent group public key that must be preserved.
+	chainCode    []byte        // Existing HD chain code that must be preserved.
+	oldParties   []tss.PartyID // Canonical dealer set of old key holders.
+	newParties   []tss.PartyID // Canonical target key-holder set.
+	newThreshold int           // Target signing threshold.
+	isRecipient  bool          // Whether this party receives and assembles a new share.
+	selfID       tss.PartyID   // Local party ID for envelope recipient/sender checks.
+	refreshMode  bool          // True for same-party zero-constant-term refresh.
+	planHash     []byte        // Digest every reshare payload must echo.
 
-	cfg     tss.ThresholdConfig
-	log     tss.Logger
-	limits  Limits
-	commits map[tss.PartyID][][]byte
-	shares  map[tss.PartyID]*fed.Scalar
+	cfg     tss.ThresholdConfig         // Local threshold runtime view for this role.
+	log     tss.Logger                  // Optional protocol logger.
+	limits  Limits                      // Local fail-closed resource policy.
+	commits map[tss.PartyID][][]byte    // Public dealer polynomial commitments by dealer.
+	shares  map[tss.PartyID]*fed.Scalar // Secret dealer contributions received by this receiver.
 
-	completed bool
-	aborted   bool
-	newShare  *KeyShare
-	guard     *tss.EnvelopeGuard
+	completed bool               // Terminal success flag after newShare is available.
+	aborted   bool               // Terminal failure/destruction flag.
+	newShare  *KeyShare          // New key share produced for recipient participants.
+	guard     *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
 }
 
 type reshareCommitmentsPayload struct {

@@ -126,8 +126,10 @@ func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
 	}
 
 	session := &SignSession{
-		message:     v.message,
-		verifyKey:   v.groupPublicKey,
+		message: v.message,
+		derivation: &tss.DerivationResult{
+			ChildPublicKey: v.groupPublicKey,
+		},
 		signers:     v.signers,
 		commitments: commitments,
 	}

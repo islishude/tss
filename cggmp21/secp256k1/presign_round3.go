@@ -273,7 +273,6 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		context:              context,
 		contextHash:          append([]byte(nil), s.contextHash...),
 		derivation:           s.derivation.Clone(),
-		verificationKey:      append([]byte(nil), s.verificationKey...),
 		planHash:             append([]byte(nil), s.planHash...),
 		publicKey:            append([]byte(nil), s.key.state.publicKey...),
 		keygenTranscriptHash: append([]byte(nil), s.key.state.keygenTranscriptHash...),

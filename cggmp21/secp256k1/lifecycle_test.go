@@ -96,6 +96,14 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 		betaDelta:  map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(300)},
 		alphaSigma: map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(400)},
 		betaSigma:  map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(500)},
+		derivation: &tss.DerivationResult{
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey: []byte{0x02, 0x03, 0x04},
+			ChildChainCode: []byte{0x05, 0x06, 0x07},
+			RequestedPath:  tss.DerivationPath{1, 2},
+			ResolvedPath:   tss.DerivationPath{1, 2},
+			AdditiveShift:  []byte{0x08, 0x09, 0x0a},
+		},
 		round1: map[tss.PartyID]presignRound1Payload{
 			2: {Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: []byte{0xcc}},
 		},
@@ -115,12 +123,26 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 	}
 }
 
+func assertDerivationPathCleared(t *testing.T, name string, path tss.DerivationPath) {
+	t.Helper()
+	for i, v := range path {
+		if v != 0 {
+			t.Fatalf("%s element %d not cleared: %d", name, i, v)
+		}
+	}
+}
+
 // TestPresignSession_Destroy_ClearsSecrets verifies that Destroy zeros all
 // secret-bearing scalars, big.Int maps, and round payload data on a manually
 // populated presign session.
 func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	s := newTestPresignSession(t)
+	childPublicKey := s.derivation.ChildPublicKey
+	childChainCode := s.derivation.ChildChainCode
+	requestedPath := s.derivation.RequestedPath
+	resolvedPath := s.derivation.ResolvedPath
+	additiveShift := s.derivation.AdditiveShift
 
 	s.Destroy()
 
@@ -149,6 +171,15 @@ func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
 	// Non-secret cleanup: round1Proofs map cleared, envelope map cleared.
 	testutil.AssertMapCleared(t, s.round1Proofs)
 	testutil.AssertMapCleared(t, s.round1ProofEnvelopes)
+
+	if s.derivation != nil {
+		t.Error("derivation not nil after Destroy")
+	}
+	testutil.AssertBytesCleared(t, childPublicKey)
+	testutil.AssertBytesCleared(t, childChainCode)
+	testutil.AssertBytesCleared(t, additiveShift)
+	assertDerivationPathCleared(t, "requested path", requestedPath)
+	assertDerivationPathCleared(t, "resolved path", resolvedPath)
 
 	// aborted must be true.
 	if !s.aborted {
@@ -195,6 +226,11 @@ func TestSignSession_Destroy_ClearsSecrets(t *testing.T) {
 func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	s := newTestPresignSession(t)
+	childPublicKey := s.derivation.ChildPublicKey
+	childChainCode := s.derivation.ChildChainCode
+	requestedPath := s.derivation.RequestedPath
+	resolvedPath := s.derivation.ResolvedPath
+	additiveShift := s.derivation.AdditiveShift
 
 	s.abort()
 
@@ -217,6 +253,14 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 	testutil.AssertMapCleared(t, s.betaSigma)
 	testutil.AssertMapCleared(t, s.round1)
 	testutil.AssertMapCleared(t, s.round2)
+	if s.derivation != nil {
+		t.Error("derivation not nil after abort")
+	}
+	testutil.AssertBytesCleared(t, childPublicKey)
+	testutil.AssertBytesCleared(t, childChainCode)
+	testutil.AssertBytesCleared(t, additiveShift)
+	assertDerivationPathCleared(t, "requested path", requestedPath)
+	assertDerivationPathCleared(t, "resolved path", resolvedPath)
 }
 
 // TestKeygenSession_Abort_ClearsSecrets verifies that abort clears all
@@ -308,6 +352,11 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	chiShare := fillSecretScalar(t, 0x22)
 	delta := fillSecretScalar(t, 0x33)
 
+	childPublicKey := []byte{0x02, 0x03, 0x04}
+	childChainCode := []byte{0x05, 0x06, 0x07}
+	requestedPath := tss.DerivationPath{1, 2}
+	resolvedPath := tss.DerivationPath{1, 2}
+	additiveShift := []byte{0x08, 0x09, 0x0a}
 	p := &Presign{state: &presignState{
 		consumed: new(atomic.Bool),
 		attempt:  newPresignAttemptBinding(false),
@@ -315,7 +364,12 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 		chiShare: chiShare,
 		delta:    delta,
 		derivation: &tss.DerivationResult{
-			AdditiveShift: []byte{0x01, 0x02, 0x03},
+			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey: childPublicKey,
+			ChildChainCode: childChainCode,
+			RequestedPath:  requestedPath,
+			ResolvedPath:   resolvedPath,
+			AdditiveShift:  additiveShift,
 		},
 	}}
 
@@ -333,7 +387,19 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	if p.state.delta.FixedLen() != 0 {
 		t.Error("delta not zeroed")
 	}
-	testutil.AssertBytesCleared(t, p.state.derivation.AdditiveShift)
+	testutil.AssertBytesCleared(t, childPublicKey)
+	testutil.AssertBytesCleared(t, childChainCode)
+	testutil.AssertBytesCleared(t, additiveShift)
+	assertDerivationPathCleared(t, "requested path", requestedPath)
+	assertDerivationPathCleared(t, "resolved path", resolvedPath)
+	if p.state.derivation.Scheme != "" ||
+		p.state.derivation.ChildPublicKey != nil ||
+		p.state.derivation.ChildChainCode != nil ||
+		p.state.derivation.RequestedPath != nil ||
+		p.state.derivation.ResolvedPath != nil ||
+		p.state.derivation.AdditiveShift != nil {
+		t.Fatal("derivation result metadata not reset after Destroy")
+	}
 }
 
 // TestDestroy_Idempotent verifies that calling Destroy twice does not panic.

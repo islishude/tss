@@ -85,7 +85,7 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 		p.state.verifyShares[0].ChiPoint[0] == verifyShares[0].ChiPoint[0] ||
 		p.state.verifyShares[0].Proof[0] == verifyShares[0].Proof[0] ||
 		p.state.derivation.AdditiveShift[0] != 9 ||
-		p.state.verificationKey[0] == verificationKey[0] {
+		p.state.derivation.ChildPublicKey[0] == verificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")
 	}
 }
