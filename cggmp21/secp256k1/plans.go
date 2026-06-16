@@ -304,7 +304,6 @@ type presignPlanState struct {
 	context         PresignContext
 	contextHash     []byte
 	derivation      *tss.DerivationResult
-	additiveShift   []byte
 	verificationKey []byte
 }
 
@@ -363,7 +362,6 @@ func NewPresignPlan(option PresignPlanOption) (*PresignPlan, error) {
 		context:         ctx.Clone(),
 		contextHash:     slices.Clone(contextHash),
 		derivation:      derivation.Clone(),
-		additiveShift:   slices.Clone(derivation.AdditiveShift),
 		verificationKey: slices.Clone(derivation.ChildPublicKey),
 	}, limits: limits, securityParams: securityParams}, nil
 }
@@ -464,7 +462,6 @@ func (p *PresignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("verification_key", p.state.verificationKey)
-	t.AppendBytes("additive_shift", p.state.additiveShift)
 	appendSecurityParamsTranscript(t, p.securityParams)
 	return t.Sum(), nil
 }
@@ -566,9 +563,6 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	}
 	if !slices.Equal(derivation.ResolvedPath, presign.state.derivation.ResolvedPath) {
 		return nil, invalidPlanConfig(key.state.party, errors.New("presign resolved path mismatch"))
-	}
-	if !bytes.Equal(derivation.AdditiveShift, presign.state.additiveShift) {
-		return nil, invalidPlanConfig(key.state.party, errors.New("presign additive shift mismatch"))
 	}
 	req := SignRequest{
 		Context:             normalizedContext.Clone(),

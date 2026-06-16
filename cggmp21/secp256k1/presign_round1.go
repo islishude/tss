@@ -45,7 +45,6 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	ctx := plan.state.context.Clone()
 	contextHash := slices.Clone(plan.state.contextHash)
 	derivation := plan.state.derivation.Clone()
-	additiveShift := slices.Clone(plan.state.additiveShift)
 	verificationKey := slices.Clone(plan.state.verificationKey)
 	paillierKey, err := key.paillierPrivate()
 	if err != nil {
@@ -167,7 +166,6 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		context:              ctx,
 		contextHash:          contextHash,
 		derivation:           derivation,
-		additiveShift:        additiveShift,
 		verificationKey:      verificationKey,
 		planHash:             slices.Clone(planHash),
 		paillier:             paillierKey,

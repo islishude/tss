@@ -309,12 +309,14 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	delta := fillSecretScalar(t, 0x33)
 
 	p := &Presign{state: &presignState{
-		consumed:      new(atomic.Bool),
-		attempt:       newPresignAttemptBinding(false),
-		kShare:        kShare,
-		chiShare:      chiShare,
-		delta:         delta,
-		additiveShift: []byte{0x01, 0x02, 0x03},
+		consumed: new(atomic.Bool),
+		attempt:  newPresignAttemptBinding(false),
+		kShare:   kShare,
+		chiShare: chiShare,
+		delta:    delta,
+		derivation: &tss.DerivationResult{
+			AdditiveShift: []byte{0x01, 0x02, 0x03},
+		},
 	}}
 
 	p.Destroy()
@@ -331,7 +333,7 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	if p.state.delta.FixedLen() != 0 {
 		t.Error("delta not zeroed")
 	}
-	testutil.AssertBytesCleared(t, p.state.additiveShift)
+	testutil.AssertBytesCleared(t, p.state.derivation.AdditiveShift)
 }
 
 // TestDestroy_Idempotent verifies that calling Destroy twice does not panic.

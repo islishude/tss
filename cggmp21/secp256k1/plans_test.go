@@ -224,7 +224,6 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 			ChildPublicKey: []byte{0x02, 0x03},
 			ChildChainCode: []byte{0x04},
 		},
-		additiveShift:   []byte{0x30, 0x31},
 		verificationKey: []byte{0x02, 0x03},
 	}}
 	presignParties := presign.Parties()

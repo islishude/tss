@@ -99,7 +99,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		Signers:              slices.Clone(s.signers),
 		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
-		AdditiveShift:        slices.Clone(s.additiveShift),
+		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
 		PublicKey:            slices.Clone(s.key.state.publicKey),
 		KeygenTranscriptHash: slices.Clone(s.key.state.keygenTranscriptHash),
 		PartiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
@@ -160,8 +160,8 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	chiShare.Mod(chiShare, order)
 	mtaSum := new(big.Int).Sub(chiShare, new(big.Int).Mul(kShare, xBar))
 	mtaSum.Mod(mtaSum, order)
-	if len(s.additiveShift) > 0 {
-		shift, err := secp.ScalarFromBytesAllowZero(s.additiveShift)
+	if len(s.derivation.AdditiveShift) > 0 {
+		shift, err := secp.ScalarFromBytesAllowZero(s.derivation.AdditiveShift)
 		if err != nil {
 			return nil, err
 		}
@@ -217,7 +217,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		Signers:              slices.Clone(s.signers),
 		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
-		AdditiveShift:        slices.Clone(s.additiveShift),
+		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
 		PublicKey:            slices.Clone(s.key.state.publicKey),
 		KeygenTranscriptHash: slices.Clone(s.key.state.keygenTranscriptHash),
 		PartiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
@@ -273,7 +273,6 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		context:              context,
 		contextHash:          append([]byte(nil), s.contextHash...),
 		derivation:           s.derivation.Clone(),
-		additiveShift:        append([]byte(nil), s.additiveShift...),
 		verificationKey:      append([]byte(nil), s.verificationKey...),
 		planHash:             append([]byte(nil), s.planHash...),
 		publicKey:            append([]byte(nil), s.key.state.publicKey...),
@@ -357,7 +356,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 	t.AppendBytes("session_id", s.sessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
-	t.AppendBytes("additive_shift", s.additiveShift)
+	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
 	t.AppendBytes("public_key", s.key.state.publicKey)
 	t.AppendBytes("keygen_transcript_hash", s.key.state.keygenTranscriptHash)
 	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.parties, partySetHashLabel))
@@ -383,7 +382,7 @@ func (s *PresignSession) round1Echo() []byte {
 	t.AppendBytes("session_id", s.sessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
-	t.AppendBytes("additive_shift", s.additiveShift)
+	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
 	for _, id := range s.signers {
 		p := s.round1[id]
 		t.AppendUint32("signer", id)

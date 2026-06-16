@@ -128,7 +128,6 @@ type presignState struct {
 	context              PresignContext
 	contextHash          []byte
 	derivation           *tss.DerivationResult
-	additiveShift        []byte
 	verificationKey      []byte
 	planHash             []byte
 	publicKey            []byte
@@ -306,7 +305,6 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 		TranscriptHash:       p.state.transcriptHash,
 		Context:              p.state.context,
 		ContextHash:          p.state.contextHash,
-		AdditiveShift:        p.state.additiveShift,
 		PlanHash:             p.state.planHash,
 		Consumed:             consumed,
 		PublicKey:            p.state.publicKey,
@@ -314,14 +312,7 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 		PartiesHash:          p.state.partiesHash,
 		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
 		SecurityParams:       p.state.securityParams,
-		DerivationScheme:     string(p.state.derivation.Scheme),
-		ChildPublicKey:       p.state.derivation.ChildPublicKey,
-		ChildChainCode:       p.state.derivation.ChildChainCode,
-		RequestedPath:        p.state.derivation.RequestedPath,
-		ResolvedPath:         p.state.derivation.ResolvedPath,
-		DerivationDepth:      p.state.derivation.Depth,
-		ParentFingerprint:    p.state.derivation.ParentFingerprint[:],
-		ChildNumber:          p.state.derivation.ChildNumber,
+		Derivation:           p.state.derivation,
 		VerificationKey:      p.state.verificationKey,
 	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
@@ -342,7 +333,6 @@ func (p *Presign) ID() []byte {
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("verification_key", p.state.verificationKey)
-	t.AppendBytes("additive_shift", p.state.additiveShift)
 	t.AppendBytes("plan_hash", p.state.planHash)
 	t.AppendBytes("public_key", p.state.publicKey)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
@@ -434,13 +424,10 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if err := validateDerivationResult(p.state.derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
 		return fmt.Errorf("invalid presign derivation: %w", err)
 	}
-	if len(p.state.additiveShift) > 0 {
-		if _, err := secp.ScalarFromBytesAllowZero(p.state.additiveShift); err != nil {
+	if len(p.state.derivation.AdditiveShift) > 0 {
+		if _, err := secp.ScalarFromBytesAllowZero(p.state.derivation.AdditiveShift); err != nil {
 			return fmt.Errorf("invalid additive shift: %w", err)
 		}
-	}
-	if !bytes.Equal(p.state.additiveShift, p.state.derivation.AdditiveShift) {
-		return errors.New("presign additive shift does not match derivation")
 	}
 	if !bytes.Equal(p.state.verificationKey, p.state.derivation.ChildPublicKey) {
 		return errors.New("presign verification key does not match derivation")
@@ -516,7 +503,9 @@ func (p *Presign) Destroy() {
 	if p.state.delta != nil {
 		p.state.delta.Destroy()
 	}
-	clear(p.state.additiveShift)
+	if p.state.derivation != nil {
+		clear(p.state.derivation.AdditiveShift)
+	}
 	clear(p.state.planHash)
 }
 
@@ -534,7 +523,6 @@ type PresignSession struct {
 	context         PresignContext
 	contextHash     []byte
 	derivation      *tss.DerivationResult
-	additiveShift   []byte
 	verificationKey []byte
 	planHash        []byte
 	paillier        *pai.PrivateKey

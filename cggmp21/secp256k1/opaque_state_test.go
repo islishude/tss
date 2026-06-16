@@ -65,7 +65,6 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	p.state.derivation.RequestedPath = tss.DerivationPath{1, 2}
 	p.state.derivation.ResolvedPath = tss.DerivationPath{1, 2}
 	p.state.derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
-	p.state.additiveShift = bytes.Repeat([]byte{9}, 32)
 
 	signers := p.Signers()
 	signers[0] = 99

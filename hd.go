@@ -7,9 +7,14 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	"github.com/islishude/tss/internal/wire"
 )
 
-const signingContextWireType = "tss.signing-context"
+const (
+	signingContextWireType   = "tss.signing-context"
+	derivationResultWireType = "tss.derivation-result"
+)
 
 // HardenedKeyStart is the first index reserved for hardened BIP32 derivation.
 // Online signing APIs currently accept only indices below this value.
@@ -184,15 +189,15 @@ func (r DerivationRequest) Clone() DerivationRequest {
 
 // DerivationResult is the result of resolving a public child-key derivation.
 type DerivationResult struct {
-	Scheme            DerivationScheme `json:"scheme"`
-	ChildPublicKey    []byte           `json:"child_public_key"`
-	ChildChainCode    []byte           `json:"child_chain_code"`
-	RequestedPath     DerivationPath   `json:"requested_path"`
-	ResolvedPath      DerivationPath   `json:"resolved_path"`
-	Depth             uint8            `json:"depth"`
-	ParentFingerprint [4]byte          `json:"parent_fingerprint"`
-	ChildNumber       uint32           `json:"child_number"`
-	AdditiveShift     []byte           `json:"additive_shift,omitempty"`
+	Scheme            DerivationScheme `json:"scheme" wire:"1,string"`
+	ChildPublicKey    []byte           `json:"child_public_key" wire:"2,bytes"`
+	ChildChainCode    []byte           `json:"child_chain_code" wire:"3,bytes,len=32"`
+	RequestedPath     DerivationPath   `json:"requested_path" wire:"4,u32list"`
+	ResolvedPath      DerivationPath   `json:"resolved_path" wire:"5,u32list"`
+	Depth             uint8            `json:"depth" wire:"6,u8"`
+	ParentFingerprint [4]byte          `json:"parent_fingerprint" wire:"7,bytes,len=4"`
+	ChildNumber       uint32           `json:"child_number" wire:"8,u32"`
+	AdditiveShift     []byte           `json:"additive_shift,omitempty" wire:"9,bytes"`
 }
 
 // Clone returns a caller-owned copy of the derivation result.
@@ -225,6 +230,64 @@ func (r *DerivationResult) Equal(other *DerivationResult) bool {
 		r.ParentFingerprint == other.ParentFingerprint &&
 		r.ChildNumber == other.ChildNumber &&
 		bytes.Equal(r.AdditiveShift, other.AdditiveShift)
+}
+
+// WireType returns the canonical wire type identifier for DerivationResult.
+func (DerivationResult) WireType() string { return derivationResultWireType }
+
+// WireVersion returns the wire format version for DerivationResult.
+func (DerivationResult) WireVersion() uint16 { return Version }
+
+// Validate checks structural invariants for a derivation result.
+func (r *DerivationResult) Validate() error {
+	if r == nil {
+		return errors.New("nil derivation result")
+	}
+	if r.Scheme == "" {
+		return errors.New("missing derivation scheme")
+	}
+	if len(r.ChildPublicKey) == 0 {
+		return errors.New("missing child public key")
+	}
+	if len(r.ChildChainCode) != 32 {
+		return ErrInvalidChainCodeLength
+	}
+	if err := r.RequestedPath.ValidateNonHardened(); err != nil {
+		return err
+	}
+	if err := r.ResolvedPath.ValidateNonHardened(); err != nil {
+		return err
+	}
+	if len(r.RequestedPath) != len(r.ResolvedPath) {
+		return errors.New("requested and resolved path depth mismatch")
+	}
+	if r.Depth != uint8(len(r.ResolvedPath)) {
+		return errors.New("derivation depth mismatch")
+	}
+	if len(r.AdditiveShift) != 0 && len(r.AdditiveShift) != 32 {
+		return errors.New("additive shift must be empty or 32 bytes")
+	}
+	return nil
+}
+
+// MarshalBinary encodes the derivation result using the object-level wire codec.
+func (r *DerivationResult) MarshalBinary() ([]byte, error) {
+	if r == nil {
+		return nil, errors.New("nil derivation result")
+	}
+	return wire.Marshal(r)
+}
+
+// UnmarshalDerivationResult decodes a canonical derivation result record.
+func UnmarshalDerivationResult(in []byte) (*DerivationResult, error) {
+	if len(in) == 0 {
+		return nil, errors.New("empty derivation result")
+	}
+	var r DerivationResult
+	if err := wire.Unmarshal(in, &r); err != nil {
+		return nil, err
+	}
+	return &r, nil
 }
 
 // SigningContext binds a signing request to key, chain, derivation, policy, and

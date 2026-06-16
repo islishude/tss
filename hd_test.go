@@ -1,9 +1,12 @@
 package tss
 
 import (
+	"bytes"
 	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/islishude/tss/internal/wire"
 )
 
 func TestDerivationPathParseStringRoundTrip(t *testing.T) {
@@ -159,5 +162,293 @@ func TestDerivationResultEqual(t *testing.T) {
 	cloned := a.Clone()
 	if !a.Equal(cloned) {
 		t.Fatal("Clone should produce an equal result")
+	}
+}
+
+func TestDerivationResultWireRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	makeResult := func() *DerivationResult {
+		return &DerivationResult{
+			Scheme:            DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey:    make([]byte, 33),
+			ChildChainCode:    make([]byte, 32),
+			RequestedPath:     DerivationPath{0, 1, 2},
+			ResolvedPath:      DerivationPath{0, 1, 2},
+			Depth:             3,
+			ParentFingerprint: [4]byte{0xde, 0xad, 0xbe, 0xef},
+			ChildNumber:       2,
+			AdditiveShift:     make([]byte, 32),
+		}
+	}
+
+	t.Run("full result with additive shift", func(t *testing.T) {
+		t.Parallel()
+		r := makeResult()
+		raw, err := r.MarshalBinary()
+		if err != nil {
+			t.Fatalf("MarshalBinary: %v", err)
+		}
+		decoded, err := UnmarshalDerivationResult(raw)
+		if err != nil {
+			t.Fatalf("UnmarshalDerivationResult: %v", err)
+		}
+		if !decoded.Equal(r) {
+			t.Fatal("round-trip mismatch")
+		}
+	})
+
+	t.Run("master path", func(t *testing.T) {
+		t.Parallel()
+		r := makeResult()
+		r.RequestedPath = nil
+		r.ResolvedPath = nil
+		r.Depth = 0
+		raw, err := r.MarshalBinary()
+		if err != nil {
+			t.Fatalf("MarshalBinary: %v", err)
+		}
+		decoded, err := UnmarshalDerivationResult(raw)
+		if err != nil {
+			t.Fatalf("UnmarshalDerivationResult: %v", err)
+		}
+		if !decoded.Equal(r) {
+			t.Fatal("round-trip mismatch for master path")
+		}
+	})
+
+	t.Run("without additive shift", func(t *testing.T) {
+		t.Parallel()
+		r := makeResult()
+		r.AdditiveShift = nil
+		raw, err := r.MarshalBinary()
+		if err != nil {
+			t.Fatalf("MarshalBinary: %v", err)
+		}
+		decoded, err := UnmarshalDerivationResult(raw)
+		if err != nil {
+			t.Fatalf("UnmarshalDerivationResult: %v", err)
+		}
+		if !decoded.Equal(r) {
+			t.Fatal("round-trip mismatch without additive shift")
+		}
+	})
+
+	t.Run("ed25519 scheme", func(t *testing.T) {
+		t.Parallel()
+		r := makeResult()
+		r.Scheme = DerivationSchemeEd25519KhovratovichLaw
+		r.ChildPublicKey = make([]byte, 32)
+		r.AdditiveShift = nil
+		raw, err := r.MarshalBinary()
+		if err != nil {
+			t.Fatalf("MarshalBinary: %v", err)
+		}
+		decoded, err := UnmarshalDerivationResult(raw)
+		if err != nil {
+			t.Fatalf("UnmarshalDerivationResult: %v", err)
+		}
+		if !decoded.Equal(r) {
+			t.Fatal("round-trip mismatch for ed25519")
+		}
+	})
+}
+
+func TestDerivationResultMarshalDeterministic(t *testing.T) {
+	t.Parallel()
+
+	r := &DerivationResult{
+		Scheme:            DerivationSchemeBIP32Secp256k1,
+		ChildPublicKey:    make([]byte, 33),
+		ChildChainCode:    make([]byte, 32),
+		RequestedPath:     DerivationPath{0, 1},
+		ResolvedPath:      DerivationPath{0, 1},
+		Depth:             2,
+		ParentFingerprint: [4]byte{0xaa, 0xbb, 0xcc, 0xdd},
+		ChildNumber:       1,
+		AdditiveShift:     make([]byte, 32),
+	}
+	first, err := r.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := r.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, second) {
+		t.Fatal("derivation result encoding is not deterministic")
+	}
+	decoded, err := UnmarshalDerivationResult(first)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reencoded, err := decoded.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(first, reencoded) {
+		t.Fatal("re-encoded derivation result differs from original")
+	}
+}
+
+func TestDerivationResultRejectsMalformed(t *testing.T) {
+	t.Parallel()
+
+	t.Run("empty input", func(t *testing.T) {
+		t.Parallel()
+		if _, err := UnmarshalDerivationResult(nil); err == nil {
+			t.Fatal("nil input accepted")
+		}
+		if _, err := UnmarshalDerivationResult([]byte{}); err == nil {
+			t.Fatal("empty input accepted")
+		}
+	})
+
+	t.Run("garbage bytes", func(t *testing.T) {
+		t.Parallel()
+		if _, err := UnmarshalDerivationResult([]byte("not a TLV message")); err == nil {
+			t.Fatal("garbage input accepted")
+		}
+	})
+
+	t.Run("wrong wire type", func(t *testing.T) {
+		t.Parallel()
+		// Build a valid TLV with the wrong type.
+		raw, err := wire.MarshalFields(Version, "tss.wrong-type", nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := UnmarshalDerivationResult(raw); err == nil {
+			t.Fatal("wrong wire type accepted")
+		}
+	})
+}
+
+func TestDerivationResultValidate(t *testing.T) {
+	t.Parallel()
+
+	valid := func() *DerivationResult {
+		return &DerivationResult{
+			Scheme:            DerivationSchemeBIP32Secp256k1,
+			ChildPublicKey:    make([]byte, 33),
+			ChildChainCode:    make([]byte, 32),
+			RequestedPath:     DerivationPath{0, 1},
+			ResolvedPath:      DerivationPath{0, 1},
+			Depth:             2,
+			ParentFingerprint: [4]byte{1, 2, 3, 4},
+			ChildNumber:       1,
+			AdditiveShift:     make([]byte, 32),
+		}
+	}
+
+	t.Run("nil receiver", func(t *testing.T) {
+		t.Parallel()
+		if (*DerivationResult)(nil).Validate() == nil {
+			t.Fatal("nil receiver accepted")
+		}
+	})
+
+	t.Run("missing scheme", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.Scheme = ""
+		if r.Validate() == nil {
+			t.Fatal("missing scheme accepted")
+		}
+	})
+
+	t.Run("missing child public key", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.ChildPublicKey = nil
+		if r.Validate() == nil {
+			t.Fatal("missing child public key accepted")
+		}
+	})
+
+	t.Run("wrong chain code length", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.ChildChainCode = make([]byte, 16)
+		if r.Validate() == nil {
+			t.Fatal("wrong chain code length accepted")
+		}
+	})
+
+	t.Run("path depth mismatch", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.RequestedPath = DerivationPath{0, 1, 2}
+		if r.Validate() == nil {
+			t.Fatal("path depth mismatch accepted")
+		}
+	})
+
+	t.Run("depth field mismatch", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.Depth = 99
+		if r.Validate() == nil {
+			t.Fatal("depth field mismatch accepted")
+		}
+	})
+
+	t.Run("wrong additive shift length", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.AdditiveShift = make([]byte, 16)
+		if r.Validate() == nil {
+			t.Fatal("wrong additive shift length accepted")
+		}
+	})
+
+	t.Run("hardened index in path", func(t *testing.T) {
+		t.Parallel()
+		r := valid()
+		r.RequestedPath = DerivationPath{HardenedKeyStart}
+		r.ResolvedPath = DerivationPath{HardenedKeyStart}
+		r.Depth = 1
+		if r.Validate() == nil {
+			t.Fatal("hardened index in path accepted")
+		}
+	})
+}
+
+func TestDerivationResultMarshalBinaryNil(t *testing.T) {
+	t.Parallel()
+	if _, err := (*DerivationResult)(nil).MarshalBinary(); err == nil {
+		t.Fatal("nil MarshalBinary accepted")
+	}
+}
+
+func TestDerivationResultCloneRoundTripViaWire(t *testing.T) {
+	t.Parallel()
+	original := &DerivationResult{
+		Scheme:            DerivationSchemeBIP32Secp256k1,
+		ChildPublicKey:    []byte{2, 3, 5, 7, 11},
+		ChildChainCode:    bytes.Repeat([]byte{0xcc}, 32),
+		RequestedPath:     DerivationPath{44, 0, 0},
+		ResolvedPath:      DerivationPath{44, 0, 0},
+		Depth:             3,
+		ParentFingerprint: [4]byte{0xa, 0xb, 0xc, 0xd},
+		ChildNumber:       0,
+		AdditiveShift:     bytes.Repeat([]byte{0xaa}, 32),
+	}
+	raw, err := original.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded, err := UnmarshalDerivationResult(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cloned := decoded.Clone()
+	if !cloned.Equal(decoded) {
+		t.Fatal("clone after wire round-trip differs")
+	}
+	cloned.ChildPublicKey[0] ^= 0xff
+	if cloned.Equal(decoded) {
+		t.Fatal("clone should not alias decoded result")
 	}
 }

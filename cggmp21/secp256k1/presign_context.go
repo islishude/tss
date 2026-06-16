@@ -94,29 +94,6 @@ func validateDerivationResult(result *tss.DerivationResult, scheme tss.Derivatio
 	return nil
 }
 
-func derivationResultFromWire(scheme tss.DerivationScheme, childPublicKey, childChainCode []byte, requestedPath, resolvedPath []uint32, depth uint8, parentFingerprint []byte, childNumber uint32, additiveShift []byte) (*tss.DerivationResult, error) {
-	if len(parentFingerprint) != 4 {
-		return nil, errors.New("parent fingerprint must be 4 bytes")
-	}
-	var fp [4]byte
-	copy(fp[:], parentFingerprint)
-	result := &tss.DerivationResult{
-		Scheme:            scheme,
-		ChildPublicKey:    slices.Clone(childPublicKey),
-		ChildChainCode:    slices.Clone(childChainCode),
-		RequestedPath:     tss.DerivationPath(requestedPath).Clone(),
-		ResolvedPath:      tss.DerivationPath(resolvedPath).Clone(),
-		Depth:             depth,
-		ParentFingerprint: fp,
-		ChildNumber:       childNumber,
-		AdditiveShift:     slices.Clone(additiveShift),
-	}
-	if err := validateDerivationResult(result, scheme); err != nil {
-		return nil, err
-	}
-	return result, nil
-}
-
 func appendDerivationResultTranscript(t *transcript.Builder, result *tss.DerivationResult) {
 	if result == nil {
 		t.AppendString("derivation_scheme", "")
