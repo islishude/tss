@@ -164,25 +164,14 @@ coverage-check: ## Enforce per-area coverage thresholds; exits non-zero on viola
 # Benchmarks
 # -----------------------------------------------------------------------------
 
-BENCHTIME ?= 1s
-BENCHCOUNT ?= 5
+BENCHTIME ?= 10s
+BENCHCOUNT ?= 1
 BENCH_PARALLEL ?= $(LOGICAL_CPUS)
 BENCH_TIMEOUT ?= 1h
 
 .PHONY: bench
-bench: ## Run lightweight benchmarks (frost, paillier; no build tags).
-	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) ./frost/ed25519 ./internal/paillier
-
-.PHONY: bench-tier1
-bench-tier1: ## Run tier1 benchmarks (ZK proofs with production parameters).
-	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) -tags='tier1' ./internal/zk/paillier
-
-.PHONY: bench-integration
-bench-integration: ## Run integration-level benchmarks (CGGMP21 full keygen/presign/sign).
-	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) -tags='integration' ./cggmp21/secp256k1
-
-.PHONY: bench-all
-bench-all: bench bench-tier1 bench-integration ## Run all benchmarks.
+bench: ## Run integration-level benchmarks
+	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) -tags='tier1 integration' ./...
 
 # -----------------------------------------------------------------------------
 # Golden files & test vectors

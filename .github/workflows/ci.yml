@@ -112,8 +112,7 @@ jobs:
         with:
           go-version: stable
 
-      - name: Check Benchmark correctly
-        run: go test -run=^$ -tags 'integration slowcrypto stress tier1' -bench '^Benchmark' ./...
+      - run: make bench
 
   test-fuzzing:
     name: Test Fuzzing (${{ matrix.os }})
