@@ -93,7 +93,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 
 	// Build and locally verify the exact outbound partial before touching the
 	// durable store. A malformed candidate must not consume the presign.
-	candidate, err := buildSignAttemptRecord(key, presign, sessionID, digest32, contextHash, planHash, lowS, guard, limits)
+	candidate, err := buildSignAttemptRecord(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, guard, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -143,7 +143,7 @@ func signAttemptConsumedError(err error) bool {
 		errors.Is(err, ErrSignAttemptNonDeterminism)
 }
 
-func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
+func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
 	kShare, err := secpScalarFromSecret(presign.state.kShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -236,7 +236,7 @@ func buildSignAttemptRecord(key *KeyShare, presign *Presign, sessionID tss.Sessi
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	validationSession, _, err := signSessionFromAttempt(context.Background(), key, presign, record, nil, guard, DefaultSignAttemptStoreTimeout, limits)
+	validationSession, _, err := signSessionFromAttempt(ctx, key, presign, record, nil, guard, DefaultSignAttemptStoreTimeout, limits)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("local sign partial self-verification failed: %w", err)
 	}
@@ -649,7 +649,7 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	s.attempt = completed.Clone()
 	s.signature = &Signature{R: slices.Clone(signature.R), S: slices.Clone(signature.S), RecoveryID: signature.RecoveryID}
 	s.completed = true
-	s.log.Info(context.Background(), "signing complete",
+	s.log.Info(ctx, "signing complete",
 		"party_id", s.key.state.party,
 		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
 	)
