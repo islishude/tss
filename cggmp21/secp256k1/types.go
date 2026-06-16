@@ -184,7 +184,10 @@ func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare, l
 }
 
 // Signature is a secp256k1 ECDSA signature encoded as r and s scalars.
+// RecoveryID is the compact recovery id in [0,3]. Chain-specific encodings
+// such as Ethereum v/yParity should be derived outside this library.
 type Signature struct {
-	R []byte `json:"r"`
-	S []byte `json:"s"`
+	R          []byte `json:"r"`
+	S          []byte `json:"s"`
+	RecoveryID uint8  `json:"recovery_id"`
 }

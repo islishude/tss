@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/rand"
 	"io"
 	"math/big"
@@ -21,6 +22,13 @@ var orderBytes = [32]byte{
 // Order returns the secp256k1 subgroup order.
 func Order() *big.Int {
 	return new(big.Int).SetBytes(orderBytes[:])
+}
+
+// XCoordGTEOrder reports whether the 32-byte big-endian X coordinate is greater than
+// or equal to the secp256k1 subgroup order n. This is used to compute the ECDSA
+// recovery ID bit 1, which signals R.X >= n to the recovery function.
+func XCoordGTEOrder(x32 []byte) bool {
+	return bytes.Compare(x32, orderBytes[:]) >= 0
 }
 
 // ScalarBaseMult returns k*G modulo the subgroup order.

@@ -343,7 +343,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	}
 	s.partials[key.state.party] = partial
 	if record.Completed {
-		sig := &Signature{R: slices.Clone(record.SignatureR), S: slices.Clone(record.SignatureS)}
+		sig := &Signature{R: slices.Clone(record.SignatureR), S: slices.Clone(record.SignatureS), RecoveryID: record.SignatureRecoveryID}
 		if !VerifyDigest(verifyKey, record.Digest, sig) {
 			return nil, nil, fmt.Errorf("%w: stored signature verification failed", ErrSignAttemptCorrupt)
 		}
@@ -523,7 +523,11 @@ func (s *SignSession) Signature() (*Signature, bool) {
 	if s == nil || !s.completed {
 		return nil, false
 	}
-	return &Signature{R: append([]byte(nil), s.signature.R...), S: append([]byte(nil), s.signature.S...)}, true
+	return &Signature{
+		R:          slices.Clone(s.signature.R),
+		S:          slices.Clone(s.signature.S),
+		RecoveryID: s.signature.RecoveryID,
+	}, true
 }
 
 func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialPayload) []tss.EvidenceField {
@@ -593,9 +597,17 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	if sigS.Sign() == 0 {
 		return errors.New("zero ECDSA s")
 	}
+	sWasNegated := false
 	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.Order()), 1)) > 0 {
 		sigS.Sub(secp.Order(), sigS)
+		sWasNegated = true
 	}
+
+	recoveryID, err := recoveryIDFromPresignR(s.presign.state.r, sWasNegated)
+	if err != nil {
+		return err
+	}
+
 	r, err := secp.ScalarFromBytes(s.presign.state.littleR)
 	if err != nil {
 		return err
@@ -614,7 +626,7 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	if s.store == nil {
 		return errors.New("sign attempt store unavailable during completion")
 	}
-	signature := Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes()}
+	signature := Signature{R: r.Bytes(), S: secp.ScalarFromBigInt(sigS).Bytes(), RecoveryID: recoveryID}
 	storeCtx, cancel := durableStoreContext(ctx, s.storeTTL)
 	defer cancel()
 	completed, err := s.store.CompleteSignAttempt(storeCtx, SignAttemptResult{
@@ -627,14 +639,15 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	}
 	if !s.attempt.SameAttempt(completed) || !completed.Completed ||
 		!bytes.Equal(completed.SignatureR, signature.R) ||
-		!bytes.Equal(completed.SignatureS, signature.S) {
+		!bytes.Equal(completed.SignatureS, signature.S) ||
+		completed.SignatureRecoveryID != signature.RecoveryID {
 		return fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
 	}
 	if err := validateSignAttemptRecordWithLimits(completed, s.limits); err != nil {
 		return err
 	}
 	s.attempt = completed.Clone()
-	s.signature = &Signature{R: slices.Clone(signature.R), S: slices.Clone(signature.S)}
+	s.signature = &Signature{R: slices.Clone(signature.R), S: slices.Clone(signature.S), RecoveryID: signature.RecoveryID}
 	s.completed = true
 	s.log.Info(context.Background(), "signing complete",
 		"party_id", s.key.state.party,
