@@ -38,8 +38,8 @@ func generatePaillierKey(ctx context.Context, reader io.Reader, bits int) (*pai.
 // VerificationShare is a caller-owned snapshot of one participant public ECDSA
 // verification share.
 type VerificationShare struct {
-	Party     tss.PartyID `json:"party"`
-	PublicKey []byte      `json:"public_key"`
+	Party     tss.PartyID `json:"party" wire:"1,u32"`
+	PublicKey []byte      `json:"public_key" wire:"2,bytes,max_bytes=point"`
 }
 
 // Clone returns a deep copy of VerificationShare
@@ -53,9 +53,9 @@ func (v VerificationShare) Clone() VerificationShare {
 // PaillierPublicShare is a caller-owned snapshot of a participant Paillier
 // public key and proof.
 type PaillierPublicShare struct {
-	Party     tss.PartyID `json:"party"`
-	PublicKey []byte      `json:"public_key"`
-	Proof     []byte      `json:"proof"`
+	Party     tss.PartyID `json:"party" wire:"1,u32"`
+	PublicKey []byte      `json:"public_key" wire:"2,bytes,max_bytes=paillier_public_key"`
+	Proof     []byte      `json:"proof" wire:"3,bytes,max_bytes=zk_proof"`
 }
 
 // Clone returns a deep copy of the PaillierPublicShare.
@@ -90,9 +90,9 @@ func (s SignVerifyShare) Clone() SignVerifyShare {
 // RingPedersenPublicShare is a caller-owned snapshot of a participant
 // Ring-Pedersen parameters and proof.
 type RingPedersenPublicShare struct {
-	Party  tss.PartyID `json:"party"`
-	Params []byte      `json:"params"`
-	Proof  []byte      `json:"proof"`
+	Party  tss.PartyID `json:"party" wire:"1,u32"`
+	Params []byte      `json:"params" wire:"2,bytes,max_bytes=ring_pedersen_params"`
+	Proof  []byte      `json:"proof" wire:"3,bytes,max_bytes=paillier_proof"`
 }
 
 // Clone returns a deep copy of the RingPedersenPublicShare.
@@ -117,7 +117,6 @@ type KeyShare struct {
 }
 
 type keyShareState struct {
-	version                uint16                    // Canonical private wire version of this key-share record.
 	securityParams         SecurityParams            // Cryptographic profile used to create this share.
 	party                  tss.PartyID               // Local owner of the secret signing share.
 	threshold              int                       // Number of signers required for CGGMP21 signing.
@@ -142,7 +141,7 @@ type keyShareState struct {
 	keygenTranscriptHash   []byte                    // Transcript hash of the completed keygen or reshare confirmation.
 	logCiphertext          []byte                    // Public ciphertext used by auxiliary logarithm proofs.
 	logProof               []byte                    // Public proof for the auxiliary logarithm statement.
-	keygenConfirmations    [][]byte                  // Canonical confirmation payloads proving every party accepted the keygen.
+	keygenConfirmations    []*KeygenConfirmation     // Confirmation set proving every party accepted the keygen.
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer

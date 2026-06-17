@@ -36,7 +36,7 @@ func (k *KeyShare) Version() uint16 {
 	if k == nil || k.state == nil {
 		return 0
 	}
-	return k.state.version
+	return tss.Version
 }
 
 // Threshold returns the signing threshold.
@@ -211,11 +211,11 @@ func (k *KeyShare) LogProofBytes() []byte {
 }
 
 // KeygenConfirmations returns a deep copy of the keygen confirmation set.
-func (k *KeyShare) KeygenConfirmations() [][]byte {
+func (k *KeyShare) KeygenConfirmations() []*KeygenConfirmation {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return wireutil.CloneByteSlices(k.state.keygenConfirmations)
+	return tss.CloneSlices(k.state.keygenConfirmations)
 }
 
 // SecurityParams returns the cryptographic profile persisted with the share.
@@ -266,8 +266,8 @@ func (k KeyShare) redactedString() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes PlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
-		k.state.version,
+		"KeyShare{Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d PaillierPublicKey:%d bytes PaillierPrivateKey:<redacted> PaillierProof:%d bytes PaillierPublicKeys:%d RingPedersenParams:%d bytes RingPedersenProof:%d bytes RingPedersenPublic:%d PaillierProofSessionID:%s PaillierProofDomain:%q ResharePlanHash:%d bytes PlanHash:%d bytes ShareProof:%d bytes KeygenTranscriptHash:%x LogCiphertext:%d bytes LogProof:%d bytes KeygenConfirmations:%d}",
+
 		k.state.party,
 		k.state.threshold,
 		k.state.parties,
@@ -313,9 +313,6 @@ func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if k == nil || k.state == nil {
 		return errors.New("nil key share")
-	}
-	if k.state.version != tss.Version {
-		return fmt.Errorf("unexpected key share version %d", k.state.version)
 	}
 	if err := k.state.securityParams.Validate(); err != nil {
 		return fmt.Errorf("invalid security params: %w", err)
@@ -586,11 +583,11 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 	// preserve an existing aggregate chain code, so every confirmation must
 	// repeat exactly that preserved value.
 	if k.state.paillierProofDomain == domainLabelRefreshPaillier || k.state.paillierProofDomain == domainLabelResharePaillier {
-		if err := verifyKeygenConfirmationSetPreservedChainCode(k, k.state.keygenConfirmations); err != nil {
+		if err := verifyKeygenConfirmationSetPreservedChainCodeStruct(k, k.state.keygenConfirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	} else {
-		if err := verifyKeygenConfirmationSet(k, k.state.keygenConfirmations); err != nil {
+		if err := verifyFinalizedKeygenConfirmationSet(k, k.state.keygenConfirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	}
@@ -724,7 +721,6 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		return nil
 	}
 	return &KeyShare{state: &keyShareState{
-		version:                k.state.version,
 		securityParams:         k.state.securityParams,
 		party:                  k.state.party,
 		threshold:              k.state.threshold,
@@ -749,6 +745,6 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		keygenTranscriptHash:   slices.Clone(k.state.keygenTranscriptHash),
 		logCiphertext:          slices.Clone(k.state.logCiphertext),
 		logProof:               slices.Clone(k.state.logProof),
-		keygenConfirmations:    wireutil.CloneByteSlices(k.state.keygenConfirmations),
+		keygenConfirmations:    tss.CloneSlices(k.state.keygenConfirmations),
 	}}
 }

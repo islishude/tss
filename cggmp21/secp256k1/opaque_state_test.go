@@ -29,7 +29,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
 	k.state.paillierPublicKeys = []PaillierPublicShare{{Party: 1, PublicKey: []byte{4}, Proof: []byte{5}}}
 	k.state.ringPedersenPublic = []RingPedersenPublicShare{{Party: 1, Params: []byte{6}, Proof: []byte{7}}}
-	k.state.keygenConfirmations = [][]byte{{8}}
+	k.state.keygenConfirmations = []*KeygenConfirmation{{Sender: 8}}
 
 	parties := k.Parties()
 	parties[0] = 99
@@ -44,7 +44,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	ringPedersenShares[0].Params[0] = 99
 	ringPedersenShares[0].Proof[0] = 99
 	confirmations := k.KeygenConfirmations()
-	confirmations[0][0] = 99
+	confirmations[0].Sender = 99
 
 	if k.state.parties[0] != 1 ||
 		k.state.groupCommitments[0][0] != 1 ||
@@ -53,7 +53,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 		k.state.paillierPublicKeys[0].Proof[0] != 5 ||
 		k.state.ringPedersenPublic[0].Params[0] != 6 ||
 		k.state.ringPedersenPublic[0].Proof[0] != 7 ||
-		k.state.keygenConfirmations[0][0] != 8 {
+		k.state.keygenConfirmations[0].Sender != 8 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }
@@ -103,7 +103,7 @@ func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 		t.Fatal("shallow KeyShare copy did not share Destroy lifecycle")
 	}
 
-	presign := &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
+	presign := &Presign{state: &presignState{version: tss.Version, consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	presignHandle := *presign
 	if err := MarkPresignConsumed(&presignHandle); err != nil {
 		t.Fatal(err)

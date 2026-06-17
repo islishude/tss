@@ -64,9 +64,9 @@ func clonePresignForTest(p *Presign) *Presign {
 		return nil
 	}
 	return &Presign{state: &presignState{
+		version:              p.state.version,
 		consumed:             p.state.consumed,
 		attempt:              p.state.attempt,
-		version:              p.state.version,
 		securityParams:       p.state.securityParams,
 		party:                p.state.party,
 		threshold:            p.state.threshold,
@@ -436,7 +436,7 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 	t.Helper()
 	for _, id := range parties {
 		s := sessions[id]
-		if s.Guard() == nil {
+		if s.guard == nil {
 			t.Fatalf("missing guard for keygen session %d", id)
 		}
 	}
@@ -489,9 +489,9 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{state: &presignState{
+		version:        tss.Version,
 		consumed:       new(atomic.Bool),
 		attempt:        newPresignAttemptBinding(false),
-		version:        tss.Version,
 		securityParams: testSecurityParams(),
 		party:          1,
 		threshold:      1,

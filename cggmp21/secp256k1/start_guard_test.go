@@ -21,7 +21,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.state.parties = tss.NewPartySet(1, 2)
 	key.state.securityParams = DefaultSecurityParams()
 	minimalPresign := func() *Presign {
-		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
+		return &Presign{state: &presignState{version: tss.Version, consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
 	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,

@@ -12,7 +12,7 @@ import (
 func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	confirmation, err := shares[1].KeygenConfirmation()
+	confirmation, err := shares[1].NewConfirmation()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -63,7 +63,7 @@ func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
 	tampered.state.chainCode[0] ^= 1
-	if err := tampered.ValidateConsistency(); err == nil {
+	if err := verifyFinalizedKeygenConfirmationSet(tampered, tampered.state.keygenConfirmations, true); err == nil {
 		t.Fatal("expected tampered aggregate chain code to be rejected")
 	}
 }
@@ -72,17 +72,11 @@ func TestFROSTKeyShareRejectsTamperedConfirmationChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
-	confirmation, err := UnmarshalKeygenConfirmation(tampered.state.keygenConfirmations[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	confirmation.ChainCode = bytes.Clone(confirmation.ChainCode)
-	confirmation.ChainCode[0] ^= 1
-	tampered.state.keygenConfirmations[1], err = confirmation.MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := tampered.ValidateConsistency(); err == nil {
+	cc := *tampered.state.keygenConfirmations[1]
+	cc.ChainCode = bytes.Clone(cc.ChainCode)
+	cc.ChainCode[0] ^= 1
+	tampered.state.keygenConfirmations[1] = &cc
+	if err := verifyFinalizedKeygenConfirmationSet(tampered, tampered.state.keygenConfirmations, true); err == nil {
 		t.Fatal("expected tampered confirmation chain code to be rejected")
 	}
 }
@@ -158,8 +152,10 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
 		t.Fatal("aborted session returned a key share")
 	}
-	if len(sessions[1].shares) != 0 {
-		t.Fatal("aborted keygen retained received share scalars")
+	for _, pd := range sessions[1].partyData {
+		if pd.share != nil {
+			t.Fatal("aborted keygen retained received share scalars")
+		}
 	}
 	if sessions[1].ownPoly != nil {
 		t.Fatal("aborted keygen retained local polynomial")
@@ -167,8 +163,10 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if sessions[1].ownMessages != nil {
 		t.Fatal("aborted keygen retained secret outbound messages")
 	}
-	if sessions[1].chainCodes != nil {
-		t.Fatal("aborted keygen retained chain codes")
+	for _, pd := range sessions[1].partyData {
+		if pd.chainCode != nil {
+			t.Fatal("aborted keygen retained chain codes")
+		}
 	}
 }
 
@@ -176,7 +174,7 @@ func frostKeygenConfirmations(t *testing.T, shares map[tss.PartyID]*KeyShare, pa
 	t.Helper()
 	confirmations := make([]*KeygenConfirmation, 0, len(parties))
 	for _, id := range parties {
-		confirmation, err := shares[id].KeygenConfirmation()
+		confirmation, err := shares[id].NewConfirmation()
 		if err != nil {
 			t.Fatal(err)
 		}

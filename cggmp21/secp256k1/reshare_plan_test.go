@@ -350,7 +350,6 @@ func TestNewResharePlanRejectsInvalidNewThreshold(t *testing.T) {
 
 func testMetadataKeyShare(party tss.PartyID, threshold int, parties tss.PartySet) *KeyShare {
 	return &KeyShare{state: &keyShareState{
-		version:        tss.Version,
 		securityParams: testSecurityParams(),
 		party:          party,
 		threshold:      threshold,

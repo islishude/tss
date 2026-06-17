@@ -119,6 +119,8 @@ func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
 
 	s := &SignSession{
 		presign: &Presign{state: &presignState{
+			version: tss.Version,
+
 			signers:        tss.NewPartySet(1, 2),
 			transcriptHash: bytes.Repeat([]byte{0x41}, 32),
 			contextHash:    bytes.Repeat([]byte{0x42}, 32),
@@ -159,11 +161,9 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &KeygenSession{
-		cfg:            tss.ThresholdConfig{SessionID: sessionID},
-		planHash:       wantPlanHash,
-		confirmations:  make(map[tss.PartyID][]byte),
-		chainCodes:     make(map[tss.PartyID][]byte),
-		chainCodeComms: make(map[tss.PartyID][]byte),
+		cfg:       tss.ThresholdConfig{SessionID: sessionID},
+		planHash:  wantPlanHash,
+		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
 	_, err = s.handleKeygenConfirmation(tss.Envelope{
 		Round:   keygenConfirmationRound,
@@ -174,7 +174,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
-	if len(s.confirmations) != 0 || len(s.chainCodes) != 0 {
+	if s.partyData[confirmation.Sender].confirmation != nil || s.partyData[confirmation.Sender].chainCode != nil {
 		t.Fatal("early confirmation plan mismatch mutated keygen state")
 	}
 	if shouldAbortSession(err) {

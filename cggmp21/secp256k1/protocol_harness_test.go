@@ -124,10 +124,10 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 	}
 	out := make(map[tss.PartyID]*KeyShare, n)
 	for _, id := range parties {
-		if sessions[id].pending == nil || sessions[id].pending.share == nil {
+		if sessions[id].pending == nil {
 			t.Fatalf("keygen pending share not complete for %d", id)
 		}
-		out[id] = cloneKeyShareValue(sessions[id].pending.share)
+		out[id] = cloneKeyShareValue(sessions[id].pending)
 	}
 	return out
 }

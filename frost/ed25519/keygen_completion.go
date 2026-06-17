@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"fmt"
 
 	fed "filippo.io/edwards25519"
@@ -14,33 +15,34 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	if s.pending != nil {
-		if len(s.confirmations) == len(s.cfg.Parties) {
+		if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
 			return nil, s.finalizeConfirmedKeyShare()
 		}
 		return nil, nil
 	}
-	if len(s.commits) != len(s.cfg.Parties) || len(s.shares) != len(s.cfg.Parties) || len(s.chainCodeComms) != len(s.cfg.Parties) {
+	if !allRound1Received(s.partyData, s.cfg.Parties) {
 		return nil, nil
 	}
-	for dealer, share := range s.shares {
+	for _, id := range s.cfg.Parties {
+		d := s.partyData[id]
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		if err := edcurve.VerifyScalarShare(s.commits[dealer], s.cfg.Self, share); err != nil {
-			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
+		if err := edcurve.VerifyScalarShare(d.commitments, s.cfg.Self, d.share); err != nil {
+			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
-				"dealer", dealer,
+				"dealer", id,
 			)
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
-				Party: dealer,
-				Blame: frostKeygenBlame(s.cfg, dealer, s.commits[dealer]),
+				Party: id,
+				Blame: frostKeygenBlame(s.cfg, id, d.commitments),
 				Err:   err,
 			}
 		}
 	}
 	secret := fed.NewScalar()
-	for _, dealer := range s.cfg.Parties {
-		secret.Add(secret, s.shares[dealer])
+	for _, id := range s.cfg.Parties {
+		secret.Add(secret, s.partyData[id].share)
 	}
 	secretScalar, err := newEdSecretScalar(secret.Bytes())
 	if err != nil {
@@ -49,8 +51,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	groupCommitments := make([][]byte, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*fed.Point, 0, len(s.cfg.Parties))
-		for _, dealer := range s.cfg.Parties {
-			p, err := edcurve.PointFromBytesAllowIdentity(s.commits[dealer][degree])
+		for _, id := range s.cfg.Parties {
+			p, err := edcurve.PointFromBytesAllowIdentity(s.partyData[id].commitments[degree])
 			if err != nil {
 				return nil, err
 			}
@@ -73,29 +75,36 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	// Chain code commitment binds the aggregate of all round-1 chain code
 	// commitments into the transcript. Individual chain codes are revealed
 	// and verified in round 2 confirmations.
-	chainCodeCommitAggregate, err := bip32util.AggregateChainCode(s.cfg.Parties, s.chainCodeComms)
+	chainCodeCommitMap := make(map[tss.PartyID][]byte, len(s.cfg.Parties))
+	for _, id := range s.cfg.Parties {
+		chainCodeCommitMap[id] = s.partyData[id].chainCodeCommit
+	}
+	chainCodeCommitAggregate, err := bip32util.AggregateChainCode(s.cfg.Parties, chainCodeCommitMap)
 	if err != nil {
 		return nil, err
 	}
-	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, s.commits, groupCommitments, verificationShares)
+	dealerCommits := make(map[tss.PartyID][][]byte, len(s.cfg.Parties))
+	for _, id := range s.cfg.Parties {
+		dealerCommits[id] = s.partyData[id].commitments
+	}
+	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, dealerCommits, groupCommitments, verificationShares)
 	share := &KeyShare{state: &keyShareState{
-		version:              tss.Version,
 		party:                s.cfg.Self,
 		threshold:            s.cfg.Threshold,
 		parties:              s.cfg.Parties.Clone(),
 		publicKey:            append([]byte(nil), groupCommitments[0]...),
-		chainCode:            append([]byte(nil), s.chainCodes[s.cfg.Self]...),
+		chainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
 		secret:               secretScalar,
 		groupCommitments:     groupCommitments,
 		verificationShares:   verificationShares,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: keygenTranscriptHash,
-		planHash:             append([]byte(nil), s.planHash...),
+		planHash:             bytes.Clone(s.planHash),
 	}}
 	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
 		return nil, err
 	}
-	confirmation, err := share.KeygenConfirmation()
+	confirmation, err := share.NewConfirmation()
 	if err != nil {
 		return nil, err
 	}
@@ -103,23 +112,35 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
+	s.partyData[s.cfg.Self].confirmation = confirmation
 	s.pending = share
 	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}
 	out := []tss.Envelope{confirmationEnv}
-	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
+	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	if len(s.confirmations) == len(s.cfg.Parties) {
+	if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
 		if err := s.finalizeConfirmedKeyShare(); err != nil {
 			return nil, err
 		}
 	}
 	return out, nil
+}
+
+// allRound1Received returns true when every party has submitted commitments,
+// shares, and chain code commitments.
+func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet) bool {
+	for _, id := range parties {
+		d := pd[id]
+		if d == nil || d.commitments == nil || d.share == nil || d.chainCodeCommit == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func validateCommitments(commitments [][]byte, threshold int) error {

@@ -13,7 +13,6 @@ import (
 // exercising accessors, formatting, and serialization rejection.
 func minimalKeyShare() *KeyShare {
 	return &KeyShare{state: &keyShareState{
-		version:                tss.Version,
 		party:                  1,
 		threshold:              2,
 		parties:                tss.NewPartySet(1, 2, 3),

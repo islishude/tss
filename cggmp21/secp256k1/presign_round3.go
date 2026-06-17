@@ -263,9 +263,9 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	context := s.context.Clone()
 	s.presign = &Presign{state: &presignState{
+		version:              tss.Version,
 		consumed:             new(atomic.Bool),
 		attempt:              newPresignAttemptBinding(false),
-		version:              tss.Version,
 		securityParams:       s.securityParams,
 		party:                s.key.state.party,
 		threshold:            s.key.state.threshold,

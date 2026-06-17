@@ -15,25 +15,31 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
+// keygenPartyData holds all per-party DKG state for a single participant.
+// All fields other than confirmation are populated during round 1;
+// confirmation is set during round 2 after the chain code is revealed.
+type keygenPartyData struct {
+	commitments     [][]byte
+	share           *fed.Scalar
+	chainCode       []byte
+	chainCodeCommit []byte
+	confirmation    *KeygenConfirmation
+}
+
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
-	mu             sync.Mutex
-	cfg            tss.ThresholdConfig         // Local threshold runtime view fixed by the keygen plan.
-	log            tss.Logger                  // Optional protocol logger.
-	limits         Limits                      // Local fail-closed resource policy.
-	commits        map[tss.PartyID][][]byte    // Public polynomial commitments by sender.
-	shares         map[tss.PartyID]*fed.Scalar // Secret Shamir shares received for the local party.
-	chainCodes     map[tss.PartyID][]byte      // Per-party chain-code contributions; secret until aggregation.
-	chainCodeComms map[tss.PartyID][]byte      // Commitments used to bind chain-code contributions.
-	planHash       []byte                      // Digest every keygen payload must echo.
-	completed      bool                        // Terminal success flag after the key share is confirmed.
-	aborted        bool                        // Terminal failure/destruction flag.
-	pending        *KeyShare                   // Completed but not yet confirmed key share.
-	confirmations  map[tss.PartyID][]byte      // Keygen confirmation payloads by participant.
-	keyShare       *KeyShare                   // Confirmed key share retained by the session.
-	ownPoly        []*fed.Scalar               // Local random polynomial coefficients; secret-bearing.
-	ownMessages    []tss.Envelope              // Secret outbound share envelopes retained until completion.
-	guard          *tss.EnvelopeGuard          // Transport replay, identity, and policy guard.
+	mu          sync.Mutex
+	cfg         tss.ThresholdConfig              // Local threshold runtime view fixed by the keygen plan.
+	limits      Limits                           // Local fail-closed resource policy.
+	partyData   map[tss.PartyID]*keygenPartyData // Per-party DKG state keyed by sender.
+	planHash    []byte                           // Digest every keygen payload must echo.
+	completed   bool                             // Terminal success flag after the key share is confirmed.
+	aborted     bool                             // Terminal failure/destruction flag.
+	pending     *KeyShare                        // Completed but not yet confirmed key share.
+	keyShare    *KeyShare                        // Confirmed key share retained by the session.
+	ownPoly     []*fed.Scalar                    // Local random polynomial coefficients; secret-bearing.
+	ownMessages []tss.Envelope                   // Secret outbound share envelopes retained until completion.
+	guard       *tss.EnvelopeGuard               // Transport replay, identity, and policy guard.
 }
 
 type keygenCommitmentsPayload struct {
@@ -98,22 +104,23 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	chainCodeCommit := chainCodeCommitment(config.SessionID, config.Self, chainCode)
+	partyData := make(map[tss.PartyID]*keygenPartyData, len(parties))
+	for _, id := range parties {
+		partyData[id] = &keygenPartyData{}
+	}
+	partyData[config.Self] = &keygenPartyData{
+		commitments:     commitments,
+		share:           evalScalarPolynomial(poly, config.Self),
+		chainCode:       bytes.Clone(chainCode),
+		chainCodeCommit: bytes.Clone(chainCodeCommit),
+	}
 	s := &KeygenSession{
-		cfg:     config,
-		log:     config.Logger(),
-		limits:  limits,
-		commits: map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:  map[tss.PartyID]*fed.Scalar{config.Self: evalScalarPolynomial(poly, config.Self)},
-		chainCodes: map[tss.PartyID][]byte{
-			config.Self: append([]byte(nil), chainCode...),
-		},
-		planHash: append([]byte(nil), planHash...),
-		chainCodeComms: map[tss.PartyID][]byte{
-			config.Self: append([]byte(nil), chainCodeCommit...),
-		},
-		confirmations: make(map[tss.PartyID][]byte, len(parties)),
-		ownPoly:       poly,
-		guard:         guard,
+		cfg:       config,
+		limits:    limits,
+		partyData: partyData,
+		planHash:  bytes.Clone(planHash),
+		ownPoly:   poly,
+		guard:     guard,
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
@@ -209,17 +216,21 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if existing, ok := s.commits[base.From]; ok {
-			if equalByteSlices(existing, p.Commitments) && bytes.Equal(s.chainCodeComms[base.From], p.ChainCodeCommit) {
+		pd, err := s.partyEntry(base.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+		}
+		if pd.commitments != nil {
+			if equalByteSlices(pd.commitments, p.Commitments) && bytes.Equal(pd.chainCodeCommit, p.ChainCodeCommit) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
 		}
-		s.commits[base.From] = p.Commitments
+		pd.commitments = p.Commitments
 		if len(p.ChainCodeCommit) != sha256.Size {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}
-		s.chainCodeComms[base.From] = append([]byte(nil), p.ChainCodeCommit...)
+		pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
 	case payloadKeygenShare:
 		p, err := unmarshalKeygenSharePayloadWithLimits(payload, s.limits)
 		if err != nil {
@@ -232,13 +243,17 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
-		if existing, ok := s.shares[base.From]; ok {
-			if existing.Equal(scalar) == 1 {
+		pd, err := s.partyEntry(base.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+		}
+		if pd.share != nil {
+			if pd.share.Equal(scalar) == 1 {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting share"))
 		}
-		s.shares[base.From] = scalar
+		pd.share = scalar
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
@@ -270,6 +285,15 @@ func (s *KeygenSession) abort() {
 	}
 	s.pending = nil
 	s.clearIntermediateSecrets()
+}
+
+// partyEntry returns the per-party data for id, or an error when id is not in the session.
+func (s *KeygenSession) partyEntry(id tss.PartyID) (*keygenPartyData, error) {
+	pd, ok := s.partyData[id]
+	if !ok {
+		return nil, fmt.Errorf("party %d is not a keygen participant", id)
+	}
+	return pd, nil
 }
 
 func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {

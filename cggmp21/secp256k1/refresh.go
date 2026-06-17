@@ -22,6 +22,17 @@ const (
 	refreshTranscriptHashLabel  = "cggmp21-secp256k1-refresh-transcript-v1"
 )
 
+// refreshPartyData holds all per-party state for a single refresh participant.
+// Commitments, share, and auxiliary material are populated during round 1;
+// confirmation is set during round 2 after the transcript is finalized.
+type refreshPartyData struct {
+	commitments  [][]byte
+	share        *big.Int
+	paillierPub  PaillierPublicShare
+	ringPedersen RingPedersenPublicShare
+	confirmation *KeygenConfirmation
+}
+
 // RefreshSession refreshes CGGMP21 key shares and rotates Paillier keys while
 // preserving the group public key and chain code. The participant set and
 // threshold are fixed to the original key share. Each existing participant
@@ -30,24 +41,19 @@ const (
 type RefreshSession struct {
 	mu sync.Mutex
 
-	oldKey          *KeyShare                               // Caller-owned share being refreshed; not destroyed with the session.
-	cfg             tss.ThresholdConfig                     // Local threshold runtime view fixed by the refresh plan.
-	log             tss.Logger                              // Optional protocol logger.
-	limits          Limits                                  // Local fail-closed resource policy.
-	securityParams  SecurityParams                          // Cryptographic profile inherited from oldKey.
-	planHash        []byte                                  // Digest every refresh payload must echo.
-	commits         map[tss.PartyID][][]byte                // Public zero-constant polynomial commitments by sender.
-	shares          map[tss.PartyID]*big.Int                // Secret refresh shares received for the local party.
-	completed       bool                                    // Terminal success flag after newShare is confirmed.
-	aborted         bool                                    // Terminal failure/destruction flag.
-	guard           *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
-	newShare        *KeyShare                               // Refreshed key share produced on completion.
-	confirmations   map[tss.PartyID][]byte                  // Refresh confirmation payloads by participant.
-	ownPoly         []*big.Int                              // Local zero-constant polynomial coefficients; secret-bearing.
-	newPaillier     *pai.PrivateKey                         // Fresh local Paillier private key for rotated auxiliary material.
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare     // Validated fresh Paillier public material by participant.
-	newPaillierPriv []byte                                  // Serialized fresh Paillier private key persisted into newShare.
-	newRingPedersen map[tss.PartyID]RingPedersenPublicShare // Validated fresh Ring-Pedersen material by participant.
+	oldKey         *KeyShare                         // Caller-owned share being refreshed; not destroyed with the session.
+	cfg            tss.ThresholdConfig               // Local threshold runtime view fixed by the refresh plan.
+	log            tss.Logger                        // Optional protocol logger.
+	limits         Limits                            // Local fail-closed resource policy.
+	securityParams SecurityParams                    // Cryptographic profile inherited from oldKey.
+	planHash       []byte                            // Digest every refresh payload must echo.
+	partyData      map[tss.PartyID]*refreshPartyData // Per-party refresh state keyed by sender.
+	completed      bool                              // Terminal success flag after newShare is confirmed.
+	aborted        bool                              // Terminal failure/destruction flag.
+	guard          *tss.EnvelopeGuard                // Transport replay, identity, and policy guard.
+	newShare       *KeyShare                         // Refreshed key share produced on completion.
+	ownPoly        []*big.Int                        // Local zero-constant polynomial coefficients; secret-bearing.
+	newPaillier    *pai.PrivateKey                   // Fresh local Paillier private key for rotated auxiliary material.
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.
@@ -94,10 +100,6 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	newPaillierPriv, err := newPaillierKey.MarshalBinary()
-	if err != nil {
-		return nil, nil, err
-	}
 	modProof, err := zkpai.ProveModulus(config.Reader(), refreshPaillierDomain(config, config.Self, newPaillierPubBytes, planHash), newPaillierKey, config.Self)
 	if err != nil {
 		return nil, nil, err
@@ -139,25 +141,28 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		commitments[i] = enc
 	}
 	s := &RefreshSession{
-		oldKey:          oldKey,
-		cfg:             config,
-		log:             config.Logger(),
-		limits:          limits,
-		securityParams:  plan.securityParams,
-		planHash:        append([]byte(nil), planHash...),
-		commits:         map[tss.PartyID][][]byte{oldKey.state.party: commitments},
-		shares:          map[tss.PartyID]*big.Int{oldKey.state.party: shamir.Eval(poly, oldKey.state.party, secp.Order())},
-		confirmations:   make(map[tss.PartyID][]byte, len(oldKey.state.parties)),
-		ownPoly:         poly,
-		newPaillier:     newPaillierKey,
-		newPaillierPriv: newPaillierPriv,
-		newPaillierPubs: map[tss.PartyID]PaillierPublicShare{
-			oldKey.state.party: {Party: oldKey.state.party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
-		},
-		newRingPedersen: map[tss.PartyID]RingPedersenPublicShare{
-			oldKey.state.party: {Party: oldKey.state.party, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
-		},
-		guard: guard,
+		oldKey:         oldKey,
+		cfg:            config,
+		log:            config.Logger(),
+		limits:         limits,
+		securityParams: plan.securityParams,
+		planHash:       append([]byte(nil), planHash...),
+		partyData: func() map[tss.PartyID]*refreshPartyData {
+			pd := make(map[tss.PartyID]*refreshPartyData, len(oldKey.state.parties))
+			for _, id := range oldKey.state.parties {
+				pd[id] = &refreshPartyData{}
+			}
+			pd[oldKey.state.party] = &refreshPartyData{
+				commitments:  commitments,
+				share:        shamir.Eval(poly, oldKey.state.party, secp.Order()),
+				paillierPub:  PaillierPublicShare{Party: oldKey.state.party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
+				ringPedersen: RingPedersenPublicShare{Party: oldKey.state.party, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
+			}
+			return pd
+		}(),
+		ownPoly:     poly,
+		newPaillier: newPaillierKey,
+		guard:       guard,
 	}
 	commitPayload, err := marshalRefreshCommitmentsPayloadWithLimits(refreshCommitmentsPayload{
 		Commitments:        commitments,
@@ -206,6 +211,15 @@ func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
 	return s.guard
 }
 
+// partyEntry returns the per-party data for id, or an error when id is not in the session.
+func (s *RefreshSession) partyEntry(id tss.PartyID) (*refreshPartyData, error) {
+	pd, ok := s.partyData[id]
+	if !ok {
+		return nil, fmt.Errorf("party %d is not a refresh participant", id)
+	}
+	return pd, nil
+}
+
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *RefreshSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
@@ -244,7 +258,11 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 	}
 	switch env.PayloadType {
 	case payloadRefreshCommitments:
-		if _, ok := s.commits[env.From]; ok {
+		pd, err := s.partyEntry(env.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if pd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh commitments"))
 		}
 		p, err := unmarshalRefreshCommitmentsPayloadWithLimits(env.Payload, s.limits)
@@ -335,11 +353,15 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
 			)
 		}
-		s.commits[env.From] = p.Commitments
-		s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
-		s.newRingPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
+		pd.commitments = p.Commitments
+		pd.paillierPub = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
+		pd.ringPedersen = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
 	case payloadRefreshShare:
-		if _, ok := s.shares[env.From]; ok {
+		pd, err := s.partyEntry(env.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		}
+		if pd.share != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
 		}
 		p, err := unmarshalRefreshSharePayloadWithLimits(env.Payload, s.limits)
@@ -350,7 +372,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		share := secp.ScalarFromBigInt(p.Share)
-		s.shares[env.From] = share.BigInt()
+		pd.share = share.BigInt()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -389,12 +411,15 @@ func (s *RefreshSession) abort() {
 		return
 	}
 	s.aborted = true
-	clearBigIntMap(s.shares)
+	for _, pd := range s.partyData {
+		if pd.share != nil {
+			secret.ClearBigInt(pd.share)
+		}
+	}
 	for _, coeff := range s.ownPoly {
 		secret.ClearBigInt(coeff)
 	}
 	s.ownPoly = nil
-	clear(s.newPaillierPriv)
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
@@ -404,4 +429,27 @@ func (s *RefreshSession) abort() {
 		s.newShare = nil
 	}
 	s.completed = false
+}
+
+// allRefreshRound1Complete returns true when every party has submitted round 1 data.
+func (s *RefreshSession) allRefreshRound1Complete() bool {
+	for _, id := range s.oldKey.state.parties {
+		pd := s.partyData[id]
+		if pd == nil || pd.commitments == nil || pd.share == nil ||
+			len(pd.paillierPub.PublicKey) == 0 || len(pd.ringPedersen.Params) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// allRefreshConfirmationsReceived returns true when every party has submitted a confirmation.
+func (s *RefreshSession) allRefreshConfirmationsReceived() bool {
+	for _, id := range s.oldKey.state.parties {
+		pd := s.partyData[id]
+		if pd == nil || pd.confirmation == nil {
+			return false
+		}
+	}
+	return true
 }

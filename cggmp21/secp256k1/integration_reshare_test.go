@@ -107,8 +107,8 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(share)); err != nil {
 		t.Fatalf("share before commitments should be buffered: %v", err)
 	}
-	if len(session1.pendingShares) != 1 {
-		t.Fatalf("got %d pending shares, want 1", len(session1.pendingShares))
+	if pendingDealerCount(session1) != 1 {
+		t.Fatalf("got %d pending shares, want 1", pendingDealerCount(session1))
 	}
 	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
@@ -116,10 +116,10 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(commitment)); err != nil {
 		t.Fatal(err)
 	}
-	if len(session1.pendingShares) != 0 {
-		t.Fatalf("got %d pending shares after commitment, want 0", len(session1.pendingShares))
+	if pendingDealerCount(session1) != 0 {
+		t.Fatalf("got %d pending shares after commitment, want 0", pendingDealerCount(session1))
 	}
-	if _, ok := session1.shares[2]; !ok {
+	if dd, ok := session1.dealerData[2]; !ok || dd.share == nil {
 		t.Fatal("pending share was not applied after commitment arrived")
 	}
 }
@@ -317,4 +317,15 @@ func collectShares(t *testing.T, shares map[tss.PartyID]*KeyShare, ids tss.Party
 		out = append(out, share)
 	}
 	return out
+}
+
+// pendingDealerCount returns the number of dealer parties with pending shares.
+func pendingDealerCount(s *ReshareSession) int {
+	n := 0
+	for _, dd := range s.dealerData {
+		if dd.pending != nil {
+			n++
+		}
+	}
+	return n
 }

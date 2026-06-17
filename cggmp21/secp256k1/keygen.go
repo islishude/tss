@@ -28,33 +28,36 @@ const (
 	keygenAborted
 )
 
+// keygenPartyData holds all per-party DKG state for a single participant.
+// All fields other than confirmation are populated during round 1;
+// confirmation is set during round 2 after the chain code is revealed.
+type keygenPartyData struct {
+	commitments     [][]byte
+	share           *big.Int
+	chainCode       []byte
+	chainCodeCommit []byte
+	paillierPub     PaillierPublicShare
+	ringPedersen    RingPedersenPublicShare
+	confirmation    *KeygenConfirmation
+}
+
 // KeygenSession tracks CGGMP21-style DKG state for one local party.
 type KeygenSession struct {
 	mu sync.Mutex
 
-	cfg            tss.ThresholdConfig                     // Local threshold runtime view fixed by the keygen plan.
-	log            tss.Logger                              // Optional protocol logger.
-	limits         Limits                                  // Local fail-closed resource policy.
-	securityParams SecurityParams                          // Cryptographic profile for Paillier and proof material.
-	planHash       []byte                                  // Digest every keygen payload must echo.
-	commits        map[tss.PartyID][][]byte                // Public polynomial commitments by sender.
-	shares         map[tss.PartyID]*big.Int                // Secret Shamir shares received for the local party.
-	chainCodes     map[tss.PartyID][]byte                  // Per-party chain-code contributions; secret until aggregation.
-	chainCodeComms map[tss.PartyID][]byte                  // Commitments used to bind chain-code contributions.
-	paillier       *pai.PrivateKey                         // Local Paillier private key generated for the key share.
-	paillierPubs   map[tss.PartyID]PaillierPublicShare     // Validated Paillier public material by participant.
-	ringPedersen   map[tss.PartyID]RingPedersenPublicShare // Validated Ring-Pedersen public material by participant.
-	completed      bool                                    // Terminal success flag after the key share is confirmed.
-	aborted        bool                                    // Terminal failure/destruction flag.
-	state          keygenState                             // Phase marker for collect, local-complete, and confirmation states.
-	pending        *pendingKeyShare                        // Completed but not yet confirmed key share.
-	confirmations  map[tss.PartyID][]byte                  // Keygen confirmation payloads by participant.
-	keyShare       *KeyShare                               // Confirmed key share retained by the session.
-	guard          *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
-}
-
-type pendingKeyShare struct {
-	share *KeyShare
+	cfg            tss.ThresholdConfig              // Local threshold runtime view fixed by the keygen plan.
+	log            tss.Logger                       // Optional protocol logger.
+	limits         Limits                           // Local fail-closed resource policy.
+	securityParams SecurityParams                   // Cryptographic profile for Paillier and proof material.
+	planHash       []byte                           // Digest every keygen payload must echo.
+	partyData      map[tss.PartyID]*keygenPartyData // Per-party DKG state keyed by sender.
+	paillier       *pai.PrivateKey                  // Local Paillier private key generated for the key share.
+	completed      bool                             // Terminal success flag after the key share is confirmed.
+	aborted        bool                             // Terminal failure/destruction flag.
+	state          keygenState                      // Phase marker for collect, local-complete, and confirmation states.
+	pending        *KeyShare                        // Completed but not yet confirmed key share.
+	keyShare       *KeyShare                        // Confirmed key share retained by the session.
+	guard          *tss.EnvelopeGuard               // Transport replay, identity, and policy guard.
 }
 
 type keygenCommitmentsPayload struct {
@@ -84,17 +87,18 @@ func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType 
 // WireVersion returns the wire format version for keygenSharePayload.
 func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
 
-// Guard returns the session's envelope guard for use by transport adapters.
-func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
-	if s == nil {
-		return nil
-	}
-	return s.guard
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
+}
+
+// partyEntry returns the per-party data for id, or an error when id is not in the session.
+func (s *KeygenSession) partyEntry(id tss.PartyID) (*keygenPartyData, error) {
+	pd, ok := s.partyData[id]
+	if !ok {
+		return nil, fmt.Errorf("party %d is not a keygen participant", id)
+	}
+	return pd, nil
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
@@ -139,13 +143,21 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	}
 	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		if _, ok := s.commits[base.From]; ok {
+		pd, err := s.partyEntry(base.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+		}
+		if pd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate commitments"))
 		}
 		return s.handleKeygenCommitments(base)
 
 	case payloadKeygenShare:
-		if _, ok := s.shares[base.From]; ok {
+		pd, err := s.partyEntry(base.From)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+		}
+		if pd.share != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate share"))
 		}
 		return s.handleKeygenShare(base)

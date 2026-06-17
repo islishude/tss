@@ -7,7 +7,6 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
@@ -32,8 +31,13 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
-	if existing, ok := s.confirmations[env.From]; ok {
-		if bytes.Equal(existing, canonical) {
+	npd, ok := s.newPartyData[env.From]
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
+	}
+	if npd.confirmation != nil {
+		existing, err := npd.confirmation.MarshalBinary()
+		if err == nil && bytes.Equal(existing, canonical) {
 			return nil, nil
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
@@ -43,7 +47,7 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
-	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	npd.confirmation = confirmation
 	return s.tryComplete()
 }
 
@@ -86,26 +90,33 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, errors.New("missing pending reshare share"))
 	}
-	encoded := make([][]byte, len(s.newParties))
+	// Collect parsed confirmations in party order (no re-unmarshal needed).
+	confirmations := make([]*KeygenConfirmation, len(s.newParties))
 	for i, id := range s.newParties {
-		confirmation, ok := s.confirmations[id]
-		if !ok {
+		c := s.newPartyData[id].confirmation
+		if c == nil {
 			s.abort()
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
 		}
-		encoded[i] = append([]byte(nil), confirmation...)
+		confirmations[i] = c
 	}
-	if err := verifyKeygenConfirmationSetPreservedChainCode(s.newShare, encoded); err != nil {
+	if err := verifyFinalizedKeygenConfirmationSet(s.newShare, confirmations); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
-	s.newShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
+	// Verify preserved chain code on each confirmation.
+	for _, c := range confirmations {
+		if !bytes.Equal(c.ChainCode, s.newShare.state.chainCode) {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
+		}
+	}
+	s.newShare.state.keygenConfirmations = tss.CloneSlices(confirmations)
 	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.selfID, err)
 	}
 	s.completed = true
-	clear(s.newPaillierPriv)
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil

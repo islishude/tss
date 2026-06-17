@@ -18,7 +18,7 @@ func (s *ReshareSession) maybeSendDealerMessages() ([]tss.Envelope, error) {
 	if !s.isDealer || s.dealerSent {
 		return nil, nil
 	}
-	if len(s.newPaillierPubs) != len(s.newParties) || len(s.newRingPedersen) != len(s.newParties) {
+	if !s.allReshareReceiverMaterialReceived() {
 		return nil, nil
 	}
 	out, err := s.dealerMessages()
@@ -63,9 +63,14 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.ownPoly = poly
-	s.commits[s.selfID] = commitments
+	dd := s.dealerData[s.selfID]
+	if dd == nil {
+		dd = &reshareDealerPartyData{}
+		s.dealerData[s.selfID] = dd
+	}
+	dd.commitments = commitments
 	if s.isReceiver {
-		s.shares[s.selfID] = shamir.Eval(poly, s.selfID, order)
+		dd.share = shamir.Eval(poly, s.selfID, order)
 	}
 	payload, err := marshalReshareDealerCommitmentsPayloadWithLimits(reshareDealerCommitmentsPayload{
 		Commitments: commitments,
@@ -114,10 +119,6 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
-	newPaillierPriv, err := newPaillierKey.MarshalBinary()
-	if err != nil {
-		return err
-	}
 	proofConfig := s.receiverConfig()
 	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes, s.planHash), newPaillierKey, s.selfID)
 	if err != nil {
@@ -144,9 +145,10 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	s.newPaillier = newPaillierKey
-	s.newPaillierPriv = newPaillierPriv
-	s.newPaillierPubs[s.selfID] = PaillierPublicShare{Party: s.selfID, PublicKey: newPaillierPubBytes, Proof: modProofBytes}
-	s.newRingPedersen[s.selfID] = RingPedersenPublicShare{Party: s.selfID, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes}
+	s.newPartyData[s.selfID] = &reshareNewPartyData{
+		paillierPub:  PaillierPublicShare{Party: s.selfID, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
+		ringPedersen: RingPedersenPublicShare{Party: s.selfID, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
+	}
 	return nil
 }
 
@@ -227,8 +229,10 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
 		)
 	}
-	s.newPaillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
-	s.newRingPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
+	s.newPartyData[env.From] = &reshareNewPartyData{
+		paillierPub:  PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof},
+		ringPedersen: RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof},
+	}
 	return nil
 }
 
@@ -239,15 +243,15 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 	if p.Receiver != s.selfID {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload receiver mismatch"))
 	}
-	commitments, ok := s.commits[from]
-	if !ok {
+	dd, ok := s.dealerData[from]
+	if !ok || dd.commitments == nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share has no dealer commitments"))
 	}
-	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)) {
+	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
 	}
 	share := secp.ScalarFromBigInt(p.Share)
-	if err := secp.VerifyShare(commitments, s.selfID, share); err != nil {
+	if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 		verifyErr := err
 		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
 		if evErr != nil {
@@ -263,13 +267,13 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 				"invalid reshare share",
 				tss.NewPartySet(from),
 				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
 				hashEvidenceField("dealer_share_payload_hash", rawPayload),
 			),
 			Err: verifyErr,
 		}
 	}
-	s.shares[from] = share.BigInt()
+	dd.share = share.BigInt()
 	return nil
 }
 

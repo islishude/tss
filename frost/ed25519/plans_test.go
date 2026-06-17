@@ -154,14 +154,14 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	if !ok {
 		t.Fatal("missing keygen share from party 2 to party 1")
 	}
-	beforeShares := len(s1.shares)
-	beforeCommits := len(s1.commits)
+	beforeShares := countNonNilShares(s1.partyData)
+	beforeCommits := countNonNilCommits(s1.partyData)
 	out, err := s1.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if len(s1.shares) != beforeShares || len(s1.commits) != beforeCommits {
+	if countNonNilShares(s1.partyData) != beforeShares || countNonNilCommits(s1.partyData) != beforeCommits {
 		t.Fatal("plan mismatch mutated keygen state")
 	}
 	if s1.aborted {
@@ -173,7 +173,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 2)
-	confirmation, err := shares[2].KeygenConfirmation()
+	confirmation, err := shares[2].NewConfirmation()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -183,11 +183,9 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &KeygenSession{
-		cfg:            tss.ThresholdConfig{SessionID: confirmation.SessionID},
-		planHash:       shares[1].PlanHashBytes(),
-		confirmations:  make(map[tss.PartyID][]byte),
-		chainCodes:     make(map[tss.PartyID][]byte),
-		chainCodeComms: make(map[tss.PartyID][]byte),
+		cfg:       tss.ThresholdConfig{SessionID: confirmation.SessionID},
+		planHash:  shares[1].PlanHashBytes(),
+		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
 	_, err = s.handleKeygenConfirmation(tss.Envelope{
 		Round:   keygenConfirmationRound,
@@ -198,7 +196,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
-	if len(s.confirmations) != 0 || len(s.chainCodes) != 0 {
+	if countNonNilConfirmations(s.partyData) != 0 || countNonNilChainCodes(s.partyData) != 0 {
 		t.Fatal("early confirmation plan mismatch mutated keygen state")
 	}
 	if shouldAbortSession(err) {
@@ -276,4 +274,44 @@ func partyIDsBytes(parties tss.PartySet) []byte {
 		out = append(out, byte(id>>24), byte(id>>16), byte(id>>8), byte(id))
 	}
 	return out
+}
+
+func countNonNilShares(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.share != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonNilCommits(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.commitments != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonNilConfirmations(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.confirmation != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonNilChainCodes(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.chainCode != nil {
+			n++
+		}
+	}
+	return n
 }

@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
@@ -30,8 +29,13 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 	if err := requirePlanHash("refresh confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
-	if existing, ok := s.confirmations[env.From]; ok {
-		if bytes.Equal(existing, canonical) {
+	pd, err := s.partyEntry(env.From)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if pd.confirmation != nil {
+		existing, err := pd.confirmation.MarshalBinary()
+		if err == nil && bytes.Equal(existing, canonical) {
 			return nil, nil
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("conflicting keygen confirmation from party %d", env.From))
@@ -41,8 +45,8 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 	}
-	s.confirmations[env.From] = append([]byte(nil), canonical...)
-	if s.newShare != nil && len(s.confirmations) == len(s.oldKey.state.parties) {
+	pd.confirmation = confirmation
+	if s.newShare != nil && s.allRefreshConfirmationsReceived() {
 		return nil, s.finalizeConfirmedShare()
 	}
 	return nil, nil
@@ -53,26 +57,33 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, errors.New("missing pending refresh share"))
 	}
-	encoded := make([][]byte, len(s.oldKey.state.parties))
+	// Collect parsed confirmations in party order (no re-unmarshal needed).
+	confirmations := make([]*KeygenConfirmation, len(s.oldKey.state.parties))
 	for i, id := range s.oldKey.state.parties {
-		confirmation, ok := s.confirmations[id]
-		if !ok {
+		c := s.partyData[id].confirmation
+		if c == nil {
 			s.abort()
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing keygen confirmation from party %d", id))
 		}
-		encoded[i] = append([]byte(nil), confirmation...)
+		confirmations[i] = c
 	}
-	if err := verifyKeygenConfirmationSetPreservedChainCode(s.newShare, encoded); err != nil {
+	if err := verifyFinalizedKeygenConfirmationSet(s.newShare, confirmations); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
 	}
-	s.newShare.state.keygenConfirmations = wireutil.CloneByteSlices(encoded)
+	// Verify preserved chain code on each confirmation.
+	for _, c := range confirmations {
+		if !bytes.Equal(c.ChainCode, s.newShare.state.chainCode) {
+			s.abort()
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
+		}
+	}
+	s.newShare.state.keygenConfirmations = tss.CloneSlices(confirmations)
 	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
 	}
 	s.completed = true
-	clear(s.newPaillierPriv)
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil

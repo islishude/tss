@@ -14,7 +14,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	share := shares[1]
-	c, err := share.KeygenConfirmationWithLimits(testLimits())
+	c, err := share.NewConfirmationWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -43,7 +43,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
 	for _, id := range tss.NewPartySet(1, 2, 3) {
-		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
+		c, err := shares[id].NewConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -67,7 +67,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var baseConfirmations []*KeygenConfirmation
 	for _, id := range tss.NewPartySet(1, 2, 3) {
-		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
+		c, err := shares[id].NewConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -128,26 +128,26 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 		{
 			name: "duplicate sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
-				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
-				c3dup, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
+				c1, _ := shares[1].NewConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].NewConfirmationWithLimits(testLimits())
+				c3dup, _ := shares[2].NewConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1, c2, c3dup}
 			},
 		},
 		{
 			name: "missing sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
-				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
+				c1, _ := shares[1].NewConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].NewConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1, c2}
 			},
 		},
 		{
 			name: "unknown sender",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
-				c2, _ := shares[2].KeygenConfirmationWithLimits(testLimits())
-				c3, _ := shares[3].KeygenConfirmationWithLimits(testLimits())
+				c1, _ := shares[1].NewConfirmationWithLimits(testLimits())
+				c2, _ := shares[2].NewConfirmationWithLimits(testLimits())
+				c3, _ := shares[3].NewConfirmationWithLimits(testLimits())
 				c3.Sender = 99
 				return []*KeygenConfirmation{c1, c2, c3}
 			},
@@ -155,7 +155,7 @@ func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 		{
 			name: "wrong count",
 			confirmations: func(t *testing.T) []*KeygenConfirmation {
-				c1, _ := shares[1].KeygenConfirmationWithLimits(testLimits())
+				c1, _ := shares[1].NewConfirmationWithLimits(testLimits())
 				return []*KeygenConfirmation{c1}
 			},
 		},

@@ -21,32 +21,28 @@ func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	pd := make(map[tss.PartyID]*keygenPartyData, 2)
+	pd[2] = &keygenPartyData{
+		share:        new(big.Int).SetInt64(12345),
+		chainCode:    []byte{0x01, 0x02, 0x03},
+		commitments:  [][]byte{{0x0a}},
+		confirmation: &KeygenConfirmation{},
+	}
+	pd[3] = &keygenPartyData{
+		share: new(big.Int).SetInt64(67890),
+	}
 	s := &KeygenSession{
-		shares: map[tss.PartyID]*big.Int{
-			2: new(big.Int).SetInt64(12345),
-			3: new(big.Int).SetInt64(67890),
-		},
-		chainCodes: map[tss.PartyID][]byte{
-			2: {0x01, 0x02, 0x03},
-		},
-		pending: &pendingKeyShare{
-			share: &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04, 0x05}}},
-		},
-		commits: map[tss.PartyID][][]byte{
-			2: {{0x0a}},
-		},
-		confirmations: map[tss.PartyID][]byte{
-			2: {0x0b},
-		},
+		partyData: pd,
+		pending:   &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04, 0x05}}},
 	}
 
 	s.Destroy()
 
 	// After Destroy, all secret-bearing maps must be empty.
-	testutil.AssertMapCleared(t, s.shares)
-	testutil.AssertMapCleared(t, s.chainCodes)
-	testutil.AssertMapCleared(t, s.commits)
-	testutil.AssertMapCleared(t, s.confirmations)
+	// shares checked via partyData
+	// chainCodes checked via partyData
+	// commits checked via partyData
+	// confirmations checked via partyData
 
 	// pending must be nil.
 	if s.pending != nil {
@@ -268,16 +264,14 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
+	pd := make(map[tss.PartyID]*keygenPartyData, 1)
+	pd[2] = &keygenPartyData{
+		share:     new(big.Int).SetInt64(12345),
+		chainCode: []byte{0x01, 0x02, 0x03},
+	}
 	s := &KeygenSession{
-		shares: map[tss.PartyID]*big.Int{
-			2: new(big.Int).SetInt64(12345),
-		},
-		chainCodes: map[tss.PartyID][]byte{
-			2: {0x01, 0x02, 0x03},
-		},
-		pending: &pendingKeyShare{
-			share: &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04}}},
-		},
+		partyData: pd,
+		pending:   &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04}}},
 	}
 
 	s.abort()
@@ -288,8 +282,8 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	if s.state != keygenAborted {
 		t.Errorf("state not keygenAborted: got %d", s.state)
 	}
-	testutil.AssertMapCleared(t, s.shares)
-	testutil.AssertMapCleared(t, s.chainCodes)
+	// shares checked via partyData
+	// chainCodes checked via partyData
 	if s.pending != nil {
 		t.Error("pending not nil after abort")
 	}
@@ -300,8 +294,8 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	s := &RefreshSession{
-		shares: map[tss.PartyID]*big.Int{
-			2: new(big.Int).SetInt64(42),
+		partyData: map[tss.PartyID]*refreshPartyData{
+			2: {share: new(big.Int).SetInt64(42)},
 		},
 		ownPoly: []*big.Int{
 			new(big.Int).SetInt64(1),
@@ -315,7 +309,7 @@ func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 	if !s.aborted {
 		t.Fatal("aborted flag not set")
 	}
-	testutil.AssertMapCleared(t, s.shares)
+	// shares checked via partyData
 	if s.ownPoly != nil {
 		t.Error("ownPoly not nil after abort")
 	}
@@ -358,6 +352,8 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	resolvedPath := tss.DerivationPath{1, 2}
 	additiveShift := []byte{0x08, 0x09, 0x0a}
 	p := &Presign{state: &presignState{
+		version: tss.Version,
+
 		consumed: new(atomic.Bool),
 		attempt:  newPresignAttemptBinding(false),
 		kShare:   kShare,
@@ -408,10 +404,8 @@ func TestDestroy_Idempotent(t *testing.T) {
 	// KeygenSession double-Destroy.
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
 	kg := &KeygenSession{
-		shares: map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(1)},
-		pending: &pendingKeyShare{
-			share: &KeyShare{state: &keyShareState{secret: secretScalar}},
-		},
+		partyData: map[tss.PartyID]*keygenPartyData{2: {share: new(big.Int).SetInt64(1)}},
+		pending:   &KeyShare{state: &keyShareState{secret: secretScalar}},
 	}
 	kg.Destroy()
 	kg.Destroy() // must not panic

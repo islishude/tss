@@ -37,15 +37,15 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	if !ok {
 		t.Fatal("missing keygen share from party 2 to party 1")
 	}
-	beforeShares := len(s1.shares)
-	beforeCommits := len(s1.commits)
-	beforePaillier := len(s1.paillierPubs)
+	beforeShares := countNonNilShares(s1.partyData)
+	beforeCommits := countNonNilCommits(s1.partyData)
+	beforePaillier := countNonNilPaillierPubs(s1.partyData)
 	out, err := s1.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if len(s1.shares) != beforeShares || len(s1.commits) != beforeCommits || len(s1.paillierPubs) != beforePaillier {
+	if countNonNilShares(s1.partyData) != beforeShares || countNonNilCommits(s1.partyData) != beforeCommits || countNonNilPaillierPubs(s1.partyData) != beforePaillier {
 		t.Fatal("plan mismatch mutated keygen state")
 	}
 	if s1.aborted {
@@ -60,4 +60,34 @@ func findCGGMPEnvelopeTo(envelopes []tss.Envelope, to tss.PartyID, payloadType t
 		}
 	}
 	return tss.Envelope{}, false
+}
+
+func countNonNilShares(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.share != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonNilCommits(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.commitments != nil {
+			n++
+		}
+	}
+	return n
+}
+
+func countNonNilPaillierPubs(pd map[tss.PartyID]*keygenPartyData) int {
+	n := 0
+	for _, d := range pd {
+		if d.paillierPub.PublicKey != nil {
+			n++
+		}
+	}
+	return n
 }

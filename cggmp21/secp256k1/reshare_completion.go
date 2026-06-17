@@ -19,12 +19,12 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	if s.newShare != nil {
-		if len(s.confirmations) == len(s.newParties) {
+		if s.allReshareConfirmationsReceived() {
 			return nil, s.finalizeConfirmedShare()
 		}
 		return nil, nil
 	}
-	if len(s.commits) != len(s.dealerParties) {
+	if !s.allDealerCommitmentsReceived() {
 		return nil, nil
 	}
 	if !s.isReceiver {
@@ -35,30 +35,24 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
 			return nil, errors.New("reshared group public key does not match original")
 		}
-		if len(s.confirmations) != len(s.newParties) {
+		if !s.allReshareConfirmationsReceived() {
 			return nil, nil
 		}
 		for _, id := range s.newParties {
-			raw, ok := s.confirmations[id]
-			if !ok {
-				return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, fmt.Errorf("missing reshare confirmation from party %d", id))
-			}
-			confirmation, err := UnmarshalKeygenConfirmation(raw)
-			if err != nil {
-				return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, keygenConfirmationRound, id, err)
-			}
-			if err := s.verifyReshareConfirmationForPublicTranscript(confirmation, newCommitments); err != nil {
+			c := s.newPartyData[id].confirmation
+			if err := s.verifyReshareConfirmationForPublicTranscript(c, newCommitments); err != nil {
 				return nil, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, id, err)
 			}
 		}
 		s.completed = true
 		return nil, nil
 	}
-	if len(s.shares) != len(s.dealerParties) || len(s.newPaillierPubs) != len(s.newParties) || len(s.newRingPedersen) != len(s.newParties) {
+	if !s.allReshareDealerDataReceived() || !s.allReshareReceiverMaterialReceived() {
 		return nil, nil
 	}
-	for dealer, share := range s.shares {
-		if err := secp.VerifyShare(s.commits[dealer], s.selfID, secp.ScalarFromBigInt(share)); err != nil {
+	for _, dealer := range s.dealerParties {
+		dd := s.dealerData[dealer]
+		if err := secp.VerifyShare(dd.commitments, s.selfID, secp.ScalarFromBigInt(dd.share)); err != nil {
 			verifyErr := err
 			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil)
 			if evErr != nil {
@@ -74,7 +68,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 					"invalid reshare share",
 					tss.NewPartySet(dealer),
 					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, s.commits[dealer])),
+					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
 				),
 				Err: verifyErr,
 			}
@@ -83,7 +77,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	order := secp.Order()
 	newSecret := new(big.Int)
 	for _, dealer := range s.dealerParties {
-		newSecret.Add(newSecret, s.shares[dealer])
+		newSecret.Add(newSecret, s.dealerData[dealer].share)
 		newSecret.Mod(newSecret, order)
 	}
 	newCommitments, err := s.aggregateCommitments()
@@ -121,13 +115,14 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	selfNPD := s.newPartyData[s.selfID]
 	localProofShare := &KeyShare{state: &keyShareState{
 		securityParams:         s.securityParams,
 		party:                  s.selfID,
 		threshold:              s.newThreshold,
 		parties:                s.newParties,
 		publicKey:              newCommitments[0],
-		paillierPublicKey:      s.newPaillierPubs[s.selfID].PublicKey,
+		paillierPublicKey:      selfNPD.paillierPub.PublicKey,
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
@@ -146,8 +141,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	newPaillierPriv, err := s.newPaillier.MarshalBinary()
+	if err != nil {
+		return nil, err
+	}
 	s.newShare = &KeyShare{state: &keyShareState{
-		version:                tss.Version,
 		securityParams:         s.securityParams,
 		party:                  s.selfID,
 		threshold:              s.newThreshold,
@@ -157,12 +155,12 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		secret:                 newSecretScalar,
 		groupCommitments:       newCommitments,
 		verificationShares:     verificationShares,
-		paillierPublicKey:      append([]byte(nil), s.newPaillierPubs[s.selfID].PublicKey...),
-		paillierPrivateKey:     append([]byte(nil), s.newPaillierPriv...),
+		paillierPublicKey:      append([]byte(nil), selfNPD.paillierPub.PublicKey...),
+		paillierPrivateKey:     newPaillierPriv,
 		paillierProof:          paillierProofBytes,
 		paillierPublicKeys:     s.sortedNewPaillierPublicKeys(),
-		ringPedersenParams:     append([]byte(nil), s.newRingPedersen[s.selfID].Params...),
-		ringPedersenProof:      append([]byte(nil), s.newRingPedersen[s.selfID].Proof...),
+		ringPedersenParams:     append([]byte(nil), selfNPD.ringPedersen.Params...),
+		ringPedersenProof:      append([]byte(nil), selfNPD.ringPedersen.Proof...),
 		ringPedersenPublic:     s.sortedNewRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
@@ -175,7 +173,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(s.newRingPedersen[s.selfID].Params, s.limits.Paillier.MaxModulusBits)
+	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(selfNPD.ringPedersen.Params, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
 	}
@@ -208,15 +206,15 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
-	confirmation, err := s.newShare.KeygenConfirmationWithLimits(s.limits)
+	confirmation, err := s.newShare.NewConfirmationWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}
+	selfNPD.confirmation = confirmation
 	encodedConfirmation, err := confirmation.MarshalBinary()
 	if err != nil {
 		return nil, err
 	}
-	s.confirmations[s.selfID] = append([]byte(nil), encodedConfirmation...)
 	confirmationEnv, err := newEnvelope(s.receiverConfig(), keygenConfirmationRound, s.selfID, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
@@ -226,7 +224,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	if len(s.confirmations) == len(s.newParties) {
+	if s.allReshareConfirmationsReceived() {
 		if err := s.finalizeConfirmedShare(); err != nil {
 			return nil, err
 		}
@@ -239,7 +237,7 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 	for degree := 0; degree < s.newThreshold; degree++ {
 		points := make([]*secp.Point, 0, len(s.dealerParties))
 		for _, dealer := range s.dealerParties {
-			commitment := s.commits[dealer][degree]
+			commitment := s.dealerData[dealer].commitments[degree]
 			p, err := secp.PointFromBytes(commitment)
 			if err != nil {
 				return nil, fmt.Errorf("invalid reshare commitment: dealer=%d degree=%d: %w", dealer, degree, err)
@@ -281,16 +279,15 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	}
 	for _, dealer := range sortedDealerParties {
 		t.AppendUint32("dealer", dealer)
-		t.AppendBytesList("dealer_commitments", s.commits[dealer])
+		t.AppendBytesList("dealer_commitments", s.dealerData[dealer].commitments)
 	}
 	for _, id := range sortedNewParties {
 		t.AppendUint32("new_party", id)
-		item := s.newPaillierPubs[id]
-		t.AppendBytes("paillier_public_key", item.PublicKey)
-		t.AppendBytes("paillier_proof", item.Proof)
-		rp := s.newRingPedersen[id]
-		t.AppendBytes("ring_pedersen_params", rp.Params)
-		t.AppendBytes("ring_pedersen_proof", rp.Proof)
+		npd := s.newPartyData[id]
+		t.AppendBytes("paillier_public_key", npd.paillierPub.PublicKey)
+		t.AppendBytes("paillier_proof", npd.paillierPub.Proof)
+		t.AppendBytes("ring_pedersen_params", npd.ringPedersen.Params)
+		t.AppendBytes("ring_pedersen_proof", npd.ringPedersen.Proof)
 	}
 	t.AppendBytesList("new_commitments", newCommitments)
 	return t.Sum()
@@ -299,11 +296,11 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {
 	out := make([]PaillierPublicShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
-		item := s.newPaillierPubs[id]
+		npd := s.newPartyData[id]
 		out = append(out, PaillierPublicShare{
-			Party:     item.Party,
-			PublicKey: append([]byte(nil), item.PublicKey...),
-			Proof:     append([]byte(nil), item.Proof...),
+			Party:     npd.paillierPub.Party,
+			PublicKey: append([]byte(nil), npd.paillierPub.PublicKey...),
+			Proof:     append([]byte(nil), npd.paillierPub.Proof...),
 		})
 	}
 	return out
@@ -312,12 +309,23 @@ func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {
 func (s *ReshareSession) sortedNewRingPedersenPublic() []RingPedersenPublicShare {
 	out := make([]RingPedersenPublicShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
-		item := s.newRingPedersen[id]
+		npd := s.newPartyData[id]
 		out = append(out, RingPedersenPublicShare{
-			Party:  item.Party,
-			Params: append([]byte(nil), item.Params...),
-			Proof:  append([]byte(nil), item.Proof...),
+			Party:  npd.ringPedersen.Party,
+			Params: append([]byte(nil), npd.ringPedersen.Params...),
+			Proof:  append([]byte(nil), npd.ringPedersen.Proof...),
 		})
 	}
 	return out
+}
+
+// allDealerCommitmentsReceived returns true when every dealer has submitted commitments.
+func (s *ReshareSession) allDealerCommitmentsReceived() bool {
+	for _, id := range s.dealerParties {
+		dd := s.dealerData[id]
+		if dd == nil || dd.commitments == nil {
+			return false
+		}
+	}
+	return true
 }

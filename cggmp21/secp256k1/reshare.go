@@ -24,6 +24,21 @@ const (
 // ErrUnsupportedRefreshThresholdChange is returned when fixed-party refresh is asked to change the threshold.
 var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: threshold change requires StartReshare")
 
+// reshareDealerPartyData holds per-dealer state for a single reshare dealer participant.
+type reshareDealerPartyData struct {
+	commitments [][]byte
+	share       *big.Int
+	pending     *pendingReshareShare
+}
+
+// reshareNewPartyData holds per-new-party state for a single reshare receiver participant.
+// Auxiliary material is populated during round 1; confirmation is set during round 2.
+type reshareNewPartyData struct {
+	paillierPub  PaillierPublicShare
+	ringPedersen RingPedersenPublicShare
+	confirmation *KeygenConfirmation
+}
+
 // ReshareSession tracks a CGGMP21 party-set-changing resharing exchange.
 //
 // Old parties act as dealers. Each dealer uses a polynomial whose constant is
@@ -46,26 +61,21 @@ type ReshareSession struct {
 	isDealer      bool         // Whether this party sends weighted dealer contributions.
 	isReceiver    bool         // Whether this party receives and assembles a new share.
 
-	cfg            tss.ThresholdConfig      // Local threshold runtime view for the current role.
-	log            tss.Logger               // Optional protocol logger.
-	limits         Limits                   // Local fail-closed resource policy.
-	securityParams SecurityParams           // Cryptographic profile for new auxiliary material.
-	planHash       []byte                   // Digest every reshare payload must echo.
-	commits        map[tss.PartyID][][]byte // Public dealer polynomial commitments by dealer.
-	shares         map[tss.PartyID]*big.Int // Secret dealer contributions received by this receiver.
-	completed      bool                     // Terminal success flag after newShare is confirmed.
-	aborted        bool                     // Terminal failure/destruction flag.
-	newShare       *KeyShare                // New key share produced for receiver participants.
-	confirmations  map[tss.PartyID][]byte   // Reshare confirmation payloads by participant.
-	ownPoly        []*big.Int               // Local weighted dealer polynomial coefficients; secret-bearing.
+	cfg            tss.ThresholdConfig                     // Local threshold runtime view for the current role.
+	log            tss.Logger                              // Optional protocol logger.
+	limits         Limits                                  // Local fail-closed resource policy.
+	securityParams SecurityParams                          // Cryptographic profile for new auxiliary material.
+	planHash       []byte                                  // Digest every reshare payload must echo.
+	dealerData     map[tss.PartyID]*reshareDealerPartyData // Per-dealer state keyed by dealer party.
+	newPartyData   map[tss.PartyID]*reshareNewPartyData    // Per-new-party state keyed by receiver party.
+	completed      bool                                    // Terminal success flag after newShare is confirmed.
+	aborted        bool                                    // Terminal failure/destruction flag.
+	newShare       *KeyShare                               // New key share produced for receiver participants.
+	ownPoly        []*big.Int                              // Local weighted dealer polynomial coefficients; secret-bearing.
 
-	newPaillier     *pai.PrivateKey                         // Fresh local Paillier private key for receiver auxiliary material.
-	newPaillierPubs map[tss.PartyID]PaillierPublicShare     // Validated fresh Paillier public material by new receiver.
-	newPaillierPriv []byte                                  // Serialized fresh Paillier private key persisted into newShare.
-	newRingPedersen map[tss.PartyID]RingPedersenPublicShare // Validated fresh Ring-Pedersen material by new receiver.
-	dealerSent      bool                                    // Whether this dealer has already emitted commitments and shares.
-	pendingShares   map[tss.PartyID]pendingReshareShare     // Early dealer shares buffered until commitments are available.
-	guard           *tss.EnvelopeGuard                      // Transport replay, identity, and policy guard.
+	newPaillier *pai.PrivateKey    // Fresh local Paillier private key for receiver auxiliary material.
+	dealerSent  bool               // Whether this dealer has already emitted commitments and shares.
+	guard       *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
 }
 
 type reshareDealerCommitmentsPayload struct {
@@ -214,39 +224,43 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		Log:          local.Log,
 	}
 	s := &ReshareSession{
-		plan:            cloneResharePlan(plan),
-		oldKey:          oldKey,
-		oldPublicKey:    append([]byte(nil), plan.state.oldGroupPublicKey...),
-		oldChainCode:    append([]byte(nil), plan.state.chainCode...),
-		oldParties:      plan.state.oldParties.Clone(),
-		dealerParties:   plan.state.dealerParties.Clone(),
-		newParties:      plan.state.newParties.Clone(),
-		newThreshold:    plan.state.newThreshold,
-		selfID:          localParty,
-		isDealer:        dealer,
-		isReceiver:      receiver,
-		cfg:             config,
-		log:             config.Logger(),
-		limits:          plan.limits,
-		securityParams:  plan.state.securityParams,
-		planHash:        append([]byte(nil), planHash...),
-		commits:         make(map[tss.PartyID][][]byte),
-		shares:          make(map[tss.PartyID]*big.Int),
-		confirmations:   make(map[tss.PartyID][]byte, len(plan.state.newParties)),
-		newPaillierPubs: make(map[tss.PartyID]PaillierPublicShare),
-		newRingPedersen: make(map[tss.PartyID]RingPedersenPublicShare),
-		pendingShares:   make(map[tss.PartyID]pendingReshareShare),
-		guard:           guard,
+		plan:           cloneResharePlan(plan),
+		oldKey:         oldKey,
+		oldPublicKey:   append([]byte(nil), plan.state.oldGroupPublicKey...),
+		oldChainCode:   append([]byte(nil), plan.state.chainCode...),
+		oldParties:     plan.state.oldParties.Clone(),
+		dealerParties:  plan.state.dealerParties.Clone(),
+		newParties:     plan.state.newParties.Clone(),
+		newThreshold:   plan.state.newThreshold,
+		selfID:         localParty,
+		isDealer:       dealer,
+		isReceiver:     receiver,
+		cfg:            config,
+		log:            config.Logger(),
+		limits:         plan.limits,
+		securityParams: plan.state.securityParams,
+		planHash:       append([]byte(nil), planHash...),
+		dealerData:     make(map[tss.PartyID]*reshareDealerPartyData),
+		newPartyData:   make(map[tss.PartyID]*reshareNewPartyData),
+		guard:          guard,
+	}
+	// Pre-initialize per-party entries so lookups never fail for valid parties.
+	for _, id := range s.dealerParties {
+		s.dealerData[id] = &reshareDealerPartyData{}
+	}
+	for _, id := range s.newParties {
+		s.newPartyData[id] = &reshareNewPartyData{}
 	}
 	if receiver {
 		if err := s.initReceiverMaterial(); err != nil {
 			return nil, nil, err
 		}
+		selfNPD := s.newPartyData[s.selfID]
 		payload, err := marshalReshareReceiverMaterialPayloadWithLimits(reshareReceiverMaterialPayload{
-			PaillierPublicKey:  s.newPaillierPubs[s.selfID].PublicKey,
-			PaillierProof:      s.newPaillierPubs[s.selfID].Proof,
-			RingPedersenParams: s.newRingPedersen[s.selfID].Params,
-			RingPedersenProof:  s.newRingPedersen[s.selfID].Proof,
+			PaillierPublicKey:  selfNPD.paillierPub.PublicKey,
+			PaillierProof:      selfNPD.paillierPub.Proof,
+			RingPedersenParams: selfNPD.ringPedersen.Params,
+			RingPedersenProof:  selfNPD.ringPedersen.Proof,
 			PlanHash:           s.planHash,
 		}, s.limits)
 		if err != nil {
@@ -330,7 +344,11 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 	}
 	switch env.PayloadType {
 	case payloadReshareDealerCommitments:
-		if _, ok := s.commits[env.From]; ok {
+		dd, ok := s.dealerData[env.From]
+		if !ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
+		}
+		if dd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
 		}
 		p, err := unmarshalReshareDealerCommitmentsPayloadWithLimits(env.Payload, s.limits)
@@ -343,12 +361,12 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if err := s.validateDealerCommitments(env.From, p.Commitments); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		s.commits[env.From] = p.Commitments
-		if pending, ok := s.pendingShares[env.From]; ok {
-			if err := s.applyReshareShare(env.From, pending.payload, pending.raw); err != nil {
+		dd.commitments = p.Commitments
+		if dd.pending != nil {
+			if err := s.applyReshareShare(env.From, dd.pending.payload, dd.pending.raw); err != nil {
 				return nil, err
 			}
-			delete(s.pendingShares, env.From)
+			dd.pending = nil
 		}
 	case payloadReshareShare:
 		if !s.isReceiver {
@@ -361,14 +379,18 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		if _, ok := s.shares[env.From]; ok {
+		dd, ok := s.dealerData[env.From]
+		if !ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a dealer", env.From))
+		}
+		if dd.share != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare share"))
 		}
-		if _, ok := s.pendingShares[env.From]; ok {
+		if dd.pending != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate pending reshare share"))
 		}
-		if _, ok := s.commits[env.From]; !ok {
-			s.pendingShares[env.From] = pendingReshareShare{
+		if dd.commitments == nil {
+			dd.pending = &pendingReshareShare{
 				payload: p.Clone(),
 				raw:     append([]byte(nil), env.Payload...),
 			}
@@ -378,7 +400,11 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 			return nil, err
 		}
 	case payloadReshareReceiverMaterial:
-		if _, ok := s.newPaillierPubs[env.From]; ok {
+		npd, ok := s.newPartyData[env.From]
+		if !ok {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
+		}
+		if len(npd.paillierPub.PublicKey) > 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
 		}
 		p, err := unmarshalReshareReceiverMaterialPayloadWithLimits(env.Payload, s.limits)
@@ -521,12 +547,16 @@ func (s *ReshareSession) abort() {
 		return
 	}
 	s.aborted = true
-	clearBigIntMap(s.shares)
-	for id, pending := range s.pendingShares {
-		pending.payload.Share = nil
-		clear(pending.payload.DealerCommitmentHash)
-		clear(pending.raw)
-		delete(s.pendingShares, id)
+	for _, dd := range s.dealerData {
+		if dd.share != nil {
+			secret.ClearBigInt(dd.share)
+		}
+		if dd.pending != nil {
+			dd.pending.payload.Share = nil
+			clear(dd.pending.payload.DealerCommitmentHash)
+			clear(dd.pending.raw)
+			dd.pending = nil
+		}
 	}
 	for _, coeff := range s.ownPoly {
 		secret.ClearBigInt(coeff)
@@ -535,10 +565,42 @@ func (s *ReshareSession) abort() {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
 	}
-	clear(s.newPaillierPriv)
 	if s.newShare != nil {
 		s.newShare.Destroy()
 		s.newShare = nil
 	}
 	s.completed = false
+}
+
+// allReshareDealerDataReceived returns true when every dealer has submitted commitments and a share.
+func (s *ReshareSession) allReshareDealerDataReceived() bool {
+	for _, id := range s.dealerParties {
+		dd := s.dealerData[id]
+		if dd == nil || dd.commitments == nil || dd.share == nil {
+			return false
+		}
+	}
+	return true
+}
+
+// allReshareReceiverMaterialReceived returns true when every new party has submitted auxiliary material.
+func (s *ReshareSession) allReshareReceiverMaterialReceived() bool {
+	for _, id := range s.newParties {
+		npd := s.newPartyData[id]
+		if npd == nil || len(npd.paillierPub.PublicKey) == 0 || len(npd.ringPedersen.Params) == 0 {
+			return false
+		}
+	}
+	return true
+}
+
+// allReshareConfirmationsReceived returns true when every new party has submitted a confirmation.
+func (s *ReshareSession) allReshareConfirmationsReceived() bool {
+	for _, id := range s.newParties {
+		npd := s.newPartyData[id]
+		if npd == nil || npd.confirmation == nil {
+			return false
+		}
+	}
+	return true
 }

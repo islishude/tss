@@ -23,7 +23,7 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	k.state.parties = tss.NewPartySet(1, 2)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
 	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
-	k.state.keygenConfirmations = [][]byte{{4}}
+	k.state.keygenConfirmations = []*KeygenConfirmation{{Sender: 4}}
 
 	parties := k.Parties()
 	parties[0] = 99
@@ -32,12 +32,12 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	verificationShares := k.VerificationShares()
 	verificationShares[0].PublicKey[0] = 99
 	confirmations := k.KeygenConfirmations()
-	confirmations[0][0] = 99
+	confirmations[0].Sender = 99
 
 	if k.state.parties[0] != 1 ||
 		k.state.groupCommitments[0][0] != 1 ||
 		k.state.verificationShares[0].PublicKey[0] != 3 ||
-		k.state.keygenConfirmations[0][0] != 4 {
+		k.state.keygenConfirmations[0].Sender != 4 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }

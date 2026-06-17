@@ -29,8 +29,8 @@ const (
 // VerificationShare is a caller-owned snapshot of a participant public share
 // derived from DKG commitments.
 type VerificationShare struct {
-	Party     tss.PartyID `json:"party"`
-	PublicKey []byte      `json:"public_key"`
+	Party     tss.PartyID `json:"party" wire:"1,u32"`
+	PublicKey []byte      `json:"public_key" wire:"2,bytes,max_bytes=point"`
 }
 
 // Clone returns a deep copy of VerificationShare
@@ -54,19 +54,18 @@ type KeyShare struct {
 }
 
 type keyShareState struct {
-	version              uint16              // Canonical private wire version of this key-share record.
-	party                tss.PartyID         // Local owner of the secret signing share.
-	threshold            int                 // Number of signers required for FROST signing.
-	parties              tss.PartySet        // Canonical full participant set for the group key.
-	publicKey            []byte              // Parent group public key before request-time derivation.
-	chainCode            []byte              // HD chain code paired with publicKey for non-hardened derivation.
-	secret               *secret.Scalar      // Local Ed25519 signing share; never exposed through accessors.
-	groupCommitments     [][]byte            // Public polynomial commitments from keygen/reshare.
-	verificationShares   []VerificationShare // Per-party public verification shares derived from commitments.
-	keygenSessionID      tss.SessionID       // Session that produced this key share.
-	keygenTranscriptHash []byte              // Transcript hash of completed keygen/reshare confirmation.
-	planHash             []byte              // Lifecycle plan digest that authorized this key share.
-	keygenConfirmations  [][]byte            // Canonical confirmation payloads proving every party accepted the keygen.
+	party                tss.PartyID           // Local owner of the secret signing share.
+	threshold            int                   // Number of signers required for FROST signing.
+	parties              tss.PartySet          // Canonical full participant set for the group key.
+	publicKey            []byte                // Parent group public key before request-time derivation.
+	chainCode            []byte                // HD chain code paired with publicKey for non-hardened derivation.
+	secret               *secret.Scalar        // Local Ed25519 signing share; never exposed through accessors.
+	groupCommitments     [][]byte              // Public polynomial commitments from keygen/reshare.
+	verificationShares   []VerificationShare   // Per-party public verification shares derived from commitments.
+	keygenSessionID      tss.SessionID         // Session that produced this key share.
+	keygenTranscriptHash []byte                // Transcript hash of completed keygen/reshare confirmation.
+	planHash             []byte                // Lifecycle plan digest that authorized this key share.
+	keygenConfirmations  []*KeygenConfirmation // Confirmation set proving every party accepted the keygen.
 }
 
 // Algorithm returns the common algorithm identifier.
@@ -87,7 +86,7 @@ func (k *KeyShare) Version() uint16 {
 	if k == nil || k.state == nil {
 		return 0
 	}
-	return k.state.version
+	return tss.Version
 }
 
 // Threshold returns the signing threshold.
@@ -174,11 +173,11 @@ func (k *KeyShare) PlanHashBytes() []byte {
 }
 
 // KeygenConfirmations returns a deep copy of the keygen confirmation set.
-func (k *KeyShare) KeygenConfirmations() [][]byte {
+func (k *KeyShare) KeygenConfirmations() []*KeygenConfirmation {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return wireutil.CloneByteSlices(k.state.keygenConfirmations)
+	return tss.CloneSlices(k.state.keygenConfirmations)
 }
 
 // MarshalBinary encodes the share using canonical TLV wire format.
@@ -215,8 +214,8 @@ func (k KeyShare) redactedString() string {
 		return "<nil>"
 	}
 	return fmt.Sprintf(
-		"KeyShare{Version:%d Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenSessionID:%s KeygenTranscriptHash:%x PlanHash:%d bytes KeygenConfirmations:%d}",
-		k.state.version,
+		"KeyShare{Party:%d Threshold:%d Parties:%v PublicKey:%x ChainCode:%d bytes Secret:<redacted> GroupCommitments:%d VerificationShares:%d KeygenSessionID:%s KeygenTranscriptHash:%x PlanHash:%d bytes KeygenConfirmations:%d}",
+
 		k.state.party,
 		k.state.threshold,
 		k.state.parties,
@@ -251,9 +250,6 @@ func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 func (k *KeyShare) validateWithoutConfirmations() error {
 	if k == nil || k.state == nil {
 		return errors.New("nil key share")
-	}
-	if k.state.version != tss.Version {
-		return fmt.Errorf("unexpected key share version %d", k.state.version)
 	}
 	if k.state.threshold <= 0 || k.state.threshold > len(k.state.parties) {
 		return errors.New("invalid threshold")
@@ -323,7 +319,7 @@ func (k *KeyShare) Validate() error {
 		return err
 	}
 	if len(k.state.keygenConfirmations) > 0 {
-		if err := verifyKeygenConfirmationSet(k, k.state.keygenConfirmations); err != nil {
+		if err := verifyFinalizedKeygenConfirmationSet(k, k.state.keygenConfirmations, false); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	}
@@ -418,7 +414,6 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		return nil
 	}
 	return &KeyShare{state: &keyShareState{
-		version:              k.state.version,
 		party:                k.state.party,
 		threshold:            k.state.threshold,
 		parties:              slices.Clone(k.state.parties),
@@ -430,7 +425,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		keygenSessionID:      k.state.keygenSessionID,
 		keygenTranscriptHash: slices.Clone(k.state.keygenTranscriptHash),
 		planHash:             slices.Clone(k.state.planHash),
-		keygenConfirmations:  wireutil.CloneByteSlices(k.state.keygenConfirmations),
+		keygenConfirmations:  cloneConfirmations(k.state.keygenConfirmations),
 	}}
 }
 

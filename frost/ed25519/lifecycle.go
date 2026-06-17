@@ -75,13 +75,20 @@ func (s *KeygenSession) clearIntermediateSecrets() {
 	if s == nil {
 		return
 	}
-	clearScalarMap(s.shares)
+	for _, pd := range s.partyData {
+		if pd.share != nil {
+			pd.share.Set(fed.NewScalar())
+			pd.share = nil
+		}
+		clear(pd.chainCode)
+		pd.chainCode = nil
+		if pd.confirmation != nil {
+			clear(pd.confirmation.ChainCode)
+			pd.confirmation = nil
+		}
+	}
 	clearScalars(s.ownPoly)
 	clearEnvelopePayloads(s.ownMessages)
-	for _, cc := range s.chainCodes {
-		clear(cc)
-	}
-	s.chainCodes = nil
 	s.ownPoly = nil
 	s.ownMessages = nil
 }

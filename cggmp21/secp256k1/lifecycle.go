@@ -17,12 +17,6 @@ func (s *KeygenSession) Destroy() {
 		return
 	}
 	s.abort()
-	for id := range s.commits {
-		delete(s.commits, id)
-	}
-	for id := range s.confirmations {
-		delete(s.confirmations, id)
-	}
 	if s.keyShare != nil {
 		s.keyShare.Destroy()
 		s.keyShare = nil

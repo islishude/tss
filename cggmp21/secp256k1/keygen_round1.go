@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
@@ -96,30 +95,31 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		}
 		commitments[i] = enc
 	}
+	partyData := make(map[tss.PartyID]*keygenPartyData, len(config.Parties))
+	for _, id := range config.Parties {
+		if id == config.Self {
+			partyData[id] = &keygenPartyData{
+				commitments:     commitments,
+				share:           shamir.Eval(poly, id, secp.Order()),
+				chainCode:       bytes.Clone(chainCode),
+				chainCodeCommit: bytes.Clone(chainCodeCommit),
+				paillierPub:     PaillierPublicShare{Party: id, PublicKey: paillierPubBytes, Proof: modProofBytes},
+				ringPedersen:    RingPedersenPublicShare{Party: id, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
+			}
+		} else {
+			partyData[id] = new(keygenPartyData)
+		}
+	}
 	s := &KeygenSession{
 		cfg:            config,
 		log:            config.Logger(),
 		limits:         limits,
 		securityParams: plan.securityParams,
 		planHash:       bytes.Clone(planHash),
-		commits:        map[tss.PartyID][][]byte{config.Self: commitments},
-		shares:         map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
-		chainCodes: map[tss.PartyID][]byte{
-			config.Self: bytes.Clone(chainCode),
-		},
-		chainCodeComms: map[tss.PartyID][]byte{
-			config.Self: bytes.Clone(chainCodeCommit),
-		},
-		paillier: paillierKey,
-		paillierPubs: map[tss.PartyID]PaillierPublicShare{
-			config.Self: {Party: config.Self, PublicKey: paillierPubBytes, Proof: modProofBytes},
-		},
-		ringPedersen: map[tss.PartyID]RingPedersenPublicShare{
-			config.Self: {Party: config.Self, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
-		},
-		state:         keygenCollecting,
-		confirmations: make(map[tss.PartyID][]byte, len(config.Parties)),
-		guard:         guard,
+		partyData:      partyData,
+		paillier:       paillierKey,
+		state:          keygenCollecting,
+		guard:          guard,
 	}
 	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
@@ -304,13 +304,14 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.commits[env.From] = p.Commitments
+	pd := s.partyData[env.From]
+	pd.commitments = p.Commitments
 	if len(p.ChainCodeCommit) != sha256.Size {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be %d bytes, got %d", sha256.Size, len(p.ChainCodeCommit)))
 	}
-	s.chainCodeComms[env.From] = append([]byte(nil), p.ChainCodeCommit...)
-	s.paillierPubs[env.From] = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
-	s.ringPedersen[env.From] = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
+	pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
+	pd.paillierPub = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
+	pd.ringPedersen = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
 
 	// ---- 5. EMIT ----
 	return s.tryComplete()
@@ -339,13 +340,13 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	// when they are already available. If the commitments have not arrived
 	// yet, defer verification to tryComplete (which re-checks all shares
 	// once every party's commitments are in).
-	if commits, ok := s.commits[env.From]; ok {
-		if err := secp.VerifyShare(commits, s.cfg.Self, share); err != nil {
+	if pd := s.partyData[env.From]; pd.commitments != nil {
+		if err := secp.VerifyShare(pd.commitments, s.cfg.Self, share); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
 				"party_id", s.cfg.Self,
 				"dealer", env.From,
 			)
-			protoErr, evErr := s.buildShareVerificationBlame(env.From, commits, err)
+			protoErr, evErr := s.buildShareVerificationBlame(env.From, pd.commitments, err)
 			if evErr != nil {
 				return nil, evErr
 			}
@@ -354,7 +355,7 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.shares[env.From] = share.BigInt()
+	s.partyData[env.From].share = share.BigInt()
 
 	// ---- 5. EMIT ----
 	return s.tryComplete()

@@ -321,7 +321,6 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		t.Fatal(err)
 	}
 	key := &KeyShare{state: &keyShareState{
-		version:              tss.Version,
 		party:                party,
 		threshold:            2,
 		parties:              parties,

@@ -98,7 +98,6 @@ func (s *ReshareSession) tryComplete() error {
 	chainCode := append([]byte(nil), s.chainCode...)
 	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.planHash, s.refreshMode, s.commits, newCommitments, verificationShares)
 	newShare := &KeyShare{state: &keyShareState{
-		version:              tss.Version,
 		party:                s.selfID,
 		threshold:            s.newThreshold,
 		parties:              s.newParties.Clone(),
