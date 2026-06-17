@@ -571,9 +571,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 	var wg sync.WaitGroup
 	results := make(chan result, workers)
 	for range workers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
 			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			if err != nil {
@@ -582,7 +580,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 			}
 			raw, err := out[0].MarshalBinary()
 			results <- result{raw: raw, err: err}
-		}()
+		})
 	}
 	wg.Wait()
 	close(results)
@@ -625,13 +623,11 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 	errs := make(chan error, len(attempts))
 	for _, candidate := range attempts {
 		candidate := candidate
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), candidate.session)
 			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			errs <- err
-		}()
+		})
 	}
 	wg.Wait()
 	close(errs)

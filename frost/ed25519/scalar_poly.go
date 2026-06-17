@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
@@ -37,9 +38,9 @@ func randomScalarPolynomial(reader io.Reader, threshold int, constant *fed.Scala
 func evalScalarPolynomial(coeffs []*fed.Scalar, id tss.PartyID) *fed.Scalar {
 	x := edcurve.ScalarFromUint64(uint64(id))
 	acc := fed.NewScalar()
-	for i := len(coeffs) - 1; i >= 0; i-- {
+	for _, coeff := range slices.Backward(coeffs) {
 		acc.Multiply(acc, x)
-		acc.Add(acc, coeffs[i])
+		acc.Add(acc, coeff)
 	}
 	return acc
 }

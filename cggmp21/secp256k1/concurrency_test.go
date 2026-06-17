@@ -47,9 +47,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 		var producedMu sync.Mutex
 		var produced []tss.Envelope
 		for _, env := range messages {
-			wg.Add(1)
-			go func(env tss.Envelope) {
-				defer wg.Done()
+			wg.Go(func() {
 				for _, id := range parties {
 					if id == env.From || (env.To != 0 && env.To != id) {
 						continue
@@ -66,7 +64,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 					produced = append(produced, out...)
 					producedMu.Unlock()
 				}
-			}(env)
+			})
 		}
 		wg.Wait()
 		return produced

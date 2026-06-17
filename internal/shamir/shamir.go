@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"math/big"
+	"slices"
 
 	"github.com/islishude/tss"
 )
@@ -66,9 +67,9 @@ func Eval(coeffs []*big.Int, id tss.PartyID, order *big.Int) *big.Int {
 	x := new(big.Int).SetUint64(uint64(id))
 	acc := new(big.Int)
 	// Horner evaluation keeps the code compact and avoids temporary powers.
-	for i := len(coeffs) - 1; i >= 0; i-- {
+	for _, coeff := range slices.Backward(coeffs) {
 		acc.Mul(acc, x)
-		acc.Add(acc, coeffs[i])
+		acc.Add(acc, coeff)
 		acc.Mod(acc, order)
 	}
 	return acc
