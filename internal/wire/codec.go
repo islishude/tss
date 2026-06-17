@@ -65,6 +65,8 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 		return fs.encodeRecord(fv, limitSet)
 	case kindRecordList:
 		return fs.encodeRecordList(fv, limitSet)
+	case kindMap:
+		return fs.encodeMap(fv, limitSet)
 	default:
 		return nil, fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}
@@ -109,6 +111,8 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits,
 		return fs.decodeRecord(fv, raw, limitSet, frameLimits)
 	case kindRecordList:
 		return fs.decodeRecordList(fv, raw, limitSet, frameLimits)
+	case kindMap:
+		return fs.decodeMap(fv, raw, limitSet, frameLimits)
 	default:
 		return fmt.Errorf("unsupported wire kind %d", fs.kind)
 	}

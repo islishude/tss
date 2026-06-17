@@ -17,7 +17,7 @@
 //
 // Supported kinds: u8, u16, u32, bool, bytes, string, u32list, byteslist,
 // partybytes, partybytepairs, nested, custom, bigint, biguint, bigpos,
-// record, recordlist.
+// record, recordlist, map.
 //
 // The kind may be omitted from the struct tag, in which case it is inferred
 // from the Go field type. Named primitive types (e.g. type SessionID [32]byte)
@@ -89,6 +89,74 @@ type ValueUnmarshaler interface {
 	UnmarshalWireValue([]byte) error
 }
 
+// MessageMarshaler is implemented by message types that provide their own
+// complete canonical TLV message encoding.
+//
+// It is object-level, unlike ValueMarshaler, which only encodes one field
+// value for `wire:",custom"` fields. The returned bytes must be a complete
+// canonical TLV message: magic || type_id || version || field_body.
+//
+// Implementations must guarantee:
+//   - correct wire type and version
+//   - canonical sorted field tags
+//   - no duplicate fields
+//   - no trailing bytes
+type MessageMarshaler interface {
+	MarshalWireMessage(opts ...MarshalOption) ([]byte, error)
+}
+
+// MessageUnmarshaler is implemented by message types that provide their own
+// complete canonical TLV message decoding.
+//
+// It is object-level, unlike ValueUnmarshaler, which only decodes one field
+// value for `wire:",custom"` fields. The implementation receives the
+// complete TLV message bytes and must decode into the receiver.
+//
+// Implementations must:
+//   - validate wire type and version
+//   - reject non-canonical encodings
+//   - not retain a reference to the input buffer
+type MessageUnmarshaler interface {
+	UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error
+}
+
+// runBeforeMarshalHook calls BeforeMarshalWire on msg if it implements
+// BeforeMarshaler, falling back to the addressable value.
+func runBeforeMarshalHook(msg any, v reflect.Value) error {
+	if bm, ok := msg.(BeforeMarshaler); ok {
+		return bm.BeforeMarshalWire()
+	}
+	if v.CanAddr() {
+		if bm, ok := v.Addr().Interface().(BeforeMarshaler); ok {
+			return bm.BeforeMarshalWire()
+		}
+	}
+	return nil
+}
+
+// runValidateHook calls Validate on msg if it implements Validator,
+// falling back to the addressable value.
+func runValidateHook(msg any, v reflect.Value) error {
+	if val, ok := msg.(Validator); ok {
+		return val.Validate()
+	}
+	if v.CanAddr() {
+		if val, ok := v.Addr().Interface().(Validator); ok {
+			return val.Validate()
+		}
+	}
+	return nil
+}
+
+// runAfterUnmarshalHook calls AfterUnmarshalWire on msg if it implements
+// AfterUnmarshaler.
+func runAfterUnmarshalHook(msg any) error {
+	if au, ok := msg.(AfterUnmarshaler); ok {
+		return au.AfterUnmarshalWire()
+	}
+	return nil
+}
+
 // Marshal encodes a struct using its "wire" struct tags into a
 // canonical TLV envelope. msg must be a struct or pointer-to-struct
 // implementing Message.
@@ -118,36 +186,52 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 		}
 	}
 
+	// Ensure v is addressable so pointer-receiver hook methods are visible.
+	if !v.CanAddr() {
+		newV := reflect.New(v.Type())
+		newV.Elem().Set(v)
+		v = newV.Elem()
+	}
+
 	var cfg marshalConfig
 	for _, opt := range opts {
 		opt.applyMarshal(&cfg)
 	}
 
-	// BeforeMarshalWire hook — try value, then pointer.
-	if bm, ok := msg.(BeforeMarshaler); ok {
-		if err := bm.BeforeMarshalWire(); err != nil {
+	if err := runBeforeMarshalHook(msg, v); err != nil {
+		return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
+	}
+
+	if err := runValidateHook(msg, v); err != nil {
+		return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
+	}
+
+	// Type-level codec hook: if the message provides its own complete TLV
+	// encoding, delegate to it and bypass reflection-based field encoding.
+	if mm, ok := msg.(MessageMarshaler); ok {
+		raw, err := mm.MarshalWireMessage(opts...)
+		if err != nil {
 			return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
 		}
-	} else if v.CanAddr() {
-		if bm, ok := v.Addr().Interface().(BeforeMarshaler); ok {
-			if err := bm.BeforeMarshalWire(); err != nil {
+		if raw == nil {
+			return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
+		}
+		return raw, nil
+	}
+	if v.CanAddr() {
+		if mm, ok := v.Addr().Interface().(MessageMarshaler); ok {
+			raw, err := mm.MarshalWireMessage(opts...)
+			if err != nil {
 				return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
 			}
+			if raw == nil {
+				return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
+			}
+			return raw, nil
 		}
 	}
 
-	// Validate before marshal — try value, then pointer.
-	if val, ok := msg.(Validator); ok {
-		if err := val.Validate(); err != nil {
-			return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
-		}
-	} else if v.CanAddr() {
-		if val, ok := v.Addr().Interface().(Validator); ok {
-			if err := val.Validate(); err != nil {
-				return nil, fmt.Errorf("wire.Marshal %s: %w", v.Type().Name(), err)
-			}
-		}
-	}
+	// Message assertion satisfied; proceed with reflection path.
 
 	s, err := getSchema(v.Type())
 	if err != nil {
@@ -195,6 +279,28 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		opt.applyUnmarshal(&cfg)
 	}
 
+	// Build a zero-value work copy. Decoding happens into work first so
+	// that a failed decode never pollutes the original dst (fail-atomic).
+	work := reflect.New(v.Type()).Elem()
+	hookTarget := work.Addr().Interface()
+
+	// Type-level codec hook: if the message provides its own complete TLV
+	// decoding, delegate to it and bypass reflection-based field decoding.
+	if um, ok := hookTarget.(MessageUnmarshaler); ok {
+		if err := um.UnmarshalWireMessage(in, opts...); err != nil {
+			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
+		}
+		if err := runAfterUnmarshalHook(hookTarget); err != nil {
+			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
+		}
+		if err := runValidateHook(hookTarget, work); err != nil {
+			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
+		}
+		v.Set(work)
+		return nil
+	}
+
+	// Proceed with reflection path.
 	limits := cfg.frameLimits
 	if limits.MaxTotalBytes == 0 && limits.MaxFields == 0 && limits.MaxFieldBytes == 0 {
 		limits = DefaultFrameLimits()
@@ -225,7 +331,6 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		}
 	}
 
-	work := reflect.New(v.Type()).Elem()
 	for i := range s.fields {
 		fs := &s.fields[i]
 		fv := work.FieldByIndex(fs.index)
@@ -234,19 +339,12 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		}
 	}
 
-	// AfterUnmarshalWire hook.
-	hookTarget := work.Addr().Interface()
-	if au, ok := hookTarget.(AfterUnmarshaler); ok {
-		if err := au.AfterUnmarshalWire(); err != nil {
-			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
-		}
+	if err := runAfterUnmarshalHook(hookTarget); err != nil {
+		return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 	}
 
-	// Validate.
-	if val, ok := hookTarget.(Validator); ok {
-		if err := val.Validate(); err != nil {
-			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
-		}
+	if err := runValidateHook(hookTarget, work); err != nil {
+		return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 	}
 
 	v.Set(work)

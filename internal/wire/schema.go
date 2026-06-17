@@ -31,6 +31,7 @@ const (
 	kindBigPos
 	kindRecord
 	kindRecordList
+	kindMap
 )
 
 // fieldSchema holds the parsed information for a single wire-tagged struct field.
@@ -44,6 +45,10 @@ type fieldSchema struct {
 	maxBytes string // limit name for max_bytes= option
 	maxItems string // limit name for max_items= option
 	maxBits  string // limit name for max_bits= option
+
+	mapKeyType   reflect.Type
+	mapValueType reflect.Type
+	mapValueKind wireKind
 }
 
 // schema is the cached parsed struct-tag information for a wire-encodable type.
@@ -232,6 +237,14 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			return fieldSchema{}, fmt.Errorf("field %s: len=%d does not match array length %d", f.Name, fs.fixedLen, f.Type.Len())
 		}
 	}
+
+	// Map kind requires additional schema initialization for key/value types.
+	if fs.kind == kindMap {
+		if err := fs.initMapSchema(); err != nil {
+			return fieldSchema{}, err
+		}
+	}
+
 	return fs, nil
 }
 
@@ -345,6 +358,11 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 			return 0, fmt.Errorf("recordlist requires []struct or []*struct, got %s", t)
 		}
 		return kindRecordList, nil
+	case "map":
+		if t.Kind() != reflect.Map {
+			return 0, fmt.Errorf("map requires map[K]V, got %s", t)
+		}
+		return kindMap, nil
 	default:
 		return 0, fmt.Errorf("unknown wire kind %q", kindStr)
 	}
@@ -355,7 +373,9 @@ var knownKindNames = map[string]bool{
 	"u8": true, "u16": true, "u32": true, "bool": true,
 	"bytes": true, "string": true, "u32list": true, "byteslist": true,
 	"partybytes": true, "partybytepairs": true, "nested": true, "custom": true,
-	"bigint": true, "biguint": true, "bigpos": true, "record": true, "recordlist": true,
+	"bigint": true, "biguint": true, "bigpos": true,
+	"record": true, "recordlist": true,
+	"map": true,
 }
 
 // isKnownKind reports whether s is a recognized wire kind name.
@@ -453,4 +473,70 @@ func indirectType(t reflect.Type) reflect.Type {
 		t = t.Elem()
 	}
 	return t
+}
+
+// initMapSchema validates and populates the map-specific schema fields.
+// It must be called after parseFieldTag sets the kind to kindMap.
+func (fs *fieldSchema) initMapSchema() error {
+	t := fs.typ
+	if t.Kind() != reflect.Map {
+		return fmt.Errorf("field %s: map requires map[K]V, got %s", fs.name, t)
+	}
+
+	keyType := t.Key()
+	if keyType.Kind() != reflect.Uint32 {
+		return fmt.Errorf("field %s: map key must be uint32-compatible, got %s", fs.name, keyType)
+	}
+
+	valueType := t.Elem()
+	valueKind, err := inferMapValueKind(valueType)
+	if err != nil {
+		return fmt.Errorf("field %s: unsupported map value %s: %w", fs.name, valueType, err)
+	}
+
+	fs.mapKeyType = keyType
+	fs.mapValueType = valueType
+	fs.mapValueKind = valueKind
+	return nil
+}
+
+// inferMapValueKind returns the wire kind for a map value type.
+// The first map version supports: uint8, uint16, uint32, bool, string,
+// []byte, [N]byte, custom (ValueMarshaler), and record (struct).
+// It rejects slices of non-byte, nested maps, and other complex types.
+func inferMapValueKind(t reflect.Type) (wireKind, error) {
+	indirect := indirectType(t)
+
+	// Check for ValueMarshaler first.
+	vmType := reflect.TypeFor[ValueMarshaler]()
+	if t.Implements(vmType) || reflect.PointerTo(indirect).Implements(vmType) || indirect.Implements(vmType) {
+		return kindCustom, nil
+	}
+
+	switch indirect.Kind() {
+	case reflect.Uint8:
+		return kindU8, nil
+	case reflect.Uint16:
+		return kindU16, nil
+	case reflect.Uint32:
+		return kindU32, nil
+	case reflect.Bool:
+		return kindBool, nil
+	case reflect.String:
+		return kindString, nil
+	case reflect.Slice:
+		if indirect.Elem().Kind() == reflect.Uint8 {
+			return kindBytes, nil
+		}
+		return 0, fmt.Errorf("slice map values are only supported for []byte, got %s", t)
+	case reflect.Array:
+		if indirect.Elem().Kind() == reflect.Uint8 {
+			return kindBytes, nil
+		}
+		return 0, fmt.Errorf("array map values are only supported for [N]byte, got %s", t)
+	case reflect.Struct:
+		return kindRecord, nil
+	default:
+		return 0, fmt.Errorf("cannot infer map value kind for %s", t)
+	}
 }

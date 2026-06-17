@@ -45,25 +45,26 @@ When the kind is omitted or the second segment is not a recognised kind name, th
 
 #### Supported Kinds
 
-| Kind             | Go Type                                                 | Wire Encoding                                        |
-| ---------------- | ------------------------------------------------------- | ---------------------------------------------------- |
-| `u8`             | `uint8`                                                 | single byte                                          |
-| `u16`            | `uint16`                                                | big-endian uint16                                    |
-| `u32`            | `uint32`, `int`, or alias                               | big-endian uint32                                    |
-| `bool`           | `bool`                                                  | `wire.Bool`                                          |
-| `bytes`          | `[]byte` / `[N]byte`                                    | raw bytes; nil → empty                               |
-| `string`         | `string`                                                | UTF-8 bytes                                          |
-| `u32list`        | `[]uint32` or alias slice                               | `wire.EncodeUint32List`                              |
-| `byteslist`      | `[][]byte`                                              | `wire.EncodeBytesList`                               |
-| `partybytes`     | `[]wire.PartyBytes[T]`                                  | `wire.EncodePartyBytes`                              |
-| `partybytepairs` | `[]wire.PartyBytePair[T]`                               | `wire.EncodePartyBytePairs`                          |
-| `nested`         | struct/pointer implementing `Message`                   | recursive `wire.Marshal`                             |
-| `record`         | struct / pointer to struct                              | record body (field count + fields), no envelope      |
-| `recordlist`     | `[]struct` / `[]*struct`                                | `uint32 count` + length-prefixed record bodies       |
-| `custom`         | type implementing `ValueMarshaler` / `ValueUnmarshaler` | caller-defined canonical bytes                       |
-| `bigint`         | `big.Int` / `*big.Int`                                  | signed-magnitude `[sign byte][minimal BE magnitude]` |
-| `biguint`        | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero = empty           |
-| `bigpos`         | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero rejected          |
+| Kind             | Go Type                                                 | Wire Encoding                                                         |
+| ---------------- | ------------------------------------------------------- | --------------------------------------------------------------------- |
+| `u8`             | `uint8`                                                 | single byte                                                           |
+| `u16`            | `uint16`                                                | big-endian uint16                                                     |
+| `u32`            | `uint32`, `int`, or alias                               | big-endian uint32                                                     |
+| `bool`           | `bool`                                                  | `wire.Bool`                                                           |
+| `bytes`          | `[]byte` / `[N]byte`                                    | raw bytes; nil → empty                                                |
+| `string`         | `string`                                                | UTF-8 bytes                                                           |
+| `u32list`        | `[]uint32` or alias slice                               | `wire.EncodeUint32List`                                               |
+| `byteslist`      | `[][]byte`                                              | `wire.EncodeBytesList`                                                |
+| `partybytes`     | `[]wire.PartyBytes[T]`                                  | `wire.EncodePartyBytes`                                               |
+| `partybytepairs` | `[]wire.PartyBytePair[T]`                               | `wire.EncodePartyBytePairs`                                           |
+| `nested`         | struct/pointer implementing `Message`                   | recursive `wire.Marshal`                                              |
+| `record`         | struct / pointer to struct                              | record body (field count + fields), no envelope                       |
+| `recordlist`     | `[]struct` / `[]*struct`                                | `uint32 count` + length-prefixed record bodies                        |
+| `custom`         | type implementing `ValueMarshaler` / `ValueUnmarshaler` | caller-defined canonical bytes                                        |
+| `bigint`         | `big.Int` / `*big.Int`                                  | signed-magnitude `[sign byte][minimal BE magnitude]`                  |
+| `biguint`        | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero = empty                            |
+| `bigpos`         | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero rejected                           |
+| `map`            | `map[K]V` where `K` is `uint32` or alias                | `uint32 count` + sorted entries of `(key_len, key, value_len, value)` |
 
 `record` and `recordlist` are typically inferred rather than declared
 explicitly. A struct field typed as `SomeStruct` infers to `record`; a field
@@ -71,28 +72,35 @@ typed as `[]SomeStruct` or `[]*SomeStruct` infers to `recordlist`. Both
 enforce the same strict canonical rules as top-level messages: exact field
 set, ascending tags, no duplicates, no trailing bytes.
 
-`big.Int` is **not** auto-inferred — callers must declare `bigint`,
-`biguint`, or `bigpos` explicitly.
+`big.Int` and `map[K]V` are **not** auto-inferred — callers must declare `bigint`,
+`biguint`, or `bigpos` explicitly, and map fields must declare `map` explicitly.
+This prevents existing or future fields from silently changing wire format if their
+Go type changes to a map.
 
 #### Kind Inference Rules
 
 When the kind is omitted, the wire codec selects:
 
-| Go Type              | Inferred Kind |
-| -------------------- | ------------- |
-| `uint8`              | `u8`          |
-| `uint16`             | `u16`         |
-| `uint32` / `int`     | `u32`         |
-| `bool`               | `bool`        |
-| `string`             | `string`      |
-| `[]byte` / `[N]byte` | `bytes`       |
-| `[]uint32` / `[]int` | `u32list`     |
-| `[][]byte`           | `byteslist`   |
-| struct               | `record`      |
-| pointer to struct    | `record`      |
-| `[]struct`           | `recordlist`  |
-| `[]*struct`          | `recordlist`  |
-| `ValueMarshaler`     | `custom`      |
+| Go Type              | Inferred Kind      |
+| -------------------- | ------------------ |
+| `uint8`              | `u8`               |
+| `uint16`             | `u16`              |
+| `uint32` / `int`     | `u32`              |
+| `bool`               | `bool`             |
+| `string`             | `string`           |
+| `[]byte` / `[N]byte` | `bytes`            |
+| `[]uint32` / `[]int` | `u32list`          |
+| `[][]byte`           | `byteslist`        |
+| struct               | `record`           |
+| pointer to struct    | `record`           |
+| `[]struct`           | `recordlist`       |
+| `[]*struct`          | `recordlist`       |
+| `ValueMarshaler`     | `custom`           |
+| `map[K]V`            | _must be declared_ |
+
+`map` is never inferred. A `map[K]V` field without `,map` in its tag produces a
+schema-parse error. This is intentional: auto-inferring maps would silently change
+the wire format of existing fields if their Go type were refactored to a map.
 
 #### Options
 
@@ -110,6 +118,8 @@ When the kind is omitted, the wire codec selects:
 - **`AfterUnmarshaler`** — optional: `AfterUnmarshalWire() error`
 - **`ValueMarshaler`** — used by `custom` kind: `MarshalWireValue() ([]byte, error)`
 - **`ValueUnmarshaler`** — used by `custom` kind: `UnmarshalWireValue([]byte) error`
+- **`MessageMarshaler`** — optional: `MarshalWireMessage(opts ...MarshalOption) ([]byte, error)`. Types implementing this interface provide their own complete canonical TLV message encoding, bypassing struct-tag reflection. The returned bytes must be a full TLV envelope (`magic || type_id || version || field_body`). BeforeMarshalWire and Validate hooks still run before the custom marshaler.
+- **`MessageUnmarshaler`** — optional: `UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error`. Types implementing this interface provide their own complete canonical TLV message decoding, bypassing struct-tag reflection. AfterUnmarshalWire and Validate hooks still run after the custom unmarshaler. Decoding is fail-atomic: the original destination is never modified on error.
 
 ### Field-Level API (Tests Only)
 
@@ -131,7 +141,39 @@ DTOs. This includes opaque FROST/CGGMP21 key shares, CGGMP21 presigns, and the
 CGGMP21 reshare plan. The public domain object is never made mutable merely for
 serialization. The `custom` kind eliminates `*secret.Scalar ↔ []byte`
 mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate
-`*big.Int ↔ []byte` conversions:
+`*big.Int ↔ []byte` conversions.
+
+When a type must completely control its TLV envelope (type ID, version, field
+order) without exposing wire-tagged exported fields, implement `MessageMarshaler`
+and `MessageUnmarshaler`. These object-level hooks delegate to an internal DTO
+while keeping the DTO and its wire tags private:
+
+```go
+type KeyShare struct {
+    state *keyShareState // unexported, no wire tags
+}
+
+func (KeyShare) WireType() string    { return "cggmp21.secp256k1.keyshare" }
+func (KeyShare) WireVersion() uint16 { return 1 }
+
+func (k KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+    w := keyShareDTOFromState(k.state)
+    return wire.Marshal(w, opts...)
+}
+
+func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+    var w keyShareDTO
+    if err := wire.Unmarshal(in, &w, opts...); err != nil {
+        return err
+    }
+    k.state = stateFromKeyShareDTO(&w)
+    return nil
+}
+```
+
+This approach keeps the DTO pattern but moves the object-to-DTO ceremony inside
+the type, making the public API cleaner. The wire codec still enforces all
+canonical rules through the inner `Marshal`/`Unmarshal` call on the DTO.
 
 ```go
 type myMessageWire struct {
@@ -169,6 +211,47 @@ Conversion functions (`toWire()` / `toDomain()`) handle structural mapping and d
 - Proof transcript and challenge labels are fixed constants in the proof
   package; changing them is a protocol-domain change and must be reviewed with
   the corresponding transcript tests.
+
+### Map Canonical Rules
+
+Map fields (`wire:"N,map"`) encode `map[K]V` where `K` must be `uint32` or a
+named `uint32` type (e.g., `tss.PartyID`). The wire format is:
+
+```text
+uint32 entry_count
+repeat entry_count:
+    uint32 key_len     (always 4)
+    key_bytes          (big-endian uint32)
+    uint32 value_len
+    value_bytes
+```
+
+Map entries are sorted by `key_bytes` in ascending big-endian order. Both
+encoding and decoding enforce:
+
+- **Deterministic output**: Go map iteration order does not affect encoding.
+  Entries are always sorted before emitting bytes.
+- **Strict sort order**: Decoders reject entries that are not in strictly
+  ascending key order (`key[i-1] < key[i]`).
+- **Duplicate keys rejected**: Encoded entries with identical key bytes produce
+  an error on both encode and decode.
+- **Key constraints**: Keys must be exactly 4 bytes (big-endian uint32).
+  `map[string]`, `map[int]`, `map[uint64]`, and other key types are rejected at
+  schema-parse time.
+- **Nil map → count 0**: A nil map encodes as `uint32(0)` with no entries.
+  An empty non-nil map encodes identically.
+- **Value types**: First-version map supports `uint8`, `uint16`, `uint32`,
+  `bool`, `string`, `[]byte`, `[N]byte`, `ValueMarshaler` (custom), and
+  struct (record) values. Slice-of-non-byte, nested map, and nested message
+  values are rejected at schema-parse time.
+- **Limits**: `max_items=name` constrains the entry count. `max_bytes=name`
+  constrains each value's byte length. Both are fail-closed — the caller must
+  provide the corresponding `FieldLimits` key.
+
+`map` is not a replacement for `partybytes` / `partybytepairs`. Those legacy
+kinds remain for existing per-party encodings. New code may use `map` when the
+wire format is being designed for the first time; converting existing
+per-party encodings is a separate refactoring decision.
 
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 
