@@ -131,7 +131,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		parties := []tss.PartyID{1, 2, 3}
+		parties := tss.NewPartySet(1, 2, 3)
 		sessions := make(map[tss.PartyID]*KeygenSession, 3)
 		messages := make([]tss.Envelope, 0)
 		for _, id := range parties {
@@ -199,7 +199,7 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.golden")
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		shares := CachedKeygenShares(t, 1, 1, false)
-		presigns := secpPresign(t, shares, []tss.PartyID{1})
+		presigns := secpPresign(t, shares, tss.NewPartySet(1))
 		raw, err := presigns[1].MarshalBinaryWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)

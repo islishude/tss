@@ -14,7 +14,7 @@ func TestCGGMP21ReshareProofDomainsBindLifecyclePlanHash(t *testing.T) {
 	sessionID[0] = 1
 	config := tss.ThresholdConfig{
 		Threshold: 2,
-		Parties:   []tss.PartyID{1, 2},
+		Parties:   tss.NewPartySet(1, 2),
 		SessionID: sessionID,
 	}
 	planHash := bytes.Repeat([]byte{0x42}, 32)
@@ -31,7 +31,7 @@ func TestCGGMP21ReshareProofDomainsBindLifecyclePlanHash(t *testing.T) {
 				label:             domainLabelResharePaillier,
 				sessionID:         sessionID,
 				threshold:         2,
-				parties:           []tss.PartyID{1, 2},
+				parties:           tss.NewPartySet(1, 2),
 				sender:            1,
 				paillierPublicKey: []byte("paillier"),
 				lifecyclePlanHash: planHash,
@@ -44,7 +44,7 @@ func TestCGGMP21ReshareProofDomainsBindLifecyclePlanHash(t *testing.T) {
 				label:              domainLabelReshareRingPedersen,
 				sessionID:          sessionID,
 				threshold:          2,
-				parties:            []tss.PartyID{1, 2},
+				parties:            tss.NewPartySet(1, 2),
 				sender:             1,
 				ringPedersenParams: []byte("ring-pedersen"),
 				lifecyclePlanHash:  planHash,
@@ -72,20 +72,20 @@ func TestCGGMP21MTAResponseProofDomainsBindLabelAndLifecyclePlan(t *testing.T) {
 
 	key := &KeyShare{state: &keyShareState{
 		threshold:            2,
-		parties:              []tss.PartyID{1, 2},
+		parties:              tss.NewPartySet(1, 2),
 		publicKey:            []byte("public-key"),
 		keygenTranscriptHash: []byte("key-transcript"),
 	}}
 	var sessionID tss.SessionID
 	sessionID[0] = 1
 	args := struct {
-		signers                    []tss.PartyID
+		signers                    tss.PartySet
 		initiator, responder       tss.PartyID
 		initiatorPaillierPublicKey []byte
 		presignContextHash         []byte
 		planHash                   []byte
 	}{
-		signers:                    []tss.PartyID{1, 2},
+		signers:                    tss.NewPartySet(1, 2),
 		initiator:                  1,
 		responder:                  2,
 		initiatorPaillierPublicKey: []byte("paillier"),

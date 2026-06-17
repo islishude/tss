@@ -50,7 +50,7 @@ func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare]
 func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, config tss.RefreshRunConfig) (tss.RefreshSession[*KeyShare], []tss.Envelope, error) {
 	guard, err := (tss.GuardConfig{
 		Self:        current.PartyID(),
-		Parties:     tss.PartySet(current.Parties()),
+		Parties:     current.Parties(),
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   config.SessionID,
 		Policies:    CGGMP21Policies(),

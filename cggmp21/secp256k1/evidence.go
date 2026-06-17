@@ -42,10 +42,10 @@ const (
 // EvidenceContext is the public context used to verify CGGMP21 blame evidence.
 type EvidenceContext struct {
 	SessionID             tss.SessionID
-	Parties               []tss.PartyID
+	Parties               tss.PartySet
 	PublicKey             []byte
 	PaillierPublicKeys    []PaillierPublicShare
-	Signers               []tss.PartyID
+	Signers               tss.PartySet
 	KeygenTranscriptHash  []byte
 	PresignTranscriptHash []byte
 }
@@ -103,11 +103,11 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 	return nil
 }
 
-func verificationErrorWithEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
+func verificationErrorWithEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed tss.PartySet, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
 	return protocolErrorWithEvidence(tss.ErrCodeVerification, env, kind, reason, blamed, err, fields...)
 }
 
-func protocolErrorWithEvidence(code string, env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
+func protocolErrorWithEvidence(code string, env tss.Envelope, kind tss.EvidenceKind, reason string, blamed tss.PartySet, err error, fields ...tss.EvidenceField) *tss.ProtocolError {
 	evidenceBytes, evErr := marshalEvidence(env, kind, reason, fields...)
 	if evErr != nil {
 		// Evidence construction failed — report an invariant failure instead of
@@ -122,7 +122,7 @@ func protocolErrorWithEvidence(code string, env tss.Envelope, kind tss.EvidenceK
 		Party: env.From,
 		Blame: &tss.Blame{
 			Reason:   reason,
-			Parties:  append([]tss.PartyID(nil), blamed...),
+			Parties:  blamed.Clone(),
 			Evidence: evidenceBytes,
 		},
 		Err: err,
@@ -143,14 +143,14 @@ func marshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fie
 
 // newBlame builds a tss.Blame from evidence fields. If evidence marshaling fails,
 // it returns nil — the caller should fall back to [tss.ErrCodeInvariant] without blame.
-func newBlame(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed []tss.PartyID, fields ...tss.EvidenceField) *tss.Blame {
+func newBlame(env tss.Envelope, kind tss.EvidenceKind, reason string, blamed tss.PartySet, fields ...tss.EvidenceField) *tss.Blame {
 	evidenceBytes, err := marshalEvidence(env, kind, reason, fields...)
 	if err != nil {
 		return nil
 	}
 	return &tss.Blame{
 		Reason:   reason,
-		Parties:  append([]tss.PartyID(nil), blamed...),
+		Parties:  blamed.Clone(),
 		Evidence: evidenceBytes,
 	}
 }
@@ -170,7 +170,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 	return fields
 }
 
-func signerEvidenceFields(signers []tss.PartyID) []tss.EvidenceField {
+func signerEvidenceFields(signers tss.PartySet) []tss.EvidenceField {
 	return []tss.EvidenceField{rawEvidenceField(evidenceFieldSignerSetHash, wireutil.PartySetHash(signers, partySetHashLabel))}
 }
 

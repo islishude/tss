@@ -76,7 +76,7 @@ func Eval(coeffs []*big.Int, id tss.PartyID, order *big.Int) *big.Int {
 }
 
 // LagrangeCoefficient returns the coefficient for reconstructing at x=0.
-func LagrangeCoefficient(id tss.PartyID, ids []tss.PartyID, order *big.Int) (*big.Int, error) {
+func LagrangeCoefficient(id tss.PartyID, ids tss.PartySet, order *big.Int) (*big.Int, error) {
 	if id == 0 {
 		return nil, errors.New("party id 0 is reserved")
 	}
@@ -122,7 +122,7 @@ func InterpolateConstant(shares []Share, order *big.Int) (*big.Int, error) {
 	if len(shares) == 0 {
 		return nil, errors.New("no shares")
 	}
-	ids := make([]tss.PartyID, len(shares))
+	ids := make(tss.PartySet, len(shares))
 	values := make(map[tss.PartyID]*big.Int, len(shares))
 	for i, share := range shares {
 		if share.Value == nil {

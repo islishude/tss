@@ -82,7 +82,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		version:              tss.Version,
 		party:                s.cfg.Self,
 		threshold:            s.cfg.Threshold,
-		parties:              append([]tss.PartyID(nil), s.cfg.Parties...),
+		parties:              s.cfg.Parties.Clone(),
 		publicKey:            append([]byte(nil), groupCommitments[0]...),
 		chainCode:            append([]byte(nil), s.chainCodes[s.cfg.Self]...),
 		secret:               secretScalar,

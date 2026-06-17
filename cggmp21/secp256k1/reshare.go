@@ -34,17 +34,17 @@ var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: thresh
 type ReshareSession struct {
 	mu sync.Mutex
 
-	plan          *ResharePlan  // Shared public reshare intent agreed by dealers and receivers.
-	oldKey        *KeyShare     // Caller-owned old share for dealers; nil for receiver-only parties.
-	oldPublicKey  []byte        // Existing parent group public key that must be preserved.
-	oldChainCode  []byte        // Existing HD chain code that must be preserved.
-	oldParties    []tss.PartyID // Canonical old key-holder set.
-	dealerParties []tss.PartyID // Old parties selected to send weighted share contributions.
-	newParties    []tss.PartyID // Canonical target key-holder set.
-	newThreshold  int           // Target signing threshold.
-	selfID        tss.PartyID   // Local party ID for envelope recipient/sender checks.
-	isDealer      bool          // Whether this party sends weighted dealer contributions.
-	isReceiver    bool          // Whether this party receives and assembles a new share.
+	plan          *ResharePlan // Shared public reshare intent agreed by dealers and receivers.
+	oldKey        *KeyShare    // Caller-owned old share for dealers; nil for receiver-only parties.
+	oldPublicKey  []byte       // Existing parent group public key that must be preserved.
+	oldChainCode  []byte       // Existing HD chain code that must be preserved.
+	oldParties    tss.PartySet // Canonical old key-holder set.
+	dealerParties tss.PartySet // Old parties selected to send weighted share contributions.
+	newParties    tss.PartySet // Canonical target key-holder set.
+	newThreshold  int          // Target signing threshold.
+	selfID        tss.PartyID  // Local party ID for envelope recipient/sender checks.
+	isDealer      bool         // Whether this party sends weighted dealer contributions.
+	isReceiver    bool         // Whether this party receives and assembles a new share.
 
 	cfg            tss.ThresholdConfig      // Local threshold runtime view for the current role.
 	log            tss.Logger               // Optional protocol logger.
@@ -134,8 +134,8 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 // The allowedParties parameter selects which participants are accepted as senders
 // for this round (e.g. old parties for dealer messages, new parties for receiver messages).
-func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties []tss.PartyID) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, tss.PartySet(allowedParties), s.selfID)
+func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties tss.PartySet) error {
+	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, allowedParties, s.selfID)
 }
 
 // StartReshareDealer starts resharing for an old-party dealer.
@@ -205,7 +205,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	}
 	config := tss.ThresholdConfig{
 		Threshold:    plan.state.newThreshold,
-		Parties:      append([]tss.PartyID(nil), plan.state.newParties...),
+		Parties:      plan.state.newParties.Clone(),
 		Self:         localParty,
 		SessionID:    plan.state.sessionID,
 		Rand:         local.Rand,
@@ -218,9 +218,9 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		oldKey:          oldKey,
 		oldPublicKey:    append([]byte(nil), plan.state.oldGroupPublicKey...),
 		oldChainCode:    append([]byte(nil), plan.state.chainCode...),
-		oldParties:      append([]tss.PartyID(nil), plan.state.oldParties...),
-		dealerParties:   append([]tss.PartyID(nil), plan.state.dealerParties...),
-		newParties:      append([]tss.PartyID(nil), plan.state.newParties...),
+		oldParties:      plan.state.oldParties.Clone(),
+		dealerParties:   plan.state.dealerParties.Clone(),
+		newParties:      plan.state.newParties.Clone(),
 		newThreshold:    plan.state.newThreshold,
 		selfID:          localParty,
 		isDealer:        dealer,
@@ -269,13 +269,13 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 
 func (s *ReshareSession) dealerConfig() tss.ThresholdConfig {
 	config := s.cfg
-	config.Parties = append([]tss.PartyID(nil), s.dealerParties...)
+	config.Parties = s.dealerParties.Clone()
 	return config
 }
 
 func (s *ReshareSession) receiverConfig() tss.ThresholdConfig {
 	config := s.cfg
-	config.Parties = append([]tss.PartyID(nil), s.newParties...)
+	config.Parties = s.newParties.Clone()
 	config.Threshold = s.newThreshold
 	return config
 }
@@ -464,10 +464,10 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 		curveID:             in.state.curveID,
 		oldGroupPublicKey:   append([]byte(nil), in.state.oldGroupPublicKey...),
 		oldGroupCommitments: wireutil.CloneByteSlices(in.state.oldGroupCommitments),
-		oldParties:          append([]tss.PartyID(nil), in.state.oldParties...),
+		oldParties:          in.state.oldParties.Clone(),
 		oldThreshold:        in.state.oldThreshold,
-		dealerParties:       append([]tss.PartyID(nil), in.state.dealerParties...),
-		newParties:          append([]tss.PartyID(nil), in.state.newParties...),
+		dealerParties:       in.state.dealerParties.Clone(),
+		newParties:          in.state.newParties.Clone(),
 		newThreshold:        in.state.newThreshold,
 		chainCode:           append([]byte(nil), in.state.chainCode...),
 		paillierBits:        in.state.paillierBits,
@@ -480,7 +480,7 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 	return out
 }
 
-func sameParties(a, b []tss.PartyID) bool {
+func sameParties(a, b tss.PartySet) bool {
 	if len(a) != len(b) {
 		return false
 	}

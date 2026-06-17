@@ -21,16 +21,16 @@ const (
 // The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
 	mu           sync.Mutex
-	oldKey       *KeyShare     // Caller-owned old share for dealers; nil for recipient-only participants.
-	oldPublicKey []byte        // Existing parent group public key that must be preserved.
-	chainCode    []byte        // Existing HD chain code that must be preserved.
-	oldParties   []tss.PartyID // Canonical dealer set of old key holders.
-	newParties   []tss.PartyID // Canonical target key-holder set.
-	newThreshold int           // Target signing threshold.
-	isRecipient  bool          // Whether this party receives and assembles a new share.
-	selfID       tss.PartyID   // Local party ID for envelope recipient/sender checks.
-	refreshMode  bool          // True for same-party zero-constant-term refresh.
-	planHash     []byte        // Digest every reshare payload must echo.
+	oldKey       *KeyShare    // Caller-owned old share for dealers; nil for recipient-only participants.
+	oldPublicKey []byte       // Existing parent group public key that must be preserved.
+	chainCode    []byte       // Existing HD chain code that must be preserved.
+	oldParties   tss.PartySet // Canonical dealer set of old key holders.
+	newParties   tss.PartySet // Canonical target key-holder set.
+	newThreshold int          // Target signing threshold.
+	isRecipient  bool         // Whether this party receives and assembles a new share.
+	selfID       tss.PartyID  // Local party ID for envelope recipient/sender checks.
+	refreshMode  bool         // True for same-party zero-constant-term refresh.
+	planHash     []byte       // Digest every reshare payload must echo.
 
 	cfg     tss.ThresholdConfig         // Local threshold runtime view for this role.
 	log     tss.Logger                  // Optional protocol logger.
@@ -84,9 +84,9 @@ func (s *ReshareSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
 }
 
-func reshareGuardParties(oldParties, newParties []tss.PartyID) tss.PartySet {
+func reshareGuardParties(oldParties, newParties tss.PartySet) tss.PartySet {
 	seen := make(map[tss.PartyID]struct{}, len(oldParties)+len(newParties))
-	union := make([]tss.PartyID, 0, len(oldParties)+len(newParties))
+	union := make(tss.PartySet, 0, len(oldParties)+len(newParties))
 	for _, id := range oldParties {
 		if _, ok := seen[id]; ok {
 			continue
@@ -101,7 +101,7 @@ func reshareGuardParties(oldParties, newParties []tss.PartyID) tss.PartySet {
 		seen[id] = struct{}{}
 		union = append(union, id)
 	}
-	return tss.PartySet(tss.SortParties(union))
+	return tss.SortParties(union)
 }
 
 func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error {
@@ -161,10 +161,10 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	oldParties := append([]tss.PartyID(nil), oldKey.state.parties...)
+	oldParties := oldKey.state.parties.Clone()
 	// Fix config.Parties to the old party set so blame evidence is deterministic.
 	config.Parties = oldParties
-	newParties := append([]tss.PartyID(nil), plan.state.newParties...)
+	newParties := plan.state.newParties.Clone()
 	newThreshold := plan.state.newThreshold
 	isRecipient := tss.ContainsParty(newParties, oldKey.state.party)
 
@@ -253,7 +253,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		return nil, invalidPlanConfig(config.Self, errors.New("recipient is in the old participant set; use StartReshare instead"))
 	}
 	validationConfig := config
-	validationConfig.Parties = append([]tss.PartyID(nil), plan.state.newParties...)
+	validationConfig.Parties = plan.state.newParties.Clone()
 	validationConfig.Threshold = plan.state.newThreshold
 	if err := validationConfig.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
@@ -266,13 +266,13 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
-	config.Parties = append([]tss.PartyID(nil), plan.state.oldParties...)
+	config.Parties = plan.state.oldParties.Clone()
 	config.Threshold = len(plan.state.oldParties)
 	return &ReshareSession{
 		oldPublicKey: append([]byte(nil), plan.state.oldPublicKey...),
 		chainCode:    append([]byte(nil), plan.state.oldChainCode...),
-		oldParties:   append([]tss.PartyID(nil), plan.state.oldParties...),
-		newParties:   append([]tss.PartyID(nil), plan.state.newParties...),
+		oldParties:   plan.state.oldParties.Clone(),
+		newParties:   plan.state.newParties.Clone(),
 		newThreshold: plan.state.newThreshold,
 		isRecipient:  true,
 		selfID:       config.Self,
@@ -320,7 +320,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	parties := append([]tss.PartyID(nil), oldKey.state.parties...)
+	parties := oldKey.state.parties.Clone()
 	config.Parties = parties
 	config.Threshold = oldKey.state.threshold
 	// Zero-coefficient polynomial preserves the group secret.

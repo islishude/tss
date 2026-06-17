@@ -29,7 +29,7 @@ var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 // excluded from the digest.
 type KeygenPlanOption struct {
 	SessionID tss.SessionID
-	Parties   []tss.PartyID
+	Parties   tss.PartySet
 	Threshold int
 	Limits    *Limits
 }
@@ -38,7 +38,7 @@ type KeygenPlanOption struct {
 type KeygenPlan struct {
 	sessionID tss.SessionID
 	threshold int
-	parties   []tss.PartyID
+	parties   tss.PartySet
 	limits    Limits
 }
 
@@ -77,7 +77,7 @@ func (p *KeygenPlan) Threshold() int {
 }
 
 // Parties returns a copy of the canonical party set.
-func (p *KeygenPlan) Parties() []tss.PartyID {
+func (p *KeygenPlan) Parties() tss.PartySet {
 	if p == nil {
 		return nil
 	}
@@ -131,7 +131,7 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 type refreshPlanState struct {
 	sessionID tss.SessionID // Refresh protocol session; every refresh envelope is scoped to it.
 	threshold int           // Existing signing threshold preserved by same-party refresh.
-	parties   []tss.PartyID // Canonical participant set preserved by same-party refresh.
+	parties   tss.PartySet  // Canonical participant set preserved by same-party refresh.
 	publicKey []byte        // Parent group public key that must remain unchanged after refresh.
 	chainCode []byte        // HD chain code that must remain unchanged after refresh.
 }
@@ -191,7 +191,7 @@ func (p *RefreshPlan) Threshold() int {
 }
 
 // Parties returns a copy of the fixed refresh participant set.
-func (p *RefreshPlan) Parties() []tss.PartyID {
+func (p *RefreshPlan) Parties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -251,8 +251,8 @@ type resharePlanState struct {
 	sessionID    tss.SessionID // Reshare protocol session; all reshare envelopes are scoped to it.
 	oldPublicKey []byte        // Existing parent group public key that resharing must preserve.
 	oldChainCode []byte        // Existing HD chain code preserved across reshare.
-	oldParties   []tss.PartyID // Canonical old dealer set.
-	newParties   []tss.PartyID // Canonical target key-holder set.
+	oldParties   tss.PartySet  // Canonical old dealer set.
+	newParties   tss.PartySet  // Canonical target key-holder set.
 	newThreshold int           // Target signing threshold for the reshared key.
 }
 
@@ -266,7 +266,7 @@ type ResharePlan struct {
 type ResharePlanOption struct {
 	OldKey       *KeyShare
 	SessionID    tss.SessionID
-	NewParties   []tss.PartyID
+	NewParties   tss.PartySet
 	NewThreshold int
 	Limits       *Limits
 }
@@ -275,9 +275,9 @@ type ResharePlanOption struct {
 type PublicResharePlanOption struct {
 	OldPublicKey []byte
 	OldChainCode []byte
-	OldParties   []tss.PartyID
+	OldParties   tss.PartySet
 	SessionID    tss.SessionID
-	NewParties   []tss.PartyID
+	NewParties   tss.PartySet
 	NewThreshold int
 	Limits       *Limits
 }
@@ -358,7 +358,7 @@ func (p *ResharePlan) OldChainCodeBytes() []byte {
 }
 
 // OldParties returns a copy of the old dealer set.
-func (p *ResharePlan) OldParties() []tss.PartyID {
+func (p *ResharePlan) OldParties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -366,7 +366,7 @@ func (p *ResharePlan) OldParties() []tss.PartyID {
 }
 
 // NewParties returns a copy of the new recipient set.
-func (p *ResharePlan) NewParties() []tss.PartyID {
+func (p *ResharePlan) NewParties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -447,11 +447,11 @@ func (p *ResharePlan) receiverConfig(local tss.LocalConfig) (tss.ThresholdConfig
 type signPlanState struct {
 	sessionID   tss.SessionID         // Signing session; commitment and partial envelopes are scoped to it.
 	threshold   int                   // Signing threshold inherited from the key share.
-	parties     []tss.PartyID         // Canonical full key-share participant set.
+	parties     tss.PartySet          // Canonical full key-share participant set.
 	publicKey   []byte                // Parent group public key before request-time HD derivation.
 	chainCode   []byte                // HD chain code paired with publicKey for path derivation.
 	keygenHash  []byte                // Transcript hash of the keygen/reshare that produced publicKey.
-	signers     []tss.PartyID         // Canonical signer subset participating in this signature.
+	signers     tss.PartySet          // Canonical signer subset participating in this signature.
 	context     tss.SigningContext    // Normalized signing context after path resolution.
 	contextHash []byte                // Canonical hash binding context to nonce and partial transcripts.
 	derivation  *tss.DerivationResult // Resolved child key/path; ChildPublicKey is the verification key.
@@ -468,7 +468,7 @@ type SignPlan struct {
 type SignPlanOption struct {
 	Key       *KeyShare
 	SessionID tss.SessionID
-	Signers   []tss.PartyID
+	Signers   tss.PartySet
 	Context   tss.SigningContext
 	Message   []byte
 	Limits    *Limits
@@ -525,7 +525,7 @@ func (p *SignPlan) SessionID() tss.SessionID {
 }
 
 // Signers returns a copy of the canonical signer set.
-func (p *SignPlan) Signers() []tss.PartyID {
+func (p *SignPlan) Signers() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -616,7 +616,7 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	return nil
 }
 
-func validatePlanParties(parties []tss.PartyID, threshold int, limits Limits) ([]tss.PartyID, error) {
+func validatePlanParties(parties tss.PartySet, threshold int, limits Limits) (tss.PartySet, error) {
 	parties = tss.SortParties(parties)
 	if threshold <= 0 {
 		return nil, errors.New("threshold must be positive")
@@ -642,7 +642,7 @@ func validatePlanParties(parties []tss.PartyID, threshold int, limits Limits) ([
 	return parties, nil
 }
 
-func validatePlanPartySet(parties []tss.PartyID, limits Limits) ([]tss.PartyID, error) {
+func validatePlanPartySet(parties tss.PartySet, limits Limits) (tss.PartySet, error) {
 	parties = tss.SortParties(parties)
 	if len(parties) == 0 {
 		return nil, errors.New("parties must not be empty")

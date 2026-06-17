@@ -36,7 +36,7 @@ type cggmpSigVector struct {
 func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 	t.Helper()
 
-	run := func(threshold, n int, signerIDs []tss.PartyID) cggmp21TestVector {
+	run := func(threshold, n int, signerIDs tss.PartySet) cggmp21TestVector {
 		shares := secpKeygen(t, threshold, n)
 
 		parties := make([]int, n)
@@ -86,8 +86,8 @@ func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 	}
 
 	return []cggmp21TestVector{
-		run(1, 1, []tss.PartyID{1}),
-		run(2, 3, []tss.PartyID{1, 2}),
+		run(1, 1, tss.NewPartySet(1)),
+		run(2, 3, tss.NewPartySet(1, 2)),
 	}
 }
 
@@ -175,7 +175,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			if v.N == 1 {
 				signerCount = 1
 			}
-			signerIDs := make([]tss.PartyID, signerCount)
+			signerIDs := make(tss.PartySet, signerCount)
 			signerShares := make([]*KeyShare, signerCount)
 			for j := range signerIDs {
 				signerIDs[j] = tss.PartyID(v.Parties[j])

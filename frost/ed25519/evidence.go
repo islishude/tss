@@ -37,12 +37,12 @@ func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitment
 		// operation; only a corrupted limits config could trigger this path.
 		return &tss.Blame{
 			Reason:  "invalid DKG share",
-			Parties: []tss.PartyID{dealer},
+			Parties: tss.NewPartySet(dealer),
 		}
 	}
 	return &tss.Blame{
 		Reason:  "invalid DKG share",
-		Parties: []tss.PartyID{dealer},
+		Parties: tss.NewPartySet(dealer),
 		Evidence: frostMarshalEvidence(
 			evidenceEnv,
 			tss.EvidenceKindFrostKeygenShare,
@@ -61,12 +61,12 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 		// operation; only a corrupted limits config could trigger this path.
 		return &tss.Blame{
 			Reason:  "invalid reshare share",
-			Parties: []tss.PartyID{dealer},
+			Parties: tss.NewPartySet(dealer),
 		}
 	}
 	return &tss.Blame{
 		Reason:  "invalid reshare share",
-		Parties: []tss.PartyID{dealer},
+		Parties: tss.NewPartySet(dealer),
 		Evidence: frostMarshalEvidence(
 			evidenceEnv,
 			tss.EvidenceKindFrostReshareShare,
@@ -78,10 +78,10 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 }
 
 // frostSignBlame builds Blame evidence for an invalid FROST partial signature.
-func frostSignBlame(env tss.Envelope, signers []tss.PartyID, publicKey []byte) *tss.Blame {
+func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *tss.Blame {
 	return &tss.Blame{
 		Reason:  "invalid FROST partial signature",
-		Parties: []tss.PartyID{env.From},
+		Parties: tss.NewPartySet(env.From),
 		Evidence: frostMarshalEvidence(
 			env,
 			tss.EvidenceKindFrostPartialSignature,
@@ -93,7 +93,7 @@ func frostSignBlame(env tss.Envelope, signers []tss.PartyID, publicKey []byte) *
 }
 
 // frostAggregateBlame builds Blame evidence for a failed aggregate Ed25519 signature.
-func frostAggregateBlame(sessionID tss.SessionID, signers []tss.PartyID, publicKey, message, sig []byte) *tss.Blame {
+func frostAggregateBlame(sessionID tss.SessionID, signers tss.PartySet, publicKey, message, sig []byte) *tss.Blame {
 	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    protocol,
 		Version:     tss.Version,
@@ -103,7 +103,7 @@ func frostAggregateBlame(sessionID tss.SessionID, signers []tss.PartyID, publicK
 	})
 	return &tss.Blame{
 		Reason:  "aggregated Ed25519 signature failed verification",
-		Parties: append([]tss.PartyID(nil), signers...),
+		Parties: signers.Clone(),
 		Evidence: frostMarshalEvidence(
 			env,
 			tss.EvidenceKindFrostAggregateSignature,

@@ -59,7 +59,7 @@ type keyShareState struct {
 	version              uint16              // Canonical private wire version of this key-share record.
 	party                tss.PartyID         // Local owner of the secret signing share.
 	threshold            int                 // Number of signers required for FROST signing.
-	parties              []tss.PartyID       // Canonical full participant set for the group key.
+	parties              tss.PartySet        // Canonical full participant set for the group key.
 	publicKey            []byte              // Parent group public key before request-time derivation.
 	chainCode            []byte              // HD chain code paired with publicKey for non-hardened derivation.
 	secret               *secret.Scalar      // Local Ed25519 signing share; never exposed through accessors.
@@ -101,7 +101,7 @@ func (k *KeyShare) Threshold() int {
 }
 
 // Parties returns a copy of the canonical participant set.
-func (k *KeyShare) Parties() []tss.PartyID {
+func (k *KeyShare) Parties() tss.PartySet {
 	if k == nil || k.state == nil {
 		return nil
 	}

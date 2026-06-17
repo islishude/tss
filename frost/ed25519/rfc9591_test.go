@@ -211,11 +211,11 @@ func TestRFC9591ThresholdCombinations(t *testing.T) {
 		name      string
 		threshold int
 		n         int
-		signers   []tss.PartyID
+		signers   tss.PartySet
 	}{
-		{"1-of-1", 1, 1, []tss.PartyID{1}},
-		{"2-of-3", 2, 3, []tss.PartyID{1, 3}},
-		{"3-of-5", 3, 5, []tss.PartyID{1, 3, 5}},
+		{"1-of-1", 1, 1, tss.NewPartySet(1)},
+		{"2-of-3", 2, 3, tss.NewPartySet(1, 3)},
+		{"3-of-5", 3, 5, tss.NewPartySet(1, 3, 5)},
 	}
 
 	message := []byte("RFC 9591 compliance test")
@@ -239,7 +239,7 @@ func TestRFC9591ThresholdCombinations(t *testing.T) {
 }
 
 type rfc9591Vector struct {
-	signers             []tss.PartyID
+	signers             tss.PartySet
 	groupPublicKey      []byte
 	message             []byte
 	coefficient1        []byte
@@ -269,7 +269,7 @@ type rfc9591Vector struct {
 func rfc9591Ed25519Vector(t *testing.T) rfc9591Vector {
 	t.Helper()
 	return rfc9591Vector{
-		signers:             []tss.PartyID{1, 3},
+		signers:             tss.NewPartySet(1, 3),
 		groupPublicKey:      hexMust(t, "15d21ccd7ee42959562fc8aa63224c8851fb3ec85a3faf66040d380fb9738673"),
 		message:             hexMust(t, "74657374"),
 		coefficient1:        hexMust(t, "178199860edd8c62f5212ee91eff1295d0d670ab4ed4506866bae57e7030b204"),
@@ -307,7 +307,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		append([]byte(nil), v.groupPublicKey...),
 		fed.NewIdentityPoint().ScalarBaseMult(coeff1).Bytes(),
 	}
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	verificationShares := make([]VerificationShare, 0, len(parties))
 	for _, id := range parties {
 		pub, err := edcurve.EvalCommitments(groupCommitments, id)

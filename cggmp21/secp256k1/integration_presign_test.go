@@ -48,7 +48,7 @@ func TestThresholdECDSA_PresignAttemptBinding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			shares := CachedKeygenShares(t, 2, 3, false)
-			signers := []tss.PartyID{1, 2}
+			signers := tss.NewPartySet(1, 2)
 			presigns := secpPresign(t, shares, signers)
 			presign := presigns[1]
 
@@ -148,7 +148,7 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			shares := CachedKeygenShares(t, 2, 3, false)
-			signers := []tss.PartyID{1, 2}
+			signers := tss.NewPartySet(1, 2)
 			presigns := secpPresign(t, shares, signers)
 			digest := sha256.Sum256([]byte(tc.name))
 			tc.run(t, shares[1], presigns[1], digest[:])
@@ -159,7 +159,7 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -185,7 +185,7 @@ func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) 
 func TestThresholdECDSA_SignAttemptConflictFailsClosed(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("store intent conflict"))
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -205,7 +205,7 @@ func TestThresholdECDSA_SignAttemptConflictFailsClosed(t *testing.T) {
 func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("store temporary error"))
 	storeErr := errors.New("commit response lost")
 	store := &outcomeUnknownSignAttemptStore{inner: newTestSignAttemptStore(), err: storeErr}
@@ -225,7 +225,7 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 		t.Fatal("outcome-unknown commit did not retain local binding")
 	}
 
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 	if err != nil {
 		t.Fatalf("resume same attempt: %v", err)
@@ -238,7 +238,7 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 func TestThresholdECDSA_StartSignCommitIsFirstDurableDecision(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("commit before load"))
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -258,7 +258,7 @@ func TestThresholdECDSA_StartSignCommitIsFirstDurableDecision(t *testing.T) {
 func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -273,7 +273,7 @@ func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	session, out, err := ResumeSign(context.Background(), shares[1], resumePresign, store, guard)
 	if !errors.Is(err, ErrSignAttemptCorrupt) {
 		t.Fatalf("ResumeSign corrupt load error = %v", err)
@@ -289,7 +289,7 @@ func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	rawFresh, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -318,7 +318,7 @@ func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+			guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 			_, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
 			if err != nil {
 				t.Fatal(err)
@@ -335,7 +335,7 @@ func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	rawPresign, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -355,7 +355,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 	}
 	ack1 := testBroadcastAck(out[0], 1)
 	ack2 := testBroadcastAck(out[0], 2)
-	cert, err := tss.NewBroadcastCertificate(out[0], tss.PartySet{1, 2}, []tss.BroadcastAck{ack1, ack2})
+	cert, err := tss.NewBroadcastCertificate(out[0], tss.NewPartySet(1, 2), []tss.BroadcastAck{ack1, ack2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -366,7 +366,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
 	if err != nil {
 		t.Fatal(err)
@@ -382,7 +382,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	rawPresign, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -422,7 +422,7 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, stores[1], guard)
 	if err != nil {
 		t.Fatal(err)
@@ -444,7 +444,7 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -482,7 +482,7 @@ func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T
 func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -516,7 +516,7 @@ func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
 func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -538,7 +538,7 @@ func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 	if err := BurnPresign(context.Background(), store, restored, "too late"); !errors.Is(err, ErrSignAttemptConflict) {
 		t.Fatalf("burn after commit error = %v", err)
 	}
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	resumed, resumedOut, err := ResumeSign(context.Background(), shares[1], restored, store, guard)
 	if err != nil {
 		t.Fatal(err)
@@ -556,7 +556,7 @@ func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -572,7 +572,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 	results := make(chan result, workers)
 	for range workers {
 		wg.Go(func() {
-			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+			guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			if err != nil {
 				results <- result{err: err}
@@ -602,7 +602,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	store := newTestSignAttemptStore()
 	type attempt struct {
 		session tss.SessionID
@@ -624,7 +624,7 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 	for _, candidate := range attempts {
 		candidate := candidate
 		wg.Go(func() {
-			guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), candidate.session)
+			guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), candidate.session)
 			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], presigns[1].ContextHashBytes(), true, store, guard, testLimits())
 			errs <- err
 		})
@@ -653,12 +653,12 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
+	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sessionID)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sessionID)
 	plan, err := NewSignPlan(SignPlanOption{
 		Key:       shares[1],
 		Presign:   presigns[1],
@@ -691,11 +691,11 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, _, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, _, err := startTestPresign(shares[1], sessionID, tss.NewPartySet(1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	_, out2, err := startTestPresign(shares[2], sessionID, tss.NewPartySet(1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +703,7 @@ func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected tampered EncK rejection")
 	} else {
-		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
 	}
 }
 
@@ -926,11 +926,11 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			s1, out1, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+			s1, out1, err := startTestPresign(shares[1], sessionID, tss.NewPartySet(1, 2))
 			if err != nil {
 				t.Fatal(err)
 			}
-			s2, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+			s2, out2, err := startTestPresign(shares[2], sessionID, tss.NewPartySet(1, 2))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -952,7 +952,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			if !errors.As(err, &protocolErr) || protocolErr.Party != 2 {
 				t.Fatalf("unexpected error: %v", err)
 			}
-			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
 		})
 	}
 }
@@ -964,11 +964,11 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	s1, _, err := startTestPresign(shares[1], sessionID, []tss.PartyID{1, 2})
+	s1, _, err := startTestPresign(shares[1], sessionID, tss.NewPartySet(1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startTestPresign(shares[2], sessionID, []tss.PartyID{1, 2})
+	_, out2, err := startTestPresign(shares[2], sessionID, tss.NewPartySet(1, 2))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -985,7 +985,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("expected presign Paillier key mismatch rejection")
 	} else {
-		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], []tss.PartyID{1, 2}, nil))
+		_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
 	}
 }
 
@@ -998,7 +998,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 		name        string
 		threshold   int
 		n           int
-		signers     []tss.PartyID
+		signers     tss.PartySet
 		preConsume  bool // whether to consume before round-trip
 		digestLabel string
 	}{
@@ -1006,7 +1006,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 			name:        "fresh round-trip 1-of-1",
 			threshold:   1,
 			n:           1,
-			signers:     []tss.PartyID{1},
+			signers:     tss.NewPartySet(1),
 			preConsume:  false,
 			digestLabel: "fresh round-trip",
 		},
@@ -1014,7 +1014,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 			name:        "consumed round-trip 2-of-3",
 			threshold:   2,
 			n:           3,
-			signers:     []tss.PartyID{1, 2},
+			signers:     tss.NewPartySet(1, 2),
 			preConsume:  true,
 			digestLabel: "consumed round-trip",
 		},
@@ -1086,7 +1086,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	presign := clonePresignForTest(presigns[1])
 	presign.state.keygenTranscriptHash = append([]byte(nil), presign.state.keygenTranscriptHash...)

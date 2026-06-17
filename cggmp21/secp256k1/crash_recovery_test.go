@@ -39,7 +39,7 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !tss.PartySet(restored.Parties()).Contains(restored.PartyID()) {
+	if !restored.Parties().Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
 	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {
@@ -57,7 +57,7 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("crash recovery test"))
 	presigns := secpPresign(t, map[tss.PartyID]*KeyShare{1: restored, 2: shares[2], 3: shares[3]},
-		[]tss.PartyID{1, 2, 3})
+		tss.NewPartySet(1, 2, 3))
 	_, outbox, err := StartSignDigest(shares[1], presigns[1], sid, digest[:])
 	if err != nil {
 		t.Fatalf("StartSignDigest with restored share failed: %v", err)
@@ -73,7 +73,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2, 3})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -91,7 +91,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	guard := testCGGMP21Guard(shares[1].PartyID(), tss.PartySet(shares[1].Parties()), sid)
+	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sid)
 	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard, testLimits()); err == nil {
 		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
 	} else {
@@ -113,7 +113,7 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2, 3})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("consume presign"))
@@ -153,7 +153,7 @@ func TestCGGMP21_Presign_DestroyMarshal(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2, 3})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	_, err := presigns[1].MarshalBinary()
 	if err != nil {

@@ -20,7 +20,7 @@ import (
 func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -64,7 +64,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -152,7 +152,7 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -190,7 +190,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -361,7 +361,7 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

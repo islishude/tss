@@ -12,8 +12,8 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 2)
-	parties := tss.PartySet{1, 2}
-	newParties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2)
+	newParties := tss.NewPartySet(1, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 	}
 	limits := testLimits()
 	signPlan, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2},
+		Key: shares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2),
 		Context: testFROSTSigningContext(), Message: []byte("guard"), Limits: &limits,
 	})
 	if err != nil {
@@ -86,7 +86,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "reshare dealer",
 			self:    1,
-			parties: tss.PartySet{1, 2, 3},
+			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
 				_, out, err := StartReshare(shares[1], resharePlan, tss.LocalConfig{Self: 1}, guard)
 				return out, err
@@ -95,7 +95,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "reshare recipient",
 			self:    3,
-			parties: tss.PartySet{1, 2, 3},
+			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
 				_, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: 3}, guard)
 				return nil, err

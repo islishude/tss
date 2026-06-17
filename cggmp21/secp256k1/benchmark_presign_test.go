@@ -12,7 +12,7 @@ import (
 
 func BenchmarkCGGMP21Presign2of3(b *testing.B) {
 	shares := CachedKeygenShares(b, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 
 	for b.Loop() {
 		secpPresign(b, shares, signers)
@@ -21,7 +21,7 @@ func BenchmarkCGGMP21Presign2of3(b *testing.B) {
 
 func BenchmarkCGGMP21Presign3of5(b *testing.B) {
 	shares := CachedKeygenShares(b, 3, 5, false)
-	signers := []tss.PartyID{1, 3, 5}
+	signers := tss.NewPartySet(1, 3, 5)
 
 	for b.Loop() {
 		secpPresign(b, shares, signers)

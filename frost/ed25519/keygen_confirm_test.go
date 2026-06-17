@@ -39,7 +39,7 @@ func TestFROSTKeygenConfirmationRoundTrip(t *testing.T) {
 func TestFROSTKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	confirmations := frostKeygenConfirmations(t, shares, []tss.PartyID{1, 2, 3})
+	confirmations := frostKeygenConfirmations(t, shares, tss.NewPartySet(1, 2, 3))
 	confirmations[1].TranscriptHash = bytes.Clone(confirmations[1].TranscriptHash)
 	confirmations[1].TranscriptHash[0] ^= 1
 	if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
@@ -50,7 +50,7 @@ func TestFROSTKeygenConfirmationRejectsMismatchedTranscriptHash(t *testing.T) {
 func TestFROSTKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	confirmations := frostKeygenConfirmations(t, shares, []tss.PartyID{1, 2, 3})
+	confirmations := frostKeygenConfirmations(t, shares, tss.NewPartySet(1, 2, 3))
 	confirmations[1].PublicKey = bytes.Clone(confirmations[1].PublicKey)
 	confirmations[1].PublicKey[0] ^= 1
 	if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
@@ -93,7 +93,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
@@ -172,7 +172,7 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	}
 }
 
-func frostKeygenConfirmations(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID) []*KeygenConfirmation {
+func frostKeygenConfirmations(t *testing.T, shares map[tss.PartyID]*KeyShare, parties tss.PartySet) []*KeygenConfirmation {
 	t.Helper()
 	confirmations := make([]*KeygenConfirmation, 0, len(parties))
 	for _, id := range parties {

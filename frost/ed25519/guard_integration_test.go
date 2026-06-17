@@ -69,7 +69,7 @@ func frosted25519DKG(t *testing.T, parties tss.PartySet, threshold int) (map[tss
 // TestFROSTKeygenRejectsRound1WithoutBroadcastCert verifies that FROST keygen
 // round 1 commitments without a BroadcastCertificate are rejected.
 func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
-	parties := tss.PartySet{11, 12, 13}
+	parties := tss.NewPartySet(11, 12, 13)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -107,7 +107,7 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 // TestFROSTKeygenRejectsPlaintextShare verifies that FROST keygen shares
 // delivered without transport confidentiality are rejected.
 func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
-	parties := tss.PartySet{21, 22, 23}
+	parties := tss.NewPartySet(21, 22, 23)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -146,7 +146,7 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 
 // TestFROSTRejectsSenderSpoofing verifies that identity mismatch is caught in FROST signing.
 func TestFROSTRejectsSenderSpoofing(t *testing.T) {
-	parties := tss.PartySet{31, 32, 33}
+	parties := tss.NewPartySet(31, 32, 33)
 	shares, _ := frosted25519DKG(t, parties, 2)
 
 	// Start a FROST sign session with guard.
@@ -154,7 +154,7 @@ func TestFROSTRejectsSenderSpoofing(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signers := []tss.PartyID{31, 32}
+	signers := tss.NewPartySet(31, 32)
 	signSession, _, err := startFROSTSign(shares[31], signSessionID, signers, []byte("test-message"))
 	if err != nil {
 		t.Fatal(err)
@@ -187,7 +187,7 @@ func TestFROSTRejectsSenderSpoofing(t *testing.T) {
 
 // TestFROSTKeygenRejectsReplay verifies replay detection in FROST keygen.
 func TestFROSTKeygenRejectsReplay(t *testing.T) {
-	parties := tss.PartySet{41, 42, 43}
+	parties := tss.NewPartySet(41, 42, 43)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -234,7 +234,7 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 // TestFROSTReshareRejectsPlaintextShare verifies that FROST reshare shares
 // delivered without confidentiality are rejected by the guard.
 func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
-	parties := tss.PartySet{51, 52, 53}
+	parties := tss.NewPartySet(51, 52, 53)
 	shares, dkgSessionID := frosted25519DKG(t, parties, 2)
 
 	// Start a reshare session with guard using the actual key share.

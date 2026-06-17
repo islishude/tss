@@ -18,14 +18,14 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key := minimalKeyShare()
 	key.state.party = 1
 	key.state.threshold = 2
-	key.state.parties = []tss.PartyID{1, 2}
+	key.state.parties = tss.NewPartySet(1, 2)
 	key.state.securityParams = DefaultSecurityParams()
 	minimalPresign := func() *Presign {
 		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	}
 	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
-		Parties:   []tss.PartyID{1, 2},
+		Parties:   tss.NewPartySet(1, 2),
 		Threshold: 2,
 	})
 	if err != nil {
@@ -36,7 +36,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	refreshPlan := &RefreshPlan{state: &refreshPlanState{
 		sessionID:    sessionID,
 		threshold:    2,
-		parties:      []tss.PartyID{1, 2},
+		parties:      tss.NewPartySet(1, 2),
 		publicKey:    key.state.publicKey,
 		chainCode:    key.state.chainCode,
 		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
@@ -44,10 +44,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	plan := &ResharePlan{state: &resharePlanState{
 		sessionID:             sessionID,
 		curveID:               reshareCurveID,
-		oldParties:            []tss.PartyID{1, 2},
+		oldParties:            tss.NewPartySet(1, 2),
 		oldThreshold:          2,
-		dealerParties:         []tss.PartyID{1, 2},
-		newParties:            []tss.PartyID{1, 2, 3},
+		dealerParties:         tss.NewPartySet(1, 2),
+		newParties:            tss.NewPartySet(1, 2, 3),
 		newThreshold:          2,
 		paillierBits:          int(DefaultSecurityParams().MinPaillierBits),
 		chainCode:             nil,
@@ -68,7 +68,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "keygen",
 			self:    1,
-			parties: tss.PartySet{1, 2},
+			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartKeygen(keygenPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
@@ -77,7 +77,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "presign",
 			self:    1,
-			parties: tss.PartySet{1, 2},
+			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartPresign(key, presignPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
@@ -86,7 +86,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "sign",
 			self:    1,
-			parties: tss.PartySet{1, 2},
+			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				p := minimalPresign()
 				_, out, err := StartSign(key, p, signPlan, tss.LocalConfig{Self: 1}, guard)
@@ -96,7 +96,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "refresh",
 			self:    1,
-			parties: tss.PartySet{1, 2},
+			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartRefresh(key, refreshPlan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
@@ -105,7 +105,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "reshare dealer",
 			self:    1,
-			parties: tss.PartySet{1, 2, 3, 4},
+			parties: tss.NewPartySet(1, 2, 3, 4),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartReshareDealer(key, plan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err
@@ -114,7 +114,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "reshare receiver",
 			self:    3,
-			parties: tss.PartySet{1, 2, 3},
+			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: 3}, guard)
 				return out, false, err
@@ -123,7 +123,7 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		{
 			name:    "reshare overlap",
 			self:    1,
-			parties: tss.PartySet{1, 2, 3},
+			parties: tss.NewPartySet(1, 2, 3),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				_, out, err := StartReshareOverlap(key, plan, tss.LocalConfig{Self: 1}, guard)
 				return out, false, err

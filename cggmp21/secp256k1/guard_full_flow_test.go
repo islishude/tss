@@ -127,7 +127,7 @@ func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, part
 // BroadcastConsistencyRequired for keygen round 1). Broadcast certificates
 // are generated from Ed25519 party keys and verified by the guard.
 func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
-	parties := tss.PartySet{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	threshold := 2
 
 	// --- Setup: identity keys for broadcast ack signing ---
@@ -194,12 +194,12 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	psSessions := make(map[tss.PartyID]*PresignSession, len(signers))
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, tss.PartySet(signers), protocol, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		g, err := tss.NewEnvelopeGuard(id, signers, protocol, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -219,7 +219,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := deliverWithCertificate(t, env, id, tss.PartySet(signers), km)
+			delivered := deliverWithCertificate(t, env, id, signers, km)
 			out, err := psSessions[id].HandlePresignMessage(delivered)
 			if err != nil {
 				t.Fatalf("presign delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
@@ -246,7 +246,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, tss.PartySet(signers), protocol, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		g, err := tss.NewEnvelopeGuard(id, signers, protocol, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -270,7 +270,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			delivered := deliverWithCertificate(t, env, id, tss.PartySet(signers), km)
+			delivered := deliverWithCertificate(t, env, id, signers, km)
 			_, err := signSessions[id].HandleSignMessage(delivered)
 			if err != nil {
 				t.Fatalf("sign delivery from %d to %d: %v", env.From, id, err)
@@ -297,7 +297,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 // TestCGGMP21GuardRejectsBroadcastWithWrongCertificate verifies that a
 // broadcast certificate with mismatched digest is rejected by the guard.
 func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
-	parties := tss.PartySet{71, 72, 73}
+	parties := tss.NewPartySet(71, 72, 73)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

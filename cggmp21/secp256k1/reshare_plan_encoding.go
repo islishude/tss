@@ -17,10 +17,10 @@ type resharePlanWire struct {
 	OldGroupPublicKey     []byte                         `wire:"3,bytes,max_bytes=point"`
 	OldGroupCommitments   [][]byte                       `wire:"4,byteslist,max_bytes=point,max_items=threshold"`
 	OldVerificationShares []wire.PartyBytes[tss.PartyID] `wire:"5,partybytes,max_bytes=point,max_items=parties"`
-	OldParties            []tss.PartyID                  `wire:"6,u32list,max_items=parties"`
+	OldParties            tss.PartySet                   `wire:"6,u32list,max_items=parties"`
 	OldThreshold          int                            `wire:"7,u32"`
-	DealerParties         []tss.PartyID                  `wire:"8,u32list,max_items=parties"`
-	NewParties            []tss.PartyID                  `wire:"9,u32list,max_items=parties"`
+	DealerParties         tss.PartySet                   `wire:"8,u32list,max_items=parties"`
+	NewParties            tss.PartySet                   `wire:"9,u32list,max_items=parties"`
 	NewThreshold          int                            `wire:"10,u32"`
 	ChainCode             []byte                         `wire:"11,bytes,max_bytes=scalar"`
 	PaillierBits          int                            `wire:"12,u32"`

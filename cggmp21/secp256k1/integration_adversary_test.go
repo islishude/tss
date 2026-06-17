@@ -19,7 +19,7 @@ import (
 // only the sender with ErrCodeVerification.
 func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 
 	tests := []struct {
 		name   string
@@ -98,7 +98,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 
 // assertSignPartialBlamesOnlySender delivers a tampered sign partial to all
 // other signers and verifies each blames only the sender.
-func assertSignPartialBlamesOnlySender(t *testing.T, sessions map[tss.PartyID]*SignSession, env tss.Envelope, signers []tss.PartyID) {
+func assertSignPartialBlamesOnlySender(t *testing.T, sessions map[tss.PartyID]*SignSession, env tss.Envelope, signers tss.PartySet) {
 	t.Helper()
 	for _, id := range signers {
 		if id == env.From {
@@ -131,7 +131,7 @@ func assertSignPartialBlamesOnlySender(t *testing.T, sessions map[tss.PartyID]*S
 // happy path: all valid partials result in a valid ECDSA signature.
 func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("happy path"))
 	signID, err := tss.NewSessionID(nil)
@@ -185,7 +185,7 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			shares := CachedKeygenShares(t, 2, 3, false)
-			signers := []tss.PartyID{1, 2, 3}
+			signers := tss.NewPartySet(1, 2, 3)
 			presigns := secpPresign(t, shares, signers)
 
 			for _, r := range presigns {
@@ -226,7 +226,7 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 
 // startSignAndCapture is a helper that starts sign sessions and returns the
 // map of sessions plus the first signer's outbound envelope.
-func startSignAndCapture(t *testing.T, shares map[tss.PartyID]*KeyShare, presigns map[tss.PartyID]*Presign, signers []tss.PartyID, signID tss.SessionID, digest []byte) (map[tss.PartyID]*SignSession, tss.Envelope) {
+func startSignAndCapture(t *testing.T, shares map[tss.PartyID]*KeyShare, presigns map[tss.PartyID]*Presign, signers tss.PartySet, signID tss.SessionID, digest []byte) (map[tss.PartyID]*SignSession, tss.Envelope) {
 	t.Helper()
 	sessions := map[tss.PartyID]*SignSession{}
 	var firstEnv tss.Envelope
@@ -250,7 +250,7 @@ func startSignAndCapture(t *testing.T, shares map[tss.PartyID]*KeyShare, presign
 // The tamper function receives the unmarshaled round3 payload and should
 // return the mutated bytes. If tamper returns nil, marshal rejection is
 // treated as valid presign-phase detection.
-func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID, tamper func(t *testing.T, p presignRound3Payload) []byte) {
+func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, tamper func(t *testing.T, p presignRound3Payload) []byte) {
 	t.Helper()
 
 	sessionID, err := tss.NewSessionID(nil)
@@ -314,7 +314,7 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 // presign-phase blame of only the sender.
 func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2, 3}
+	signers := tss.NewPartySet(1, 2, 3)
 
 	tests := []struct {
 		name   string
@@ -404,7 +404,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 //  8. Expect no blame-all-signers path.
 func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("original defect regression"))
 	signID, err := tss.NewSessionID(nil)

@@ -42,7 +42,7 @@ func partyIDScalarEncoding(id tss.PartyID) ([]byte, error) {
 	return s.Bytes(), nil
 }
 
-func encodeGroupCommitmentList(signers []tss.PartyID, commitments map[tss.PartyID]nonceCommitment) ([]byte, error) {
+func encodeGroupCommitmentList(signers tss.PartySet, commitments map[tss.PartyID]nonceCommitment) ([]byte, error) {
 	out := make([]byte, 0, len(signers)*(32+32+32))
 	for _, id := range signers {
 		commitment, ok := commitments[id]

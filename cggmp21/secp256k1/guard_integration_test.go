@@ -37,7 +37,7 @@ func buildTestConfig(parties tss.PartySet, threshold int, sessionID tss.SessionI
 // TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert verifies that keygen round 1
 // commitments without a BroadcastCertificate are rejected by the guard.
 func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
-	parties := tss.PartySet{11, 12, 13}
+	parties := tss.NewPartySet(11, 12, 13)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
@@ -73,7 +73,7 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 // TestCGGMP21KeygenRejectsPlaintextShare verifies that keygen round 1 shares
 // delivered without transport confidentiality are rejected.
 func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
-	parties := tss.PartySet{21, 22, 23}
+	parties := tss.NewPartySet(21, 22, 23)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
@@ -107,7 +107,7 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 // TestCGGMP21KeygenRejectsUnauthenticatedTransport verifies that messages
 // without transport authentication are rejected by the guard.
 func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
-	parties := tss.PartySet{31, 32, 33}
+	parties := tss.NewPartySet(31, 32, 33)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
@@ -139,7 +139,7 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 
 // TestCGGMP21KeygenRejectsSenderSpoofing verifies that identity mismatch is caught.
 func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
-	parties := tss.PartySet{41, 42, 43}
+	parties := tss.NewPartySet(41, 42, 43)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
@@ -174,7 +174,7 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 
 // TestCGGMP21KeygenRejectsReplay verifies that replayed keygen messages are detected.
 func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
-	parties := tss.PartySet{51, 52, 53}
+	parties := tss.NewPartySet(51, 52, 53)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 
@@ -217,7 +217,7 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 // TestCGGMP21KeygenRejectsUnknownPayloadPolicy verifies that unregistered payload
 // types are rejected under guard.
 func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
-	parties := tss.PartySet{61, 62, 63}
+	parties := tss.NewPartySet(61, 62, 63)
 	sessionID := makeSessionID(t)
 	configs := buildTestConfig(parties, 2, sessionID)
 

@@ -28,14 +28,14 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sidA, _ := tss.NewSessionID(nil)
-			_, outA, err := startFROSTSign(shares[1], sidA, []tss.PartyID{1, 2}, messageA)
+			_, outA, err := startFROSTSign(shares[1], sidA, tss.NewPartySet(1, 2), messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
 			commitA := outA[0]
 
 			sidB, _ := tss.NewSessionID(nil)
-			sess1B, _, err := startFROSTSign(shares[1], sidB, []tss.PartyID{1, 2}, messageA)
+			sess1B, _, err := startFROSTSign(shares[1], sidB, tss.NewPartySet(1, 2), messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -46,11 +46,11 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sid, _ := tss.NewSessionID(nil)
-			sess1, _, err := startFROSTSign(shares[1], sid, []tss.PartyID{1, 2}, messageA)
+			sess1, _, err := startFROSTSign(shares[1], sid, tss.NewPartySet(1, 2), messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
-			_, out2, err := startFROSTSign(shares[2], sid, []tss.PartyID{1, 2}, messageA)
+			_, out2, err := startFROSTSign(shares[2], sid, tss.NewPartySet(1, 2), messageA)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -65,7 +65,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sid, _ := tss.NewSessionID(nil)
-			signers := []tss.PartyID{1, 2}
+			signers := tss.NewPartySet(1, 2)
 
 			sess1, out1, err := startFROSTSign(shares[1], sid, signers, messageA)
 			if err != nil {
@@ -115,7 +115,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 
 			// All sessions share the same session ID so guard passes cross-context.
 			sid, _ := tss.NewSessionID(nil)
-			signers := []tss.PartyID{1, 2}
+			signers := tss.NewPartySet(1, 2)
 
 			sess1A, out1A, err := startFROSTSign(shares[1], sid, signers, messageA)
 			if err != nil {
@@ -152,8 +152,8 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			t.Parallel()
 
 			sid, _ := tss.NewSessionID(nil)
-			signers2 := []tss.PartyID{1, 2}
-			signers3 := []tss.PartyID{1, 2, 3}
+			signers2 := tss.NewPartySet(1, 2)
+			signers3 := tss.NewPartySet(1, 2, 3)
 
 			// Party 1 for 2-signer set.
 			sess1_2, out1, err := startFROSTSign(shares[1], sid, signers2, messageA)
@@ -210,7 +210,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			}
 
 			sid, _ := tss.NewSessionID(nil)
-			signers := []tss.PartyID{1, 2}
+			signers := tss.NewPartySet(1, 2)
 
 			// Party 1 with shift1.
 			sess1, out1, err := startFROSTSignWithOptions(hdShares[1], sid, signers, messageA,

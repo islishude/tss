@@ -28,7 +28,7 @@ var errPlanHashMismatch = errors.New("lifecycle plan hash mismatch")
 // intentionally excluded from the digest.
 type KeygenPlanOption struct {
 	SessionID      tss.SessionID
-	Parties        []tss.PartyID
+	Parties        tss.PartySet
 	Threshold      int
 	Limits         *Limits
 	SecurityParams *SecurityParams
@@ -39,7 +39,7 @@ type KeygenPlanOption struct {
 type KeygenPlan struct {
 	sessionID      tss.SessionID
 	threshold      int
-	parties        []tss.PartyID
+	parties        tss.PartySet
 	limits         Limits
 	securityParams SecurityParams
 }
@@ -87,7 +87,7 @@ func (p *KeygenPlan) Threshold() int {
 }
 
 // Parties returns a copy of the canonical keygen party set.
-func (p *KeygenPlan) Parties() []tss.PartyID {
+func (p *KeygenPlan) Parties() tss.PartySet {
 	if p == nil {
 		return nil
 	}
@@ -148,7 +148,7 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 type refreshPlanState struct {
 	sessionID    tss.SessionID // Refresh protocol session; every refresh message must echo this through the envelope.
 	threshold    int           // Existing signing threshold preserved by same-party refresh.
-	parties      []tss.PartyID // Canonical participant set preserved by same-party refresh.
+	parties      tss.PartySet  // Canonical participant set preserved by same-party refresh.
 	publicKey    []byte        // Parent group public key that must remain unchanged after refresh.
 	chainCode    []byte        // HD chain code that must remain unchanged after refresh.
 	paillierBits int           // Shared modulus size for the fresh Paillier keys generated during refresh.
@@ -220,7 +220,7 @@ func (p *RefreshPlan) SessionID() tss.SessionID {
 }
 
 // Parties returns a copy of the fixed refresh party set.
-func (p *RefreshPlan) Parties() []tss.PartyID {
+func (p *RefreshPlan) Parties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -297,10 +297,10 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 type presignPlanState struct {
 	sessionID   tss.SessionID         // Presign protocol session; every presign envelope is scoped to it.
 	threshold   int                   // Signing threshold inherited from the key share.
-	parties     []tss.PartyID         // Canonical key-share participant set, not just the active signer set.
+	parties     tss.PartySet          // Canonical key-share participant set, not just the active signer set.
 	publicKey   []byte                // Parent group public key before request-time HD derivation.
 	keygenHash  []byte                // Transcript hash of the keygen that produced publicKey and parties.
-	signers     []tss.PartyID         // Canonical subset allowed to contribute to this presign.
+	signers     tss.PartySet          // Canonical subset allowed to contribute to this presign.
 	context     PresignContext        // Normalized signing context after path resolution.
 	contextHash []byte                // Canonical hash of context, used to bind the presign across phases.
 	derivation  *tss.DerivationResult // Resolved child key/path; ChildPublicKey is the verification key.
@@ -317,7 +317,7 @@ type PresignPlan struct {
 type PresignPlanOption struct {
 	Key            *KeyShare
 	SessionID      tss.SessionID
-	Signers        []tss.PartyID
+	Signers        tss.PartySet
 	Context        PresignContext
 	Limits         *Limits
 	SecurityParams *SecurityParams
@@ -373,7 +373,7 @@ func (p *PresignPlan) SessionID() tss.SessionID {
 }
 
 // Signers returns a copy of the canonical signer set.
-func (p *PresignPlan) Signers() []tss.PartyID {
+func (p *PresignPlan) Signers() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -389,7 +389,7 @@ func (p *PresignPlan) Threshold() int {
 }
 
 // Parties returns a copy of the key participant set bound by the presign plan.
-func (p *PresignPlan) Parties() []tss.PartyID {
+func (p *PresignPlan) Parties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -671,7 +671,7 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	return validatePresign(key, presign, p.limits)
 }
 
-func validatePlanParties(parties []tss.PartyID, threshold int, limits Limits) ([]tss.PartyID, error) {
+func validatePlanParties(parties tss.PartySet, threshold int, limits Limits) (tss.PartySet, error) {
 	parties = tss.SortParties(parties)
 	if threshold <= 0 {
 		return nil, errors.New("threshold must be positive")

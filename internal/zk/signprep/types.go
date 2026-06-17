@@ -14,7 +14,7 @@ type Statement struct {
 	Protocol             tss.ProtocolID
 	SessionID            tss.SessionID
 	Party                tss.PartyID
-	Signers              []tss.PartyID
+	Signers              tss.PartySet
 	PlanHash             []byte
 	ContextHash          []byte
 	AdditiveShift        []byte

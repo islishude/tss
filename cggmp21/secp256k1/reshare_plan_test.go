@@ -18,7 +18,7 @@ const testResharePlanPaillierBits = 3072
 func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.dealerParties = []tss.PartyID{1, 2}
+	plan.state.dealerParties = tss.NewPartySet(1, 2)
 	if err := plan.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -45,7 +45,7 @@ func TestResharePlanValidateRejectsWrongOldPublicKey(t *testing.T) {
 func TestResharePlanValidateRejectsDealerOutsideOldSet(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.dealerParties = []tss.PartyID{4}
+	plan.state.dealerParties = tss.NewPartySet(4)
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted dealer outside old party set")
 	}
@@ -280,10 +280,10 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 			2: mustResharePlanPoint(t, 3),
 			3: mustResharePlanPoint(t, 4),
 		},
-		oldParties:     []tss.PartyID{1, 2, 3},
+		oldParties:     tss.NewPartySet(1, 2, 3),
 		oldThreshold:   2,
-		dealerParties:  []tss.PartyID{1, 2},
-		newParties:     []tss.PartyID{2, 3},
+		dealerParties:  tss.NewPartySet(1, 2),
+		newParties:     tss.NewPartySet(2, 3),
 		newThreshold:   2,
 		chainCode:      bytes.Repeat([]byte{0x44}, 32),
 		paillierBits:   testResharePlanPaillierBits,
@@ -302,7 +302,7 @@ func mustResharePlanPoint(t *testing.T, scalar int64) []byte {
 
 func TestNewResharePlanRejectsEmptyOldParties(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, nil), NewParties: []tss.PartyID{1}, NewThreshold: 1, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, nil), NewParties: tss.NewPartySet(1), NewThreshold: 1, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error for empty old parties")
 	}
@@ -310,7 +310,7 @@ func TestNewResharePlanRejectsEmptyOldParties(t *testing.T) {
 
 func TestNewResharePlanRejectsZeroThreshold(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 0, []tss.PartyID{1}), DealerParties: []tss.PartyID{1}, NewParties: []tss.PartyID{2}, NewThreshold: 1, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 0, tss.NewPartySet(1)), DealerParties: tss.NewPartySet(1), NewParties: tss.NewPartySet(2), NewThreshold: 1, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error for zero threshold")
 	}
@@ -318,7 +318,7 @@ func TestNewResharePlanRejectsZeroThreshold(t *testing.T) {
 
 func TestNewResharePlanRejectsThresholdExceedsOldParties(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 3, []tss.PartyID{1, 2}), DealerParties: []tss.PartyID{1}, NewParties: []tss.PartyID{2}, NewThreshold: 2, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 3, tss.NewPartySet(1, 2)), DealerParties: tss.NewPartySet(1), NewParties: tss.NewPartySet(2), NewThreshold: 2, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error when threshold > old party count")
 	}
@@ -326,7 +326,7 @@ func TestNewResharePlanRejectsThresholdExceedsOldParties(t *testing.T) {
 
 func TestNewResharePlanRejectsThresholdZeroParties(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, []tss.PartyID{1}), NewParties: []tss.PartyID{1}, NewThreshold: 1, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, tss.NewPartySet(1)), NewParties: tss.NewPartySet(1), NewThreshold: 1, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error for empty dealer parties")
 	}
@@ -334,7 +334,7 @@ func TestNewResharePlanRejectsThresholdZeroParties(t *testing.T) {
 
 func TestNewResharePlanRejectsNilNewParties(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, []tss.PartyID{1}), DealerParties: []tss.PartyID{1}, NewThreshold: 1, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, tss.NewPartySet(1)), DealerParties: tss.NewPartySet(1), NewThreshold: 1, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error for nil new parties")
 	}
@@ -342,13 +342,13 @@ func TestNewResharePlanRejectsNilNewParties(t *testing.T) {
 
 func TestNewResharePlanRejectsInvalidNewThreshold(t *testing.T) {
 	t.Parallel()
-	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, []tss.PartyID{1}), DealerParties: []tss.PartyID{1}, NewParties: []tss.PartyID{2, 3}, NewThreshold: 5, Limits: testLimitsPtr()})
+	_, err := NewResharePlan(ResharePlanOption{OldKey: testMetadataKeyShare(1, 1, tss.NewPartySet(1)), DealerParties: tss.NewPartySet(1), NewParties: tss.NewPartySet(2, 3), NewThreshold: 5, Limits: testLimitsPtr()})
 	if err == nil {
 		t.Fatal("expected error when newThreshold > new party count")
 	}
 }
 
-func testMetadataKeyShare(party tss.PartyID, threshold int, parties []tss.PartyID) *KeyShare {
+func testMetadataKeyShare(party tss.PartyID, threshold int, parties tss.PartySet) *KeyShare {
 	return &KeyShare{state: &keyShareState{
 		version:        tss.Version,
 		securityParams: testSecurityParams(),

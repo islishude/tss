@@ -296,7 +296,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		t.Fatal("duplicate ack was not idempotent")
 	}
 	ack2 := testBroadcastAck(env, 2)
-	cert, err := tss.NewBroadcastCertificate(env, tss.PartySet(record.DeliveryPolicy.Recipients), []tss.BroadcastAck{ack1, ack2})
+	cert, err := tss.NewBroadcastCertificate(env, record.DeliveryPolicy.Recipients, []tss.BroadcastAck{ack1, ack2})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -432,7 +432,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		PresignID:                  bytes.Repeat([]byte{0x55}, sha256.Size),
 		SessionID:                  sessionID,
 		Party:                      1,
-		SignerSetHash:              signAttemptSignerSetHash([]tss.PartyID{1, 2}),
+		SignerSetHash:              signAttemptSignerSetHash(tss.NewPartySet(1, 2)),
 		SignPlanHash:               signPlanHash,
 		ContextHash:                contextHash,
 		Digest:                     digest,
@@ -446,7 +446,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 			Mode:                 policy.Mode,
 			Confidentiality:      policy.Confidentiality,
 			BroadcastConsistency: policy.BroadcastConsistency,
-			Recipients:           []tss.PartyID{1, 2},
+			Recipients:           tss.NewPartySet(1, 2),
 		},
 	}
 	record.IntentHash = signAttemptIntentHash(record)

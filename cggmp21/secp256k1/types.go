@@ -123,7 +123,7 @@ type keyShareState struct {
 	securityParams         SecurityParams            // Cryptographic profile used to create this share.
 	party                  tss.PartyID               // Local owner of the secret signing share.
 	threshold              int                       // Number of signers required for CGGMP21 signing.
-	parties                []tss.PartyID             // Canonical full participant set for the group key.
+	parties                tss.PartySet              // Canonical full participant set for the group key.
 	publicKey              []byte                    // Parent group public key before request-time derivation.
 	chainCode              []byte                    // HD chain code paired with publicKey for non-hardened derivation.
 	secret                 *secret.Scalar            // Local ECDSA signing share; never exposed through accessors.
@@ -150,7 +150,7 @@ type keyShareState struct {
 // validateSignVerifyShares checks that the verify shares set matches the signer
 // set: one entry per signer, no extras, no duplicates, canonical point encodings,
 // and non-empty proofs within size limits.
-func validateSignVerifyShares(signers []tss.PartyID, shares []SignVerifyShare, limits Limits) error {
+func validateSignVerifyShares(signers tss.PartySet, shares []SignVerifyShare, limits Limits) error {
 	if len(shares) != len(signers) {
 		return fmt.Errorf("verify shares count %d != signers %d", len(shares), len(signers))
 	}

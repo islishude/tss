@@ -16,7 +16,7 @@ func minimalKeyShare() *KeyShare {
 		version:                tss.Version,
 		party:                  1,
 		threshold:              2,
-		parties:                []tss.PartyID{1, 2, 3},
+		parties:                tss.NewPartySet(1, 2, 3),
 		publicKey:              make([]byte, 33),
 		chainCode:              make([]byte, 32),
 		paillierProofDomain:    "keygen.modulus",

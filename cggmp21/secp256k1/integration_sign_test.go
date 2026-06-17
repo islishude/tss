@@ -15,11 +15,11 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 		name      string
 		threshold int
 		parties   int
-		signers   []tss.PartyID
+		signers   tss.PartySet
 	}{
-		{name: "1-of-1", threshold: 1, parties: 1, signers: []tss.PartyID{1}},
-		{name: "2-of-3", threshold: 2, parties: 3, signers: []tss.PartyID{1, 3}},
-		{name: "3-of-5", threshold: 3, parties: 5, signers: []tss.PartyID{1, 3, 5}},
+		{name: "1-of-1", threshold: 1, parties: 1, signers: tss.NewPartySet(1)},
+		{name: "2-of-3", threshold: 2, parties: 3, signers: tss.NewPartySet(1, 3)},
+		{name: "3-of-5", threshold: 3, parties: 5, signers: tss.NewPartySet(1, 3, 5)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			shares := secpKeygen(t, tc.threshold, tc.parties)
@@ -41,7 +41,7 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 
 func TestThresholdECDSASignerSubsets(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	for _, signers := range [][]tss.PartyID{{1, 2}, {1, 3}, {2, 3}} {
+	for _, signers := range []tss.PartySet{tss.NewPartySet(1, 2), tss.NewPartySet(1, 3), tss.NewPartySet(2, 3)} {
 		selected := make([]*KeyShare, 0, len(signers))
 		for _, id := range signers {
 			selected = append(selected, shares[id])
@@ -59,7 +59,7 @@ func TestThresholdECDSASignerSubsets(t *testing.T) {
 
 func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("online tamper"))
 	signID, err := tss.NewSessionID(nil)

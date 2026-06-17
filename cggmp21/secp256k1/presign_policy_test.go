@@ -10,7 +10,7 @@ import (
 
 func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	signers := []tss.PartyID{1}
+	signers := tss.NewPartySet(1)
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath([]uint32{0}).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)

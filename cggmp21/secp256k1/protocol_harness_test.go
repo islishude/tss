@@ -66,13 +66,13 @@ func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShar
 
 type protocolHarness struct {
 	threshold int
-	parties   []tss.PartyID
+	parties   tss.PartySet
 	shares    map[tss.PartyID]*KeyShare
 }
 
 func newHarness(t testing.TB, threshold, n int) *protocolHarness {
 	t.Helper()
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -83,7 +83,7 @@ func newHarness(t testing.TB, threshold, n int) *protocolHarness {
 	}
 }
 
-func (h *protocolHarness) evidenceContext(sessionID tss.SessionID, receiver tss.PartyID, signers []tss.PartyID, presign *Presign) EvidenceContext {
+func (h *protocolHarness) evidenceContext(sessionID tss.SessionID, receiver tss.PartyID, signers tss.PartySet, presign *Presign) EvidenceContext {
 	ctx := secpEvidenceContext(h.shares[receiver], signers, presign)
 	ctx.SessionID = sessionID
 	return ctx
@@ -95,7 +95,7 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -138,7 +138,7 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -176,7 +176,7 @@ func secpKeygenWithPlanOption(t testing.TB, threshold, n int, option KeygenPlanO
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -202,11 +202,11 @@ func secpKeygenWithPlanOption(t testing.TB, threshold, n int, option KeygenPlanO
 	return out
 }
 
-func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID) map[tss.PartyID]*Presign {
+func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers tss.PartySet) map[tss.PartyID]*Presign {
 	return secpPresignWithContext(t, shares, signers, testPresignContext())
 }
 
-func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID, ctx PresignContext) map[tss.PartyID]*Presign {
+func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx PresignContext) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -251,12 +251,12 @@ func bigOne() *big.Int {
 	return big.NewInt(1)
 }
 
-func secpEvidenceContext(share *KeyShare, signers []tss.PartyID, presign *Presign) EvidenceContext {
+func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign) EvidenceContext {
 	ctx := EvidenceContext{
-		Parties:              append([]tss.PartyID(nil), share.state.parties...),
+		Parties:              share.state.parties.Clone(),
 		PublicKey:            append([]byte(nil), share.state.publicKey...),
 		PaillierPublicKeys:   append([]PaillierPublicShare(nil), share.state.paillierPublicKeys...),
-		Signers:              append([]tss.PartyID(nil), signers...),
+		Signers:              signers.Clone(),
 		KeygenTranscriptHash: append([]byte(nil), share.state.keygenTranscriptHash...),
 	}
 	if presign != nil {
@@ -305,7 +305,7 @@ func assertNoBlame(t testing.TB, protocolErr *tss.ProtocolError) {
 	}
 }
 
-func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
+func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newParties tss.PartySet, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
 	t.Helper()
 	var reference *KeyShare
 	for _, share := range oldShares {
@@ -319,7 +319,7 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 	return runCGGMP21ReshareWithDealers(t, oldShares, reference.state.parties, newParties, newThreshold)
 }
 
-func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeyShare, dealerParties, newParties []tss.PartyID, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
+func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeyShare, dealerParties, newParties tss.PartySet, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
 	t.Helper()
 	var reference *KeyShare
 	for _, share := range oldShares {
@@ -405,7 +405,7 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 	}
 }
 
-func validateCGGMP21Shares(t testing.TB, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID) {
+func validateCGGMP21Shares(t testing.TB, shares map[tss.PartyID]*KeyShare, parties tss.PartySet) {
 	t.Helper()
 	for _, id := range parties {
 		if err := shares[id].ValidateWithLimits(testLimits()); err != nil {

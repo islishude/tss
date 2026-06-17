@@ -26,7 +26,7 @@ func TestCGGMP21DefaultsRemainProduction(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x61)
 	if _, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
-		Parties:   []tss.PartyID{1},
+		Parties:   tss.NewPartySet(1),
 		Threshold: 1,
 	}); err == nil {
 		t.Fatal("production keygen plan accepted 1-of-1")
@@ -35,7 +35,7 @@ func TestCGGMP21DefaultsRemainProduction(t *testing.T) {
 	testParams := testSecurityParams()
 	if _, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID:      sessionID,
-		Parties:        []tss.PartyID{1},
+		Parties:        tss.NewPartySet(1),
 		Threshold:      1,
 		Limits:         &limits,
 		SecurityParams: &testParams,
@@ -54,7 +54,7 @@ func TestCGGMP21KeygenPlanDigestBindsSecurityParams(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x62)
 	option := KeygenPlanOption{
 		SessionID: sessionID,
-		Parties:   []tss.PartyID{1, 2},
+		Parties:   tss.NewPartySet(1, 2),
 		Threshold: 2,
 		Limits:    &limits,
 	}
@@ -95,7 +95,7 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 		t.Fatalf("key security params = %+v, want %+v", restoredKey.SecurityParams(), want)
 	}
 
-	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
+	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	presign := presigns[1]
 	if err := presign.Validate(); err == nil {
 		t.Fatal("production Validate accepted a test-profile presign")
@@ -128,7 +128,7 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 	if _, err := NewPresignPlan(PresignPlanOption{
 		Key:            shares[1],
 		SessionID:      sessionID,
-		Signers:        []tss.PartyID{1, 2},
+		Signers:        tss.NewPartySet(1, 2),
 		Context:        testPresignContext(),
 		Limits:         &limits,
 		SecurityParams: &production,
@@ -136,7 +136,7 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 		t.Fatal("presign plan accepted security params that differ from the key")
 	}
 
-	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
+	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	mismatched := clonePresignForTest(presigns[1])
 	mismatched.state.securityParams = production
 	if _, err := NewSignPlan(SignPlanOption{
@@ -167,7 +167,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 		t.Fatal("key share accepted retired flattened security params")
 	}
 
-	presigns := secpPresignWithContext(t, shares, []tss.PartyID{1, 2}, testPresignContext())
+	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	presignRaw, err := presigns[1].MarshalBinaryWithLimits(limits)
 	if err != nil {
 		t.Fatal(err)

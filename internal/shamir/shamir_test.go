@@ -260,14 +260,14 @@ func TestLagrangeCoefficientRejectsInvalidInputs(t *testing.T) {
 	tests := []struct {
 		name  string
 		id    tss.PartyID
-		set   []tss.PartyID
+		set   tss.PartySet
 		order int64
 	}{
-		{"id is zero", 0, []tss.PartyID{1, 2, 3}, 101},
-		{"set contains zero", 1, []tss.PartyID{1, 0, 2}, 101},
-		{"duplicate in set", 1, []tss.PartyID{1, 2, 2}, 101},
-		{"id not in set", 3, []tss.PartyID{1, 2, 4}, 101},
-		{"non-invertible denominator", 1, []tss.PartyID{1, 6}, 5},
+		{"id is zero", 0, tss.NewPartySet(1, 2, 3), 101},
+		{"set contains zero", 1, tss.NewPartySet(1, 0, 2), 101},
+		{"duplicate in set", 1, tss.NewPartySet(1, 2, 2), 101},
+		{"id not in set", 3, tss.NewPartySet(1, 2, 4), 101},
+		{"non-invertible denominator", 1, tss.NewPartySet(1, 6), 5},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -287,7 +287,7 @@ func TestLagrangeCoefficientCorrectness(t *testing.T) {
 	// Lagrange coefficient for point 1 among {1,2}:
 	// λ₁ = 2/(2-1) = 2 (since x=2 is the other point)
 	order := big.NewInt(101)
-	lambda, err := LagrangeCoefficient(1, []tss.PartyID{1, 2}, order)
+	lambda, err := LagrangeCoefficient(1, tss.NewPartySet(1, 2), order)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -311,11 +311,11 @@ func TestLagrangeCoefficientReconstructs(t *testing.T) {
 
 	pairs := []struct {
 		name string
-		ids  []tss.PartyID
+		ids  tss.PartySet
 	}{
-		{name: "{1,2}", ids: []tss.PartyID{1, 2}},
-		{name: "{2,3}", ids: []tss.PartyID{2, 3}},
-		{name: "{1,3}", ids: []tss.PartyID{1, 3}},
+		{name: "{1,2}", ids: tss.NewPartySet(1, 2)},
+		{name: "{2,3}", ids: tss.NewPartySet(2, 3)},
+		{name: "{1,3}", ids: tss.NewPartySet(1, 3)},
 	}
 	for _, tc := range pairs {
 		t.Run(tc.name, func(t *testing.T) {

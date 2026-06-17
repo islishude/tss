@@ -14,8 +14,8 @@ import (
 func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygenHD(t, 2, 3)
-	oldParties := []tss.PartyID{1, 2, 3}
-	newParties := []tss.PartyID{2, 3, 4}
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
 	newThreshold := 2
 	oldPublicKey := oldShares[1].PublicKeyBytes()
 	oldChainCode := append([]byte(nil), oldShares[1].state.chainCode...)
@@ -52,7 +52,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	}
 	reshareSessions[4] = recipient
 
-	deliverReshareMessages(t, []tss.PartyID{1, 2, 3, 4}, messages, reshareSessions)
+	deliverReshareMessages(t, tss.NewPartySet(1, 2, 3, 4), messages, reshareSessions)
 	newShares := collectReshareShares(t, newParties, reshareSessions)
 
 	for _, id := range newParties {
@@ -99,7 +99,7 @@ func TestStartRefreshRequiresMatchingSelf(t *testing.T) {
 	}
 	_, _, err = startFROSTRefresh(shares[1], tss.ThresholdConfig{
 		Threshold: 2,
-		Parties:   []tss.PartyID{1, 2},
+		Parties:   tss.NewPartySet(1, 2),
 		Self:      2,
 		SessionID: sessionID,
 	})
@@ -117,17 +117,17 @@ func TestStartReshareValidatesNewParticipantSet(t *testing.T) {
 	}
 	config := tss.ThresholdConfig{
 		Threshold: 2,
-		Parties:   []tss.PartyID{1, 2, 3},
+		Parties:   tss.NewPartySet(1, 2, 3),
 		Self:      1,
 		SessionID: sessionID,
 	}
 
 	for _, tc := range []struct {
 		name       string
-		newParties []tss.PartyID
+		newParties tss.PartySet
 	}{
-		{name: "zero party", newParties: []tss.PartyID{0, 1, 2}},
-		{name: "duplicate party", newParties: []tss.PartyID{1, 1, 2}},
+		{name: "zero party", newParties: tss.NewPartySet(0, 1, 2)},
+		{name: "duplicate party", newParties: tss.NewPartySet(1, 1, 2)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
@@ -150,7 +150,7 @@ func TestStartReshareRejectsProductionOneOfOneTarget(t *testing.T) {
 		t.Fatal(err)
 	}
 	plan, err := NewResharePlan(ResharePlanOption{
-		OldKey: shares[1], SessionID: sessionID, NewParties: []tss.PartyID{1}, NewThreshold: 1,
+		OldKey: shares[1], SessionID: sessionID, NewParties: tss.NewPartySet(1), NewThreshold: 1,
 	})
 	if err == nil || !strings.Contains(err.Error(), "below production minimum") {
 		t.Fatalf("expected production threshold rejection, got %v", err)
@@ -163,8 +163,8 @@ func TestStartReshareRejectsProductionOneOfOneTarget(t *testing.T) {
 func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
-	oldParties := []tss.PartyID{1, 2, 3}
-	newParties := []tss.PartyID{2, 3, 4}
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
 	oldChainCode := oldShares[1].state.chainCode
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -207,7 +207,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected old-party recipient failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, []tss.PartyID{1, 1, 2}, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, tss.NewPartySet(1, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -216,7 +216,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected duplicate old-party failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, []tss.PartyID{0, 1, 2}, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, tss.NewPartySet(0, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -229,8 +229,8 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 func TestReshareNewRecipientBindsGuard(t *testing.T) {
 	t.Parallel()
 	oldShares := frostKeygen(t, 2, 3)
-	oldParties := []tss.PartyID{1, 2, 3}
-	newParties := []tss.PartyID{2, 3, 4}
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -257,7 +257,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	session, _, err := startFROSTReshare(shares[1], parties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   parties,
@@ -321,7 +321,7 @@ func TestReshareCompletionClearsIntermediateShares(t *testing.T) {
 	}
 	session, out, err := startFROSTRefresh(shares[1], tss.ThresholdConfig{
 		Threshold: 1,
-		Parties:   []tss.PartyID{1},
+		Parties:   tss.NewPartySet(1),
 		Self:      1,
 		SessionID: sessionID,
 	})

@@ -130,7 +130,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
-		parties:                append([]tss.PartyID(nil), s.cfg.Parties...),
+		parties:                s.cfg.Parties.Clone(),
 		publicKey:              append([]byte(nil), groupCommitments[0]...),
 		chainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
@@ -239,7 +239,7 @@ func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits 
 			evidenceEnv,
 			tss.EvidenceKindKeygenShare,
 			"invalid DKG share",
-			[]tss.PartyID{dealer},
+			tss.NewPartySet(dealer),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, commits)),
 		),

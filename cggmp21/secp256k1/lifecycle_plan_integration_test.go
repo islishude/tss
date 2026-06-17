@@ -11,7 +11,7 @@ import (
 
 func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x61)
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	plan1Security := testSecurityParams()
 	plan1, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, SecurityParams: &plan1Security})
 	if err != nil {

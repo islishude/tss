@@ -6,7 +6,7 @@ import (
 )
 
 // Parties returns a sorted party set {1, 2, ..., n}.
-func Parties(n int) []tss.PartyID {
+func Parties(n int) tss.PartySet {
 	return testutil.MustPartySet(n)
 }
 
@@ -23,8 +23,8 @@ func (tc ThresholdCase) N() int { return tc.Parties }
 func (tc ThresholdCase) T() int { return tc.Threshold }
 
 // SignerSubset returns the parties at the given 1-based indices.
-func SignerSubset(all []tss.PartyID, ids ...int) []tss.PartyID {
-	out := make([]tss.PartyID, len(ids))
+func SignerSubset(all tss.PartySet, ids ...int) tss.PartySet {
+	out := make(tss.PartySet, len(ids))
 	for i, id := range ids {
 		out[i] = all[id-1]
 	}

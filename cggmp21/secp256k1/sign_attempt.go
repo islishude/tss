@@ -47,7 +47,7 @@ type SignAttemptDeliveryPolicy struct {
 	Mode                 tss.DeliveryMode
 	Confidentiality      tss.ConfidentialityPolicy
 	BroadcastConsistency tss.BroadcastConsistencyPolicy
-	Recipients           []tss.PartyID
+	Recipients           tss.PartySet
 }
 
 // Clone returns an independent copy of the delivery policy snapshot.
@@ -562,7 +562,7 @@ func validateSignAttemptDeliveryPolicy(r SignAttemptRecord, env tss.Envelope) er
 }
 
 func validateSignAttemptDeliveryState(r SignAttemptRecord, env tss.Envelope) error {
-	recipients := tss.PartySet(r.DeliveryPolicy.Recipients)
+	recipients := r.DeliveryPolicy.Recipients
 	seen := make(map[tss.PartyID]struct{}, len(r.DeliveryState.Acks))
 	order := signAttemptRecipientOrder(r.DeliveryPolicy.Recipients)
 	prev := -1
@@ -638,7 +638,7 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	recipients := tss.PartySet(record.DeliveryPolicy.Recipients)
+	recipients := record.DeliveryPolicy.Recipients
 	updated := record.Clone()
 	if update.Ack != nil {
 		if err := addSignAttemptDeliveryAck(&updated, update.Ack.Clone(), env, recipients); err != nil {
@@ -650,7 +650,7 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 		if err := cert.VerifyStructure(env, recipients); err != nil {
 			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
 		}
-		cert.Recipients = tss.PartySet(updated.DeliveryPolicy.Recipients).Clone()
+		cert.Recipients = updated.DeliveryPolicy.Recipients.Clone()
 		orderSignAttemptCertificateAcks(cert, updated.DeliveryPolicy.Recipients)
 		if _, err := marshalSignAttemptCertificate(cert); err != nil {
 			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
@@ -693,7 +693,7 @@ func orderSignAttemptDeliveryAcks(record *SignAttemptRecord) {
 	})
 }
 
-func orderSignAttemptCertificateAcks(cert *tss.BroadcastCertificate, recipients []tss.PartyID) {
+func orderSignAttemptCertificateAcks(cert *tss.BroadcastCertificate, recipients tss.PartySet) {
 	if cert == nil || len(cert.Acks) <= 1 {
 		return
 	}
@@ -703,7 +703,7 @@ func orderSignAttemptCertificateAcks(cert *tss.BroadcastCertificate, recipients 
 	})
 }
 
-func signAttemptRecipientOrder(recipients []tss.PartyID) map[tss.PartyID]int {
+func signAttemptRecipientOrder(recipients tss.PartySet) map[tss.PartyID]int {
 	order := make(map[tss.PartyID]int, len(recipients))
 	for i, id := range recipients {
 		order[id] = i
@@ -779,7 +779,7 @@ func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
 	return t.Sum()
 }
 
-func signAttemptSignerSetHash(signers []tss.PartyID) []byte {
+func signAttemptSignerSetHash(signers tss.PartySet) []byte {
 	return wireutil.PartySetHash(signers, signAttemptSignerSetLabel)
 }
 
@@ -858,7 +858,7 @@ func signAttemptCertificateFromWire(raw []byte) *tss.BroadcastCertificate {
 		Round:       w.Round,
 		From:        w.From,
 		PayloadType: tss.PayloadType(w.PayloadType),
-		Recipients:  tss.PartySet(w.Recipients),
+		Recipients:  w.Recipients,
 		Acks:        signAttemptAcksFromWire(w.Acks),
 	}
 	copy(cert.PayloadHash[:], w.PayloadHash)

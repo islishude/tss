@@ -23,7 +23,7 @@ func TestThresholdConfigRejectsTooManyParties(t *testing.T) {
 
 	cfg := ThresholdConfig{
 		Threshold: 1,
-		Parties:   []PartyID{1, 2, 3, 4, 5},
+		Parties:   NewPartySet(1, 2, 3, 4, 5),
 		Self:      1,
 	}
 	if err := cfg.ValidateWithLimits(limits); err == nil {
@@ -38,7 +38,7 @@ func TestThresholdConfigRejectsTooLargeThreshold(t *testing.T) {
 
 	cfg := ThresholdConfig{
 		Threshold: 4,
-		Parties:   []PartyID{1, 2, 3, 4},
+		Parties:   NewPartySet(1, 2, 3, 4),
 		Self:      1,
 	}
 	if err := cfg.ValidateWithLimits(limits); err == nil {
@@ -51,7 +51,7 @@ func TestThresholdConfigAllowsOneOfOneOnlyWhenExplicit(t *testing.T) {
 	// Default threshold limits are fail-closed: reject 1-of-1.
 	cfg := ThresholdConfig{
 		Threshold: 1,
-		Parties:   []PartyID{1},
+		Parties:   NewPartySet(1),
 		Self:      1,
 	}
 	if err := cfg.Validate(); err == nil {
@@ -78,7 +78,7 @@ func TestThresholdConfigRejectsThresholdExceedsParties(t *testing.T) {
 	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 4,
-		Parties:   []PartyID{1, 2, 3},
+		Parties:   NewPartySet(1, 2, 3),
 		Self:      1,
 	}
 	if err := cfg.Validate(); err == nil {
@@ -90,7 +90,7 @@ func TestThresholdConfigRejectsZeroPartyID(t *testing.T) {
 	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 1,
-		Parties:   []PartyID{0},
+		Parties:   NewPartySet(0),
 		Self:      0,
 	}
 	if err := cfg.Validate(); err == nil {
@@ -102,7 +102,7 @@ func TestThresholdConfigRejectsDuplicatePartyIDs(t *testing.T) {
 	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 2,
-		Parties:   []PartyID{1, 2, 1},
+		Parties:   NewPartySet(1, 2, 1),
 		Self:      1,
 	}
 	if err := cfg.Validate(); err == nil {
@@ -114,7 +114,7 @@ func TestThresholdConfigRejectsSelfNotInParties(t *testing.T) {
 	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 2,
-		Parties:   []PartyID{1, 2},
+		Parties:   NewPartySet(1, 2),
 		Self:      3,
 	}
 	if err := cfg.Validate(); err == nil {
@@ -127,8 +127,8 @@ func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
 	limits := defaultTestThresholdLimits()
 	limits.MaxSigners = 3
 
-	keyParties := []PartyID{1, 2, 3, 4, 5}
-	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 3, 4}, limits); err == nil {
+	keyParties := NewPartySet(1, 2, 3, 4, 5)
+	if err := ValidateSignerSet(keyParties, 2, NewPartySet(1, 2, 3, 4), limits); err == nil {
 		t.Fatal("expected error for too many signers")
 	}
 }
@@ -136,8 +136,8 @@ func TestValidateSignerSetRejectsTooManySigners(t *testing.T) {
 func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
 	t.Parallel()
 	limits := defaultTestThresholdLimits()
-	keyParties := []PartyID{1, 2, 3}
-	if err := ValidateSignerSet(keyParties, 3, []PartyID{1}, limits); err == nil {
+	keyParties := NewPartySet(1, 2, 3)
+	if err := ValidateSignerSet(keyParties, 3, NewPartySet(1), limits); err == nil {
 		t.Fatal("expected error for not enough signers")
 	}
 }
@@ -145,8 +145,8 @@ func TestValidateSignerSetRejectsBelowThreshold(t *testing.T) {
 func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
 	t.Parallel()
 	limits := defaultTestThresholdLimits()
-	keyParties := []PartyID{1, 2, 3}
-	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 4}, limits); err == nil {
+	keyParties := NewPartySet(1, 2, 3)
+	if err := ValidateSignerSet(keyParties, 2, NewPartySet(1, 4), limits); err == nil {
 		t.Fatal("expected error for non-participant signer")
 	}
 }
@@ -154,8 +154,8 @@ func TestValidateSignerSetRejectsNonParticipant(t *testing.T) {
 func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
 	t.Parallel()
 	limits := defaultTestThresholdLimits()
-	keyParties := []PartyID{1, 2, 3}
-	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 1}, limits); err == nil {
+	keyParties := NewPartySet(1, 2, 3)
+	if err := ValidateSignerSet(keyParties, 2, NewPartySet(1, 2, 1), limits); err == nil {
 		t.Fatal("expected error for duplicate signer")
 	}
 }
@@ -163,7 +163,7 @@ func TestValidateSignerSetRejectsDuplicateSigner(t *testing.T) {
 func TestValidateSignerSetRejectsEmpty(t *testing.T) {
 	t.Parallel()
 	limits := defaultTestThresholdLimits()
-	keyParties := []PartyID{1, 2, 3}
+	keyParties := NewPartySet(1, 2, 3)
 	if err := ValidateSignerSet(keyParties, 2, nil, limits); err == nil {
 		t.Fatal("expected error for empty signers")
 	}
@@ -173,13 +173,13 @@ func TestValidateSignerSetOversizedRequiresAllow(t *testing.T) {
 	t.Parallel()
 	limits := defaultTestThresholdLimits()
 	limits.AllowOversizedSignerSet = false
-	keyParties := []PartyID{1, 2, 3, 4}
-	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 3}, limits); err == nil {
+	keyParties := NewPartySet(1, 2, 3, 4)
+	if err := ValidateSignerSet(keyParties, 2, NewPartySet(1, 2, 3), limits); err == nil {
 		t.Fatal("expected error when oversized signer set not allowed")
 	}
 	// Same with AllowOversizedSignerSet=true should pass.
 	limits.AllowOversizedSignerSet = true
-	if err := ValidateSignerSet(keyParties, 2, []PartyID{1, 2, 3}, limits); err != nil {
+	if err := ValidateSignerSet(keyParties, 2, NewPartySet(1, 2, 3), limits); err != nil {
 		t.Fatalf("expected oversized signer set to be allowed: %v", err)
 	}
 }
@@ -202,7 +202,7 @@ func TestDefaultThresholdLimitsRejectsBelowMinThreshold(t *testing.T) {
 	t.Parallel()
 	cfg := ThresholdConfig{
 		Threshold: 1,
-		Parties:   []PartyID{1, 2},
+		Parties:   NewPartySet(1, 2),
 		Self:      1,
 	}
 	if err := cfg.Validate(); err == nil {

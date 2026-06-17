@@ -68,7 +68,7 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 		},
 		{
 			name:    "mismatched signer count",
-			mutate:  func(p *Presign) { p.state.signers = []tss.PartyID{1, 2} },
+			mutate:  func(p *Presign) { p.state.signers = tss.NewPartySet(1, 2) },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "mismatched signer/verify share count",
 		},
@@ -76,7 +76,7 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 			name: "duplicate VerifyShare",
 			mutate: func(p *Presign) {
 				vs := p.state.verifyShares[0]
-				p.state.signers = []tss.PartyID{1, 1}
+				p.state.signers = tss.NewPartySet(1, 1)
 				p.state.verifyShares = []SignVerifyShare{vs, vs}
 			},
 			check: func(p *Presign) error {
@@ -227,7 +227,7 @@ func TestFast_OriginalDefectBlameShape(t *testing.T) {
 		Code: tss.ErrCodeVerification,
 		Blame: &tss.Blame{
 			Reason:  "sign partial verification failed",
-			Parties: []tss.PartyID{3},
+			Parties: tss.NewPartySet(3),
 		},
 	}
 	if verificationErr.Code != tss.ErrCodeVerification {

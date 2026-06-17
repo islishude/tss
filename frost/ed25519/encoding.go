@@ -15,7 +15,7 @@ const keyShareWireType = "frost.ed25519.keyshare"
 type keyShareWire struct {
 	Party                tss.PartyID                    `wire:"1,u32"`
 	Threshold            int                            `wire:"2,u32"`
-	Parties              []tss.PartyID                  `wire:"3,u32list"`
+	Parties              tss.PartySet                   `wire:"3,u32list"`
 	PublicKey            []byte                         `wire:"4,bytes,max_bytes=point"`
 	Secret               *secret.Scalar                 `wire:"5,custom,len=32"`
 	GroupCommitments     [][]byte                       `wire:"6,byteslist,max_bytes=point,max_items=threshold"`

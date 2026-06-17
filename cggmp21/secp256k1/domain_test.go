@@ -35,7 +35,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	}{
 		{name: "party", mutate: func(k *KeyShare) { k.state.party = 2 }},
 		{name: "threshold", mutate: func(k *KeyShare) { k.state.threshold++ }},
-		{name: "parties", mutate: func(k *KeyShare) { k.state.parties = []tss.PartyID{1, 2, 3} }},
+		{name: "parties", mutate: func(k *KeyShare) { k.state.parties = tss.NewPartySet(1, 2, 3) }},
 		{name: "public key", mutate: func(k *KeyShare) { k.state.publicKey[0] ^= 1 }},
 		{name: "keygen transcript", mutate: func(k *KeyShare) { k.state.keygenTranscriptHash[0] ^= 1 }},
 		{name: "lifecycle plan", mutate: func(k *KeyShare) { k.state.planHash[0] ^= 1 }},
@@ -55,7 +55,7 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	t.Parallel()
 	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{})
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -96,7 +96,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
-	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(shares[1], sessionID, []tss.PartyID{1, 2, 3}, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
+	if err := mta.VerifyStart(s1.securityParams, mtaStartProofDomain(shares[1], sessionID, tss.NewPartySet(1, 2, 3), 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash), startFrom2, pk2, rp1, round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated signer set")
 	}
 	wrongContextHash := slices.Clone(s1.contextHash)

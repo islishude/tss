@@ -29,8 +29,8 @@ type proofDomainContext struct {
 	label                string        // Domain label identifying the protocol phase for domain separation.
 	sessionID            tss.SessionID // Protocol session binding the proof to a single run.
 	threshold            int           // Signing threshold; part of the proof statement.
-	parties              []tss.PartyID // Canonical full participant set.
-	signers              []tss.PartyID // Signing subset for presign/sign-phase proofs.
+	parties              tss.PartySet  // Canonical full participant set.
+	signers              tss.PartySet  // Signing subset for presign/sign-phase proofs.
 	sender               tss.PartyID   // Party that created (or will verify) the proof.
 	receiver             tss.PartyID   // Counterparty in interactive (MtA) proofs.
 	statementPublicKey   []byte        // Group public key bound into the proof statement.
@@ -103,7 +103,7 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []
 	}
 }
 
-func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, prover, verifier tss.PartyID, proverPaillierPublicKey, presignContextHash, planHash []byte) []byte {
+func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, prover, verifier tss.PartyID, proverPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:                domainLabelPresignMTAStartProof,
 		sessionID:            sessionID,
@@ -168,15 +168,15 @@ func refreshRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, p
 	})
 }
 
-func mtaDeltaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
+func mtaDeltaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return mtaResponseDomain(domainLabelPresignMTADelta, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash)
 }
 
-func mtaSigmaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
+func mtaSigmaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return mtaResponseDomain(domainLabelPresignMTASigma, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash)
 }
 
-func mtaResponseDomain(label string, key *KeyShare, sessionID tss.SessionID, signers []tss.PartyID, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
+func mtaResponseDomain(label string, key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
 	return proofDomain(proofDomainContext{
 		label:                label,
 		sessionID:            sessionID,

@@ -28,13 +28,13 @@ func TestSignPrepProofAcceptsValidStatements(t *testing.T) {
 		{
 			name: "base statement",
 			opts: []signPrepFixtureOption{
-				withSignPrepParty(1, []tss.PartyID{1, 2, 3}),
+				withSignPrepParty(1, tss.NewPartySet(1, 2, 3)),
 			},
 		},
 		{
 			name: "additive shift",
 			opts: []signPrepFixtureOption{
-				withSignPrepParty(2, []tss.PartyID{2, 3}),
+				withSignPrepParty(2, tss.NewPartySet(2, 3)),
 				withSignPrepAdditiveShift(),
 				func(stmt *Statement, _ *Witness) {
 					stmt.ContextHash = bytes.Repeat([]byte{0x11}, 32)
@@ -99,10 +99,10 @@ func TestSignPrepProofRejectsStatementMutation(t *testing.T) {
 		{
 			name: "wrong signer set",
 			opts: []signPrepFixtureOption{
-				withSignPrepParty(8, []tss.PartyID{8, 9}),
+				withSignPrepParty(8, tss.NewPartySet(8, 9)),
 			},
 			mutate: func(stmt *Statement) {
-				stmt.Signers = []tss.PartyID{8, 10}
+				stmt.Signers = tss.NewPartySet(8, 10)
 			},
 		},
 		{
@@ -144,7 +144,7 @@ func TestSignPrepProofRejectsStatementMutation(t *testing.T) {
 func TestSignPrepProofEncodingRoundTrip(t *testing.T) {
 	t.Parallel()
 
-	fx := newSignPrepProofFixture(t, 10, withSignPrepParty(10, []tss.PartyID{10}))
+	fx := newSignPrepProofFixture(t, 10, withSignPrepParty(10, tss.NewPartySet(10)))
 	encoded, err := fx.proof.MarshalBinary()
 	if err != nil {
 		t.Fatalf("MarshalBinary: %v", err)
@@ -194,7 +194,7 @@ func TestSignPrepProofRejectsInvalidProofEncoding(t *testing.T) {
 			input: func(t *testing.T) []byte {
 				t.Helper()
 
-				fx := newSignPrepProofFixture(t, 12, withSignPrepParty(12, []tss.PartyID{12}))
+				fx := newSignPrepProofFixture(t, 12, withSignPrepParty(12, tss.NewPartySet(12)))
 				encoded, err := fx.proof.MarshalBinary()
 				if err != nil {
 					t.Fatalf("MarshalBinary: %v", err)
@@ -240,7 +240,7 @@ func TestSignPrepProofRejectsInvalidProofEncoding(t *testing.T) {
 func TestSignPrepProofRejectsNilProof(t *testing.T) {
 	t.Parallel()
 
-	fx := newSignPrepProofFixture(t, 11, withSignPrepParty(11, []tss.PartyID{11}))
+	fx := newSignPrepProofFixture(t, 11, withSignPrepParty(11, tss.NewPartySet(11)))
 	if err := Verify(fx.stmt, nil); err == nil {
 		t.Fatal("expected failure with nil proof")
 	}
@@ -258,7 +258,7 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 		Protocol:             "cggmp21-secp256k1",
 		SessionID:            tss.SessionID{byte(seed)},
 		Party:                tss.PartyID(seed),
-		Signers:              []tss.PartyID{tss.PartyID(seed)},
+		Signers:              tss.NewPartySet(tss.PartyID(seed)),
 		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
 		PublicKey:            kPoint,
 		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),
@@ -293,11 +293,11 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 	return signPrepProofFixture{stmt: stmt, wit: wit, proof: proof}
 }
 
-func withSignPrepParty(party tss.PartyID, signers []tss.PartyID) signPrepFixtureOption {
+func withSignPrepParty(party tss.PartyID, signers tss.PartySet) signPrepFixtureOption {
 	return func(stmt *Statement, _ *Witness) {
 		stmt.SessionID = tss.SessionID{byte(party)}
 		stmt.Party = party
-		stmt.Signers = append([]tss.PartyID(nil), signers...)
+		stmt.Signers = signers.Clone()
 	}
 }
 

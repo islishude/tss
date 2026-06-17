@@ -13,13 +13,13 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	t.Parallel()
 
 	sessionID := frostPlanTestSession(0x11)
-	parties := []tss.PartyID{3, 1, 2}
+	parties := tss.NewPartySet(3, 1, 2)
 	plan, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2})
 	if err != nil {
 		t.Fatal(err)
 	}
 	same, err := NewKeygenPlan(KeygenPlanOption{
-		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2,
+		SessionID: sessionID, Parties: tss.NewPartySet(1, 2, 3), Threshold: 2,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -29,13 +29,13 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	parties[0] = 99
 	gotParties := plan.Parties()
 	gotParties[0] = 99
-	if !bytes.Equal(partyIDsBytes(plan.Parties()), partyIDsBytes([]tss.PartyID{1, 2, 3})) {
+	if !bytes.Equal(partyIDsBytes(plan.Parties()), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
 		t.Fatal("keygen plan party getter or constructor aliases caller memory")
 	}
 	localLimits := DefaultLimits()
 	localLimits.Payload.MaxMessageBytes--
 	withLocalLimits, err := NewKeygenPlan(KeygenPlanOption{
-		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2, Limits: &localLimits,
+		SessionID: sessionID, Parties: tss.NewPartySet(1, 2, 3), Threshold: 2, Limits: &localLimits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -43,13 +43,13 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	assertSamePlanDigest(t, plan, withLocalLimits)
 
 	for name, other := range map[string]*KeygenPlan{
-		"threshold": mustFROSTKeygenPlan(t, sessionID, []tss.PartyID{1, 2, 3}, 3),
-		"session":   mustFROSTKeygenPlan(t, frostPlanTestSession(0x12), []tss.PartyID{1, 2, 3}, 2),
+		"threshold": mustFROSTKeygenPlan(t, sessionID, tss.NewPartySet(1, 2, 3), 3),
+		"session":   mustFROSTKeygenPlan(t, frostPlanTestSession(0x12), tss.NewPartySet(1, 2, 3), 2),
 	} {
 		assertDifferentPlanDigest(t, name, plan, other)
 	}
 	if _, err := NewKeygenPlan(KeygenPlanOption{
-		SessionID: sessionID, Parties: []tss.PartyID{1, 2}, Threshold: 3,
+		SessionID: sessionID, Parties: tss.NewPartySet(1, 2), Threshold: 3,
 	}); err == nil {
 		t.Fatal("keygen plan accepted threshold greater than party count")
 	} else {
@@ -58,7 +58,7 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	strictLimits := DefaultLimits()
 	strictLimits.Threshold.MaxParties = 2
 	if _, err := NewKeygenPlan(KeygenPlanOption{
-		SessionID: sessionID, Parties: []tss.PartyID{1, 2, 3}, Threshold: 2, Limits: &strictLimits,
+		SessionID: sessionID, Parties: tss.NewPartySet(1, 2, 3), Threshold: 2, Limits: &strictLimits,
 	}); err == nil {
 		t.Fatal("keygen plan ignored local party limit")
 	} else {
@@ -82,7 +82,7 @@ func TestFROSTKeygenPlanZeroValueIsInvalid(t *testing.T) {
 func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	shares := frostKeygen(t, 2, 3)
 	sessionID := frostPlanTestSession(0x21)
-	signers := []tss.PartyID{2, 1}
+	signers := tss.NewPartySet(2, 1)
 	message := []byte("plan-bound message")
 
 	limits := testLimits()
@@ -93,7 +93,7 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 		t.Fatal(err)
 	}
 	same, err := NewSignPlan(SignPlanOption{
-		Key: shares[2], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: message, Limits: &limits,
+		Key: shares[2], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: message, Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +106,7 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	gotSigners[0] = 99
 	gotMessage := plan.Message()
 	gotMessage[0] ^= 0xff
-	if !bytes.Equal(partyIDsBytes(plan.Signers()), partyIDsBytes([]tss.PartyID{1, 2})) {
+	if !bytes.Equal(partyIDsBytes(plan.Signers()), partyIDsBytes(tss.NewPartySet(1, 2))) {
 		t.Fatal("sign plan signer getter or constructor aliases caller memory")
 	}
 	if !bytes.Equal(plan.Message(), []byte("plan-bound message")) {
@@ -114,7 +114,7 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	}
 
 	otherMessage, err := NewSignPlan(SignPlanOption{
-		Key: shares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: []byte("other message"), Limits: &limits,
+		Key: shares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: []byte("other message"), Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -123,7 +123,7 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 
 	otherShares := frostKeygen(t, 2, 4)
 	otherKey, err := NewSignPlan(SignPlanOption{
-		Key: otherShares[1], SessionID: sessionID, Signers: []tss.PartyID{1, 2}, Context: testFROSTSigningContext(), Message: []byte("plan-bound message"), Limits: &limits,
+		Key: otherShares[1], SessionID: sessionID, Signers: tss.NewPartySet(1, 2), Context: testFROSTSigningContext(), Message: []byte("plan-bound message"), Limits: &limits,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -135,7 +135,7 @@ func TestFROSTKeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	t.Parallel()
 
 	sessionID := frostPlanTestSession(0x31)
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	guard1 := testFROSTGuard(1, parties, sessionID)
 	guard2 := testFROSTGuard(2, parties, sessionID)
 	plan1 := mustFROSTKeygenPlan(t, sessionID, parties, 2)
@@ -240,7 +240,7 @@ func assertDifferentPlanDigest(t *testing.T, name string, a, b digestPlan) {
 	}
 }
 
-func mustFROSTKeygenPlan(t *testing.T, sessionID tss.SessionID, parties []tss.PartyID, threshold int) *KeygenPlan {
+func mustFROSTKeygenPlan(t *testing.T, sessionID tss.SessionID, parties tss.PartySet, threshold int) *KeygenPlan {
 	t.Helper()
 	plan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
@@ -270,7 +270,7 @@ func findEnvelopeTo(envelopes []tss.Envelope, to tss.PartyID, payloadType tss.Pa
 	return tss.Envelope{}, false
 }
 
-func partyIDsBytes(parties []tss.PartyID) []byte {
+func partyIDsBytes(parties tss.PartySet) []byte {
 	out := make([]byte, 0, len(parties)*4)
 	for _, id := range parties {
 		out = append(out, byte(id>>24), byte(id>>16), byte(id>>8), byte(id))

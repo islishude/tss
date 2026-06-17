@@ -20,7 +20,7 @@ func TestFROSTKeyShareHasNoExportedFields(t *testing.T) {
 func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.parties = []tss.PartyID{1, 2}
+	k.state.parties = tss.NewPartySet(1, 2)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
 	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
 	k.state.keygenConfirmations = [][]byte{{4}}

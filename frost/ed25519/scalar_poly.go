@@ -45,7 +45,7 @@ func evalScalarPolynomial(coeffs []*fed.Scalar, id tss.PartyID) *fed.Scalar {
 	return acc
 }
 
-func lagrangeCoefficientScalar(id tss.PartyID, ids []tss.PartyID) (*fed.Scalar, error) {
+func lagrangeCoefficientScalar(id tss.PartyID, ids tss.PartySet) (*fed.Scalar, error) {
 	if id == 0 {
 		return nil, errors.New("party id 0 is reserved")
 	}

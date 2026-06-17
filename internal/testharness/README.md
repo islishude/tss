@@ -29,7 +29,7 @@ Rules:
 package testharness
 
 // Parties returns a sorted party set {1, 2, ..., n}.
-func Parties(n int) []tss.PartyID
+func Parties(n int) tss.PartySet
 
 // ThresholdCase bundles threshold and party count for table-driven tests.
 type ThresholdCase struct {
@@ -42,7 +42,7 @@ func (tc ThresholdCase) T() int
 
 // SignerSubset returns a subset of the given party set.
 // ids are 1-based party indices.
-func SignerSubset(all []tss.PartyID, ids ...int) []tss.PartyID
+func SignerSubset(all tss.PartySet, ids ...int) tss.PartySet
 ```
 
 #### 3. Protocol Runner

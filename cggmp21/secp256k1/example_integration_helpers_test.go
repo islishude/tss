@@ -249,10 +249,10 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 // with the corresponding key share and signer identity.
 func runExampleCGGMPPresign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
-	signers []tss.PartyID,
+	signers tss.PartySet,
 	ctx cggmp.PresignContext,
 ) (map[tss.PartyID]*cggmp.Presign, error) {
-	signerSet := tss.PartySet(signers)
+	signerSet := signers
 	security := newExampleCGGMPSecurity(signerSet)
 	// Presign is a separate protocol lifecycle, so it receives a session ID
 	// distinct from keygen and from the later online-signing session.
@@ -311,10 +311,10 @@ func runExampleCGGMPPresign(
 func runExampleCGGMPSign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
 	presigns map[tss.PartyID]*cggmp.Presign,
-	signers []tss.PartyID,
+	signers tss.PartySet,
 	request cggmp.SignRequest,
 ) ([]byte, *cggmp.Signature, error) {
-	signerSet := tss.PartySet(signers)
+	signerSet := signers
 	security := newExampleCGGMPSecurity(signerSet)
 	// The online phase has its own session identity even though it consumes
 	// state created by the presign lifecycle.

@@ -36,7 +36,7 @@ func deterministicRNG(seedHex string) *rand.ChaCha8 {
 func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeyShare {
 	t.Helper()
 	rng := deterministicRNG(seedHex)
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}

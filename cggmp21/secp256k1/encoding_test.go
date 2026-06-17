@@ -143,7 +143,7 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw1, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 func TestCGGMP21PresignRejectsUnsortedSigners(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
-	presigns := secpPresign(t, shares, []tss.PartyID{1, 2})
+	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	unsorted := clonePresignForTest(presigns[1])
 	unsorted.state.signers[0], unsorted.state.signers[1] = unsorted.state.signers[1], unsorted.state.signers[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {

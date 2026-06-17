@@ -29,7 +29,7 @@ func TestGoldenProof(t *testing.T) {
 		Protocol:             "cggmp21-secp256k1",
 		SessionID:            tss.SessionID{1},
 		Party:                1,
-		Signers:              []tss.PartyID{1, 2, 3},
+		Signers:              tss.NewPartySet(1, 2, 3),
 		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
 		AdditiveShift:        nil,
 		PublicKey:            kPoint,

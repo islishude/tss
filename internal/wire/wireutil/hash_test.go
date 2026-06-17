@@ -9,8 +9,8 @@ import (
 
 func TestPartySetHash_SameSetDifferentOrderProducesSameHash(t *testing.T) {
 	t.Parallel()
-	a := PartySetHash([]tss.PartyID{1, 2, 3}, "test-v1")
-	b := PartySetHash([]tss.PartyID{3, 1, 2}, "test-v1")
+	a := PartySetHash(tss.NewPartySet(1, 2, 3), "test-v1")
+	b := PartySetHash(tss.NewPartySet(3, 1, 2), "test-v1")
 	if !bytes.Equal(a, b) {
 		t.Fatal("same party set in different order produced different hashes")
 	}
@@ -18,8 +18,8 @@ func TestPartySetHash_SameSetDifferentOrderProducesSameHash(t *testing.T) {
 
 func TestPartySetHash_DifferentSetsProduceDifferentHashes(t *testing.T) {
 	t.Parallel()
-	a := PartySetHash([]tss.PartyID{1, 2}, "test-v1")
-	b := PartySetHash([]tss.PartyID{1, 2, 3}, "test-v1")
+	a := PartySetHash(tss.NewPartySet(1, 2), "test-v1")
+	b := PartySetHash(tss.NewPartySet(1, 2, 3), "test-v1")
 	if bytes.Equal(a, b) {
 		t.Fatal("different party sets produced identical hashes")
 	}
@@ -27,8 +27,8 @@ func TestPartySetHash_DifferentSetsProduceDifferentHashes(t *testing.T) {
 
 func TestPartySetHash_DifferentLabelsProduceDifferentHashes(t *testing.T) {
 	t.Parallel()
-	a := PartySetHash([]tss.PartyID{1, 2}, "keygen-v1")
-	b := PartySetHash([]tss.PartyID{1, 2}, "signing-v1")
+	a := PartySetHash(tss.NewPartySet(1, 2), "keygen-v1")
+	b := PartySetHash(tss.NewPartySet(1, 2), "signing-v1")
 	if bytes.Equal(a, b) {
 		t.Fatal("different labels produced identical hashes")
 	}
@@ -44,7 +44,7 @@ func TestPartySetHash_EmptySlice(t *testing.T) {
 
 func TestPartySetHash_SingleParty(t *testing.T) {
 	t.Parallel()
-	h := PartySetHash([]tss.PartyID{42}, "test-v1")
+	h := PartySetHash(tss.NewPartySet(42), "test-v1")
 	if len(h) != 32 {
 		t.Fatalf("expected 32-byte hash, got %d bytes", len(h))
 	}
@@ -52,7 +52,7 @@ func TestPartySetHash_SingleParty(t *testing.T) {
 
 func TestPartySetHash_Deterministic(t *testing.T) {
 	t.Parallel()
-	parties := []tss.PartyID{5, 1, 9}
+	parties := tss.NewPartySet(5, 1, 9)
 	a := PartySetHash(parties, "test-v1")
 	b := PartySetHash(parties, "test-v1")
 	if !bytes.Equal(a, b) {

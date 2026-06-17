@@ -24,7 +24,7 @@ func TestFast_LongLivedStateTypesHaveNoExportedFields(t *testing.T) {
 func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.state.parties = []tss.PartyID{1, 2}
+	k.state.parties = tss.NewPartySet(1, 2)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
 	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
 	k.state.paillierPublicKeys = []PaillierPublicShare{{Party: 1, PublicKey: []byte{4}, Proof: []byte{5}}}

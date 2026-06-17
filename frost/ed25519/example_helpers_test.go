@@ -151,8 +151,8 @@ func (s *exampleFROSTSecurity) route(
 	return nil
 }
 
-func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, option frost.KeygenPlanOption) (map[tss.PartyID]*frost.KeyShare, error) {
-	partySet := tss.PartySet(parties)
+func runExampleFROSTKeygen(parties tss.PartySet, threshold int, option frost.KeygenPlanOption) (map[tss.PartyID]*frost.KeyShare, error) {
+	partySet := parties
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -198,11 +198,11 @@ func runExampleFROSTKeygen(parties []tss.PartyID, threshold int, option frost.Ke
 	return shares, nil
 }
 
-func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.PartyID, message []byte, opts frost.SignOptions) ([]byte, []byte, error) {
+func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.PartySet, message []byte, opts frost.SignOptions) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
-	partySet := tss.PartySet(shares[signers[0]].Parties())
+	partySet := shares[signers[0]].Parties()
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -233,7 +233,7 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 		sessions[id] = session
 		queue = append(queue, out...)
 	}
-	if err := security.route(queue, tss.PartySet(signers), func(tss.Envelope) tss.PartySet {
+	if err := security.route(queue, signers, func(tss.Envelope) tss.PartySet {
 		return partySet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleSignMessage(env)
@@ -247,9 +247,9 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers []tss.P
 	return sessions[signers[0]].VerifyKey(), signature, nil
 }
 
-func mergeExamplePartySets(sets ...[]tss.PartyID) tss.PartySet {
+func mergeExamplePartySets(sets ...tss.PartySet) tss.PartySet {
 	seen := make(map[tss.PartyID]struct{})
-	var merged []tss.PartyID
+	var merged tss.PartySet
 	for _, set := range sets {
 		for _, id := range set {
 			if _, ok := seen[id]; ok {
@@ -259,5 +259,5 @@ func mergeExamplePartySets(sets ...[]tss.PartyID) tss.PartySet {
 			merged = append(merged, id)
 		}
 	}
-	return tss.PartySet(tss.SortParties(merged))
+	return tss.SortParties(merged)
 }

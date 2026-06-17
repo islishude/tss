@@ -16,7 +16,7 @@ import (
 func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -57,7 +57,7 @@ func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare 
 
 // slowCryptoPresign runs a full presign with production params and returns
 // the presign records keyed by party.
-func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID) map[tss.PartyID]*Presign {
+func slowCryptoPresign(t *testing.T, shares map[tss.PartyID]*KeyShare, signers tss.PartySet) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -123,7 +123,7 @@ func TestSlowCrypto_Keygen3of5Production(t *testing.T) {
 func TestSlowCrypto_Presign3of5Production(t *testing.T) {
 	t.Parallel()
 	shares := slowCryptoKeygen(t, 3, 5)
-	signers := []tss.PartyID{1, 3, 5}
+	signers := tss.NewPartySet(1, 3, 5)
 	presigns := slowCryptoPresign(t, shares, signers)
 	if len(presigns) != 3 {
 		t.Fatalf("expected 3 presigns, got %d", len(presigns))
@@ -135,7 +135,7 @@ func TestSlowCrypto_Presign3of5Production(t *testing.T) {
 func TestSlowCrypto_Sign3of5Production(t *testing.T) {
 	t.Parallel()
 	shares := slowCryptoKeygen(t, 3, 5)
-	signers := []tss.PartyID{1, 3, 5}
+	signers := tss.NewPartySet(1, 3, 5)
 
 	selected := make([]*KeyShare, 0, len(signers))
 	for _, id := range signers {
@@ -158,7 +158,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 	shares := slowCryptoKeygen(t, 2, 3)
 
 	// Run refresh to rotate Paillier keys.
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -212,7 +212,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 	}
 
 	// Sign with refreshed shares.
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	selected := make([]*KeyShare, 0, len(signers))
 	for _, id := range signers {
 		selected = append(selected, refreshed[id])
@@ -232,7 +232,7 @@ func TestSlowCrypto_Refresh2of3Production(t *testing.T) {
 func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	t.Parallel()
 	shares := slowCryptoKeygenWithPlanOption(t, 2, 3, KeygenPlanOption{})
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	path := []uint32{0, 17}
 
 	// Verify derivation produces valid child key.
@@ -293,7 +293,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 func slowCryptoKeygenWithPlanOption(t *testing.T, threshold, n int, option KeygenPlanOption) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -333,7 +333,7 @@ func slowCryptoKeygenWithPlanOption(t *testing.T, threshold, n int, option Keyge
 }
 
 // slowCryptoPresignWithContext runs presign with explicit context and production params.
-func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare, signers []tss.PartyID, ctx PresignContext) map[tss.PartyID]*Presign {
+func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx PresignContext) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

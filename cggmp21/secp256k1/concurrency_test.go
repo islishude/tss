@@ -23,7 +23,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -91,7 +91,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
 	rng := rand.New(rand.NewPCG(42, 42)) //nolint:gosec // deterministic RNG for reproducible test shuffles
 	shares := CachedKeygenShares(t, 2, 3, false)
-	signers := []tss.PartyID{1, 3}
+	signers := tss.NewPartySet(1, 3)
 
 	for range 10 {
 		sessionID, err := tss.NewSessionID(nil)

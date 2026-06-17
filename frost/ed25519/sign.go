@@ -21,7 +21,7 @@ type SignSession struct {
 	log              tss.Logger                      // Optional protocol logger.
 	limits           Limits                          // Local fail-closed resource policy.
 	message          []byte                          // Caller message copied into the session and released on abort.
-	signers          []tss.PartyID                   // Canonical signer set participating in this signature.
+	signers          tss.PartySet                    // Canonical signer set participating in this signature.
 	context          tss.SigningContext              // Normalized signing context after path resolution.
 	contextHash      []byte                          // Hash binding context to nonce and partial transcripts.
 	derivation       *tss.DerivationResult           // Resolved child key/path; destroyed if the session aborts.
@@ -363,7 +363,7 @@ func (s *SignSession) clearNonceBytes() {
 	s.eNonce = nil
 }
 
-func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
+func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error {
 	if key.state.threshold < limits.Threshold.MinProductionThreshold {
 		if !limits.Threshold.AllowOneOfOne || key.state.threshold != 1 || len(key.state.parties) != 1 {
 			return fmt.Errorf("key threshold %d is below production minimum %d", key.state.threshold, limits.Threshold.MinProductionThreshold)
@@ -421,7 +421,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
-	ids := make([]tss.PartyID, len(signers))
+	ids := make(tss.PartySet, len(signers))
 	shares := make(map[tss.PartyID]*KeyShare, len(signers))
 	for i, share := range signers {
 		if err := share.ValidateConsistency(); err != nil {
@@ -439,7 +439,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round1 := make([]tss.Envelope, 0, len(signers))
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
-		guard := newInProcessGuard(id, tss.PartySet(shares[id].state.parties), sessionID)
+		guard := newInProcessGuard(id, shares[id].state.parties, sessionID)
 		plan, err := NewSignPlan(SignPlanOption{
 			Key:       shares[id],
 			SessionID: sessionID,

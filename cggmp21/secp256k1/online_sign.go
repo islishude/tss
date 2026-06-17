@@ -442,7 +442,7 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.presign.state.signers), s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.presign.state.signers, s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
@@ -491,7 +491,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 			base,
 			tss.EvidenceKindSignPartial,
 			"malformed sign partial payload",
-			[]tss.PartyID{base.From},
+			tss.NewPartySet(base.From),
 			err,
 			s.signPartialContextEvidenceFields(payload)...,
 		)
@@ -505,7 +505,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 			base,
 			tss.EvidenceKindSignPartial,
 			"sign partial verification failed",
-			[]tss.PartyID{base.From},
+			tss.NewPartySet(base.From),
 			err,
 			s.signPartialEvidenceFields(base.From, p)...,
 		)
@@ -750,7 +750,7 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	return nil
 }
 
-func validateSignerSet(key *KeyShare, signers []tss.PartyID, limits Limits) error {
+func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error {
 	return tss.ValidateSignerSet(key.state.parties, key.state.threshold, signers, limits.ThresholdLimits())
 }
 

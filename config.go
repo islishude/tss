@@ -153,7 +153,7 @@ func TestGuardConfig(self PartyID, parties PartySet, protocol ProtocolID, sessio
 // ThresholdConfig contains local participant configuration for a protocol run.
 type ThresholdConfig struct {
 	Threshold    int
-	Parties      []PartyID
+	Parties      PartySet
 	Self         PartyID
 	SessionID    SessionID
 	Rand         io.Reader       `json:"-"`
@@ -255,8 +255,8 @@ func (c ThresholdConfig) ValidateWithLimits(l ThresholdLimits) error {
 }
 
 // SortedParties returns the configured party set in ascending order.
-func (c ThresholdConfig) SortedParties() []PartyID {
-	return SortParties(c.Parties)
+func (c ThresholdConfig) SortedParties() PartySet {
+	return c.Parties.Sorted()
 }
 
 // Reader returns the configured randomness source or crypto/rand.

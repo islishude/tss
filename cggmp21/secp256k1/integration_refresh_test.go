@@ -17,7 +17,7 @@ import (
 
 // runRefresh starts refresh sessions for all parties, delivers messages, and
 // returns the completed sessions.
-func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties []tss.PartyID, sessionID tss.SessionID) map[tss.PartyID]*RefreshSession {
+func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties tss.PartySet, sessionID tss.SessionID) map[tss.PartyID]*RefreshSession {
 	t.Helper()
 	sessions := make(map[tss.PartyID]*RefreshSession)
 	queue := make([]tss.Envelope, 0)
@@ -98,7 +98,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	session, _, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
@@ -174,7 +174,7 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 
 func TestThresholdECDSARefreshValidationBindsPreservedChainCode(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, true)
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -198,10 +198,10 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 		threshold int
 		n         int
 		hd        bool
-		signers   []tss.PartyID
+		signers   tss.PartySet
 	}{
-		{name: "2-of-3 non-HD", threshold: 2, n: 3, hd: false, signers: []tss.PartyID{1, 3}},
-		{name: "2-of-2 HD preserves chain code", threshold: 2, n: 2, hd: true, signers: []tss.PartyID{1, 2}},
+		{name: "2-of-3 non-HD", threshold: 2, n: 3, hd: false, signers: tss.NewPartySet(1, 3)},
+		{name: "2-of-2 HD preserves chain code", threshold: 2, n: 2, hd: true, signers: tss.NewPartySet(1, 2)},
 	}
 
 	for _, tc := range tests {
@@ -213,7 +213,7 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			parties := make([]tss.PartyID, tc.n)
+			parties := make(tss.PartySet, tc.n)
 			for i := range parties {
 				parties[i] = tss.PartyID(i + 1)
 			}

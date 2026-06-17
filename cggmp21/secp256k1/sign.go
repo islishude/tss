@@ -121,7 +121,7 @@ type presignState struct {
 	securityParams       SecurityParams         // Cryptographic profile inherited from the key share.
 	party                tss.PartyID            // Local owner of this presign share.
 	threshold            int                    // Number of signer partials required to complete ECDSA signing.
-	signers              []tss.PartyID          // Canonical signer set authorized for this presign.
+	signers              tss.PartySet           // Canonical signer set authorized for this presign.
 	r                    []byte                 // Aggregate nonce point R encoded for ECDSA.
 	littleR              []byte                 // ECDSA r scalar derived from R.
 	transcriptHash       []byte                 // Cross-party presign transcript hash.
@@ -165,7 +165,7 @@ func (p *Presign) Threshold() int {
 }
 
 // Signers returns a copy of the canonical signer set.
-func (p *Presign) Signers() []tss.PartyID {
+func (p *Presign) Signers() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -513,7 +513,7 @@ type PresignSession struct {
 	log            tss.Logger            // Optional protocol logger.
 	limits         Limits                // Local fail-closed resource policy.
 	securityParams SecurityParams        // Cryptographic profile inherited from the key share.
-	signers        []tss.PartyID         // Canonical signer set participating in this presign.
+	signers        tss.PartySet          // Canonical signer set participating in this presign.
 	context        PresignContext        // Normalized context bound to the resulting presign.
 	contextHash    []byte                // Hash of context; echoed through presign/sign validation.
 	derivation     *tss.DerivationResult // Resolved child key/path; destroyed if the session aborts.
@@ -701,7 +701,7 @@ func (s *PresignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, tss.PartySet(s.signers), s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.signers, s.key.state.party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.

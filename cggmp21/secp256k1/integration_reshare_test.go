@@ -19,7 +19,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
@@ -70,7 +70,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
@@ -126,7 +126,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 
 func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 2, false)
-	newShares, _ := runCGGMP21ReshareWithDealers(t, shares, []tss.PartyID{1, 2}, []tss.PartyID{3, 4}, 2)
+	newShares, _ := runCGGMP21ReshareWithDealers(t, shares, tss.NewPartySet(1, 2), tss.NewPartySet(3, 4), 2)
 	share := cloneKeyShareValue(newShares[3])
 	if len(share.ResharePlanHashBytes()) != sha256.Size {
 		t.Fatalf("got reshare plan hash length %d, want %d", len(share.ResharePlanHashBytes()), sha256.Size)
@@ -143,13 +143,13 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dealers := []tss.PartyID{1, 2}
-	newParties := []tss.PartyID{3, 4}
+	dealers := tss.NewPartySet(1, 2)
+	newParties := tss.NewPartySet(3, 4)
 	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: dealers, NewParties: newParties, NewThreshold: 2, Limits: testLimitsPtr()})
 	if err != nil {
 		t.Fatal(err)
 	}
-	allParties := tss.PartySet{1, 2, 3, 4}
+	allParties := tss.NewPartySet(1, 2, 3, 4)
 	sessions := make(map[tss.PartyID]*ReshareSession, len(allParties))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range dealers {
@@ -221,38 +221,38 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 
 	tests := []struct {
 		name          string
-		newParties    []tss.PartyID
+		newParties    tss.PartySet
 		newThreshold  int
-		dealerParties []tss.PartyID // nil means all old parties
-		signers       []tss.PartyID
+		dealerParties tss.PartySet // nil means all old parties
+		signers       tss.PartySet
 		removedParty  tss.PartyID // party expected to be removed (0 = none)
 		assert        func(t *testing.T, newShares map[tss.PartyID]*KeyShare, sessions map[tss.PartyID]*ReshareSession)
 	}{
 		{
 			name:         "add party 2-of-3 to 2-of-4",
-			newParties:   []tss.PartyID{1, 2, 3, 4},
+			newParties:   tss.NewPartySet(1, 2, 3, 4),
 			newThreshold: 2,
-			signers:      []tss.PartyID{2, 4},
+			signers:      tss.NewPartySet(2, 4),
 		},
 		{
 			name:         "remove party 2-of-3 to 2-of-2",
-			newParties:   []tss.PartyID{1, 3},
+			newParties:   tss.NewPartySet(1, 3),
 			newThreshold: 2,
-			signers:      []tss.PartyID{1, 3},
+			signers:      tss.NewPartySet(1, 3),
 			removedParty: 2,
 		},
 		{
 			name:         "threshold increase 2-of-3 to 3-of-5",
-			newParties:   []tss.PartyID{1, 2, 3, 4, 5},
+			newParties:   tss.NewPartySet(1, 2, 3, 4, 5),
 			newThreshold: 3,
-			signers:      []tss.PartyID{1, 4, 5},
+			signers:      tss.NewPartySet(1, 4, 5),
 		},
 		{
 			name:          "disjoint dealer subset 2-of-3 to 2-of-3",
-			newParties:    []tss.PartyID{4, 5, 6},
+			newParties:    tss.NewPartySet(4, 5, 6),
 			newThreshold:  2,
-			dealerParties: []tss.PartyID{1, 3},
-			signers:       []tss.PartyID{4, 6},
+			dealerParties: tss.NewPartySet(1, 3),
+			signers:       tss.NewPartySet(4, 6),
 		},
 	}
 
@@ -306,7 +306,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 }
 
 // collectShares returns key shares for the given party IDs.
-func collectShares(t *testing.T, shares map[tss.PartyID]*KeyShare, ids []tss.PartyID) []*KeyShare {
+func collectShares(t *testing.T, shares map[tss.PartyID]*KeyShare, ids tss.PartySet) []*KeyShare {
 	t.Helper()
 	out := make([]*KeyShare, 0, len(ids))
 	for _, id := range ids {

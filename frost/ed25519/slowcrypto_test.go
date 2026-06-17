@@ -16,7 +16,7 @@ import (
 func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -60,7 +60,7 @@ func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make([]tss.PartyID, n)
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}
@@ -118,7 +118,7 @@ func TestSlowCrypto_Keygen3of5(t *testing.T) {
 // TestSlowCrypto_Sign3of5 verifies 3-of-5 sign with production limits.
 func TestSlowCrypto_Sign3of5(t *testing.T) {
 	shares := slowFrostKeygen(t, 3, 5)
-	signers := []tss.PartyID{1, 3, 5}
+	signers := tss.NewPartySet(1, 3, 5)
 
 	selected := make([]*KeyShare, 0, len(signers))
 	for _, id := range signers {
@@ -138,7 +138,7 @@ func TestSlowCrypto_Sign3of5(t *testing.T) {
 // production limits, then signs with the refreshed shares.
 func TestSlowCrypto_Refresh2of3(t *testing.T) {
 	shares := slowFrostKeygen(t, 2, 3)
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -214,8 +214,8 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 // (2-of-3 → 2-of-4) with production limits.
 func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	oldShares := slowFrostKeygen(t, 2, 3)
-	oldParties := []tss.PartyID{1, 2, 3}
-	newParties := []tss.PartyID{1, 2, 3, 4}
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(1, 2, 3, 4)
 	newThreshold := 2
 	oldPublicKey := oldShares[1].PublicKeyBytes()
 
@@ -278,7 +278,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 // signing with production limits.
 func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 	shares := slowFrostKeygenHD(t, 2, 3)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	path := []uint32{0, 17}
 
 	// Derive child public key.

@@ -313,8 +313,8 @@ func TestBindPresignToAttemptRejectsNil(t *testing.T) {
 
 func TestValidateSignerSetRejectsEmptyKey(t *testing.T) {
 	t.Parallel()
-	key := &KeyShare{state: &keyShareState{party: 1, threshold: 1, parties: []tss.PartyID{1}}}
-	err := validateSignerSet(key, []tss.PartyID{}, DefaultLimits())
+	key := &KeyShare{state: &keyShareState{party: 1, threshold: 1, parties: tss.NewPartySet(1)}}
+	err := validateSignerSet(key, tss.NewPartySet(), DefaultLimits())
 	if err == nil {
 		t.Fatal("expected empty signer set rejection")
 	}

@@ -45,7 +45,7 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 		if v.N == 1 {
 			signerCount = 1
 		}
-		signers := make([]tss.PartyID, signerCount)
+		signers := make(tss.PartySet, signerCount)
 		signerShares := make([]*KeyShare, signerCount)
 		for j := range signers {
 			signers[j] = tss.PartyID(v.Parties[j])

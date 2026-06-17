@@ -40,7 +40,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 	valid := func() ThresholdConfig {
 		return ThresholdConfig{
 			Threshold: 2,
-			Parties:   []PartyID{1, 2, 3},
+			Parties:   NewPartySet(1, 2, 3),
 			Self:      1,
 		}
 	}
@@ -50,8 +50,8 @@ func TestThresholdConfigValidate(t *testing.T) {
 			name string
 			cfg  ThresholdConfig
 		}{
-			{"2-of-3", ThresholdConfig{Threshold: 2, Parties: []PartyID{1, 2, 3}, Self: 1}},
-			{"3-of-3", ThresholdConfig{Threshold: 3, Parties: []PartyID{1, 2, 3}, Self: 1}},
+			{"2-of-3", ThresholdConfig{Threshold: 2, Parties: NewPartySet(1, 2, 3), Self: 1}},
+			{"3-of-3", ThresholdConfig{Threshold: 3, Parties: NewPartySet(1, 2, 3), Self: 1}},
 		}
 		for _, tc := range cases {
 			t.Run(tc.name, func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 
 	t.Run("1-of-1 requires explicit AllowOneOfOne", func(t *testing.T) {
 		// Production defaults reject 1-of-1.
-		cfg1 := ThresholdConfig{Threshold: 1, Parties: []PartyID{5}, Self: 5}
+		cfg1 := ThresholdConfig{Threshold: 1, Parties: NewPartySet(5), Self: 5}
 		if err := cfg1.Validate(); err == nil {
 			t.Error("expected error for 1-of-1 without explicit AllowOneOfOne")
 		}
@@ -99,7 +99,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for nil parties")
 		}
-		cfg.Parties = []PartyID{}
+		cfg.Parties = NewPartySet()
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for empty parties")
 		}
@@ -115,7 +115,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 
 	t.Run("reserved party id zero", func(t *testing.T) {
 		cfg := valid()
-		cfg.Parties = []PartyID{0, 2, 3}
+		cfg.Parties = NewPartySet(0, 2, 3)
 		cfg.Self = 2
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for party id 0")
@@ -124,7 +124,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 
 	t.Run("duplicate party ids", func(t *testing.T) {
 		cfg := valid()
-		cfg.Parties = []PartyID{1, 2, 2}
+		cfg.Parties = NewPartySet(1, 2, 2)
 		if err := cfg.Validate(); err == nil {
 			t.Error("expected error for duplicate party ids")
 		}
@@ -142,7 +142,7 @@ func TestThresholdConfigValidate(t *testing.T) {
 		// Duplicate is caught before the self-in-parties check.
 		cfg := ThresholdConfig{
 			Threshold: 2,
-			Parties:   []PartyID{1, 1, 3},
+			Parties:   NewPartySet(1, 1, 3),
 			Self:      3,
 		}
 		if err := cfg.Validate(); err == nil {
@@ -154,9 +154,9 @@ func TestThresholdConfigValidate(t *testing.T) {
 func TestThresholdConfigSortedParties(t *testing.T) {
 	t.Parallel()
 	t.Run("already sorted", func(t *testing.T) {
-		cfg := ThresholdConfig{Parties: []PartyID{1, 2, 3, 4, 5}}
+		cfg := ThresholdConfig{Parties: NewPartySet(1, 2, 3, 4, 5)}
 		got := cfg.SortedParties()
-		want := []PartyID{1, 2, 3, 4, 5}
+		want := NewPartySet(1, 2, 3, 4, 5)
 		if !partySlicesEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
@@ -167,25 +167,25 @@ func TestThresholdConfigSortedParties(t *testing.T) {
 	})
 
 	t.Run("reversed order", func(t *testing.T) {
-		cfg := ThresholdConfig{Parties: []PartyID{5, 4, 3, 2, 1}}
+		cfg := ThresholdConfig{Parties: NewPartySet(5, 4, 3, 2, 1)}
 		got := cfg.SortedParties()
-		want := []PartyID{1, 2, 3, 4, 5}
+		want := NewPartySet(1, 2, 3, 4, 5)
 		if !partySlicesEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	})
 
 	t.Run("random non-contiguous", func(t *testing.T) {
-		cfg := ThresholdConfig{Parties: []PartyID{42, 7, 100, 3, 15}}
+		cfg := ThresholdConfig{Parties: NewPartySet(42, 7, 100, 3, 15)}
 		got := cfg.SortedParties()
-		want := []PartyID{3, 7, 15, 42, 100}
+		want := NewPartySet(3, 7, 15, 42, 100)
 		if !partySlicesEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}
 	})
 
 	t.Run("preserves original order", func(t *testing.T) {
-		original := []PartyID{3, 1, 2}
+		original := NewPartySet(3, 1, 2)
 		cfg := ThresholdConfig{Parties: original}
 		cfg.SortedParties()
 		if original[0] != 3 || original[1] != 1 || original[2] != 2 {
@@ -274,7 +274,7 @@ func TestThresholdConfigLogAndTimeoutFields(t *testing.T) {
 }
 
 // partySlicesEqual compares two PartyID slices for equality.
-func partySlicesEqual(a, b []PartyID) bool {
+func partySlicesEqual(a, b PartySet) bool {
 	if len(a) != len(b) {
 		return false
 	}
@@ -288,13 +288,13 @@ func partySlicesEqual(a, b []PartyID) bool {
 
 func TestSortParties(t *testing.T) {
 	t.Parallel()
-	got := SortParties([]PartyID{3, 1, 2})
-	want := []PartyID{1, 2, 3}
+	got := SortParties(NewPartySet(3, 1, 2))
+	want := NewPartySet(1, 2, 3)
 	if !partySlicesEqual(got, want) {
 		t.Fatalf("SortParties = %v, want %v", got, want)
 	}
 	// Original slice is not mutated.
-	orig := []PartyID{3, 1, 2}
+	orig := NewPartySet(3, 1, 2)
 	SortParties(orig)
 	if orig[0] != 3 {
 		t.Fatal("SortParties mutated the original slice")
@@ -304,14 +304,14 @@ func TestSortParties(t *testing.T) {
 		t.Fatal("SortParties(nil) should return nil")
 	}
 	// Single element.
-	if got := SortParties([]PartyID{42}); len(got) != 1 || got[0] != 42 {
+	if got := SortParties(NewPartySet(42)); len(got) != 1 || got[0] != 42 {
 		t.Fatal("SortParties single element")
 	}
 }
 
 func TestContainsParty(t *testing.T) {
 	t.Parallel()
-	parties := []PartyID{1, 2, 3}
+	parties := NewPartySet(1, 2, 3)
 	if !ContainsParty(parties, 1) {
 		t.Fatal("ContainsParty(1) should be true")
 	}
@@ -321,7 +321,7 @@ func TestContainsParty(t *testing.T) {
 	if ContainsParty(nil, 1) {
 		t.Fatal("ContainsParty(nil) should be false")
 	}
-	if ContainsParty([]PartyID{}, 1) {
+	if ContainsParty(NewPartySet(), 1) {
 		t.Fatal("ContainsParty(empty) should be false")
 	}
 }

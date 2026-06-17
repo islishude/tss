@@ -30,10 +30,10 @@ type resharePlanState struct {
 	oldGroupPublicKey     []byte                 // Existing parent group public key that resharing must preserve.
 	oldGroupCommitments   [][]byte               // Existing public polynomial commitments for old shares.
 	oldVerificationShares map[tss.PartyID][]byte // Existing per-party public verification shares keyed by old party.
-	oldParties            []tss.PartyID          // Canonical old key-holder set.
+	oldParties            tss.PartySet           // Canonical old key-holder set.
 	oldThreshold          int                    // Signing threshold of the old key.
-	dealerParties         []tss.PartyID          // Old parties selected to contribute weighted dealer polynomials.
-	newParties            []tss.PartyID          // Canonical target key-holder set.
+	dealerParties         tss.PartySet           // Old parties selected to contribute weighted dealer polynomials.
+	newParties            tss.PartySet           // Canonical target key-holder set.
 	newThreshold          int                    // Signing threshold for the reshared key.
 	chainCode             []byte                 // HD chain code preserved across reshare.
 	paillierBits          int                    // Shared modulus size for new receiver auxiliary material.
@@ -85,11 +85,11 @@ func (p *ResharePlan) OldVerificationShares() map[tss.PartyID][]byte {
 }
 
 // OldParties returns a copy of the old participant set.
-func (p *ResharePlan) OldParties() []tss.PartyID {
+func (p *ResharePlan) OldParties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return append([]tss.PartyID(nil), p.state.oldParties...)
+	return p.state.oldParties.Clone()
 }
 
 // OldThreshold returns the old signing threshold.
@@ -101,19 +101,19 @@ func (p *ResharePlan) OldThreshold() int {
 }
 
 // DealerParties returns a copy of the selected old dealer set.
-func (p *ResharePlan) DealerParties() []tss.PartyID {
+func (p *ResharePlan) DealerParties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return append([]tss.PartyID(nil), p.state.dealerParties...)
+	return p.state.dealerParties.Clone()
 }
 
 // NewParties returns a copy of the new participant set.
-func (p *ResharePlan) NewParties() []tss.PartyID {
+func (p *ResharePlan) NewParties() tss.PartySet {
 	if p == nil || p.state == nil {
 		return nil
 	}
-	return append([]tss.PartyID(nil), p.state.newParties...)
+	return p.state.newParties.Clone()
 }
 
 // NewThreshold returns the new signing threshold.
@@ -207,8 +207,8 @@ type ReshareOverlapSession = ReshareSession
 type ResharePlanOption struct {
 	OldKey         *KeyShare
 	SessionID      tss.SessionID
-	DealerParties  []tss.PartyID
-	NewParties     []tss.PartyID
+	DealerParties  tss.PartySet
+	NewParties     tss.PartySet
 	NewThreshold   int
 	PaillierBits   int
 	Limits         *Limits
@@ -263,7 +263,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		securityParams:        securityParams,
 	}, limits: limits}
 	if len(plan.state.dealerParties) == 0 {
-		plan.state.dealerParties = append([]tss.PartyID(nil), plan.state.oldParties...)
+		plan.state.dealerParties = plan.state.oldParties.Clone()
 	}
 	if err := plan.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, err)

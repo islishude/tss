@@ -14,7 +14,7 @@ import (
     "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
-parties := []tss.PartyID{1, 2, 3}
+parties := tss.NewPartySet(1, 2, 3)
 plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
     SessionID: sessionID,
     Parties: parties,

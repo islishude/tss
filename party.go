@@ -30,13 +30,13 @@ func (ps PartySet) Add(ids ...PartyID) PartySet {
 }
 
 // NewPartySet returns a PartySet containing parties in the given order.
-func NewPartySet(parties ...uint32) PartySet {
+func NewPartySet(parties ...PartyID) PartySet {
 	return parties
 }
 
 // MergePartySet takes a set slice and returns a new sorted set containing elements which are in either or both of this set and the given set
 func MergePartySet(sets ...PartySet) PartySet {
-	var merged []PartyID
+	var merged PartySet
 	seen := make(map[PartyID]struct{})
 	for _, set := range sets {
 		for _, id := range set {
@@ -52,12 +52,12 @@ func MergePartySet(sets ...PartySet) PartySet {
 }
 
 // ContainsParty reports whether id appears in parties.
-func ContainsParty(parties []PartyID, id PartyID) bool {
+func ContainsParty(parties PartySet, id PartyID) bool {
 	return slices.Contains(parties, id)
 }
 
 // SortParties returns a sorted copy of parties.
-func SortParties(parties []PartyID) []PartyID {
+func SortParties(parties PartySet) PartySet {
 	out := slices.Clone(parties)
 	slices.Sort(out)
 	return out
@@ -67,7 +67,7 @@ func SortParties(parties []PartyID) []PartyID {
 // It verifies: non-empty, minimum size (threshold), maximum size, membership,
 // and no duplicates. For algorithms where AllowOversizedSignerSet is false,
 // signer count must exactly equal threshold.
-func ValidateSignerSet(keyParties []PartyID, threshold int, signers []PartyID, limits ThresholdLimits) error {
+func ValidateSignerSet(keyParties PartySet, threshold int, signers PartySet, limits ThresholdLimits) error {
 	if len(signers) == 0 {
 		return errors.New("signers must not be empty")
 	}

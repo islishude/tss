@@ -129,9 +129,9 @@ type Signature struct {
 
 // Blame identifies parties and public evidence associated with a protocol failure.
 type Blame struct {
-	Reason   string    `json:"reason"`
-	Parties  []PartyID `json:"parties"`
-	Evidence []byte    `json:"evidence,omitempty"`
+	Reason   string   `json:"reason"`
+	Parties  PartySet `json:"parties"`
+	Evidence []byte   `json:"evidence,omitempty"`
 }
 
 // Cloneable is an interface for types that have a Clone() T method.

@@ -13,7 +13,7 @@ import (
 func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 	t.Parallel()
 
-	parties := []tss.PartyID{1, 2}
+	parties := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -24,7 +24,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		Parties:   parties,
 		Self:      1,
 		SessionID: sessionID,
-	}, testFROSTGuard(1, tss.PartySet(parties), sessionID))
+	}, testFROSTGuard(1, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,7 +34,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 		Parties:   parties,
 		Self:      2,
 		SessionID: sessionID,
-	}, testFROSTGuard(2, tss.PartySet(parties), sessionID))
+	}, testFROSTGuard(2, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -143,7 +143,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			Parties:   parties,
 			Self:      1,
 			SessionID: sessionID,
-		}, testFROSTGuard(1, tss.PartySet(parties), sessionID))
+		}, testFROSTGuard(1, parties, sessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -165,7 +165,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 	shares := frostKeygen(t, 2, 3)
 	parties := tss.SortParties(shares[1].state.parties)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	message := []byte("test-message")
 
 	sessionID, err := tss.NewSessionID(nil)
@@ -173,12 +173,12 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	sign1, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, tss.PartySet(parties), sessionID))
+	sign1, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, out2, err := startFROSTSign(shares[2], sessionID, signers, message, testFROSTGuard(2, tss.PartySet(parties), sessionID))
+	_, out2, err := startFROSTSign(shares[2], sessionID, signers, message, testFROSTGuard(2, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -189,8 +189,8 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 	// Start party 3 (not a signer) to get a commitment from outside the signer set.
 	// Use a separate signer set that includes party 3.
-	signersWith3 := []tss.PartyID{1, 2, 3}
-	_, out3, err := startFROSTSign(shares[3], sessionID, signersWith3, message, testFROSTGuard(3, tss.PartySet(parties), sessionID))
+	signersWith3 := tss.NewPartySet(1, 2, 3)
+	_, out3, err := startFROSTSign(shares[3], sessionID, signersWith3, message, testFROSTGuard(3, parties, sessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -277,7 +277,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 	t.Run("duplicate commitment", func(t *testing.T) {
 		t.Parallel()
 
-		sess2, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, tss.PartySet(parties), sessionID))
+		sess2, _, err := startFROSTSign(shares[1], sessionID, signers, message, testFROSTGuard(1, parties, sessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -296,16 +296,16 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		t.Parallel()
 
 		dupSessionID, _ := tss.NewSessionID(nil)
-		signers2 := []tss.PartyID{1, 2}
+		signers2 := tss.NewPartySet(1, 2)
 
 		// Start party 1 with 2 signers so delivery of party 2's partial triggers completion.
-		sess1, out1, err := startFROSTSign(shares[1], dupSessionID, signers2, message, testFROSTGuard(1, tss.PartySet(parties), dupSessionID))
+		sess1, out1, err := startFROSTSign(shares[1], dupSessionID, signers2, message, testFROSTGuard(1, parties, dupSessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Start party 2.
-		sess2, out2, err := startFROSTSign(shares[2], dupSessionID, signers2, message, testFROSTGuard(2, tss.PartySet(parties), dupSessionID))
+		sess2, out2, err := startFROSTSign(shares[2], dupSessionID, signers2, message, testFROSTGuard(2, parties, dupSessionID))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -346,7 +346,7 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 2)
-	oldParties := []tss.PartyID{1, 2}
+	oldParties := tss.NewPartySet(1, 2)
 	newParties := oldParties // same committee
 
 	reshareSessionID, err := tss.NewSessionID(nil)
@@ -359,7 +359,7 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 		Parties:   newParties,
 		Self:      1,
 		SessionID: reshareSessionID,
-	}, testFROSTGuard(1, tss.PartySet(oldParties), reshareSessionID))
+	}, testFROSTGuard(1, oldParties, reshareSessionID))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -369,7 +369,7 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 		Parties:   newParties,
 		Self:      2,
 		SessionID: reshareSessionID,
-	}, testFROSTGuard(2, tss.PartySet(oldParties), reshareSessionID))
+	}, testFROSTGuard(2, oldParties, reshareSessionID))
 	if err != nil {
 		t.Fatal(err)
 	}

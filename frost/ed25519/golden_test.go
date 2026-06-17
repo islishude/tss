@@ -19,7 +19,7 @@ func TestGoldenKeyShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	sessions := make(map[tss.PartyID]*KeygenSession, 3)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {

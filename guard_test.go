@@ -163,7 +163,7 @@ func TestNewEnvelopeGuardRejectsSelfNotInParties(t *testing.T) {
 
 func TestNewEnvelopeGuardRejectsEmptyParties(t *testing.T) {
 	t.Parallel()
-	_, err := NewEnvelopeGuard(1, PartySet{}, "test-proto", testSessionID(t), testPolicySet(), NewInMemoryReplayCache())
+	_, err := NewEnvelopeGuard(1, NewPartySet(), "test-proto", testSessionID(t), testPolicySet(), NewInMemoryReplayCache())
 	if err == nil {
 		t.Fatal("expected error for empty parties")
 	}

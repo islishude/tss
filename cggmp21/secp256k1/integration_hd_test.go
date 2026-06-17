@@ -12,7 +12,7 @@ import (
 
 func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3, true)
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	path := []uint32{0, 17}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
 	if err != nil {
@@ -157,7 +157,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 		t.Fatal(err)
 	}
 	childPub := result.ChildPublicKey
-	signers := []tss.PartyID{1, 2}
+	signers := tss.NewPartySet(1, 2)
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
@@ -223,7 +223,7 @@ func TestBIP32RejectsEmptyChainCode(t *testing.T) {
 
 func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	signers := []tss.PartyID{1}
+	signers := tss.NewPartySet(1)
 	ctx := testPresignContext()
 	// Empty derivation path: the public key should be the parent key.
 	ctx.Derivation.Path = tss.DerivationPath(nil).Clone()
@@ -252,7 +252,7 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 
 func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	signers := []tss.PartyID{1}
+	signers := tss.NewPartySet(1)
 	path := []uint32{0, 1}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
 	if err != nil {
@@ -284,7 +284,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 
 func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	signers := []tss.PartyID{1}
+	signers := tss.NewPartySet(1)
 
 	// Create presign for path A.
 	ctxA := testPresignContext()
@@ -306,7 +306,7 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 
 func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1, true)
-	signers := []tss.PartyID{1}
+	signers := tss.NewPartySet(1)
 	path := []uint32{0, 5}
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()

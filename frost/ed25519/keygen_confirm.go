@@ -31,7 +31,7 @@ type KeygenConfirmation struct {
 	SessionID       tss.SessionID `wire:"1,bytes,len=32"`
 	Sender          tss.PartyID   `wire:"2,u32"`
 	Threshold       int           `wire:"3,u32"`
-	Parties         []tss.PartyID `wire:"4,u32list"`
+	Parties         tss.PartySet  `wire:"4,u32list"`
 	PublicKey       []byte        `wire:"5,bytes"`
 	TranscriptHash  []byte        `wire:"6,bytes"`
 	CommitmentsHash []byte        `wire:"7,bytes"`

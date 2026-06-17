@@ -6,8 +6,6 @@ import (
 	"bytes"
 	stded25519 "crypto/ed25519"
 	"testing"
-
-	"github.com/islishude/tss"
 )
 
 // TestFROSTKeyShareCrashRecovery verifies that a FROST KeyShare
@@ -40,7 +38,7 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !tss.PartySet(restored.Parties()).Contains(restored.PartyID()) {
+	if !restored.Parties().Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
 	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {

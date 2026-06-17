@@ -42,7 +42,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var confirmations []*KeygenConfirmation
-	for _, id := range []tss.PartyID{1, 2, 3} {
+	for _, id := range tss.NewPartySet(1, 2, 3) {
 		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
@@ -66,7 +66,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3, false)
 	var baseConfirmations []*KeygenConfirmation
-	for _, id := range []tss.PartyID{1, 2, 3} {
+	for _, id := range tss.NewPartySet(1, 2, 3) {
 		c, err := shares[id].KeygenConfirmationWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
@@ -206,7 +206,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := []tss.PartyID{1, 2, 3}
+	parties := tss.NewPartySet(1, 2, 3)
 	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {

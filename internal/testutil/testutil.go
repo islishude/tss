@@ -117,8 +117,8 @@ func OtherParty(parties tss.PartySet, self tss.PartyID) tss.PartyID {
 }
 
 // MustPartySet returns a sorted party set {1, 2, ..., n}.
-func MustPartySet(n int) []tss.PartyID {
-	parties := make([]tss.PartyID, n)
+func MustPartySet(n int) tss.PartySet {
+	parties := make(tss.PartySet, n)
 	for i := range parties {
 		parties[i] = tss.PartyID(i + 1)
 	}

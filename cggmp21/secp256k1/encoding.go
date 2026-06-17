@@ -20,7 +20,7 @@ const (
 type keyShareWire struct {
 	Party                  tss.PartyID                       `wire:"1,u32"`
 	Threshold              int                               `wire:"2,u32"`
-	Parties                []tss.PartyID                     `wire:"3,u32list"`
+	Parties                tss.PartySet                      `wire:"3,u32list"`
 	PublicKey              []byte                            `wire:"4,bytes,max_bytes=point"`
 	ChainCode              []byte                            `wire:"5,bytes"`
 	Secret                 *secret.Scalar                    `wire:"6,custom,len=32"`
@@ -238,7 +238,7 @@ func UnmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 type presignWire struct {
 	Party                tss.PartyID           `wire:"1,u32"`
 	Threshold            int                   `wire:"2,u32"`
-	Signers              []tss.PartyID         `wire:"3,u32list"`
+	Signers              tss.PartySet          `wire:"3,u32list"`
 	R                    []byte                `wire:"4,bytes,max_bytes=point"`
 	LittleR              []byte                `wire:"5,bytes,max_bytes=point"`
 	KShare               *secret.Scalar        `wire:"6,custom,len=32"`

@@ -101,7 +101,7 @@ func (s *ReshareSession) tryComplete() error {
 		version:              tss.Version,
 		party:                s.selfID,
 		threshold:            s.newThreshold,
-		parties:              append([]tss.PartyID(nil), s.newParties...),
+		parties:              s.newParties.Clone(),
 		publicKey:            append([]byte(nil), publicKey...),
 		chainCode:            chainCode,
 		secret:               newSecretScalar,

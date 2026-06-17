@@ -48,7 +48,7 @@ func (k *KeyShare) Threshold() int {
 }
 
 // Parties returns a copy of the canonical participant set.
-func (k *KeyShare) Parties() []tss.PartyID {
+func (k *KeyShare) Parties() tss.PartySet {
 	if k == nil || k.state == nil {
 		return nil
 	}
