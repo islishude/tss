@@ -52,6 +52,11 @@ var (
 // the master path "m".
 type DerivationPath []uint32
 
+// NewDerivationPath returns a DerivationPath containing bip32 pathes in the given order.
+func NewDerivationPath(pathes ...uint32) DerivationPath {
+	return pathes
+}
+
 // ParseDerivationPath parses paths in the form "m" or "m/0/1/2".
 func ParseDerivationPath(s string) (DerivationPath, error) {
 	if s == "m" {

@@ -9,19 +9,29 @@ import (
 // PartySet is an ordered set of protocol participants.
 type PartySet []PartyID
 
-// Contains reports whether id is in the party set.
+// Contains reports whether ps contains id
 func (ps PartySet) Contains(id PartyID) bool {
 	return ContainsParty(ps, id)
 }
 
-// Sorted returns a sorted copy of the party set.
+// Sorted returns a sorted copy of PartySet.
 func (ps PartySet) Sorted() PartySet {
 	return SortParties(ps)
 }
 
-// Clone returns a deep copy of the party set.
+// Clone returns a copy of PartySet with a separate backing array
 func (ps PartySet) Clone() PartySet {
 	return slices.Clone(ps)
+}
+
+// Add returns a new PartySet with given PartyID list
+func (ps PartySet) Add(ids ...PartyID) PartySet {
+	return append(ps, ids...)
+}
+
+// NewPartySet returns a PartySet containing parties in the given order.
+func NewPartySet(parties ...uint32) PartySet {
+	return parties
 }
 
 // MergePartySet takes a set slice and returns a new sorted set containing elements which are in either or both of this set and the given set

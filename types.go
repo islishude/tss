@@ -7,7 +7,8 @@ const envelopeHashLabel = "github.com/islishude/tss/envelope/v1"
 
 const envelopeWireType = "tss.envelope"
 
-// PartyID identifies one protocol participant; zero is reserved as "unset".
+// PartyID identifies a protocol participant.
+// The zero value is reserved to mean unset and broadcast mode for Envelope.
 type PartyID = uint32
 
 // ProtocolID names a threshold signature protocol implemented by this module.
