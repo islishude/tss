@@ -13,7 +13,7 @@ import (
 // Example_full_lifecycle demonstrates keygen, persistence, presign, and signing.
 func Example_full_lifecycle() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -63,7 +63,7 @@ func Example_full_lifecycle() {
 // Example_multiParty demonstrates a 2-of-3 threshold ECDSA signature.
 func Example_multiParty() {
 	parties := []tss.PartyID{1, 2, 3}
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -97,7 +97,7 @@ func Example_multiParty() {
 func ExampleStartRefresh() {
 	parties := []tss.PartyID{1, 2}
 	partySet := tss.PartySet(parties)
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -177,7 +177,7 @@ func ExampleStartReshareDealer() {
 	oldPartySet := tss.PartySet(oldParties)
 	newPartySet := tss.PartySet(newParties)
 	allParties := tss.MergePartySet(oldParties, newParties)
-	shares, err := runExampleCGGMPKeygen(oldParties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: oldParties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -268,7 +268,7 @@ func ExampleStartReshareDealer() {
 // ExampleDeriveNonHardenedBIP32 demonstrates child-key threshold signing.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}
@@ -309,7 +309,7 @@ func ExampleDeriveNonHardenedBIP32() {
 // Example_serialization demonstrates key-share and presign binary round trips.
 func Example_serialization() {
 	parties := []tss.PartyID{1, 2}
-	shares, err := runExampleCGGMPKeygen(parties, 2, cggmp.KeygenPlanOption{})
+	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
 	if err != nil {
 		panic(err)
 	}

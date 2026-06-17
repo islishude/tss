@@ -182,7 +182,8 @@ func (s *exampleCGGMPSecurity) route(
 // runExampleCGGMPKeygen executes a complete dealerless key-generation lifecycle
 // using only the package's public integration API. All parties share one global
 // plan, while each party owns an independent guard and KeygenSession.
-func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggmp.KeyShare, error) {
+func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggmp.KeyShare, error) {
+	parties := option.Parties
 	security := newExampleCGGMPSecurity(parties)
 	// A fresh session ID prevents messages from another keygen execution from
 	// being accepted by these guards or bound into this lifecycle transcript.
@@ -195,8 +196,6 @@ func runExampleCGGMPKeygen(parties []tss.PartyID, threshold int, option cggmp.Ke
 	// Construct the plan once so threshold, committee, HD policy, and Paillier
 	// parameters are identical and transcript-bound for every participant.
 	option.SessionID = sessionID
-	option.Parties = parties
-	option.Threshold = threshold
 	if option.SecurityParams == nil {
 		params := cggmp.SecurityParams{
 			Ell:             256,
