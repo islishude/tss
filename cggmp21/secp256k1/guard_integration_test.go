@@ -43,14 +43,15 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 
 	// Start one session with production policies (broadcast consistency required)
 	// so the guard rejects round-1 commitments without a BroadcastCertificate.
-	session, _, err := startCGGMP21Keygen(configs[11], tss.NewTestEnvelopeGuard(11, parties, protocol, sessionID, CGGMP21Policies()))
+	session, _, err := startCGGMP21Keygen(configs[11],
+		tss.NewTestEnvelopeGuard(11, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, CGGMP21Policies()))
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	// Construct a commitments broadcast without certificate.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -84,7 +85,7 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 
 	// Construct a direct share envelope without confidentiality.
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -117,7 +118,7 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 	}
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -149,7 +150,7 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 	}
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -185,7 +186,7 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 
 	// First delivery of a valid broadcast message.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -227,7 +228,7 @@ func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
 	}
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,

@@ -237,8 +237,8 @@ func (c ThresholdConfig) ValidateWithLimits(l ThresholdLimits) error {
 	seen := make(map[PartyID]struct{}, len(c.Parties))
 	hasSelf := false
 	for _, id := range c.Parties {
-		if id == 0 {
-			return errors.New("party id 0 is reserved")
+		if id == BroadcastPartyId {
+			return errors.New("party id zero is reserved")
 		}
 		if _, ok := seen[id]; ok {
 			return fmt.Errorf("duplicate party id %d", id)

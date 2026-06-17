@@ -81,7 +81,7 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *ReshareSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.oldParties, s.selfID)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, s.oldParties, s.selfID)
 }
 
 func reshareGuardParties(oldParties, newParties tss.PartySet) tss.PartySet {
@@ -158,7 +158,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	oldParties := oldKey.state.parties.Clone()
@@ -210,7 +210,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -225,7 +225,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
+		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -262,7 +262,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	// Blame evidence for reshare share verification is scoped to old dealers.
@@ -317,7 +317,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := oldKey.state.parties.Clone()
@@ -356,7 +356,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadReshareCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -371,7 +371,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
+		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}

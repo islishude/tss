@@ -75,7 +75,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	dealerConfig := s.dealerConfig()
-	dealerEnv, err := envelope(dealerConfig, 1, s.selfID, 0, payloadReshareDealerCommitments, payload)
+	dealerEnv, err := newEnvelope(dealerConfig, 1, s.selfID, tss.BroadcastPartyId, payloadReshareDealerCommitments, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -96,7 +96,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		shareEnv, err := envelope(dealerConfig, 1, s.selfID, id, payloadReshareShare, sharePayload)
+		shareEnv, err := newEnvelope(dealerConfig, 1, s.selfID, id, payloadReshareShare, sharePayload)
 		if err != nil {
 			return nil, err
 		}
@@ -249,7 +249,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 	share := secp.ScalarFromBigInt(p.Share)
 	if err := secp.VerifyShare(commitments, s.selfID, share); err != nil {
 		verifyErr := err
-		evidenceEnv, evErr := envelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
+		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
 		if evErr != nil {
 			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, evErr)
 		}

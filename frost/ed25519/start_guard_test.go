@@ -124,13 +124,13 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 				name: "wrong session",
 				guard: func() *tss.EnvelopeGuard {
 					wrongSession, _ := tss.NewSessionID(nil)
-					return tss.NewTestEnvelopeGuard(tc.self, tc.parties, protocol, wrongSession, testFROSTPolicies())
+					return tss.NewTestEnvelopeGuard(tc.self, tc.parties, tss.ProtocolFROSTEd25519, wrongSession, testFROSTPolicies())
 				},
 			},
 			{
 				name: "wrong self",
 				guard: func() *tss.EnvelopeGuard {
-					return tss.NewTestEnvelopeGuard(testutil.OtherParty(tc.parties, tc.self), tc.parties, protocol, sessionID, testFROSTPolicies())
+					return tss.NewTestEnvelopeGuard(testutil.OtherParty(tc.parties, tc.self), tc.parties, tss.ProtocolFROSTEd25519, sessionID, testFROSTPolicies())
 				},
 			},
 		} {

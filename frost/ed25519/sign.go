@@ -88,7 +88,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if plan == nil || plan.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil sign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	// Validate the local key against the immutable plan before deriving nonce
@@ -166,7 +166,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		return nil, nil, err
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolFROSTEd25519,
 		Version:     tss.Version,
 		SessionID:   plan.state.sessionID,
 		Round:       1,
@@ -219,7 +219,7 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.key.state.parties, s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.key.state.parties, s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
@@ -379,7 +379,7 @@ func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error
 // A noop ack verifier is safe here because inProcessPolicies relaxes all broadcast
 // consistency requirements — VerifyFull is never invoked.
 func newInProcessGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, protocol, sessionID, inProcessPolicies(), tss.NewInMemoryReplayCache())
+	g, err := tss.NewEnvelopeGuard(self, parties, tss.ProtocolFROSTEd25519, sessionID, inProcessPolicies(), tss.NewInMemoryReplayCache())
 	if err != nil {
 		panic(err)
 	}

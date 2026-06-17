@@ -116,7 +116,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	}
 
 	// 5. Transport authentication.
-	if info.Peer == 0 {
+	if info.Peer == BroadcastPartyId {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrUnauthenticatedTransport)
 	}
 
@@ -131,7 +131,7 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	}
 
 	// 8. Recipient check for direct messages.
-	if base.To != 0 && base.To != g.Self {
+	if base.To != BroadcastPartyId && base.To != g.Self {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, base.To))
 	}
 
@@ -144,13 +144,15 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	// 10. Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
-		if base.To == 0 {
+		if base.To == BroadcastPartyId {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedDirectMessage, base.PayloadType))
 		}
 	case DeliveryBroadcast:
-		if base.To != 0 {
+		if base.To != BroadcastPartyId {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, base.PayloadType))
 		}
+	default:
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown delivery mode %d: %s", policy.Mode, base.PayloadType))
 	}
 
 	// 11. Confidentiality enforcement.
@@ -163,6 +165,10 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		if info.Protection == ChannelConfidential {
 			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, base.PayloadType))
 		}
+	case ConfidentialityOptional:
+		// nothing to enforce — either plaintext or confidential is acceptable
+	default:
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unknown confidentiality policy %d: %s", policy.Confidentiality, base.PayloadType))
 	}
 
 	// 12. Broadcast consistency enforcement against the provided party set.

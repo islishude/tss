@@ -402,7 +402,7 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 		return nil, err
 	}
 	t := transcript.New(resharePlanDigestLabel)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendString("curve", p.state.curveID)

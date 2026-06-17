@@ -58,7 +58,7 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 	if err != nil {
 		return err
 	}
-	if evidence.Protocol != protocol {
+	if evidence.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 		return fmt.Errorf("unexpected evidence protocol %q", evidence.Protocol)
 	}
 	if ctx.SessionID != (tss.SessionID{}) && evidence.SessionID != ctx.SessionID {

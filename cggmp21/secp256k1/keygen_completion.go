@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
@@ -203,7 +204,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	s.confirmations[s.cfg.Self] = append([]byte(nil), encodedConfirmation...)
 	s.pending = &pendingKeyShare{share: share}
 	s.state = keygenConfirming
-	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.cfg.Self, 0, payloadKeygenConfirmation, encodedConfirmation)
+	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}
@@ -227,7 +228,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 // commitments. Callers are responsible for logging the failure with the
 // appropriate path-specific context (eager or deferred).
 func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
-	evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil)
+	evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil)
 	if evErr != nil {
 		return nil, evErr
 	}
@@ -332,7 +333,7 @@ func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCod
 
 // verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func verifyCGGMPChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) != sha256.Size || len(chainCode) != 32 {
+	if len(commit) != sha256.Size || len(chainCode) != bip32util.ChainCodeSize {
 		return false
 	}
 	expected := cggmpChainCodeCommit(sessionID, partyID, chainCode)

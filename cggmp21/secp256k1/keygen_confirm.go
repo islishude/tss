@@ -80,7 +80,7 @@ func keygenCommitmentsHash(commitments [][]byte) []byte {
 
 // Validate performs structural checks on the confirmation.
 func (c KeygenConfirmation) Validate() error {
-	if c.Sender == 0 {
+	if c.Sender == tss.BroadcastPartyId {
 		return errors.New("keygen confirmation: zero sender")
 	}
 	if c.Threshold < 1 {
@@ -98,7 +98,7 @@ func (c KeygenConfirmation) Validate() error {
 	if len(c.CommitmentsHash) != sha256.Size {
 		return errors.New("keygen confirmation: invalid commitments hash length")
 	}
-	if len(c.ChainCode) != 32 {
+	if len(c.ChainCode) != bip32util.ChainCodeSize {
 		return errors.New("keygen confirmation: chain code must be 32 bytes")
 	}
 	if len(c.PlanHash) != sha256.Size {
@@ -391,8 +391,8 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 
 	// ---- 4. MUTATE STATE ----
 	// Store the revealed chain code for XOR aggregation.
-	s.chainCodes[env.From] = append([]byte(nil), confirmation.ChainCode...)
-	s.confirmations[env.From] = append([]byte(nil), canonical...)
+	s.chainCodes[env.From] = bytes.Clone(confirmation.ChainCode)
+	s.confirmations[env.From] = bytes.Clone(canonical)
 
 	// ---- 5. EMIT ----
 	if s.pending != nil && len(s.confirmations) == len(s.cfg.Parties) {

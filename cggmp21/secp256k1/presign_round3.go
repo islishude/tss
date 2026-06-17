@@ -93,7 +93,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		return err
 	}
 	stmt := signprep.Statement{
-		Protocol:             protocol,
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            s.sessionID,
 		Party:                from,
 		Signers:              slices.Clone(s.signers),
@@ -211,7 +211,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 
 	// Build signprep proof.
 	stmt := signprep.Statement{
-		Protocol:             protocol,
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            s.sessionID,
 		Party:                s.key.state.party,
 		Signers:              slices.Clone(s.signers),
@@ -286,7 +286,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if err := s.tryComplete(); err != nil {
 		return nil, err
 	}
-	env, err := envelope(s.config, 3, s.key.state.party, 0, payloadPresignRound3, payload)
+	env, err := newEnvelope(s.config, 3, s.key.state.party, tss.BroadcastPartyId, payloadPresignRound3, payload)
 	if err != nil {
 		return nil, err
 	}

@@ -442,7 +442,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if r.RecordVersion != signAttemptRecordVersion {
 		return fmt.Errorf("%w: unexpected sign attempt record version %d", ErrSignAttemptCorrupt, r.RecordVersion)
 	}
-	if r.Protocol != protocol {
+	if r.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 		return fmt.Errorf("%w: unexpected protocol %q", ErrSignAttemptCorrupt, r.Protocol)
 	}
 	if r.Version != tss.Version {

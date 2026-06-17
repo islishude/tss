@@ -11,6 +11,9 @@ const envelopeWireType = "tss.envelope"
 // The zero value is reserved to mean unset and broadcast mode for Envelope.
 type PartyID = uint32
 
+// BroadcastPartyId is the receiver of broadcast mode
+const BroadcastPartyId PartyID = 0
+
 // ProtocolID names a threshold signature protocol implemented by this module.
 type ProtocolID string
 
@@ -116,15 +119,6 @@ type KeyShare interface {
 	Derive(path DerivationPath, opts ...DeriveOption) (*DerivationResult, error)
 	MarshalBinary() ([]byte, error)
 	Destroy()
-}
-
-// Signature is the common transport shape for algorithm-specific signatures.
-type Signature struct {
-	Algorithm Algorithm `json:"algorithm"`
-	PublicKey []byte    `json:"public_key"`
-	Data      []byte    `json:"data"`
-	R         []byte    `json:"r,omitempty"`
-	S         []byte    `json:"s,omitempty"`
 }
 
 // Blame identifies parties and public evidence associated with a protocol failure.

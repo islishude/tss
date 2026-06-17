@@ -135,7 +135,7 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 // The allowedParties parameter selects which participants are accepted as senders
 // for this round (e.g. old parties for dealer messages, new parties for receiver messages).
 func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties tss.PartySet) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, allowedParties, s.selfID)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, allowedParties, s.selfID)
 }
 
 // StartReshareDealer starts resharing for an old-party dealer.
@@ -170,7 +170,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(localParty, errors.New("nil reshare plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, localParty); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, localParty); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, localParty, err)
 	}
 	if err := plan.ValidateWithLimits(plan.limits); err != nil {
@@ -252,7 +252,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		if err != nil {
 			return nil, nil, err
 		}
-		receiverEnv, err := envelope(s.receiverConfig(), 1, s.selfID, 0, payloadReshareReceiverMaterial, payload)
+		receiverEnv, err := newEnvelope(s.receiverConfig(), 1, s.selfID, tss.BroadcastPartyId, payloadReshareReceiverMaterial, payload)
 		if err != nil {
 			return nil, nil, err
 		}

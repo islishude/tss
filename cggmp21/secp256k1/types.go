@@ -1,18 +1,16 @@
 package secp256k1
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 )
-
-const protocol = tss.ProtocolCGGMP21Secp256k1
 
 const (
 	payloadKeygenCommitments  tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
@@ -48,7 +46,7 @@ type VerificationShare struct {
 func (v VerificationShare) Clone() VerificationShare {
 	return VerificationShare{
 		Party:     v.Party,
-		PublicKey: slices.Clone(v.PublicKey),
+		PublicKey: bytes.Clone(v.PublicKey),
 	}
 }
 
@@ -64,8 +62,8 @@ type PaillierPublicShare struct {
 func (p PaillierPublicShare) Clone() PaillierPublicShare {
 	return PaillierPublicShare{
 		Party:     p.Party,
-		PublicKey: slices.Clone(p.PublicKey),
-		Proof:     slices.Clone(p.Proof),
+		PublicKey: bytes.Clone(p.PublicKey),
+		Proof:     bytes.Clone(p.Proof),
 	}
 }
 
@@ -83,9 +81,9 @@ type SignVerifyShare struct {
 func (s SignVerifyShare) Clone() SignVerifyShare {
 	return SignVerifyShare{
 		Party:    s.Party,
-		KPoint:   slices.Clone(s.KPoint),
-		ChiPoint: slices.Clone(s.ChiPoint),
-		Proof:    slices.Clone(s.Proof),
+		KPoint:   bytes.Clone(s.KPoint),
+		ChiPoint: bytes.Clone(s.ChiPoint),
+		Proof:    bytes.Clone(s.Proof),
 	}
 }
 
@@ -101,8 +99,8 @@ type RingPedersenPublicShare struct {
 func (r RingPedersenPublicShare) Clone() RingPedersenPublicShare {
 	return RingPedersenPublicShare{
 		Party:  r.Party,
-		Params: slices.Clone(r.Params),
-		Proof:  slices.Clone(r.Proof),
+		Params: bytes.Clone(r.Params),
+		Proof:  bytes.Clone(r.Proof),
 	}
 }
 

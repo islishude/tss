@@ -31,7 +31,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	for dealer, share := range s.shares {
 		if err := secp.VerifyShare(s.commits[dealer], s.oldKey.state.party, secp.ScalarFromBigInt(share)); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := envelope(s.cfg, 1, dealer, s.oldKey.state.party, payloadRefreshShare, nil)
+			evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.oldKey.state.party, payloadRefreshShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
@@ -220,7 +220,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	s.confirmations[s.oldKey.state.party] = append([]byte(nil), encodedConfirmation...)
-	confirmationEnv, err := envelope(s.cfg, keygenConfirmationRound, s.oldKey.state.party, 0, payloadKeygenConfirmation, encodedConfirmation)
+	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.oldKey.state.party, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}

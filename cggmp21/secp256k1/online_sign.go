@@ -25,13 +25,13 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 	if presign == nil || presign.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign"))
 	}
-	if local.Self == 0 {
+	if local.Self == tss.BroadcastPartyId {
 		local.Self = key.state.party
 	}
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil sign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	if err := key.ValidateWithLimits(plan.limits); err != nil {
@@ -44,8 +44,19 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 	if err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
-	request := plan.state.request.Clone()
-	return startSignDigestBoundWithTimeout(local.Ctx(), key, presign, plan.state.sessionID, plan.state.digest, plan.state.contextHash, planHash, request.LowS, request.AttemptStore, guard, durableStoreTimeout(request.DurableStoreTimeout), plan.limits)
+	return startSignDigestBoundWithTimeout(
+		local.Ctx(),
+		key,
+		presign,
+		plan.state.sessionID,
+		plan.state.digest,
+		plan.state.contextHash,
+		planHash,
+		plan.state.request.LowS,
+		plan.state.request.AttemptStore,
+		guard, durableStoreTimeout(plan.state.request.DurableStoreTimeout),
+		plan.limits,
+	)
 }
 
 func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
@@ -66,7 +77,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if presign == nil || presign.state == nil {
 		return nil, nil, errors.New("nil presign")
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, sessionID, key.state.party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, sessionID, key.state.party); err != nil {
 		return nil, nil, err
 	}
 	if err := key.requireMPCMaterial(limits); err != nil {
@@ -184,7 +195,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 		return SignAttemptRecord{}, err
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -203,13 +214,13 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	payloadHash := tss.PayloadHashFromEnvelope(env)
 	envelopeDigest := env.Digest()
 	digestBindingHash := digestHash(digest32, contextHash)
-	policy, err := CGGMP21Policies().Match(protocol, env.Round, env.PayloadType)
+	policy, err := CGGMP21Policies().Match(tss.ProtocolCGGMP21Secp256k1, env.Round, env.PayloadType)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
 	record := SignAttemptRecord{
 		RecordVersion:              signAttemptRecordVersion,
-		Protocol:                   protocol,
+		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
 		Version:                    tss.Version,
 		PresignID:                  presign.ID(),
 		SessionID:                  sessionID,
@@ -281,7 +292,7 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 		_ = MarkPresignConsumed(presign)
 		return nil, nil, err
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, record.SessionID, key.state.party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.SessionID, key.state.party); err != nil {
 		return nil, nil, err
 	}
 	if !bindPresignToAttempt(presign, record.IntentHash, true) {
@@ -442,7 +453,7 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.presign.state.signers, s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.presign.state.signers, s.key.state.party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.

@@ -488,11 +488,11 @@ func unmarshalRefreshSharePayloadWithLimits(in []byte, limits Limits) (refreshSh
 	return p, nil
 }
 
-// envelope creates a protocol envelope with the cggmp21-secp256k1 protocol id
+// newEnvelope creates a protocol newEnvelope with the cggmp21-secp256k1 protocol id
 // and current wire version.
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
+func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
 	return tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   config.SessionID,
 		Round:       round,

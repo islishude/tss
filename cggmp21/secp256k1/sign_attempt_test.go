@@ -403,7 +403,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		t.Fatal(err)
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
@@ -420,14 +420,14 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	}
 	envelopeHash := sha256.Sum256(envelopeBytes)
 	payloadHash := tss.PayloadHashFromEnvelope(env)
-	policy, err := CGGMP21Policies().Match(protocol, env.Round, env.PayloadType)
+	policy, err := CGGMP21Policies().Match(tss.ProtocolCGGMP21Secp256k1, env.Round, env.PayloadType)
 	if err != nil {
 		t.Fatal(err)
 	}
 	envelopeDigest := env.Digest()
 	record := SignAttemptRecord{
 		RecordVersion:              signAttemptRecordVersion,
-		Protocol:                   protocol,
+		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
 		Version:                    tss.Version,
 		PresignID:                  bytes.Repeat([]byte{0x55}, sha256.Size),
 		SessionID:                  sessionID,

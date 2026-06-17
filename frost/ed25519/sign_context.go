@@ -40,7 +40,7 @@ func signContextHash(ctx tss.SigningContext) []byte {
 		resolvedPath = ctx.Derivation.Path
 	}
 	t := transcript.New(signContextHashLabel)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendString("curve", "ed25519")
 	t.AppendString("key_id", ctx.KeyID)

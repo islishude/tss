@@ -64,7 +64,7 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 		return tss.Envelope{}
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolFROSTEd25519,
 		Version:     tss.Version,
 		SessionID:   s.sessionID,
 		Round:       2,

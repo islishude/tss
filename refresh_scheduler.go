@@ -217,7 +217,7 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) error {
 func sendRefreshEnvelopes(ctx context.Context, transport Transport, envs []Envelope) error {
 	for i, env := range envs {
 		var err error
-		if env.To == 0 {
+		if env.To == BroadcastPartyId {
 			err = transport.Broadcast(ctx, env)
 		} else {
 			err = transport.Send(ctx, env)

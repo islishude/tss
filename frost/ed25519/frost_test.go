@@ -15,7 +15,7 @@ import (
 
 // testFROSTGuard creates an EnvelopeGuard for FROST Ed25519 protocol tests.
 func testFROSTGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	return tss.NewTestEnvelopeGuard(self, parties, protocol, sessionID, testFROSTPolicies())
+	return tss.NewTestEnvelopeGuard(self, parties, tss.ProtocolFROSTEd25519, sessionID, testFROSTPolicies())
 }
 
 func testFROSTGuardParties(parties tss.PartySet, self tss.PartyID) tss.PartySet {
@@ -1399,7 +1399,7 @@ func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
 
 	// Construct a fake envelope from a non-participant.
 	fakeEnv := tss.Envelope{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolFROSTEd25519,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,

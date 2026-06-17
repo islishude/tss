@@ -70,7 +70,7 @@ func (t *InMemoryTransport) Parties() PartySet {
 
 // Send delivers a direct envelope to the addressed recipient.
 func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
-	if env.To == 0 {
+	if env.To == BroadcastPartyId {
 		return fmt.Errorf("%w: cannot Send to broadcast address", ErrExpectedDirectMessage)
 	}
 
@@ -104,7 +104,7 @@ func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
 
 // Broadcast delivers an envelope to all parties.
 func (t *InMemoryTransport) Broadcast(_ context.Context, env Envelope) error {
-	if env.To != 0 {
+	if env.To != BroadcastPartyId {
 		return fmt.Errorf("%w: cannot Broadcast to direct address", ErrExpectedBroadcastMessage)
 	}
 
@@ -236,7 +236,7 @@ func (m *MaliciousTransport) Send(ctx context.Context, env Envelope) error {
 }
 
 func (m *MaliciousTransport) sendWithReceiveFacts(env Envelope, peer PartyID, protection ChannelProtection, channelID string) error {
-	if env.To == 0 {
+	if env.To == BroadcastPartyId {
 		return fmt.Errorf("%w: cannot Send to broadcast address", ErrExpectedDirectMessage)
 	}
 	policy, err := m.inner.policies.Match(env.Protocol, env.Round, env.PayloadType)

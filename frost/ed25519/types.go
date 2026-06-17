@@ -18,8 +18,6 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
-const protocol = tss.ProtocolFROSTEd25519
-
 const (
 	payloadKeygenCommitments  tss.PayloadType = "frost.ed25519.keygen.commitments"
 	payloadKeygenShare        tss.PayloadType = "frost.ed25519.keygen.share"

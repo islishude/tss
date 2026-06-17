@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -8,6 +9,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/shamir"
@@ -37,14 +39,14 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 
 	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
 	config.Parties = config.SortedParties()
 
-	chainCode := make([]byte, 32)
+	chainCode := make([]byte, bip32util.ChainCodeSize)
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 		return nil, nil, err
 	}
@@ -99,14 +101,14 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		log:            config.Logger(),
 		limits:         limits,
 		securityParams: plan.securityParams,
-		planHash:       append([]byte(nil), planHash...),
+		planHash:       bytes.Clone(planHash),
 		commits:        map[tss.PartyID][][]byte{config.Self: commitments},
 		shares:         map[tss.PartyID]*big.Int{config.Self: shamir.Eval(poly, config.Self, secp.Order())},
 		chainCodes: map[tss.PartyID][]byte{
-			config.Self: append([]byte(nil), chainCode...),
+			config.Self: bytes.Clone(chainCode),
 		},
 		chainCodeComms: map[tss.PartyID][]byte{
-			config.Self: append([]byte(nil), chainCodeCommit...),
+			config.Self: bytes.Clone(chainCodeCommit),
 		},
 		paillier: paillierKey,
 		paillierPubs: map[tss.PartyID]PaillierPublicShare{
@@ -132,7 +134,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, keygenStartRound, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -146,7 +148,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload)
+		shareEnv, err := newEnvelope(config, keygenStartRound, config.Self, id, payloadKeygenShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}

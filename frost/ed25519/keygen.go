@@ -10,6 +10,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/transcript"
 )
@@ -77,7 +78,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	parties := config.SortedParties()
@@ -120,7 +121,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, config.Self, 0, payloadKeygenCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,7 +137,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			return nil, nil, err
 		}
 		// Shamir shares are secret-bearing and must be delivered over a confidential transport.
-		shareEnv, err := envelope(config, 1, config.Self, id, payloadKeygenShare, payload)
+		shareEnv, err := newEnvelope(config, 1, config.Self, id, payloadKeygenShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -161,7 +162,7 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one DKG envelope.
@@ -271,9 +272,9 @@ func (s *KeygenSession) abort() {
 	s.clearIntermediateSecrets()
 }
 
-func envelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
+func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
 	return tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolFROSTEd25519,
 		Version:     tss.Version,
 		SessionID:   config.SessionID,
 		Round:       round,
@@ -299,7 +300,7 @@ func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode
 
 // verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func verifyChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) != sha256.Size || len(chainCode) != 32 {
+	if len(commit) != sha256.Size || len(chainCode) != bip32util.ChainCodeSize {
 		return false
 	}
 	expected := chainCodeCommitment(sessionID, partyID, chainCode)

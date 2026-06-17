@@ -222,7 +222,7 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 
 func proofDomain(ctx proofDomainContext) []byte {
 	t := transcript.New(proofDomainVersion)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendString("proof_label", ctx.label)
 	t.AppendBytes("session_id", ctx.sessionID[:])

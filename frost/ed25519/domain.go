@@ -18,7 +18,7 @@ const (
 func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties tss.PartySet, chainCode, planHash []byte, dealerCommitments map[tss.PartyID][][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
 	t := transcript.New(frostKeygenTranscriptLabel)
 	t.AppendString("ciphersuite_context", rfc9591ContextString)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("threshold", uint32(threshold))
@@ -38,7 +38,7 @@ func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties t
 func frostReshareTranscriptHash(sessionID tss.SessionID, oldParties, newParties tss.PartySet, newThreshold int, oldPublicKey, chainCode, planHash []byte, refreshMode bool, dealerCommitments map[tss.PartyID][][]byte, newCommitments [][]byte, verificationShares []VerificationShare) []byte {
 	t := transcript.New(frostReshareTranscriptLabel)
 	t.AppendString("ciphersuite_context", rfc9591ContextString)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendBytes("session_id", sessionID[:])
 	sortedOldParties := tss.SortParties(oldParties)

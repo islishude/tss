@@ -13,7 +13,9 @@ import (
 const (
 	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
-	keygenConfirmationRound    = 2
+
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
 )
 
 type keygenState uint8
@@ -92,7 +94,7 @@ func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
@@ -132,7 +134,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	}
 
 	// Round 1 dispatch.
-	if base.Round != 1 {
+	if base.Round != keygenStartRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages"))
 	}
 	switch base.PayloadType {

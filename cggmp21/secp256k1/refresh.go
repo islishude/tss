@@ -79,7 +79,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, config.SessionID, config.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
 	if err := oldKey.requireMPCMaterial(limits); err != nil {
@@ -170,7 +170,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := envelope(config, 1, oldKey.state.party, 0, payloadRefreshCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadRefreshCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -184,7 +184,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := envelope(config, 1, oldKey.state.party, id, payloadRefreshShare, payload)
+		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadRefreshShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -208,7 +208,7 @@ func (s *RefreshSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *RefreshSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
 // HandleRefreshMessage validates and applies one refresh envelope.

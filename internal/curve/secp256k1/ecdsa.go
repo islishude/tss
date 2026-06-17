@@ -6,6 +6,11 @@ import (
 	"math/big"
 )
 
+const (
+	// PubkeyLength is the compressed public key length
+	PubkeyLength = 33
+)
+
 // SignECDSA signs a 32-byte digest with a fresh random nonce.
 func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s Scalar, err error) {
 	if len(digest) != 32 {

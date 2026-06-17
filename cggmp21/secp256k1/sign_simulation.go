@@ -52,7 +52,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		return nil, nil, err
 	}
 	for _, id := range ids {
-		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.parties, protocol, presignID, simPolicies, tss.NewInMemoryReplayCache())
+		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.parties, tss.ProtocolCGGMP21Secp256k1, presignID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}
@@ -105,7 +105,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		}
 		var session *SignSession
 		var out []tss.Envelope
-		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.parties, protocol, signID, simPolicies, tss.NewInMemoryReplayCache())
+		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.parties, tss.ProtocolCGGMP21Secp256k1, signID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}

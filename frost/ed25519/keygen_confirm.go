@@ -196,7 +196,9 @@ func verifyKeygenConfirmationSetInternal(local *KeyShare, encoded [][]byte, enfo
 		if !bytes.Equal(c.PlanHash, localConf.PlanHash) {
 			return fmt.Errorf("keygen confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
 		}
-		chainCodes[c.Sender] = slices.Clone(c.ChainCode)
+		if enforceChainCode {
+			chainCodes[c.Sender] = slices.Clone(c.ChainCode)
+		}
 	}
 
 	for _, id := range local.state.parties {

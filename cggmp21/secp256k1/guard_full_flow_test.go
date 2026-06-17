@@ -96,7 +96,7 @@ func deliverWithCertificate(t *testing.T, env tss.Envelope, to tss.PartyID, part
 	protection := tss.ChannelPlaintext
 	var cert *tss.BroadcastCertificate
 	for _, p := range CGGMP21Policies().Entries() {
-		if p.Protocol == protocol && p.Round == env.Round && p.PayloadType == env.PayloadType {
+		if p.Protocol == tss.ProtocolCGGMP21Secp256k1 && p.Round == env.Round && p.PayloadType == env.PayloadType {
 			if p.Confidentiality == tss.ConfidentialityRequired {
 				protection = tss.ChannelConfidential
 			}
@@ -149,7 +149,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			Self:      id,
 			SessionID: kgSessionID,
 		}
-		g, err := tss.NewEnvelopeGuard(id, parties, protocol, kgSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		g, err := tss.NewEnvelopeGuard(id, parties, tss.ProtocolCGGMP21Secp256k1, kgSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -199,7 +199,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, signers, protocol, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		g, err := tss.NewEnvelopeGuard(id, signers, tss.ProtocolCGGMP21Secp256k1, presignSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -246,7 +246,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	queue = nil
 
 	for _, id := range signers {
-		g, err := tss.NewEnvelopeGuard(id, signers, protocol, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+		g, err := tss.NewEnvelopeGuard(id, signers, tss.ProtocolCGGMP21Secp256k1, signSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -305,7 +305,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	km := newKeyMaterial(t, parties)
 
 	cfg := tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 71, SessionID: sessionID}
-	g, err := tss.NewEnvelopeGuard(71, parties, protocol, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
+	g, err := tss.NewEnvelopeGuard(71, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -317,7 +317,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 
 	// Create a valid broadcast envelope.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
-		Protocol:    protocol,
+		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,

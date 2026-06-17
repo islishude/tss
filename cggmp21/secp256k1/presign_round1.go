@@ -26,7 +26,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, protocol, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
 	if err := key.requireMPCMaterial(plan.limits); err != nil {
@@ -152,7 +152,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := envelope(config, 1, key.state.party, 0, payloadPresignRound1, payload)
+	env, err := newEnvelope(config, 1, key.state.party, tss.BroadcastPartyId, payloadPresignRound1, payload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,7 +217,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofEnv, err := envelope(config, 1, key.state.party, peer, payloadPresignRound1Proof, proofPayload)
+		proofEnv, err := newEnvelope(config, 1, key.state.party, peer, payloadPresignRound1Proof, proofPayload)
 		if err != nil {
 			return nil, nil, err
 		}

@@ -24,7 +24,7 @@ import (
 // It uses the production policy set but relaxes broadcast consistency requirements
 // since test harnesses don't coordinate BroadcastCertificates.
 func testCGGMP21Guard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	return tss.NewTestEnvelopeGuard(self, parties, protocol, sessionID, testCGGMP21Policies())
+	return tss.NewTestEnvelopeGuard(self, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, testCGGMP21Policies())
 }
 
 func testCGGMP21GuardParties(parties tss.PartySet, self tss.PartyID) tss.PartySet {
@@ -542,7 +542,7 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) []byte {
 	xBarPoint := kPoint
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
 	stmt := signprep.Statement{
-		Protocol:             protocol,
+		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            tss.SessionID{1},
 		Party:                1,
 		Signers:              tss.NewPartySet(1),

@@ -50,7 +50,7 @@ func presignContextHash(ctx PresignContext) []byte {
 		resolvedPath = ctx.Derivation.Path
 	}
 	t := transcript.New(presignContextHashLabel)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendString("curve", "secp256k1")
 	t.AppendString("key_id", ctx.KeyID)
@@ -116,7 +116,7 @@ func appendDerivationResultTranscript(t *transcript.Builder, result *tss.Derivat
 
 func signMessageDigest(contextHash []byte, messageDomain string, message []byte) []byte {
 	t := transcript.New(signMessageDigestLabel)
-	t.AppendString("protocol", string(protocol))
+	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.Version))
 	t.AppendString("curve", "secp256k1")
 	t.AppendBytes("context_hash", contextHash)

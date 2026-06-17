@@ -701,7 +701,7 @@ func (s *PresignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, protocol, s.sessionID, s.signers, s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.signers, s.key.state.party)
 }
 
 // HandlePresignMessage validates and applies one presign envelope.

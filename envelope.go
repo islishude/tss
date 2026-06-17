@@ -1,6 +1,7 @@
 package tss
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"time"
@@ -177,7 +178,7 @@ func validateEnvelopeFields(env *Envelope, limits EnvelopeLimits) error {
 	if !env.SessionID.Valid() {
 		return errors.New("invalid session id")
 	}
-	if env.From == 0 {
+	if env.From == BroadcastPartyId {
 		return errors.New("envelope sender is zero (unset)")
 	}
 	return nil
@@ -262,7 +263,7 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 	if !input.SessionID.Valid() {
 		return Envelope{}, ErrInvalidSessionID
 	}
-	if input.From == 0 {
+	if input.From == BroadcastPartyId {
 		return Envelope{}, errors.New("envelope sender is zero (unset)")
 	}
 	e := Envelope{
@@ -273,7 +274,7 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 		From:        input.From,
 		To:          input.To,
 		PayloadType: input.PayloadType,
-		Payload:     append([]byte(nil), input.Payload...),
+		Payload:     bytes.Clone(input.Payload),
 	}
 	return e, nil
 }
@@ -316,7 +317,7 @@ func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnve
 	if err != nil {
 		return InboundEnvelope{}, err
 	}
-	if info.Peer == 0 {
+	if info.Peer == BroadcastPartyId {
 		return InboundEnvelope{}, ErrUnauthenticatedTransport
 	}
 	if info.Protection == ChannelProtectionUnknown {
@@ -373,15 +374,17 @@ func ValidateEnvelopePolicy(env InboundEnvelope, self PartyID, policies PolicySe
 	// Delivery mode enforcement.
 	switch policy.Mode {
 	case DeliveryDirect:
-		if to := env.To(); to == 0 {
+		if to := env.To(); to == BroadcastPartyId {
 			return fmt.Errorf("%w: %s", ErrExpectedDirectMessage, pt)
 		} else if to != self {
 			return fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, self, to)
 		}
 	case DeliveryBroadcast:
-		if env.To() != 0 {
+		if env.To() != BroadcastPartyId {
 			return fmt.Errorf("%w: %s", ErrExpectedBroadcastMessage, pt)
 		}
+	default:
+		return fmt.Errorf("unknown delivery mode %d: %s", policy.Mode, pt)
 	}
 
 	// Confidentiality enforcement.
@@ -396,6 +399,10 @@ func ValidateEnvelopePolicy(env InboundEnvelope, self PartyID, policies PolicySe
 		if env.ReceiveInfo().Protection == ChannelConfidential {
 			return fmt.Errorf("%w: %s", ErrUnexpectedConfidentiality, pt)
 		}
+	case ConfidentialityOptional:
+		// nothing to enforce — either plaintext or confidential is acceptable
+	default:
+		return fmt.Errorf("unknown confidentiality policy %d: %s", policy.Confidentiality, pt)
 	}
 
 	return nil

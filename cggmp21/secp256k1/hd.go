@@ -37,7 +37,7 @@ func deriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath
 	if len(chainCode) == 0 {
 		return nil, tss.ErrChainCodeRequired
 	}
-	if len(chainCode) != 32 {
+	if len(chainCode) != bip32util.ChainCodeSize {
 		return nil, fmt.Errorf("%w: got %d bytes", tss.ErrInvalidChainCodeLength, len(chainCode))
 	}
 	if _, err := secp.PointFromBytes(publicKey); err != nil {
@@ -193,7 +193,7 @@ type ExtendedPublicKey struct {
 	Depth             uint8
 	ParentFingerprint [4]byte
 	ChildNumber       uint32
-	ChainCode         [32]byte
+	ChainCode         [bip32util.ChainCodeSize]byte
 	PublicKey         []byte // 33-byte compressed secp256k1 public key
 }
 
@@ -204,15 +204,14 @@ func (x ExtendedPublicKey) Validate() error {
 		return fmt.Errorf("%w: unknown version 0x%08X", tss.ErrInvalidExtendedPublicKey,
 			binary.BigEndian.Uint32(x.Version[:]))
 	}
-	if len(x.PublicKey) != 33 {
-		return fmt.Errorf("%w: public key must be 33 bytes, got %d", tss.ErrInvalidExtendedPublicKey,
-			len(x.PublicKey))
+	if len(x.PublicKey) != secp.PubkeyLength {
+		return fmt.Errorf("%w: public key must be %d bytes, got %d", tss.ErrInvalidExtendedPublicKey, secp.PubkeyLength, len(x.PublicKey))
 	}
 	if _, err := secp.PointFromBytes(x.PublicKey); err != nil {
 		return fmt.Errorf("%w: %w", tss.ErrInvalidExtendedPublicKey, err)
 	}
-	if len(x.ChainCode) != 32 {
-		return fmt.Errorf("%w: chain code must be 32 bytes", tss.ErrInvalidExtendedPublicKey)
+	if len(x.ChainCode) != bip32util.ChainCodeSize {
+		return fmt.Errorf("%w: chain code must be %d bytes", tss.ErrInvalidExtendedPublicKey, bip32util.ChainCodeSize)
 	}
 	return nil
 }
@@ -267,7 +266,7 @@ func ParseExtendedPublicKey(s string) (*ExtendedPublicKey, error) {
 	copy(x.ParentFingerprint[:], payload[5:9])
 	x.ChildNumber = binary.BigEndian.Uint32(payload[9:13])
 	copy(x.ChainCode[:], payload[13:45])
-	x.PublicKey = make([]byte, 33)
+	x.PublicKey = make([]byte, secp.PubkeyLength)
 	copy(x.PublicKey, payload[45:])
 
 	if err := x.Validate(); err != nil {

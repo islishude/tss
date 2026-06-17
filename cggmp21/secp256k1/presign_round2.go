@@ -159,7 +159,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		round2Env, err := envelope(s.config, 2, s.key.state.party, peer, payloadPresignRound2, payload)
+		round2Env, err := newEnvelope(s.config, 2, s.key.state.party, peer, payloadPresignRound2, payload)
 		if err != nil {
 			return nil, err
 		}
