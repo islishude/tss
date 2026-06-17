@@ -127,12 +127,12 @@ jobs:
 
   test-slowcrypto:
     name: Test SlowCrypto (${{ matrix.os }})
+    needs: check
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, ubuntu-24.04-arm]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 180
     steps:
       - name: Checkout
         uses: actions/checkout@v6
