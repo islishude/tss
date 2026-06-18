@@ -5,6 +5,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -81,7 +82,9 @@ func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
 	for _, payload := range xs {
 		clear(payload.Gamma)
 		clear(payload.EncK)
-		clear(payload.PaillierPublicKey)
+		secret.ClearBigInt(payload.PaillierPublicKey.N)
+		secret.ClearBigInt(payload.PaillierPublicKey.G)
+		secret.ClearBigInt(payload.PaillierPublicKey.NSquared)
 	}
 	clear(xs)
 }
@@ -89,7 +92,7 @@ func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
 func clearPresignRound1ProofMap(xs map[tss.PartyID]presignRound1ProofPayload) {
 	for _, payload := range xs {
 		clear(payload.PublicRound1Hash)
-		clear(payload.EncKProof)
+		clearEncProof(&payload.EncKProof)
 	}
 	clear(xs)
 }
@@ -97,10 +100,45 @@ func clearPresignRound1ProofMap(xs map[tss.PartyID]presignRound1ProofPayload) {
 func clearPresignRound2Map(xs map[tss.PartyID]presignRound2Payload) {
 	for _, payload := range xs {
 		clear(payload.Delta.Ciphertext)
-		clear(payload.Delta.Proof)
+		clearAffGProof(&payload.Delta.Proof)
 		clear(payload.Sigma.Ciphertext)
-		clear(payload.Sigma.Proof)
+		clearAffGProof(&payload.Sigma.Proof)
 		clear(payload.Round1Echo)
 	}
 	clear(xs)
+}
+
+func clearEncProof(p *zkpai.EncProof) {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.C)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	clear(p.TranscriptHash)
+	*p = zkpai.EncProof{}
+}
+
+func clearAffGProof(p *zkpai.AffGProof) {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.By)
+	secret.ClearBigInt(p.E)
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.F)
+	secret.ClearBigInt(p.T)
+	secret.ClearBigInt(p.Y)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	secret.ClearBigInt(p.Z4)
+	secret.ClearBigInt(p.W)
+	secret.ClearBigInt(p.WY)
+	clear(p.TranscriptHash)
+	*p = zkpai.AffGProof{}
 }

@@ -24,8 +24,7 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 	if err := start.Validate(); err != nil {
 		return nil, err
 	}
-	proof, err := zkpai.UnmarshalAffGProof(response.Proof)
-	if err != nil {
+	if err := response.Validate(); err != nil {
 		return nil, err
 	}
 	encA := new(big.Int).SetBytes(start.Ciphertext)
@@ -41,12 +40,12 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 		ProverPaillierN:   pkB,
 		C:                 encA,
 		D:                 resp,
-		Y:                 proof.Y, // Y is carried in the proof
+		Y:                 response.Proof.Y, // Y is carried in the proof
 		X:                 bCommit,
 		VerifierAux:       verifierAux,
 	}
 
-	if err := zkpai.VerifyAffG(params, responseDomain, stmt, proof); err != nil {
+	if err := zkpai.VerifyAffG(params, responseDomain, stmt, &response.Proof); err != nil {
 		return nil, fmt.Errorf("invalid MtA response proof: %w", err)
 	}
 	alpha, err := skA.Decrypt(resp)

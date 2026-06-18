@@ -73,6 +73,12 @@ type RingPedersenParams struct {
 	T *big.Int
 }
 
+// WireType returns the canonical wire type identifier for RingPedersenParams.
+func (RingPedersenParams) WireType() string { return ringPedersenParamsWireType }
+
+// WireVersion returns the wire format version for RingPedersenParams.
+func (RingPedersenParams) WireVersion() uint16 { return proofVersion }
+
 // RingPedersenProof is CGGMP24 Πprm proving knowledge of lambda such that
 // s = t^lambda mod N for Ring-Pedersen parameters (N, s, t).
 type RingPedersenProof struct {

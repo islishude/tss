@@ -95,6 +95,11 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 	if err != nil {
 		return err
 	}
+	round1From := s.round1[from]
+	paillierPublicKeyBytes, err := canonicalWireMessageBytes(&round1From.PaillierPublicKey, s.limits)
+	if err != nil {
+		return err
+	}
 	stmt := signprep.Statement{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            s.sessionID,
@@ -111,7 +116,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		XBarPoint:            xBarPoint,
 		Gamma:                slices.Clone(s.round1[from].Gamma),
 		EncK:                 slices.Clone(s.round1[from].EncK),
-		PaillierPublicKey:    slices.Clone(s.round1[from].PaillierPublicKey),
+		PaillierPublicKey:    paillierPublicKeyBytes,
 		Round1Echo:           s.round1Echo(),
 		Delta:                scalarBytes(p.Delta),
 	}
@@ -217,6 +222,10 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 
 	// Build signprep proof.
+	paillierPublicKey, err := canonicalWireMessageBytes(s.key.state.paillierPublicKey, s.limits)
+	if err != nil {
+		return nil, err
+	}
 	stmt := signprep.Statement{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            s.sessionID,
@@ -233,7 +242,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		XBarPoint:            xBarPoint,
 		Gamma:                slices.Clone(s.round1[s.key.state.party].Gamma),
 		EncK:                 slices.Clone(s.round1[s.key.state.party].EncK),
-		PaillierPublicKey:    slices.Clone(s.key.state.paillierPublicKey),
+		PaillierPublicKey:    paillierPublicKey,
 		Round1Echo:           s.round1Echo(),
 		Delta:                deltaShare.Bytes(),
 	}
@@ -406,7 +415,8 @@ func (s *PresignSession) round1Echo() []byte {
 		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", p.Gamma)
 		t.AppendBytes("enc_k", p.EncK)
-		t.AppendBytes("paillier_public_key", p.PaillierPublicKey)
+		paillierPublicKeyBytes, _ := canonicalWireMessageBytes(&p.PaillierPublicKey, s.limits)
+		t.AppendBytes("paillier_public_key", paillierPublicKeyBytes)
 	}
 	return t.Sum()
 }

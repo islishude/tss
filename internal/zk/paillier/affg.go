@@ -71,6 +71,12 @@ type AffGProof struct {
 	TranscriptHash []byte
 }
 
+// WireType returns the canonical wire type identifier for AffGProof.
+func (AffGProof) WireType() string { return affGProofWireType }
+
+// WireVersion returns the wire format version for AffGProof.
+func (AffGProof) WireVersion() uint16 { return affGProofVersion }
+
 // Clone returns a deep copy of the AffGProof.
 func (p *AffGProof) Clone() *AffGProof {
 	if p == nil {
@@ -95,6 +101,24 @@ func (p *AffGProof) Clone() *AffGProof {
 		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
 	}
 	return cp
+}
+
+// Validate checks that the AffGProof is structurally complete.
+func (p *AffGProof) Validate() error {
+	if p == nil {
+		return errors.New("nil AffGProof")
+	}
+	if p.Version != affGProofVersion {
+		return fmt.Errorf("unsupported AffGProof version %d", p.Version)
+	}
+	if p.A == nil || p.Bx == nil || p.By == nil || p.E == nil || p.S == nil || p.F == nil || p.T == nil ||
+		p.Y == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil || p.Z4 == nil || p.W == nil || p.WY == nil {
+		return errors.New("incomplete AffGProof")
+	}
+	if len(p.TranscriptHash) != sha256.Size {
+		return errors.New("invalid AffGProof transcript hash")
+	}
+	return nil
 }
 
 // ProveAffG creates a Πaff-g proof for the MtA response.
@@ -580,10 +604,16 @@ func (affGProofWire) WireType() string { return affGProofWireType }
 // WireVersion returns the wire format version for affGProofWire.
 func (affGProofWire) WireVersion() uint16 { return affGProofVersion }
 
-// MarshalBinary encodes the AffGProof using the object-level wire codec.
-func (p *AffGProof) MarshalBinary() ([]byte, error) {
+// MarshalWireMessage encodes AffGProof as a canonical TLV message.
+func (p *AffGProof) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil AffGProof")
+	}
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	if len(opts) == 0 {
+		opts = []wire.MarshalOption{wire.WithFieldLimitsForMarshal(zkFieldLimits())}
 	}
 	return wire.Marshal(affGProofWire{
 		Version:        p.Version,
@@ -602,7 +632,15 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 		W:              p.W,
 		WY:             p.WY,
 		TranscriptHash: p.TranscriptHash,
-	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
+	}, opts...)
+}
+
+// MarshalBinary encodes the AffGProof using the object-level wire codec.
+func (p *AffGProof) MarshalBinary() ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil AffGProof")
+	}
+	return wire.Marshal(p)
 }
 
 // UnmarshalAffGProof decodes a canonical TLV AffGProof.
@@ -614,10 +652,13 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 	return p, nil
 }
 
-// UnmarshalBinary decodes a canonical TLV AffGProof.
-func (p *AffGProof) UnmarshalBinary(in []byte) error {
+// UnmarshalWireMessage decodes AffGProof from a canonical TLV message.
+func (p *AffGProof) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	if len(opts) == 0 {
+		opts = []wire.UnmarshalOption{wire.WithFieldLimits(zkFieldLimits())}
+	}
 	var w affGProofWire
-	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &w, opts...); err != nil {
 		return err
 	}
 	if w.Version != affGProofVersion {
@@ -641,8 +682,16 @@ func (p *AffGProof) UnmarshalBinary(in []byte) error {
 		WY:             w.WY,
 		TranscriptHash: w.TranscriptHash,
 	}
+	if err := decoded.Validate(); err != nil {
+		return err
+	}
 	*p = decoded
 	return nil
+}
+
+// UnmarshalBinary decodes a canonical TLV AffGProof.
+func (p *AffGProof) UnmarshalBinary(in []byte) error {
+	return wire.Unmarshal(in, p)
 }
 
 func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitness) error {

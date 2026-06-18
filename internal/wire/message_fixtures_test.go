@@ -110,6 +110,52 @@ type nestedLimitMessage struct {
 func (m nestedLimitMessage) WireType() string    { return "test.nestedlimit" }
 func (m nestedLimitMessage) WireVersion() uint16 { return 1 }
 
+type nestedOuterLimitInnerMessage struct {
+	Payload []byte `wire:"1,bytes"`
+}
+
+func (m nestedOuterLimitInnerMessage) WireType() string    { return "test.nestedouterlimit.inner" }
+func (m nestedOuterLimitInnerMessage) WireVersion() uint16 { return 1 }
+
+type nestedOuterLimitMessage struct {
+	Inner nestedOuterLimitInnerMessage `wire:"1,nested,max_bytes=field"`
+}
+
+func (m nestedOuterLimitMessage) WireType() string    { return "test.nestedouterlimit" }
+func (m nestedOuterLimitMessage) WireVersion() uint16 { return 1 }
+
+type nestedPointerMessage struct {
+	Inner *nestedOuterLimitInnerMessage `wire:"1,nested,max_bytes=field"`
+}
+
+func (m nestedPointerMessage) WireType() string    { return "test.nestedpointer" }
+func (m nestedPointerMessage) WireVersion() uint16 { return 1 }
+
+type nestedHookInnerMessage struct {
+	AfterCalled bool
+	Value       uint16 `wire:"1,u16"`
+}
+
+func (m nestedHookInnerMessage) WireType() string    { return "test.nestedhook.inner" }
+func (m nestedHookInnerMessage) WireVersion() uint16 { return 1 }
+func (m *nestedHookInnerMessage) AfterUnmarshalWire() error {
+	m.AfterCalled = true
+	return nil
+}
+func (m nestedHookInnerMessage) Validate() error {
+	if m.Value == 0 {
+		return errSentinel
+	}
+	return nil
+}
+
+type nestedHookMessage struct {
+	Inner nestedHookInnerMessage `wire:"1,nested"`
+}
+
+func (m nestedHookMessage) WireType() string    { return "test.nestedhook" }
+func (m nestedHookMessage) WireVersion() uint16 { return 1 }
+
 type validatedMessage struct {
 	Value []byte `wire:"1,bytes"`
 	ok    bool

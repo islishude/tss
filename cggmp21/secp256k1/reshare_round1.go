@@ -7,7 +7,6 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	pai "github.com/islishude/tss/internal/paillier"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -118,16 +117,12 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
-	newPaillierPubBytes, err := newPaillierKey.PublicKey.MarshalBinary()
-	if err != nil {
-		return err
-	}
 	proofConfig := s.receiverConfig()
-	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), resharePaillierDomain(proofConfig, s.selfID, newPaillierPubBytes, s.planHash), newPaillierKey, s.selfID)
+	modDomain, err := resharePaillierDomain(proofConfig, s.selfID, &newPaillierKey.PublicKey, s.planHash, s.limits)
 	if err != nil {
 		return err
 	}
-	modProofBytes, err := zkpai.Marshal(modProof)
+	modProof, err := zkpai.ProveModulus(s.cfg.Reader(), modDomain, newPaillierKey, s.selfID)
 	if err != nil {
 		return err
 	}
@@ -136,35 +131,37 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	defer ringPedersenLambda.Destroy()
-	ringPedersenParamsBytes, err := zkpai.MarshalRingPedersenParams(ringPedersenParams)
+	ringDomain, err := reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParams, s.planHash, s.limits)
 	if err != nil {
 		return err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), reshareRingPedersenDomain(proofConfig, s.selfID, ringPedersenParamsBytes, s.planHash), newPaillierKey, ringPedersenParams, ringPedersenLambda, s.selfID)
-	if err != nil {
-		return err
-	}
-	ringPedersenProofBytes, err := zkpai.Marshal(ringPedersenProof)
+	ringPedersenProof, err := zkpai.ProveRingPedersen(s.cfg.Reader(), ringDomain, newPaillierKey, ringPedersenParams, ringPedersenLambda, s.selfID)
 	if err != nil {
 		return err
 	}
 	s.newPaillier = newPaillierKey
 	s.newPartyData[s.selfID] = &reshareNewPartyData{
-		paillierPub:  PaillierPublicShare{Party: s.selfID, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
-		ringPedersen: RingPedersenPublicShare{Party: s.selfID, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
+		paillierPub: paillierPublicMaterial{
+			Party:     s.selfID,
+			PublicKey: clonePaillierPublicKey(&newPaillierKey.PublicKey),
+			Proof:     modProof.Clone(),
+		},
+		ringPedersen: ringPedersenPublicMaterial{
+			Party:  s.selfID,
+			Params: cloneRingPedersenParams(ringPedersenParams),
+			Proof:  ringPedersenProof.Clone(),
+		},
 	}
 	return nil
 }
 
 func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p reshareReceiverMaterialPayload) error {
-	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, s.limits.Paillier.MaxModulusBits)
+	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
 	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
-	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
-	}
+	pk := &p.PaillierPublicKey
+	proof := &p.PaillierProof
 	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return verificationErrorWithEvidence(
 			env,
@@ -173,10 +170,14 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			tss.NewPartySet(env.From),
 			err,
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	if !zkpai.VerifyModulus(resharePaillierDomain(s.receiverConfig(), env.From, p.PaillierPublicKey, s.planHash), pk, env.From, proof) {
+	modDomain, err := resharePaillierDomain(s.receiverConfig(), env.From, pk, s.planHash, s.limits)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	if !zkpai.VerifyModulus(modDomain, pk, env.From, proof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -184,22 +185,10 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			tss.NewPartySet(env.From),
 			errors.New("invalid reshare Paillier modulus proof"),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	ringParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, s.limits.Paillier.MaxModulusBits)
-	if err != nil {
-		return protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed reshare Ring-Pedersen parameters",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
-	}
+	ringParams := &p.RingPedersenParams
 	if ringParams.N.Cmp(pk.N) != 0 {
 		return verificationErrorWithEvidence(
 			env,
@@ -208,22 +197,15 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	ringProof, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof)
+	ringProof := &p.RingPedersenProof
+	ringDomain, err := reshareRingPedersenDomain(s.receiverConfig(), env.From, ringParams, s.planHash, s.limits)
 	if err != nil {
-		return protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed reshare Ring-Pedersen proof",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
-		)
+		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	if !zkpai.VerifyRingPedersen(reshareRingPedersenDomain(s.receiverConfig(), env.From, p.RingPedersenParams, s.planHash), ringParams, env.From, ringProof) {
+	if !zkpai.VerifyRingPedersen(ringDomain, ringParams, env.From, ringProof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,
@@ -234,8 +216,16 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 		)
 	}
 	s.newPartyData[env.From] = &reshareNewPartyData{
-		paillierPub:  PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof},
-		ringPedersen: RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof},
+		paillierPub: paillierPublicMaterial{
+			Party:     env.From,
+			PublicKey: clonePaillierPublicKey(&p.PaillierPublicKey),
+			Proof:     p.PaillierProof.Clone(),
+		},
+		ringPedersen: ringPedersenPublicMaterial{
+			Party:  env.From,
+			Params: cloneRingPedersenParams(&p.RingPedersenParams),
+			Proof:  p.RingPedersenProof.Clone(),
+		},
 	}
 	return nil
 }

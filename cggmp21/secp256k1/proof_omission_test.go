@@ -7,10 +7,8 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // TestKeygenRejectsMissingModulusProof verifies that a keygen commitments
@@ -43,9 +41,13 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	corruptedProof := make([]byte, len(payload.PaillierProof))
+	proofBytes, err := canonicalWireMessageBytes(&payload.PaillierProof, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptedProof := make([]byte, len(proofBytes))
 	for i := range corruptedProof {
-		corruptedProof[i] = payload.PaillierProof[i] ^ 0xFF
+		corruptedProof[i] = proofBytes[i] ^ 0xFF
 	}
 	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{PaillierProof: corruptedProof})
 	if err != nil {
@@ -83,9 +85,13 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	corruptedRP := make([]byte, len(payload.RingPedersenProof))
+	proofBytes, err := canonicalWireMessageBytes(&payload.RingPedersenProof, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptedRP := make([]byte, len(proofBytes))
 	for i := range corruptedRP {
-		corruptedRP[i] = payload.RingPedersenProof[i] ^ 0xFF
+		corruptedRP[i] = proofBytes[i] ^ 0xFF
 	}
 	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{RingPedersenProof: corruptedRP})
 	if err != nil {
@@ -119,29 +125,37 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 		return nil, errors.New("chain code must be 32 bytes")
 	}
 	// Apply overrides: use original value when override is nil.
-	pkBytes := p.PaillierPublicKey
-	if o.PaillierPublicKey != nil {
-		pkBytes = o.PaillierPublicKey
-	} else if _, err := pai.UnmarshalPublicKey(pkBytes); err != nil {
+	pkBytes, err := canonicalWireMessageBytes(&p.PaillierPublicKey, testLimits())
+	if err != nil {
 		return nil, err
 	}
-	modProof := p.PaillierProof
+	if o.PaillierPublicKey != nil {
+		pkBytes = o.PaillierPublicKey
+	}
+	modProof, err := canonicalWireMessageBytes(&p.PaillierProof, testLimits())
+	if err != nil {
+		return nil, err
+	}
 	if o.PaillierProof != nil {
 		modProof = o.PaillierProof
 	}
-	rpProof := p.RingPedersenProof
+	ringPedersenParams, err := canonicalWireMessageBytes(&p.RingPedersenParams, testLimits())
+	if err != nil {
+		return nil, err
+	}
+	rpProof, err := canonicalWireMessageBytes(&p.RingPedersenProof, testLimits())
+	if err != nil {
+		return nil, err
+	}
 	if o.RingPedersenProof != nil {
 		rpProof = o.RingPedersenProof
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParams(p.RingPedersenParams); err != nil {
-		return nil, err
 	}
 	return testutil.MarshalFieldsByName(tss.Version, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, map[string][]byte{
 		"Commitments":        wire.EncodeBytesList(p.Commitments),
 		"PaillierPublicKey":  wire.NonNilBytes(pkBytes),
 		"PaillierProof":      wire.NonNilBytes(modProof),
 		"ChainCodeCommit":    wire.NonNilBytes(p.ChainCodeCommit),
-		"RingPedersenParams": wire.NonNilBytes(p.RingPedersenParams),
+		"RingPedersenParams": wire.NonNilBytes(ringPedersenParams),
 		"RingPedersenProof":  wire.NonNilBytes(rpProof),
 	})
 }
@@ -172,9 +186,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.PaillierProof) > 0 {
-		payload.PaillierProof[len(payload.PaillierProof)-1] ^= 1
-	}
+	payload.PaillierProof.TranscriptHash[0] ^= 1
 	mutated, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -209,9 +221,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(payload.RingPedersenProof) > 0 {
-		payload.RingPedersenProof[len(payload.RingPedersenProof)-1] ^= 1
-	}
+	payload.RingPedersenProof.TranscriptHash[0] ^= 1
 	mutated, err := marshalKeygenCommitmentsPayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -386,9 +396,13 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use a bypass that skips key validation but still produces valid wire format.
-	corruptedKey := make([]byte, len(payload.PaillierPublicKey))
+	keyBytes, err := canonicalWireMessageBytes(&payload.PaillierPublicKey, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	corruptedKey := make([]byte, len(keyBytes))
 	for i := range corruptedKey {
-		corruptedKey[i] = payload.PaillierPublicKey[i] ^ 0xFF
+		corruptedKey[i] = keyBytes[i] ^ 0xFF
 	}
 	mutated, err := marshalKeygenCommitmentsPayloadBypass(payload, keygenCommitmentsOverrides{PaillierPublicKey: corruptedKey})
 	if err != nil {

@@ -916,8 +916,8 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 		name   string
 		mutate func(*presignRound2Payload)
 	}{
-		{name: "delta", mutate: func(p *presignRound2Payload) { p.Delta.Proof[0] ^= 1 }},
-		{name: "sigma", mutate: func(p *presignRound2Payload) { p.Sigma.Proof[0] ^= 1 }},
+		{name: "delta", mutate: func(p *presignRound2Payload) { p.Delta.Proof.TranscriptHash[0] ^= 1 }},
+		{name: "sigma", mutate: func(p *presignRound2Payload) { p.Sigma.Proof.TranscriptHash[0] ^= 1 }},
 		{name: "echo", mutate: func(p *presignRound2Payload) { p.Round1Echo[0] ^= 1 }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -976,7 +976,11 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.PaillierPublicKey = shares[1].PaillierPublicKeyBytes()
+	paillierPublicKey, err := shares[1].paillierPublicFor(1, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.PaillierPublicKey = *paillierPublicKey
 	mutated, err := marshalPresignRound1Payload(payload)
 	if err != nil {
 		t.Fatal(err)

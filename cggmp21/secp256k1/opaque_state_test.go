@@ -21,15 +21,78 @@ func TestFast_LongLivedStateTypesHaveNoExportedFields(t *testing.T) {
 	}
 }
 
+func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		typ    reflect.Type
+		fields []string
+	}{
+		{
+			typ: reflect.TypeFor[keyShareState](),
+			fields: []string{
+				"paillierPublicKey",
+				"paillierPrivateKey",
+				"paillierProof",
+				"paillierPublicKeys",
+				"ringPedersenParams",
+				"ringPedersenProof",
+				"ringPedersenPublic",
+			},
+		},
+		{
+			typ:    reflect.TypeFor[keygenPartyData](),
+			fields: []string{"paillierPub", "ringPedersen"},
+		},
+		{
+			typ:    reflect.TypeFor[refreshPartyData](),
+			fields: []string{"paillierPub", "ringPedersen"},
+		},
+		{
+			typ:    reflect.TypeFor[reshareNewPartyData](),
+			fields: []string{"paillierPub", "ringPedersen"},
+		},
+	} {
+		for _, name := range tc.fields {
+			field, ok := tc.typ.FieldByName(name)
+			if !ok {
+				t.Fatalf("%s missing field %s", tc.typ.Name(), name)
+			}
+			if field.Type == reflect.TypeFor[[]byte]() ||
+				field.Type == reflect.TypeFor[PaillierPublicShare]() ||
+				field.Type == reflect.TypeFor[RingPedersenPublicShare]() ||
+				field.Type == reflect.TypeFor[[]PaillierPublicShare]() ||
+				field.Type == reflect.TypeFor[[]RingPedersenPublicShare]() {
+				t.Errorf("%s.%s still uses a wire snapshot type", tc.typ.Name(), name)
+			}
+		}
+	}
+}
+
 func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
 	k.state.parties = tss.NewPartySet(1, 2)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
 	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
-	k.state.paillierPublicKeys = []PaillierPublicShare{{Party: 1, PublicKey: []byte{4}, Proof: []byte{5}}}
-	k.state.ringPedersenPublic = []RingPedersenPublicShare{{Party: 1, Params: []byte{6}, Proof: []byte{7}}}
+	paillierMaterial, err := paillierPublicMaterialFromSnapshot(testPaillierPublicShare(t), testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ringPedersenMaterial, err := ringPedersenPublicMaterialFromSnapshot(testRingPedersenPublicShare(t), testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	k.state.paillierPublicKeys = []paillierPublicMaterial{paillierMaterial}
+	k.state.ringPedersenPublic = []ringPedersenPublicMaterial{ringPedersenMaterial}
 	k.state.keygenConfirmations = []*KeygenConfirmation{{Sender: 8}}
+	paillierBefore, err := k.state.paillierPublicKeys[0].snapshot(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ringPedersenBefore, err := k.state.ringPedersenPublic[0].snapshot(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	parties := k.Parties()
 	parties[0] = 99
@@ -46,13 +109,19 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	confirmations := k.KeygenConfirmations()
 	confirmations[0].Sender = 99
 
+	paillierAfter, err := k.state.paillierPublicKeys[0].snapshot(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	ringPedersenAfter, err := k.state.ringPedersenPublic[0].snapshot(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if k.state.parties[0] != 1 ||
 		k.state.groupCommitments[0][0] != 1 ||
 		k.state.verificationShares[0].PublicKey[0] != 3 ||
-		k.state.paillierPublicKeys[0].PublicKey[0] != 4 ||
-		k.state.paillierPublicKeys[0].Proof[0] != 5 ||
-		k.state.ringPedersenPublic[0].Params[0] != 6 ||
-		k.state.ringPedersenPublic[0].Proof[0] != 7 ||
+		!reflect.DeepEqual(paillierBefore, paillierAfter) ||
+		!reflect.DeepEqual(ringPedersenBefore, ringPedersenAfter) ||
 		k.state.keygenConfirmations[0].Sender != 8 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
@@ -92,14 +161,15 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 
 func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 	t.Parallel()
+	privateKey := testPaillierPrivateKey(t)
 	key := &KeyShare{state: &keyShareState{
 		chainCode:          []byte{1, 2},
 		secret:             fillSecretScalar(t, 1),
-		paillierPrivateKey: []byte{3, 4},
+		paillierPrivateKey: privateKey,
 	}}
 	keyHandle := *key
 	keyHandle.Destroy()
-	if key.state.secret.FixedLen() != 0 || key.state.chainCode[0] != 0 || key.state.paillierPrivateKey[0] != 0 {
+	if key.state.secret.FixedLen() != 0 || key.state.chainCode[0] != 0 || privateKey.Lambda.FixedLen() != 0 {
 		t.Fatal("shallow KeyShare copy did not share Destroy lifecycle")
 	}
 
@@ -115,10 +185,11 @@ func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 
 func TestFast_KeygenAccessorReturnsIndependentKeyShareState(t *testing.T) {
 	t.Parallel()
+	privateKey := testPaillierPrivateKey(t)
 	internal := &KeyShare{state: &keyShareState{
 		secret:             fillSecretScalar(t, 7),
 		chainCode:          []byte{1, 2},
-		paillierPrivateKey: []byte{3, 4},
+		paillierPrivateKey: privateKey,
 	}}
 	session := &KeygenSession{
 		state:     keygenConfirmed,
@@ -132,7 +203,7 @@ func TestFast_KeygenAccessorReturnsIndependentKeyShareState(t *testing.T) {
 	share.Destroy()
 	if internal.state.secret.FixedLen() == 0 ||
 		internal.state.chainCode[0] == 0 ||
-		internal.state.paillierPrivateKey[0] == 0 {
+		privateKey.Lambda.FixedLen() == 0 {
 		t.Fatal("destroying accessor result changed session-owned key share")
 	}
 }

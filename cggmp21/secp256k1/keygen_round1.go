@@ -10,7 +10,6 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	pai "github.com/islishude/tss/internal/paillier"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -54,15 +53,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	paillierPubBytes, err := paillierKey.PublicKey.MarshalBinary()
+	modDomain, err := keygenModulusDomain(config, config.Self, &paillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.Reader(), keygenModulusDomain(config, config.Self, paillierPubBytes, planHash), paillierKey, config.Self)
-	if err != nil {
-		return nil, nil, err
-	}
-	modProofBytes, err := zkpai.Marshal(modProof)
+	modProof, err := zkpai.ProveModulus(config.Reader(), modDomain, paillierKey, config.Self)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -71,15 +66,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	defer ringPedersenLambda.Destroy()
-	ringPedersenParamsBytes, err := zkpai.MarshalRingPedersenParams(ringPedersenParams)
+	ringDomain, err := keygenRingPedersenDomain(config, config.Self, ringPedersenParams, planHash, limits)
 	if err != nil {
 		return nil, nil, err
 	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), keygenRingPedersenDomain(config, config.Self, ringPedersenParamsBytes, planHash), paillierKey, ringPedersenParams, ringPedersenLambda, config.Self)
-	if err != nil {
-		return nil, nil, err
-	}
-	ringPedersenProofBytes, err := zkpai.Marshal(ringPedersenProof)
+	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), ringDomain, paillierKey, ringPedersenParams, ringPedersenLambda, config.Self)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -108,8 +99,16 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 				share:           localShare,
 				chainCode:       bytes.Clone(chainCode),
 				chainCodeCommit: bytes.Clone(chainCodeCommit),
-				paillierPub:     PaillierPublicShare{Party: id, PublicKey: paillierPubBytes, Proof: modProofBytes},
-				ringPedersen:    RingPedersenPublicShare{Party: id, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
+				paillierPub: paillierPublicMaterial{
+					Party:     id,
+					PublicKey: clonePaillierPublicKey(&paillierKey.PublicKey),
+					Proof:     modProof.Clone(),
+				},
+				ringPedersen: ringPedersenPublicMaterial{
+					Party:  id,
+					Params: cloneRingPedersenParams(ringPedersenParams),
+					Proof:  ringPedersenProof.Clone(),
+				},
 			}
 		} else {
 			partyData[id] = new(keygenPartyData)
@@ -128,11 +127,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
 		Commitments:        commitments,
-		PaillierPublicKey:  paillierPubBytes,
-		PaillierProof:      modProofBytes,
+		PaillierPublicKey:  paillierKey.PublicKey,
+		PaillierProof:      *modProof,
 		ChainCodeCommit:    chainCodeCommit,
-		RingPedersenParams: ringPedersenParamsBytes,
-		RingPedersenProof:  ringPedersenProofBytes,
+		RingPedersenParams: *ringPedersenParams,
+		RingPedersenProof:  *ringPedersenProof,
 		PlanHash:           planHash,
 	}, s.limits)
 	if err != nil {
@@ -206,32 +205,12 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 		)
 	}
-	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, s.limits.Paillier.MaxModulusBits)
+	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
 	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed Paillier public key",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(p.PaillierProof)
-	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed Paillier modulus proof",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
-	}
+	pk := &p.PaillierPublicKey
+	proof := &p.PaillierProof
 	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return nil, verificationErrorWithEvidence(
 			env,
@@ -240,10 +219,14 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			tss.NewPartySet(env.From),
 			err,
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, env.From, proof) {
+	modDomain, err := keygenModulusDomain(s.cfg, env.From, pk, s.planHash, s.limits)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	if !zkpai.VerifyModulus(modDomain, pk, env.From, proof) {
 		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -255,22 +238,10 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			tss.NewPartySet(env.From),
 			errors.New("invalid Paillier modulus proof"),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	ringParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, s.limits.Paillier.MaxModulusBits)
-	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed Ring-Pedersen parameters",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
-	}
+	ringParams := &p.RingPedersenParams
 	if ringParams.N.Cmp(pk.N) != 0 {
 		return nil, verificationErrorWithEvidence(
 			env,
@@ -279,23 +250,15 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
-	ringProof, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof)
+	ringProof := &p.RingPedersenProof
+	ringDomain, err := keygenRingPedersenDomain(s.cfg, env.From, ringParams, s.planHash, s.limits)
 	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			env,
-			tss.EvidenceKindKeygenPaillier,
-			"malformed Ring-Pedersen proof",
-			tss.NewPartySet(env.From),
-			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
-		)
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, env.From, ringProof) {
+	if !zkpai.VerifyRingPedersen(ringDomain, ringParams, env.From, ringProof) {
 		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
@@ -307,7 +270,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 			tss.NewPartySet(env.From),
 			errors.New("invalid Ring-Pedersen proof"),
 			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			hashEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey),
+			observedPaillierKeyHash,
 		)
 	}
 
@@ -318,8 +281,16 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be %d bytes, got %d", sha256.Size, len(p.ChainCodeCommit)))
 	}
 	pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
-	pd.paillierPub = PaillierPublicShare{Party: env.From, PublicKey: p.PaillierPublicKey, Proof: p.PaillierProof}
-	pd.ringPedersen = RingPedersenPublicShare{Party: env.From, Params: p.RingPedersenParams, Proof: p.RingPedersenProof}
+	pd.paillierPub = paillierPublicMaterial{
+		Party:     env.From,
+		PublicKey: clonePaillierPublicKey(&p.PaillierPublicKey),
+		Proof:     p.PaillierProof.Clone(),
+	}
+	pd.ringPedersen = ringPedersenPublicMaterial{
+		Party:  env.From,
+		Params: cloneRingPedersenParams(&p.RingPedersenParams),
+		Proof:  p.RingPedersenProof.Clone(),
+	}
 
 	// ---- 5. EMIT ----
 	return s.tryComplete()

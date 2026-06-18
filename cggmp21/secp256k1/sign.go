@@ -19,6 +19,7 @@ import (
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
@@ -637,10 +638,10 @@ func (s *SignSession) abort() {
 }
 
 type presignRound1Payload struct {
-	Gamma             []byte `json:"gamma" wire:"1,bytes,max_bytes=point"`
-	EncK              []byte `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
-	PaillierPublicKey []byte `json:"paillier_public_key" wire:"3,bytes,max_bytes=paillier_public_key"`
-	PlanHash          []byte `json:"plan_hash" wire:"4,bytes,len=32"`
+	Gamma             []byte        `json:"gamma" wire:"1,bytes,max_bytes=point"`
+	EncK              []byte        `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
+	PaillierPublicKey pai.PublicKey `json:"paillier_public_key" wire:"3,nested,max_bytes=paillier_public_key"`
+	PlanHash          []byte        `json:"plan_hash" wire:"4,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1Payload.
@@ -650,9 +651,9 @@ func (presignRound1Payload) WireType() string { return presignRound1PayloadWireT
 func (presignRound1Payload) WireVersion() uint16 { return tss.Version }
 
 type presignRound1ProofPayload struct {
-	PublicRound1Hash []byte `json:"public_round1_hash" wire:"1,bytes,len=32"`
-	EncKProof        []byte `json:"enc_k_proof" wire:"2,bytes,max_bytes=zk_proof"`
-	PlanHash         []byte `json:"plan_hash" wire:"3,bytes,len=32"`
+	PublicRound1Hash []byte         `json:"public_round1_hash" wire:"1,bytes,len=32"`
+	EncKProof        zkpai.EncProof `json:"enc_k_proof" wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash         []byte         `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1ProofPayload.
@@ -662,8 +663,8 @@ func (presignRound1ProofPayload) WireType() string { return presignRound1ProofPa
 func (presignRound1ProofPayload) WireVersion() uint16 { return tss.Version }
 
 type presignRound2Payload struct {
-	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested"`
-	Sigma      mta.ResponseMessage `json:"sigma" wire:"2,nested"`
+	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested,max_bytes=mta_response"`
+	Sigma      mta.ResponseMessage `json:"sigma" wire:"2,nested,max_bytes=mta_response"`
 	Round1Echo []byte              `json:"round1_echo" wire:"3,bytes,len=32"`
 	PlanHash   []byte              `json:"plan_hash" wire:"4,bytes,len=32"`
 }

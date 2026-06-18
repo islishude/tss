@@ -637,6 +637,112 @@ func TestMessageNestedRejectsLimitViolations(t *testing.T) {
 	}
 }
 
+func TestNestedMaxBytesMarshalRejectsOversized(t *testing.T) {
+	t.Parallel()
+
+	_, err := Marshal(nestedOuterLimitMessage{
+		Inner: nestedOuterLimitInnerMessage{Payload: []byte("too long")},
+	}, WithFieldLimitsForMarshal(FieldLimits{"field": 20}))
+	if err == nil {
+		t.Fatal("expected outer nested max_bytes violation")
+	}
+}
+
+func TestNestedMaxBytesUnmarshalRejectsOversized(t *testing.T) {
+	t.Parallel()
+
+	innerRaw, err := Marshal(nestedOuterLimitInnerMessage{Payload: []byte("too long")})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := MarshalFields(1, "test.nestedouterlimit", []Field{{Tag: 1, Value: innerRaw}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded nestedOuterLimitMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 20})); err == nil {
+		t.Fatal("expected outer nested max_bytes violation")
+	}
+}
+
+func TestNestedMaxBytesMissingLimitFailsClosed(t *testing.T) {
+	t.Parallel()
+
+	msg := nestedOuterLimitMessage{
+		Inner: nestedOuterLimitInnerMessage{Payload: []byte("ok")},
+	}
+	if _, err := Marshal(msg); err == nil {
+		t.Fatal("expected marshal to require named nested limit")
+	}
+
+	raw, err := Marshal(msg, WithFieldLimitsForMarshal(FieldLimits{"field": 1000}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded nestedOuterLimitMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected unmarshal to require named nested limit")
+	}
+}
+
+func TestNestedValidateCalled(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Marshal(nestedHookMessage{Inner: nestedHookInnerMessage{Value: 0}}); err == nil {
+		t.Fatal("expected nested Validate error during marshal")
+	}
+
+	innerRaw, err := MarshalFields(1, "test.nestedhook.inner", []Field{{Tag: 1, Value: Uint16(0)}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := MarshalFields(1, "test.nestedhook", []Field{{Tag: 1, Value: innerRaw}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded nestedHookMessage
+	if err := Unmarshal(raw, &decoded); err == nil {
+		t.Fatal("expected nested Validate error during unmarshal")
+	}
+}
+
+func TestNestedAfterUnmarshalCalled(t *testing.T) {
+	t.Parallel()
+
+	raw, err := Marshal(nestedHookMessage{Inner: nestedHookInnerMessage{Value: 7}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded nestedHookMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if !decoded.Inner.AfterCalled {
+		t.Fatal("nested AfterUnmarshalWire was not called")
+	}
+}
+
+func TestNestedPointerNilRejected(t *testing.T) {
+	t.Parallel()
+
+	if _, err := Marshal(nestedPointerMessage{}, WithFieldLimitsForMarshal(FieldLimits{"field": 1000})); err == nil {
+		t.Fatal("expected nil nested pointer to be rejected")
+	}
+}
+
+func TestNestedErrorIncludesFieldPath(t *testing.T) {
+	t.Parallel()
+
+	raw, err := Marshal(nestedHookMessage{Inner: nestedHookInnerMessage{Value: 0}})
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if !strings.Contains(err.Error(), "Inner") || !strings.Contains(err.Error(), "tag 1") {
+		t.Fatalf("error should mention nested field name and tag: %v", err)
+	}
+	_ = raw
+}
+
 func TestMessageValidateAndHooks(t *testing.T) {
 	t.Parallel()
 

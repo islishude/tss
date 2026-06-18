@@ -117,18 +117,17 @@ func TestVerifyStartErrors(t *testing.T) {
 	})
 
 	t.Run("truncated proof", func(t *testing.T) {
-		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, proof[:4])
+		truncated := proof.Clone()
+		truncated.TranscriptHash = truncated.TranscriptHash[:4]
+		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, truncated)
 		if err == nil {
 			t.Fatal("expected error for truncated proof")
 		}
 	})
 
 	t.Run("garbled proof", func(t *testing.T) {
-		garbled := make([]byte, len(proof))
-		copy(garbled, proof)
-		for i := range garbled {
-			garbled[i] ^= 0xFF
-		}
+		garbled := proof.Clone()
+		garbled.Version = 99
 		err := VerifyStart(params, []byte("domain"), opening.Message, &skA.PublicKey, *rpB, garbled)
 		if err == nil {
 			t.Fatal("expected error for garbled proof")

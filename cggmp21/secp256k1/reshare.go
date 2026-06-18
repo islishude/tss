@@ -10,6 +10,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire/wireutil"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 const (
@@ -33,8 +34,8 @@ type reshareDealerPartyData struct {
 // reshareNewPartyData holds per-new-party state for a single reshare receiver participant.
 // Auxiliary material is populated during round 1; confirmation is set during round 2.
 type reshareNewPartyData struct {
-	paillierPub  PaillierPublicShare
-	ringPedersen RingPedersenPublicShare
+	paillierPub  paillierPublicMaterial
+	ringPedersen ringPedersenPublicMaterial
 	confirmation *KeygenConfirmation
 }
 
@@ -88,11 +89,11 @@ func (reshareDealerCommitmentsPayload) WireType() string { return reshareDealerC
 func (reshareDealerCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type reshareReceiverMaterialPayload struct {
-	PaillierPublicKey  []byte `wire:"1,bytes,max_bytes=paillier_public_key"`
-	PaillierProof      []byte `wire:"2,bytes,max_bytes=zk_proof"`
-	RingPedersenParams []byte `wire:"3,bytes,max_bytes=ring_pedersen_params"`
-	RingPedersenProof  []byte `wire:"4,bytes,max_bytes=paillier_proof"`
-	PlanHash           []byte `wire:"5,bytes,len=32"`
+	PaillierPublicKey  pai.PublicKey            `wire:"1,nested,max_bytes=paillier_public_key"`
+	PaillierProof      zkpai.ModulusProof       `wire:"2,nested,max_bytes=zk_proof"`
+	RingPedersenParams zkpai.RingPedersenParams `wire:"3,nested,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  zkpai.RingPedersenProof  `wire:"4,nested,max_bytes=paillier_proof"`
+	PlanHash           []byte                   `wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for reshareReceiverMaterialPayload.
@@ -255,10 +256,10 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		}
 		selfNPD := s.newPartyData[s.selfID]
 		payload, err := marshalReshareReceiverMaterialPayloadWithLimits(reshareReceiverMaterialPayload{
-			PaillierPublicKey:  selfNPD.paillierPub.PublicKey,
-			PaillierProof:      selfNPD.paillierPub.Proof,
-			RingPedersenParams: selfNPD.ringPedersen.Params,
-			RingPedersenProof:  selfNPD.ringPedersen.Proof,
+			PaillierPublicKey:  *clonePaillierPublicKey(selfNPD.paillierPub.PublicKey),
+			PaillierProof:      *selfNPD.paillierPub.Proof.Clone(),
+			RingPedersenParams: *cloneRingPedersenParams(selfNPD.ringPedersen.Params),
+			RingPedersenProof:  *selfNPD.ringPedersen.Proof.Clone(),
 			PlanHash:           s.planHash,
 		}, s.limits)
 		if err != nil {
@@ -402,7 +403,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if !ok {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("party %d is not a new party", env.From))
 		}
-		if len(npd.paillierPub.PublicKey) > 0 {
+		if npd.paillierPub.PublicKey != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
 		}
 		p, err := tss.DecodeBinaryValueWithLimits[reshareReceiverMaterialPayload](env.Payload, s.limits)
@@ -586,7 +587,8 @@ func (s *ReshareSession) allReshareDealerDataReceived() bool {
 func (s *ReshareSession) allReshareReceiverMaterialReceived() bool {
 	for _, id := range s.newParties {
 		npd := s.newPartyData[id]
-		if npd == nil || len(npd.paillierPub.PublicKey) == 0 || len(npd.ringPedersen.Params) == 0 {
+		if npd == nil || npd.paillierPub.PublicKey == nil || npd.paillierPub.Proof == nil ||
+			npd.ringPedersen.Params == nil || npd.ringPedersen.Proof == nil {
 			return false
 		}
 	}

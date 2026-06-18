@@ -406,7 +406,13 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	finalShare.state.chainCode = chainCode
 	// Recomputation: now that we have the real chain codes, produce the final
 	// transcript hash that binds them.
-	finalShare.state.keygenTranscriptHash = s.keygenTranscriptHash(finalShare.state.groupCommitments)
+	finalTranscriptHash, err := s.keygenTranscriptHash(finalShare.state.groupCommitments)
+	if err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeInvariant, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	finalShare.state.keygenTranscriptHash = finalTranscriptHash
 	// Store parsed confirmation structs directly.
 	finalShare.state.keygenConfirmations = tss.CloneSlices(confirmations)
 	if err := finalShare.ValidateWithLimits(s.limits); err != nil {

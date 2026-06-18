@@ -88,7 +88,15 @@ func TestMTAProductShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(responseDecoded.Proof, response.Proof) {
+	decodedProofRaw, err := responseDecoded.Proof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	responseProofRaw, err := response.Proof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(decodedProofRaw, responseProofRaw) {
 		t.Fatal("MtA response mismatch after round trip")
 	}
 	if _, err := UnmarshalStartMessage([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
@@ -97,7 +105,7 @@ func TestMTAProductShares(t *testing.T) {
 	if _, err := UnmarshalResponseMessage([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
 		t.Fatal("JSON MtA response decoded")
 	}
-	response.Proof[0] ^= 1
+	response.Proof.TranscriptHash[0] ^= 1
 	if _, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA); err == nil {
 		t.Fatal("tampered response proof verified")
 	}

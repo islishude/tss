@@ -7,8 +7,10 @@ import (
 
 	"github.com/islishude/tss"
 
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 const (
@@ -52,6 +54,35 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
 func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
+	limits := DefaultLimits()
+	paillierPublicKey, err := canonicalWireMessageBytes(k.state.paillierPublicKey, limits)
+	if err != nil {
+		return nil, fmt.Errorf("encode Paillier public key: %w", err)
+	}
+	paillierPrivateKey, err := k.state.paillierPrivateKey.MarshalBinary()
+	if err != nil {
+		return nil, fmt.Errorf("encode Paillier private key: %w", err)
+	}
+	paillierProof, err := canonicalWireMessageBytes(k.state.paillierProof, limits)
+	if err != nil {
+		return nil, fmt.Errorf("encode Paillier proof: %w", err)
+	}
+	ringPedersenParams, err := canonicalWireMessageBytes(k.state.ringPedersenParams, limits)
+	if err != nil {
+		return nil, fmt.Errorf("encode Ring-Pedersen parameters: %w", err)
+	}
+	ringPedersenProof, err := canonicalWireMessageBytes(k.state.ringPedersenProof, limits)
+	if err != nil {
+		return nil, fmt.Errorf("encode Ring-Pedersen proof: %w", err)
+	}
+	ringPedersenPublic, err := ringPedersenPublicMaterialSnapshots(k.state.ringPedersenPublic, limits)
+	if err != nil {
+		return nil, err
+	}
+	paillierPublicKeys, err := paillierPublicMaterialSnapshots(k.state.paillierPublicKeys, limits)
+	if err != nil {
+		return nil, err
+	}
 	return &keyShareWire{
 		Party:                  k.state.party,
 		Threshold:              k.state.threshold,
@@ -61,13 +92,13 @@ func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 		Secret:                 k.state.secret,
 		GroupCommitments:       k.state.groupCommitments,
 		VerificationShares:     k.state.verificationShares,
-		PaillierPublicKey:      k.state.paillierPublicKey,
-		PaillierPrivateKey:     k.state.paillierPrivateKey,
-		PaillierProof:          k.state.paillierProof,
-		RingPedersenParams:     k.state.ringPedersenParams,
-		RingPedersenProof:      k.state.ringPedersenProof,
-		RingPedersenPublic:     k.state.ringPedersenPublic,
-		PaillierPublicKeys:     k.state.paillierPublicKeys,
+		PaillierPublicKey:      paillierPublicKey,
+		PaillierPrivateKey:     paillierPrivateKey,
+		PaillierProof:          paillierProof,
+		RingPedersenParams:     ringPedersenParams,
+		RingPedersenProof:      ringPedersenProof,
+		RingPedersenPublic:     ringPedersenPublic,
+		PaillierPublicKeys:     paillierPublicKeys,
 		ShareProof:             k.state.shareProof,
 		KeygenTranscriptHash:   k.state.keygenTranscriptHash,
 		PaillierProofSessionID: k.state.paillierProofSessionID[:],
@@ -82,12 +113,41 @@ func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 }
 
 func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
+	limits := DefaultLimits()
 	if _, err := secpScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
 	sid, err := tss.SessionIDFromBytes(w.PaillierProofSessionID)
 	if err != nil {
 		return nil, fmt.Errorf("invalid paillier proof session id: %w", err)
+	}
+	paillierPublicKey, err := pai.UnmarshalPublicKeyWithMaxModulusBits(w.PaillierPublicKey, limits.Paillier.MaxModulusBits)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Paillier public key: %w", err)
+	}
+	paillierPrivateKey, err := pai.UnmarshalPrivateKey(w.PaillierPrivateKey)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Paillier private key: %w", err)
+	}
+	paillierProof, err := zkpai.UnmarshalModulusProof(w.PaillierProof)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Paillier proof: %w", err)
+	}
+	ringPedersenParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(w.RingPedersenParams, limits.Paillier.MaxModulusBits)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Ring-Pedersen parameters: %w", err)
+	}
+	ringPedersenProof, err := zkpai.UnmarshalRingPedersenProof(w.RingPedersenProof)
+	if err != nil {
+		return nil, fmt.Errorf("invalid Ring-Pedersen proof: %w", err)
+	}
+	ringPedersenPublic, err := ringPedersenPublicMaterialsFromSnapshots(w.RingPedersenPublic, limits)
+	if err != nil {
+		return nil, err
+	}
+	paillierPublicKeys, err := paillierPublicMaterialsFromSnapshots(w.PaillierPublicKeys, limits)
+	if err != nil {
+		return nil, err
 	}
 	return &keyShareState{
 		securityParams:         w.SecurityParams,
@@ -99,13 +159,13 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 		secret:                 w.Secret,
 		groupCommitments:       w.GroupCommitments,
 		verificationShares:     w.VerificationShares,
-		paillierPublicKey:      w.PaillierPublicKey,
-		paillierPrivateKey:     w.PaillierPrivateKey,
-		paillierProof:          w.PaillierProof,
-		ringPedersenParams:     w.RingPedersenParams,
-		ringPedersenProof:      w.RingPedersenProof,
-		ringPedersenPublic:     w.RingPedersenPublic,
-		paillierPublicKeys:     w.PaillierPublicKeys,
+		paillierPublicKey:      paillierPublicKey,
+		paillierPrivateKey:     paillierPrivateKey,
+		paillierProof:          paillierProof,
+		ringPedersenParams:     ringPedersenParams,
+		ringPedersenProof:      ringPedersenProof,
+		ringPedersenPublic:     ringPedersenPublic,
+		paillierPublicKeys:     paillierPublicKeys,
 		shareProof:             w.ShareProof,
 		keygenTranscriptHash:   w.KeygenTranscriptHash,
 		paillierProofSessionID: sid,

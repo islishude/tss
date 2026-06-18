@@ -346,7 +346,11 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
 all active Paillier ZK proof types (Πmod, Πprm, Πenc, Πaff-g, Πlog\*), and
 Schnorr share proofs all use the same strict TLV encoding as other binary
-records. Keygen, presign, and signing payloads reject
+records. CGGMP21 keygen, refresh, reshare, and presign payloads carry
+Paillier public keys, Ring-Pedersen parameters, and Paillier/MtA proofs as
+nested typed TLV records, not pre-serialized opaque byte strings. Nested fields
+still enforce the enclosing field's named `max_bytes` limit before decoding.
+Keygen, presign, and signing payloads reject
 JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
@@ -356,6 +360,7 @@ Current presign wire shapes are:
 - `mta.start-message`: field 1 is the Paillier ciphertext only.
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
+- `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
 - `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (signprep proof bytes).
 - `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 

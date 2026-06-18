@@ -67,6 +67,26 @@ func validatePayloadWithLimits[T any](p T, limits Limits) error {
 	return nil
 }
 
+func validatePaillierPublicKeyWithLimits(pk *pai.PublicKey, limits Limits) error {
+	if pk == nil {
+		return errors.New("nil Paillier public key")
+	}
+	if pk.N != nil && pk.N.BitLen() > limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("paillier modulus too large: %d > %d", pk.N.BitLen(), limits.Paillier.MaxModulusBits)
+	}
+	return pk.Validate()
+}
+
+func validateRingPedersenParamsWithLimits(params *zkpai.RingPedersenParams, limits Limits) error {
+	if params == nil {
+		return errors.New("nil Ring-Pedersen parameters")
+	}
+	if params.N != nil && params.N.BitLen() > limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("ring-pedersen modulus too large: %d > %d", params.N.BitLen(), limits.Paillier.MaxModulusBits)
+	}
+	return zkpai.ValidateRingPedersenParams(params)
+}
+
 // MarshalBinary encodes the keygen commitments payload.
 func (p keygenCommitmentsPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -92,10 +112,10 @@ func (p keygenCommitmentsPayload) Validate() error {
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+	if err := p.PaillierProof.Validate(); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
+	if err := p.RingPedersenProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.ChainCodeCommit) != 32 {
@@ -112,10 +132,10 @@ func (p keygenCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validateRingPedersenParamsWithLimits(&p.RingPedersenParams, limits); err != nil {
 		return err
 	}
 	return nil
@@ -199,8 +219,7 @@ func (p presignRound1Payload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	_, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits)
-	return err
+	return validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits)
 }
 
 func marshalPresignRound1ProofPayloadWithLimits(p presignRound1ProofPayload, limits Limits) ([]byte, error) {
@@ -232,7 +251,7 @@ func (p presignRound1ProofPayload) Validate() error {
 	if len(p.PublicRound1Hash) != sha256.Size {
 		return errors.New("round1 public hash must be 32 bytes")
 	}
-	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
+	if err := p.EncKProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -514,10 +533,10 @@ func (p *reshareReceiverMaterialPayload) UnmarshalBinaryWithLimits(in []byte, li
 
 // Validate checks the reshare receiver material payload structure.
 func (p reshareReceiverMaterialPayload) Validate() error {
-	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+	if err := p.PaillierProof.Validate(); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
+	if err := p.RingPedersenProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -531,22 +550,22 @@ func (p reshareReceiverMaterialPayload) ValidateWithLimits(limits Limits) error 
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validateRingPedersenParamsWithLimits(&p.RingPedersenParams, limits); err != nil {
 		return err
 	}
 	return nil
 }
 
 type refreshCommitmentsPayload struct {
-	Commitments        [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PaillierPublicKey  []byte   `wire:"2,bytes,max_bytes=paillier_public_key"`
-	PaillierProof      []byte   `wire:"3,bytes,max_bytes=zk_proof"`
-	RingPedersenParams []byte   `wire:"4,bytes,max_bytes=ring_pedersen_params"`
-	RingPedersenProof  []byte   `wire:"5,bytes,max_bytes=paillier_proof"`
-	PlanHash           []byte   `wire:"6,bytes,len=32"`
+	Commitments        [][]byte                 `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PaillierPublicKey  pai.PublicKey            `wire:"2,nested,max_bytes=paillier_public_key"`
+	PaillierProof      zkpai.ModulusProof       `wire:"3,nested,max_bytes=zk_proof"`
+	RingPedersenParams zkpai.RingPedersenParams `wire:"4,nested,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  zkpai.RingPedersenProof  `wire:"5,nested,max_bytes=paillier_proof"`
+	PlanHash           []byte                   `wire:"6,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for refreshCommitmentsPayload.
@@ -595,10 +614,10 @@ func (p refreshCommitmentsPayload) Validate() error {
 	if err := validateRefreshCommitments(p.Commitments, len(p.Commitments)); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+	if err := p.PaillierProof.Validate(); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
+	if err := p.RingPedersenProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -612,10 +631,10 @@ func (p refreshCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits); err != nil {
 		return err
 	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+	if err := validateRingPedersenParamsWithLimits(&p.RingPedersenParams, limits); err != nil {
 		return err
 	}
 	return nil

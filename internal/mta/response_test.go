@@ -6,6 +6,7 @@ import (
 
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // Tier 0: ResponseMessage validation and wire error paths (no crypto keygen).
@@ -15,18 +16,20 @@ func TestResponseMessageValidate(t *testing.T) {
 	// A valid ResponseMessage needs a valid AffGProof. Construct a minimal one via
 	// the seedMessages helper and validate it.
 	_, validResponse := seedMessages(t)
+	badProof := validResponse.Proof
+	badProof.Version = 99
 
 	tests := []struct {
 		name       string
 		ciphertext []byte
-		proof      []byte
+		proof      zkpai.AffGProof
 		wantErr    bool
 	}{
 		{name: "valid", ciphertext: validResponse.Ciphertext, proof: validResponse.Proof, wantErr: false},
 		{name: "empty ciphertext", ciphertext: nil, proof: validResponse.Proof, wantErr: true},
-		{name: "empty proof", ciphertext: validResponse.Ciphertext, proof: nil, wantErr: true},
+		{name: "empty proof", ciphertext: validResponse.Ciphertext, proof: zkpai.AffGProof{}, wantErr: true},
 		{name: "leading zero ciphertext", ciphertext: []byte{0x00, 0x01}, proof: validResponse.Proof, wantErr: true},
-		{name: "garbled proof", ciphertext: validResponse.Ciphertext, proof: []byte{0xFF, 0xFE}, wantErr: true},
+		{name: "garbled proof", ciphertext: validResponse.Ciphertext, proof: badProof, wantErr: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -45,7 +48,7 @@ func TestResponseMessageValidate(t *testing.T) {
 func TestResponseMessageMarshalBinaryInvalid(t *testing.T) {
 	t.Parallel()
 
-	m := ResponseMessage{Ciphertext: nil, Proof: nil}
+	m := ResponseMessage{Ciphertext: nil, Proof: zkpai.AffGProof{}}
 	_, err := m.MarshalBinary()
 	if err == nil {
 		t.Fatal("expected error marshaling invalid response message")
@@ -55,6 +58,7 @@ func TestResponseMessageMarshalBinaryInvalid(t *testing.T) {
 func TestUnmarshalResponseMessageErrors(t *testing.T) {
 	t.Parallel()
 	_, validResponse := seedMessages(t)
+	validProofRaw := mustMarshalAffGProof(t, validResponse.Proof)
 	validRaw, err := validResponse.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
@@ -97,7 +101,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 			data: func() []byte {
 				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
-					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: validResponse.Proof},
+					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: validProofRaw},
 					{Tag: 99, Value: []byte{0x01}},
 				})
 				return b
@@ -124,16 +128,25 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 }
 
 // mustMarshalResponseAtVersion marshals a ResponseMessage with an overridden version.
-func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext, proof []byte) []byte {
+func mustMarshalResponseAtVersion(t *testing.T, version uint16, ciphertext []byte, proof zkpai.AffGProof) []byte {
 	t.Helper()
 	b, err := wire.MarshalFields(version, responseMessageWireType, []wire.Field{
 		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: ciphertext},
-		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: proof},
+		{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: mustMarshalAffGProof(t, proof)},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	return b
+}
+
+func mustMarshalAffGProof(t *testing.T, proof zkpai.AffGProof) []byte {
+	t.Helper()
+	raw, err := proof.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 // Tier 1: Respond error paths (needs crypto keygen).
@@ -161,7 +174,7 @@ func TestResponseMessageBinaryRoundTrip(t *testing.T) {
 	if !bytes.Equal(decoded.Ciphertext, validResponse.Ciphertext) {
 		t.Fatal("ciphertext mismatch after round trip")
 	}
-	if !bytes.Equal(decoded.Proof, validResponse.Proof) {
+	if !bytes.Equal(mustMarshalAffGProof(t, decoded.Proof), mustMarshalAffGProof(t, validResponse.Proof)) {
 		t.Fatal("proof mismatch after round trip")
 	}
 }

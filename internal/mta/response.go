@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/paillier/paillierct"
@@ -21,8 +22,8 @@ const (
 
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
 type ResponseMessage struct {
-	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`
-	Proof      []byte `json:"proof" wire:"2,bytes"`
+	Ciphertext []byte          `json:"ciphertext" wire:"1,bytes"`
+	Proof      zkpai.AffGProof `json:"proof" wire:"2,nested,max_bytes=zk_proof"`
 }
 
 // WireType returns the canonical wire type identifier for ResponseMessage.
@@ -33,7 +34,7 @@ func (ResponseMessage) WireVersion() uint16 { return messageVersion }
 
 // MarshalBinary encodes the MtA response message using the object-level wire codec.
 func (m ResponseMessage) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(m)
+	return wire.Marshal(m, wire.WithFieldLimitsForMarshal(responseMessageFieldLimits()))
 }
 
 // UnmarshalResponseMessage decodes a TLV MtA response message using the object-level wire codec.
@@ -48,7 +49,7 @@ func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
 // UnmarshalBinary decodes a TLV MtA response message.
 func (m *ResponseMessage) UnmarshalBinary(in []byte) error {
 	var decoded ResponseMessage
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(responseMessageFieldLimits())); err != nil {
 		return err
 	}
 	*m = decoded
@@ -60,10 +61,20 @@ func (m ResponseMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
 	}
-	if _, err := zkpai.UnmarshalAffGProof(m.Proof); err != nil {
+	if err := m.Proof.Validate(); err != nil {
 		return fmt.Errorf("invalid MtA response proof: %w", err)
 	}
 	return nil
+}
+
+func responseMessageFieldLimits() wire.FieldLimits {
+	return wire.FieldLimits{
+		"zk_proof":         tss.DefaultMaxZKProofBytes,
+		"paillier_modulus": tss.DefaultMaxPaillierCiphertextBytes,
+		"point":            tss.DefaultMaxPointBytes,
+		"signed_response":  tss.DefaultMaxPaillierCiphertextBytes,
+		"paillier_signed":  tss.DefaultMaxPaillierCiphertextBytes,
+	}
 }
 
 // Respond creates Enc(a*b+beta) under the initiator's Paillier key and proves
@@ -77,7 +88,7 @@ func (m ResponseMessage) Validate() error {
 //   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
-func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *secret.Scalar, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *secret.Scalar, error) {
+func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof *zkpai.EncProof, b *secret.Scalar, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *secret.Scalar, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -149,14 +160,10 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 	if err != nil {
 		return nil, nil, err
 	}
-	proofBytes, err := proof.MarshalBinary()
-	if err != nil {
-		return nil, nil, err
-	}
 	betaShareScalar := secp.ScalarNeg(mustSecpScalar(beta))
 	betaShare, err := secret.NewScalar(betaShareScalar.Bytes(), secp.ScalarSize)
 	if err != nil {
 		return nil, nil, err
 	}
-	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: proofBytes}, betaShare, nil
+	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: *proof}, betaShare, nil
 }

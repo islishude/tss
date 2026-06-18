@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/transcript"
+	"github.com/islishude/tss/internal/wire"
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
@@ -159,10 +160,11 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 	if key == nil {
 		return nil
 	}
+	paillierPublicKeys, _ := paillierPublicMaterialSnapshots(key.state.paillierPublicKeys, DefaultLimits())
 	fields := []tss.EvidenceField{
 		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)),
 		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.publicKey),
-		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(key.state.paillierPublicKeys)),
+		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(paillierPublicKeys)),
 	}
 	if len(key.state.keygenTranscriptHash) > 0 {
 		fields = append(fields, rawEvidenceField(evidenceFieldKeygenTranscriptHash, key.state.keygenTranscriptHash))
@@ -180,6 +182,21 @@ func rawEvidenceField(key string, value []byte) tss.EvidenceField {
 
 func hashEvidenceField(key string, value []byte) tss.EvidenceField {
 	return rawEvidenceField(key, hashBytes(value))
+}
+
+func canonicalWireMessageBytes(msg wire.Message, limits Limits) ([]byte, error) {
+	if msg == nil {
+		return nil, errors.New("nil wire message")
+	}
+	return wire.Marshal(msg, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
+func hashWireEvidenceField(key string, msg wire.Message, limits Limits) (tss.EvidenceField, error) {
+	raw, err := canonicalWireMessageBytes(msg, limits)
+	if err != nil {
+		return tss.EvidenceField{}, fmt.Errorf("%s: %w", key, err)
+	}
+	return hashEvidenceField(key, raw), nil
 }
 
 func hashBytes(value []byte) []byte {

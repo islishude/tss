@@ -362,7 +362,7 @@ func TestCGGMP21PresignRound1ProofOrderingAndReplay(t *testing.T) {
 		}
 		proof := presignRound1ProofEnvelopeFor(t, out2, 1)
 		mutated, err := mutatePresignRound1ProofPayload(proof.Payload, func(p *presignRound1ProofPayload) {
-			p.EncKProof[len(p.EncKProof)-1] ^= 1
+			p.EncKProof.TranscriptHash[0] ^= 1
 		})
 		if err != nil {
 			t.Fatal(err)

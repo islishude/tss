@@ -70,7 +70,11 @@ func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenC
 	if !bytes.Equal(c.PublicKey, s.oldPublicKey) {
 		return fmt.Errorf("reshare confirmation public key mismatch from party %d", c.Sender)
 	}
-	if !bytes.Equal(c.TranscriptHash, s.reshareTranscriptHash(newCommitments)) {
+	transcriptHash, err := s.reshareTranscriptHash(newCommitments)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(c.TranscriptHash, transcriptHash) {
 		return fmt.Errorf("reshare confirmation transcript mismatch from party %d", c.Sender)
 	}
 	if !bytes.Equal(c.PlanHash, s.planHash) {

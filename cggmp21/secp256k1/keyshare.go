@@ -99,18 +99,26 @@ func (k *KeyShare) VerificationShares() []VerificationShare {
 
 // PaillierPublicKeyBytes returns a copy of the local Paillier public key.
 func (k *KeyShare) PaillierPublicKeyBytes() []byte {
-	if k == nil || k.state == nil {
+	if k == nil || k.state == nil || k.state.paillierPublicKey == nil {
 		return nil
 	}
-	return slices.Clone(k.state.paillierPublicKey)
+	raw, err := canonicalWireMessageBytes(k.state.paillierPublicKey, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // PaillierProofBytes returns a copy of the local Paillier modulus proof.
 func (k *KeyShare) PaillierProofBytes() []byte {
-	if k == nil || k.state == nil {
+	if k == nil || k.state == nil || k.state.paillierProof == nil {
 		return nil
 	}
-	return slices.Clone(k.state.paillierProof)
+	raw, err := canonicalWireMessageBytes(k.state.paillierProof, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // PaillierPublicKeys returns deep copies of all participant Paillier public keys.
@@ -118,23 +126,35 @@ func (k *KeyShare) PaillierPublicKeys() []PaillierPublicShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return tss.CloneSlices(k.state.paillierPublicKeys)
+	out, err := paillierPublicMaterialSnapshots(k.state.paillierPublicKeys, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // RingPedersenParamsBytes returns a copy of the local Ring-Pedersen parameters.
 func (k *KeyShare) RingPedersenParamsBytes() []byte {
-	if k == nil || k.state == nil {
+	if k == nil || k.state == nil || k.state.ringPedersenParams == nil {
 		return nil
 	}
-	return slices.Clone(k.state.ringPedersenParams)
+	raw, err := canonicalWireMessageBytes(k.state.ringPedersenParams, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // RingPedersenProofBytes returns a copy of the local Ring-Pedersen proof.
 func (k *KeyShare) RingPedersenProofBytes() []byte {
-	if k == nil || k.state == nil {
+	if k == nil || k.state == nil || k.state.ringPedersenProof == nil {
 		return nil
 	}
-	return slices.Clone(k.state.ringPedersenProof)
+	raw, err := canonicalWireMessageBytes(k.state.ringPedersenProof, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return raw
 }
 
 // RingPedersenPublic returns deep copies of all public Ring-Pedersen records.
@@ -142,7 +162,11 @@ func (k *KeyShare) RingPedersenPublic() []RingPedersenPublicShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return tss.CloneSlices(k.state.ringPedersenPublic)
+	out, err := ringPedersenPublicMaterialSnapshots(k.state.ringPedersenPublic, DefaultLimits())
+	if err != nil {
+		return nil
+	}
+	return out
 }
 
 // PaillierProofSessionID returns the session bound into the Paillier proof.
@@ -278,11 +302,11 @@ func (k KeyShare) redactedString() string {
 		len(k.state.chainCode),
 		len(k.state.groupCommitments),
 		len(k.state.verificationShares),
-		len(k.state.paillierPublicKey),
-		len(k.state.paillierProof),
+		wireMessageSize(k.state.paillierPublicKey),
+		wireMessageSize(k.state.paillierProof),
 		len(k.state.paillierPublicKeys),
-		len(k.state.ringPedersenParams),
-		len(k.state.ringPedersenProof),
+		wireMessageSize(k.state.ringPedersenParams),
+		wireMessageSize(k.state.ringPedersenProof),
 		len(k.state.ringPedersenPublic),
 		k.state.paillierProofSessionID,
 		k.state.paillierProofDomain,
@@ -294,6 +318,17 @@ func (k KeyShare) redactedString() string {
 		len(k.state.logProof),
 		len(k.state.keygenConfirmations),
 	)
+}
+
+func wireMessageSize(msg wire.Message) int {
+	if msg == nil {
+		return 0
+	}
+	raw, err := canonicalWireMessageBytes(msg, DefaultLimits())
+	if err != nil {
+		return 0
+	}
+	return len(raw)
 }
 
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record with size caps.
@@ -387,19 +422,19 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 			return fmt.Errorf("invalid verification share for %d: %w", vs.Party, err)
 		}
 	}
-	if len(k.state.paillierPublicKey) == 0 {
+	if k.state.paillierPublicKey == nil {
 		return errors.New("missing paillier public key")
 	}
-	if len(k.state.paillierPrivateKey) == 0 {
+	if k.state.paillierPrivateKey == nil {
 		return errors.New("missing paillier private key")
 	}
-	if len(k.state.paillierProof) == 0 {
+	if k.state.paillierProof == nil {
 		return errors.New("missing paillier proof")
 	}
-	if len(k.state.ringPedersenParams) == 0 {
+	if k.state.ringPedersenParams == nil {
 		return errors.New("missing Ring-Pedersen parameters")
 	}
-	if len(k.state.ringPedersenProof) == 0 {
+	if k.state.ringPedersenProof == nil {
 		return errors.New("missing Ring-Pedersen proof")
 	}
 	if len(k.state.paillierPublicKeys) != len(k.state.parties) {
@@ -436,45 +471,45 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if len(k.state.logProof) == 0 {
 		return errors.New("missing log proof")
 	}
-	pk, err := pai.UnmarshalPublicKeyWithMaxModulusBits(k.state.paillierPublicKey, limits.Paillier.MaxModulusBits)
-	if err != nil {
+	pk := k.state.paillierPublicKey
+	if err := pk.Validate(); err != nil {
 		return fmt.Errorf("invalid paillier public key: %w", err)
-	}
-	sk, err := pai.UnmarshalPrivateKey(k.state.paillierPrivateKey)
-	if err != nil {
-		return fmt.Errorf("invalid paillier private key: %w", err)
-	}
-	pub, err := sk.PublicKey.MarshalBinary()
-	if err != nil {
-		return err
-	}
-	if !bytes.Equal(pub, k.state.paillierPublicKey) {
-		return errors.New("paillier public/private key mismatch")
-	}
-	modProof, err := zkpai.UnmarshalModulusProof(k.state.paillierProof)
-	if err != nil {
-		return fmt.Errorf("invalid paillier proof: %w", err)
 	}
 	if err := checkPaillierModulusBounds(pk, limits, k.state.securityParams); err != nil {
 		return fmt.Errorf("local paillier modulus does not meet security requirements: %w", err)
 	}
-	if !zkpai.VerifyModulus(keySharePaillierProofDomain(k), pk, k.state.party, modProof) {
+	sk := k.state.paillierPrivateKey
+	if err := sk.PublicKey.Validate(); err != nil {
+		return fmt.Errorf("invalid paillier private key: %w", err)
+	}
+	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
+		return errors.New("paillier public/private key mismatch")
+	}
+	modProof := k.state.paillierProof
+	if err := modProof.Validate(); err != nil {
+		return fmt.Errorf("invalid paillier proof: %w", err)
+	}
+	localPaillierDomain, err := keySharePaillierProofDomain(k, limits)
+	if err != nil {
+		return err
+	}
+	if !zkpai.VerifyModulus(localPaillierDomain, pk, k.state.party, modProof) {
 		return errors.New("invalid local paillier proof")
 	}
-	localRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.state.ringPedersenParams, limits.Paillier.MaxModulusBits)
-	if err != nil {
+	localRPParams := k.state.ringPedersenParams
+	if err := localRPParams.Validate(); err != nil {
 		return fmt.Errorf("invalid local Ring-Pedersen parameters: %w", err)
 	}
 	if localRPParams.N.Cmp(pk.N) != 0 {
 		return errors.New("local Ring-Pedersen modulus does not match Paillier modulus")
 	}
-	localRPProof, err := zkpai.UnmarshalRingPedersenProof(k.state.ringPedersenProof)
-	if err != nil {
+	localRPProof := k.state.ringPedersenProof
+	if err := localRPProof.Validate(); err != nil {
 		return fmt.Errorf("invalid local Ring-Pedersen proof: %w", err)
 	}
-	localRPDomain := keyShareRingPedersenProofDomain(k, k.state.party, k.state.ringPedersenParams)
-	if localRPDomain == nil {
-		return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.state.paillierProofDomain)
+	localRPDomain, err := keyShareRingPedersenProofDomain(k, k.state.party, localRPParams, limits)
+	if err != nil {
+		return err
 	}
 	if !zkpai.VerifyRingPedersen(localRPDomain, localRPParams, k.state.party, localRPProof) {
 		return errors.New("invalid local Ring-Pedersen proof")
@@ -490,21 +525,21 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if rp.Party != item.Party {
 			return fmt.Errorf("Ring-Pedersen public parameters do not match Paillier party %d", item.Party)
 		}
-		if len(item.PublicKey) == 0 || len(item.Proof) == 0 {
+		if item.PublicKey == nil || item.Proof == nil {
 			return fmt.Errorf("incomplete paillier public key for party %d", item.Party)
 		}
-		if len(rp.Params) == 0 || len(rp.Proof) == 0 {
+		if rp.Params == nil || rp.Proof == nil {
 			return fmt.Errorf("incomplete Ring-Pedersen public parameters for party %d", rp.Party)
 		}
-		peerPK, err := pai.UnmarshalPublicKeyWithMaxModulusBits(item.PublicKey, limits.Paillier.MaxModulusBits)
-		if err != nil {
+		peerPK := item.PublicKey
+		if err := peerPK.Validate(); err != nil {
 			return fmt.Errorf("invalid paillier public key for party %d: %w", item.Party, err)
 		}
-		peerProof, err := zkpai.UnmarshalModulusProof(item.Proof)
-		if err != nil {
+		peerProof := item.Proof
+		if err := peerProof.Validate(); err != nil {
 			return fmt.Errorf("invalid paillier proof for party %d: %w", item.Party, err)
 		}
-		proofDomain, err := k.paillierPublicProofDomainFor(item.Party, item.PublicKey)
+		proofDomain, err := k.paillierPublicProofDomainFor(item.Party, peerPK, limits)
 		if err != nil {
 			return err
 		}
@@ -514,20 +549,20 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if !zkpai.VerifyModulus(proofDomain, peerPK, item.Party, peerProof) {
 			return fmt.Errorf("invalid paillier proof for party %d", item.Party)
 		}
-		peerRPParams, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(rp.Params, limits.Paillier.MaxModulusBits)
-		if err != nil {
+		peerRPParams := rp.Params
+		if err := peerRPParams.Validate(); err != nil {
 			return fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", rp.Party, err)
 		}
 		if peerRPParams.N.Cmp(peerPK.N) != 0 {
 			return fmt.Errorf("Ring-Pedersen modulus mismatch for party %d", rp.Party)
 		}
-		peerRPProof, err := zkpai.UnmarshalRingPedersenProof(rp.Proof)
-		if err != nil {
+		peerRPProof := rp.Proof
+		if err := peerRPProof.Validate(); err != nil {
 			return fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", rp.Party, err)
 		}
-		rpDomain := keyShareRingPedersenProofDomain(k, rp.Party, rp.Params)
-		if rpDomain == nil {
-			return fmt.Errorf("unsupported Ring-Pedersen proof domain %q", k.state.paillierProofDomain)
+		rpDomain, err := keyShareRingPedersenProofDomain(k, rp.Party, peerRPParams, limits)
+		if err != nil {
+			return err
 		}
 		if !zkpai.VerifyRingPedersen(rpDomain, peerRPParams, rp.Party, peerRPProof) {
 			return fmt.Errorf("invalid Ring-Pedersen proof for party %d", rp.Party)
@@ -560,7 +595,10 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if err != nil {
 		return fmt.Errorf("invalid verification share: %w", err)
 	}
-	logDomain := logProofDomain(k, pk, verificationShare, k.state.keygenTranscriptHash)
+	logDomain, err := logProofDomain(k, pk, verificationShare, k.state.keygenTranscriptHash, limits)
+	if err != nil {
+		return err
+	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   pk,
 		C:           ciphertext,
@@ -642,41 +680,72 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 			return fmt.Errorf("verification share %d too large: %d > %d", i, len(share.PublicKey), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.state.paillierPublicKey) > limits.Paillier.MaxPublicKeyBytes {
-		return fmt.Errorf("paillier public key too large: %d > %d", len(k.state.paillierPublicKey), limits.Paillier.MaxPublicKeyBytes)
+	paillierPublicKeyBytes, err := canonicalWireMessageBytes(k.state.paillierPublicKey, limits)
+	if err != nil {
+		return fmt.Errorf("paillier public key: %w", err)
 	}
-	if len(k.state.paillierPrivateKey) > limits.Paillier.MaxPrivateKeyBytes {
-		return fmt.Errorf("paillier private key too large: %d > %d", len(k.state.paillierPrivateKey), limits.Paillier.MaxPrivateKeyBytes)
+	if len(paillierPublicKeyBytes) > limits.Paillier.MaxPublicKeyBytes {
+		return fmt.Errorf("paillier public key too large: %d > %d", len(paillierPublicKeyBytes), limits.Paillier.MaxPublicKeyBytes)
 	}
-	if len(k.state.paillierProof) > limits.ZK.MaxProofBytes {
-		return fmt.Errorf("paillier proof too large: %d > %d", len(k.state.paillierProof), limits.ZK.MaxProofBytes)
+	if k.state.paillierPrivateKey == nil {
+		return errors.New("missing paillier private key")
 	}
-	if len(k.state.ringPedersenParams) > limits.Paillier.MaxRingPedersenBytes {
-		return fmt.Errorf("Ring-Pedersen parameters too large: %d > %d", len(k.state.ringPedersenParams), limits.Paillier.MaxRingPedersenBytes)
+	paillierPrivateKeyBytes, err := k.state.paillierPrivateKey.MarshalBinary()
+	if err != nil {
+		return fmt.Errorf("paillier private key: %w", err)
 	}
-	if len(k.state.ringPedersenProof) > limits.Paillier.MaxProofBytes {
-		return fmt.Errorf("Ring-Pedersen proof too large: %d > %d", len(k.state.ringPedersenProof), limits.Paillier.MaxProofBytes)
+	if len(paillierPrivateKeyBytes) > limits.Paillier.MaxPrivateKeyBytes {
+		return fmt.Errorf("paillier private key too large: %d > %d", len(paillierPrivateKeyBytes), limits.Paillier.MaxPrivateKeyBytes)
+	}
+	paillierProofBytes, err := canonicalWireMessageBytes(k.state.paillierProof, limits)
+	if err != nil {
+		return fmt.Errorf("paillier proof: %w", err)
+	}
+	if len(paillierProofBytes) > limits.ZK.MaxProofBytes {
+		return fmt.Errorf("paillier proof too large: %d > %d", len(paillierProofBytes), limits.ZK.MaxProofBytes)
+	}
+	ringPedersenParamsBytes, err := canonicalWireMessageBytes(k.state.ringPedersenParams, limits)
+	if err != nil {
+		return fmt.Errorf("Ring-Pedersen parameters: %w", err)
+	}
+	if len(ringPedersenParamsBytes) > limits.Paillier.MaxRingPedersenBytes {
+		return fmt.Errorf("Ring-Pedersen parameters too large: %d > %d", len(ringPedersenParamsBytes), limits.Paillier.MaxRingPedersenBytes)
+	}
+	ringPedersenProofBytes, err := canonicalWireMessageBytes(k.state.ringPedersenProof, limits)
+	if err != nil {
+		return fmt.Errorf("Ring-Pedersen proof: %w", err)
+	}
+	if len(ringPedersenProofBytes) > limits.Paillier.MaxProofBytes {
+		return fmt.Errorf("Ring-Pedersen proof too large: %d > %d", len(ringPedersenProofBytes), limits.Paillier.MaxProofBytes)
 	}
 	if len(k.state.ringPedersenPublic) > limits.Threshold.MaxParties {
 		return fmt.Errorf("Ring-Pedersen public shares too large: %d > %d", len(k.state.ringPedersenPublic), limits.Threshold.MaxParties)
 	}
 	for i, share := range k.state.ringPedersenPublic {
-		if len(share.Params) > limits.Paillier.MaxRingPedersenBytes {
-			return fmt.Errorf("Ring-Pedersen public share %d parameters too large: %d > %d", i, len(share.Params), limits.Paillier.MaxRingPedersenBytes)
+		snapshot, err := share.snapshot(limits)
+		if err != nil {
+			return fmt.Errorf("Ring-Pedersen public share %d: %w", i, err)
 		}
-		if len(share.Proof) > limits.Paillier.MaxProofBytes {
-			return fmt.Errorf("Ring-Pedersen public share %d proof too large: %d > %d", i, len(share.Proof), limits.Paillier.MaxProofBytes)
+		if len(snapshot.Params) > limits.Paillier.MaxRingPedersenBytes {
+			return fmt.Errorf("Ring-Pedersen public share %d parameters too large: %d > %d", i, len(snapshot.Params), limits.Paillier.MaxRingPedersenBytes)
+		}
+		if len(snapshot.Proof) > limits.Paillier.MaxProofBytes {
+			return fmt.Errorf("Ring-Pedersen public share %d proof too large: %d > %d", i, len(snapshot.Proof), limits.Paillier.MaxProofBytes)
 		}
 	}
 	if len(k.state.paillierPublicKeys) > limits.Threshold.MaxParties {
 		return fmt.Errorf("paillier public shares too large: %d > %d", len(k.state.paillierPublicKeys), limits.Threshold.MaxParties)
 	}
 	for i, share := range k.state.paillierPublicKeys {
-		if len(share.PublicKey) > limits.Paillier.MaxPublicKeyBytes {
-			return fmt.Errorf("paillier public share %d key too large: %d > %d", i, len(share.PublicKey), limits.Paillier.MaxPublicKeyBytes)
+		snapshot, err := share.snapshot(limits)
+		if err != nil {
+			return fmt.Errorf("paillier public share %d: %w", i, err)
 		}
-		if len(share.Proof) > limits.ZK.MaxProofBytes {
-			return fmt.Errorf("paillier public share %d proof too large: %d > %d", i, len(share.Proof), limits.ZK.MaxProofBytes)
+		if len(snapshot.PublicKey) > limits.Paillier.MaxPublicKeyBytes {
+			return fmt.Errorf("paillier public share %d key too large: %d > %d", i, len(snapshot.PublicKey), limits.Paillier.MaxPublicKeyBytes)
+		}
+		if len(snapshot.Proof) > limits.ZK.MaxProofBytes {
+			return fmt.Errorf("paillier public share %d proof too large: %d > %d", i, len(snapshot.Proof), limits.ZK.MaxProofBytes)
 		}
 	}
 	if len(k.state.shareProof) > limits.ZK.MaxProofBytes {
@@ -694,7 +763,7 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 	return nil
 }
 
-func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPublicKey []byte) ([]byte, error) {
+func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPublicKey *pai.PublicKey, limits Limits) ([]byte, error) {
 	config := tss.ThresholdConfig{
 		Threshold: k.state.threshold,
 		Parties:   k.state.parties,
@@ -703,11 +772,11 @@ func (k *KeyShare) paillierPublicProofDomainFor(party tss.PartyID, paillierPubli
 	}
 	switch k.state.paillierProofDomain {
 	case domainLabelKeygenModulus:
-		return keygenModulusDomain(config, party, paillierPublicKey, k.state.planHash), nil
+		return keygenModulusDomain(config, party, paillierPublicKey, k.state.planHash, limits)
 	case domainLabelRefreshPaillier:
-		return refreshPaillierDomain(config, party, paillierPublicKey, k.state.planHash), nil
+		return refreshPaillierDomain(config, party, paillierPublicKey, k.state.planHash, limits)
 	case domainLabelResharePaillier:
-		return resharePaillierDomain(config, party, paillierPublicKey, k.state.planHash), nil
+		return resharePaillierDomain(config, party, paillierPublicKey, k.state.planHash, limits)
 	default:
 		return nil, fmt.Errorf("unsupported paillier public proof domain %q", k.state.paillierProofDomain)
 	}
@@ -723,19 +792,17 @@ func checkPaillierModulusBounds(pk *pai.PublicKey, limits Limits, params Securit
 	return params.CheckPaillierModulus(pk)
 }
 
-// Destroy zeros the local secret scalar, Paillier private-key bytes, and chain
+// Destroy zeros the local secret scalar, Paillier private key, and chain
 // code in place. After Destroy, the KeyShare is permanently unusable for MPC
 // operations.
 //
 // # Go zeroization boundaries
 //
 // Destroy zeroes the fields that this package controls: secret (fixed-length
-// [secret.Scalar]), paillierPrivateKey (Paillier λ/μ), and ChainCode. It does
+// [secret.Scalar]), paillierPrivateKey (Paillier lambda/mu), and ChainCode. It does
 // not zero GroupCommitments, VerificationShares, or other public material —
 // those fields contain no secret data. The Paillier private key that has been
-// serialized to paillierPrivateKey may still have intermediate *big.Int values
-// reachable via the GC; the paillier package's own Destroy function handles
-// its in-memory representations. A shallow Go copy is only another handle to
+// not zero public protocol material. A shallow Go copy is only another handle to
 // this same lifecycle state. Callers that extracted values via getters (for
 // example [KeyShare.ChainCodeBytes]) before Destroy own independent copies that
 // must be zeroed separately.
@@ -747,7 +814,9 @@ func (k *KeyShare) Destroy() {
 	if k.state.secret != nil {
 		k.state.secret.Destroy()
 	}
-	clear(k.state.paillierPrivateKey)
+	if k.state.paillierPrivateKey != nil {
+		k.state.paillierPrivateKey.Destroy()
+	}
 }
 
 func (k *KeyShare) requireMPCMaterial(limits Limits) error {
@@ -763,11 +832,20 @@ func (k *KeyShare) requireMPCMaterial(limits Limits) error {
 }
 
 func (k *KeyShare) paillierPublic(limits Limits) (*pai.PublicKey, error) {
-	return pai.UnmarshalPublicKeyWithMaxModulusBits(k.state.paillierPublicKey, limits.Paillier.MaxModulusBits)
+	if k.state.paillierPublicKey == nil {
+		return nil, errors.New("missing local Paillier public key")
+	}
+	if err := checkPaillierModulusBounds(k.state.paillierPublicKey, limits, k.state.securityParams); err != nil {
+		return nil, err
+	}
+	return clonePaillierPublicKey(k.state.paillierPublicKey), nil
 }
 
 func (k *KeyShare) paillierPrivate() (*pai.PrivateKey, error) {
-	return pai.UnmarshalPrivateKey(k.state.paillierPrivateKey)
+	if k.state.paillierPrivateKey == nil {
+		return nil, errors.New("missing local Paillier private key")
+	}
+	return k.state.paillierPrivateKey.Clone(), nil
 }
 
 func (k *KeyShare) paillierPublicFor(id tss.PartyID, limits Limits) (*pai.PublicKey, error) {
@@ -776,7 +854,10 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID, limits Limits) (*pai.Public
 	}
 	for _, item := range k.state.paillierPublicKeys {
 		if item.Party == id {
-			return pai.UnmarshalPublicKeyWithMaxModulusBits(item.PublicKey, limits.Paillier.MaxModulusBits)
+			if err := checkPaillierModulusBounds(item.PublicKey, limits, k.state.securityParams); err != nil {
+				return nil, err
+			}
+			return clonePaillierPublicKey(item.PublicKey), nil
 		}
 	}
 	return nil, fmt.Errorf("missing Paillier public key for party %d", id)
@@ -785,19 +866,17 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID, limits Limits) (*pai.Public
 // ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
 func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID, limits Limits) (zkpai.RingPedersenParams, error) {
 	if id == k.state.party {
-		params, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(k.state.ringPedersenParams, limits.Paillier.MaxModulusBits)
-		if err != nil {
-			return zkpai.RingPedersenParams{}, err
+		if k.state.ringPedersenParams == nil {
+			return zkpai.RingPedersenParams{}, errors.New("missing local Ring-Pedersen params")
 		}
-		return *params, nil
+		return *cloneRingPedersenParams(k.state.ringPedersenParams), nil
 	}
 	for _, item := range k.state.ringPedersenPublic {
 		if item.Party == id {
-			params, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(item.Params, limits.Paillier.MaxModulusBits)
-			if err != nil {
-				return zkpai.RingPedersenParams{}, err
+			if item.Params == nil {
+				return zkpai.RingPedersenParams{}, fmt.Errorf("missing Ring-Pedersen params for party %d", id)
 			}
-			return *params, nil
+			return *cloneRingPedersenParams(item.Params), nil
 		}
 	}
 	return zkpai.RingPedersenParams{}, fmt.Errorf("missing Ring-Pedersen params for party %d", id)
@@ -826,13 +905,13 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		secret:                 k.state.secret.Clone(),
 		groupCommitments:       wireutil.CloneByteSlices(k.state.groupCommitments),
 		verificationShares:     tss.CloneSlices(k.state.verificationShares),
-		paillierPublicKey:      slices.Clone(k.state.paillierPublicKey),
-		paillierPrivateKey:     slices.Clone(k.state.paillierPrivateKey),
-		paillierProof:          slices.Clone(k.state.paillierProof),
-		paillierPublicKeys:     tss.CloneSlices(k.state.paillierPublicKeys),
-		ringPedersenParams:     slices.Clone(k.state.ringPedersenParams),
-		ringPedersenProof:      slices.Clone(k.state.ringPedersenProof),
-		ringPedersenPublic:     tss.CloneSlices(k.state.ringPedersenPublic),
+		paillierPublicKey:      clonePaillierPublicKey(k.state.paillierPublicKey),
+		paillierPrivateKey:     k.state.paillierPrivateKey.Clone(),
+		paillierProof:          k.state.paillierProof.Clone(),
+		paillierPublicKeys:     clonePaillierPublicMaterials(k.state.paillierPublicKeys),
+		ringPedersenParams:     cloneRingPedersenParams(k.state.ringPedersenParams),
+		ringPedersenProof:      k.state.ringPedersenProof.Clone(),
+		ringPedersenPublic:     cloneRingPedersenPublicMaterials(k.state.ringPedersenPublic),
 		paillierProofSessionID: k.state.paillierProofSessionID,
 		paillierProofDomain:    k.state.paillierProofDomain,
 		resharePlanHash:        slices.Clone(k.state.resharePlanHash),

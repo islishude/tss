@@ -87,7 +87,10 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
-	transcriptHash := s.keygenTranscriptHash(groupCommitments)
+	transcriptHash, err := s.keygenTranscriptHash(groupCommitments)
+	if err != nil {
+		return nil, err
+	}
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.cfg.Self)
 	if !ok {
 		return nil, errors.New("missing local verification share")
@@ -106,35 +109,24 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		secretScalar.Destroy()
 		return nil, err
 	}
-	localPaillierPub, err := s.paillier.PublicKey.MarshalBinary()
-	if err != nil {
-		secretScalar.Destroy()
-		return nil, err
-	}
-	localPaillierPriv, err := s.paillier.MarshalBinary()
-	if err != nil {
-		secretScalar.Destroy()
-		return nil, err
-	}
 	localProofShare := &KeyShare{state: &keyShareState{
 		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
 		parties:                s.cfg.Parties,
 		publicKey:              groupCommitments[0],
-		paillierPublicKey:      localPaillierPub,
+		paillierPublicKey:      clonePaillierPublicKey(&s.paillier.PublicKey),
 		planHash:               bytes.Clone(s.planHash),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
 	}}
-	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.paillier, s.cfg.Self)
+	localPaillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
 		return nil, err
 	}
-	localPaillierProofBytes, err := zkpai.Marshal(localPaillierProof)
+	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), localPaillierDomain, s.paillier, s.cfg.Self)
 	if err != nil {
-		secretScalar.Destroy()
 		return nil, err
 	}
 	localRingPedersen := s.partyData[s.cfg.Self].ringPedersen
@@ -148,12 +140,12 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		secret:                 secretScalar,
 		groupCommitments:       groupCommitments,
 		verificationShares:     verificationShares,
-		paillierPublicKey:      localPaillierPub,
-		paillierPrivateKey:     localPaillierPriv,
-		paillierProof:          localPaillierProofBytes,
+		paillierPublicKey:      clonePaillierPublicKey(&s.paillier.PublicKey),
+		paillierPrivateKey:     s.paillier.Clone(),
+		paillierProof:          localPaillierProof.Clone(),
 		paillierPublicKeys:     s.sortedPaillierPublicKeys(),
-		ringPedersenParams:     bytes.Clone(localRingPedersen.Params),
-		ringPedersenProof:      bytes.Clone(localRingPedersen.Proof),
+		ringPedersenParams:     cloneRingPedersenParams(localRingPedersen.Params),
+		ringPedersenProof:      localRingPedersen.Proof.Clone(),
 		ringPedersenPublic:     s.sortedRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
@@ -168,11 +160,11 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	defer logRandomness.Destroy()
-	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(localRingPedersen.Params, s.limits.Paillier.MaxModulusBits)
+	localRP := cloneRingPedersenParams(localRingPedersen.Params)
+	logDomain, err := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
+		return nil, err
 	}
-	logDomain := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash)
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
 		return nil, fmt.Errorf("invalid verification share: %w", err)
@@ -238,7 +230,8 @@ func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet
 	for _, id := range parties {
 		d, ok := pd[id]
 		if !ok || d == nil || d.commitments == nil || d.share == nil || d.chainCodeCommit == nil ||
-			d.paillierPub.PublicKey == nil || d.ringPedersen.Params == nil {
+			d.paillierPub.PublicKey == nil || d.paillierPub.Proof == nil ||
+			d.ringPedersen.Params == nil || d.ringPedersen.Proof == nil {
 			return false
 		}
 	}
@@ -302,40 +295,48 @@ func (s *KeygenSession) abort() {
 	}
 }
 
-func (s *KeygenSession) sortedPaillierPublicKeys() []PaillierPublicShare {
-	out := make([]PaillierPublicShare, 0, len(s.cfg.Parties))
+func (s *KeygenSession) sortedPaillierPublicKeys() []paillierPublicMaterial {
+	out := make([]paillierPublicMaterial, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		item := s.partyData[id].paillierPub
-		out = append(out, item.Clone())
+		out = append(out, item.clone())
 	}
 	return out
 }
 
-func (s *KeygenSession) sortedRingPedersenPublic() []RingPedersenPublicShare {
-	out := make([]RingPedersenPublicShare, 0, len(s.cfg.Parties))
+func (s *KeygenSession) sortedRingPedersenPublic() []ringPedersenPublicMaterial {
+	out := make([]ringPedersenPublicMaterial, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		item := s.partyData[id].ringPedersen
-		out = append(out, item.Clone())
+		out = append(out, item.clone())
 	}
 	return out
 }
 
-func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) []byte {
+func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) ([]byte, error) {
 	t := transcript.New(keygenTranscriptHashLabel)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
 	for _, id := range tss.SortParties(s.cfg.Parties) {
 		d := s.partyData[id]
+		paillierSnapshot, err := d.paillierPub.snapshot(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		ringPedersenSnapshot, err := d.ringPedersen.snapshot(s.limits)
+		if err != nil {
+			return nil, err
+		}
 		t.AppendUint32("party", id)
 		t.AppendBytesList("commitments", d.commitments)
-		t.AppendBytes("paillier_public_key", d.paillierPub.PublicKey)
-		t.AppendBytes("paillier_proof", d.paillierPub.Proof)
-		t.AppendBytes("ring_pedersen_params", d.ringPedersen.Params)
-		t.AppendBytes("ring_pedersen_proof", d.ringPedersen.Proof)
+		t.AppendBytes("paillier_public_key", paillierSnapshot.PublicKey)
+		t.AppendBytes("paillier_proof", paillierSnapshot.Proof)
+		t.AppendBytes("ring_pedersen_params", ringPedersenSnapshot.Params)
+		t.AppendBytes("ring_pedersen_proof", ringPedersenSnapshot.Proof)
 		t.AppendBytes("chain_code_commitment", d.chainCodeCommit)
 	}
 	t.AppendBytesList("group_commitments", groupCommitments)
-	return t.Sum()
+	return t.Sum(), nil
 }
 
 func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, bool) {

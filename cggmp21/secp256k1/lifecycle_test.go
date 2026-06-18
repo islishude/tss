@@ -8,8 +8,10 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
+	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // TestKeygenSession_Destroy_ClearsSecrets verifies that Destroy zeros all
@@ -87,6 +89,58 @@ func mustTestSecretScalar(t *testing.T, value uint64) *secret.Scalar {
 	return out
 }
 
+func testPaillierPublicKey(seed int64) pai.PublicKey {
+	n := big.NewInt(seed)
+	return pai.PublicKey{
+		N:        n,
+		G:        big.NewInt(seed + 1),
+		NSquared: new(big.Int).Mul(n, n),
+	}
+}
+
+func testPaillierPrivateKey(t *testing.T) *pai.PrivateKey {
+	t.Helper()
+	publicKey := testPaillierPublicKey(65)
+	return &pai.PrivateKey{
+		PublicKey: publicKey,
+		Lambda:    mustTestSecretScalar(t, 1),
+		Mu:        mustTestSecretScalar(t, 2),
+		P:         mustTestSecretScalar(t, 3),
+		Q:         mustTestSecretScalar(t, 4),
+	}
+}
+
+func testEncProof(seed int64) zkpai.EncProof {
+	return zkpai.EncProof{
+		S:              big.NewInt(seed),
+		A:              big.NewInt(seed + 1),
+		C:              big.NewInt(seed + 2),
+		Z1:             big.NewInt(seed + 3),
+		Z2:             big.NewInt(seed + 4),
+		Z3:             big.NewInt(seed + 5),
+		TranscriptHash: []byte{byte(seed), byte(seed + 1)},
+	}
+}
+
+func testAffGProof(seed int64) zkpai.AffGProof {
+	return zkpai.AffGProof{
+		A:              big.NewInt(seed),
+		By:             big.NewInt(seed + 1),
+		E:              big.NewInt(seed + 2),
+		S:              big.NewInt(seed + 3),
+		F:              big.NewInt(seed + 4),
+		T:              big.NewInt(seed + 5),
+		Y:              big.NewInt(seed + 6),
+		Z1:             big.NewInt(seed + 7),
+		Z2:             big.NewInt(seed + 8),
+		Z3:             big.NewInt(seed + 9),
+		Z4:             big.NewInt(seed + 10),
+		W:              big.NewInt(seed + 11),
+		WY:             big.NewInt(seed + 12),
+		TranscriptHash: []byte{byte(seed), byte(seed + 1)},
+	}
+}
+
 // newTestPresignSession creates a PresignSession populated with non-zero secret
 // scalars, MtA scalar maps, and round payload data suitable for testing Destroy
 // and abort cleanup.
@@ -110,18 +164,18 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 			AdditiveShift:  []byte{0x08, 0x09, 0x0a},
 		},
 		round1: map[tss.PartyID]presignRound1Payload{
-			2: {Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: []byte{0xcc}},
+			2: {Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: testPaillierPublicKey(600)},
 		},
 		round1Proofs: map[tss.PartyID]presignRound1ProofPayload{
-			2: {PublicRound1Hash: []byte{0xdd}, EncKProof: []byte{0xee}},
+			2: {PublicRound1Hash: []byte{0xdd}, EncKProof: testEncProof(700)},
 		},
 		round1ProofEnvelopes: map[tss.PartyID]tss.Envelope{
 			2: {},
 		},
 		round2: map[tss.PartyID]presignRound2Payload{
 			2: {
-				Delta:      mta.ResponseMessage{Ciphertext: []byte{0x01}, Proof: []byte{0x02}},
-				Sigma:      mta.ResponseMessage{Ciphertext: []byte{0x03}, Proof: []byte{0x04}},
+				Delta:      mta.ResponseMessage{Ciphertext: []byte{0x01}, Proof: testAffGProof(800)},
+				Sigma:      mta.ResponseMessage{Ciphertext: []byte{0x03}, Proof: testAffGProof(900)},
 				Round1Echo: []byte{0x05},
 			},
 		},
@@ -317,22 +371,31 @@ func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 }
 
 // TestKeyShare_Destroy_ClearsSecrets verifies that KeyShare.Destroy zeros the
-// secret scalar, chain code, and Paillier private-key bytes.
+// secret scalar, chain code, and Paillier private-key material.
 func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	secretScalar := fillSecretScalar(t, 0x42)
+	privateKey := testPaillierPrivateKey(t)
 	k := &KeyShare{state: &keyShareState{
 		chainCode:          []byte{0x01, 0x02, 0x03, 0x04},
 		secret:             secretScalar,
-		paillierPrivateKey: []byte{0xaa, 0xbb, 0xcc},
+		paillierPrivateKey: privateKey,
 	}}
 
 	k.Destroy()
 
 	// Chain code must be zeroed (clear zeros elements but preserves length).
 	testutil.AssertBytesCleared(t, k.state.chainCode)
-	// Paillier private key must be zeroed.
-	testutil.AssertBytesCleared(t, k.state.paillierPrivateKey)
+	for name, scalar := range map[string]*secret.Scalar{
+		"lambda": privateKey.Lambda,
+		"mu":     privateKey.Mu,
+		"p":      privateKey.P,
+		"q":      privateKey.Q,
+	} {
+		if scalar.FixedLen() != 0 {
+			t.Errorf("Paillier private key %s not zeroed after Destroy", name)
+		}
+	}
 	// secret must report zero length (buf is set to nil by Destroy).
 	if k.state.secret.FixedLen() != 0 {
 		t.Error("secret scalar not zeroed after Destroy")

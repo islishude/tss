@@ -98,14 +98,27 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK}
-		startProofDomain := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash)
-		startProof := s.round1Proofs[peer].EncKProof
+		peerRound1 := s.round1[peer]
+		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		startProofPayload := s.round1Proofs[peer]
+		startProof := &startProofPayload.EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
 			s.securityParams,
 			nil,
 			startProofDomain,
-			mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
+			deltaDomain,
 			start,
 			startProof,
 			s.gamma,
@@ -124,7 +137,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			s.securityParams,
 			nil,
 			startProofDomain,
-			mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
+			sigmaDomain,
 			start,
 			startProof,
 			s.xBar,
@@ -177,9 +190,13 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 		return err
 	}
 
+	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	if err != nil {
+		return err
+	}
 	alphaDelta, err := mta.Finish(
 		s.securityParams,
-		mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
+		deltaDomain,
 		start,
 		p.Delta,
 		gammaCommit,
@@ -194,9 +211,13 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if err != nil {
 		return err
 	}
+	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	if err != nil {
+		return err
+	}
 	alphaSigma, err := mta.Finish(
 		s.securityParams,
-		mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, s.key.state.paillierPublicKey, s.contextHash, s.planHash),
+		sigmaDomain,
 		start,
 		p.Sigma,
 		xBarCommit,

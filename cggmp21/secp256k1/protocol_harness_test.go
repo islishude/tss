@@ -279,7 +279,7 @@ func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign
 	ctx := EvidenceContext{
 		Parties:              share.state.parties.Clone(),
 		PublicKey:            append([]byte(nil), share.state.publicKey...),
-		PaillierPublicKeys:   append([]PaillierPublicShare(nil), share.state.paillierPublicKeys...),
+		PaillierPublicKeys:   share.PaillierPublicKeys(),
 		Signers:              signers.Clone(),
 		KeygenTranscriptHash: append([]byte(nil), share.state.keygenTranscriptHash...),
 	}

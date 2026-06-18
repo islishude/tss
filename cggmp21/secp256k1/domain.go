@@ -1,9 +1,15 @@
 package secp256k1
 
 import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/transcript"
+	"github.com/islishude/tss/internal/wire"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 const (
@@ -25,177 +31,496 @@ const (
 	domainLabelRefreshLogProof      = "refresh.log-proof"
 )
 
-type proofDomainContext struct {
-	label                string        // Domain label identifying the protocol phase for domain separation.
-	sessionID            tss.SessionID // Protocol session binding the proof to a single run.
-	threshold            int           // Signing threshold; part of the proof statement.
-	parties              tss.PartySet  // Canonical full participant set.
-	signers              tss.PartySet  // Signing subset for presign/sign-phase proofs.
-	sender               tss.PartyID   // Party that created (or will verify) the proof.
-	receiver             tss.PartyID   // Counterparty in interactive (MtA) proofs.
-	statementPublicKey   []byte        // Group public key bound into the proof statement.
-	keygenTranscriptHash []byte        // Transcript hash of the keygen that produced the key share.
-	paillierPublicKey    []byte        // Serialized Paillier public key of the prover.
-	ringPedersenParams   []byte        // Serialized Ring-Pedersen parameters of the prover.
-	presignContextHash   []byte        // Presign context hash binding the proof to a specific presign session.
-	lifecyclePlanHash    []byte        // Lifecycle plan digest binding the proof to a keygen/refresh/reshare plan.
+type domainBuilder struct {
+	t *transcript.Builder
 }
 
-func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:             domainLabelKeygenModulus,
-		sessionID:         config.SessionID,
-		threshold:         config.Threshold,
-		parties:           config.Parties,
-		sender:            sender,
-		paillierPublicKey: paillierPublicKey,
-		lifecyclePlanHash: planHash,
-	})
+type lifecycleBinding struct {
+	SessionID tss.SessionID
+	Threshold int
+	Parties   tss.PartySet
+	Sender    tss.PartyID
+	PlanHash  []byte
 }
 
-func keygenRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:              domainLabelKeygenRingPedersen,
-		sessionID:          config.SessionID,
-		threshold:          config.Threshold,
-		parties:            config.Parties,
-		sender:             sender,
-		ringPedersenParams: params,
-		lifecyclePlanHash:  planHash,
-	})
+type keyShareBinding struct {
+	SessionID            tss.SessionID
+	Threshold            int
+	Parties              tss.PartySet
+	Sender               tss.PartyID
+	PublicKey            []byte
+	KeygenTranscriptHash []byte
+	PlanHash             []byte
 }
 
-func keySharePaillierProofDomain(key *KeyShare) []byte {
-	if key == nil {
-		return nil
+type presignBinding struct {
+	SessionID            tss.SessionID
+	Threshold            int
+	Parties              tss.PartySet
+	Signers              tss.PartySet
+	Sender               tss.PartyID
+	Receiver             tss.PartyID
+	PublicKey            []byte
+	KeygenTranscriptHash []byte
+	PresignContextHash   []byte
+	PlanHash             []byte
+}
+
+type logProofBinding struct {
+	SessionID         tss.SessionID
+	Threshold         int
+	Parties           tss.PartySet
+	Sender            tss.PartyID
+	VerificationShare []byte
+	TranscriptHash    []byte
+	PlanHash          []byte
+}
+
+type mtaResponseKind string
+
+const (
+	mtaResponseKindDelta mtaResponseKind = domainLabelPresignMTADelta
+	mtaResponseKindSigma mtaResponseKind = domainLabelPresignMTASigma
+)
+
+func newDomainBuilder(label string) (*domainBuilder, error) {
+	if label == "" {
+		return nil, errors.New("missing proof domain label")
 	}
-	return proofDomain(proofDomainContext{
-		label:                domainLabelKeySharePaillier,
-		threshold:            key.state.threshold,
-		parties:              key.state.parties,
-		sender:               key.state.party,
-		statementPublicKey:   key.state.publicKey,
-		keygenTranscriptHash: key.state.keygenTranscriptHash,
-		paillierPublicKey:    key.state.paillierPublicKey,
-		lifecyclePlanHash:    key.state.planHash,
-	})
+	t := transcript.New(proofDomainVersion)
+	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
+	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendString("proof_label", label)
+	return &domainBuilder{t: t}, nil
 }
 
-func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params []byte) []byte {
-	if key == nil {
-		return nil
+func requireHash32(name string, value []byte) error {
+	if len(value) != sha256.Size {
+		return fmt.Errorf("%s must be %d bytes, got %d", name, sha256.Size, len(value))
 	}
-	config := tss.ThresholdConfig{
+	return nil
+}
+
+func validateDomainParticipants(threshold int, parties tss.PartySet) error {
+	if threshold <= 0 {
+		return errors.New("proof domain threshold must be positive")
+	}
+	if len(parties) == 0 {
+		return errors.New("proof domain parties must not be empty")
+	}
+	if threshold > len(parties) {
+		return fmt.Errorf("proof domain threshold %d exceeds party count %d", threshold, len(parties))
+	}
+	if err := wire.ValidateStrictSortedIDs(parties); err != nil {
+		return fmt.Errorf("proof domain parties: %w", err)
+	}
+	return nil
+}
+
+func requireDomainParty(name string, party tss.PartyID, parties tss.PartySet) error {
+	if party == tss.BroadcastPartyId {
+		return fmt.Errorf("proof domain %s must not be zero", name)
+	}
+	if !parties.Contains(party) {
+		return fmt.Errorf("proof domain %s %d is not a participant", name, party)
+	}
+	return nil
+}
+
+func (b *domainBuilder) appendLifecycleBinding(binding lifecycleBinding) error {
+	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
+		return err
+	}
+	if binding.SessionID == (tss.SessionID{}) {
+		return errors.New("proof domain lifecycle session id must not be zero")
+	}
+	if err := requireDomainParty("sender", binding.Sender, binding.Parties); err != nil {
+		return err
+	}
+	b.t.AppendBytes("session_id", binding.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(binding.Threshold))
+	b.t.AppendUint32List("parties", tss.SortParties(binding.Parties))
+	b.t.AppendUint32List("signers", nil)
+	b.t.AppendUint32("sender", binding.Sender)
+	b.t.AppendUint32("receiver", 0)
+	b.t.AppendBytes("public_key", nil)
+	b.t.AppendBytes("keygen_transcript_hash", nil)
+	return nil
+}
+
+func (b *domainBuilder) appendKeyShareBinding(binding keyShareBinding) error {
+	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
+		return err
+	}
+	if err := requireDomainParty("sender", binding.Sender, binding.Parties); err != nil {
+		return err
+	}
+	if len(binding.PublicKey) == 0 {
+		return errors.New("proof domain public key is required")
+	}
+	if err := requireHash32("keygen transcript hash", binding.KeygenTranscriptHash); err != nil {
+		return err
+	}
+	b.t.AppendBytes("session_id", binding.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(binding.Threshold))
+	b.t.AppendUint32List("parties", tss.SortParties(binding.Parties))
+	b.t.AppendUint32List("signers", nil)
+	b.t.AppendUint32("sender", binding.Sender)
+	b.t.AppendUint32("receiver", 0)
+	b.t.AppendBytes("public_key", binding.PublicKey)
+	b.t.AppendBytes("keygen_transcript_hash", binding.KeygenTranscriptHash)
+	return nil
+}
+
+func (b *domainBuilder) appendPresignBinding(binding presignBinding) error {
+	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
+		return err
+	}
+	if binding.SessionID == (tss.SessionID{}) {
+		return errors.New("proof domain presign session id must not be zero")
+	}
+	if err := wire.ValidateStrictSortedIDs(binding.Signers); err != nil {
+		return fmt.Errorf("proof domain signers: %w", err)
+	}
+	if len(binding.Signers) < binding.Threshold {
+		return fmt.Errorf("proof domain signer count %d is below threshold %d", len(binding.Signers), binding.Threshold)
+	}
+	for _, signer := range binding.Signers {
+		if !binding.Parties.Contains(signer) {
+			return fmt.Errorf("proof domain signer %d is not a participant", signer)
+		}
+	}
+	if err := requireDomainParty("sender", binding.Sender, binding.Signers); err != nil {
+		return err
+	}
+	if err := requireDomainParty("receiver", binding.Receiver, binding.Signers); err != nil {
+		return err
+	}
+	if binding.Sender == binding.Receiver {
+		return errors.New("proof domain sender and receiver must differ")
+	}
+	if len(binding.PublicKey) == 0 {
+		return errors.New("proof domain public key is required")
+	}
+	if err := requireHash32("keygen transcript hash", binding.KeygenTranscriptHash); err != nil {
+		return err
+	}
+	b.t.AppendBytes("session_id", binding.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(binding.Threshold))
+	b.t.AppendUint32List("parties", tss.SortParties(binding.Parties))
+	b.t.AppendUint32List("signers", tss.SortParties(binding.Signers))
+	b.t.AppendUint32("sender", binding.Sender)
+	b.t.AppendUint32("receiver", binding.Receiver)
+	b.t.AppendBytes("public_key", binding.PublicKey)
+	b.t.AppendBytes("keygen_transcript_hash", binding.KeygenTranscriptHash)
+	return nil
+}
+
+func (b *domainBuilder) appendLogProofBinding(binding logProofBinding) error {
+	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
+		return err
+	}
+	if binding.SessionID == (tss.SessionID{}) {
+		return errors.New("proof domain log session id must not be zero")
+	}
+	if err := requireDomainParty("sender", binding.Sender, binding.Parties); err != nil {
+		return err
+	}
+	if len(binding.VerificationShare) == 0 {
+		return errors.New("proof domain verification share is required")
+	}
+	if err := requireHash32("transcript hash", binding.TranscriptHash); err != nil {
+		return err
+	}
+	b.t.AppendBytes("session_id", binding.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(binding.Threshold))
+	b.t.AppendUint32List("parties", tss.SortParties(binding.Parties))
+	b.t.AppendUint32List("signers", nil)
+	b.t.AppendUint32("sender", binding.Sender)
+	b.t.AppendUint32("receiver", 0)
+	b.t.AppendBytes("public_key", binding.VerificationShare)
+	b.t.AppendBytes("keygen_transcript_hash", binding.TranscriptHash)
+	return nil
+}
+
+func (b *domainBuilder) appendPaillierStatement(pk *pai.PublicKey, limits Limits) error {
+	raw, err := canonicalWireMessageBytes(pk, limits)
+	if err != nil {
+		return fmt.Errorf("paillier public key domain statement: %w", err)
+	}
+	b.t.AppendBytes("paillier_public_key", raw)
+	b.t.AppendBytes("ring_pedersen_params", nil)
+	return nil
+}
+
+func (b *domainBuilder) appendRingPedersenStatement(params *zkpai.RingPedersenParams, limits Limits) error {
+	raw, err := canonicalWireMessageBytes(params, limits)
+	if err != nil {
+		return fmt.Errorf("Ring-Pedersen params domain statement: %w", err)
+	}
+	b.t.AppendBytes("paillier_public_key", nil)
+	b.t.AppendBytes("ring_pedersen_params", raw)
+	return nil
+}
+
+func (b *domainBuilder) appendNoPresignContext() {
+	b.t.AppendBytes("presign_context_hash", nil)
+}
+
+func (b *domainBuilder) appendPresignContext(hash []byte) error {
+	if err := requireHash32("presign context hash", hash); err != nil {
+		return err
+	}
+	b.t.AppendBytes("presign_context_hash", hash)
+	return nil
+}
+
+func (b *domainBuilder) appendLifecyclePlanHash(hash []byte) error {
+	if err := requireHash32("lifecycle plan hash", hash); err != nil {
+		return err
+	}
+	b.t.AppendBytes("lifecycle_plan_hash", hash)
+	return nil
+}
+
+func (b *domainBuilder) sum() []byte {
+	return b.t.Sum()
+}
+
+func lifecycleFromConfig(config tss.ThresholdConfig, sender tss.PartyID, planHash []byte) lifecycleBinding {
+	return lifecycleBinding{
+		SessionID: config.SessionID,
+		Threshold: config.Threshold,
+		Parties:   config.Parties,
+		Sender:    sender,
+		PlanHash:  planHash,
+	}
+}
+
+func keyShareDomainBinding(key *KeyShare, sessionID tss.SessionID, sender tss.PartyID, statementPublicKey, transcriptHash []byte) (keyShareBinding, error) {
+	if key == nil || key.state == nil {
+		return keyShareBinding{}, errors.New("nil key share")
+	}
+	return keyShareBinding{
+		SessionID:            sessionID,
+		Threshold:            key.state.threshold,
+		Parties:              key.state.parties,
+		Sender:               sender,
+		PublicKey:            statementPublicKey,
+		KeygenTranscriptHash: transcriptHash,
+		PlanHash:             key.state.planHash,
+	}, nil
+}
+
+func presignDomainBinding(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, sender, receiver tss.PartyID, presignContextHash, planHash []byte) (presignBinding, error) {
+	if key == nil || key.state == nil {
+		return presignBinding{}, errors.New("nil key share")
+	}
+	return presignBinding{
+		SessionID:            sessionID,
+		Threshold:            key.state.threshold,
+		Parties:              key.state.parties,
+		Signers:              signers,
+		Sender:               sender,
+		Receiver:             receiver,
+		PublicKey:            key.state.publicKey,
+		KeygenTranscriptHash: key.state.keygenTranscriptHash,
+		PresignContextHash:   presignContextHash,
+		PlanHash:             planHash,
+	}, nil
+}
+
+func paillierDomain(label string, binding lifecycleBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendLifecycleBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendPaillierStatement(pk, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func ringPedersenDomain(label string, binding lifecycleBinding, params *zkpai.RingPedersenParams, limits Limits) ([]byte, error) {
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendLifecycleBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendRingPedersenStatement(params, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func keySharePaillierDomain(key *KeyShare, binding keyShareBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
+	b, err := newDomainBuilder(domainLabelKeySharePaillier)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendKeyShareBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendPaillierStatement(pk, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func mtaPaillierDomain(label string, binding presignBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendPresignBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendPaillierStatement(pk, limits); err != nil {
+		return nil, err
+	}
+	if err := b.appendPresignContext(binding.PresignContextHash); err != nil {
+		return nil, err
+	}
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func logProofDomainWithBinding(label string, binding logProofBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendLogProofBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendPaillierStatement(pk, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func keygenModulusDomain(config tss.ThresholdConfig, sender tss.PartyID, pk *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	return paillierDomain(domainLabelKeygenModulus, lifecycleFromConfig(config, sender, planHash), pk, limits)
+}
+
+func keygenRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return ringPedersenDomain(domainLabelKeygenRingPedersen, lifecycleFromConfig(config, sender, planHash), params, limits)
+}
+
+func keySharePaillierProofDomain(key *KeyShare, limits Limits) ([]byte, error) {
+	if key == nil || key.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	if key.state.paillierPublicKey == nil {
+		return nil, errors.New("key share paillier proof domain: missing public key")
+	}
+	binding, err := keyShareDomainBinding(key, tss.SessionID{}, key.state.party, key.state.publicKey, key.state.keygenTranscriptHash)
+	if err != nil {
+		return nil, err
+	}
+	return keySharePaillierDomain(key, binding, key.state.paillierPublicKey, limits)
+}
+
+func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params *zkpai.RingPedersenParams, limits Limits) ([]byte, error) {
+	if key == nil || key.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	if params == nil {
+		return nil, errors.New("key share Ring-Pedersen proof domain: missing parameters")
+	}
+	binding := lifecycleBinding{
+		SessionID: key.state.paillierProofSessionID,
 		Threshold: key.state.threshold,
 		Parties:   key.state.parties,
-		Self:      party,
-		SessionID: key.state.paillierProofSessionID,
+		Sender:    party,
+		PlanHash:  key.state.planHash,
 	}
 	switch key.state.paillierProofDomain {
 	case domainLabelKeygenModulus:
-		return keygenRingPedersenDomain(config, party, params, key.state.planHash)
+		return ringPedersenDomain(domainLabelKeygenRingPedersen, binding, params, limits)
 	case domainLabelRefreshPaillier:
-		return refreshRingPedersenDomain(config, party, params, key.state.planHash)
+		return ringPedersenDomain(domainLabelRefreshRingPedersen, binding, params, limits)
 	case domainLabelResharePaillier:
-		return reshareRingPedersenDomain(config, party, params, key.state.planHash)
+		return ringPedersenDomain(domainLabelReshareRingPedersen, binding, params, limits)
 	default:
-		return nil
+		return nil, fmt.Errorf("unsupported Ring-Pedersen proof domain %q", key.state.paillierProofDomain)
 	}
 }
 
-func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, prover, verifier tss.PartyID, proverPaillierPublicKey, presignContextHash, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:                domainLabelPresignMTAStartProof,
-		sessionID:            sessionID,
-		threshold:            key.state.threshold,
-		parties:              key.state.parties,
-		signers:              signers,
-		sender:               prover,
-		receiver:             verifier,
-		statementPublicKey:   key.state.publicKey,
-		keygenTranscriptHash: key.state.keygenTranscriptHash,
-		paillierPublicKey:    proverPaillierPublicKey,
-		presignContextHash:   presignContextHash,
-		lifecyclePlanHash:    planHash,
-	})
+func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, prover, verifier tss.PartyID, proverPaillierPublicKey *pai.PublicKey, presignContextHash, planHash []byte, limits Limits) ([]byte, error) {
+	binding, err := presignDomainBinding(key, sessionID, signers, prover, verifier, presignContextHash, planHash)
+	if err != nil {
+		return nil, err
+	}
+	return mtaPaillierDomain(domainLabelPresignMTAStartProof, binding, proverPaillierPublicKey, limits)
 }
 
-func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:             domainLabelResharePaillier,
-		sessionID:         config.SessionID,
-		threshold:         config.Threshold,
-		parties:           config.Parties,
-		sender:            sender,
-		paillierPublicKey: paillierPublicKey,
-		lifecyclePlanHash: planHash,
-	})
+func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, pk *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	return paillierDomain(domainLabelResharePaillier, lifecycleFromConfig(config, sender, planHash), pk, limits)
 }
 
-func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:              domainLabelReshareRingPedersen,
-		sessionID:          config.SessionID,
-		threshold:          config.Threshold,
-		parties:            config.Parties,
-		sender:             sender,
-		ringPedersenParams: params,
-		lifecyclePlanHash:  planHash,
-	})
+func reshareRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return ringPedersenDomain(domainLabelReshareRingPedersen, lifecycleFromConfig(config, sender, planHash), params, limits)
 }
 
-func refreshPaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, paillierPublicKey, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:             domainLabelRefreshPaillier,
-		sessionID:         config.SessionID,
-		threshold:         config.Threshold,
-		parties:           config.Parties,
-		sender:            sender,
-		paillierPublicKey: paillierPublicKey,
-		lifecyclePlanHash: planHash,
-	})
+func refreshPaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, pk *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	return paillierDomain(domainLabelRefreshPaillier, lifecycleFromConfig(config, sender, planHash), pk, limits)
 }
 
-func refreshRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:              domainLabelRefreshRingPedersen,
-		sessionID:          config.SessionID,
-		threshold:          config.Threshold,
-		parties:            config.Parties,
-		sender:             sender,
-		ringPedersenParams: params,
-		lifecyclePlanHash:  planHash,
-	})
+func refreshRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, params *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return ringPedersenDomain(domainLabelRefreshRingPedersen, lifecycleFromConfig(config, sender, planHash), params, limits)
 }
 
-func mtaDeltaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
-	return mtaResponseDomain(domainLabelPresignMTADelta, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash)
+func mtaDeltaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey *pai.PublicKey, presignContextHash, planHash []byte, limits Limits) ([]byte, error) {
+	return mtaResponseProofDomain(mtaResponseKindDelta, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash, limits)
 }
 
-func mtaSigmaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
-	return mtaResponseDomain(domainLabelPresignMTASigma, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash)
+func mtaSigmaResponseDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey *pai.PublicKey, presignContextHash, planHash []byte, limits Limits) ([]byte, error) {
+	return mtaResponseProofDomain(mtaResponseKindSigma, key, sessionID, signers, initiator, responder, initiatorPaillierPublicKey, presignContextHash, planHash, limits)
 }
 
-func mtaResponseDomain(label string, key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey, presignContextHash, planHash []byte) []byte {
-	return proofDomain(proofDomainContext{
-		label:                label,
-		sessionID:            sessionID,
-		threshold:            key.state.threshold,
-		parties:              key.state.parties,
-		signers:              signers,
-		sender:               responder,
-		receiver:             initiator,
-		statementPublicKey:   key.state.publicKey,
-		keygenTranscriptHash: key.state.keygenTranscriptHash,
-		paillierPublicKey:    initiatorPaillierPublicKey,
-		presignContextHash:   presignContextHash,
-		lifecyclePlanHash:    planHash,
-	})
+func mtaResponseProofDomain(kind mtaResponseKind, key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, initiator, responder tss.PartyID, initiatorPaillierPublicKey *pai.PublicKey, presignContextHash, planHash []byte, limits Limits) ([]byte, error) {
+	binding, err := presignDomainBinding(key, sessionID, signers, responder, initiator, presignContextHash, planHash)
+	if err != nil {
+		return nil, err
+	}
+	switch kind {
+	case mtaResponseKindDelta, mtaResponseKindSigma:
+		return mtaPaillierDomain(string(kind), binding, initiatorPaillierPublicKey, limits)
+	default:
+		return nil, fmt.Errorf("unsupported MtA response domain kind %q", kind)
+	}
 }
 
-func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcriptHash []byte) []byte {
-	if key == nil || pk == nil {
-		return nil
+func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcriptHash []byte, limits Limits) ([]byte, error) {
+	if key == nil || key.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	if pk == nil {
+		return nil, errors.New("nil paillier public key")
 	}
 	label := domainLabelKeyShareLogProof
 	switch key.state.paillierProofDomain {
@@ -204,38 +529,14 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 	case domainLabelRefreshPaillier:
 		label = domainLabelRefreshLogProof
 	}
-	// MarshalBinary cannot fail for a validated or freshly-generated PublicKey;
-	// callers must ensure pk passes pai.UnmarshalPublicKey or pai.GenerateKey first.
-	pkBytes, _ := pk.MarshalBinary()
-	return proofDomain(proofDomainContext{
-		label:                label,
-		sessionID:            key.state.paillierProofSessionID,
-		threshold:            key.state.threshold,
-		parties:              key.state.parties,
-		sender:               key.state.party,
-		statementPublicKey:   verificationShare,
-		keygenTranscriptHash: transcriptHash,
-		paillierPublicKey:    pkBytes,
-		lifecyclePlanHash:    key.state.planHash,
-	})
-}
-
-func proofDomain(ctx proofDomainContext) []byte {
-	t := transcript.New(proofDomainVersion)
-	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
-	t.AppendUint32("version", uint32(tss.Version))
-	t.AppendString("proof_label", ctx.label)
-	t.AppendBytes("session_id", ctx.sessionID[:])
-	t.AppendUint32("threshold", uint32(ctx.threshold))
-	t.AppendUint32List("parties", tss.SortParties(ctx.parties))
-	t.AppendUint32List("signers", tss.SortParties(ctx.signers))
-	t.AppendUint32("sender", ctx.sender)
-	t.AppendUint32("receiver", ctx.receiver)
-	t.AppendBytes("public_key", ctx.statementPublicKey)
-	t.AppendBytes("keygen_transcript_hash", ctx.keygenTranscriptHash)
-	t.AppendBytes("paillier_public_key", ctx.paillierPublicKey)
-	t.AppendBytes("ring_pedersen_params", ctx.ringPedersenParams)
-	t.AppendBytes("presign_context_hash", ctx.presignContextHash)
-	t.AppendBytes("lifecycle_plan_hash", ctx.lifecyclePlanHash)
-	return t.Sum()
+	binding := logProofBinding{
+		SessionID:         key.state.paillierProofSessionID,
+		Threshold:         key.state.threshold,
+		Parties:           key.state.parties,
+		Sender:            key.state.party,
+		VerificationShare: verificationShare,
+		TranscriptHash:    transcriptHash,
+		PlanHash:          key.state.planHash,
+	}
+	return logProofDomainWithBinding(label, binding, pk, limits)
 }

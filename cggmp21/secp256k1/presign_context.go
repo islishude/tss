@@ -127,8 +127,9 @@ func signMessageDigest(contextHash []byte, messageDomain string, message []byte)
 
 func mtaResponseHash(label string, response mta.ResponseMessage) []byte {
 	t := transcript.New(mtaResponseEvidenceLabel)
+	proofBytes, _ := response.Proof.MarshalBinary()
 	t.AppendString("response_label", label)
 	t.AppendBytes("ciphertext", response.Ciphertext)
-	t.AppendBytes("proof", response.Proof)
+	t.AppendBytes("proof", proofBytes)
 	return t.Sum()
 }

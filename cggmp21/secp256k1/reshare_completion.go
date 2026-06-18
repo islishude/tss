@@ -110,7 +110,10 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
-	transcriptHash := s.reshareTranscriptHash(newCommitments)
+	transcriptHash, err := s.reshareTranscriptHash(newCommitments)
+	if err != nil {
+		return nil, err
+	}
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.selfID)
 	if !ok {
 		return nil, errors.New("missing local verification share")
@@ -136,25 +139,19 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		threshold:              s.newThreshold,
 		parties:                s.newParties,
 		publicKey:              newCommitments[0],
-		paillierPublicKey:      selfNPD.paillierPub.PublicKey,
+		paillierPublicKey:      clonePaillierPublicKey(selfNPD.paillierPub.PublicKey),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
 		resharePlanHash:        s.planHash,
 		planHash:               append([]byte(nil), s.planHash...),
 	}}
-	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), keySharePaillierProofDomain(localProofShare), s.newPaillier, s.selfID)
+	paillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
 		return nil, err
 	}
-	paillierProofBytes, err := zkpai.Marshal(paillierProof)
+	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), paillierDomain, s.newPaillier, s.selfID)
 	if err != nil {
-		newSecretScalar.Destroy()
-		return nil, err
-	}
-	newPaillierPriv, err := s.newPaillier.MarshalBinary()
-	if err != nil {
-		newSecretScalar.Destroy()
 		return nil, err
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
@@ -167,12 +164,12 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		secret:                 newSecretScalar,
 		groupCommitments:       newCommitments,
 		verificationShares:     verificationShares,
-		paillierPublicKey:      append([]byte(nil), selfNPD.paillierPub.PublicKey...),
-		paillierPrivateKey:     newPaillierPriv,
-		paillierProof:          paillierProofBytes,
+		paillierPublicKey:      clonePaillierPublicKey(selfNPD.paillierPub.PublicKey),
+		paillierPrivateKey:     s.newPaillier.Clone(),
+		paillierProof:          paillierProof.Clone(),
 		paillierPublicKeys:     s.sortedNewPaillierPublicKeys(),
-		ringPedersenParams:     append([]byte(nil), selfNPD.ringPedersen.Params...),
-		ringPedersenProof:      append([]byte(nil), selfNPD.ringPedersen.Proof...),
+		ringPedersenParams:     cloneRingPedersenParams(selfNPD.ringPedersen.Params),
+		ringPedersenProof:      selfNPD.ringPedersen.Proof.Clone(),
 		ringPedersenPublic:     s.sortedNewRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelResharePaillier,
@@ -186,11 +183,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	defer logRandomness.Destroy()
-	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(selfNPD.ringPedersen.Params, s.limits.Paillier.MaxModulusBits)
+	localRP := cloneRingPedersenParams(selfNPD.ringPedersen.Params)
+	logDomain, err := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
-		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
+		return nil, err
 	}
-	logDomain := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash)
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
 		return nil, fmt.Errorf("invalid verification share: %w", err)
@@ -266,7 +263,7 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 	return newCommitments, nil
 }
 
-func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
+func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) ([]byte, error) {
 	t := transcript.New(reshareTranscriptHashLabel)
 	t.AppendString("curve", s.plan.state.curveID)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
@@ -294,37 +291,37 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) []byte {
 	for _, id := range sortedNewParties {
 		t.AppendUint32("new_party", id)
 		npd := s.newPartyData[id]
-		t.AppendBytes("paillier_public_key", npd.paillierPub.PublicKey)
-		t.AppendBytes("paillier_proof", npd.paillierPub.Proof)
-		t.AppendBytes("ring_pedersen_params", npd.ringPedersen.Params)
-		t.AppendBytes("ring_pedersen_proof", npd.ringPedersen.Proof)
+		paillierSnapshot, err := npd.paillierPub.snapshot(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		ringPedersenSnapshot, err := npd.ringPedersen.snapshot(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		t.AppendBytes("paillier_public_key", paillierSnapshot.PublicKey)
+		t.AppendBytes("paillier_proof", paillierSnapshot.Proof)
+		t.AppendBytes("ring_pedersen_params", ringPedersenSnapshot.Params)
+		t.AppendBytes("ring_pedersen_proof", ringPedersenSnapshot.Proof)
 	}
 	t.AppendBytesList("new_commitments", newCommitments)
-	return t.Sum()
+	return t.Sum(), nil
 }
 
-func (s *ReshareSession) sortedNewPaillierPublicKeys() []PaillierPublicShare {
-	out := make([]PaillierPublicShare, 0, len(s.newParties))
+func (s *ReshareSession) sortedNewPaillierPublicKeys() []paillierPublicMaterial {
+	out := make([]paillierPublicMaterial, 0, len(s.newParties))
 	for _, id := range s.newParties {
 		npd := s.newPartyData[id]
-		out = append(out, PaillierPublicShare{
-			Party:     npd.paillierPub.Party,
-			PublicKey: append([]byte(nil), npd.paillierPub.PublicKey...),
-			Proof:     append([]byte(nil), npd.paillierPub.Proof...),
-		})
+		out = append(out, npd.paillierPub.clone())
 	}
 	return out
 }
 
-func (s *ReshareSession) sortedNewRingPedersenPublic() []RingPedersenPublicShare {
-	out := make([]RingPedersenPublicShare, 0, len(s.newParties))
+func (s *ReshareSession) sortedNewRingPedersenPublic() []ringPedersenPublicMaterial {
+	out := make([]ringPedersenPublicMaterial, 0, len(s.newParties))
 	for _, id := range s.newParties {
 		npd := s.newPartyData[id]
-		out = append(out, RingPedersenPublicShare{
-			Party:  npd.ringPedersen.Party,
-			Params: append([]byte(nil), npd.ringPedersen.Params...),
-			Proof:  append([]byte(nil), npd.ringPedersen.Proof...),
-		})
+		out = append(out, npd.ringPedersen.clone())
 	}
 	return out
 }

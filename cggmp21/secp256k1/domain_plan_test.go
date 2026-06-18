@@ -2,10 +2,30 @@ package secp256k1
 
 import (
 	"bytes"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
+	pai "github.com/islishude/tss/internal/paillier"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
+
+func testDomainPaillierKey() *pai.PublicKey {
+	n := big.NewInt(65)
+	return &pai.PublicKey{
+		N:        n,
+		G:        new(big.Int).Add(n, big.NewInt(1)),
+		NSquared: new(big.Int).Mul(n, n),
+	}
+}
+
+func testDomainRingPedersenParams() *zkpai.RingPedersenParams {
+	return &zkpai.RingPedersenParams{
+		N: big.NewInt(65),
+		S: big.NewInt(2),
+		T: big.NewInt(4),
+	}
+}
 
 func TestCGGMP21ReshareProofDomainsBindLifecyclePlanHash(t *testing.T) {
 	t.Parallel()
@@ -20,48 +40,32 @@ func TestCGGMP21ReshareProofDomainsBindLifecyclePlanHash(t *testing.T) {
 	planHash := bytes.Repeat([]byte{0x42}, 32)
 
 	tests := []struct {
-		name string
-		got  []byte
-		ctx  proofDomainContext
+		name   string
+		domain func([]byte) ([]byte, error)
 	}{
-		{
-			name: "paillier",
-			got:  resharePaillierDomain(config, 1, []byte("paillier"), planHash),
-			ctx: proofDomainContext{
-				label:             domainLabelResharePaillier,
-				sessionID:         sessionID,
-				threshold:         2,
-				parties:           tss.NewPartySet(1, 2),
-				sender:            1,
-				paillierPublicKey: []byte("paillier"),
-				lifecyclePlanHash: planHash,
-			},
-		},
-		{
-			name: "ring pedersen",
-			got:  reshareRingPedersenDomain(config, 1, []byte("ring-pedersen"), planHash),
-			ctx: proofDomainContext{
-				label:              domainLabelReshareRingPedersen,
-				sessionID:          sessionID,
-				threshold:          2,
-				parties:            tss.NewPartySet(1, 2),
-				sender:             1,
-				ringPedersenParams: []byte("ring-pedersen"),
-				lifecyclePlanHash:  planHash,
-			},
-		},
+		{name: "paillier", domain: func(hash []byte) ([]byte, error) {
+			return resharePaillierDomain(config, 1, testDomainPaillierKey(), hash, testLimits())
+		}},
+		{name: "ring pedersen", domain: func(hash []byte) ([]byte, error) {
+			return reshareRingPedersenDomain(config, 1, testDomainRingPedersenParams(), hash, testLimits())
+		}},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if want := proofDomain(tc.ctx); !bytes.Equal(tc.got, want) {
-				t.Fatal("reshare proof domain omitted lifecycle plan hash")
+			got, err := tc.domain(planHash)
+			if err != nil {
+				t.Fatal(err)
 			}
-			tc.ctx.lifecyclePlanHash = nil
-			if legacy := proofDomain(tc.ctx); bytes.Equal(tc.got, legacy) {
-				t.Fatal("reshare proof domain matches legacy domain without lifecycle plan hash")
+			if len(got) == 0 {
+				t.Fatal("empty proof domain")
+			}
+			for _, invalid := range [][]byte{nil, bytes.Repeat([]byte{0x42}, 31), bytes.Repeat([]byte{0x42}, 33)} {
+				if _, err := tc.domain(invalid); err == nil {
+					t.Fatalf("accepted lifecycle plan hash length %d", len(invalid))
+				}
 			}
 		})
 	}
@@ -74,34 +78,60 @@ func TestCGGMP21MTAResponseProofDomainsBindLabelAndLifecyclePlan(t *testing.T) {
 		threshold:            2,
 		parties:              tss.NewPartySet(1, 2),
 		publicKey:            []byte("public-key"),
-		keygenTranscriptHash: []byte("key-transcript"),
+		keygenTranscriptHash: bytes.Repeat([]byte{0x24}, 32),
+		planHash:             bytes.Repeat([]byte{0x25}, 32),
 	}}
 	var sessionID tss.SessionID
 	sessionID[0] = 1
 	args := struct {
 		signers                    tss.PartySet
 		initiator, responder       tss.PartyID
-		initiatorPaillierPublicKey []byte
+		initiatorPaillierPublicKey *pai.PublicKey
 		presignContextHash         []byte
 		planHash                   []byte
 	}{
 		signers:                    tss.NewPartySet(1, 2),
 		initiator:                  1,
 		responder:                  2,
-		initiatorPaillierPublicKey: []byte("paillier"),
-		presignContextHash:         []byte("presign-context"),
+		initiatorPaillierPublicKey: testDomainPaillierKey(),
+		presignContextHash:         bytes.Repeat([]byte{0x41}, 32),
 		planHash:                   bytes.Repeat([]byte{0x42}, 32),
 	}
 
-	delta := mtaDeltaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, args.planHash)
-	sigma := mtaSigmaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, args.planHash)
+	delta, err := mtaDeltaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, args.planHash, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	sigma, err := mtaSigmaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, args.planHash, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if bytes.Equal(delta, sigma) {
 		t.Fatal("MtA delta and sigma response domains must differ")
 	}
 	wrongPlanHash := bytes.Clone(args.planHash)
 	wrongPlanHash[0] ^= 1
-	wrongPlan := mtaDeltaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, wrongPlanHash)
+	wrongPlan, err := mtaDeltaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, args.presignContextHash, wrongPlanHash, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
 	if bytes.Equal(delta, wrongPlan) {
 		t.Fatal("MtA response domain must bind the lifecycle plan hash")
+	}
+	for _, tc := range []struct {
+		name        string
+		contextHash []byte
+		planHash    []byte
+	}{
+		{name: "missing context", contextHash: nil, planHash: args.planHash},
+		{name: "short context", contextHash: bytes.Repeat([]byte{1}, 31), planHash: args.planHash},
+		{name: "missing plan", contextHash: args.presignContextHash, planHash: nil},
+		{name: "short plan", contextHash: args.presignContextHash, planHash: bytes.Repeat([]byte{1}, 31)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := mtaDeltaResponseDomain(key, sessionID, args.signers, args.initiator, args.responder, args.initiatorPaillierPublicKey, tc.contextHash, tc.planHash, testLimits()); err == nil {
+				t.Fatal("accepted invalid MtA proof-domain binding")
+			}
+		})
 	}
 }
