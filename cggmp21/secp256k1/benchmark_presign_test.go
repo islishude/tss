@@ -11,7 +11,7 @@ import (
 // Offline: pre-compute before signing.
 
 func BenchmarkCGGMP21Presign2of3(b *testing.B) {
-	shares := CachedKeygenShares(b, 2, 3, false)
+	shares := CachedKeygenShares(b, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 
 	for b.Loop() {
@@ -20,7 +20,7 @@ func BenchmarkCGGMP21Presign2of3(b *testing.B) {
 }
 
 func BenchmarkCGGMP21Presign3of5(b *testing.B) {
-	shares := CachedKeygenShares(b, 3, 5, false)
+	shares := CachedKeygenShares(b, 3, 5)
 	signers := tss.NewPartySet(1, 3, 5)
 
 	for b.Loop() {

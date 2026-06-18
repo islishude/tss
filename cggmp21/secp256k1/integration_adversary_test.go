@@ -18,7 +18,7 @@ import (
 // various fields in an online signing partial results in precise blame of
 // only the sender with ErrCodeVerification.
 func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 
 	tests := []struct {
@@ -70,6 +70,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			presigns := secpPresign(t, shares, signers)
 			digest := sha256.Sum256([]byte("adversarial " + tc.name))
 			signID, err := tss.NewSessionID(nil)
@@ -130,7 +131,9 @@ func assertSignPartialBlamesOnlySender(t *testing.T, sessions map[tss.PartyID]*S
 // TestIntegration_ValidPartialsProduceValidSignature verifies the full
 // happy path: all valid partials result in a valid ECDSA signature.
 func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("happy path"))
@@ -184,7 +187,9 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			shares := CachedKeygenShares(t, 2, 3, false)
+			t.Parallel()
+
+			shares := CachedKeygenShares(t, 2, 3)
 			signers := tss.NewPartySet(1, 2, 3)
 			presigns := secpPresign(t, shares, signers)
 
@@ -313,7 +318,8 @@ func runPresignRound3TamperTest(t *testing.T, shares map[tss.PartyID]*KeyShare, 
 // presign round3 fields (KPoint, ChiPoint, Proof) results in immediate
 // presign-phase blame of only the sender.
 func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2, 3)
 
 	tests := []struct {
@@ -385,6 +391,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 			runPresignRound3TamperTest(t, shares, signers, tc.tamper)
 		})
 	}
@@ -403,7 +410,8 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 //  7. Expect session not to enter aggregation (not completed).
 //  8. Expect no blame-all-signers path.
 func TestIntegration_OriginalDefectRegression(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, false)
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	digest := sha256.Sum256([]byte("original defect regression"))

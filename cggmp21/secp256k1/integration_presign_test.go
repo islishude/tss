@@ -47,7 +47,7 @@ func TestThresholdECDSA_PresignAttemptBinding(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			shares := CachedKeygenShares(t, 2, 3, false)
+			shares := CachedKeygenShares(t, 2, 3)
 			signers := tss.NewPartySet(1, 2)
 			presigns := secpPresign(t, shares, signers)
 			presign := presigns[1]
@@ -147,7 +147,7 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			shares := CachedKeygenShares(t, 2, 3, false)
+			shares := CachedKeygenShares(t, 2, 3)
 			signers := tss.NewPartySet(1, 2)
 			presigns := secpPresign(t, shares, signers)
 			digest := sha256.Sum256([]byte(tc.name))
@@ -158,7 +158,7 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 
 func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -184,7 +184,7 @@ func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) 
 
 func TestThresholdECDSA_SignAttemptConflictFailsClosed(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("store intent conflict"))
 	sessionID, err := tss.NewSessionID(nil)
@@ -204,7 +204,7 @@ func TestThresholdECDSA_SignAttemptConflictFailsClosed(t *testing.T) {
 
 func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("store temporary error"))
 	storeErr := errors.New("commit response lost")
@@ -237,7 +237,7 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 
 func TestThresholdECDSA_StartSignCommitIsFirstDurableDecision(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	digest := sha256.Sum256([]byte("commit before load"))
 	sessionID, err := tss.NewSessionID(nil)
@@ -257,7 +257,7 @@ func TestThresholdECDSA_StartSignCommitIsFirstDurableDecision(t *testing.T) {
 
 func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -288,7 +288,7 @@ func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 
 func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	rawFresh, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -334,7 +334,7 @@ func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 
 func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	rawPresign, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -381,7 +381,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 
 func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	rawPresign, err := presigns[1].MarshalBinary()
@@ -443,7 +443,7 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 
 func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	sessionID, err := tss.NewSessionID(nil)
@@ -481,7 +481,7 @@ func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T
 
 func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -515,7 +515,7 @@ func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
 
 func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
@@ -555,7 +555,7 @@ func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 
 func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -601,7 +601,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 
 func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	store := newTestSignAttemptStore()
 	type attempt struct {
@@ -652,7 +652,7 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 
 func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -686,7 +686,7 @@ func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 
 func TestThresholdECDSATamperedEncKBlamesSender(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -911,7 +911,7 @@ func startSignDigestWithStoreMustBeConsumed(t *testing.T, share *KeyShare, presi
 
 func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	for _, tc := range []struct {
 		name   string
 		mutate func(*presignRound2Payload)
@@ -959,7 +959,7 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 
 func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -1023,7 +1023,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			shares := CachedKeygenShares(t, tc.threshold, tc.n, false)
+			shares := CachedKeygenShares(t, tc.threshold, tc.n)
 			presigns := secpPresign(t, shares, tc.signers)
 			presign := presigns[tc.signers[0]]
 
@@ -1085,7 +1085,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 
 func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	presign := clonePresignForTest(presigns[1])

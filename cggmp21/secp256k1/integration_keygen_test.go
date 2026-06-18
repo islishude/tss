@@ -75,7 +75,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 
 func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)

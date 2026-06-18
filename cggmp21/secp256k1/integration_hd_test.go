@@ -11,7 +11,9 @@ import (
 )
 
 func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	path := []uint32{0, 17}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
@@ -60,7 +62,9 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 }
 
 func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := []*KeyShare{shares[1], shares[2]}
 	path := []uint32{0, 9}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
@@ -84,7 +88,9 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 }
 
 func TestBIP32SingleLevel(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	pubKey := shares[1].PublicKeyBytes()
 	chainCode := shares[1].ChainCodeBytes()
 
@@ -111,7 +117,9 @@ func TestBIP32SingleLevel(t *testing.T) {
 }
 
 func TestBIP32MultiLevel(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	pubKey := shares[1].PublicKeyBytes()
 	chainCode := shares[1].ChainCodeBytes()
 
@@ -150,7 +158,9 @@ func TestBIP32MultiLevel(t *testing.T) {
 }
 
 func TestBIP32DeriveAndSign(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 3, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 3)
 	path := []uint32{0, 5}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
 	if err != nil {
@@ -199,7 +209,9 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 }
 
 func TestBIP32RejectsHardened(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	_, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{tss.HardenedKeyStart})
 	if err == nil {
 		t.Fatal("expected error for hardened index")
@@ -211,7 +223,9 @@ func TestBIP32RejectsHardened(t *testing.T) {
 }
 
 func TestBIP32RejectsEmptyChainCode(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	if len(shares[1].ChainCodeBytes()) > 0 {
 		t.Skip("unexpected chain code with HD disabled")
 	}
@@ -222,7 +236,9 @@ func TestBIP32RejectsEmptyChainCode(t *testing.T) {
 }
 
 func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	signers := tss.NewPartySet(1)
 	ctx := testPresignContext()
 	// Empty derivation path: the public key should be the parent key.
@@ -251,7 +267,9 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 }
 
 func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	signers := tss.NewPartySet(1)
 	path := []uint32{0, 1}
 	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
@@ -283,7 +301,9 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 }
 
 func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	signers := tss.NewPartySet(1)
 
 	// Create presign for path A.
@@ -305,7 +325,9 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 }
 
 func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, true)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	signers := tss.NewPartySet(1)
 	path := []uint32{0, 5}
 	ctx := testPresignContext()

@@ -18,7 +18,7 @@ import (
 func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 
 	raw, err := shares[1].MarshalBinary()
 	if err != nil {
@@ -72,7 +72,7 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	raw, err := presigns[1].MarshalBinary()
@@ -112,7 +112,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	sid, _ := tss.NewSessionID(nil)
@@ -152,7 +152,7 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 func TestCGGMP21_Presign_DestroyMarshal(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2, 3))
 
 	_, err := presigns[1].MarshalBinary()
@@ -173,7 +173,7 @@ func TestCGGMP21_Presign_DestroyMarshal(t *testing.T) {
 func TestCGGMP21_KeyShare_DeterministicMarshal(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 
 	raw1, err := shares[1].MarshalBinary()
 	if err != nil {

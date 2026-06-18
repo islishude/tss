@@ -12,7 +12,7 @@ import (
 
 func TestKeygenConfirmationRoundTrip(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	share := shares[1]
 	c, err := share.NewConfirmationWithLimits(testLimits())
 	if err != nil {
@@ -40,7 +40,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 
 func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	var confirmations []*KeygenConfirmation
 	for _, id := range tss.NewPartySet(1, 2, 3) {
 		c, err := shares[id].NewConfirmationWithLimits(testLimits())
@@ -64,7 +64,7 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 // with a mismatched transcript hash, public key, or commitments hash is rejected.
 func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	var baseConfirmations []*KeygenConfirmation
 	for _, id := range tss.NewPartySet(1, 2, 3) {
 		c, err := shares[id].NewConfirmationWithLimits(testLimits())
@@ -119,7 +119,7 @@ func TestKeygenConfirmationRejectsTamperedFields(t *testing.T) {
 // sets with duplicate, missing, unknown, or wrong-count senders are rejected.
 func TestKeygenConfirmationRejectsInvalidSenderSets(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 
 	tests := []struct {
 		name          string
@@ -194,7 +194,7 @@ func TestUnconfirmedKeyShareValidateAndMarshalReject(t *testing.T) {
 
 func TestConfirmedKeyShareAcceptedByRequireMPC(t *testing.T) {
 	t.Parallel()
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	if err := shares[1].requireMPCMaterial(testLimits()); err != nil {
 		t.Fatalf("requireMPCMaterial rejected confirmed share: %v", err)
 	}

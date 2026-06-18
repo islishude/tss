@@ -31,7 +31,9 @@ func (*cggmpRefreshRunnerTransport) Receive(context.Context) (tss.InboundEnvelop
 }
 
 func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
-	shares := CachedKeygenShares(t, 1, 1, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
 	current := shares[1]
 	oldPublicKey := current.PublicKeyBytes()
 	sessionID, err := tss.NewSessionID(nil)

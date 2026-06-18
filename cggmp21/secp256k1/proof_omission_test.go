@@ -231,7 +231,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 2, false)
+	shares := CachedKeygenShares(t, 2, 2)
 	share := shares[1]
 
 	// Marshal/unmarshal to get a clean copy.
@@ -257,7 +257,7 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 2, false)
+	shares := CachedKeygenShares(t, 2, 2)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -285,7 +285,7 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 2, false)
+	shares := CachedKeygenShares(t, 2, 2)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -310,7 +310,7 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 2, false)
+	shares := CachedKeygenShares(t, 2, 2)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()
@@ -334,7 +334,7 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 	t.Parallel()
 
-	shares := CachedKeygenShares(t, 2, 2, false)
+	shares := CachedKeygenShares(t, 2, 2)
 	share := shares[1]
 
 	raw, err := share.MarshalBinary()

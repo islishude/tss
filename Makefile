@@ -18,9 +18,8 @@ PKGS ?= ./...
 LOGICAL_CPUS := $(shell nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 4)
 PKG_PARALLEL ?= 8
 TEST_PARALLEL ?= $(LOGICAL_CPUS)
-INTEGRATION_PKG_PARALLEL ?= 3
-INTEGRATION_PARALLEL ?= $(shell cpus=$(LOGICAL_CPUS); \
-	if [ "$$cpus" -lt 1 ]; then echo 1; elif [ "$$cpus" -gt 4 ]; then echo 4; else echo "$$cpus"; fi)
+INTEGRATION_PKG_PARALLEL ?= 4
+INTEGRATION_PARALLEL ?= $(LOGICAL_CPUS)
 FUZZ_PARALLEL ?= 4
 
 UNIT_TIMEOUT ?= 1m
@@ -93,6 +92,11 @@ test-stress: ## Tier 4: repeated race/stress run; explicit or scheduled only.
 .PHONY: test-budget
 test-budget: ## Run Tier 0+1+2 tests with runtime budget checker.
 	$(GO) test -json -tags='tier1,integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) $(PKGS) | $(GO) run ./internal/testutil/cmd/testbudget
+
+.PHONY: test-budget-timing
+test-budget-timing: ## Print slowest integration tests with integration parallelism.
+	$(GO) test -count=1 -json -tags='integration' -p $(INTEGRATION_PKG_PARALLEL) -parallel $(INTEGRATION_PARALLEL) -timeout $(INTEGRATION_TIMEOUT) ./... | \
+		$(GO) run ./internal/testutil/cmd/testbudget -tier=integration -top=50 -leaves -fail=false
 
 # -----------------------------------------------------------------------------
 # Fuzzing

@@ -1,7 +1,9 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
+	"fmt"
 	"math/big"
 	"strings"
 	"sync"
@@ -20,6 +22,7 @@ type fixtureKey struct {
 type keygenFixtureEntry struct {
 	once   sync.Once
 	shares map[tss.PartyID]*KeyShare
+	err    error
 }
 
 // keygenFixtureCache avoids repeated full-DKG executions for identical
@@ -27,33 +30,44 @@ type keygenFixtureEntry struct {
 // independent clones, so callers may mutate their copy freely.
 var keygenFixtureCache sync.Map // map[fixtureKey]*keygenFixtureEntry
 
-// CachedKeygenShares returns a clone of a previously-generated keygen fixture
-// for (threshold, n), or generates a fresh one and caches clones on first use.
-func CachedKeygenShares(t testing.TB, threshold, n int, enableHD bool) map[tss.PartyID]*KeyShare {
+// CachedKeygenShares returns independent clones of a cached keygen fixture.
+//
+// Key shares always include a 32-byte chain code. HD-specific tests should use
+// the same cached shares and exercise derivation logic separately; HD is not a
+// keygen fixture dimension unless production keygen later gains a true non-HD
+// mode.
+func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	_ = enableHD
 	key := fixtureKey{threshold: threshold, n: n}
 	actual, _ := keygenFixtureCache.LoadOrStore(key, &keygenFixtureEntry{})
 	entry := actual.(*keygenFixtureEntry)
 	entry.once.Do(func() {
-		defer func() {
-			if entry.shares == nil {
-				keygenFixtureCache.Delete(key)
-			}
-		}()
-		entry.shares = cloneKeyShareMap(secpKeygen(t, threshold, n))
+		shares, fromFixture, err := loadOrGenerateKeygenFixture(threshold, n)
+		if err != nil {
+			entry.err = err
+			return
+		}
+		if !fromFixture {
+			t.Logf("no committed keygen fixture for %d-of-%d; running full DKG fallback", threshold, n)
+		}
+		entry.shares = cloneKeyShareMap(shares)
 	})
+	if entry.err != nil {
+		keygenFixtureCache.Delete(key)
+		t.Fatalf("cached keygen fixture %d-of-%d: %v", threshold, n, entry.err)
+	}
 	if entry.shares == nil {
-		t.Fatal("cached keygen fixture was not initialized")
+		keygenFixtureCache.Delete(key)
+		t.Fatalf("cached keygen fixture %d-of-%d was not initialized", threshold, n)
 	}
 	return cloneKeyShareMap(entry.shares)
 }
 
 // cachedKeygenFixture is a convenience wrapper around CachedKeygenShares for
-// non-HD keygen. Kept for backward compatibility with existing callers.
+// tests that use the package-local harness.
 func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	return CachedKeygenShares(t, threshold, n, false)
+	return CachedKeygenShares(t, threshold, n)
 }
 
 func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
@@ -134,9 +148,17 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 
 func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
-	session, err := tss.NewSessionID(nil)
+	shares, err := runSecpKeygen(threshold, n)
 	if err != nil {
 		t.Fatal(err)
+	}
+	return shares
+}
+
+func runSecpKeygen(threshold, n int) (map[tss.PartyID]*KeyShare, error) {
+	session, err := tss.NewSessionID(nil)
+	if err != nil {
+		return nil, err
 	}
 	parties := make(tss.PartySet, n)
 	for i := range parties {
@@ -147,27 +169,29 @@ func secpKeygen(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	for _, id := range parties {
 		kg, out, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: threshold, Parties: parties, Self: id, SessionID: session})
 		if err != nil {
-			t.Fatal(err)
+			return nil, fmt.Errorf("start keygen party %d: %w", id, err)
 		}
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	deliverKeygenMessages(t, sessions, parties, messages)
+	if err := deliverKeygenMessagesE(sessions, parties, messages); err != nil {
+		return nil, err
+	}
 	out := make(map[tss.PartyID]*KeyShare, n)
 	var pub []byte
 	for _, id := range parties {
 		share, ok := sessions[id].KeyShare()
 		if !ok {
-			t.Fatalf("keygen not complete for %d", id)
+			return nil, fmt.Errorf("keygen not complete for party %d", id)
 		}
 		if pub == nil {
 			pub = share.state.publicKey
-		} else if string(pub) != string(share.state.publicKey) {
-			t.Fatal("group public key mismatch")
+		} else if !bytes.Equal(pub, share.state.publicKey) {
+			return nil, fmt.Errorf("group public key mismatch for party %d", id)
 		}
 		out[id] = share
 	}
-	return out
+	return out, nil
 }
 
 func secpKeygenWithPlanOption(t testing.TB, threshold, n int, option KeygenPlanOption) map[tss.PartyID]*KeyShare {

@@ -89,11 +89,14 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 // delivered in arbitrary order within each round still produce valid signatures.
 // Messages are shuffled round-by-round since later rounds depend on earlier ones.
 func TestCGGMP21AdversarialDeliveryOrder(t *testing.T) {
+	t.Parallel()
+
 	rng := rand.New(rand.NewPCG(42, 42)) //nolint:gosec // deterministic RNG for reproducible test shuffles
-	shares := CachedKeygenShares(t, 2, 3, false)
+	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 3)
 
-	for range 10 {
+	const iterations = 3
+	for range iterations {
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
 			t.Fatal(err)

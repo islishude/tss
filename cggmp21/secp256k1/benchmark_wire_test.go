@@ -9,7 +9,7 @@ import (
 // Serialization: envelope and key share encode/decode.
 
 func BenchmarkCGGMP21WireKeyShareRoundTrip(b *testing.B) {
-	shares := CachedKeygenShares(b, 2, 3, false)
+	shares := CachedKeygenShares(b, 2, 3)
 	var ks KeyShare
 	for _, v := range shares {
 		ks = *v

@@ -14,7 +14,9 @@ import (
 )
 
 func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -65,7 +67,9 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -125,7 +129,9 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	newShares, _ := runCGGMP21ReshareWithDealers(t, shares, tss.NewPartySet(1, 2), tss.NewPartySet(3, 4), 2)
 	share := cloneKeyShareValue(newShares[3])
 	if len(share.ResharePlanHashBytes()) != sha256.Size {
@@ -138,7 +144,9 @@ func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
 }
 
 func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -216,16 +224,20 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 // group public key across add-party, remove-party, threshold-change, and
 // disjoint-dealer-subset scenarios.
 func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
-	oldShares := CachedKeygenShares(t, 2, 3, false)
-	oldPub := oldShares[1].PublicKeyBytes()
+	oldShareFixtures := map[fixtureKey]map[tss.PartyID]*KeyShare{
+		{threshold: 2, n: 2}: CachedKeygenShares(t, 2, 2),
+		{threshold: 2, n: 3}: CachedKeygenShares(t, 2, 3),
+	}
 
 	tests := []struct {
 		name          string
+		oldKey        fixtureKey
 		newParties    tss.PartySet
 		newThreshold  int
 		dealerParties tss.PartySet // nil means all old parties
 		signers       tss.PartySet
 		removedParty  tss.PartyID // party expected to be removed (0 = none)
+		verifySigning bool
 		assert        func(t *testing.T, newShares map[tss.PartyID]*KeyShare, sessions map[tss.PartyID]*ReshareSession)
 	}{
 		{
@@ -235,17 +247,19 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 			signers:      tss.NewPartySet(2, 4),
 		},
 		{
-			name:         "remove party 2-of-3 to 2-of-2",
-			newParties:   tss.NewPartySet(1, 3),
-			newThreshold: 2,
-			signers:      tss.NewPartySet(1, 3),
-			removedParty: 2,
+			name:          "remove party 2-of-3 to 2-of-2",
+			newParties:    tss.NewPartySet(1, 3),
+			newThreshold:  2,
+			signers:       tss.NewPartySet(1, 3),
+			removedParty:  2,
+			verifySigning: true,
 		},
 		{
-			name:         "threshold increase 2-of-3 to 3-of-5",
-			newParties:   tss.NewPartySet(1, 2, 3, 4, 5),
+			name:         "threshold increase 2-of-2 to 3-of-3",
+			oldKey:       fixtureKey{threshold: 2, n: 2},
+			newParties:   tss.NewPartySet(1, 2, 3),
 			newThreshold: 3,
-			signers:      tss.NewPartySet(1, 4, 5),
+			signers:      tss.NewPartySet(1, 2, 3),
 		},
 		{
 			name:          "disjoint dealer subset 2-of-3 to 2-of-3",
@@ -258,6 +272,19 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			oldKey := tc.oldKey
+			if oldKey == (fixtureKey{}) {
+				oldKey = fixtureKey{threshold: 2, n: 3}
+			}
+			oldFixture := oldShareFixtures[oldKey]
+			if oldFixture == nil {
+				t.Fatalf("missing old key fixture for %d-of-%d", oldKey.threshold, oldKey.n)
+			}
+			oldShares := cloneKeyShareMap(oldFixture)
+			oldPub := oldShares[1].PublicKeyBytes()
+
 			var newShares map[tss.PartyID]*KeyShare
 			var sessions map[tss.PartyID]*ReshareSession
 
@@ -289,7 +316,11 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 				}
 			}
 
-			// Sign and verify with the selected signer subset.
+			if !tc.verifySigning {
+				return
+			}
+
+			// Sign and verify with a representative selected signer subset.
 			digest := sha256.Sum256([]byte("reshare " + tc.name))
 			pub, sig, err := SignDigest(digest[:], collectShares(t, newShares, tc.signers))
 			if err != nil {

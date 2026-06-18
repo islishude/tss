@@ -13,7 +13,7 @@ import (
 // Online latency: interactive signing path.
 
 func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
-	shares := CachedKeygenShares(b, 2, 3, false)
+	shares := CachedKeygenShares(b, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	digest := sha256.Sum256([]byte("benchmark"))
 
@@ -49,7 +49,7 @@ func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
 }
 
 func BenchmarkCGGMP21OnlineSign3of5(b *testing.B) {
-	shares := CachedKeygenShares(b, 3, 5, false)
+	shares := CachedKeygenShares(b, 3, 5)
 	signers := tss.NewPartySet(1, 3, 5)
 	digest := sha256.Sum256([]byte("benchmark 3of5"))
 

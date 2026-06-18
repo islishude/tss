@@ -72,7 +72,9 @@ func TestCGGMP21KeygenPlanDigestBindsSecurityParams(t *testing.T) {
 }
 
 func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	limits := testLimits()
 	want := testSecurityParams()
 
@@ -120,7 +122,9 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 }
 
 func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	limits := testLimits()
 	production := DefaultSecurityParams()
 	sessionID := cggmpPlanTestSession(0x63)
@@ -155,7 +159,9 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 }
 
 func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
-	shares := CachedKeygenShares(t, 2, 2, false)
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 2, 2)
 	limits := testLimits()
 
 	keyRaw, err := shares[1].MarshalBinaryWithLimits(limits)

@@ -5,6 +5,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"slices"
@@ -445,10 +446,16 @@ func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error
 
 func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties tss.PartySet, messages []tss.Envelope) {
 	t.Helper()
+	if err := deliverKeygenMessagesE(sessions, parties, messages); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss.PartySet, messages []tss.Envelope) error {
 	for _, id := range parties {
 		s := sessions[id]
 		if s.guard == nil {
-			t.Fatalf("missing guard for keygen session %d", id)
+			return fmt.Errorf("missing guard for keygen session %d", id)
 		}
 	}
 	queue := append([]tss.Envelope(nil), messages...)
@@ -461,11 +468,12 @@ func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession
 			}
 			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
 			if err != nil {
-				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+				return fmt.Errorf("deliver %s from %d to %d: %w", env.PayloadType, env.From, id, err)
 			}
 			queue = append(queue, out...)
 		}
 	}
+	return nil
 }
 
 // --- Minimal presign fixture ---

@@ -4,23 +4,14 @@ package secp256k1
 
 import "testing"
 
-// Offline: key generation (full DKG).
-
-func BenchmarkCGGMP21Keygen2of3(b *testing.B) {
+func BenchmarkCGGMP21KeygenFull2of3(b *testing.B) {
 	for b.Loop() {
-		_ = CachedKeygenShares(b, 2, 3, false)
+		_ = secpKeygen(b, 2, 3)
 	}
 }
 
-func BenchmarkCGGMP21Keygen3of5(b *testing.B) {
+func BenchmarkCGGMP21KeygenFull3of5(b *testing.B) {
 	for b.Loop() {
-		_ = CachedKeygenShares(b, 3, 5, false)
-	}
-}
-
-// BenchmarkCGGMP21KeygenHD tests keygen with HD chain code enabled.
-func BenchmarkCGGMP21KeygenHD2of3(b *testing.B) {
-	for b.Loop() {
-		_ = CachedKeygenShares(b, 2, 3, true)
+		_ = secpKeygen(b, 3, 5)
 	}
 }
