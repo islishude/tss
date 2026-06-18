@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"fmt"
 	"math/big"
 
 	fiatscalar "github.com/islishude/tss/internal/fiat/secp256k1scalar"
@@ -9,6 +10,30 @@ import (
 // ScalarFromBigInt converts a *big.Int to Scalar, reducing mod N.
 func ScalarFromBigInt(x *big.Int) Scalar {
 	return scalarFromBig(x)
+}
+
+// ScalarFromUint64 converts v to a Scalar without using big.Int.
+// Values used by protocol code are party identifiers, so v must be non-zero.
+// Zero is represented as ScalarZero for internal polynomial evaluation at x=0.
+func ScalarFromUint64(v uint64) Scalar {
+	return scalarFromUint64(v)
+}
+
+// ScalarFromBytesModOrder reduces a 32-byte big-endian integer modulo the
+// secp256k1 subgroup order. The zero result is accepted.
+//
+// Since every 256-bit input is less than 2*n, reduction requires at most one
+// subtraction of the subgroup order.
+func ScalarFromBytesModOrder(in []byte) (Scalar, error) {
+	if len(in) != ScalarSize {
+		return Scalar{}, fmt.Errorf("secp256k1 scalar input must be %d bytes", ScalarSize)
+	}
+	var be [ScalarSize]byte
+	copy(be[:], in)
+	if !lt32BE(be, scalarModulus) {
+		sub32BE(&be, scalarModulus)
+	}
+	return mustScalarFromBytes(be), nil
 }
 
 func scalarFromBig(x *big.Int) Scalar {

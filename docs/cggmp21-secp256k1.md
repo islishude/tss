@@ -833,7 +833,13 @@ pubKey, sig, err := Sign(message, shares, ctx) // in-memory exchange
 | `c^b mod n²` (MtA)     | `paillierct.ExpCT` (no blinding — ZK proof verifies exact relation) |
 | `Enc(m, r)`            | `math/big.Int.Exp` (public exponent — acceptable)                   |
 
-All Paillier secret exponents (`λ`, `μ`, MtA responder scalar `b`) and CGGMP key/presign scalar shares are stored as `secret.Scalar` fixed-length bytes at rest in key-share and presign records. They never expose `String()`, variable-length `Bytes()`, `BigInt()`, or JSON. Existing Shamir and MtA arithmetic may decode fixed-length scalars into local `big.Int` temporaries, which are kept internal and cleared on session destroy.
+All non-negative Paillier secrets (`λ`, `μ`, factors, randomness), MtA openings,
+and CGGMP key, presign, and DKG scalar shares use fixed-width `secret.Scalar`;
+signed proof masks use `secret.SignedInt`. Keygen, refresh, and reshare payloads
+encode DKG shares as fixed 32-byte scalar fields, while secp256k1 Shamir,
+Lagrange, and Schnorr arithmetic stay in fixed scalar types. Owned `big.Int`
+temporaries are limited to Paillier validation, encoding, and public proof
+response arithmetic boundaries and are cleared after use.
 
 See [docs/security.md](security.md) for the full constant-time policy.
 

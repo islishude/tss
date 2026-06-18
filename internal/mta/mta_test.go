@@ -2,35 +2,16 @@ package mta
 
 import (
 	"bytes"
-	"context"
 	"math/big"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	pai "github.com/islishude/tss/internal/paillier"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 func TestMTAProductShares(t *testing.T) {
 	t.Parallel()
 	params := testSecurityParams()
-	skA, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	skB, err := pai.GenerateKeyForTest(context.Background(), nil, 1024)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Generate verifier-specific Ring-Pedersen params for both sides.
-	rpA, _, err := zkpai.GenerateRingPedersenParams(nil, skA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rpB, _, err := zkpai.GenerateRingPedersenParams(nil, skB)
-	if err != nil {
-		t.Fatal(err)
-	}
+	skA, skB, rpA, rpB := setupTestEnv(t)
 	a := big.NewInt(13)
 	b := big.NewInt(37)
 	bCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
@@ -39,7 +20,9 @@ func TestMTAProductShares(t *testing.T) {
 	}
 	startDomain := []byte("start")
 	responseDomain := []byte("response")
-	start, err := Start(nil, a, &skA.PublicKey)
+	aSecret := testSecretScalar(t, a)
+	bSecret := testSecretScalar(t, b)
+	start, err := Start(nil, aSecret, &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,32 +39,23 @@ func TestMTAProductShares(t *testing.T) {
 	if err := VerifyStart(params, startDomain, start.Message, &skA.PublicKey, *rpA, startProof); err == nil {
 		t.Fatal("start proof verified for wrong verifier aux")
 	}
-	legacyProof, err := zkpai.ProveEncryption(nil, startDomain, &skA.PublicKey, new(big.Int).SetBytes(start.Message.Ciphertext), start.k, start.rho) //nolint:staticcheck // verifies legacy proof rejection
+	response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	legacyProofBytes, err := zkpai.Marshal(legacyProof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := VerifyStart(params, startDomain, start.Message, &skA.PublicKey, *rpB, legacyProofBytes); err == nil {
-		t.Fatal("legacy encryption proof verified as EncProof")
-	}
-	response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, nil, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA); err == nil {
+	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, nil, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA); err == nil {
 		t.Fatal("missing start proof accepted")
 	}
-	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpA, *rpA); err == nil {
+	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpA, *rpA); err == nil {
 		t.Fatal("start proof for different verifier accepted")
 	}
 	alphaShare, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	got := new(big.Int).Add(alphaShare, betaShare)
+	alphaBig := testSecretBig(t, alphaShare)
+	betaBig := testSecretBig(t, betaShare)
+	got := new(big.Int).Add(alphaBig, betaBig)
 	got.Mod(got, secp.Order())
 	want := new(big.Int).Mul(a, b)
 	want.Mod(want, secp.Order())

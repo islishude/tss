@@ -16,13 +16,8 @@
 //     secp256k1 curve point share the same discrete logarithm in range,
 //     using Ring-Pedersen commitment to hide the integer witness.
 //
-// All  proofs use SecurityParams to configure statistical and computational
+// All proofs use SecurityParams to configure statistical and computational
 // security parameters, a typed Transcript API for Fiat-Shamir challenge
 // derivation, signed integer encoding for witness responses, and strict
 // ciphertext/point membership checks before algebraic equation verification.
-//
-// Legacy proof types (EncryptionProof, MTAResponseProof, LogProof) are
-// version 1 and are rejected by the new proof verifiers. The MtA Start path
-// retains EncryptionProof v1 for the broadcast Round 1 flow where per-verifier
-// Ring-Pedersen commitments are impractical; the witness k_i is ephemeral.
 package paillier

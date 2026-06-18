@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 
@@ -12,7 +11,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -27,7 +26,7 @@ const (
 // confirmation is set during round 2 after the transcript is finalized.
 type refreshPartyData struct {
 	commitments  [][]byte
-	share        *big.Int
+	share        *secret.Scalar
 	paillierPub  PaillierPublicShare
 	ringPedersen RingPedersenPublicShare
 	confirmation *KeygenConfirmation
@@ -52,7 +51,6 @@ type RefreshSession struct {
 	aborted        bool                              // Terminal failure/destruction flag.
 	guard          *tss.EnvelopeGuard                // Transport replay, identity, and policy guard.
 	newShare       *KeyShare                         // Refreshed key share produced on completion.
-	ownPoly        []*big.Int                        // Local zero-constant polynomial coefficients; secret-bearing.
 	newPaillier    *pai.PrivateKey                   // Fresh local Paillier private key for rotated auxiliary material.
 }
 
@@ -112,6 +110,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	defer ringPedersenLambda.Destroy()
 	ringPedersenParamsBytes, err := zkpai.MarshalRingPedersenParams(ringPedersenParams)
 	if err != nil {
 		return nil, nil, err
@@ -124,21 +123,26 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	poly, err := shamir.RandomPolynomial(config.Reader(), secp.Order(), config.Threshold, big.NewInt(0))
+	zero := secp.ScalarZero()
+	poly, err := shamirsecp.RandomPolynomial(config.Reader(), config.Threshold, &zero)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		if coeff.Sign() == 0 {
+		if coeff.IsZero() {
 			commitments[i] = nil
 			continue
 		}
-		enc, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff)))
+		enc, err := secp.PointBytes(secp.ScalarBaseMult(coeff))
 		if err != nil {
 			return nil, nil, err
 		}
 		commitments[i] = enc
+	}
+	localShare, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, oldKey.state.party))
+	if err != nil {
+		return nil, nil, err
 	}
 	s := &RefreshSession{
 		oldKey:         oldKey,
@@ -154,13 +158,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 			}
 			pd[oldKey.state.party] = &refreshPartyData{
 				commitments:  commitments,
-				share:        shamir.Eval(poly, oldKey.state.party, secp.Order()),
+				share:        localShare,
 				paillierPub:  PaillierPublicShare{Party: oldKey.state.party, PublicKey: newPaillierPubBytes, Proof: modProofBytes},
 				ringPedersen: RingPedersenPublicShare{Party: oldKey.state.party, Params: ringPedersenParamsBytes, Proof: ringPedersenProofBytes},
 			}
 			return pd
 		}(),
-		ownPoly:     poly,
 		newPaillier: newPaillierKey,
 		guard:       guard,
 	}
@@ -184,8 +187,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if id == oldKey.state.party {
 			continue
 		}
-		share := shamir.Eval(poly, id, secp.Order())
+		share, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, id))
+		if err != nil {
+			return nil, nil, err
+		}
 		payload, err := marshalRefreshSharePayloadWithLimits(refreshSharePayload{Share: share, PlanHash: planHash}, s.limits)
+		share.Destroy()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -371,8 +378,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		share := secp.ScalarFromBigInt(p.Share)
-		pd.share = share.BigInt()
+		pd.share = p.Share.Clone()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -413,13 +419,10 @@ func (s *RefreshSession) abort() {
 	s.aborted = true
 	for _, pd := range s.partyData {
 		if pd.share != nil {
-			secret.ClearBigInt(pd.share)
+			pd.share.Destroy()
+			pd.share = nil
 		}
 	}
-	for _, coeff := range s.ownPoly {
-		secret.ClearBigInt(coeff)
-	}
-	s.ownPoly = nil
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil

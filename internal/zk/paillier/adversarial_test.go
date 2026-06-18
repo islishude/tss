@@ -159,7 +159,10 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		CiphertextK:     ciphertextZero,
 		VerifierAux:     *aux,
 	}
-	witnessZero := EncWitness{K: zeroK, Rho: rhoZero}
+	witnessZero := EncWitness{
+		K:   testSecpSecretScalar(t, zeroK),
+		Rho: testSecretScalarFixed(t, rhoZero, modulusBytes(sk.N)),
+	}
 	proofZero, err := ProveEnc(params, []byte("zero witness"), stmtZero, witnessZero, nil)
 	if err != nil {
 		t.Fatalf("ProveEnc rejected k=0: %v", err)
@@ -182,7 +185,8 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xMulC, err := OMulCT(&sk.PublicKey, xVal, ciphertextX, signedPowerOfTwoBytes(params.Ell))
+	xSecret := testSignedSecret(t, xVal, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(&sk.PublicKey, xSecret, ciphertextX, signedPowerOfTwoBytes(params.Ell))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -200,7 +204,12 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		VerifierAux:       *aux,
 	}
 	// Witness: Rho is the randomness for Enc_Nj(y; rho) inside D, which is encYZero's rhoYZero.
-	witnessAffGZero := AffGWitness{X: xVal, Y: zeroY, Rho: rhoYZero, RhoY: rhoYZero}
+	witnessAffGZero := AffGWitness{
+		X:    testSecpSecretScalar(t, xVal),
+		Y:    testSecpSecretScalar(t, zeroY),
+		Rho:  testSecretScalarFixed(t, rhoYZero, modulusBytes(sk.N)),
+		RhoY: testSecretScalarFixed(t, rhoYZero, modulusBytes(sk.N)),
+	}
 	proofAffGZero, err := ProveAffG(params, []byte("zero y witness"), stmtAffGZero, witnessAffGZero, nil)
 	if err != nil {
 		t.Fatalf("ProveAffG rejected y=0: %v", err)
@@ -229,11 +238,11 @@ func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
 
 	len1 := max(signedPowerOfTwoBytes(256), multRangeBytes(params.N, 256))
 	len2 := max(signedPowerOfTwoBytes(256), multRangeBytes(params.N, 256))
-	c1, err := RPCommitCT(*params, a1, b1, len1)
+	c1, err := RPCommitCT(*params, testSignedSecret(t, a1, len1), testSignedSecret(t, b1, len1), len1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c2, err := RPCommitCT(*params, a2, b2, len2)
+	c2, err := RPCommitCT(*params, testSignedSecret(t, a2, len2), testSignedSecret(t, b2, len2), len2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -255,31 +264,6 @@ func TestAffGProofRejectsBxOffCurve(t *testing.T) {
 	tampered.Bx = nil
 	if err := VerifyAffG(params, state, stmt, tampered); err == nil {
 		t.Fatal("AffGProof accepted nil Bx")
-	}
-}
-
-// TestEncryptionProofRejectsZeroResponse verifies that a legacy
-// EncryptionProof with a zero (or empty) response is rejected.
-// The validatePositiveIntBytes check requires non-empty and no leading zero.
-func TestEncryptionProofRejectsZeroResponse(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	domain := []byte("zero response test")
-	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof, err := ProveEncryption(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Set response to represent zero.
-	tampered := proof.Clone()
-	tampered.Response = []byte{0x00} // leading zero → non-minimal → rejected by validateEncryptionProof
-	if _, err := Marshal(tampered); err == nil {
-		t.Fatal("EncryptionProof with zero-leading response marshaled (should be rejected)")
 	}
 }
 
@@ -342,31 +326,6 @@ func TestNewProofRejectsNonUnitCommitment(t *testing.T) {
 	})
 }
 
-// TestLegacyEncryptionProofNonUnitCommitment verifies that legacy proofs
-// also reject non-unit commitment values.
-func TestLegacyEncryptionProofNonUnitCommitment(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	domain := []byte("non-unit test")
-
-	proof, err := ProveEncryption(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Tamper the point commitment to an invalid curve point.
-	tampered := proof.Clone()
-	tampered.PointCommitment = []byte{0x00} // invalid point encoding
-	if VerifyEncryption(domain, &sk.PublicKey, ciphertext, tampered) {
-		t.Fatal("EncryptionProof accepted invalid point commitment")
-	}
-}
-
 // TestModulusProofRejectsEvenModulus verifies that VerifyModulus rejects
 // moduli with Bit(0)==0 (even numbers). The check at proofs.go ensures
 // the modulus is odd.
@@ -405,7 +364,10 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 		CiphertextK:     ciphertext,
 		VerifierAux:     *aux,
 	}
-	witness := EncWitness{K: k, Rho: rho}
+	witness := EncWitness{
+		K:   testSecpSecretScalar(t, k),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 	proof, err := ProveEnc(params, []byte("degenerate test"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)

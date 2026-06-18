@@ -129,8 +129,8 @@ func TestStartOpeningDestroy(t *testing.T) {
 	ciphertext := []byte{0x0a, 0x0b, 0x0c}
 	opening := &StartOpening{
 		Message: StartMessage{Ciphertext: ciphertext},
-		k:       big.NewInt(42),
-		rho:     big.NewInt(99),
+		k:       testSecretScalar(t, big.NewInt(42)),
+		rho:     testSecretScalar(t, big.NewInt(99)),
 	}
 	opening.Destroy()
 	if opening.k != nil {
@@ -165,7 +165,7 @@ func TestStartOpeningString(t *testing.T) {
 	}
 	opening := &StartOpening{
 		Message: StartMessage{Ciphertext: []byte{0x01}},
-		k:       big.NewInt(42),
+		k:       testSecretScalar(t, big.NewInt(42)),
 	}
 	s := opening.String()
 	if s == "" || s == "<nil>" {

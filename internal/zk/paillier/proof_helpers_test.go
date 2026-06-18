@@ -1,7 +1,6 @@
 package paillier
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"math/big"
@@ -10,9 +9,34 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
+
+func testSecretScalarFixed(t *testing.T, x *big.Int, fixedLen int) *secret.Scalar {
+	t.Helper()
+	out, err := secretScalarFromBig(x, fixedLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(out.Destroy)
+	return out
+}
+
+func testSecpSecretScalar(t *testing.T, x *big.Int) *secret.Scalar {
+	t.Helper()
+	return testSecretScalarFixed(t, x, secp.ScalarSize)
+}
+
+func testSignedSecret(t *testing.T, x *big.Int, fixedLen int) *secret.SignedInt {
+	t.Helper()
+	out, err := signedSecretFromBig(x, fixedLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(out.Destroy)
+	return out
+}
 
 // testPaillierKeyEntry wraps a sync.Once to prevent duplicate key generation
 // under parallel test execution. The cached key is immutable after construction.
@@ -47,35 +71,6 @@ func testPaillierKey(tb testing.TB, bits int) *pai.PrivateKey {
 	return entry.sk.Clone()
 }
 
-func mtaResponseForTest(t *testing.T, sk *pai.PrivateKey, encA, b, beta *big.Int) (*big.Int, *big.Int) {
-	t.Helper()
-	encBeta, betaRandomness, err := sk.Encrypt(nil, beta)
-	if err != nil {
-		t.Fatal(err)
-	}
-	nLen := modulusBytes(sk.N)
-	nSquaredLen := 2 * nLen
-	encPowBytes, err := paillierct.ExpCT(
-		paillierct.FixedEncode(sk.NSquared, nSquaredLen),
-		paillierct.FixedEncode(encA, nSquaredLen),
-		secp.ScalarFromBigInt(b).Bytes(),
-	)
-	if err != nil {
-		t.Fatal(err)
-	}
-	response := new(big.Int).SetBytes(encPowBytes)
-	response.Mul(response, encBeta)
-	response.Mod(response, sk.NSquared)
-	return response, betaRandomness
-}
-
-func prependZero(in []byte) []byte {
-	out := make([]byte, 0, len(in)+1)
-	out = append(out, 0)
-	out = append(out, in...)
-	return out
-}
-
 func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 	t.Helper()
 	raw, err := wire.MarshalFields(proofVersion, typeID, fields)
@@ -83,28 +78,6 @@ func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 		t.Fatal(err)
 	}
 	return raw
-}
-
-func assertEncryptionProofRoundTrip(t *testing.T, proof *EncryptionProof) {
-	t.Helper()
-	raw, err := Marshal(proof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := UnmarshalEncryptionProof(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := Marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("encryption proof encoding is not deterministic")
-	}
-	if _, err := UnmarshalEncryptionProof(append(raw, 0)); err == nil {
-		t.Fatal("encryption proof accepted trailing bytes")
-	}
 }
 
 func prependZeroToWireField(raw []byte, typeID string, model any, fieldName string) ([]byte, error) {

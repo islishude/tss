@@ -103,7 +103,7 @@ func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
-	payload := keygenSharePayload{Share: big.NewInt(1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -124,6 +124,70 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 		t.Error("round-trip produced different encoding")
 	}
 	if _, err := unmarshalKeygenSharePayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+// TestFast_GoldenRefreshSharePayload verifies deterministic wire encoding of
+// refresh share payloads. No refresh protocol run is required.
+func TestFast_GoldenRefreshSharePayload(t *testing.T) {
+	t.Parallel()
+	payload := refreshSharePayload{Share: testSecretScalar(t, 2), PlanHash: bytes.Repeat([]byte{0x91}, 32)}
+	raw, err := marshalRefreshSharePayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "RefreshSharePayload.golden")
+	testutil.CheckGolden(t, golden, raw)
+
+	decoded, err := unmarshalRefreshSharePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalRefreshSharePayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalRefreshSharePayload(append(raw, 0)); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+// TestFast_GoldenReshareSharePayload verifies deterministic wire encoding of
+// reshare dealer-to-receiver share payloads.
+func TestFast_GoldenReshareSharePayload(t *testing.T) {
+	t.Parallel()
+	payload := reshareSharePayload{
+		Dealer:               1,
+		Receiver:             2,
+		Share:                testSecretScalar(t, 3),
+		DealerCommitmentHash: bytes.Repeat([]byte{0x92}, 32),
+		PlanHash:             bytes.Repeat([]byte{0x93}, 32),
+	}
+	raw, err := marshalReshareSharePayload(payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "ReshareSharePayload.golden")
+	testutil.CheckGolden(t, golden, raw)
+
+	decoded, err := unmarshalReshareSharePayload(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := marshalReshareSharePayload(decoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if _, err := unmarshalReshareSharePayload(append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

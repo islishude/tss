@@ -344,9 +344,9 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 - `internal/zk/signprep.Proof` (Schnorr + DLEQ, 8 fields: MPoint, KCommitment, MCommitment, DLEQA1, DLEQA2, KResponse, MResponse, DLEQResponse)
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
-all active Paillier ZK proof types (modulus, Ring-Pedersen parameters/proof,
-encryption, MtA response, log), and Schnorr share proofs all use the same strict
-TLV encoding as other binary records. Keygen, presign, and signing payloads reject
+all active Paillier ZK proof types (Πmod, Πprm, Πenc, Πaff-g, Πlog\*), and
+Schnorr share proofs all use the same strict TLV encoding as other binary
+records. Keygen, presign, and signing payloads reject
 JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
@@ -359,7 +359,8 @@ Current presign wire shapes are:
 - `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (signprep proof bytes).
 - `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
-Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
+Retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` wire types have no
+decoder or compatibility path.
 
 `SignVerifyShare` implements the standard binary marshal/unmarshal interfaces
 with wire type `cggmp21.secp256k1.sign-verify-share`. Its fields are party ID,

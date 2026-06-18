@@ -8,8 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
-	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 )
 
 // handlePresignRound2 validates and applies a presign round 2 payload.
@@ -86,16 +85,6 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	gamma, err := secpSecretBig(s.gamma)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(gamma)
-	xBar, err := secpSecretBig(s.xBar)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(xBar)
 	for _, peer := range s.signers {
 		if peer == s.key.state.party {
 			continue
@@ -119,7 +108,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
 			start,
 			startProof,
-			gamma,
+			s.gamma,
 			s.gammaComm,
 			peerPK,
 			selfPK,
@@ -138,7 +127,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, s.round1[peer].PaillierPublicKey, s.contextHash, s.planHash),
 			start,
 			startProof,
-			xBar,
+			s.xBar,
 			s.xBarComm,
 			peerPK,
 			selfPK,
@@ -146,6 +135,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			peerRP,
 		)
 		if err != nil {
+			betaDelta.Destroy()
 			return nil, err
 		}
 		s.betaDelta[peer] = betaDelta
@@ -231,9 +221,9 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lambda, err := shamir.LagrangeCoefficient(id, s.signers, secp.Order())
+	lambda, err := shamirsecp.LagrangeCoefficient(id, s.signers)
 	if err != nil {
 		return nil, err
 	}
-	return secp.PointBytes(secp.ScalarMult(point, secp.ScalarFromBigInt(lambda)))
+	return secp.PointBytes(secp.ScalarMult(point, lambda))
 }

@@ -7,6 +7,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -16,7 +17,7 @@ import (
 //   - skA: initiator's Paillier private key
 //   - pkB: responder's Paillier public key (Ni in Πaff-g)
 //   - verifierAux: initiator's own Ring-Pedersen parameters
-func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*big.Int, error) {
+func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*secret.Scalar, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
 	}
@@ -52,6 +53,7 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 	if err != nil {
 		return nil, err
 	}
+	defer secret.ClearBigInt(alpha)
 	alpha.Mod(alpha, secp.Order())
-	return alpha, nil
+	return secret.NewScalar(alpha.FillBytes(make([]byte, secp.ScalarSize)), secp.ScalarSize)
 }

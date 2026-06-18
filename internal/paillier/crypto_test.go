@@ -264,7 +264,9 @@ func TestEncryptWithRandomnessRejectsInvalidInputs(t *testing.T) {
 		t.Fatal("nil randomness accepted")
 	}
 	// r not coprime to N.
-	badR := new(big.Int).Mul(sk.P, big.NewInt(2)) // multiple of P, not coprime to N
+	pBytes := sk.P.FixedBytes()
+	defer clear(pBytes)
+	badR := new(big.Int).Mul(new(big.Int).SetBytes(pBytes), big.NewInt(2)) // multiple of P, not coprime to N
 	if _, err := pk.EncryptWithRandomness(big.NewInt(1), badR); err == nil {
 		t.Fatal("non-coprime randomness accepted")
 	}

@@ -3,8 +3,6 @@ package paillier
 import (
 	"math/big"
 	"testing"
-
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // TestSignedPowerOfTwoBoundary verifies InSignedPowerOfTwo accepts exactly at
@@ -94,45 +92,6 @@ func TestMultRangeBoundary(t *testing.T) {
 		if inMultRange(below, n, bits) {
 			t.Errorf("bits=%d: -(N·2^bits+1) should be rejected", bits)
 		}
-	}
-}
-
-// TestZKRangeBound verifies that zkRangeBound(e) computes the correct bound
-// 2^{l+ε} + e·q, matching the statistical ZK formula used by all legacy proofs.
-func TestZKRangeBound(t *testing.T) {
-	t.Parallel()
-	q := secp.Order()
-
-	// Test e=0: bound = 2^{l+ε} = 2^384
-	eZero := big.NewInt(0)
-	boundZero := zkRangeBound(eZero)
-	expectedZero := twoToThe(maskBits) // 2^384
-	if boundZero.Cmp(expectedZero) != 0 {
-		t.Fatalf("zkRangeBound(0) = %s, want 2^384", boundZero)
-	}
-
-	// Test e=1: bound = 2^384 + q
-	eOne := big.NewInt(1)
-	boundOne := zkRangeBound(eOne)
-	expectedOne := new(big.Int).Set(expectedZero)
-	expectedOne.Add(expectedOne, q)
-	if boundOne.Cmp(expectedOne) != 0 {
-		t.Fatalf("zkRangeBound(1) = %s, want 2^384 + q", boundOne)
-	}
-
-	// Test e = secp256k1 order - 1 (max realistic challenge for legacy proofs)
-	eMax := new(big.Int).Sub(q, big.NewInt(1))
-	boundMax := zkRangeBound(eMax)
-	expectedMax := new(big.Int).Mul(eMax, q)
-	expectedMax.Add(expectedMax, expectedZero)
-	if boundMax.Cmp(expectedMax) != 0 {
-		t.Fatalf("zkRangeBound(q-1) mismatch")
-	}
-
-	// Verify bound is strictly tight: bound-1 is less than bound
-	below := new(big.Int).Sub(boundOne, big.NewInt(1))
-	if below.Cmp(boundOne) >= 0 {
-		t.Fatal("bound-1 >= bound — arithmetic error")
 	}
 }
 

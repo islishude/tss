@@ -6,6 +6,8 @@ import (
 	"io"
 	"math/big"
 	"testing"
+
+	"github.com/islishude/tss/internal/secret"
 )
 
 func TestPrivateKeyJSONAndDestroy(t *testing.T) {
@@ -33,11 +35,11 @@ func TestPrivateKeyJSONAndDestroy(t *testing.T) {
 			t.Fatal("mu was not cleared")
 		}
 	}
-	for name, value := range map[string]*big.Int{
+	for name, value := range map[string]*secret.Scalar{
 		"p": sk.P,
 		"q": sk.Q,
 	} {
-		if value == nil || value.Sign() != 0 {
+		if value == nil || value.FixedLen() != 0 {
 			t.Fatalf("%s was not cleared", name)
 		}
 	}

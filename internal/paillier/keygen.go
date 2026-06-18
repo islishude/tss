@@ -98,18 +98,47 @@ func generateKeyInner(ctx context.Context, reader io.Reader, bits int) (*Private
 		u.Mod(u, nSquared)
 		lu := L(u, n)
 		muBig := new(big.Int).ModInverse(lu, n)
+		clearSecrets := func() {
+			secret.ClearBigInt(p)
+			secret.ClearBigInt(q)
+			secret.ClearBigInt(lambdaBig)
+			secret.ClearBigInt(u)
+			secret.ClearBigInt(lu)
+			secret.ClearBigInt(muBig)
+		}
 		if muBig == nil {
+			clearSecrets()
 			continue
 		}
 		nLen := (n.BitLen() + 7) / 8
+		factorLen := (nLen + 1) / 2
 		lambdaSec, err := secret.NewScalar(paillierct.FixedEncode(lambdaBig, nLen), nLen)
 		if err != nil {
+			clearSecrets()
 			continue
 		}
 		muSec, err := secret.NewScalar(paillierct.FixedEncode(muBig, nLen), nLen)
 		if err != nil {
+			lambdaSec.Destroy()
+			clearSecrets()
 			continue
 		}
+		pSec, err := secret.NewScalar(paillierct.FixedEncode(p, factorLen), factorLen)
+		if err != nil {
+			lambdaSec.Destroy()
+			muSec.Destroy()
+			clearSecrets()
+			continue
+		}
+		qSec, err := secret.NewScalar(paillierct.FixedEncode(q, factorLen), factorLen)
+		if err != nil {
+			lambdaSec.Destroy()
+			muSec.Destroy()
+			pSec.Destroy()
+			clearSecrets()
+			continue
+		}
+		clearSecrets()
 		return &PrivateKey{
 			PublicKey: PublicKey{
 				N:        n,
@@ -118,8 +147,8 @@ func generateKeyInner(ctx context.Context, reader io.Reader, bits int) (*Private
 			},
 			Lambda: lambdaSec,
 			Mu:     muSec,
-			P:      p,
-			Q:      q,
+			P:      pSec,
+			Q:      qSec,
 		}, nil
 	}
 }

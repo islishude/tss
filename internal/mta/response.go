@@ -10,6 +10,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -54,9 +55,7 @@ func (m *ResponseMessage) UnmarshalBinary(in []byte) error {
 	return nil
 }
 
-// Validate checks the canonical proof record and ciphertext integer.
-// The proof must be a valid AffGProof. Legacy MTAResponseProof payloads are
-// rejected rather than supported as a fallback.
+// Validate checks the canonical AffG proof record and ciphertext integer.
 func (m ResponseMessage) Validate() error {
 	if err := validatePositiveIntegerBytes(m.Ciphertext); err != nil {
 		return fmt.Errorf("invalid MtA response ciphertext: %w", err)
@@ -78,26 +77,29 @@ func (m ResponseMessage) Validate() error {
 //   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
-func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *big.Int, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *big.Int, error) {
+func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof []byte, b *secret.Scalar, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *secret.Scalar, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
 	if err := VerifyStart(params, startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
 		return nil, nil, err
 	}
-	if b == nil || b.Sign() <= 0 || b.Cmp(secp.Order()) >= 0 {
+	bScalar, err := secpScalarFromSecret(b)
+	if err != nil {
 		return nil, nil, errors.New("b out of range")
 	}
 
 	encA := new(big.Int).SetBytes(start.Ciphertext)
-	beta, err := randomScalar(reader)
+	beta, err := randomSecretScalar(reader)
 	if err != nil {
 		return nil, nil, err
 	}
-	encBeta, betaRandomness, err := pkA.Encrypt(reader, beta)
+	defer beta.Destroy()
+	encBeta, betaRandomness, err := pkA.EncryptSecret(reader, beta)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer betaRandomness.Destroy()
 
 	// encA^b mod N² via constant-time modular exponentiation.
 	// Ciphertext blinding is NOT applied here because the ZK proof
@@ -106,7 +108,8 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 	nSquaredLen := 2 * nLen
 	nSquaredBytes := paillierct.FixedEncode(pkA.NSquared, nSquaredLen)
 	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
-	bBytes := scalarFixedBytes(b)
+	bBytes := b.FixedBytes()
+	defer clear(bBytes)
 
 	encRespBytes, err := paillierct.ExpCT(nSquaredBytes, encABytes, bBytes)
 	if err != nil {
@@ -117,13 +120,14 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 	response.Mod(response, pkA.NSquared)
 
 	// Encrypt beta under the responder's own key for the Y commitment.
-	yCiphertext, yRandomness, err := pkB.Encrypt(reader, beta)
+	yCiphertext, yRandomness, err := pkB.EncryptSecret(reader, beta)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer yRandomness.Destroy()
 
 	// Curve commitment X = b * G.
-	X := secp.ScalarBaseMult(secp.ScalarFromBigInt(b))
+	X := secp.ScalarBaseMult(bScalar)
 
 	stmt := zkpai.AffGStatement{
 		ReceiverPaillierN: pkA,
@@ -135,10 +139,10 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 		VerifierAux:       affGVerifierAux,
 	}
 	witness := zkpai.AffGWitness{
-		X:    new(big.Int).Set(b),
-		Y:    new(big.Int).Set(beta),
-		Rho:  new(big.Int).Set(betaRandomness),
-		RhoY: new(big.Int).Set(yRandomness),
+		X:    b,
+		Y:    beta,
+		Rho:  betaRandomness,
+		RhoY: yRandomness,
 	}
 
 	proof, err := zkpai.ProveAffG(params, responseDomain, stmt, witness, reader)
@@ -149,7 +153,10 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 	if err != nil {
 		return nil, nil, err
 	}
-	betaShare := new(big.Int).Neg(beta)
-	betaShare.Mod(betaShare, secp.Order())
+	betaShareScalar := secp.ScalarNeg(mustSecpScalar(beta))
+	betaShare, err := secret.NewScalar(betaShareScalar.Bytes(), secp.ScalarSize)
+	if err != nil {
+		return nil, nil, err
+	}
 	return &ResponseMessage{Ciphertext: response.Bytes(), Proof: proofBytes}, betaShare, nil
 }

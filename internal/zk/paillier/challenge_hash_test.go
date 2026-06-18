@@ -3,7 +3,6 @@ package paillier
 import (
 	"fmt"
 	"math"
-	"math/big"
 	"testing"
 )
 
@@ -98,49 +97,6 @@ func TestChallengeSignedNoModularBias(t *testing.T) {
 
 	if math.Abs(zScore) > 5.0 {
 		t.Errorf("Bit 127 shows modular bias: z=%.2f (>5σ)", zScore)
-	}
-}
-
-// TestLegacyProofChallengeDistribution verifies that legacy challenge()
-// produces uniformly distributed full-width SHA-256 challenges.
-func TestLegacyProofChallengeDistribution(t *testing.T) {
-	t.Parallel()
-	const nChallenges = 5000
-
-	// Generate challenges with different inputs.
-	mean := new(big.Int)
-
-	for i := range nChallenges {
-		c := challenge([]byte("legacy dist test"), []byte{byte(i), byte(i >> 8)})
-		mean.Add(mean, c)
-	}
-
-	// Expected mean for uniform values in [0, 2^256) is approximately 2^255.
-	mean.Div(mean, big.NewInt(nChallenges))
-	expected := new(big.Int).Lsh(big.NewInt(1), 255)
-
-	// Compute |mean - expected| / expected as relative deviation.
-	diff := new(big.Int).Sub(mean, expected)
-	diff.Abs(diff)
-	relDev := new(big.Int).Mul(diff, big.NewInt(1000000))
-	relDev.Div(relDev, expected)
-
-	t.Logf("Legacy challenge mean: %s (expected ~q/2 = %s)", mean, expected)
-	t.Logf("Relative deviation: %d ppm", relDev.Int64())
-
-	// For 5,000 uniform 256-bit samples, the sample mean has roughly 0.8%
-	// relative standard deviation. A 5% bound catches gross bias without
-	// treating ordinary sample variance as a protocol failure.
-	if relDev.Cmp(big.NewInt(50000)) > 0 {
-		t.Errorf("Legacy challenge mean deviates >50000 ppm from expected")
-	}
-
-	// Verify no zero challenges in 5000 samples (probability ≈ 5000/q ≈ 0).
-	for i := range nChallenges {
-		c := challenge([]byte("legacy zero check"), []byte{byte(i), byte(i >> 8)})
-		if c.Sign() == 0 {
-			t.Errorf("iteration %d: legacy challenge is zero (probability ~2^-256)", i)
-		}
 	}
 }
 

@@ -5,8 +5,6 @@ package paillier
 import (
 	"math/big"
 	"testing"
-
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 func TestEncProofVerificationMatrix(t *testing.T) {
@@ -60,7 +58,7 @@ func TestEncProofVerificationMatrix(t *testing.T) {
 	}
 
 	badWitness := witness
-	badWitness.K = new(big.Int).Add(witness.K, big.NewInt(1))
+	badWitness.K = testSecpSecretScalar(t, big.NewInt(18))
 	if _, err := ProveEnc(params, state, stmt, badWitness, nil); err == nil {
 		t.Fatal("EncProof accepted witness that does not open ciphertext")
 	}
@@ -120,7 +118,7 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 	}
 
 	badWitness := witness
-	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
+	badWitness.X = testSecpSecretScalar(t, big.NewInt(24))
 	if _, err := ProveAffG(params, state, stmt, badWitness, nil); err == nil {
 		t.Fatal("AffGProof accepted witness that does not open statement")
 	}
@@ -178,7 +176,7 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 	}
 
 	badWitness := witness
-	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
+	badWitness.X = testSecpSecretScalar(t, big.NewInt(32))
 	if _, err := ProveLogStar(params, state, stmt, badWitness, nil); err == nil {
 		t.Fatal("LogStarProof accepted witness that does not open statement")
 	}
@@ -188,29 +186,6 @@ func TestProofsUseV1Version(t *testing.T) {
 	t.Parallel()
 	sk := testPaillierKey(t, 1024)
 	domain := []byte("version check")
-
-	scalar := big.NewInt(3)
-	c, r, _ := sk.Encrypt(nil, scalar)
-	encProof, _ := ProveEncryption(nil, domain, &sk.PublicKey, c, scalar, r)
-	if encProof.Version != 1 {
-		t.Fatalf("encryption proof version %d, want 1", encProof.Version)
-	}
-
-	pt, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
-	logProof, _ := ProveLog(nil, domain, &sk.PublicKey, c, scalar, r, pt)
-	if logProof.Version != 1 {
-		t.Fatalf("log proof version %d, want 1", logProof.Version)
-	}
-
-	b := big.NewInt(5)
-	beta := big.NewInt(11)
-	bCom, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	resp, betaR := mtaResponseForTest(t, sk, c, b, beta)
-	mtaProof, _ := ProveMTAResponse(nil, domain, &sk.PublicKey, c, resp, bCom, b, beta, betaR)
-	if mtaProof.Version != 1 {
-		t.Fatalf("MtA proof version %d, want 1", mtaProof.Version)
-	}
-
 	modProof, _ := ProveModulus(nil, domain, sk, 1)
 	if modProof.Version != 1 {
 		t.Fatalf("modulus proof version %d, want 1", modProof.Version)
@@ -220,5 +195,8 @@ func TestProofsUseV1Version(t *testing.T) {
 	rpProof, _ := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
 	if rpProof.Version != 1 {
 		t.Fatalf("Ring-Pedersen proof version %d, want 1", rpProof.Version)
+	}
+	if encProofVersion != 1 || affGProofVersion != 1 || logStarProofVersion != 1 {
+		t.Fatal("retained proof version changed")
 	}
 }

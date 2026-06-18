@@ -11,6 +11,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -31,8 +32,8 @@ type LogStarStatement struct {
 
 // LogStarWitness is the secret witness for a Πlog* proof.
 type LogStarWitness struct {
-	X   *big.Int // scalar
-	Rho *big.Int // Paillier encryption randomness
+	X   *secret.Scalar // scalar
+	Rho *secret.Scalar // Paillier encryption randomness
 }
 
 // LogStarProof is a CGGMP-compatible Πlog* proof that a Paillier ciphertext
@@ -87,36 +88,64 @@ func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w 
 	Nj := stmt.VerifierAux.N
 
 	// Sample masks.
-	alpha, err := SampleSignedPowerOfTwo(rng, params.EncRange()) // ±2^(Ell+Epsilon)
+	alpha, err := sampleSignedSecret(rng, params.EncRange()) // ±2^(Ell+Epsilon)
 	if err != nil {
 		return nil, err
 	}
-	r, err := SampleZNStar(rng, N.N)
+	defer alpha.Destroy()
+	r, err := sampleZNStarSecret(rng, N.N)
 	if err != nil {
 		return nil, err
 	}
-	mask, err := SampleMultRange(rng, params.Ell, Nj) // ±(2^Ell * Nj)
+	defer r.Destroy()
+	mask, err := sampleMultRangeSecret(rng, params.Ell, Nj) // ±(2^Ell * Nj)
 	if err != nil {
 		return nil, err
 	}
-	gamma, err := SampleMultRange(rng, params.EncRange(), Nj) // ±(2^(Ell+Epsilon) * Nj)
+	defer mask.Destroy()
+	gamma, err := sampleMultRangeSecret(rng, params.EncRange(), Nj) // ±(2^(Ell+Epsilon) * Nj)
 	if err != nil {
 		return nil, err
 	}
+	defer gamma.Destroy()
 
 	// Commitments.
 	secretCommitLen := max(signedPowerOfTwoBytes(params.Ell), multRangeBytes(Nj, params.Ell))
-	S, err := RPCommitCT(stmt.VerifierAux, w.X, mask, secretCommitLen)
+	xSigned, err := signedSecretFromScalar(w.X, secretCommitLen)
 	if err != nil {
 		return nil, err
 	}
-	A, err := EncRandom(N, alpha, r)
+	defer xSigned.Destroy()
+	maskPadded, err := resizeSignedSecret(mask, secretCommitLen)
 	if err != nil {
 		return nil, err
 	}
-	Y := secp.ScalarMult(stmt.B, secp.ScalarFromBigInt(alpha))
+	defer maskPadded.Destroy()
+	S, err := RPCommitCT(stmt.VerifierAux, xSigned, maskPadded, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	A, err := encRandomSecrets(N, alpha, r)
+	if err != nil {
+		return nil, err
+	}
+	alphaScalar, err := signedSecretSecpScalar(alpha)
+	if err != nil {
+		return nil, err
+	}
+	Y := secp.ScalarMult(stmt.B, alphaScalar)
 	maskCommitLen := max(signedPowerOfTwoBytes(params.EncRange()), multRangeBytes(Nj, params.EncRange()))
-	D, err := RPCommitCT(stmt.VerifierAux, alpha, gamma, maskCommitLen)
+	alphaPadded, err := resizeSignedSecret(alpha, maskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer alphaPadded.Destroy()
+	gammaPadded, err := resizeSignedSecret(gamma, maskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer gammaPadded.Destroy()
+	D, err := RPCommitCT(stmt.VerifierAux, alphaPadded, gammaPadded, maskCommitLen)
 	if err != nil {
 		return nil, err
 	}
@@ -132,15 +161,46 @@ func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w 
 	}
 
 	// Responses.
-	z1 := new(big.Int).Mul(e, w.X)
-	z1.Add(z1, alpha)
+	xBig, err := secretScalarBig(w.X)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(xBig)
+	alphaBig, err := signedSecretBig(alpha)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(alphaBig)
+	z1 := new(big.Int).Mul(e, xBig)
+	z1.Add(z1, alphaBig)
 
-	rhoExp := new(big.Int).Exp(w.Rho, e, N.N)
-	z2 := new(big.Int).Mul(r, rhoExp)
+	rhoBig, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoBig)
+	rBig, err := secretScalarBig(r)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rBig)
+	rhoExp := new(big.Int).Exp(rhoBig, e, N.N)
+	defer secret.ClearBigInt(rhoExp)
+	z2 := new(big.Int).Mul(rBig, rhoExp)
 	z2.Mod(z2, N.N)
 
-	z3 := new(big.Int).Mul(e, mask)
-	z3.Add(z3, gamma)
+	maskBig, err := signedSecretBig(mask)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(maskBig)
+	gammaBig, err := signedSecretBig(gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gammaBig)
+	z3 := new(big.Int).Mul(e, maskBig)
+	z3.Add(z3, gammaBig)
 
 	return &LogStarProof{
 		Version:        logStarProofVersion,
@@ -355,15 +415,37 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	if w.X == nil || w.Rho == nil {
 		return errors.New("nil witness field")
 	}
-	if !InSignedPowerOfTwo(w.X, params.Ell) {
+	if w.X.FixedLen() != secp.ScalarSize {
+		return errors.New("witness x has invalid width")
+	}
+	xBytes := w.X.FixedBytes()
+	if _, err := secp.ScalarFromBytesAllowZero(xBytes); err != nil {
+		clear(xBytes)
+		return errors.New("witness x is not canonical")
+	}
+	clear(xBytes)
+	if w.Rho.FixedLen() != modulusBytes(stmt.PaillierN.N) {
+		return errors.New("witness rho has invalid width")
+	}
+	x, err := secretScalarBig(w.X)
+	if err != nil {
+		return errors.New("invalid witness x")
+	}
+	defer secret.ClearBigInt(x)
+	if !InUnsignedPowerOfTwo(x, params.Ell) {
 		return errors.New("witness x out of range")
 	}
-	if !IsZNStar(w.Rho, stmt.PaillierN.N) {
+	rho, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return errors.New("invalid witness rho")
+	}
+	defer secret.ClearBigInt(rho)
+	if !IsZNStar(rho, stmt.PaillierN.N) {
 		return errors.New("witness rho not in Z*_N")
 	}
 
 	// Verify C == Enc_N(x; rho).
-	expectedC, err := EncRandom(stmt.PaillierN, w.X, w.Rho)
+	expectedC, err := stmt.PaillierN.EncryptWithSecretRandomness(w.X, w.Rho)
 	if err != nil {
 		return fmt.Errorf("cannot verify ciphertext: %w", err)
 	}
@@ -372,7 +454,13 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	}
 
 	// Verify X == x * B.
-	expectedX := secp.ScalarMult(stmt.B, secp.ScalarFromBigInt(w.X))
+	xBytes = w.X.FixedBytes()
+	defer clear(xBytes)
+	xScalar, err := secp.ScalarFromBytes(xBytes)
+	if err != nil {
+		return errors.New("invalid witness x scalar")
+	}
+	expectedX := secp.ScalarMult(stmt.B, xScalar)
 	if !secp.Equal(stmt.X, expectedX) {
 		return errors.New("witness x does not open X")
 	}

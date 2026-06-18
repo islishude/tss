@@ -10,7 +10,8 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
-	"github.com/islishude/tss/internal/shamir"
+	"github.com/islishude/tss/internal/secret"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 )
 
@@ -75,18 +76,17 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	lambda, err := shamir.LagrangeCoefficient(key.state.party, signers, secp.Order())
+	lambda, err := shamirsecp.LagrangeCoefficient(key.state.party, signers)
 	if err != nil {
 		return nil, nil, err
 	}
-	sec, err := key.secretBig()
+	sec, err := secpScalarFromSecret(key.state.secret)
 	if err != nil {
 		return nil, nil, err
 	}
 	// xBar is lambda_i*x_i, the signer-set-adjusted secret share used in
 	// chi = k*x. The public commitment is derived from the verification share.
-	xBar := new(big.Int).Mul(lambda, sec)
-	xBar.Mod(xBar, secp.Order())
+	xBar := secp.ScalarMul(lambda, sec)
 	kShareSecret, err := newSecpSecretScalar(kShare.Bytes())
 	if err != nil {
 		return nil, nil, err
@@ -105,7 +105,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 			gammaSecret.Destroy()
 		}
 	}()
-	xBarSecret, err := secpSecretScalarFromBig(xBar)
+	xBarSecret, err := secpSecretScalarFromScalar(xBar)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -122,13 +122,13 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	xBarComm, err := secp.PointBytes(secp.ScalarMult(localVerificationPoint, secp.ScalarFromBigInt(lambda)))
+	xBarComm, err := secp.PointBytes(secp.ScalarMult(localVerificationPoint, lambda))
 	if err != nil {
 		return nil, nil, err
 	}
 	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
 	// Πenc proof bound to that public payload and the peer's RP parameters.
-	startOpening, err := mta.Start(config.Reader(), kShare.BigInt(), &paillierKey.PublicKey)
+	startOpening, err := mta.Start(config.Reader(), kShareSecret, &paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -179,12 +179,12 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		round1ProofEnvelopes: make(map[tss.PartyID]tss.Envelope),
 		round1Verified:       map[tss.PartyID]bool{key.state.party: true},
 		round2:               make(map[tss.PartyID]presignRound2Payload),
-		deltas:               make(map[tss.PartyID]*big.Int),
+		deltas:               make(map[tss.PartyID]*secret.Scalar),
 		verifyShares:         make(map[tss.PartyID]SignVerifyShare),
-		alphaDelta:           make(map[tss.PartyID]*big.Int),
-		betaDelta:            make(map[tss.PartyID]*big.Int),
-		alphaSigma:           make(map[tss.PartyID]*big.Int),
-		betaSigma:            make(map[tss.PartyID]*big.Int),
+		alphaDelta:           make(map[tss.PartyID]*secret.Scalar),
+		betaDelta:            make(map[tss.PartyID]*secret.Scalar),
+		alphaSigma:           make(map[tss.PartyID]*secret.Scalar),
+		betaSigma:            make(map[tss.PartyID]*secret.Scalar),
 		startOpening:         startOpening,
 		guard:                guard,
 	}

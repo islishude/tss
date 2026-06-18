@@ -77,22 +77,26 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lambda, err := encodePositiveInt(scalarToBig(sk.Lambda))
+	lambda, err := encodePositiveSecretScalar(sk.Lambda)
 	if err != nil {
 		return nil, err
 	}
-	mu, err := encodePositiveInt(scalarToBig(sk.Mu))
+	defer clear(lambda)
+	mu, err := encodePositiveSecretScalar(sk.Mu)
 	if err != nil {
 		return nil, err
 	}
-	p, err := encodePositiveInt(sk.P)
+	defer clear(mu)
+	p, err := encodePositiveSecretScalar(sk.P)
 	if err != nil {
 		return nil, err
 	}
-	q, err := encodePositiveInt(sk.Q)
+	defer clear(p)
+	q, err := encodePositiveSecretScalar(sk.Q)
 	if err != nil {
 		return nil, err
 	}
+	defer clear(q)
 	return wire.Marshal(privateKeyWire{N: n, G: g, Lambda: lambda, Mu: mu, P: p, Q: q})
 }
 
@@ -123,26 +127,45 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 	if err != nil {
 		return fmt.Errorf("invalid lambda: %w", err)
 	}
+	defer secret.ClearBigInt(lambdaBig)
 	muBig, err := decodePositiveIntBytes(w.Mu)
 	if err != nil {
 		return fmt.Errorf("invalid mu: %w", err)
 	}
+	defer secret.ClearBigInt(muBig)
 	p, err := decodePositiveIntBytes(w.P)
 	if err != nil {
 		return fmt.Errorf("invalid p: %w", err)
 	}
+	defer secret.ClearBigInt(p)
 	q, err := decodePositiveIntBytes(w.Q)
 	if err != nil {
 		return fmt.Errorf("invalid q: %w", err)
 	}
+	defer secret.ClearBigInt(q)
 	nLen := (n.BitLen() + 7) / 8
+	factorLen := (nLen + 1) / 2
 	lambdaSec, err := secret.NewScalar(paillierct.FixedEncode(lambdaBig, nLen), nLen)
 	if err != nil {
 		return fmt.Errorf("invalid lambda: %w", err)
 	}
 	muSec, err := secret.NewScalar(paillierct.FixedEncode(muBig, nLen), nLen)
 	if err != nil {
+		lambdaSec.Destroy()
 		return fmt.Errorf("invalid mu: %w", err)
+	}
+	pSec, err := secret.NewScalar(paillierct.FixedEncode(p, factorLen), factorLen)
+	if err != nil {
+		lambdaSec.Destroy()
+		muSec.Destroy()
+		return fmt.Errorf("invalid p: %w", err)
+	}
+	qSec, err := secret.NewScalar(paillierct.FixedEncode(q, factorLen), factorLen)
+	if err != nil {
+		lambdaSec.Destroy()
+		muSec.Destroy()
+		pSec.Destroy()
+		return fmt.Errorf("invalid q: %w", err)
 	}
 	decoded := PrivateKey{
 		PublicKey: PublicKey{
@@ -152,14 +175,33 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 		},
 		Lambda: lambdaSec,
 		Mu:     muSec,
-		P:      p,
-		Q:      q,
+		P:      pSec,
+		Q:      qSec,
 	}
 	if err := decoded.Validate(); err != nil {
+		decoded.Destroy()
 		return err
 	}
 	*sk = decoded
 	return nil
+}
+
+func encodePositiveSecretScalar(x *secret.Scalar) ([]byte, error) {
+	if x == nil {
+		return nil, errors.New("integer must be positive")
+	}
+	fixed := x.FixedBytes()
+	defer clear(fixed)
+	first := 0
+	for first < len(fixed) && fixed[first] == 0 {
+		first++
+	}
+	if first == len(fixed) {
+		return nil, errors.New("integer must be positive")
+	}
+	out := make([]byte, len(fixed)-first)
+	copy(out, fixed[first:])
+	return out, nil
 }
 
 // encodePositiveInt returns the minimal big-endian encoding of a positive integer.

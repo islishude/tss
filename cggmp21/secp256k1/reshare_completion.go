@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -52,7 +51,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	for _, dealer := range s.dealerParties {
 		dd := s.dealerData[dealer]
-		if err := secp.VerifyShare(dd.commitments, s.selfID, secp.ScalarFromBigInt(dd.share)); err != nil {
+		share, err := secpScalarFromSecret(dd.share)
+		if err != nil {
+			return nil, err
+		}
+		if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 			verifyErr := err
 			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil)
 			if evErr != nil {
@@ -74,17 +77,25 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 			}
 		}
 	}
-	order := secp.Order()
-	newSecret := new(big.Int)
+	newSecret := secp.ScalarZero()
 	for _, dealer := range s.dealerParties {
-		newSecret.Add(newSecret, s.dealerData[dealer].share)
-		newSecret.Mod(newSecret, order)
+		share, err := secpScalarFromSecret(s.dealerData[dealer].share)
+		if err != nil {
+			return nil, err
+		}
+		newSecret = secp.ScalarAdd(newSecret, share)
 	}
-	newCommitments, err := s.aggregateCommitments()
+	newSecretScalar, err := secpSecretScalarFromScalar(newSecret)
 	if err != nil {
 		return nil, err
 	}
+	newCommitments, err := s.aggregateCommitments()
+	if err != nil {
+		newSecretScalar.Destroy()
+		return nil, err
+	}
 	if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
+		newSecretScalar.Destroy()
 		return nil, errors.New("reshared group public key does not match original")
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
@@ -104,15 +115,18 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if !ok {
 		return nil, errors.New("missing local verification share")
 	}
-	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, newSecret)
+	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, newSecretScalar)
 	if err != nil {
+		newSecretScalar.Destroy()
 		return nil, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
+		newSecretScalar.Destroy()
 		return nil, errors.New("local share proof public key mismatch")
 	}
 	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
+		newSecretScalar.Destroy()
 		return nil, err
 	}
 	selfNPD := s.newPartyData[s.selfID]
@@ -135,14 +149,12 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	paillierProofBytes, err := zkpai.Marshal(paillierProof)
 	if err != nil {
-		return nil, err
-	}
-	newSecretScalar, err := secpSecretScalarFromBig(newSecret)
-	if err != nil {
+		newSecretScalar.Destroy()
 		return nil, err
 	}
 	newPaillierPriv, err := s.newPaillier.MarshalBinary()
 	if err != nil {
+		newSecretScalar.Destroy()
 		return nil, err
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
@@ -169,10 +181,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		shareProof:             shareProofBytes,
 		keygenTranscriptHash:   transcriptHash,
 	}}
-	logCiphertext, logRandomness, err := s.newPaillier.Encrypt(s.cfg.Reader(), newSecret)
+	logCiphertext, logRandomness, err := s.newPaillier.EncryptSecret(s.cfg.Reader(), newSecretScalar)
 	if err != nil {
 		return nil, err
 	}
+	defer logRandomness.Destroy()
 	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(selfNPD.ringPedersen.Params, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
@@ -186,13 +199,10 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		PaillierN:   &s.newPaillier.PublicKey,
 		C:           logCiphertext,
 		X:           verificationPoint,
-		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
 		VerifierAux: *localRP,
 	}
-	logWitness := zkpai.LogStarWitness{
-		X:   new(big.Int).Set(newSecret),
-		Rho: new(big.Int).Set(logRandomness),
-	}
+	logWitness := zkpai.LogStarWitness{X: newSecretScalar, Rho: logRandomness}
 	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return nil, err

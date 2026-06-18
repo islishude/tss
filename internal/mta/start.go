@@ -7,7 +7,6 @@ import (
 	"io"
 	"math/big"
 
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -32,8 +31,8 @@ func (StartMessage) WireVersion() uint16 { return messageVersion }
 // StartOpening carries the local witness for an MtA start ciphertext.
 type StartOpening struct {
 	Message StartMessage
-	k       *big.Int
-	rho     *big.Int
+	k       *secret.Scalar
+	rho     *secret.Scalar
 }
 
 // MarshalBinary encodes the MtA start message using the object-level wire codec.
@@ -69,21 +68,21 @@ func (m StartMessage) Validate() error {
 }
 
 // Start encrypts scalar a and retains the opening for per-verifier proofs.
-func Start(reader io.Reader, a *big.Int, pk *pai.PublicKey) (*StartOpening, error) {
+func Start(reader io.Reader, a *secret.Scalar, pk *pai.PublicKey) (*StartOpening, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
-	if a == nil || a.Sign() <= 0 || a.Cmp(secp.Order()) >= 0 {
+	if _, err := secpScalarFromSecret(a); err != nil {
 		return nil, errors.New("a out of range")
 	}
-	c, r, err := pk.Encrypt(reader, a)
+	c, r, err := pk.EncryptSecret(reader, a)
 	if err != nil {
 		return nil, err
 	}
 	return &StartOpening{
 		Message: StartMessage{Ciphertext: c.Bytes()},
-		k:       new(big.Int).Set(a),
-		rho:     new(big.Int).Set(r),
+		k:       a.Clone(),
+		rho:     r,
 	}, nil
 }
 
@@ -93,8 +92,8 @@ func (o *StartOpening) Destroy() {
 		return
 	}
 	clear(o.Message.Ciphertext)
-	secret.ClearBigInt(o.k)
-	secret.ClearBigInt(o.rho)
+	o.k.Destroy()
+	o.rho.Destroy()
 	o.k = nil
 	o.rho = nil
 }

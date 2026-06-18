@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Tier 0: ResponseMessage validation and wire error paths (no crypto keygen).
@@ -18,7 +19,8 @@ func TestRespondErrors(t *testing.T) {
 
 	a := big.NewInt(13)
 	b := big.NewInt(37)
-	start, err := Start(nil, a, &skA.PublicKey)
+	bSecret := testSecretScalar(t, b)
+	start, err := Start(nil, testSecretScalar(t, a), &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -38,32 +40,37 @@ func TestRespondErrors(t *testing.T) {
 		}
 	})
 	t.Run("zero b", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, big.NewInt(0), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(t, big.NewInt(0)), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err == nil {
 			t.Fatal("expected error for zero b")
 		}
 	})
-	t.Run("negative b", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, big.NewInt(-5), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	t.Run("wrong width b", func(t *testing.T) {
+		wrongWidth, scalarErr := secret.NewScalar([]byte{5}, secp.ScalarSize-1)
+		if scalarErr != nil {
+			t.Fatal(scalarErr)
+		}
+		defer wrongWidth.Destroy()
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, wrongWidth, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err == nil {
-			t.Fatal("expected error for negative b")
+			t.Fatal("expected error for wrong-width b")
 		}
 	})
 	t.Run("b at order", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, new(big.Int).Set(secp.Order()), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(t, secp.Order()), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err == nil {
 			t.Fatal("expected error for b at order")
 		}
 	})
 	t.Run("invalid start message", func(t *testing.T) {
 		badStart := StartMessage{Ciphertext: nil}
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), badStart, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), badStart, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid start message")
 		}
 	})
 	t.Run("wrong start proof domain", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("wrong-domain"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+		_, _, err := Respond(params, nil, []byte("wrong-domain"), []byte("response"), start.Message, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err == nil {
 			t.Fatal("expected error for wrong start proof domain")
 		}
@@ -78,7 +85,7 @@ func TestRespondBoundaryValues(t *testing.T) {
 	responseDomain := []byte("response")
 
 	a := big.NewInt(13)
-	start, err := Start(nil, a, &skA.PublicKey)
+	start, err := Start(nil, testSecretScalar(t, a), &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +108,7 @@ func TestRespondBoundaryValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, betaShare, err := Respond(params, nil, startProofDomain, responseDomain, start.Message, startProof, bv.b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+			response, betaShare, err := Respond(params, nil, startProofDomain, responseDomain, start.Message, startProof, testSecretScalar(t, bv.b), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

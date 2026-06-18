@@ -5,12 +5,10 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -30,10 +28,13 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if !allRound1Received(s.partyData, s.cfg.Parties) {
 		return nil, nil
 	}
-	order := secp.Order()
 	for _, id := range s.cfg.Parties {
 		d := s.partyData[id]
-		if err := secp.VerifyShare(d.commitments, s.cfg.Self, secp.ScalarFromBigInt(d.share)); err != nil {
+		share, err := secpScalarFromSecret(d.share)
+		if err != nil {
+			return nil, err
+		}
+		if err := secp.VerifyShare(d.commitments, s.cfg.Self, share); err != nil {
 			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", id,
@@ -45,10 +46,17 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 			return nil, protoErr
 		}
 	}
-	secret := new(big.Int)
+	localSecret := secp.ScalarZero()
 	for _, id := range s.cfg.Parties {
-		secret.Add(secret, s.partyData[id].share)
-		secret.Mod(secret, order)
+		share, err := secpScalarFromSecret(s.partyData[id].share)
+		if err != nil {
+			return nil, err
+		}
+		localSecret = secp.ScalarAdd(localSecret, share)
+	}
+	secretScalar, err := secpSecretScalarFromScalar(localSecret)
+	if err != nil {
+		return nil, err
 	}
 	// Chain code is aggregated from round 2 confirmation reveals (commit-reveal).
 	groupCommitments := make([][]byte, s.cfg.Threshold)
@@ -84,23 +92,28 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if !ok {
 		return nil, errors.New("missing local verification share")
 	}
-	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, secret)
+	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, secretScalar)
 	if err != nil {
+		secretScalar.Destroy()
 		return nil, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
+		secretScalar.Destroy()
 		return nil, errors.New("local share proof public key mismatch")
 	}
 	shareProofBytes, err := shareProof.MarshalBinary()
 	if err != nil {
+		secretScalar.Destroy()
 		return nil, err
 	}
 	localPaillierPub, err := s.paillier.PublicKey.MarshalBinary()
 	if err != nil {
+		secretScalar.Destroy()
 		return nil, err
 	}
 	localPaillierPriv, err := s.paillier.MarshalBinary()
 	if err != nil {
+		secretScalar.Destroy()
 		return nil, err
 	}
 	localProofShare := &KeyShare{state: &keyShareState{
@@ -110,7 +123,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		parties:                s.cfg.Parties,
 		publicKey:              groupCommitments[0],
 		paillierPublicKey:      localPaillierPub,
-		planHash:               append([]byte(nil), s.planHash...),
+		planHash:               bytes.Clone(s.planHash),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
@@ -121,19 +134,16 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	localPaillierProofBytes, err := zkpai.Marshal(localPaillierProof)
 	if err != nil {
+		secretScalar.Destroy()
 		return nil, err
 	}
 	localRingPedersen := s.partyData[s.cfg.Self].ringPedersen
-	secretScalar, err := secpSecretScalarFromBig(secret)
-	if err != nil {
-		return nil, err
-	}
 	share := &KeyShare{state: &keyShareState{
 		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
 		parties:                s.cfg.Parties.Clone(),
-		publicKey:              append([]byte(nil), groupCommitments[0]...),
+		publicKey:              bytes.Clone(groupCommitments[0]),
 		chainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
 		groupCommitments:       groupCommitments,
@@ -142,21 +152,22 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		paillierPrivateKey:     localPaillierPriv,
 		paillierProof:          localPaillierProofBytes,
 		paillierPublicKeys:     s.sortedPaillierPublicKeys(),
-		ringPedersenParams:     append([]byte(nil), localRingPedersen.Params...),
-		ringPedersenProof:      append([]byte(nil), localRingPedersen.Proof...),
+		ringPedersenParams:     bytes.Clone(localRingPedersen.Params),
+		ringPedersenProof:      bytes.Clone(localRingPedersen.Proof),
 		ringPedersenPublic:     s.sortedRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
 		shareProof:             shareProofBytes,
-		planHash:               append([]byte(nil), s.planHash...),
+		planHash:               bytes.Clone(s.planHash),
 		keygenTranscriptHash:   transcriptHash,
 	}}
 	// Π^log*: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i,
 	// using the prover's own Ring-Pedersen parameters for the commitment.
-	logCiphertext, logRandomness, err := s.paillier.Encrypt(s.cfg.Reader(), secret)
+	logCiphertext, logRandomness, err := s.paillier.EncryptSecret(s.cfg.Reader(), secretScalar)
 	if err != nil {
 		return nil, err
 	}
+	defer logRandomness.Destroy()
 	localRP, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(localRingPedersen.Params, s.limits.Paillier.MaxModulusBits)
 	if err != nil {
 		return nil, fmt.Errorf("unmarshal local RP params: %w", err)
@@ -170,13 +181,10 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		PaillierN:   &s.paillier.PublicKey,
 		C:           logCiphertext,
 		X:           verificationPoint,
-		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))), // G
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
 		VerifierAux: *localRP,
 	}
-	logWitness := zkpai.LogStarWitness{
-		X:   new(big.Int).Set(secret),
-		Rho: new(big.Int).Set(logRandomness),
-	}
+	logWitness := zkpai.LogStarWitness{X: secretScalar, Rho: logRandomness}
 	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
 		return nil, err
@@ -274,7 +282,7 @@ func (s *KeygenSession) abort() {
 	s.state = keygenAborted
 	for _, pd := range s.partyData {
 		if pd.share != nil {
-			secret.ClearBigInt(pd.share)
+			pd.share.Destroy()
 			pd.share = nil
 		}
 		clear(pd.chainCode)

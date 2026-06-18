@@ -75,39 +75,6 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 		},
 		{
-			name: "EncryptionProof",
-			marshal: func(t *testing.T) []byte {
-				t.Helper()
-				return mustMarshalProof(t, seedEncryptionProof(t))
-			},
-			roundTrip: func(t *testing.T, raw []byte) {
-				t.Helper()
-				assertProofWireRoundTrip(t, raw, UnmarshalEncryptionProof, Marshal)
-			},
-		},
-		{
-			name: "MTAResponseProof",
-			marshal: func(t *testing.T) []byte {
-				t.Helper()
-				return mustMarshalProof(t, seedMTAResponseProof(t))
-			},
-			roundTrip: func(t *testing.T, raw []byte) {
-				t.Helper()
-				assertProofWireRoundTrip(t, raw, UnmarshalMTAResponseProof, Marshal)
-			},
-		},
-		{
-			name: "LogProof",
-			marshal: func(t *testing.T) []byte {
-				t.Helper()
-				return mustMarshalProof(t, seedLogProof(t))
-			},
-			roundTrip: func(t *testing.T, raw []byte) {
-				t.Helper()
-				assertProofWireRoundTrip(t, raw, UnmarshalLogProof, Marshal)
-			},
-		},
-		{
 			name: "EncProof",
 			marshal: func(t *testing.T) []byte {
 				t.Helper()

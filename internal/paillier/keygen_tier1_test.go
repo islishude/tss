@@ -5,6 +5,8 @@ package paillier
 import (
 	"context"
 	"testing"
+
+	"github.com/islishude/tss/internal/secret"
 )
 
 func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
@@ -15,6 +17,10 @@ func TestGenerateKeyUsesSafePrimeFactorsAt1024Bits(t *testing.T) {
 	if sk.N.BitLen() != 2048 {
 		t.Fatalf("N has %d bits, want 2048", sk.N.BitLen())
 	}
-	assertSafePrimeFactor(t, sk.P, 1024)
-	assertSafePrimeFactor(t, sk.Q, 1024)
+	p := scalarToBig(sk.P)
+	q := scalarToBig(sk.Q)
+	defer secret.ClearBigInt(p)
+	defer secret.ClearBigInt(q)
+	assertSafePrimeFactor(t, p, 1024)
+	assertSafePrimeFactor(t, q, 1024)
 }

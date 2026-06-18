@@ -25,7 +25,9 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 		return nil, err
 	}
 	kShare := new(big.Int).Set(wit.KShare)
+	defer secret.ClearBigInt(kShare)
 	mtaSum := new(big.Int).Set(wit.MTASum)
+	defer secret.ClearBigInt(mtaSum)
 	mtaIsZero := mtaSum.Sign() == 0
 
 	// Compute MPoint = M_i * G. When M_i = 0, MPoint is the identity (point at

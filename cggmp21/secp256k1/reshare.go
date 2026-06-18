@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 
 	"github.com/islishude/tss"
@@ -27,7 +26,7 @@ var ErrUnsupportedRefreshThresholdChange = errors.New("cggmp21/secp256k1: thresh
 // reshareDealerPartyData holds per-dealer state for a single reshare dealer participant.
 type reshareDealerPartyData struct {
 	commitments [][]byte
-	share       *big.Int
+	share       *secret.Scalar
 	pending     *pendingReshareShare
 }
 
@@ -71,7 +70,6 @@ type ReshareSession struct {
 	completed      bool                                    // Terminal success flag after newShare is confirmed.
 	aborted        bool                                    // Terminal failure/destruction flag.
 	newShare       *KeyShare                               // New key share produced for receiver participants.
-	ownPoly        []*big.Int                              // Local weighted dealer polynomial coefficients; secret-bearing.
 
 	newPaillier *pai.PrivateKey    // Fresh local Paillier private key for receiver auxiliary material.
 	dealerSent  bool               // Whether this dealer has already emitted commitments and shares.
@@ -104,11 +102,11 @@ func (reshareReceiverMaterialPayload) WireType() string { return reshareReceiver
 func (reshareReceiverMaterialPayload) WireVersion() uint16 { return tss.Version }
 
 type reshareSharePayload struct {
-	Dealer               tss.PartyID `wire:"1,u32"`
-	Receiver             tss.PartyID `wire:"2,u32"`
-	Share                *big.Int    `wire:"3,bigpos,max_bytes=scalar"`
-	DealerCommitmentHash []byte      `wire:"4,bytes,len=32"`
-	PlanHash             []byte      `wire:"5,bytes,len=32"`
+	Dealer               tss.PartyID    `wire:"1,u32"`
+	Receiver             tss.PartyID    `wire:"2,u32"`
+	Share                *secret.Scalar `wire:"3,custom,len=32"`
+	DealerCommitmentHash []byte         `wire:"4,bytes,len=32"`
+	PlanHash             []byte         `wire:"5,bytes,len=32"`
 }
 
 // Clone returns a deep copy of reshareSharePayload
@@ -116,7 +114,7 @@ func (p reshareSharePayload) Clone() reshareSharePayload {
 	return reshareSharePayload{
 		Dealer:               p.Dealer,
 		Receiver:             p.Receiver,
-		Share:                new(big.Int).Set(p.Share),
+		Share:                p.Share.Clone(),
 		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
 		PlanHash:             append([]byte(nil), p.PlanHash...),
 	}
@@ -549,17 +547,18 @@ func (s *ReshareSession) abort() {
 	s.aborted = true
 	for _, dd := range s.dealerData {
 		if dd.share != nil {
-			secret.ClearBigInt(dd.share)
+			dd.share.Destroy()
+			dd.share = nil
 		}
 		if dd.pending != nil {
-			dd.pending.payload.Share = nil
+			if dd.pending.payload.Share != nil {
+				dd.pending.payload.Share.Destroy()
+				dd.pending.payload.Share = nil
+			}
 			clear(dd.pending.payload.DealerCommitmentHash)
 			clear(dd.pending.raw)
 			dd.pending = nil
 		}
-	}
-	for _, coeff := range s.ownPoly {
-		secret.ClearBigInt(coeff)
 	}
 	if s.newPaillier != nil {
 		s.newPaillier.Destroy()

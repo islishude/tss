@@ -3,7 +3,6 @@
 package paillier
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 
@@ -92,29 +91,4 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 			t.Fatal("modulus proof with bad x^4 equation verified")
 		}
 	})
-}
-
-func assertModulusProofRoundTrip(t *testing.T, proof *ModulusProof) {
-	t.Helper()
-	raw, err := Marshal(proof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.HasPrefix(raw, []byte("TSS1")) {
-		t.Fatal("modulus proof was not binary TLV")
-	}
-	decoded, err := UnmarshalModulusProof(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := Marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("modulus proof encoding is not deterministic")
-	}
-	if _, err := UnmarshalModulusProof(append(raw, 0)); err == nil {
-		t.Fatal("modulus proof accepted trailing bytes")
-	}
 }

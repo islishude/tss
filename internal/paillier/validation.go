@@ -65,30 +65,50 @@ func (sk PrivateKey) Validate() error {
 	if sk.Lambda == nil || sk.Mu == nil {
 		return errors.New("invalid secret scalar")
 	}
-	if sk.P == nil || sk.P.Sign() <= 0 {
+	nLen := (sk.N.BitLen() + 7) / 8
+	factorLen := (nLen + 1) / 2
+	if sk.Lambda.FixedLen() != nLen || sk.Mu.FixedLen() != nLen {
+		return errors.New("invalid secret scalar width")
+	}
+	if sk.P == nil || sk.P.FixedLen() != factorLen {
 		return errors.New("invalid p")
 	}
-	if sk.Q == nil || sk.Q.Sign() <= 0 {
+	if sk.Q == nil || sk.Q.FixedLen() != factorLen {
 		return errors.New("invalid q")
 	}
-	if sk.P.Cmp(sk.Q) == 0 {
+	p := scalarToBig(sk.P)
+	defer secret.ClearBigInt(p)
+	q := scalarToBig(sk.Q)
+	defer secret.ClearBigInt(q)
+	if p.Sign() <= 0 {
+		return errors.New("invalid p")
+	}
+	if q.Sign() <= 0 {
+		return errors.New("invalid q")
+	}
+	if p.Cmp(q) == 0 {
 		return errors.New("paillier factors must differ")
 	}
-	if new(big.Int).Mul(sk.P, sk.Q).Cmp(sk.N) != 0 {
+	if new(big.Int).Mul(p, q).Cmp(sk.N) != 0 {
 		return errors.New("paillier factors do not multiply to modulus")
 	}
-	if !sk.P.ProbablyPrime(64) || !sk.Q.ProbablyPrime(64) {
+	if !p.ProbablyPrime(64) || !q.ProbablyPrime(64) {
 		return errors.New("paillier factors must be prime")
 	}
 	lambdaBig := scalarToBig(sk.Lambda)
-	wantLambda := lcm(new(big.Int).Sub(sk.P, big.NewInt(1)), new(big.Int).Sub(sk.Q, big.NewInt(1)))
+	defer secret.ClearBigInt(lambdaBig)
+	wantLambda := lcm(new(big.Int).Sub(p, big.NewInt(1)), new(big.Int).Sub(q, big.NewInt(1)))
+	defer secret.ClearBigInt(wantLambda)
 	if lambdaBig.Cmp(wantLambda) != 0 {
 		return errors.New("invalid paillier lambda")
 	}
 	// For the enforced g=n+1 variant, L(g^lambda mod n^2) = lambda mod n.
 	// This avoids variable-time modular exponentiation with secret lambda.
 	wantMu := new(big.Int).ModInverse(lambdaBig, sk.N)
-	if wantMu == nil || scalarToBig(sk.Mu).Cmp(wantMu) != 0 {
+	defer secret.ClearBigInt(wantMu)
+	muBig := scalarToBig(sk.Mu)
+	defer secret.ClearBigInt(muBig)
+	if wantMu == nil || muBig.Cmp(wantMu) != 0 {
 		return errors.New("invalid paillier mu")
 	}
 	return nil
@@ -108,5 +128,7 @@ func scalarToBig(s *secret.Scalar) *big.Int {
 	if s == nil {
 		return nil
 	}
-	return new(big.Int).SetBytes(s.FixedBytes())
+	fixed := s.FixedBytes()
+	defer clear(fixed)
+	return new(big.Int).SetBytes(fixed)
 }

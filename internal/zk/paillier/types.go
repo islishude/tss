@@ -6,24 +6,10 @@ import (
 
 const proofVersion = 1
 
-// Security parameters for statistical zero-knowledge in Fiat-Shamir proofs.
-// l (securityParameter) matches the secp256k1 order bit length.
-// ε (statSecurityParam) provides the statistical hiding margin so that
-// the mask α ∈ [0, 2^{l+ε}) makes witness recovery from z = α + e·x
-// computationally infeasible (~2^ε candidates).
-const (
-	securityParameter = 256                                   // l, secp256k1 order ≈ 2^256
-	statSecurityParam = 128                                   // ε, statistical security parameter
-	maskBits          = securityParameter + statSecurityParam // 384
-)
-
 const (
 	modulusProofWireType       = "zk.paillier.modulus-proof"
-	mtaResponseProofWireType   = "zk.paillier.mta-response-proof"
-	logProofWireType           = "zk.paillier.log-proof"
 	ringPedersenParamsWireType = "zk.paillier.ring-pedersen-params"
 	ringPedersenProofWireType  = "zk.paillier.ring-pedersen-proof"
-	encryptionProofWireType    = "zk.paillier.encryption-proof"
 )
 
 const (
@@ -32,19 +18,11 @@ const (
 	modulusYLabel              = "cggmp24-paillier-mod-y-v1"
 	ringPedersenProofTag       = "prm"
 	ringPedersenChallengeLabel = "cggmp24-paillier-prm-challenge-v1"
-	mtaProofTag                = "mta"
-	mtaChallengeLabel          = "paillier-mta-response-challenge-v1"
-	logProofTag                = "log"
-	logChallengeLabel          = "paillier-log-challenge-v1"
-	encryptionProofTag         = "enc"
-	encryptionChallengeLabel   = "paillier-encryption-challenge-v1"
 )
 
 const (
 	modulusProofRounds      = 128
 	ringPedersenProofRounds = 128
-
-	mtaResponseScalarMaxBytes = 128
 )
 
 // ModulusProof is CGGMP24 Πmod for a Paillier-Blum modulus. It proves
@@ -85,88 +63,6 @@ func (p *ModulusProof) Clone() *ModulusProof {
 		cp.Z = append(cp.Z, append([]byte(nil), z...))
 	}
 	return cp
-}
-
-// MTAResponseProof binds an MtA response to ciphertexts and commitments.
-//
-// Deprecated: MTAResponseProof is superseded by [AffGProof] for CGGMP-compatible
-// MtA response verification. It is only accepted by legacy verifiers in the
-// keygen/refresh flows. New code must use [ProveAffG]/[VerifyAffG] instead.
-type MTAResponseProof struct {
-	Version          uint16 `json:"version"`
-	TranscriptHash   []byte `json:"transcript_hash" wire:"1,bytes"`
-	BetaCommitment   []byte `json:"beta_commitment" wire:"2,bytes"`
-	CipherCommitment []byte `json:"cipher_commitment" wire:"3,bytes"`
-	BCommitment      []byte `json:"b_commitment" wire:"4,bytes"`
-	BetaNonce        []byte `json:"beta_nonce" wire:"5,bytes"`
-	BResponse        []byte `json:"b_response" wire:"6,bytes"`
-	BetaResponse     []byte `json:"beta_response" wire:"7,bytes"`
-	Randomness       []byte `json:"randomness" wire:"8,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for MTAResponseProof.
-func (MTAResponseProof) WireType() string { return mtaResponseProofWireType }
-
-// WireVersion returns the wire format version for MTAResponseProof.
-func (MTAResponseProof) WireVersion() uint16 { return proofVersion }
-
-// Clone returns a deep copy of the MTAResponseProof.
-func (p *MTAResponseProof) Clone() *MTAResponseProof {
-	if p == nil {
-		return nil
-	}
-	return &MTAResponseProof{
-		Version:          p.Version,
-		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
-		BetaCommitment:   append([]byte(nil), p.BetaCommitment...),
-		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
-		BCommitment:      append([]byte(nil), p.BCommitment...),
-		BetaNonce:        append([]byte(nil), p.BetaNonce...),
-		BResponse:        append([]byte(nil), p.BResponse...),
-		BetaResponse:     append([]byte(nil), p.BetaResponse...),
-		Randomness:       append([]byte(nil), p.Randomness...),
-	}
-}
-
-// LogProof (Π^log) proves that a Paillier ciphertext c = Enc(a) and a secp256k1
-// curve point A = a·G share the same discrete logarithm a. Per CGGMP21
-// Section 6.2, this is used during key refresh to prove that a new Paillier
-// ciphertext encrypts the same scalar as an existing verification share.
-//
-// Deprecated: LogProof is superseded by [LogStarProof] for CGGMP-compatible
-// discrete-log equality proofs with Ring-Pedersen hiding. It is only accepted
-// by legacy verifiers in the keygen/refresh flows. New code must use
-// [ProveLogStar]/[VerifyLogStar] instead.
-type LogProof struct {
-	Version          uint16 `json:"version"`
-	Point            []byte `json:"point" wire:"1,bytes"`
-	CipherCommitment []byte `json:"cipher_commitment" wire:"2,bytes"`
-	PointCommitment  []byte `json:"point_commitment" wire:"3,bytes"`
-	Response         []byte `json:"response" wire:"4,bytes"`
-	Randomness       []byte `json:"randomness" wire:"5,bytes"`
-	TranscriptHash   []byte `json:"transcript_hash" wire:"6,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for LogProof.
-func (LogProof) WireType() string { return logProofWireType }
-
-// WireVersion returns the wire format version for LogProof.
-func (LogProof) WireVersion() uint16 { return proofVersion }
-
-// Clone returns a deep copy of the LogProof.
-func (p *LogProof) Clone() *LogProof {
-	if p == nil {
-		return nil
-	}
-	return &LogProof{
-		Version:          p.Version,
-		Point:            append([]byte(nil), p.Point...),
-		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
-		PointCommitment:  append([]byte(nil), p.PointCommitment...),
-		Response:         append([]byte(nil), p.Response...),
-		Randomness:       append([]byte(nil), p.Randomness...),
-		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
-	}
 }
 
 // RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
@@ -210,48 +106,4 @@ func (p *RingPedersenProof) Clone() *RingPedersenProof {
 		cp.Responses = append(cp.Responses, append([]byte(nil), r...))
 	}
 	return cp
-}
-
-// EncryptionProof (Π^Enc) is a unified Σ-protocol proving that a Paillier
-// ciphertext c = Enc(m, r) encrypts a scalar m < q (the secp256k1 order)
-// and that the public curve commitment A = m·G opens to the same scalar.
-// It combines Π^Eq (scalar knowledge) and the range constraint |m| < q
-// into a single Fiat-Shamir challenge. Per CGGMP21 Section 4.1.
-//
-// Deprecated: EncryptionProof is superseded by [EncProof] for CGGMP-compatible
-// encryption-in-range proofs with Ring-Pedersen hiding. It is only used by the
-// MtA Start broadcast Round 1 flow where per-verifier Ring-Pedersen commitments
-// are impractical. New code must use [ProveEnc]/[VerifyEnc] instead.
-type EncryptionProof struct {
-	Version          uint16 `json:"version"`
-	ScalarCommitment []byte `json:"scalar_commitment" wire:"1,bytes"`
-	CipherCommitment []byte `json:"cipher_commitment" wire:"2,bytes"`
-	PointCommitment  []byte `json:"point_commitment" wire:"3,bytes"`
-	Bound            []byte `json:"bound" wire:"4,bytes"`
-	Response         []byte `json:"response" wire:"5,bytes"`
-	Randomness       []byte `json:"randomness" wire:"6,bytes"`
-	TranscriptHash   []byte `json:"transcript_hash" wire:"7,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for EncryptionProof.
-func (EncryptionProof) WireType() string { return encryptionProofWireType }
-
-// WireVersion returns the wire format version for EncryptionProof.
-func (EncryptionProof) WireVersion() uint16 { return proofVersion }
-
-// Clone returns a deep copy of the EncryptionProof.
-func (p *EncryptionProof) Clone() *EncryptionProof {
-	if p == nil {
-		return nil
-	}
-	return &EncryptionProof{
-		Version:          p.Version,
-		ScalarCommitment: append([]byte(nil), p.ScalarCommitment...),
-		CipherCommitment: append([]byte(nil), p.CipherCommitment...),
-		PointCommitment:  append([]byte(nil), p.PointCommitment...),
-		Bound:            append([]byte(nil), p.Bound...),
-		Response:         append([]byte(nil), p.Response...),
-		Randomness:       append([]byte(nil), p.Randomness...),
-		TranscriptHash:   append([]byte(nil), p.TranscriptHash...),
-	}
 }

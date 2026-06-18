@@ -49,245 +49,6 @@ func (r *replayReader) reset() {
 	r.count = 0
 }
 
-// TestEncryptionProofSpecialSoundness demonstrates that two accepting
-// EncryptionProof transcripts with identical commitments but different
-// challenges allow extraction of the witness scalar m.
-//
-// Given (e, z=α+e·m) and (e', z'=α+e'·m) with e≠e' and the same α:
-//
-//	m = (z − z') / (e − e')
-//
-// This is the core security property that makes Σ-protocols proofs of
-// knowledge: if a prover can answer two different challenges with the same
-// commitment, they must know the witness. A failure here means the proof
-// system does not actually extract the claimed knowledge.
-func TestEncryptionProofSpecialSoundness(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	scalar := big.NewInt(12345)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rng := newReplayReader("extract-encryption")
-
-	// Proof 1 with domain "extract-1"
-	proof1, err := ProveEncryption(rng, []byte("extract-1"), &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyEncryption([]byte("extract-1"), &sk.PublicKey, ciphertext, proof1) {
-		t.Fatal("proof1 did not verify")
-	}
-
-	// Proof 2: reset RNG to reuse the same α, but with a different domain
-	// to get a different challenge e.
-	rng.reset()
-	proof2, err := ProveEncryption(rng, []byte("extract-2"), &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyEncryption([]byte("extract-2"), &sk.PublicKey, ciphertext, proof2) {
-		t.Fatal("proof2 did not verify")
-	}
-
-	// Verify commitments are identical.
-	if string(proof1.CipherCommitment) != string(proof2.CipherCommitment) {
-		t.Fatal("commitments differ — RNG replay failed")
-	}
-
-	// Extract witness: m = (z - z')/(e - e')
-	transcript1 := encryptionTranscript([]byte("extract-1"), &sk.PublicKey, ciphertext,
-		proof1.ScalarCommitment, proof1.Bound,
-		new(big.Int).SetBytes(proof1.CipherCommitment),
-		proof1.PointCommitment)
-	e1 := challenge([]byte(encryptionChallengeLabel), transcript1)
-
-	transcript2 := encryptionTranscript([]byte("extract-2"), &sk.PublicKey, ciphertext,
-		proof2.ScalarCommitment, proof2.Bound,
-		new(big.Int).SetBytes(proof2.CipherCommitment),
-		proof2.PointCommitment)
-	e2 := challenge([]byte(encryptionChallengeLabel), transcript2)
-
-	if e1.Cmp(e2) == 0 {
-		t.Fatal("challenges are identical — domain separation failed")
-	}
-
-	z1 := new(big.Int).SetBytes(proof1.Response)
-	z2 := new(big.Int).SetBytes(proof2.Response)
-
-	eDiff := new(big.Int).Sub(e1, e2)
-	zDiff := new(big.Int).Sub(z1, z2)
-
-	if new(big.Int).Mod(zDiff, eDiff).Sign() != 0 {
-		t.Fatal("zDiff is not divisible by eDiff — special soundness extraction failed")
-	}
-
-	extractedM := new(big.Int).Div(zDiff, eDiff)
-	// The extracted witness must match the original (mod secp256k1 order).
-	extractedM.Mod(extractedM, secp.Order())
-	expected := new(big.Int).Mod(scalar, secp.Order())
-	if extractedM.Cmp(expected) != 0 {
-		t.Fatalf("extracted m = %s, want %s", extractedM, expected)
-	}
-	t.Logf("EncryptionProof extractor: m = %s (mod q)", extractedM)
-}
-
-// TestLogProofSpecialSoundness demonstrates witness extraction for Π^log.
-func TestLogProofSpecialSoundness(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	scalar := big.NewInt(7777)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pointBytes, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rng := newReplayReader("extract-log")
-	proof1, err := ProveLog(rng, []byte("extract-1"), &sk.PublicKey, ciphertext, scalar, randomness, pointBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyLog([]byte("extract-1"), &sk.PublicKey, ciphertext, proof1) {
-		t.Fatal("proof1 did not verify")
-	}
-
-	rng.reset()
-	proof2, err := ProveLog(rng, []byte("extract-2"), &sk.PublicKey, ciphertext, scalar, randomness, pointBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyLog([]byte("extract-2"), &sk.PublicKey, ciphertext, proof2) {
-		t.Fatal("proof2 did not verify")
-	}
-
-	if string(proof1.CipherCommitment) != string(proof2.CipherCommitment) {
-		t.Fatal("commitments differ — RNG replay failed")
-	}
-
-	transcript1 := logTranscript([]byte("extract-1"), &sk.PublicKey, ciphertext, proof1.Point,
-		new(big.Int).SetBytes(proof1.CipherCommitment), proof1.PointCommitment)
-	e1 := challenge([]byte(logChallengeLabel), transcript1)
-
-	transcript2 := logTranscript([]byte("extract-2"), &sk.PublicKey, ciphertext, proof2.Point,
-		new(big.Int).SetBytes(proof2.CipherCommitment), proof2.PointCommitment)
-	e2 := challenge([]byte(logChallengeLabel), transcript2)
-
-	if e1.Cmp(e2) == 0 {
-		t.Fatal("challenges are identical")
-	}
-
-	z1 := new(big.Int).SetBytes(proof1.Response)
-	z2 := new(big.Int).SetBytes(proof2.Response)
-	eDiff := new(big.Int).Sub(e1, e2)
-	zDiff := new(big.Int).Sub(z1, z2)
-
-	if new(big.Int).Mod(zDiff, eDiff).Sign() != 0 {
-		t.Fatal("LogProof: zDiff not divisible by eDiff — extraction failed")
-	}
-	extracted := new(big.Int).Div(zDiff, eDiff)
-	extracted.Mod(extracted, secp.Order())
-	expected := new(big.Int).Mod(scalar, secp.Order())
-	if extracted.Cmp(expected) != 0 {
-		t.Fatalf("extracted a = %s, want %s", extracted, expected)
-	}
-	t.Logf("LogProof extractor: a = %s (mod q)", extracted)
-}
-
-// TestMTAResponseProofSpecialSoundness demonstrates witness extraction for
-// the legacy MTAResponseProof. Two transcripts with the same commitments
-// but different challenges allow extraction of both b and beta.
-func TestMTAResponseProofSpecialSoundness(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	a := big.NewInt(42)
-	b := big.NewInt(123)
-	beta := big.NewInt(456)
-
-	encA, _, err := sk.Encrypt(nil, a)
-	if err != nil {
-		t.Fatal(err)
-	}
-	bCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(b)))
-	if err != nil {
-		t.Fatal(err)
-	}
-	response, betaRandomness := mtaResponseForTest(t, sk, encA, b, beta)
-
-	rng := newReplayReader("extract-mta")
-	proof1, err := ProveMTAResponse(rng, []byte("extract-1"), &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyMTAResponse([]byte("extract-1"), &sk.PublicKey, encA, response, bCommitment, proof1) {
-		t.Fatal("proof1 did not verify")
-	}
-
-	rng.reset()
-	proof2, err := ProveMTAResponse(rng, []byte("extract-2"), &sk.PublicKey, encA, response, bCommitment, b, beta, betaRandomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !VerifyMTAResponse([]byte("extract-2"), &sk.PublicKey, encA, response, bCommitment, proof2) {
-		t.Fatal("proof2 did not verify")
-	}
-
-	if string(proof1.CipherCommitment) != string(proof2.CipherCommitment) {
-		t.Fatal("commitments differ — RNG replay failed")
-	}
-
-	transcript1 := mtaTranscript([]byte("extract-1"), &sk.PublicKey, encA, response,
-		bCommitment, proof1.BetaCommitment,
-		new(big.Int).SetBytes(proof1.CipherCommitment),
-		proof1.BCommitment, proof1.BetaNonce)
-	e1 := challenge([]byte(mtaChallengeLabel), transcript1)
-
-	transcript2 := mtaTranscript([]byte("extract-2"), &sk.PublicKey, encA, response,
-		bCommitment, proof2.BetaCommitment,
-		new(big.Int).SetBytes(proof2.CipherCommitment),
-		proof2.BCommitment, proof2.BetaNonce)
-	e2 := challenge([]byte(mtaChallengeLabel), transcript2)
-
-	if e1.Cmp(e2) == 0 {
-		t.Fatal("challenges are identical")
-	}
-
-	// Extract b.
-	zB1 := new(big.Int).SetBytes(proof1.BResponse)
-	zB2 := new(big.Int).SetBytes(proof2.BResponse)
-	eDiff := new(big.Int).Sub(e1, e2)
-	zDiffB := new(big.Int).Sub(zB1, zB2)
-	if new(big.Int).Mod(zDiffB, eDiff).Sign() != 0 {
-		t.Fatal("MTAResponseProof: zDiffB not divisible by eDiff — extraction failed")
-	}
-	extractedB := new(big.Int).Div(zDiffB, eDiff)
-	extractedB.Mod(extractedB, secp.Order())
-	expectedB := new(big.Int).Mod(b, secp.Order())
-	if extractedB.Cmp(expectedB) != 0 {
-		t.Fatalf("extracted b = %s, want %s", extractedB, expectedB)
-	}
-
-	// Extract beta.
-	zBeta1 := new(big.Int).SetBytes(proof1.BetaResponse)
-	zBeta2 := new(big.Int).SetBytes(proof2.BetaResponse)
-	zDiffBeta := new(big.Int).Sub(zBeta1, zBeta2)
-	if new(big.Int).Mod(zDiffBeta, eDiff).Sign() != 0 {
-		t.Fatal("MTAResponseProof: zDiffBeta not divisible by eDiff — extraction failed")
-	}
-	extractedBeta := new(big.Int).Div(zDiffBeta, eDiff)
-	extractedBeta.Mod(extractedBeta, secp.Order())
-	expectedBeta := new(big.Int).Mod(beta, secp.Order())
-	if extractedBeta.Cmp(expectedBeta) != 0 {
-		t.Fatalf("extracted beta = %s, want %s", extractedBeta, expectedBeta)
-	}
-	t.Logf("MTAResponseProof extractor: b=%s, beta=%s (mod q)", extractedB, extractedBeta)
-}
-
 // TestEncProofSpecialSoundness demonstrates witness extraction for the new
 // CGGMP Πenc proof. Extracts k = (z1 - z1')/(e - e').
 func TestEncProofSpecialSoundness(t *testing.T) {
@@ -308,7 +69,10 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 		CiphertextK:     ciphertext,
 		VerifierAux:     *aux,
 	}
-	witness := EncWitness{K: k, Rho: rho}
+	witness := EncWitness{
+		K:   testSecpSecretScalar(t, k),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 
 	rng := newReplayReader("extract-enc")
 	proof1, err := ProveEnc(params, []byte("extract-1"), stmt, witness, rng)
@@ -378,7 +142,12 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	xMulC, err := OMulCT(&sk.PublicKey, x, c, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(
+		&sk.PublicKey,
+		testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell)),
+		c,
+		signedPowerOfTwoBytes(params.Ell),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -399,7 +168,12 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       *aux,
 	}
-	witness := AffGWitness{X: x, Y: y, Rho: rho, RhoY: rhoY}
+	witness := AffGWitness{
+		X:    testSecpSecretScalar(t, x),
+		Y:    testSecpSecretScalar(t, y),
+		Rho:  testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+		RhoY: testSecretScalarFixed(t, rhoY, modulusBytes(sk.N)),
+	}
 
 	rng := newReplayReader("extract-affg")
 	proof1, err := ProveAffG(params, []byte("extract-1"), stmt, witness, rng)
@@ -489,7 +263,10 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 		B:           base,
 		VerifierAux: *aux,
 	}
-	witness := LogStarWitness{X: x, Rho: rho}
+	witness := LogStarWitness{
+		X:   testSecpSecretScalar(t, x),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 
 	rng := newReplayReader("extract-logstar")
 	proof1, err := ProveLogStar(params, []byte("extract-1"), stmt, witness, rng)
@@ -540,52 +317,6 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 		t.Fatalf("extracted x = %s, want %s", extractedX, x)
 	}
 	t.Logf("LogStarProof extractor: x = %s", extractedX)
-}
-
-// TestExtractorRequiresDifferentChallenges verifies that the extractor fails
-// (as expected) when challenges are the same — two transcripts with identical
-// commitments and identical challenges do NOT allow witness extraction.
-func TestExtractorRequiresDifferentChallenges(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	rng := newReplayReader("extract-same-challenge")
-	domain := []byte("same-domain")
-
-	proof1, err := ProveEncryption(rng, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-	rng.reset()
-	_, err = ProveEncryption(rng, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	transcript := encryptionTranscript(domain, &sk.PublicKey, ciphertext,
-		proof1.ScalarCommitment, proof1.Bound,
-		new(big.Int).SetBytes(proof1.CipherCommitment),
-		proof1.PointCommitment)
-	e1 := challenge([]byte(encryptionChallengeLabel), transcript)
-	e2 := challenge([]byte(encryptionChallengeLabel), transcript)
-
-	if e1.Cmp(e2) != 0 {
-		t.Fatal("challenges differ unexpectedly")
-	}
-
-	// When e1 == e2, eDiff = 0, and extraction fails with division by zero.
-	// This confirms that two transcripts must have DIFFERENT challenges for
-	// the extractor to work.
-	eDiff := new(big.Int).Sub(e1, e2)
-	if eDiff.Sign() != 0 {
-		t.Fatal("eDiff should be zero")
-	}
-	t.Log("Extractor correctly requires different challenges (e1 == e2, extraction impossible)")
 }
 
 // replayReader implements io.Reader — confirmed above.

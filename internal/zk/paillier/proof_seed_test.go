@@ -47,48 +47,6 @@ func seedRingPedersenProof() *RingPedersenProof {
 	}
 }
 
-func seedEncryptionProof(tb proofFataler) *EncryptionProof {
-	tb.Helper()
-	return &EncryptionProof{
-		Version:          proofVersion,
-		ScalarCommitment: seedPoint(tb, 1),
-		CipherCommitment: []byte{2},
-		PointCommitment:  seedPoint(tb, 3),
-		Bound:            secp.Order().Bytes(),
-		Response:         []byte{4},
-		Randomness:       []byte{5},
-		TranscriptHash:   proofSeedHash(6),
-	}
-}
-
-func seedMTAResponseProof(tb proofFataler) *MTAResponseProof {
-	tb.Helper()
-	return &MTAResponseProof{
-		Version:          proofVersion,
-		TranscriptHash:   proofSeedHash(10),
-		BetaCommitment:   seedPoint(tb, 11),
-		CipherCommitment: []byte{12},
-		BCommitment:      seedPoint(tb, 13),
-		BetaNonce:        seedPoint(tb, 14),
-		BResponse:        []byte{15},
-		BetaResponse:     []byte{16},
-		Randomness:       []byte{17},
-	}
-}
-
-func seedLogProof(tb proofFataler) *LogProof {
-	tb.Helper()
-	return &LogProof{
-		Version:          proofVersion,
-		Point:            seedPoint(tb, 21),
-		CipherCommitment: []byte{22},
-		PointCommitment:  seedPoint(tb, 23),
-		Response:         []byte{24},
-		Randomness:       []byte{25},
-		TranscriptHash:   proofSeedHash(26),
-	}
-}
-
 func seedEncProof() *EncProof {
 	return &EncProof{
 		Version:        encProofVersion,
@@ -140,15 +98,6 @@ func seedLogStarProof() *LogStarProof {
 
 func proofSeedHash(b byte) []byte {
 	return bytes.Repeat([]byte{b}, sha256.Size)
-}
-
-func seedPoint(tb proofFataler, scalar int64) []byte {
-	tb.Helper()
-	out, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(scalar))))
-	if err != nil {
-		tb.Fatal(err)
-	}
-	return out
 }
 
 func seedCurvePoint(scalar int64) *secp.Point {

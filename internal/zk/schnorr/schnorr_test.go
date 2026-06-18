@@ -2,18 +2,29 @@ package schnorr
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
+func testSecretScalar(t *testing.T, value uint64) *secret.Scalar {
+	t.Helper()
+	scalar := secp.ScalarFromUint64(value)
+	out, err := secret.NewScalar(scalar.Bytes(), secp.ScalarSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(out.Destroy)
+	return out
+}
+
 func TestProof(t *testing.T) {
 	t.Parallel()
 
-	proof, public, err := Prove([]byte("test"), big.NewInt(13))
+	proof, public, err := Prove([]byte("test"), testSecretScalar(t, 13))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -62,7 +73,7 @@ func TestProof(t *testing.T) {
 func TestProofRejectsInvalidInputs(t *testing.T) {
 	t.Parallel()
 
-	proof, public, err := Prove([]byte("test"), big.NewInt(13))
+	proof, public, err := Prove([]byte("test"), testSecretScalar(t, 13))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -72,10 +83,35 @@ func TestProofRejectsInvalidInputs(t *testing.T) {
 
 		tests := []struct {
 			name   string
-			secret *big.Int
+			secret *secret.Scalar
 		}{
 			{name: "nil", secret: nil},
-			{name: "zero", secret: big.NewInt(0)},
+			{name: "wrong width", secret: func() *secret.Scalar {
+				out, err := secret.NewScalar([]byte{1}, secp.ScalarSize-1)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(out.Destroy)
+				return out
+			}()},
+			{name: "zero", secret: func() *secret.Scalar {
+				out, err := secret.NewScalar(make([]byte, secp.ScalarSize), secp.ScalarSize)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(out.Destroy)
+				return out
+			}()},
+			{name: "out of range", secret: func() *secret.Scalar {
+				order := secp.Order().FillBytes(make([]byte, secp.ScalarSize))
+				out, err := secret.NewScalar(order, secp.ScalarSize)
+				clear(order)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(out.Destroy)
+				return out
+			}()},
 		}
 		for i := range tests {
 			tc := tests[i]
@@ -126,11 +162,11 @@ func TestProofRejectsInvalidInputs(t *testing.T) {
 func TestProofTamper(t *testing.T) {
 	t.Parallel()
 
-	proof, public, err := Prove([]byte("test"), big.NewInt(13))
+	proof, public, err := Prove([]byte("test"), testSecretScalar(t, 13))
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, otherPublic, err := Prove([]byte("test"), big.NewInt(17))
+	_, otherPublic, err := Prove([]byte("test"), testSecretScalar(t, 17))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -167,11 +203,11 @@ func TestProofTamper(t *testing.T) {
 func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 	t.Parallel()
 
-	validCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+	validCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarOne()))
 	if err != nil {
 		t.Fatal(err)
 	}
-	validResponse := secp.ScalarFromBigInt(big.NewInt(2)).Bytes()
+	validResponse := secp.ScalarFromUint64(2).Bytes()
 	tests := []struct {
 		name    string
 		version uint16

@@ -5,7 +5,6 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -51,11 +50,17 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badShare := new(big.Int).Set(payload.Share)
-	badShare.Add(badShare, big.NewInt(1))
-	badShare.Mod(badShare, secp.Order())
-	if badShare.Sign() == 0 {
-		badShare.SetInt64(1)
+	shareScalar, err := secpScalarFromSecret(payload.Share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badScalar := secp.ScalarAdd(shareScalar, secp.ScalarOne())
+	if badScalar.IsZero() {
+		badScalar = secp.ScalarOne()
+	}
+	badShare, err := secpSecretScalarFromScalar(badScalar)
+	if err != nil {
+		t.Fatal(err)
 	}
 	payload.Share = badShare
 	dealer2Out[1].Payload, err = marshalReshareSharePayload(payload)

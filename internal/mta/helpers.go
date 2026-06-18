@@ -1,26 +1,39 @@
 package mta
 
 import (
-	"crypto/rand"
 	"errors"
 	"io"
 	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 )
 
 const messageVersion = 1
 
-func randomScalar(reader io.Reader) (*big.Int, error) {
-	for {
-		x, err := rand.Int(reader, secp.Order())
-		if err != nil {
-			return nil, err
-		}
-		if x.Sign() != 0 {
-			return x, nil
-		}
+func randomSecretScalar(reader io.Reader) (*secret.Scalar, error) {
+	x, err := secp.RandomScalar(reader)
+	if err != nil {
+		return nil, err
 	}
+	return secret.NewScalar(x.Bytes(), secp.ScalarSize)
+}
+
+func secpScalarFromSecret(x *secret.Scalar) (secp.Scalar, error) {
+	if x == nil {
+		return secp.Scalar{}, errors.New("nil secret scalar")
+	}
+	fixed := x.FixedBytes()
+	defer clear(fixed)
+	return secp.ScalarFromBytes(fixed)
+}
+
+func mustSecpScalar(x *secret.Scalar) secp.Scalar {
+	out, err := secpScalarFromSecret(x)
+	if err != nil {
+		panic("mta: invalid internal secret scalar")
+	}
+	return out
 }
 
 func validatePositiveIntegerBytes(in []byte) error {
@@ -34,16 +47,4 @@ func validatePositiveIntegerBytes(in []byte) error {
 		return errors.New("integer must be positive")
 	}
 	return nil
-}
-
-// scalarFixedBytes encodes a secp256k1 scalar as fixed-length 32-byte big-endian.
-func scalarFixedBytes(x *big.Int) []byte {
-	const scalarByteLen = 32
-	b := x.Bytes()
-	if len(b) >= scalarByteLen {
-		return b[len(b)-scalarByteLen:]
-	}
-	out := make([]byte, scalarByteLen)
-	copy(out[scalarByteLen-len(b):], b)
-	return out
 }

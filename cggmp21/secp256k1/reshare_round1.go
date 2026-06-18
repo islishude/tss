@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/shamir"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -35,23 +34,21 @@ func (s *ReshareSession) maybeSendDealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
-	order := secp.Order()
-	lambda, err := shamir.LagrangeCoefficient(s.selfID, s.dealerParties, order)
+	lambda, err := shamirsecp.LagrangeCoefficient(s.selfID, s.dealerParties)
 	if err != nil {
 		return nil, err
 	}
-	oldSecret, err := s.oldKey.secretBig()
+	oldSecret, err := secpScalarFromSecret(s.oldKey.state.secret)
 	if err != nil {
 		return nil, err
 	}
-	constant := new(big.Int).Mul(oldSecret, lambda)
-	constant.Mod(constant, order)
+	constant := secp.ScalarMul(oldSecret, lambda)
 	// The wire format has no SEC 1 encoding for infinity, so every dealer
 	// contribution commitment must be representable as a finite point.
-	if constant.Sign() == 0 {
+	if constant.IsZero() {
 		return nil, errors.New("reshare dealer constant is zero")
 	}
-	poly, err := shamir.RandomPolynomial(s.cfg.Reader(), order, s.newThreshold, constant)
+	poly, err := shamirsecp.RandomPolynomial(s.cfg.Reader(), s.newThreshold, &constant)
 	if err != nil {
 		return nil, err
 	}
@@ -62,7 +59,6 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err := s.validateDealerCommitments(s.selfID, commitments); err != nil {
 		return nil, err
 	}
-	s.ownPoly = poly
 	dd := s.dealerData[s.selfID]
 	if dd == nil {
 		dd = &reshareDealerPartyData{}
@@ -70,7 +66,10 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	}
 	dd.commitments = commitments
 	if s.isReceiver {
-		dd.share = shamir.Eval(poly, s.selfID, order)
+		dd.share, err = secpSecretScalarFromScalar(shamirsecp.Eval(poly, s.selfID))
+		if err != nil {
+			return nil, err
+		}
 	}
 	payload, err := marshalReshareDealerCommitmentsPayloadWithLimits(reshareDealerCommitmentsPayload{
 		Commitments: commitments,
@@ -90,7 +89,10 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if id == s.selfID {
 			continue
 		}
-		share := shamir.Eval(s.ownPoly, id, order)
+		share, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, id))
+		if err != nil {
+			return nil, err
+		}
 		sharePayload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
@@ -98,6 +100,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 			DealerCommitmentHash: commitmentsHash,
 			PlanHash:             s.planHash,
 		}, s.limits)
+		share.Destroy()
 		if err != nil {
 			return nil, err
 		}
@@ -132,6 +135,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
+	defer ringPedersenLambda.Destroy()
 	ringPedersenParamsBytes, err := zkpai.MarshalRingPedersenParams(ringPedersenParams)
 	if err != nil {
 		return err
@@ -250,7 +254,10 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
 	}
-	share := secp.ScalarFromBigInt(p.Share)
+	share, err := secpScalarFromSecret(p.Share)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
+	}
 	if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 		verifyErr := err
 		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
@@ -273,7 +280,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 			Err: verifyErr,
 		}
 	}
-	dd.share = share.BigInt()
+	dd.share = p.Share.Clone()
 	return nil
 }
 
@@ -307,13 +314,13 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if err != nil {
 		return fmt.Errorf("invalid old verification share for dealer %d: %w", dealer, err)
 	}
-	lambda, err := shamir.LagrangeCoefficient(dealer, s.dealerParties, secp.Order())
+	lambda, err := shamirsecp.LagrangeCoefficient(dealer, s.dealerParties)
 	if err != nil {
 		return err
 	}
 	// The dealer contribution preserves the old secret only if its constant
 	// commitment is the old verification share weighted for this dealer set.
-	expected, err := secp.PointBytes(secp.ScalarMult(oldPoint, secp.ScalarFromBigInt(lambda)))
+	expected, err := secp.PointBytes(secp.ScalarMult(oldPoint, lambda))
 	if err != nil {
 		return err
 	}
@@ -323,13 +330,13 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	return nil
 }
 
-func polynomialCommitments(poly []*big.Int) ([][]byte, error) {
+func polynomialCommitments(poly shamirsecp.Polynomial) ([][]byte, error) {
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		if coeff.Sign() == 0 {
+		if coeff.IsZero() {
 			return nil, fmt.Errorf("polynomial coefficient %d is zero", i)
 		}
-		enc, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff)))
+		enc, err := secp.PointBytes(secp.ScalarBaseMult(coeff))
 		if err != nil {
 			return nil, err
 		}

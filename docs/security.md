@@ -102,9 +102,12 @@ CGGMP21 `Presign` values only through their explicit binary encoders, then store
 the resulting bytes under caller-managed encryption.
 
 Algorithm-specific `KeyShare` types, CGGMP21 `Presign`, and CGGMP21
-`ResharePlan` are opaque handles with no exported state fields. Key shares and
-presign records store local scalar shares as fixed-length `secret.Scalar`
-values. Byte, slice, map, context, and nested-record getters return caller-owned
+`ResharePlan` are opaque handles with no exported state fields. Key shares,
+presign records, and CGGMP21 keygen/refresh/reshare DKG share state store local
+scalar shares as fixed-length `secret.Scalar` values. CGGMP21 DKG share payloads
+also encode shares as fixed 32-byte scalar fields, and secp256k1 Shamir
+arithmetic uses fixed-width scalar operations rather than retaining `big.Int`
+shares. Byte, slice, map, context, and nested-record getters return caller-owned
 copies. Their string and Go-string formatting is redacted.
 
 A shallow Go copy of a key share or presign is another handle to the same
@@ -229,9 +232,17 @@ The constant-time path enforces:
 - ciphertext blinding (`c' = c * r^n mod n²`) during decryption;
 - no secret-dependent branches, array indices, or early returns.
 
-Secret scalars (`λ`, `μ`) are stored as `secret.Scalar` (fixed-length bytes)
-and do not expose `String()`, variable-length `Bytes()`, `BigInt()`, or JSON
-encoding.
+Non-negative secrets (`λ`, `μ`, Paillier factors, randomness, CGGMP key shares,
+presign shares, MtA openings, and DKG shares) use fixed-width `secret.Scalar`.
+Signed Paillier proof masks use `secret.SignedInt`. Schnorr proof generation and
+verification use secp256k1 scalar arithmetic without `math/big`. Owned
+`big.Int` temporaries exist only at Paillier validation, encoding, and public
+proof-response arithmetic boundaries and are cleared after use.
+
+This does not claim that the full Paillier implementation is constant-time.
+Only secret-exponent modular exponentiation is required to use
+`internal/paillier/paillierct`; public-modulus, public-challenge, and public-proof
+operations may remain variable-time.
 
 ## CGGMP21 Status
 
@@ -240,8 +251,8 @@ encoding.
 The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible constructions:
 
 - **Πenc**: Paillier encryption in range with Ring-Pedersen commitments, large integer masks sampled from ±2^(Ell+Epsilon), and strict ciphertext membership and response range checks. Presign Round 1 uses verifier-specific Πenc proofs because the statement binds the verifier's Ring-Pedersen auxiliary parameters.
-- **Πaff-g**: Paillier affine operation with group commitment in range, replacing the legacy MTAResponseProof. Uses Ring-Pedersen commitments and binds the prover's Paillier key, the verifier's auxiliary parameters, and all statement fields into the Fiat-Shamir challenge.
-- **Πlog\***: Group element vs Paillier encryption in range, replacing the legacy LogProof. Uses Ring-Pedersen commitment to hide the integer witness and binds the Paillier ciphertext, curve points, and base point into the challenge.
+- **Πaff-g**: Paillier affine operation with group commitment in range. Uses Ring-Pedersen commitments and binds the prover's Paillier key, the verifier's auxiliary parameters, and all statement fields into the Fiat-Shamir challenge.
+- **Πlog\***: Group element vs Paillier encryption in range. Uses Ring-Pedersen commitment to hide the integer witness and binds the Paillier ciphertext, curve points, and base point into the challenge.
 
 All three proofs use the canonical typed transcript API; the Fiat-Shamir challenge is never reduced modulo the secp256k1 order for Paillier-integer proofs.
 

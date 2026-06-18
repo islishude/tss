@@ -15,7 +15,9 @@ the CGGMP24 revision for Πmod and Ring-Pedersen Πprm.
 | Πlog\* (`LogStarProof`)    | `zk.paillier.logstar-proof`       | `internal/zk/paillier/logstar.go` `ProveLogStar` / `VerifyLogStar`          |
 | Schnorr proof              | `zk.schnorr.proof`                | `internal/zk/schnorr/schnorr.go`                                            |
 
-Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta), and `LogProof` (Π^log) remain in `proofs.go` for compatibility tests and deletion tracking. Production presign code rejects these proof bytes; Round 1 uses per-verifier `EncProof` (`Πenc`).
+The retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` types and
+wire decoders have been removed. Round 1 uses per-verifier `EncProof` (`Πenc`);
+there is no legacy proof fallback.
 
 ## Review Focus
 
@@ -27,6 +29,11 @@ Legacy proof types (v1) `EncryptionProof` (Π^Enc), `MTAResponseProof` (Π^mta),
 - Πenc, Πaff-g, and Πlog\* proofs require Ring-Pedersen commitments to hide
   integer witnesses; commitment nonces are sampled from the configured
   `SecurityParams` ranges.
+- Schnorr witnesses and challenges use fixed-width secp256k1 scalar arithmetic;
+  `internal/zk/schnorr` contains no `math/big` boundary.
+- Paillier witnesses, randomness, masks, Ring-Pedersen lambda, private factors,
+  and MtA openings use `secret.Scalar` or `secret.SignedInt`. Public moduli,
+  ciphertexts, challenges, and proof responses remain `big.Int`.
 - Verifier range checks (z1 ∈ ±2^(EncRange+1), z3 ∈ ±(N · 2^(EncRange+1)), etc.)
   must precede algebraic equation checks.
 - secp256k1 points must be compressed canonical points and never infinity.

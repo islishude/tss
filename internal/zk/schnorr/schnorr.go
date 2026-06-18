@@ -3,10 +3,10 @@ package schnorr
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -38,15 +38,22 @@ func (Proof) WireType() string { return proofWireType }
 func (Proof) WireVersion() uint16 { return proofVersion }
 
 // Prove creates a Fiat-Shamir Schnorr proof for secret and returns its public key.
-func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
-	if secret == nil || secret.Sign() == 0 {
+func Prove(domain []byte, secretScalar *secret.Scalar) (*Proof, []byte, error) {
+	if secretScalar == nil || secretScalar.FixedLen() != secp.ScalarSize {
 		return nil, nil, errors.New("secret must be non-zero")
 	}
-	sec := secp.ScalarFromBigInt(secret)
+	secretBytes := secretScalar.FixedBytes()
+	defer clear(secretBytes)
+	sec, err := secp.ScalarFromBytes(secretBytes)
+	if err != nil {
+		return nil, nil, errors.New("secret must be a canonical non-zero secp256k1 scalar")
+	}
+	defer sec.Set(secp.ScalarZero())
 	nonce, err := secp.RandomScalar(nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer nonce.Set(secp.ScalarZero())
 	public, err := secp.PointBytes(secp.ScalarBaseMult(sec))
 	if err != nil {
 		return nil, nil, err
@@ -55,9 +62,8 @@ func Prove(domain []byte, secret *big.Int) (*Proof, []byte, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	challenge := challenge(domain, public, commitment)
 	// Fiat-Shamir Schnorr response: s = k + e*x mod q.
-	challengeScalar := secp.ScalarFromBigInt(challenge)
+	challengeScalar := challenge(domain, public, commitment)
 	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), nonce)
 	return &Proof{Commitment: commitment, Response: response.Bytes()}, public, nil
 }
@@ -82,7 +88,7 @@ func Verify(domain, public []byte, proof *Proof) bool {
 	challenge := challenge(domain, public, proof.Commitment)
 	left := secp.ScalarBaseMult(response)
 	// Verification checks [s]G = R + [e]X.
-	right := secp.Add(commitmentPoint, secp.ScalarMult(publicPoint, secp.ScalarFromBigInt(challenge)))
+	right := secp.Add(commitmentPoint, secp.ScalarMult(publicPoint, challenge))
 	return secp.Equal(left, right)
 }
 
@@ -124,12 +130,14 @@ func (p *Proof) Validate() error {
 	return nil
 }
 
-func challenge(domain, public, commitment []byte) *big.Int {
+func challenge(domain, public, commitment []byte) secp.Scalar {
 	t := transcript.New(schnorrChallengeLabel)
 	t.AppendBytes("outer_domain", domain)
 	t.AppendBytes("public_key", public)
 	t.AppendBytes("commitment", commitment)
-	out := new(big.Int).SetBytes(t.Sum())
-	out.Mod(out, secp.Order())
+	out, err := secp.ScalarFromBytesModOrder(t.Sum())
+	if err != nil {
+		panic("schnorr: SHA-256 challenge has invalid width")
+	}
 	return out
 }

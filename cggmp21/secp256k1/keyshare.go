@@ -750,10 +750,6 @@ func (k *KeyShare) Destroy() {
 	clear(k.state.paillierPrivateKey)
 }
 
-func (k *KeyShare) secretBig() (*big.Int, error) {
-	return secpSecretBig(k.state.secret)
-}
-
 func (k *KeyShare) requireMPCMaterial(limits Limits) error {
 	if err := k.ValidateWithLimits(limits); err != nil {
 		return err

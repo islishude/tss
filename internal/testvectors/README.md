@@ -15,7 +15,7 @@ wire/v1/                          — binary golden vectors (wire format stabili
                                      Presign, Presign.fast, PresignRound3Payload, ResharePlan,
                                      SignAttemptRecord, SignPartialPayload
   zk/         11 files             — SecurityParams, ModulusProof, RingPedersenParams,
-                                     RingPedersenProof, EncryptionProof, MTAResponseProof, LogProof,
+                                     RingPedersenProof,
                                      EncProof, AffGProof, LogStarProof, SchnorrProof
 
 protocol/                           — JSON cross-implementation vectors (protocol flows)

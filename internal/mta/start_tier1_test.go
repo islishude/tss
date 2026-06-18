@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Tier 0: StartMessage validation and wire error paths (no crypto keygen).
@@ -17,13 +18,19 @@ func TestStartErrors(t *testing.T) {
 
 	tests := []struct {
 		name string
-		a    *big.Int
+		a    *secret.Scalar
 	}{
 		{name: "nil a", a: nil},
-		{name: "zero a", a: big.NewInt(0)},
-		{name: "negative a", a: big.NewInt(-5)},
-		{name: "a at order", a: new(big.Int).Set(secp.Order())},
-		{name: "a above order", a: new(big.Int).Add(secp.Order(), big.NewInt(1))},
+		{name: "zero a", a: testSecretScalar(t, big.NewInt(0))},
+		{name: "wrong width", a: func() *secret.Scalar {
+			out, err := secret.NewScalar([]byte{1}, secp.ScalarSize-1)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(out.Destroy)
+			return out
+		}()},
+		{name: "a at order", a: testSecretScalar(t, secp.Order())},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -42,10 +49,10 @@ func TestStartBoundaryValues(t *testing.T) {
 	orderMinus1 := new(big.Int).Sub(secp.Order(), big.NewInt(1))
 	tests := []struct {
 		name string
-		a    *big.Int
+		a    *secret.Scalar
 	}{
-		{name: "a=1", a: big.NewInt(1)},
-		{name: "a=order-1", a: orderMinus1},
+		{name: "a=1", a: testSecretScalar(t, big.NewInt(1))},
+		{name: "a=order-1", a: testSecretScalar(t, orderMinus1)},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -78,8 +85,8 @@ func TestProveStartForVerifierErrors(t *testing.T) {
 	t.Run("opening with invalid ciphertext", func(t *testing.T) {
 		opening := &StartOpening{
 			Message: StartMessage{Ciphertext: nil},
-			k:       big.NewInt(13),
-			rho:     big.NewInt(37),
+			k:       testSecretScalar(t, big.NewInt(13)),
+			rho:     testSecretScalar(t, big.NewInt(37)),
 		}
 		_, err := ProveStartForVerifier(params, nil, nil, opening, &skA.PublicKey, *rpB)
 		if err == nil {
@@ -93,8 +100,7 @@ func TestVerifyStartErrors(t *testing.T) {
 	skA, _, _, rpB := setupTestEnv(t)
 	params := testSecurityParams()
 
-	a := big.NewInt(42)
-	opening, err := Start(nil, a, &skA.PublicKey)
+	opening, err := Start(nil, testSecretScalar(t, big.NewInt(42)), &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}

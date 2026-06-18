@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -81,16 +82,81 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 	}
 }
 
+func TestSecretWitnessesRejectMalformedFixedScalars(t *testing.T) {
+	t.Parallel()
+
+	wrongWidth, err := secret.NewScalar([]byte{1}, secp.ScalarSize-1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer wrongWidth.Destroy()
+	orderBytes := secp.Order().FillBytes(make([]byte, secp.ScalarSize))
+	outOfRange, err := secret.NewScalar(orderBytes, secp.ScalarSize)
+	clear(orderBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer outOfRange.Destroy()
+
+	t.Run("enc", func(t *testing.T) {
+		params, stmt, witness, _ := encProofFixture(t)
+		for _, bad := range []EncWitness{
+			{K: wrongWidth, Rho: witness.Rho},
+			{K: outOfRange, Rho: witness.Rho},
+			{K: witness.K, Rho: wrongWidth},
+		} {
+			if _, err := ProveEnc(params, []byte("enc matrix"), stmt, bad, nil); err == nil {
+				t.Fatal("EncProof accepted malformed secret witness")
+			}
+		}
+		destroyed := witness.K.Clone()
+		destroyed.Destroy()
+		if _, err := ProveEnc(params, []byte("enc matrix"), stmt, EncWitness{
+			K: destroyed, Rho: witness.Rho,
+		}, nil); err == nil {
+			t.Fatal("EncProof accepted destroyed secret witness")
+		}
+	})
+
+	t.Run("affg", func(t *testing.T) {
+		params, stmt, witness, _ := affGProofFixture(t)
+		for _, bad := range []AffGWitness{
+			{X: wrongWidth, Y: witness.Y, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: outOfRange, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: witness.Y, Rho: wrongWidth, RhoY: witness.RhoY},
+		} {
+			if _, err := ProveAffG(params, []byte("affg matrix"), stmt, bad, nil); err == nil {
+				t.Fatal("AffGProof accepted malformed secret witness")
+			}
+		}
+	})
+
+	t.Run("logstar", func(t *testing.T) {
+		params, stmt, witness, _ := logStarProofFixture(t)
+		for _, bad := range []LogStarWitness{
+			{X: wrongWidth, Rho: witness.Rho},
+			{X: outOfRange, Rho: witness.Rho},
+			{X: witness.X, Rho: wrongWidth},
+		} {
+			if _, err := ProveLogStar(params, []byte("logstar matrix"), stmt, bad, nil); err == nil {
+				t.Fatal("LogStarProof accepted malformed secret witness")
+			}
+		}
+	})
+}
+
 func encProofFixture(t *testing.T) (SecurityParams, EncStatement, EncWitness, *EncProof) {
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lambda.Destroy()
 	k := big.NewInt(17)
-	ciphertext, rho, err := sk.Encrypt(nil, k)
+	kSecret := testSecpSecretScalar(t, k)
+	ciphertext, rho, err := sk.EncryptSecret(nil, kSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,7 +165,7 @@ func encProofFixture(t *testing.T) (SecurityParams, EncStatement, EncWitness, *E
 		CiphertextK:     ciphertext,
 		VerifierAux:     *aux,
 	}
-	witness := EncWitness{K: k, Rho: rho}
+	witness := EncWitness{K: kSecret, Rho: rho}
 	proof, err := ProveEnc(params, []byte("enc matrix"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -111,21 +177,25 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lambda.Destroy()
 	x := big.NewInt(23)
 	y := big.NewInt(29)
-	c, _, err := sk.Encrypt(nil, x)
+	xSecret := testSecpSecretScalar(t, x)
+	ySecret := testSecpSecretScalar(t, y)
+	c, _, err := sk.EncryptSecret(nil, xSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	encYReceiver, rho, err := sk.Encrypt(nil, y)
+	encYReceiver, rho, err := sk.EncryptSecret(nil, ySecret)
 	if err != nil {
 		t.Fatal(err)
 	}
-	xMulC, err := OMulCT(&sk.PublicKey, x, c, signedPowerOfTwoBytes(params.Ell))
+	xSigned := testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(&sk.PublicKey, xSigned, c, signedPowerOfTwoBytes(params.Ell))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -133,7 +203,7 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 	if err != nil {
 		t.Fatal(err)
 	}
-	proverY, rhoY, err := sk.Encrypt(nil, y)
+	proverY, rhoY, err := sk.EncryptSecret(nil, ySecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -146,7 +216,7 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       *aux,
 	}
-	witness := AffGWitness{X: x, Y: y, Rho: rho, RhoY: rhoY}
+	witness := AffGWitness{X: xSecret, Y: ySecret, Rho: rho, RhoY: rhoY}
 	proof, err := ProveAffG(params, []byte("affg matrix"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -158,12 +228,14 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 	t.Helper()
 	params := fastProofParams()
 	sk := testPaillierKey(t, 512)
-	aux, _, err := GenerateRingPedersenParams(nil, sk)
+	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
 		t.Fatal(err)
 	}
+	lambda.Destroy()
 	x := big.NewInt(31)
-	c, rho, err := sk.Encrypt(nil, x)
+	xSecret := testSecpSecretScalar(t, x)
+	c, rho, err := sk.EncryptSecret(nil, xSecret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -175,7 +247,7 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 		B:           base,
 		VerifierAux: *aux,
 	}
-	witness := LogStarWitness{X: x, Rho: rho}
+	witness := LogStarWitness{X: xSecret, Rho: rho}
 	proof, err := ProveLogStar(params, []byte("logstar matrix"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)

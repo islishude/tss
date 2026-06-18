@@ -7,6 +7,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -34,15 +35,44 @@ func setupTestEnv(tb testing.TB) (skA, skB *pai.PrivateKey, rpA, rpB *zkpai.Ring
 	if err != nil {
 		tb.Fatal(err)
 	}
-	rpA, _, err = zkpai.GenerateRingPedersenParams(nil, skA)
+	var lambdaA *secret.Scalar
+	rpA, lambdaA, err = zkpai.GenerateRingPedersenParams(nil, skA)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	rpB, _, err = zkpai.GenerateRingPedersenParams(nil, skB)
+	lambdaA.Destroy()
+	var lambdaB *secret.Scalar
+	rpB, lambdaB, err = zkpai.GenerateRingPedersenParams(nil, skB)
 	if err != nil {
 		tb.Fatal(err)
 	}
+	lambdaB.Destroy()
 	return skA, skB, rpA, rpB
+}
+
+func testSecretScalar(tb testing.TB, x *big.Int) *secret.Scalar {
+	tb.Helper()
+	if x == nil {
+		return nil
+	}
+	magnitude := new(big.Int).Abs(x)
+	defer secret.ClearBigInt(magnitude)
+	out, err := secret.NewScalar(magnitude.FillBytes(make([]byte, secp.ScalarSize)), secp.ScalarSize)
+	if err != nil {
+		tb.Fatal(err)
+	}
+	tb.Cleanup(out.Destroy)
+	return out
+}
+
+func testSecretBig(tb testing.TB, x *secret.Scalar) *big.Int {
+	tb.Helper()
+	if x == nil {
+		return nil
+	}
+	fixed := x.FixedBytes()
+	defer clear(fixed)
+	return new(big.Int).SetBytes(fixed)
 }
 
 func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
@@ -54,7 +84,7 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	start, err := Start(nil, a, &skA.PublicKey)
+	start, err := Start(nil, testSecretScalar(tb, a), &skA.PublicKey)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -63,7 +93,7 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(tb, b), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 	if err != nil {
 		tb.Fatal(err)
 	}
@@ -111,62 +141,24 @@ func TestValidatePositiveIntegerBytes(t *testing.T) {
 	}
 }
 
-func TestScalarFixedBytes(t *testing.T) {
+func TestRandomSecretScalar(t *testing.T) {
 	t.Parallel()
 
-	t.Run("short scalar padded to 32 bytes", func(t *testing.T) {
-		t.Parallel()
-
-		x := big.NewInt(13)
-		b := scalarFixedBytes(x)
-		if len(b) != 32 {
-			t.Fatalf("got %d bytes, want 32", len(b))
-		}
-		if new(big.Int).SetBytes(b).Cmp(x) != 0 {
-			t.Fatal("round-trip mismatch")
-		}
-	})
-	t.Run("exact 32 byte scalar", func(t *testing.T) {
-		t.Parallel()
-
-		x := new(big.Int)
-		for i := range 32 {
-			x.Lsh(x, 8)
-			x.Or(x, big.NewInt(int64(i+1)))
-		}
-		b := scalarFixedBytes(x)
-		if len(b) != 32 {
-			t.Fatalf("got %d bytes, want 32", len(b))
-		}
-		// Truncation expected — only lower 32 bytes preserved.
-		got := new(big.Int).SetBytes(b)
-		want := new(big.Int).Mod(x, new(big.Int).Lsh(big.NewInt(1), 256))
-		if got.Cmp(want) != 0 {
-			t.Fatalf("truncation mismatch")
-		}
-	})
-}
-
-func TestRandomScalar(t *testing.T) {
-	t.Parallel()
-
-	x, err := randomScalar(testutil.DeterministicReader(1))
+	x, err := randomSecretScalar(testutil.DeterministicReader(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.Sign() <= 0 {
-		t.Fatal("random scalar must be positive")
-	}
-	if x.Cmp(secp.Order()) >= 0 {
-		t.Fatal("random scalar out of range")
+	xScalar, err := secpScalarFromSecret(x)
+	if err != nil || xScalar.IsZero() {
+		t.Fatal("random scalar is invalid")
 	}
 
-	xAgain, err := randomScalar(testutil.DeterministicReader(1))
+	xAgain, err := randomSecretScalar(testutil.DeterministicReader(1))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if x.Cmp(xAgain) != 0 {
-		t.Fatal("randomScalar did not consume deterministic reader reproducibly")
+	if !x.Equal(xAgain) {
+		t.Fatal("randomSecretScalar did not consume deterministic reader reproducibly")
 	}
 }
 

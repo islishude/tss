@@ -10,15 +10,16 @@ implementation.
   <code>RingPedersenProof</code> (CGGMP24 Πprm),
   <code>EncProof</code> (Πenc), <code>AffGProof</code> (Πaff-g), and
   <code>LogStarProof</code> (Πlog\*).
-- Legacy v1 types (<code>EncryptionProof</code>, <code>MTAResponseProof</code>,
-  <code>LogProof</code>) remain in <code>proofs.go</code> for compatibility
-  tests and deletion tracking; production presign code does not consume them.
+- Retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` types, wire
+  decoders, golden vectors, and compatibility tests have been removed.
 - All proofs receive explicit <code>SecurityParams</code> (Ell, EllPrime,
   Epsilon, ChallengeBits, MinPaillierBits) from the CGGMP21 plan/session.
 - Integer responses use canonical signed-magnitude encoding; verifier range
   checks precede all algebraic equation checks.
 - All proofs use Ring-Pedersen commitments to hide integer witnesses.
   Commitment nonces are sampled from the configured <code>SecurityParams</code> ranges.
+- Witness scalars and Paillier randomness use fixed-width `secret.Scalar`;
+  signed masks use `secret.SignedInt`. Public proof responses remain `big.Int`.
 - Proof payloads are canonical TLV records through <code>internal/wire</code> at
   version 1.
 - The package has not yet received independent cryptographic review. The audit
@@ -32,10 +33,8 @@ implementation.
 | Πmod (<code>ModulusProof</code>)      | CGGMP24 proof for a Paillier-Blum modulus. Contains <code>w</code> and exactly 128 verifier-derived rounds <code>(x_i,a_i,b_i,z_i)</code>; it never carries prover-supplied <code>y_i</code>. | Paillier prime factors <code>p</code>, <code>q</code> where <code>p ≡ q ≡ 3 (mod 4)</code>. | Typed proof transcript: proof tag, curve, proof version, outer domain, party id, Paillier public key, <code>w</code>.                     | Structural validation, odd composite N, <code>w,x_i,z_i ∈ Z\*\_N</code>, <code>Jacobi(w,N)=-1</code>, bit checks, <code>z_i^N=y_i</code>, and <code>x_i^4=(-1)^a w^b y_i</code>. | <code>zk.paillier.modulus-proof</code>       | Active (keygen, reshare, refresh)                     |
 | Πprm (<code>RingPedersenProof</code>) | CGGMP24 proof of Ring-Pedersen parameters <code>(N,s,t)</code>, proving knowledge of λ such that <code>s=t^λ mod N</code>.                                                                    | Ring-Pedersen secret λ.                                                                     | Typed proof transcript: proof tag, curve, proof version, outer domain, party id, canonical parameter bytes, commitments.                  | Validates <code>(N,s,t)</code>, exact 128 rounds, verifier-derived challenge bits, response bounds, and <code>t^z = commitment·s^e mod N</code>.                                 | <code>zk.paillier.ring-pedersen-proof</code> | Active (keygen, reshare, refresh)                     |
 | Πenc (<code>EncProof</code>)          | Paillier encryption of a plaintext in ±2^Ell, with Ring-Pedersen commitment under the verifier's auxiliary parameters.                                                                        | Scalar <code>k</code>, Paillier randomness <code>ρ</code>.                                  | Typed transcript: curve, proof tag, version, SecurityParams, state, prover N, verifier N/S/T, K, S, A, C.                                 | Ciphertext/point/RP membership, z1/z3 range, challenge recomputation, Paillier equation, RP equation.                                                                            | <code>zk.paillier.enc-proof</code>           | Active (presign round 1, per verifier)                |
-| Πaff-g (<code>AffGProof</code>)       | MtA response: D = x⊙C ⊕ Enc(y;ρ) with X=x·G and Y=Enc(y), using verifier's Ring-Pedersen params. Y is carried in the proof so the initiator can verify equation 3.                            | Scalars <code>x, y</code>, randomness <code>ρ, ρY</code>.                                   | Typed transcript: curve, proof tag, version, SecurityParams, state, receiver/prover N, verifier N/S/T, C, D, Y, X, A, Bx, By, E, S, F, T. | 6 membership checks, 4 range checks, 5 algebraic equations (2 Paillier, 1 curve, 2 RP).                                                                                          | <code>zk.paillier.aff-g-proof-</code>        | Active (presign round 2 via <code>mta.Respond</code>) |
-| Πlog\* (<code>LogStarProof</code>)    | Paillier ciphertext and curve point share discrete log in range, with Ring-Pedersen commitment under the prover's own parameters.                                                             | Scalar <code>x</code>, Paillier randomness <code>ρ</code>.                                  | Typed transcript: curve, proof tag, version, SecurityParams, state, Paillier N, verifier N/S/T, C, X, B, S, A, Y, D.                      | Ciphertext/point/RP membership, z1/z3 range, challenge recomputation, Paillier equation, curve equation, RP equation.                                                            | <code>zk.paillier.logstar-proof-</code>      | Active (keygen, reshare, refresh)                     |
-
-Legacy v1 proofs (<code>EncryptionProof</code>, <code>MTAResponseProof</code>, <code>LogProof</code>) use the wire types <code>zk.paillier.encryption-proof</code>, <code>zk.paillier.mta-response-proof</code>, and <code>zk.paillier.log-proof</code> respectively. Production presign code rejects these proof bytes instead of falling back to old verifiers.
+| Πaff-g (<code>AffGProof</code>)       | MtA response: D = x⊙C ⊕ Enc(y;ρ) with X=x·G and Y=Enc(y), using verifier's Ring-Pedersen params. Y is carried in the proof so the initiator can verify equation 3.                            | Scalars <code>x, y</code>, randomness <code>ρ, ρY</code>.                                   | Typed transcript: curve, proof tag, version, SecurityParams, state, receiver/prover N, verifier N/S/T, C, D, Y, X, A, Bx, By, E, S, F, T. | 6 membership checks, 4 range checks, 5 algebraic equations (2 Paillier, 1 curve, 2 RP).                                                                                          | <code>zk.paillier.aff-g-proof</code>         | Active (presign round 2 via <code>mta.Respond</code>) |
+| Πlog\* (<code>LogStarProof</code>)    | Paillier ciphertext and curve point share discrete log in range, with Ring-Pedersen commitment under the prover's own parameters.                                                             | Scalar <code>x</code>, Paillier randomness <code>ρ</code>.                                  | Typed transcript: curve, proof tag, version, SecurityParams, state, Paillier N, verifier N/S/T, C, X, B, S, A, Y, D.                      | Ciphertext/point/RP membership, z1/z3 range, challenge recomputation, Paillier equation, curve equation, RP equation.                                                            | <code>zk.paillier.logstar-proof</code>       | Active (keygen, reshare, refresh)                     |
 
 ## Usage by Protocol Phase
 
@@ -68,6 +67,9 @@ All Paillier private-key operations use <code>filippo.io/bigmod</code> via
 | <code>c^λ mod n²</code> (Decrypt)     | <code>paillierct.ExpSecretBlinded</code> with ciphertext blinding              | <code>internal/paillier/paillier.go</code> |
 | <code>c^b mod n²</code> (MtA Respond) | <code>paillierct.ExpCT</code> (no blinding — ZK proof verifies exact relation) | <code>internal/mta/mta.go</code>           |
 
+This table covers secret-exponent operations only. The package does not claim
+that all Paillier arithmetic is constant-time.
+
 ## Blockers Before Production Use
 
 - Review the outer proof-domain fields against the final CGGMP21 message schedule.
@@ -92,9 +94,6 @@ Every Σ-protocol proof type has a corresponding test demonstrating that two
 accepting transcripts with identical commitments but different challenges allow
 witness extraction:
 
-- `TestEncryptionProofSpecialSoundness` — extracts `m = (z − z′)/(e − e′) mod q`
-- `TestMTAResponseProofSpecialSoundness` — extracts `b` and `beta`
-- `TestLogProofSpecialSoundness` — extracts discrete log `a`
 - `TestEncProofSpecialSoundness` — extracts `k`
 - `TestAffGProofSpecialSoundness` — extracts `x` and `y`
 - `TestLogStarProofSpecialSoundness` — extracts `x`
@@ -111,7 +110,6 @@ commitments with different challenges via distinct domain labels.
 - Πprm bit independence (lag-1 autocorrelation test)
 - New proof ChallengeSigned distribution (5000 challenges, 128-bit chi-squared)
 - Modular bias test for ChallengeSigned (MSB uniformity)
-- Legacy challenge distribution and zero-probability analysis
 
 ### Phase 3: Range Bound Boundary Precision
 
@@ -120,9 +118,7 @@ commitments with different challenges via distinct domain labels.
 - `InSignedPowerOfTwo` accepts at ±2^bits, rejects at ±(2^bits+1)
 - `InUnsignedPowerOfTwo` accepts [0, 2^bits), rejects at 2^bits
 - `inMultRange` accepts at ±N·2^bits, rejects at ±(N·2^bits+1)
-- `zkRangeBound(e)` formula correctness: 2^{l+ε} + e·q
 - Every new proof type: out-of-range responses rejected at exact boundary
-- Legacy proofs: zkRangeBound boundary rejection verified
 
 ### Phase 4: Parameter Consistency
 
@@ -143,7 +139,6 @@ commitments with different challenges via distinct domain labels.
 - Every EncProof/AffGProof/LogStarProof statement field is transcript-bound
 - Every algebraic verification equation tested independently
 - Statement Y == proof Y check in AffGProof
-- EncryptionProof.Bound validated against secp256k1 order
 - Wrong public key / wrong ciphertext / wrong verifier aux all rejected
 - Paillier key domain separation (all proof tags verified distinct)
 
@@ -179,26 +174,16 @@ commitments with different challenges via distinct domain labels.
 
 **Covered by**: `challenge_zero_test.go` (Tier 0)
 
-- Legacy `challenge()` (proofs.go) does NOT reject zero (2^-256 probability, documented)
 - New `Transcript.ChallengeSigned()` (transcript.go) REJECTS zero with error
 - 1-bit challenge zero-guard tested: ~50% rejection rate confirmed
-- All challenge labels (mta, log, encryption) verified distinct
 
 ### Known Limitations
 
-1. **Legacy proofs** (`EncryptionProof`, `MTAResponseProof`, `LogProof`) do not bind
-   `SecurityParams` to the transcript. A verifier using different parameters than
-   the prover would not detect the mismatch through the challenge.
-
-2. **Legacy `challenge()`** in `proofs.go` does not reject zero challenges
-   (probability 2^-256, considered cryptographically negligible but not
-   cryptographically impossible).
-
-3. **Πmod proof** verifier-derived y_i values use `expandHash` which may have
+1. **Πmod proof** verifier-derived y_i values use `expandHash` which may have
    subtle biases when deriving values in Z\*\_N for small N. With production
    (3072-bit) moduli, the rejection sampling rate is negligible.
 
-4. **Statistical hiding** with production params provides ~358 bits of hiding
+2. **Statistical hiding** with production params provides ~358 bits of hiding
    (EncRange − ChallengeBits = 486 − 128). This exceeds the 128-bit target
    but is less than the 128-bit statistical security parameter (ε=230) might
    suggest when considered as an additive bound.

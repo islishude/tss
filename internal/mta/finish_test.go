@@ -18,7 +18,7 @@ func TestFinishErrors(t *testing.T) {
 
 	a := big.NewInt(13)
 	b := big.NewInt(37)
-	start, err := Start(nil, a, &skA.PublicKey)
+	start, err := Start(nil, testSecretScalar(t, a), &skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestFinishErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(t, b), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -102,7 +102,7 @@ func TestFinishMultipleValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		start, err := Start(nil, a, &skA.PublicKey)
+		start, err := Start(nil, testSecretScalar(t, a), &skA.PublicKey)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -110,7 +110,7 @@ func TestFinishMultipleValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, b, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+		response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, testSecretScalar(t, b), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -118,7 +118,9 @@ func TestFinishMultipleValues(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		got := new(big.Int).Add(alphaShare, betaShare)
+		alphaBig := testSecretBig(t, alphaShare)
+		betaBig := testSecretBig(t, betaShare)
+		got := new(big.Int).Add(alphaBig, betaBig)
 		got.Mod(got, secp.Order())
 		want := new(big.Int).Mul(a, b)
 		want.Mod(want, secp.Order())

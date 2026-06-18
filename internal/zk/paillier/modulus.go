@@ -10,6 +10,7 @@ import (
 	"math/big"
 
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -24,7 +25,13 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 	if err := sk.Validate(); err != nil {
 		return nil, err
 	}
-	if err := validateBlumFactors(sk.P, sk.Q); err != nil {
+	p, q, err := paillierFactors(sk)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(p)
+	defer secret.ClearBigInt(q)
+	if err := validateBlumFactors(p, q); err != nil {
 		return nil, err
 	}
 	raw, err := sk.PublicKey.MarshalBinary()
@@ -32,11 +39,16 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 		return nil, err
 	}
 	nLen := modulusBytes(sk.N)
-	phi := paillierPhi(sk)
+	phi, err := paillierPhi(sk)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(phi)
 	invN := new(big.Int).ModInverse(new(big.Int).Mod(sk.N, phi), phi)
 	if invN == nil {
 		return nil, errors.New("paillier modulus is not invertible modulo phi(N)")
 	}
+	defer secret.ClearBigInt(invN)
 
 	w, err := randomJacobiMinusOne(reader, sk.N)
 	if err != nil {
@@ -58,7 +70,7 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 		if err != nil {
 			return nil, fmt.Errorf("modulus proof z round %d: %w", i, err)
 		}
-		a, b, x, err := fourthRootForModulusProof(sk, w, y)
+		a, b, x, err := fourthRootForModulusProof(sk, p, q, phi, w, y)
 		if err != nil {
 			return nil, fmt.Errorf("modulus proof fourth root round %d: %w", i, err)
 		}
@@ -237,7 +249,7 @@ func randomJacobiMinusOne(reader io.Reader, n *big.Int) (*big.Int, error) {
 	}
 }
 
-func fourthRootForModulusProof(sk *pai.PrivateKey, w, y *big.Int) (int, int, *big.Int, error) {
+func fourthRootForModulusProof(sk *pai.PrivateKey, p, q, phi, w, y *big.Int) (int, int, *big.Int, error) {
 	for a := 0; a <= 1; a++ {
 		for b := 0; b <= 1; b++ {
 			target := new(big.Int).Set(y)
@@ -249,10 +261,10 @@ func fourthRootForModulusProof(sk *pai.PrivateKey, w, y *big.Int) (int, int, *bi
 				target.Neg(target)
 				target.Mod(target, sk.N)
 			}
-			if !isQuadraticResidueComposite(target, sk.P, sk.Q) {
+			if !isQuadraticResidueComposite(target, p, q) {
 				continue
 			}
-			root, err := fourthRootBlum(sk, target)
+			root, err := fourthRootBlum(sk, phi, target)
 			if err != nil {
 				return 0, 0, nil, err
 			}
@@ -266,11 +278,12 @@ func fourthRootForModulusProof(sk *pai.PrivateKey, w, y *big.Int) (int, int, *bi
 	return 0, 0, nil, errors.New("no quadratic-residue adjustment found")
 }
 
-func fourthRootBlum(sk *pai.PrivateKey, target *big.Int) (*big.Int, error) {
-	phi := paillierPhi(sk)
+func fourthRootBlum(sk *pai.PrivateKey, phi, target *big.Int) (*big.Int, error) {
 	sqrtExp := new(big.Int).Add(phi, big.NewInt(4))
+	defer secret.ClearBigInt(sqrtExp)
 	sqrtExp.Rsh(sqrtExp, 3)
 	fourthExp := new(big.Int).Mul(sqrtExp, sqrtExp)
+	defer secret.ClearBigInt(fourthExp)
 	nLen := modulusBytes(sk.N)
 	return expSecretMod(sk.N, target, fourthExp, nLen, 2*nLen)
 }

@@ -11,6 +11,8 @@ import (
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 	transcriptpkg "github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -27,7 +29,7 @@ func RPCommit(params RingPedersenParams, x, mu *big.Int) (*big.Int, error) {
 
 // RPCommitCT computes the Ring-Pedersen commitment using fixed-width
 // constant-time exponentiation for secret witness and mask exponents.
-func RPCommitCT(params RingPedersenParams, x, mu *big.Int, expLen int) (*big.Int, error) {
+func RPCommitCT(params RingPedersenParams, x, mu *secret.SignedInt, expLen int) (*big.Int, error) {
 	if err := validateRPParamsForCommit(params); err != nil {
 		return nil, err
 	}
@@ -107,7 +109,7 @@ func MultiExpSignedMod(base1, exp1, base2, exp2, modulus *big.Int) (*big.Int, er
 // used. The effective base is selected from {base, invBase} based on the sign
 // of exp. This ensures the same sequence of operations regardless of whether
 // the exponent is positive or negative.
-func ExpSignedModCT(modulus, base, exp *big.Int, modLen, expLen int) (*big.Int, error) {
+func ExpSignedModCT(modulus, base *big.Int, exp *secret.SignedInt, modLen, expLen int) (*big.Int, error) {
 	if base == nil || exp == nil || modulus == nil {
 		return nil, errors.New("nil ExpSignedModCT input")
 	}
@@ -126,18 +128,25 @@ func ExpSignedModCT(modulus, base, exp *big.Int, modLen, expLen int) (*big.Int, 
 		return nil, errors.New("base is not invertible modulo modulus")
 	}
 
-	// Always work with the absolute value of the secret exponent.
-	absExp := new(big.Int).Abs(exp)
-
-	// Select the effective base: use invBase when exp was negative, base otherwise.
-	// Both base and invBase are public; the selection below does not leak secret
-	// material through the base value.
-	b := new(big.Int).Set(base)
-	if exp.Sign() < 0 {
-		b.Set(invBase)
+	baseBytes := paillierct.FixedEncode(new(big.Int).Mod(base, modulus), modLen)
+	inverseBytes := paillierct.FixedEncode(invBase, modLen)
+	selectedBase, err := exp.SelectBySign(baseBytes, inverseBytes)
+	clear(baseBytes)
+	clear(inverseBytes)
+	if err != nil {
+		return nil, err
 	}
-
-	return expSecretMod(modulus, b, absExp, modLen, expLen)
+	defer clear(selectedBase)
+	magnitude := exp.FixedMagnitude()
+	defer clear(magnitude)
+	if len(magnitude) != expLen {
+		return nil, errors.New("secret exponent has invalid width")
+	}
+	out, err := paillierct.ExpCT(paillierct.FixedEncode(modulus, modLen), selectedBase, magnitude)
+	if err != nil {
+		return nil, err
+	}
+	return new(big.Int).SetBytes(out), nil
 }
 
 // validateRPParamsForCommit validates Ring-Pedersen auxiliary parameters for
@@ -153,7 +162,7 @@ func validateRPParamsForCommit(params RingPedersenParams) error {
 
 // GenerateRingPedersenParams creates Ring-Pedersen public parameters tied to
 // sk.N and returns the secret lambda needed to prove Πprm.
-func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPedersenParams, *big.Int, error) {
+func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPedersenParams, *secret.Scalar, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -163,18 +172,33 @@ func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPede
 	if err := sk.Validate(); err != nil {
 		return nil, nil, err
 	}
-	phi := paillierPhi(sk)
+	phi, err := paillierPhi(sk)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer secret.ClearBigInt(phi)
 	nLen := modulusBytes(sk.N)
-	var lambda *big.Int
+	var lambda *secret.Scalar
+	success := false
+	defer func() {
+		if !success {
+			lambda.Destroy()
+		}
+	}()
 	for {
 		v, err := rand.Int(reader, phi)
 		if err != nil {
 			return nil, nil, err
 		}
 		if v.Sign() != 0 {
-			lambda = v
+			lambda, err = secretScalarFromBig(v, nLen)
+			secret.ClearBigInt(v)
+			if err != nil {
+				return nil, nil, err
+			}
 			break
 		}
+		secret.ClearBigInt(v)
 	}
 	for {
 		t, err := randomCoprime(reader, sk.N)
@@ -182,13 +206,17 @@ func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPede
 			return nil, nil, err
 		}
 		if t.Cmp(big.NewInt(1)) <= 0 {
+			secret.ClearBigInt(t)
 			continue
 		}
-		s, err := expSecretMod(sk.N, t, lambda, nLen, nLen)
+		s, err := expSecretScalarMod(sk.N, t, lambda, nLen)
 		if err != nil {
+			secret.ClearBigInt(t)
 			return nil, nil, err
 		}
 		if s.Cmp(big.NewInt(1)) <= 0 {
+			secret.ClearBigInt(s)
+			secret.ClearBigInt(t)
 			continue
 		}
 		params := &RingPedersenParams{
@@ -197,14 +225,17 @@ func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPede
 			T: t,
 		}
 		if err := ValidateRingPedersenParams(params); err != nil {
+			secret.ClearBigInt(s)
+			secret.ClearBigInt(t)
 			continue
 		}
+		success = true
 		return params, lambda, nil
 	}
 }
 
 // ProveRingPedersen creates CGGMP24 Πprm for Ring-Pedersen parameters.
-func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, params *RingPedersenParams, lambda *big.Int, party uint32) (*RingPedersenProof, error) {
+func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, params *RingPedersenParams, lambda *secret.Scalar, party uint32) (*RingPedersenProof, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -220,44 +251,70 @@ func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, para
 	if params.N.Cmp(sk.N) != 0 {
 		return nil, errors.New("Ring-Pedersen modulus does not match Paillier key")
 	}
-	if lambda == nil || lambda.Sign() <= 0 {
+	if lambda == nil || lambda.FixedLen() != modulusBytes(sk.N) {
 		return nil, errors.New("invalid Ring-Pedersen lambda")
 	}
 	nLen := modulusBytes(sk.N)
-	s, err := expSecretMod(sk.N, params.T, lambda, nLen, nLen)
+	s, err := expSecretScalarMod(sk.N, params.T, lambda, nLen)
 	if err != nil {
 		return nil, err
 	}
+	defer secret.ClearBigInt(s)
 	if s.Cmp(params.S) != 0 {
 		return nil, errors.New("Ring-Pedersen lambda does not open s")
 	}
-	phi := paillierPhi(sk)
+	phi, err := paillierPhi(sk)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(phi)
 	commitments := make([][]byte, ringPedersenProofRounds)
-	nonces := make([]*big.Int, ringPedersenProofRounds)
+	nonces := make([]*secret.Scalar, ringPedersenProofRounds)
+	defer func() {
+		for _, nonce := range nonces {
+			nonce.Destroy()
+		}
+	}()
 	for i := range ringPedersenProofRounds {
-		nonce, err := rand.Int(reader, phi)
+		nonceBig, err := rand.Int(reader, phi)
 		if err != nil {
 			return nil, err
 		}
-		commitment, err := expSecretMod(sk.N, params.T, nonce, nLen, nLen)
+		nonce, err := secretScalarFromBig(nonceBig, nLen)
+		secret.ClearBigInt(nonceBig)
 		if err != nil {
+			return nil, err
+		}
+		commitment, err := expSecretScalarMod(sk.N, params.T, nonce, nLen)
+		if err != nil {
+			nonce.Destroy()
 			return nil, err
 		}
 		nonces[i] = nonce
 		commitments[i] = fixedModNBytes(commitment, nLen)
+		secret.ClearBigInt(commitment)
 	}
 	transcript := ringPedersenTranscript(domain, params, party, commitments)
 	challenges := make([]byte, ringPedersenProofRounds)
 	responses := make([][]byte, ringPedersenProofRounds)
+	lambdaBig, err := secretScalarBig(lambda)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(lambdaBig)
 	for i := range ringPedersenProofRounds {
 		e := ringPedersenChallenge(transcript, i)
 		challenges[i] = e
-		z := new(big.Int).Set(nonces[i])
+		z, err := secretScalarBig(nonces[i])
+		if err != nil {
+			return nil, err
+		}
 		if e == 1 {
-			z.Add(z, lambda)
+			z.Add(z, lambdaBig)
 		}
 		z.Mod(z, phi)
 		responses[i] = fixedModNBytes(z, nLen)
+		secret.ClearBigInt(z)
 	}
 	return &RingPedersenProof{
 		Version:        proofVersion,

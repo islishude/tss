@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss/internal/paillier/paillierct"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Encrypt encrypts message with fresh random invertible Paillier randomness.
@@ -30,6 +31,40 @@ func (pk PublicKey) Encrypt(reader io.Reader, message *big.Int) (*big.Int, *big.
 	return c, r, nil
 }
 
+// EncryptSecret encrypts a fixed-width non-negative secret message and returns
+// the Paillier randomness as fixed-width secret material.
+func (pk PublicKey) EncryptSecret(reader io.Reader, message *secret.Scalar) (*big.Int, *secret.Scalar, error) {
+	if message == nil {
+		return nil, nil, errors.New("nil message")
+	}
+	messageBig := scalarToBig(message)
+	defer secret.ClearBigInt(messageBig)
+	ciphertext, randomness, err := pk.Encrypt(reader, messageBig)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer secret.ClearBigInt(randomness)
+	nLen := (pk.N.BitLen() + 7) / 8
+	randomnessSecret, err := secret.NewScalar(paillierct.FixedEncode(randomness, nLen), nLen)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ciphertext, randomnessSecret, nil
+}
+
+// EncryptWithSecretRandomness encrypts a fixed-width non-negative secret
+// message using fixed-width secret Paillier randomness.
+func (pk PublicKey) EncryptWithSecretRandomness(message, randomness *secret.Scalar) (*big.Int, error) {
+	if message == nil || randomness == nil {
+		return nil, errors.New("nil encryption input")
+	}
+	messageBig := scalarToBig(message)
+	defer secret.ClearBigInt(messageBig)
+	randomnessBig := scalarToBig(randomness)
+	defer secret.ClearBigInt(randomnessBig)
+	return pk.EncryptWithRandomness(messageBig, randomnessBig)
+}
+
 // EncryptWithRandomness encrypts message using caller-provided randomness r.
 //
 // The G^m mod N² step uses constant-time modular exponentiation because the
@@ -47,20 +82,25 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 		return nil, errors.New("paillier randomness is not invertible")
 	}
 	m := mod(message, pk.N)
+	defer secret.ClearBigInt(m)
 
 	// G^m mod N² via constant-time exponentiation.
 	nLen := (pk.N.BitLen() + 7) / 8
 	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
 	gBytes := paillierct.FixedEncode(pk.G, 2*nLen)
 	mBytes := paillierct.FixedEncode(m, nLen)
+	defer clear(mBytes)
 	gmBytes, err := paillierct.ExpCT(nSquaredBytes, gBytes, mBytes)
 	if err != nil {
 		return nil, fmt.Errorf("paillier encrypt: %w", err)
 	}
+	defer clear(gmBytes)
 	gm := new(big.Int).SetBytes(gmBytes)
+	defer secret.ClearBigInt(gm)
 
 	// r^n mod N² — exponent n is the public modulus, so variable-time is acceptable.
 	rn := new(big.Int).Exp(r, pk.N, pk.NSquared)
+	defer secret.ClearBigInt(rn)
 	c := new(big.Int).Mul(gm, rn)
 	c.Mod(c, pk.NSquared)
 	return c, nil
@@ -94,10 +134,12 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	}
 	cBytes := paillierct.FixedEncode(ciphertext, len(nSquaredBytes))
 	lambdaBytes := sk.Lambda.FixedBytes()
+	defer clear(lambdaBytes)
 	uBytes, err := ct.ExpSecretBlinded(rand.Reader, cBytes, lambdaBytes, nBytes)
 	if err != nil {
 		return nil, fmt.Errorf("paillier decryption: %w", err)
 	}
+	defer clear(uBytes)
 
 	// L(u) = (u - 1) / n. The division is exact for valid Paillier ciphertexts
 	// and only depends on the public modulus n.
@@ -108,6 +150,7 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	// constant-time and ciphertext-blinded; the marginal timing variation
 	// from a single multiplication is not practically exploitable.
 	muBig := scalarToBig(sk.Mu)
+	defer secret.ClearBigInt(muBig)
 	m := new(big.Int).Mul(l, muBig)
 	m.Mod(m, sk.N)
 	return m, nil

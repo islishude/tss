@@ -11,7 +11,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/shamir"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	"github.com/islishude/tss/internal/zk/signprep"
@@ -58,7 +58,11 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.deltas[env.From] = delta.BigInt()
+	deltaSecret, err := secpSecretScalarFromScalar(delta)
+	if err != nil {
+		return nil, err
+	}
+	s.deltas[env.From] = deltaSecret
 	s.verifyShares[env.From] = SignVerifyShare{
 		Party:    env.From,
 		KPoint:   p.KPoint,
@@ -75,8 +79,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 	if err != nil {
 		return fmt.Errorf("invalid signprep proof: %w", err)
 	}
-	order := secp.Order()
-	lambda, err := shamir.LagrangeCoefficient(from, s.signers, order)
+	lambda, err := shamirsecp.LagrangeCoefficient(from, s.signers)
 	if err != nil {
 		return err
 	}
@@ -88,7 +91,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 	if err != nil {
 		return err
 	}
-	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, secp.ScalarFromBigInt(lambda)))
+	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, lambda))
 	if err != nil {
 		return err
 	}
@@ -129,70 +132,74 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if s.round3Sent || len(s.round2) != len(s.signers)-1 {
 		return nil, nil
 	}
-	kShare, err := secpSecretBig(s.kShare)
+	kShare, err := secpScalarFromSecret(s.kShare)
 	if err != nil {
 		return nil, err
 	}
-	defer secret.ClearBigInt(kShare)
-	gamma, err := secpSecretBig(s.gamma)
+	gamma, err := secpScalarFromSecret(s.gamma)
 	if err != nil {
 		return nil, err
 	}
-	defer secret.ClearBigInt(gamma)
-	xBar, err := secpSecretBig(s.xBar)
+	xBar, err := secpScalarFromSecret(s.xBar)
 	if err != nil {
 		return nil, err
 	}
-	defer secret.ClearBigInt(xBar)
-	deltaShare := new(big.Int).Mul(kShare, gamma)
-	chiShare := new(big.Int).Mul(kShare, xBar)
-	order := secp.Order()
+	deltaShare := secp.ScalarMul(kShare, gamma)
+	chiShare := secp.ScalarMul(kShare, xBar)
 	for _, peer := range s.signers {
 		if peer == s.key.state.party {
 			continue
 		}
-		deltaShare.Add(deltaShare, s.alphaDelta[peer])
-		deltaShare.Add(deltaShare, s.betaDelta[peer])
-		chiShare.Add(chiShare, s.alphaSigma[peer])
-		chiShare.Add(chiShare, s.betaSigma[peer])
+		alphaDelta, err := secpScalarFromSecret(s.alphaDelta[peer])
+		if err != nil {
+			return nil, err
+		}
+		betaDelta, err := secpScalarFromSecret(s.betaDelta[peer])
+		if err != nil {
+			return nil, err
+		}
+		alphaSigma, err := secpScalarFromSecret(s.alphaSigma[peer])
+		if err != nil {
+			return nil, err
+		}
+		betaSigma, err := secpScalarFromSecret(s.betaSigma[peer])
+		if err != nil {
+			return nil, err
+		}
+		deltaShare = secp.ScalarAdd(deltaShare, alphaDelta)
+		deltaShare = secp.ScalarAdd(deltaShare, betaDelta)
+		chiShare = secp.ScalarAdd(chiShare, alphaSigma)
+		chiShare = secp.ScalarAdd(chiShare, betaSigma)
 	}
-	deltaShare.Mod(deltaShare, order)
-	chiShare.Mod(chiShare, order)
-	mtaSum := new(big.Int).Sub(chiShare, new(big.Int).Mul(kShare, xBar))
-	mtaSum.Mod(mtaSum, order)
+	baseChi := secp.ScalarMul(kShare, xBar)
+	mtaSum := secp.ScalarSub(chiShare, baseChi)
 	if len(s.derivation.AdditiveShift) > 0 {
 		shift, err := secp.ScalarFromBytesAllowZero(s.derivation.AdditiveShift)
 		if err != nil {
 			return nil, err
 		}
 		if !shift.IsZero() {
-			shiftTerm := new(big.Int).Mul(kShare, shift.BigInt())
-			chiShare.Add(chiShare, shiftTerm)
-			chiShare.Mod(chiShare, order)
+			chiShare = secp.ScalarAdd(chiShare, secp.ScalarMul(kShare, shift))
 		}
 	}
-	s.deltas[s.key.state.party] = deltaShare
+	deltaSecret, err := secpSecretScalarFromScalar(deltaShare)
+	if err != nil {
+		return nil, err
+	}
+	s.deltas[s.key.state.party] = deltaSecret
 
 	// Compute KPoint and ChiPoint.
-	kScalar, err := secp.ScalarFromBytes(scalarBytes(kShare))
+	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(kShare))
 	if err != nil {
 		return nil, err
 	}
-	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(kScalar))
-	if err != nil {
-		return nil, err
-	}
-	chiScalar, err := secp.ScalarFromBytes(scalarBytes(chiShare))
-	if err != nil {
-		return nil, err
-	}
-	chiPoint, err := secp.PointBytes(secp.ScalarBaseMult(chiScalar))
+	chiPoint, err := secp.PointBytes(secp.ScalarBaseMult(chiShare))
 	if err != nil {
 		return nil, err
 	}
 
 	// Compute XBarPoint.
-	lambda, err := shamir.LagrangeCoefficient(s.key.state.party, s.signers, order)
+	lambda, err := shamirsecp.LagrangeCoefficient(s.key.state.party, s.signers)
 	if err != nil {
 		return nil, err
 	}
@@ -204,7 +211,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, secp.ScalarFromBigInt(lambda)))
+	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, lambda))
 	if err != nil {
 		return nil, err
 	}
@@ -228,12 +235,18 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		EncK:                 slices.Clone(s.round1[s.key.state.party].EncK),
 		PaillierPublicKey:    slices.Clone(s.key.state.paillierPublicKey),
 		Round1Echo:           s.round1Echo(),
-		Delta:                scalarBytes(deltaShare),
+		Delta:                deltaShare.Bytes(),
 	}
+	kShareBig := kShare.BigInt()
+	defer secret.ClearBigInt(kShareBig)
+	mtaSumBig := mtaSum.BigInt()
+	defer secret.ClearBigInt(mtaSumBig)
+	chiShareBig := chiShare.BigInt()
+	defer secret.ClearBigInt(chiShareBig)
 	wit := signprep.Witness{
-		KShare:   new(big.Int).Set(kShare),
-		MTASum:   mtaSum,
-		ChiShare: new(big.Int).Set(chiShare),
+		KShare:   kShareBig,
+		MTASum:   mtaSumBig,
+		ChiShare: chiShareBig,
 	}
 	proof, err := signprep.Prove(s.config.Reader(), stmt, wit)
 	if err != nil {
@@ -244,8 +257,10 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		return nil, err
 	}
 
+	deltaShareBig := deltaShare.BigInt()
+	defer secret.ClearBigInt(deltaShareBig)
 	payload, err := marshalPresignRound3PayloadWithLimits(presignRound3Payload{
-		Delta:    deltaShare,
+		Delta:    deltaShareBig,
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proofBytes,
@@ -279,7 +294,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		partiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
 		kShare:               s.kShare.Clone(),
 	}}
-	s.presign.state.chiShare, err = secpSecretScalarFromBig(chiShare)
+	s.presign.state.chiShare, err = secpSecretScalarFromScalar(chiShare)
 	if err != nil {
 		return nil, err
 	}
@@ -297,33 +312,37 @@ func (s *PresignSession) tryComplete() error {
 	if s.completed || len(s.deltas) != len(s.signers) || len(s.verifyShares) != len(s.signers) {
 		return nil
 	}
-	order := secp.Order()
-	delta := new(big.Int)
+	delta := secp.ScalarZero()
 	gammaPoints := make([]*secp.Point, 0, len(s.signers))
 	for _, id := range s.signers {
-		delta.Add(delta, s.deltas[id])
-		delta.Mod(delta, order)
+		deltaShare, err := secpScalarFromSecret(s.deltas[id])
+		if err != nil {
+			return err
+		}
+		delta = secp.ScalarAdd(delta, deltaShare)
 		gammaPoint, err := secp.PointFromBytes(s.round1[id].Gamma)
 		if err != nil {
 			return err
 		}
 		gammaPoints = append(gammaPoints, gammaPoint)
 	}
-	if delta.Sign() == 0 {
+	if delta.IsZero() {
 		return errors.New("zero presign delta")
 	}
-	deltaInv := new(big.Int).ModInverse(delta, order)
-	if deltaInv == nil {
+	deltaInv, err := secp.ScalarInvert(delta)
+	if err != nil {
 		return errors.New("non-invertible presign delta")
 	}
 	gamma := secp.AddPoints(gammaPoints...)
-	RPoint := secp.ScalarMult(gamma, secp.ScalarFromBigInt(deltaInv))
+	RPoint := secp.ScalarMult(gamma, deltaInv)
 	R, err := secp.PointBytes(RPoint)
 	if err != nil {
 		return err
 	}
-	littleR := new(big.Int).Mod(RPoint.X.BigInt(), order)
-	if littleR.Sign() == 0 {
+	littleRBig := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
+	defer secret.ClearBigInt(littleRBig)
+	littleR := secp.ScalarFromBigInt(littleRBig)
+	if littleR.IsZero() {
 		return errors.New("zero ECDSA r")
 	}
 	if s.presign == nil {
@@ -336,8 +355,8 @@ func (s *PresignSession) tryComplete() error {
 		s.presign.state.verifyShares = append(s.presign.state.verifyShares, s.verifyShares[id].Clone())
 	}
 	s.presign.state.r = R
-	s.presign.state.littleR = scalarBytes(littleR)
-	s.presign.state.delta, err = secpSecretScalarFromBig(delta)
+	s.presign.state.littleR = littleR.Bytes()
+	s.presign.state.delta, err = secpSecretScalarFromScalar(delta)
 	if err != nil {
 		return err
 	}
@@ -350,7 +369,7 @@ func (s *PresignSession) tryComplete() error {
 	return nil
 }
 
-func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int) []byte {
+func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta secp.Scalar) []byte {
 	t := transcript.New(presignTranscriptHashLabel)
 	t.AppendBytes("session_id", s.sessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
@@ -363,7 +382,7 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", s.round1[id].Gamma)
 		t.AppendBytes("enc_k", s.round1[id].EncK)
-		t.AppendBytes("delta_share", scalarBytes(s.deltas[id]))
+		t.AppendBytes("delta_share", s.deltas[id].FixedBytes())
 		vs := s.verifyShares[id]
 		t.AppendBytes("k_point", vs.KPoint)
 		t.AppendBytes("chi_point", vs.ChiPoint)
@@ -371,8 +390,8 @@ func (s *PresignSession) presignTranscriptHash(R []byte, littleR, delta *big.Int
 		t.AppendBytes("proof_hash", proofHash[:])
 	}
 	t.AppendBytes("r_point", R)
-	t.AppendBytes("little_r", scalarBytes(littleR))
-	t.AppendBytes("delta", scalarBytes(delta))
+	t.AppendBytes("little_r", littleR.Bytes())
+	t.AppendBytes("delta", delta.Bytes())
 	return t.Sum()
 }
 

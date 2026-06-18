@@ -10,6 +10,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -146,7 +147,7 @@ func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 
 // Validate checks the keygen share payload structure.
 func (p keygenSharePayload) Validate() error {
-	if err := validateScalarRangeStrict(p.Share); err != nil {
+	if err := validateSecretScalarStrict(p.Share); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -475,7 +476,7 @@ func (p reshareSharePayload) Validate() error {
 	if p.Receiver == 0 {
 		return errors.New("reshare share receiver is zero")
 	}
-	if err := validateScalarRangeStrict(p.Share); err != nil {
+	if err := validateSecretScalarStrict(p.Share); err != nil {
 		return err
 	}
 	if len(p.DealerCommitmentHash) != sha256.Size {
@@ -555,8 +556,8 @@ func (refreshCommitmentsPayload) WireType() string { return refreshCommitmentsPa
 func (refreshCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type refreshSharePayload struct {
-	Share    *big.Int `wire:"1,bigpos,max_bytes=scalar"`
-	PlanHash []byte   `wire:"2,bytes,len=32"`
+	Share    *secret.Scalar `wire:"1,custom,len=32"`
+	PlanHash []byte         `wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for refreshSharePayload.
@@ -646,7 +647,7 @@ func (p *refreshSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits
 
 // Validate checks the refresh share payload structure.
 func (p refreshSharePayload) Validate() error {
-	if err := validateScalarRangeStrict(p.Share); err != nil {
+	if err := validateSecretScalarAllowZero(p.Share); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {

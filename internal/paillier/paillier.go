@@ -29,14 +29,14 @@ func (pk *PublicKey) AfterUnmarshalWire() error {
 }
 
 // PrivateKey contains Paillier secret factors and decryption exponents.
-// Lambda and Mu use fixed-length secret.Scalar to prevent accidental logging,
-// variable-length encoding, and non-constant-time conversion of secret material.
+// All private factors and exponents use fixed-length secret.Scalar values to
+// prevent accidental logging and long-lived variable-width representations.
 type PrivateKey struct {
 	PublicKey
 	Lambda *secret.Scalar
 	Mu     *secret.Scalar
-	P      *big.Int
-	Q      *big.Int
+	P      *secret.Scalar
+	Q      *secret.Scalar
 }
 
 // MarshalJSON rejects default JSON encoding of Paillier private keys.
@@ -60,8 +60,8 @@ func (sk *PrivateKey) Clone() *PrivateKey {
 		},
 		Lambda: sk.Lambda.Clone(),
 		Mu:     sk.Mu.Clone(),
-		P:      new(big.Int).Set(sk.P),
-		Q:      new(big.Int).Set(sk.Q),
+		P:      sk.P.Clone(),
+		Q:      sk.Q.Clone(),
 	}
 }
 
@@ -72,8 +72,8 @@ func (sk *PrivateKey) Destroy() {
 	}
 	sk.Lambda.Destroy()
 	sk.Mu.Destroy()
-	secret.ClearBigInt(sk.P)
-	secret.ClearBigInt(sk.Q)
+	sk.P.Destroy()
+	sk.Q.Destroy()
 }
 
 const paillierWireVersion = 1

@@ -544,14 +544,14 @@ type PresignSession struct {
 	round1ProofEnvelopes map[tss.PartyID]tss.Envelope              // Original proof envelopes retained for blame evidence.
 	round1Verified       map[tss.PartyID]bool                      // Senders whose round-1 proof has been checked.
 	round2               map[tss.PartyID]presignRound2Payload      // MtA response payloads by sender; contains secret-derived ciphertexts.
-	deltas               map[tss.PartyID]*big.Int                  // Delta shares collected for aggregate nonce computation.
+	deltas               map[tss.PartyID]*secret.Scalar            // Delta shares collected for aggregate nonce computation.
 	verifyShares         map[tss.PartyID]SignVerifyShare           // Round-3 public verification shares by signer.
 	startOpening         *mta.StartOpening                         // Local MtA opening material; secret-bearing until round 2 completes.
 
-	alphaDelta map[tss.PartyID]*big.Int // Local MtA alpha terms for delta, keyed by peer.
-	betaDelta  map[tss.PartyID]*big.Int // Local MtA beta terms for delta, keyed by peer.
-	alphaSigma map[tss.PartyID]*big.Int // Local MtA alpha terms for sigma, keyed by peer.
-	betaSigma  map[tss.PartyID]*big.Int // Local MtA beta terms for sigma, keyed by peer.
+	alphaDelta map[tss.PartyID]*secret.Scalar // Local MtA alpha terms for delta, keyed by peer.
+	betaDelta  map[tss.PartyID]*secret.Scalar // Local MtA beta terms for delta, keyed by peer.
+	alphaSigma map[tss.PartyID]*secret.Scalar // Local MtA alpha terms for sigma, keyed by peer.
+	betaSigma  map[tss.PartyID]*secret.Scalar // Local MtA beta terms for sigma, keyed by peer.
 
 	round2Sent      bool     // Whether this party already emitted round-2 MtA responses.
 	round3Sent      bool     // Whether this party already emitted round-3 verification material.
@@ -579,11 +579,11 @@ func (s *PresignSession) abort() {
 		s.paillier.Destroy()
 		s.paillier = nil
 	}
-	clearBigIntMap(s.deltas)
-	clearBigIntMap(s.alphaDelta)
-	clearBigIntMap(s.betaDelta)
-	clearBigIntMap(s.alphaSigma)
-	clearBigIntMap(s.betaSigma)
+	clearSecretScalarMap(s.deltas)
+	clearSecretScalarMap(s.alphaDelta)
+	clearSecretScalarMap(s.betaDelta)
+	clearSecretScalarMap(s.alphaSigma)
+	clearSecretScalarMap(s.betaSigma)
 	clearPresignRound1Map(s.round1)
 	clearPresignRound2Map(s.round2)
 	if s.derivation != nil {

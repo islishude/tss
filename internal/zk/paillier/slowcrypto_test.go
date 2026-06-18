@@ -49,7 +49,9 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	if err := VerifyEnc(params, []byte("other"), encStmt, encProof); err == nil {
 		t.Fatal("production EncProof verified under wrong state")
 	}
-	if _, err := ProveEnc(params, domain, encStmt, EncWitness{K: new(big.Int).Add(encWitness.K, big.NewInt(1)), Rho: encWitness.Rho}, nil); err == nil {
+	if _, err := ProveEnc(params, domain, encStmt, EncWitness{
+		K: testSecpSecretScalar(t, big.NewInt(18)), Rho: encWitness.Rho,
+	}, nil); err == nil {
 		t.Fatal("production EncProof accepted wrong witness")
 	}
 
@@ -61,7 +63,7 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 		t.Fatal("production AffGProof verified under wrong state")
 	}
 	if _, err := ProveAffG(params, domain, affGStmt, AffGWitness{
-		X: new(big.Int).Add(affGWitness.X, big.NewInt(1)), Y: affGWitness.Y, Rho: affGWitness.Rho, RhoY: affGWitness.RhoY,
+		X: testSecpSecretScalar(t, big.NewInt(24)), Y: affGWitness.Y, Rho: affGWitness.Rho, RhoY: affGWitness.RhoY,
 	}, nil); err == nil {
 		t.Fatal("production AffGProof accepted wrong witness")
 	}
@@ -73,7 +75,9 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	if err := VerifyLogStar(params, []byte("other"), logStmt, logProof); err == nil {
 		t.Fatal("production LogStarProof verified under wrong state")
 	}
-	if _, err := ProveLogStar(params, domain, logStmt, LogStarWitness{X: new(big.Int).Add(logWitness.X, big.NewInt(1)), Rho: logWitness.Rho}, nil); err == nil {
+	if _, err := ProveLogStar(params, domain, logStmt, LogStarWitness{
+		X: testSecpSecretScalar(t, big.NewInt(32)), Rho: logWitness.Rho,
+	}, nil); err == nil {
 		t.Fatal("production LogStarProof accepted wrong witness")
 	}
 }
@@ -86,7 +90,10 @@ func slowEncProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux *
 		t.Fatal(err)
 	}
 	stmt := EncStatement{ProverPaillierN: &sk.PublicKey, CiphertextK: ciphertext, VerifierAux: *aux}
-	witness := EncWitness{K: k, Rho: rho}
+	witness := EncWitness{
+		K:   testSecpSecretScalar(t, k),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 	proof, err := ProveEnc(params, []byte("slowcrypto paillier zk"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -106,7 +113,12 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 	if err != nil {
 		t.Fatal(err)
 	}
-	xMulC, err := OMulCT(&sk.PublicKey, x, c, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(
+		&sk.PublicKey,
+		testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell)),
+		c,
+		signedPowerOfTwoBytes(params.Ell),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -127,7 +139,12 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       *aux,
 	}
-	witness := AffGWitness{X: x, Y: y, Rho: rho, RhoY: rhoY}
+	witness := AffGWitness{
+		X:    testSecpSecretScalar(t, x),
+		Y:    testSecpSecretScalar(t, y),
+		Rho:  testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+		RhoY: testSecretScalarFixed(t, rhoY, modulusBytes(sk.N)),
+	}
 	proof, err := ProveAffG(params, []byte("slowcrypto paillier zk"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -150,7 +167,10 @@ func slowLogStarProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, a
 		B:           base,
 		VerifierAux: *aux,
 	}
-	witness := LogStarWitness{X: x, Rho: rho}
+	witness := LogStarWitness{
+		X:   testSecpSecretScalar(t, x),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 	proof, err := ProveLogStar(params, []byte("slowcrypto paillier zk"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)

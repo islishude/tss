@@ -9,7 +9,9 @@ import (
 	"io"
 	"math/big"
 
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -28,8 +30,8 @@ type EncStatement struct {
 
 // EncWitness is the secret witness for a Πenc proof.
 type EncWitness struct {
-	K   *big.Int // plaintext scalar, in ±2^Ell
-	Rho *big.Int // Paillier encryption randomness for K
+	K   *secret.Scalar // plaintext scalar, in [0, 2^Ell)
+	Rho *secret.Scalar // Paillier encryption randomness for K
 }
 
 // EncProof is a CGGMP-compatible Πenc proof that a Paillier ciphertext
@@ -100,37 +102,61 @@ func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witne
 	Nj := statement.VerifierAux.N
 
 	// Sample masks.
-	alpha, err := SampleSignedPowerOfTwo(rng, params.EncRange())
+	alpha, err := sampleSignedSecret(rng, params.EncRange())
 	if err != nil {
 		return nil, err
 	}
+	defer alpha.Destroy()
 	// mu ← ±(2^Ell * N_j)
-	mu, err := SampleMultRange(rng, params.Ell, Nj)
+	mu, err := sampleMultRangeSecret(rng, params.Ell, Nj)
 	if err != nil {
 		return nil, err
 	}
-	r, err := SampleZNStar(rng, Ni.N)
+	defer mu.Destroy()
+	r, err := sampleZNStarSecret(rng, Ni.N)
 	if err != nil {
 		return nil, err
 	}
+	defer r.Destroy()
 	// gamma ← ±(2^(Ell + Epsilon) * N_j)
-	gamma, err := SampleMultRange(rng, params.EncRange(), Nj)
+	gamma, err := sampleMultRangeSecret(rng, params.EncRange(), Nj)
 	if err != nil {
 		return nil, err
 	}
+	defer gamma.Destroy()
 
 	// Commitments.
 	secretCommitLen := max(signedPowerOfTwoBytes(params.Ell), multRangeBytes(Nj, params.Ell))
-	S, err := RPCommitCT(statement.VerifierAux, witness.K, mu, secretCommitLen)
+	kSigned, err := signedSecretFromScalar(witness.K, secretCommitLen)
 	if err != nil {
 		return nil, err
 	}
-	A, err := EncRandom(Ni, alpha, r)
+	defer kSigned.Destroy()
+	muPadded, err := resizeSignedSecret(mu, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer muPadded.Destroy()
+	S, err := RPCommitCT(statement.VerifierAux, kSigned, muPadded, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	A, err := encRandomSecrets(Ni, alpha, r)
 	if err != nil {
 		return nil, err
 	}
 	maskCommitLen := max(signedPowerOfTwoBytes(params.EncRange()), multRangeBytes(Nj, params.EncRange()))
-	C, err := RPCommitCT(statement.VerifierAux, alpha, gamma, maskCommitLen)
+	alphaPadded, err := resizeSignedSecret(alpha, maskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer alphaPadded.Destroy()
+	gammaPadded, err := resizeSignedSecret(gamma, maskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer gammaPadded.Destroy()
+	C, err := RPCommitCT(statement.VerifierAux, alphaPadded, gammaPadded, maskCommitLen)
 	if err != nil {
 		return nil, err
 	}
@@ -143,18 +169,49 @@ func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witne
 	}
 
 	// Responses.
+	kBig, err := secretScalarBig(witness.K)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(kBig)
+	alphaBig, err := signedSecretBig(alpha)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(alphaBig)
 	// z1 = alpha + e*k
-	z1 := new(big.Int).Mul(e, witness.K)
-	z1.Add(z1, alpha)
+	z1 := new(big.Int).Mul(e, kBig)
+	z1.Add(z1, alphaBig)
 
 	// z2 = r * rho^e mod N_i
-	rhoExp := new(big.Int).Exp(witness.Rho, e, Ni.N)
-	z2 := new(big.Int).Mul(r, rhoExp)
+	rBig, err := secretScalarBig(r)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rBig)
+	rhoBig, err := secretScalarBig(witness.Rho)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoBig)
+	rhoExp := new(big.Int).Exp(rhoBig, e, Ni.N)
+	defer secret.ClearBigInt(rhoExp)
+	z2 := new(big.Int).Mul(rBig, rhoExp)
 	z2.Mod(z2, Ni.N)
 
 	// z3 = gamma + e*mu
-	z3 := new(big.Int).Mul(e, mu)
-	z3.Add(z3, gamma)
+	muBig, err := signedSecretBig(mu)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(muBig)
+	gammaBig, err := signedSecretBig(gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gammaBig)
+	z3 := new(big.Int).Mul(e, muBig)
+	z3.Add(z3, gammaBig)
 
 	return &EncProof{
 		Version:        encProofVersion,
@@ -311,14 +368,36 @@ func validateEncStatement(params SecurityParams, stmt EncStatement, w EncWitness
 	if w.K == nil || w.Rho == nil {
 		return errors.New("nil witness")
 	}
-	if !InSignedPowerOfTwo(w.K, params.Ell) {
+	if w.K.FixedLen() != secp.ScalarSize {
+		return errors.New("witness k has invalid width")
+	}
+	kBytes := w.K.FixedBytes()
+	if _, err := secp.ScalarFromBytesAllowZero(kBytes); err != nil {
+		clear(kBytes)
+		return errors.New("witness k is not canonical")
+	}
+	clear(kBytes)
+	if w.Rho.FixedLen() != modulusBytes(stmt.ProverPaillierN.N) {
+		return errors.New("witness rho has invalid width")
+	}
+	k, err := secretScalarBig(w.K)
+	if err != nil {
+		return errors.New("invalid witness k")
+	}
+	defer secret.ClearBigInt(k)
+	if !InUnsignedPowerOfTwo(k, params.Ell) {
 		return errors.New("witness k out of range")
 	}
-	if !IsZNStar(w.Rho, stmt.ProverPaillierN.N) {
+	rho, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return errors.New("invalid witness rho")
+	}
+	defer secret.ClearBigInt(rho)
+	if !IsZNStar(rho, stmt.ProverPaillierN.N) {
 		return errors.New("witness rho not in Z*_N")
 	}
 	// Verify K == Enc(k; rho).
-	expectedK, err := EncRandom(stmt.ProverPaillierN, w.K, w.Rho)
+	expectedK, err := stmt.ProverPaillierN.EncryptWithSecretRandomness(w.K, w.Rho)
 	if err != nil {
 		return fmt.Errorf("cannot verify witness encryption: %w", err)
 	}

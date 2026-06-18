@@ -3,7 +3,6 @@ package schnorr
 import (
 	"bytes"
 	"encoding/hex"
-	"math/big"
 	"os"
 	"path/filepath"
 	"testing"
@@ -15,12 +14,10 @@ func TestGoldenProof(t *testing.T) {
 	t.Parallel()
 
 	// Construct a valid proof deterministically using known scalars.
-	secret := big.NewInt(1)
-	nonce := big.NewInt(2)
 	domain := []byte("golden-test-domain")
 
-	sec := secp.ScalarFromBigInt(secret)
-	n := secp.ScalarFromBigInt(nonce)
+	sec := secp.ScalarOne()
+	n := secp.ScalarFromUint64(2)
 	public, err := secp.PointBytes(secp.ScalarBaseMult(sec))
 	if err != nil {
 		t.Fatal(err)
@@ -29,8 +26,7 @@ func TestGoldenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	challengeScalar := secp.ScalarFromBigInt(challenge(domain, public, commitment))
-	response := secp.ScalarAdd(secp.ScalarMul(challengeScalar, sec), n)
+	response := secp.ScalarAdd(secp.ScalarMul(challenge(domain, public, commitment), sec), n)
 
 	p := &Proof{Commitment: commitment, Response: response.Bytes()}
 
@@ -82,7 +78,7 @@ func TestGoldenSchnorrMarshalBinaryRejectsInvalid(t *testing.T) {
 		t.Error("accepted nil fields")
 	}
 
-	validCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+	validCommitment, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarOne()))
 	if err != nil {
 		t.Fatal(err)
 	}

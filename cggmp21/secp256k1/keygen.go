@@ -3,11 +3,11 @@ package secp256k1
 import (
 	"errors"
 	"fmt"
-	"math/big"
 	"sync"
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 )
 
 const (
@@ -33,7 +33,7 @@ const (
 // confirmation is set during round 2 after the chain code is revealed.
 type keygenPartyData struct {
 	commitments     [][]byte
-	share           *big.Int
+	share           *secret.Scalar
 	chainCode       []byte
 	chainCodeCommit []byte
 	paillierPub     PaillierPublicShare
@@ -77,8 +77,8 @@ func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayl
 func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
 
 type keygenSharePayload struct {
-	Share    *big.Int `wire:"1,bigpos,max_bytes=scalar"`
-	PlanHash []byte   `wire:"2,bytes,len=32"`
+	Share    *secret.Scalar `wire:"1,custom,len=32"`
+	PlanHash []byte         `wire:"2,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.

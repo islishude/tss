@@ -5,8 +5,6 @@ package paillier
 import (
 	"math/big"
 	"testing"
-
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // TestEncProofRelationCompleteness verifies that every field in the EncStatement
@@ -186,154 +184,6 @@ func TestLogStarProofRelationCompleteness(t *testing.T) {
 	_ = witness
 }
 
-// TestLegacyProofRelationCompleteness verifies that each legacy proof's
-// statement and witness fields are properly bound.
-func TestLegacyProofRelationCompleteness(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	domain := []byte("relation completeness")
-
-	// EncryptionProof: verify wrong statement elements cause rejection.
-	t.Run("EncryptionProof", func(t *testing.T) {
-		t.Parallel()
-		scalar := big.NewInt(42)
-		ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-		if err != nil {
-			t.Fatal(err)
-		}
-		proof, err := ProveEncryption(nil, domain, &sk.PublicKey, ciphertext, scalar, randomness)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !VerifyEncryption(domain, &sk.PublicKey, ciphertext, proof) {
-			t.Fatal("valid proof rejected")
-		}
-
-		// Wrong ciphertext → reject.
-		wrongCT := new(big.Int).Add(ciphertext, big.NewInt(1))
-		if VerifyEncryption(domain, &sk.PublicKey, wrongCT, proof) {
-			t.Fatal("EncryptionProof verified with wrong ciphertext")
-		}
-
-		// Wrong public key → reject. Use a different bit size to avoid cache collision.
-		sk2 := testPaillierKey(t, 1536)
-		if VerifyEncryption(domain, &sk2.PublicKey, ciphertext, proof) {
-			t.Fatal("EncryptionProof verified with wrong public key")
-		}
-
-		// Wrong bound → reject. The proof carries its own bound; tampering
-		// with it changes the transcript hash.
-		tampered := proof.Clone()
-		tampered.Bound = append([]byte(nil), tampered.Bound...)
-		tampered.Bound[0] ^= 1
-		if VerifyEncryption(domain, &sk.PublicKey, ciphertext, tampered) {
-			t.Fatal("EncryptionProof verified with tampered bound")
-		}
-	})
-
-	// ModulusProof: verify wrong party/index causes rejection.
-	t.Run("ModulusProof", func(t *testing.T) {
-		t.Parallel()
-		proof, err := ProveModulus(nil, domain, sk, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !VerifyModulus(domain, &sk.PublicKey, 1, proof) {
-			t.Fatal("valid proof rejected")
-		}
-		if VerifyModulus(domain, &sk.PublicKey, 2, proof) {
-			t.Fatal("ModulusProof verified with wrong party")
-		}
-	})
-
-	// RingPedersenProof: verify wrong params cause rejection.
-	t.Run("RingPedersenProof", func(t *testing.T) {
-		t.Parallel()
-		params, lambda, err := GenerateRingPedersenParams(nil, sk)
-		if err != nil {
-			t.Fatal(err)
-		}
-		proof, err := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !VerifyRingPedersen(domain, params, 1, proof) {
-			t.Fatal("valid proof rejected")
-		}
-
-		// Wrong params (different size to avoid cache collision).
-		sk2 := testPaillierKey(t, 1536)
-		params2, _, err := GenerateRingPedersenParams(nil, sk2)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if VerifyRingPedersen(domain, params2, 1, proof) {
-			t.Fatal("RingPedersenProof verified with wrong params")
-		}
-	})
-}
-
-// TestEncryptionProofBoundFieldValidation verifies that the Bound field in
-// EncryptionProof is validated against secp256k1 order. If Bound != secp.Order(),
-// the range check is off and a prover could claim a different scalar bound.
-func TestEncryptionProofBoundFieldValidation(t *testing.T) {
-	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	scalar := big.NewInt(42)
-	ciphertext, randomness, err := sk.Encrypt(nil, scalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	proof, err := ProveEncryption(nil, []byte("bound test"), &sk.PublicKey, ciphertext, scalar, randomness)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Verify the bound equals secp256k1 order.
-	if new(big.Int).SetBytes(proof.Bound).Cmp(secp.Order()) != 0 {
-		t.Fatal("EncryptionProof.Bound != secp256k1 order")
-	}
-
-	// Tamper with the bound to something smaller.
-	tampered := proof.Clone()
-	tampered.Bound = big.NewInt(100).Bytes()
-	if VerifyEncryption([]byte("bound test"), &sk.PublicKey, ciphertext, tampered) {
-		t.Fatal("EncryptionProof verified with tampered bound (smaller)")
-	}
-}
-
-// TestTranscriptBindsAllPaillierKeys verifies that each proof type's transcript
-// binds the Paillier public key. Without this, a proof could be replayed with
-// a different key.
-func TestTranscriptBindsAllPaillierKeys(t *testing.T) {
-	t.Parallel()
-
-	sk := testPaillierKey(t, 1024)
-	sk2 := testPaillierKey(t, 1536) // different size avoids key cache collision
-	domain := []byte("key binding test")
-
-	t.Run("EncryptionProof key binding", func(t *testing.T) {
-		t.Parallel()
-		scalar := big.NewInt(7)
-		c, r, _ := sk.Encrypt(nil, scalar)
-		proof, _ := ProveEncryption(nil, domain, &sk.PublicKey, c, scalar, r)
-		if VerifyEncryption(domain, &sk2.PublicKey, c, proof) {
-			t.Fatal("EncryptionProof verified with wrong Paillier key")
-		}
-	})
-
-	t.Run("LogProof key binding", func(t *testing.T) {
-		t.Parallel()
-		scalar := big.NewInt(13)
-		c, r, _ := sk.Encrypt(nil, scalar)
-		pt, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(scalar)))
-		proof, _ := ProveLog(nil, domain, &sk.PublicKey, c, scalar, r, pt)
-		if VerifyLog(domain, &sk2.PublicKey, c, proof) {
-			t.Fatal("LogProof verified with wrong Paillier key")
-		}
-	})
-}
-
 // TestNoUncheckedEncProofField audits every field in EncProof, AffGProof, and
 // LogStarProof to ensure each field is either:
 // 1. Version-checked
@@ -482,7 +332,10 @@ func TestEncProofStatementOpensCiphertext(t *testing.T) {
 		VerifierAux:     *aux,
 	}
 	// Witness with wrong k: the ciphertext K does not decrypt to wrongK.
-	badWitness := EncWitness{K: wrongK, Rho: rho}
+	badWitness := EncWitness{
+		K:   testSecpSecretScalar(t, wrongK),
+		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
+	}
 	_, err = ProveEnc(params, []byte("open test"), stmt, badWitness, nil)
 	if err == nil {
 		t.Fatal("ProveEnc accepted witness that does not open ciphertext K")
@@ -495,7 +348,7 @@ func TestAffGProofStatementOpensD(t *testing.T) {
 	t.Parallel()
 	params, stmt, witness, _ := affGProofFixture(t)
 	badWitness := witness
-	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
+	badWitness.X = testSecpSecretScalar(t, big.NewInt(24))
 	_, err := ProveAffG(params, []byte("open test"), stmt, badWitness, nil)
 	if err == nil {
 		t.Fatal("ProveAffG accepted witness that does not open D")
@@ -508,7 +361,7 @@ func TestLogStarProofStatementOpensC(t *testing.T) {
 	t.Parallel()
 	params, stmt, witness, _ := logStarProofFixture(t)
 	badWitness := witness
-	badWitness.X = new(big.Int).Add(witness.X, big.NewInt(1))
+	badWitness.X = testSecpSecretScalar(t, big.NewInt(32))
 	_, err := ProveLogStar(params, []byte("open test"), stmt, badWitness, nil)
 	if err == nil {
 		t.Fatal("ProveLogStar accepted witness that does not open C")

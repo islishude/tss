@@ -11,7 +11,7 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/shamir"
+	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -70,6 +70,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
+	defer ringPedersenLambda.Destroy()
 	ringPedersenParamsBytes, err := zkpai.MarshalRingPedersenParams(ringPedersenParams)
 	if err != nil {
 		return nil, nil, err
@@ -82,25 +83,29 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	poly, err := shamir.RandomPolynomial(config.Reader(), secp.Order(), config.Threshold, nil)
+	poly, err := shamirsecp.RandomPolynomial(config.Reader(), config.Threshold, nil)
 	if err != nil {
 		return nil, nil, err
 	}
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
-		point := secp.ScalarBaseMult(secp.ScalarFromBigInt(coeff))
+		point := secp.ScalarBaseMult(coeff)
 		enc, err := secp.PointBytes(point)
 		if err != nil {
 			return nil, nil, err
 		}
 		commitments[i] = enc
 	}
+	localShare, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, config.Self))
+	if err != nil {
+		return nil, nil, err
+	}
 	partyData := make(map[tss.PartyID]*keygenPartyData, len(config.Parties))
 	for _, id := range config.Parties {
 		if id == config.Self {
 			partyData[id] = &keygenPartyData{
 				commitments:     commitments,
-				share:           shamir.Eval(poly, id, secp.Order()),
+				share:           localShare,
 				chainCode:       bytes.Clone(chainCode),
 				chainCodeCommit: bytes.Clone(chainCodeCommit),
 				paillierPub:     PaillierPublicShare{Party: id, PublicKey: paillierPubBytes, Proof: modProofBytes},
@@ -143,8 +148,12 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		if id == config.Self {
 			continue
 		}
-		share := shamir.Eval(poly, id, secp.Order())
+		share, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, id))
+		if err != nil {
+			return nil, nil, err
+		}
 		payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{Share: share, PlanHash: planHash}, s.limits)
+		share.Destroy()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -334,7 +343,10 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	share := secp.ScalarFromBigInt(p.Share)
+	share, err := secpScalarFromSecret(p.Share)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
 
 	// Eagerly verify the share against the sender's polynomial commitments
 	// when they are already available. If the commitments have not arrived
@@ -355,7 +367,7 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.partyData[env.From].share = share.BigInt()
+	s.partyData[env.From].share = p.Share.Clone()
 
 	// ---- 5. EMIT ----
 	return s.tryComplete()

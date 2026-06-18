@@ -3,7 +3,6 @@
 package paillier
 
 import (
-	"bytes"
 	"math/big"
 	"testing"
 )
@@ -77,26 +76,4 @@ func TestRingPedersenProofChecks(t *testing.T) {
 			})
 		}
 	})
-}
-
-func assertRingPedersenProofRoundTrip(t *testing.T, proof *RingPedersenProof) {
-	t.Helper()
-	raw, err := Marshal(proof)
-	if err != nil {
-		t.Fatal(err)
-	}
-	decoded, err := UnmarshalRingPedersenProof(raw)
-	if err != nil {
-		t.Fatal(err)
-	}
-	again, err := Marshal(decoded)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, again) {
-		t.Fatal("Ring-Pedersen proof encoding is not deterministic")
-	}
-	if _, err := UnmarshalRingPedersenProof(append(raw, 0)); err == nil {
-		t.Fatal("Ring-Pedersen proof accepted trailing bytes")
-	}
 }

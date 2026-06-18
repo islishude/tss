@@ -15,11 +15,29 @@ func newSecpSecretScalar(data []byte) (*secret.Scalar, error) {
 	return secret.NewScalar(data, secp.ScalarSize)
 }
 
+func newSecpSecretScalarAllowZero(data []byte) (*secret.Scalar, error) {
+	if _, err := secp.ScalarFromBytesAllowZero(data); err != nil {
+		return nil, err
+	}
+	return secret.NewScalar(data, secp.ScalarSize)
+}
+
 func secpSecretScalarFromBig(x *big.Int) (*secret.Scalar, error) {
 	if x == nil {
 		return nil, errors.New("nil secret scalar")
 	}
 	return newSecpSecretScalar(scalarBytes(x))
+}
+
+func secpSecretScalarFromScalar(x secp.Scalar) (*secret.Scalar, error) {
+	if x.IsZero() {
+		return nil, errors.New("zero secret scalar")
+	}
+	return newSecpSecretScalar(x.Bytes())
+}
+
+func secpSecretScalarFromScalarAllowZero(x secp.Scalar) (*secret.Scalar, error) {
+	return newSecpSecretScalarAllowZero(x.Bytes())
 }
 
 func secpScalarFromSecret(s *secret.Scalar) (secp.Scalar, error) {
@@ -29,12 +47,11 @@ func secpScalarFromSecret(s *secret.Scalar) (secp.Scalar, error) {
 	return secp.ScalarFromBytes(s.FixedBytes())
 }
 
-func secpSecretBig(s *secret.Scalar) (*big.Int, error) {
-	scalar, err := secpScalarFromSecret(s)
-	if err != nil {
-		return nil, err
+func secpScalarFromSecretAllowZero(s *secret.Scalar) (secp.Scalar, error) {
+	if s == nil {
+		return secp.Scalar{}, errors.New("nil secret scalar")
 	}
-	return scalar.BigInt(), nil
+	return secp.ScalarFromBytesAllowZero(s.FixedBytes())
 }
 
 // scalarBytes encodes x as a fixed-length secp256k1 scalar in canonical
@@ -63,6 +80,20 @@ func validateScalarRangeStrict(x *big.Int) error {
 	}
 	if x.Cmp(secp.Order()) >= 0 {
 		return errors.New("scalar exceeds group order")
+	}
+	return nil
+}
+
+func validateSecretScalarStrict(x *secret.Scalar) error {
+	if _, err := secpScalarFromSecret(x); err != nil {
+		return err
+	}
+	return nil
+}
+
+func validateSecretScalarAllowZero(x *secret.Scalar) error {
+	if _, err := secpScalarFromSecretAllowZero(x); err != nil {
+		return err
 	}
 	return nil
 }

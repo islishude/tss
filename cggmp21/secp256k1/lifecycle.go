@@ -70,6 +70,13 @@ func clearBigIntMap(xs map[tss.PartyID]*big.Int) {
 	clear(xs)
 }
 
+func clearSecretScalarMap(xs map[tss.PartyID]*secret.Scalar) {
+	for _, x := range xs {
+		x.Destroy()
+	}
+	clear(xs)
+}
+
 func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
 	for _, payload := range xs {
 		clear(payload.Gamma)

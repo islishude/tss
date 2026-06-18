@@ -11,6 +11,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -37,10 +38,10 @@ type AffGStatement struct {
 
 // AffGWitness is the secret witness for a Πaff-g proof.
 type AffGWitness struct {
-	X    *big.Int // affine multiplier (scalar for curve point X)
-	Y    *big.Int // affine additive term
-	Rho  *big.Int // randomness for Enc_Nj(y; rho) inside D
-	RhoY *big.Int // randomness for Y = Enc_Ni(y; rhoY)
+	X    *secret.Scalar // affine multiplier (scalar for curve point X)
+	Y    *secret.Scalar // affine additive term
+	Rho  *secret.Scalar // randomness for Enc_Nj(y; rho) inside D
+	RhoY *secret.Scalar // randomness for Y = Enc_Ni(y; rhoY)
 }
 
 // AffGProof is a CGGMP-compatible Πaff-g proof that an MtA response was
@@ -113,45 +114,53 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	Nhat := stmt.VerifierAux.N // Nhat_j = Nj
 
 	// Sample masks.
-	alpha, err := SampleSignedPowerOfTwo(rng, params.EncRange()) // ±2^(Ell+Epsilon)
+	alpha, err := sampleSignedSecret(rng, params.EncRange()) // ±2^(Ell+Epsilon)
 	if err != nil {
 		return nil, err
 	}
-	beta, err := SampleSignedPowerOfTwo(rng, params.AffGRange()) // ±2^(EllPrime+Epsilon)
+	defer alpha.Destroy()
+	beta, err := sampleSignedSecret(rng, params.AffGRange()) // ±2^(EllPrime+Epsilon)
 	if err != nil {
 		return nil, err
 	}
-	r, err := SampleZNStar(rng, Nj.N)
+	defer beta.Destroy()
+	r, err := sampleZNStarSecret(rng, Nj.N)
 	if err != nil {
 		return nil, err
 	}
-	rY, err := SampleZNStar(rng, Ni.N)
+	defer r.Destroy()
+	rY, err := sampleZNStarSecret(rng, Ni.N)
 	if err != nil {
 		return nil, err
 	}
-	gamma, err := SampleMultRange(rng, params.EncRange(), Nhat) // ±(2^(Ell+Epsilon) * Nhat)
+	defer rY.Destroy()
+	gamma, err := sampleMultRangeSecret(rng, params.EncRange(), Nhat) // ±(2^(Ell+Epsilon) * Nhat)
 	if err != nil {
 		return nil, err
 	}
-	delta, err := SampleMultRange(rng, params.AffGRange(), Nhat) // ±(2^(EllPrime+Epsilon) * Nhat)
+	defer gamma.Destroy()
+	delta, err := sampleMultRangeSecret(rng, params.AffGRange(), Nhat) // ±(2^(EllPrime+Epsilon) * Nhat)
 	if err != nil {
 		return nil, err
 	}
-	mask, err := SampleMultRange(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
+	defer delta.Destroy()
+	mask, err := sampleMultRangeSecret(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
 	if err != nil {
 		return nil, err
 	}
-	mu, err := SampleMultRange(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
+	defer mask.Destroy()
+	mu, err := sampleMultRangeSecret(rng, params.Ell, Nhat) // ±(2^Ell * Nhat)
 	if err != nil {
 		return nil, err
 	}
+	defer mu.Destroy()
 
 	// A = (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
 	alphaMulC, err := OMulCT(Nj, alpha, stmt.C, signedPowerOfTwoBytes(params.EncRange()))
 	if err != nil {
 		return nil, err
 	}
-	encBeta, err := EncRandom(Nj, beta, r)
+	encBeta, err := encRandomSecrets(Nj, beta, r)
 	if err != nil {
 		return nil, err
 	}
@@ -161,32 +170,76 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	}
 
 	// Bx = alpha * G
-	Bx := secp.ScalarBaseMult(secp.ScalarFromBigInt(alpha))
+	alphaScalar, err := signedSecretSecpScalar(alpha)
+	if err != nil {
+		return nil, err
+	}
+	Bx := secp.ScalarBaseMult(alphaScalar)
 
 	// By = Enc_Ni(beta; rY)
-	By, err := EncRandom(Ni, beta, rY)
+	By, err := encRandomSecrets(Ni, beta, rY)
 	if err != nil {
 		return nil, err
 	}
 
 	// RP commitments.
 	encMaskCommitLen := max(signedPowerOfTwoBytes(params.EncRange()), multRangeBytes(Nhat, params.EncRange()))
-	E, err := RPCommitCT(stmt.VerifierAux, alpha, gamma, encMaskCommitLen)
+	alphaPadded, err := resizeSignedSecret(alpha, encMaskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer alphaPadded.Destroy()
+	gammaPadded, err := resizeSignedSecret(gamma, encMaskCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer gammaPadded.Destroy()
+	E, err := RPCommitCT(stmt.VerifierAux, alphaPadded, gammaPadded, encMaskCommitLen)
 	if err != nil {
 		return nil, err
 	}
 	secretCommitLen := max(signedPowerOfTwoBytes(params.Ell), multRangeBytes(Nhat, params.Ell))
-	S, err := RPCommitCT(stmt.VerifierAux, w.X, mask, secretCommitLen)
+	xSigned, err := signedSecretFromScalar(w.X, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer xSigned.Destroy()
+	maskPadded, err := resizeSignedSecret(mask, secretCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer maskPadded.Destroy()
+	S, err := RPCommitCT(stmt.VerifierAux, xSigned, maskPadded, secretCommitLen)
 	if err != nil {
 		return nil, err
 	}
 	affineCommitLen := max(signedPowerOfTwoBytes(params.AffGRange()), multRangeBytes(Nhat, params.AffGRange()))
-	F, err := RPCommitCT(stmt.VerifierAux, beta, delta, affineCommitLen)
+	betaPadded, err := resizeSignedSecret(beta, affineCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer betaPadded.Destroy()
+	deltaPadded, err := resizeSignedSecret(delta, affineCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer deltaPadded.Destroy()
+	F, err := RPCommitCT(stmt.VerifierAux, betaPadded, deltaPadded, affineCommitLen)
 	if err != nil {
 		return nil, err
 	}
 	yCommitLen := max(signedPowerOfTwoBytes(params.EllPrime), multRangeBytes(Nhat, params.Ell))
-	T, err := RPCommitCT(stmt.VerifierAux, w.Y, mu, yCommitLen)
+	ySigned, err := signedSecretFromScalar(w.Y, yCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer ySigned.Destroy()
+	muPadded, err := resizeSignedSecret(mu, yCommitLen)
+	if err != nil {
+		return nil, err
+	}
+	defer muPadded.Destroy()
+	T, err := RPCommitCT(stmt.VerifierAux, ySigned, muPadded, yCommitLen)
 	if err != nil {
 		return nil, err
 	}
@@ -202,17 +255,54 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	}
 
 	// Responses.
-	z1 := new(big.Int).Mul(e, w.X)
-	z1.Add(z1, alpha)
-
-	z2 := new(big.Int).Mul(e, w.Y)
-	z2.Add(z2, beta)
-
-	z3 := new(big.Int).Mul(e, mask)
-	z3.Add(z3, gamma)
-
-	z4 := new(big.Int).Mul(e, mu)
-	z4.Add(z4, delta)
+	xBig, err := secretScalarBig(w.X)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(xBig)
+	yBig, err := secretScalarBig(w.Y)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(yBig)
+	alphaBig, err := signedSecretBig(alpha)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(alphaBig)
+	betaBig, err := signedSecretBig(beta)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(betaBig)
+	maskBig, err := signedSecretBig(mask)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(maskBig)
+	gammaBig, err := signedSecretBig(gamma)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(gammaBig)
+	muBig, err := signedSecretBig(mu)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(muBig)
+	deltaBig, err := signedSecretBig(delta)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(deltaBig)
+	z1 := new(big.Int).Mul(e, xBig)
+	z1.Add(z1, alphaBig)
+	z2 := new(big.Int).Mul(e, yBig)
+	z2.Add(z2, betaBig)
+	z3 := new(big.Int).Mul(e, maskBig)
+	z3.Add(z3, gammaBig)
+	z4 := new(big.Int).Mul(e, muBig)
+	z4.Add(z4, deltaBig)
 
 	// w = r * rho^e mod Nj.
 	// math/big.Int.Exp is used here with a secret base (w.Rho, Paillier
@@ -222,14 +312,36 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	// size are not exploitable by a remote verifier in the non-interactive
 	// setting. The value is further masked by multiplication with the
 	// fresh random r before being included in the proof.
-	rhoExp := new(big.Int).Exp(w.Rho, e, Nj.N)
-	wVal := new(big.Int).Mul(r, rhoExp)
+	rhoBig, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoBig)
+	rBig, err := secretScalarBig(r)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rBig)
+	rhoExp := new(big.Int).Exp(rhoBig, e, Nj.N)
+	defer secret.ClearBigInt(rhoExp)
+	wVal := new(big.Int).Mul(rBig, rhoExp)
 	wVal.Mod(wVal, Nj.N)
 
 	// wY = rY * rhoY^e mod Ni.
 	// Same rationale as above: public exponent, prover-local computation.
-	rhoYExp := new(big.Int).Exp(w.RhoY, e, Ni.N)
-	wY := new(big.Int).Mul(rY, rhoYExp)
+	rhoYBig, err := secretScalarBig(w.RhoY)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rhoYBig)
+	rYBig, err := secretScalarBig(rY)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(rYBig)
+	rhoYExp := new(big.Int).Exp(rhoYBig, e, Ni.N)
+	defer secret.ClearBigInt(rhoYExp)
+	wY := new(big.Int).Mul(rYBig, rhoYExp)
 	wY.Mod(wY, Ni.N)
 
 	return &AffGProof{
@@ -568,25 +680,69 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	if w.X == nil || w.Y == nil || w.Rho == nil || w.RhoY == nil {
 		return errors.New("nil witness field")
 	}
-	if !InSignedPowerOfTwo(w.X, params.Ell) {
+	if w.X.FixedLen() != secp.ScalarSize || w.Y.FixedLen() != secp.ScalarSize {
+		return errors.New("scalar witness has invalid width")
+	}
+	xBytes := w.X.FixedBytes()
+	if _, err := secp.ScalarFromBytesAllowZero(xBytes); err != nil {
+		clear(xBytes)
+		return errors.New("witness x is not canonical")
+	}
+	clear(xBytes)
+	yBytes := w.Y.FixedBytes()
+	if _, err := secp.ScalarFromBytesAllowZero(yBytes); err != nil {
+		clear(yBytes)
+		return errors.New("witness y is not canonical")
+	}
+	clear(yBytes)
+	if w.Rho.FixedLen() != modulusBytes(stmt.ReceiverPaillierN.N) ||
+		w.RhoY.FixedLen() != modulusBytes(stmt.ProverPaillierN.N) {
+		return errors.New("randomness witness has invalid width")
+	}
+	x, err := secretScalarBig(w.X)
+	if err != nil {
+		return errors.New("invalid witness x")
+	}
+	defer secret.ClearBigInt(x)
+	y, err := secretScalarBig(w.Y)
+	if err != nil {
+		return errors.New("invalid witness y")
+	}
+	defer secret.ClearBigInt(y)
+	rho, err := secretScalarBig(w.Rho)
+	if err != nil {
+		return errors.New("invalid witness rho")
+	}
+	defer secret.ClearBigInt(rho)
+	rhoY, err := secretScalarBig(w.RhoY)
+	if err != nil {
+		return errors.New("invalid witness rhoY")
+	}
+	defer secret.ClearBigInt(rhoY)
+	if !InUnsignedPowerOfTwo(x, params.Ell) {
 		return errors.New("witness x out of range")
 	}
-	if !InSignedPowerOfTwo(w.Y, params.EllPrime) {
+	if !InUnsignedPowerOfTwo(y, params.EllPrime) {
 		return errors.New("witness y out of range")
 	}
-	if !IsZNStar(w.Rho, stmt.ReceiverPaillierN.N) {
+	if !IsZNStar(rho, stmt.ReceiverPaillierN.N) {
 		return errors.New("witness rho not in Z*_Nj")
 	}
-	if !IsZNStar(w.RhoY, stmt.ProverPaillierN.N) {
+	if !IsZNStar(rhoY, stmt.ProverPaillierN.N) {
 		return errors.New("witness rhoY not in Z*_Ni")
 	}
 
 	// Verify D == (x ⊙ C) ⊕ Enc_Nj(y; rho).
-	xMulC, err := OMulCT(stmt.ReceiverPaillierN, w.X, stmt.C, signedPowerOfTwoBytes(params.Ell))
+	xSigned, err := signedSecretFromScalar(w.X, signedPowerOfTwoBytes(params.Ell))
 	if err != nil {
 		return fmt.Errorf("cannot verify D: %w", err)
 	}
-	encY, err := EncRandom(stmt.ReceiverPaillierN, w.Y, w.Rho)
+	defer xSigned.Destroy()
+	xMulC, err := OMulCT(stmt.ReceiverPaillierN, xSigned, stmt.C, signedPowerOfTwoBytes(params.Ell))
+	if err != nil {
+		return fmt.Errorf("cannot verify D: %w", err)
+	}
+	encY, err := stmt.ReceiverPaillierN.EncryptWithSecretRandomness(w.Y, w.Rho)
 	if err != nil {
 		return fmt.Errorf("cannot verify D: %w", err)
 	}
@@ -599,7 +755,7 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	}
 
 	// Verify Y == Enc_Ni(y; rhoY).
-	expectedY, err := EncRandom(stmt.ProverPaillierN, w.Y, w.RhoY)
+	expectedY, err := stmt.ProverPaillierN.EncryptWithSecretRandomness(w.Y, w.RhoY)
 	if err != nil {
 		return fmt.Errorf("cannot verify Y: %w", err)
 	}
@@ -608,7 +764,13 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	}
 
 	// Verify X == x * G.
-	expectedX := secp.ScalarBaseMult(secp.ScalarFromBigInt(w.X))
+	xBytes = w.X.FixedBytes()
+	defer clear(xBytes)
+	xScalar, err := secp.ScalarFromBytes(xBytes)
+	if err != nil {
+		return errors.New("invalid witness x scalar")
+	}
+	expectedX := secp.ScalarBaseMult(xScalar)
 	if !secp.Equal(stmt.X, expectedX) {
 		return errors.New("witness x does not open X")
 	}

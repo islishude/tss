@@ -19,7 +19,7 @@ import (
 func TestGoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
 
-	payload := keygenSharePayload{Share: big.NewInt(1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)

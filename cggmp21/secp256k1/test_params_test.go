@@ -1,7 +1,11 @@
 package secp256k1
 
 import (
+	"math/big"
+	"testing"
+
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
 )
 
 func testLimits() Limits {
@@ -36,6 +40,15 @@ func testSecurityParams() SecurityParams {
 		ChallengeBits:   128,
 		MinPaillierBits: 768,
 	}
+}
+
+func testSecretScalar(t testing.TB, v int64) *secret.Scalar {
+	t.Helper()
+	s, err := secpSecretScalarFromBig(big.NewInt(v))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return s
 }
 
 func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error) {

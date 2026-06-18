@@ -7,6 +7,7 @@ import (
 	"math/big"
 
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // IsZNStar reports whether x is a member of Z*_N (1 <= x < N and gcd(x, N) = 1).
@@ -150,7 +151,7 @@ func OMulPublic(pk *pai.PublicKey, k, c *big.Int) (*big.Int, error) {
 // OMulCT homomorphically multiplies a Paillier ciphertext by a secret scalar
 // using fixed-width constant-time exponentiation. It delegates the sign-handling
 // and constant-time exponentiation to ExpSignedModCT.
-func OMulCT(pk *pai.PublicKey, k, c *big.Int, expLen int) (*big.Int, error) {
+func OMulCT(pk *pai.PublicKey, k *secret.SignedInt, c *big.Int, expLen int) (*big.Int, error) {
 	if pk == nil {
 		return nil, errors.New("nil Paillier public key")
 	}

@@ -23,13 +23,13 @@ func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
 	}
 	pd := make(map[tss.PartyID]*keygenPartyData, 2)
 	pd[2] = &keygenPartyData{
-		share:        new(big.Int).SetInt64(12345),
+		share:        testSecretScalar(t, 12345),
 		chainCode:    []byte{0x01, 0x02, 0x03},
 		commitments:  [][]byte{{0x0a}},
 		confirmation: &KeygenConfirmation{},
 	}
 	pd[3] = &keygenPartyData{
-		share: new(big.Int).SetInt64(67890),
+		share: testSecretScalar(t, 67890),
 	}
 	s := &KeygenSession{
 		partyData: pd,
@@ -78,8 +78,17 @@ func fillSecretScalar(t *testing.T, seed byte) *secret.Scalar {
 	return s
 }
 
+func mustTestSecretScalar(t *testing.T, value uint64) *secret.Scalar {
+	t.Helper()
+	out, err := secpSecretScalarFromScalar(secp.ScalarFromUint64(value))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // newTestPresignSession creates a PresignSession populated with non-zero secret
-// scalars, big.Int maps, and round payload data suitable for testing Destroy
+// scalars, MtA scalar maps, and round payload data suitable for testing Destroy
 // and abort cleanup.
 func newTestPresignSession(t *testing.T) *PresignSession {
 	t.Helper()
@@ -87,11 +96,11 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 		kShare:     fillSecretScalar(t, 0x01),
 		gamma:      fillSecretScalar(t, 0x11),
 		xBar:       fillSecretScalar(t, 0x21),
-		deltas:     map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(100)},
-		alphaDelta: map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(200)},
-		betaDelta:  map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(300)},
-		alphaSigma: map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(400)},
-		betaSigma:  map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(500)},
+		deltas:     map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 100)},
+		alphaDelta: map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 200)},
+		betaDelta:  map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 300)},
+		alphaSigma: map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 400)},
+		betaSigma:  map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 500)},
 		derivation: &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: []byte{0x02, 0x03, 0x04},
@@ -266,7 +275,7 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
 	pd := make(map[tss.PartyID]*keygenPartyData, 1)
 	pd[2] = &keygenPartyData{
-		share:     new(big.Int).SetInt64(12345),
+		share:     testSecretScalar(t, 12345),
 		chainCode: []byte{0x01, 0x02, 0x03},
 	}
 	s := &KeygenSession{
@@ -289,18 +298,13 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	}
 }
 
-// TestRefreshSession_Abort_ClearsSecrets verifies that abort clears shares
-// and polynomial coefficients on a refresh session.
+// TestRefreshSession_Abort_ClearsSecrets verifies that abort clears shares on a
+// refresh session.
 func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	s := &RefreshSession{
 		partyData: map[tss.PartyID]*refreshPartyData{
-			2: {share: new(big.Int).SetInt64(42)},
-		},
-		ownPoly: []*big.Int{
-			new(big.Int).SetInt64(1),
-			new(big.Int).SetInt64(2),
-			new(big.Int).SetInt64(3),
+			2: {share: testSecretScalar(t, 42)},
 		},
 	}
 
@@ -310,9 +314,6 @@ func TestRefreshSession_Abort_ClearsSecrets(t *testing.T) {
 		t.Fatal("aborted flag not set")
 	}
 	// shares checked via partyData
-	if s.ownPoly != nil {
-		t.Error("ownPoly not nil after abort")
-	}
 }
 
 // TestKeyShare_Destroy_ClearsSecrets verifies that KeyShare.Destroy zeros the
@@ -404,7 +405,7 @@ func TestDestroy_Idempotent(t *testing.T) {
 	// KeygenSession double-Destroy.
 	secretScalar, _ := secpSecretScalarFromBig(big.NewInt(42))
 	kg := &KeygenSession{
-		partyData: map[tss.PartyID]*keygenPartyData{2: {share: new(big.Int).SetInt64(1)}},
+		partyData: map[tss.PartyID]*keygenPartyData{2: {share: testSecretScalar(t, 1)}},
 		pending:   &KeyShare{state: &keyShareState{secret: secretScalar}},
 	}
 	kg.Destroy()
@@ -414,11 +415,11 @@ func TestDestroy_Idempotent(t *testing.T) {
 	kShare := fillSecretScalar(t, 0x01)
 	ps := &PresignSession{
 		kShare:       kShare,
-		deltas:       map[tss.PartyID]*big.Int{2: new(big.Int).SetInt64(1)},
-		alphaDelta:   make(map[tss.PartyID]*big.Int),
-		betaDelta:    make(map[tss.PartyID]*big.Int),
-		alphaSigma:   make(map[tss.PartyID]*big.Int),
-		betaSigma:    make(map[tss.PartyID]*big.Int),
+		deltas:       map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 1)},
+		alphaDelta:   make(map[tss.PartyID]*secret.Scalar),
+		betaDelta:    make(map[tss.PartyID]*secret.Scalar),
+		alphaSigma:   make(map[tss.PartyID]*secret.Scalar),
+		betaSigma:    make(map[tss.PartyID]*secret.Scalar),
 		round1:       make(map[tss.PartyID]presignRound1Payload),
 		round1Proofs: make(map[tss.PartyID]presignRound1ProofPayload),
 		round2:       make(map[tss.PartyID]presignRound2Payload),
