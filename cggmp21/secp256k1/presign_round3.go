@@ -222,7 +222,11 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 
 	// Build signprep proof.
-	paillierPublicKey, err := canonicalWireMessageBytes(s.key.state.paillierPublicKey, s.limits)
+	localPaillierPublicKey, err := s.key.paillierPublicFor(s.key.state.party, s.limits)
+	if err != nil {
+		return nil, err
+	}
+	paillierPublicKey, err := canonicalWireMessageBytes(localPaillierPublicKey, s.limits)
 	if err != nil {
 		return nil, err
 	}

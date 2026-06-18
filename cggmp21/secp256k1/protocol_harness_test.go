@@ -189,6 +189,9 @@ func runSecpKeygen(threshold, n int) (map[tss.PartyID]*KeyShare, error) {
 		} else if !bytes.Equal(pub, share.state.publicKey) {
 			return nil, fmt.Errorf("group public key mismatch for party %d", id)
 		}
+		if err := validateKeySharePartyDataSet(share, parties); err != nil {
+			return nil, fmt.Errorf("keygen party %d: %w", id, err)
+		}
 		out[id] = share
 	}
 	return out, nil
@@ -432,8 +435,31 @@ func deliverCGGMP21ReshareMessages(t testing.TB, queue []tss.Envelope, sessions 
 func validateCGGMP21Shares(t testing.TB, shares map[tss.PartyID]*KeyShare, parties tss.PartySet) {
 	t.Helper()
 	for _, id := range parties {
+		if err := validateKeySharePartyDataSet(shares[id], parties); err != nil {
+			t.Fatalf("validate new share %d party data: %v", id, err)
+		}
 		if err := shares[id].ValidateWithLimits(testLimits()); err != nil {
 			t.Fatalf("validate new share %d: %v", id, err)
 		}
 	}
+}
+
+func validateKeySharePartyDataSet(share *KeyShare, parties tss.PartySet) error {
+	if share == nil || share.state == nil {
+		return errors.New("nil key share")
+	}
+	if len(share.state.partyData) != len(parties) {
+		return fmt.Errorf("party data count %d != party count %d", len(share.state.partyData), len(parties))
+	}
+	for _, id := range parties {
+		if _, ok := share.state.partyData[id]; !ok {
+			return fmt.Errorf("missing party data for %d", id)
+		}
+	}
+	for id := range share.state.partyData {
+		if !tss.ContainsParty(parties, id) {
+			return fmt.Errorf("unexpected party data for %d", id)
+		}
+	}
+	return nil
 }

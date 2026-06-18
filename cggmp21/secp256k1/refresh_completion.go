@@ -141,12 +141,14 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	selfPD := s.partyData[s.oldKey.state.party]
 	// Construct a temporary share for domain-separated Paillier proof binding.
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.oldKey.state.party,
-		threshold:              s.cfg.Threshold,
-		parties:                s.oldKey.state.parties,
-		publicKey:              newCommitments[0],
-		paillierPublicKey:      clonePaillierPublicKey(selfPD.paillierPub.PublicKey),
+		securityParams: s.securityParams,
+		party:          s.oldKey.state.party,
+		threshold:      s.cfg.Threshold,
+		parties:        s.oldKey.state.parties,
+		publicKey:      newCommitments[0],
+		partyData: map[tss.PartyID]keySharePartyData{
+			s.oldKey.state.party: {paillierPublicKey: selfPD.paillierPub.PublicKey.Clone()},
+		},
 		planHash:               append([]byte(nil), s.planHash...),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
@@ -160,6 +162,25 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	partyData := make(map[tss.PartyID]keySharePartyData, len(s.oldKey.state.parties))
+	for _, id := range s.oldKey.state.parties {
+		verificationShare, ok := verificationShareFor(verificationShares, id)
+		if !ok {
+			return nil, fmt.Errorf("missing verification share for party %d", id)
+		}
+		sessionData := s.partyData[id]
+		partyProof := sessionData.paillierPub.Proof
+		if id == s.oldKey.state.party {
+			partyProof = paillierProof
+		}
+		partyData[id] = keySharePartyData{
+			verificationShare:  bytes.Clone(verificationShare),
+			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			paillierProof:      partyProof.Clone(),
+			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+		}
+	}
 	s.newShare = &KeyShare{state: &keyShareState{
 		securityParams:         s.securityParams,
 		party:                  s.oldKey.state.party,
@@ -169,14 +190,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		chainCode:              append([]byte(nil), s.oldKey.state.chainCode...),
 		secret:                 newSecretScalar,
 		groupCommitments:       newCommitments,
-		verificationShares:     verificationShares,
-		paillierPublicKey:      clonePaillierPublicKey(selfPD.paillierPub.PublicKey),
+		partyData:              partyData,
 		paillierPrivateKey:     s.newPaillier.Clone(),
-		paillierProof:          paillierProof.Clone(),
-		paillierPublicKeys:     s.sortedNewPaillierPublicKeys(),
-		ringPedersenParams:     cloneRingPedersenParams(selfPD.ringPedersen.Params),
-		ringPedersenProof:      selfPD.ringPedersen.Proof.Clone(),
-		ringPedersenPublic:     s.sortedNewRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelRefreshPaillier,
 		shareProof:             shareProofBytes,
@@ -190,7 +205,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	defer logRandomness.Destroy()
-	localRP := cloneRingPedersenParams(selfPD.ringPedersen.Params)
+	localRP := selfPD.ringPedersen.Params.Clone()
 	logDomain, err := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
 		return nil, err
@@ -295,22 +310,4 @@ func validateRefreshCommitments(commitments [][]byte, threshold int) error {
 		}
 	}
 	return nil
-}
-
-func (s *RefreshSession) sortedNewPaillierPublicKeys() []paillierPublicMaterial {
-	out := make([]paillierPublicMaterial, 0, len(s.oldKey.state.parties))
-	for _, id := range s.oldKey.state.parties {
-		pd := s.partyData[id]
-		out = append(out, pd.paillierPub.clone())
-	}
-	return out
-}
-
-func (s *RefreshSession) sortedNewRingPedersenPublic() []ringPedersenPublicMaterial {
-	out := make([]ringPedersenPublicMaterial, 0, len(s.oldKey.state.parties))
-	for _, id := range s.oldKey.state.parties {
-		pd := s.partyData[id]
-		out = append(out, pd.ringPedersen.clone())
-	}
-	return out
 }

@@ -28,6 +28,30 @@ func (pk *PublicKey) AfterUnmarshalWire() error {
 	return nil
 }
 
+// Clone returns a deep copy of PublicKey
+func (pk *PublicKey) Clone() *PublicKey {
+	if pk == nil {
+		return nil
+	}
+	var n *big.Int
+	if pk.N != nil {
+		n = new(big.Int).Set(pk.N)
+	}
+	var g *big.Int
+	if pk.G != nil {
+		g = new(big.Int).Set(pk.G)
+	}
+	var ns *big.Int
+	if pk.NSquared != nil {
+		ns = new(big.Int).Set(pk.NSquared)
+	}
+	return &PublicKey{
+		N:        n,
+		G:        g,
+		NSquared: ns,
+	}
+}
+
 // PrivateKey contains Paillier secret factors and decryption exponents.
 // All private factors and exponents use fixed-length secret.Scalar values to
 // prevent accidental logging and long-lived variable-width representations.

@@ -30,13 +30,8 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 		{
 			typ: reflect.TypeFor[keyShareState](),
 			fields: []string{
-				"paillierPublicKey",
+				"partyData",
 				"paillierPrivateKey",
-				"paillierProof",
-				"paillierPublicKeys",
-				"ringPedersenParams",
-				"ringPedersenProof",
-				"ringPedersenPublic",
 			},
 		},
 		{
@@ -71,9 +66,8 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.state.parties = tss.NewPartySet(1, 2)
+	k.state.parties = tss.NewPartySet(1)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
-	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
 	paillierMaterial, err := paillierPublicMaterialFromSnapshot(testPaillierPublicShare(t), testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -82,14 +76,22 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.state.paillierPublicKeys = []paillierPublicMaterial{paillierMaterial}
-	k.state.ringPedersenPublic = []ringPedersenPublicMaterial{ringPedersenMaterial}
-	k.state.keygenConfirmations = []*KeygenConfirmation{{Sender: 8}}
-	paillierBefore, err := k.state.paillierPublicKeys[0].snapshot(testLimits())
+	k.state.partyData = map[tss.PartyID]keySharePartyData{
+		1: {
+			verificationShare:  []byte{3},
+			paillierPublicKey:  paillierMaterial.PublicKey,
+			paillierProof:      paillierMaterial.Proof,
+			ringPedersenParams: ringPedersenMaterial.Params,
+			ringPedersenProof:  ringPedersenMaterial.Proof,
+			keygenConfirmation: &KeygenConfirmation{Sender: 1},
+		},
+	}
+	dataBefore := k.state.partyData[1]
+	paillierBefore, err := (paillierPublicMaterial{Party: 1, PublicKey: dataBefore.paillierPublicKey, Proof: dataBefore.paillierProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ringPedersenBefore, err := k.state.ringPedersenPublic[0].snapshot(testLimits())
+	ringPedersenBefore, err := (ringPedersenPublicMaterial{Party: 1, Params: dataBefore.ringPedersenParams, Proof: dataBefore.ringPedersenProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,20 +111,21 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	confirmations := k.KeygenConfirmations()
 	confirmations[0].Sender = 99
 
-	paillierAfter, err := k.state.paillierPublicKeys[0].snapshot(testLimits())
+	dataAfter := k.state.partyData[1]
+	paillierAfter, err := (paillierPublicMaterial{Party: 1, PublicKey: dataAfter.paillierPublicKey, Proof: dataAfter.paillierProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ringPedersenAfter, err := k.state.ringPedersenPublic[0].snapshot(testLimits())
+	ringPedersenAfter, err := (ringPedersenPublicMaterial{Party: 1, Params: dataAfter.ringPedersenParams, Proof: dataAfter.ringPedersenProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if k.state.parties[0] != 1 ||
 		k.state.groupCommitments[0][0] != 1 ||
-		k.state.verificationShares[0].PublicKey[0] != 3 ||
+		dataAfter.verificationShare[0] != 3 ||
 		!reflect.DeepEqual(paillierBefore, paillierAfter) ||
 		!reflect.DeepEqual(ringPedersenBefore, ringPedersenAfter) ||
-		k.state.keygenConfirmations[0].Sender != 8 {
+		dataAfter.keygenConfirmation.Sender != 1 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }

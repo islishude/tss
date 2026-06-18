@@ -30,7 +30,13 @@ payloads.
 
 Keygen state machines produce algorithm-specific `KeyShare` records. `MarshalBinary` is deterministic and uses canonical TLV encoding for the share record. Secret material is not encrypted by this package; callers must encrypt persisted shares when needed and call `Destroy` when practical.
 
-CGGMP21 key shares include Paillier private material, Ring-Pedersen parameters/proofs, proof data, and a mandatory 32-byte HD chain code needed by the signing path. Old CGGMP21 shares without current Paillier/ZK fields are rejected and require rerunning keygen. Old GG20 wire identifiers are rejected.
+CGGMP21 key shares include Paillier private material, party-keyed public
+verification/Paillier/Ring-Pedersen material, proof data, and a mandatory
+32-byte HD chain code needed by the signing path. The party-data map key set
+must exactly match the canonical participant set; ordered protocol material is
+derived from that participant order. Old CGGMP21 shares without current
+Paillier/ZK fields or using the retired per-party record-list layout are
+rejected and require rerunning keygen. Old GG20 wire identifiers are rejected.
 
 ## Signing Lifecycle
 

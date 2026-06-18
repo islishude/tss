@@ -44,7 +44,9 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 		{name: "keygen transcript", mutate: func(k *KeyShare) { k.state.keygenTranscriptHash[0] ^= 1 }},
 		{name: "lifecycle plan", mutate: func(k *KeyShare) { k.state.planHash[0] ^= 1 }},
 		{name: "paillier public key", mutate: func(k *KeyShare) {
-			k.state.paillierPublicKey = clonePaillierPublicKey(shares[2].state.paillierPublicKey)
+			data := k.state.partyData[k.state.party]
+			data.paillierPublicKey = shares[2].state.partyData[shares[2].state.party].paillierPublicKey.Clone()
+			k.state.partyData[k.state.party] = data
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

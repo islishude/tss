@@ -366,24 +366,6 @@ func ringPedersenDomain(label string, binding lifecycleBinding, params *zkpai.Ri
 	return b.sum(), nil
 }
 
-func keySharePaillierDomain(key *KeyShare, binding keyShareBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
-	b, err := newDomainBuilder(domainLabelKeySharePaillier)
-	if err != nil {
-		return nil, err
-	}
-	if err := b.appendKeyShareBinding(binding); err != nil {
-		return nil, err
-	}
-	if err := b.appendPaillierStatement(pk, limits); err != nil {
-		return nil, err
-	}
-	b.appendNoPresignContext()
-	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
-		return nil, err
-	}
-	return b.sum(), nil
-}
-
 func mtaPaillierDomain(label string, binding presignBinding, pk *pai.PublicKey, limits Limits) ([]byte, error) {
 	b, err := newDomainBuilder(label)
 	if err != nil {
@@ -434,14 +416,32 @@ func keySharePaillierProofDomain(key *KeyShare, limits Limits) ([]byte, error) {
 	if key == nil || key.state == nil {
 		return nil, errors.New("nil key share")
 	}
-	if key.state.paillierPublicKey == nil {
+	data, err := key.partyDataFor(key.state.party)
+	if err != nil {
+		return nil, err
+	}
+	if data.paillierPublicKey == nil {
 		return nil, errors.New("key share paillier proof domain: missing public key")
 	}
 	binding, err := keyShareDomainBinding(key, tss.SessionID{}, key.state.party, key.state.publicKey, key.state.keygenTranscriptHash)
 	if err != nil {
 		return nil, err
 	}
-	return keySharePaillierDomain(key, binding, key.state.paillierPublicKey, limits)
+	b, err := newDomainBuilder(domainLabelKeySharePaillier)
+	if err != nil {
+		return nil, err
+	}
+	if err := b.appendKeyShareBinding(binding); err != nil {
+		return nil, err
+	}
+	if err := b.appendPaillierStatement(data.paillierPublicKey, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(binding.PlanHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
 }
 
 func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params *zkpai.RingPedersenParams, limits Limits) ([]byte, error) {

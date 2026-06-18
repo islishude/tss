@@ -160,7 +160,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 	if key == nil {
 		return nil
 	}
-	paillierPublicKeys, _ := paillierPublicMaterialSnapshots(key.state.paillierPublicKeys, DefaultLimits())
+	paillierPublicKeys := key.PaillierPublicKeys()
 	fields := []tss.EvidenceField{
 		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)),
 		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.publicKey),

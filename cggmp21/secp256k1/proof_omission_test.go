@@ -332,7 +332,9 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.state.paillierProof = nil
+	data := decoded.state.partyData[decoded.state.party]
+	data.paillierProof = nil
+	decoded.state.partyData[decoded.state.party] = data
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing PaillierProof marshaled successfully")
@@ -356,7 +358,9 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.state.ringPedersenProof = nil
+	data := decoded.state.partyData[decoded.state.party]
+	data.ringPedersenProof = nil
+	decoded.state.partyData[decoded.state.party] = data
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing RingPedersenProof marshaled successfully")

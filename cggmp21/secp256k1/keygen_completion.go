@@ -110,12 +110,14 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.cfg.Self,
-		threshold:              s.cfg.Threshold,
-		parties:                s.cfg.Parties,
-		publicKey:              groupCommitments[0],
-		paillierPublicKey:      clonePaillierPublicKey(&s.paillier.PublicKey),
+		securityParams: s.securityParams,
+		party:          s.cfg.Self,
+		threshold:      s.cfg.Threshold,
+		parties:        s.cfg.Parties,
+		publicKey:      groupCommitments[0],
+		partyData: map[tss.PartyID]keySharePartyData{
+			s.cfg.Self: {paillierPublicKey: s.paillier.PublicKey.Clone()},
+		},
 		planHash:               bytes.Clone(s.planHash),
 		keygenTranscriptHash:   transcriptHash,
 		paillierProofSessionID: s.cfg.SessionID,
@@ -130,6 +132,25 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	localRingPedersen := s.partyData[s.cfg.Self].ringPedersen
+	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
+	for _, id := range s.cfg.Parties {
+		verificationShare, ok := verificationShareFor(verificationShares, id)
+		if !ok {
+			return nil, fmt.Errorf("missing verification share for party %d", id)
+		}
+		sessionData := s.partyData[id]
+		paillierProof := sessionData.paillierPub.Proof
+		if id == s.cfg.Self {
+			paillierProof = localPaillierProof
+		}
+		partyData[id] = keySharePartyData{
+			verificationShare:  bytes.Clone(verificationShare),
+			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			paillierProof:      paillierProof.Clone(),
+			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+		}
+	}
 	share := &KeyShare{state: &keyShareState{
 		securityParams:         s.securityParams,
 		party:                  s.cfg.Self,
@@ -139,14 +160,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		chainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
 		groupCommitments:       groupCommitments,
-		verificationShares:     verificationShares,
-		paillierPublicKey:      clonePaillierPublicKey(&s.paillier.PublicKey),
+		partyData:              partyData,
 		paillierPrivateKey:     s.paillier.Clone(),
-		paillierProof:          localPaillierProof.Clone(),
-		paillierPublicKeys:     s.sortedPaillierPublicKeys(),
-		ringPedersenParams:     cloneRingPedersenParams(localRingPedersen.Params),
-		ringPedersenProof:      localRingPedersen.Proof.Clone(),
-		ringPedersenPublic:     s.sortedRingPedersenPublic(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
 		shareProof:             shareProofBytes,
@@ -160,7 +175,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	defer logRandomness.Destroy()
-	localRP := cloneRingPedersenParams(localRingPedersen.Params)
+	localRP := localRingPedersen.Params.Clone()
 	logDomain, err := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
 		return nil, err
@@ -293,24 +308,6 @@ func (s *KeygenSession) abort() {
 		s.pending.Destroy()
 		s.pending = nil
 	}
-}
-
-func (s *KeygenSession) sortedPaillierPublicKeys() []paillierPublicMaterial {
-	out := make([]paillierPublicMaterial, 0, len(s.cfg.Parties))
-	for _, id := range s.cfg.Parties {
-		item := s.partyData[id].paillierPub
-		out = append(out, item.clone())
-	}
-	return out
-}
-
-func (s *KeygenSession) sortedRingPedersenPublic() []ringPedersenPublicMaterial {
-	out := make([]ringPedersenPublicMaterial, 0, len(s.cfg.Parties))
-	for _, id := range s.cfg.Parties {
-		item := s.partyData[id].ringPedersen
-		out = append(out, item.clone())
-	}
-	return out
 }
 
 func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) ([]byte, error) {

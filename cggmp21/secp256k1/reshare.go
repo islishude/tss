@@ -116,8 +116,8 @@ func (p reshareSharePayload) Clone() reshareSharePayload {
 		Dealer:               p.Dealer,
 		Receiver:             p.Receiver,
 		Share:                p.Share.Clone(),
-		DealerCommitmentHash: append([]byte(nil), p.DealerCommitmentHash...),
-		PlanHash:             append([]byte(nil), p.PlanHash...),
+		DealerCommitmentHash: bytes.Clone(p.DealerCommitmentHash),
+		PlanHash:             bytes.Clone(p.PlanHash),
 	}
 }
 
@@ -225,8 +225,8 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 	s := &ReshareSession{
 		plan:           cloneResharePlan(plan),
 		oldKey:         oldKey,
-		oldPublicKey:   append([]byte(nil), plan.state.oldGroupPublicKey...),
-		oldChainCode:   append([]byte(nil), plan.state.chainCode...),
+		oldPublicKey:   bytes.Clone(plan.state.oldGroupPublicKey),
+		oldChainCode:   bytes.Clone(plan.state.chainCode),
 		oldParties:     plan.state.oldParties.Clone(),
 		dealerParties:  plan.state.dealerParties.Clone(),
 		newParties:     plan.state.newParties.Clone(),
@@ -238,7 +238,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		log:            config.Logger(),
 		limits:         plan.limits,
 		securityParams: plan.state.securityParams,
-		planHash:       append([]byte(nil), planHash...),
+		planHash:       bytes.Clone(planHash),
 		dealerData:     make(map[tss.PartyID]*reshareDealerPartyData),
 		newPartyData:   make(map[tss.PartyID]*reshareNewPartyData),
 		guard:          guard,
@@ -256,9 +256,9 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		}
 		selfNPD := s.newPartyData[s.selfID]
 		payload, err := marshalReshareReceiverMaterialPayloadWithLimits(reshareReceiverMaterialPayload{
-			PaillierPublicKey:  *clonePaillierPublicKey(selfNPD.paillierPub.PublicKey),
-			PaillierProof:      *selfNPD.paillierPub.Proof.Clone(),
-			RingPedersenParams: *cloneRingPedersenParams(selfNPD.ringPedersen.Params),
+			PaillierPublicKey:  *(selfNPD.paillierPub.PublicKey.Clone()),
+			PaillierProof:      *(selfNPD.paillierPub.Proof.Clone()),
+			RingPedersenParams: *(selfNPD.ringPedersen.Params.Clone()),
 			RingPedersenProof:  *selfNPD.ringPedersen.Proof.Clone(),
 			PlanHash:           s.planHash,
 		}, s.limits)
@@ -391,7 +391,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if dd.commitments == nil {
 			dd.pending = &pendingReshareShare{
 				payload: p.Clone(),
-				raw:     append([]byte(nil), env.Payload...),
+				raw:     bytes.Clone(env.Payload),
 			}
 			return nil, nil
 		}
@@ -472,9 +472,10 @@ func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan *ResharePlan) error
 	if !sameByteSlices(oldKey.state.groupCommitments, plan.state.oldGroupCommitments) {
 		return errors.New("old key commitments do not match reshare plan")
 	}
-	for _, vs := range oldKey.state.verificationShares {
-		if !bytes.Equal(vs.PublicKey, plan.state.oldVerificationShares[vs.Party]) {
-			return fmt.Errorf("old key verification share for party %d does not match reshare plan", vs.Party)
+	for _, id := range oldKey.state.parties {
+		verificationShare, ok := oldKey.verificationShare(id)
+		if !ok || !bytes.Equal(verificationShare, plan.state.oldVerificationShares[id]) {
+			return fmt.Errorf("old key verification share for party %d does not match reshare plan", id)
 		}
 	}
 	return nil
@@ -487,20 +488,20 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 	out := &ResharePlan{state: &resharePlanState{
 		sessionID:           in.state.sessionID,
 		curveID:             in.state.curveID,
-		oldGroupPublicKey:   append([]byte(nil), in.state.oldGroupPublicKey...),
+		oldGroupPublicKey:   bytes.Clone(in.state.oldGroupPublicKey),
 		oldGroupCommitments: wireutil.CloneByteSlices(in.state.oldGroupCommitments),
 		oldParties:          in.state.oldParties.Clone(),
 		oldThreshold:        in.state.oldThreshold,
 		dealerParties:       in.state.dealerParties.Clone(),
 		newParties:          in.state.newParties.Clone(),
 		newThreshold:        in.state.newThreshold,
-		chainCode:           append([]byte(nil), in.state.chainCode...),
+		chainCode:           bytes.Clone(in.state.chainCode),
 		paillierBits:        in.state.paillierBits,
 		securityParams:      in.state.securityParams,
 	}, limits: in.limits}
 	out.state.oldVerificationShares = make(map[tss.PartyID][]byte, len(in.state.oldVerificationShares))
 	for id, share := range in.state.oldVerificationShares {
-		out.state.oldVerificationShares[id] = append([]byte(nil), share...)
+		out.state.oldVerificationShares[id] = bytes.Clone(share)
 	}
 	return out
 }

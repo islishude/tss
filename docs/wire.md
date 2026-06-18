@@ -274,6 +274,13 @@ kinds remain for existing per-party encodings. New code may use `map` when the
 wire format is being designed for the first time; converting existing
 per-party encodings is a separate refactoring decision.
 
+CGGMP21 secp256k1 `KeyShare` uses this map encoding for its per-party public
+material. The map key is the sole party identity source and must exactly match
+the share's canonical `Parties` set. The value does not repeat a party field.
+Transcript, hash, confirmation, and public getter paths iterate `Parties`; they
+never depend on Go map iteration order. The retired record-list key-share
+layout is not decoded.
+
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 
 ## Labeled SHA-256 Transcripts

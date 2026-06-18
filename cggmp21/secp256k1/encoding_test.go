@@ -5,6 +5,7 @@ package secp256k1
 import (
 	"bytes"
 	"math"
+	"slices"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -27,12 +28,36 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("key share encoding is not deterministic")
 	}
+	reordered := cloneKeyShareValue(shares[1])
+	reordered.state.partyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.parties))
+	for i := len(reordered.state.parties) - 1; i >= 0; i-- {
+		id := reordered.state.parties[i]
+		reordered.state.partyData[id] = shares[1].state.partyData[id].Clone()
+	}
+	raw3, err := reordered.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw1, raw3) {
+		t.Fatal("key share map insertion order changed canonical encoding")
+	}
 	decoded, err := UnmarshalKeyShare(raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(decoded.PublicKeyBytes(), shares[1].PublicKeyBytes()) {
 		t.Fatal("public key mismatch after canonical round trip")
+	}
+	if !slices.Equal(decoded.Parties(), shares[1].Parties()) {
+		t.Fatal("party order changed after canonical round trip")
+	}
+	for i, id := range decoded.Parties() {
+		if decoded.VerificationShares()[i].Party != id ||
+			decoded.PaillierPublicKeys()[i].Party != id ||
+			decoded.RingPedersenPublic()[i].Party != id ||
+			decoded.KeygenConfirmations()[i].Sender != id {
+			t.Fatalf("public getter order does not match Parties at index %d", i)
+		}
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
 	if _, err := UnmarshalKeyShare(trailing); err == nil {
@@ -49,7 +74,9 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 		t.Fatal("unsorted party set encoded")
 	}
 	nonCanonicalPaillier := cloneKeyShareValue(shares[1])
-	nonCanonicalPaillier.state.paillierPublicKey.G = nil
+	data := nonCanonicalPaillier.state.partyData[nonCanonicalPaillier.state.party]
+	data.paillierPublicKey.G = nil
+	nonCanonicalPaillier.state.partyData[nonCanonicalPaillier.state.party] = data
 	if _, err := nonCanonicalPaillier.MarshalBinary(); err == nil {
 		t.Fatal("malformed Paillier public key encoded")
 	}
@@ -58,69 +85,123 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
-	raw, err := shares[1].MarshalBinary()
+	w, err := encodeKeyShareWire(shares[1])
 	if err != nil {
 		t.Fatal(err)
 	}
-	mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "KeygenConfirmations", []byte{2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := UnmarshalKeyShare(mutated); err == nil {
-		t.Fatal("key share accepted malformed keygen confirmations")
+	data := w.PartyData[1]
+	data.KeygenConfirmation.Sender = 2
+	w.PartyData[1] = data
+	if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
+		t.Fatal("key share accepted confirmation sender that did not match the party-data key")
 	}
 }
 
 func TestCGGMP21KeyShareRejectsEmptyKeygenConfirmations(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
-	raw, err := shares[1].MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
-	mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "KeygenConfirmations", wire.EncodeBytesList(nil))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := UnmarshalKeyShare(mutated); err == nil {
-		t.Fatal("key share accepted empty keygen confirmations")
+	missing := cloneKeyShareValue(shares[1])
+	data := missing.state.partyData[1]
+	data.keygenConfirmation = nil
+	missing.state.partyData[1] = data
+	if _, err := missing.MarshalBinary(); err == nil {
+		t.Fatal("key share accepted missing keygen confirmation")
 	}
 }
 
 func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
-	raw, err := shares[1].MarshalBinary()
-	if err != nil {
-		t.Fatal(err)
-	}
 
 	for _, tc := range []struct {
-		name  string
-		field string
-		value []byte
+		name   string
+		mutate func(*keyShareWire)
 	}{
-		{name: "paillier public key", field: "PaillierPublicKey", value: []byte{}},
-		{name: "paillier private key", field: "PaillierPrivateKey", value: []byte{}},
-		{name: "paillier proof", field: "PaillierProof", value: []byte{}},
-		{name: "Ring-Pedersen parameters", field: "RingPedersenParams", value: []byte{}},
-		{name: "Ring-Pedersen proof", field: "RingPedersenProof", value: []byte{}},
-		{name: "Ring-Pedersen public parameters", field: "RingPedersenPublic", value: wire.Uint32(0)},
-		{name: "paillier public key set", field: "PaillierPublicKeys", value: wire.Uint32(0)},
-		{name: "share proof", field: "ShareProof", value: []byte{}},
-		{name: "keygen transcript hash", field: "KeygenTranscriptHash", value: []byte{}},
+		{name: "verification share", mutate: func(w *keyShareWire) {
+			data := w.PartyData[1]
+			data.VerificationShare = nil
+			w.PartyData[1] = data
+		}},
+		{name: "paillier public key", mutate: func(w *keyShareWire) {
+			data := w.PartyData[1]
+			data.PaillierPublicKey = nil
+			w.PartyData[1] = data
+		}},
+		{name: "paillier private key", mutate: func(w *keyShareWire) { w.PaillierPrivateKey = nil }},
+		{name: "paillier proof", mutate: func(w *keyShareWire) {
+			data := w.PartyData[1]
+			data.PaillierProof = nil
+			w.PartyData[1] = data
+		}},
+		{name: "Ring-Pedersen parameters", mutate: func(w *keyShareWire) {
+			data := w.PartyData[1]
+			data.RingPedersenParams = nil
+			w.PartyData[1] = data
+		}},
+		{name: "Ring-Pedersen proof", mutate: func(w *keyShareWire) {
+			data := w.PartyData[1]
+			data.RingPedersenProof = nil
+			w.PartyData[1] = data
+		}},
+		{name: "share proof", mutate: func(w *keyShareWire) { w.ShareProof = nil }},
+		{name: "keygen transcript hash", mutate: func(w *keyShareWire) { w.KeygenTranscriptHash = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, tc.field, tc.value)
+			w, err := encodeKeyShareWire(shares[1])
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalKeyShare(mutated); err == nil {
+			tc.mutate(w)
+			if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
 				t.Fatalf("key share missing %s decoded", tc.name)
 			}
 		})
 	}
+}
+
+func TestCGGMP21KeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*keyShareWire)
+	}{
+		{name: "missing", mutate: func(w *keyShareWire) { delete(w.PartyData, 3) }},
+		{name: "extra", mutate: func(w *keyShareWire) { w.PartyData[4] = w.PartyData[3] }},
+		{name: "broadcast", mutate: func(w *keyShareWire) { w.PartyData[tss.BroadcastPartyId] = w.PartyData[3] }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			w, err := encodeKeyShareWire(shares[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(w)
+			if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
+				t.Fatalf("key share accepted %s party data", tc.name)
+			}
+		})
+	}
+}
+
+func TestCGGMP21KeyShareRejectsLocalPaillierKeyMismatch(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+	mismatched := cloneKeyShareValue(shares[1])
+	mismatched.state.paillierPrivateKey = shares[2].state.paillierPrivateKey.Clone()
+	if err := mismatched.ValidateWithLimits(testLimits()); err == nil {
+		t.Fatal("key share accepted local Paillier private key from another party")
+	}
+}
+
+func marshalKeyShareWireForTest(t testing.TB, w *keyShareWire) []byte {
+	t.Helper()
+	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
@@ -128,13 +209,17 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3)
 
 	badModulusProof := cloneKeyShareValue(shares[1])
-	badModulusProof.state.paillierPublicKeys[0].Proof = badModulusProof.state.paillierPublicKeys[1].Proof.Clone()
+	modulusData := badModulusProof.state.partyData[1]
+	modulusData.paillierProof = badModulusProof.state.partyData[2].paillierProof.Clone()
+	badModulusProof.state.partyData[1] = modulusData
 	if err := badModulusProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Paillier modulus proof")
 	}
 
 	badRingPedersenProof := cloneKeyShareValue(shares[1])
-	badRingPedersenProof.state.ringPedersenPublic[0].Proof = badRingPedersenProof.state.ringPedersenPublic[1].Proof.Clone()
+	ringData := badRingPedersenProof.state.partyData[1]
+	ringData.ringPedersenProof = badRingPedersenProof.state.partyData[2].ringPedersenProof.Clone()
+	badRingPedersenProof.state.partyData[1] = ringData
 	if err := badRingPedersenProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Ring-Pedersen proof")
 	}

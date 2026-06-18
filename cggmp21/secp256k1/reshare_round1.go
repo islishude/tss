@@ -143,12 +143,12 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	s.newPartyData[s.selfID] = &reshareNewPartyData{
 		paillierPub: paillierPublicMaterial{
 			Party:     s.selfID,
-			PublicKey: clonePaillierPublicKey(&newPaillierKey.PublicKey),
+			PublicKey: newPaillierKey.PublicKey.Clone(),
 			Proof:     modProof.Clone(),
 		},
 		ringPedersen: ringPedersenPublicMaterial{
 			Party:  s.selfID,
-			Params: cloneRingPedersenParams(ringPedersenParams),
+			Params: ringPedersenParams.Clone(),
 			Proof:  ringPedersenProof.Clone(),
 		},
 	}
@@ -218,12 +218,12 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	s.newPartyData[env.From] = &reshareNewPartyData{
 		paillierPub: paillierPublicMaterial{
 			Party:     env.From,
-			PublicKey: clonePaillierPublicKey(&p.PaillierPublicKey),
+			PublicKey: p.PaillierPublicKey.Clone(),
 			Proof:     p.PaillierProof.Clone(),
 		},
 		ringPedersen: ringPedersenPublicMaterial{
 			Party:  env.From,
-			Params: cloneRingPedersenParams(&p.RingPedersenParams),
+			Params: p.RingPedersenParams.Clone(),
 			Proof:  p.RingPedersenProof.Clone(),
 		},
 	}

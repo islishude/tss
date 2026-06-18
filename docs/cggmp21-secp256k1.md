@@ -27,6 +27,16 @@ Collection getters such as `Parties()`, `GroupCommitments()`,
 `VerificationShares()`, `PaillierPublicKeys()`, `RingPedersenPublic()`, and
 `KeygenConfirmations()` return deep copies, including nested byte slices.
 
+The serialized share stores each participant's verification share, Paillier
+public key/proof, Ring-Pedersen parameters/proof, and final keygen confirmation
+in one party-keyed map. Its keys must exactly equal `Parties`; missing, extra,
+or broadcast-party entries are rejected. The wire codec sorts map keys
+canonically, while getters, transcript inputs, hashes, and confirmation sets are
+materialized in `Parties` order. `GroupCommitments` remains an ordered list by
+polynomial degree, not a party-keyed map. This wire change is intentionally not
+backward compatible; persisted shares using the retired record-list layout must
+be regenerated.
+
 The local secp256k1 share is stored as `internal/secret.Scalar` fixed-length
 bytes. `String()`, `GoString()`, `Format()`, and `MarshalJSON()` redact or reject
 secret material. `Destroy()` zeroes package-owned secret material in place. A
@@ -108,7 +118,12 @@ At this point the session has only local pending material. It is not a usable `K
 
 Each party broadcasts `cggmp21.secp256k1.keygen.confirmation` in keygen round 2. The payload is a canonical binary `KeygenConfirmation` binding the session ID, sender, threshold, ordered party set, group public key, keygen transcript hash, and commitments hash.
 
-The keygen session stores one canonical confirmation from each party, sorted by `Parties`. Only after the full set verifies does `Complete()`/`KeyShare()` return a `KeyShare`. The serialized key share contains the full confirmation evidence set; old records without this evidence are invalid.
+The keygen session stores one canonical confirmation under each sender's party
+key. Only after the full set verifies does `Complete()`/`KeyShare()` return a
+`KeyShare`. Ordered confirmation operations still materialize the set in
+`Parties` order. The serialized key share contains the full confirmation
+evidence set; old records without this evidence or using the retired
+record-list key-share layout are invalid.
 
 ### Domain Separation
 

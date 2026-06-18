@@ -153,12 +153,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 				share:       localShare,
 				paillierPub: paillierPublicMaterial{
 					Party:     oldKey.state.party,
-					PublicKey: clonePaillierPublicKey(&newPaillierKey.PublicKey),
+					PublicKey: newPaillierKey.PublicKey.Clone(),
 					Proof:     modProof.Clone(),
 				},
 				ringPedersen: ringPedersenPublicMaterial{
 					Party:  oldKey.state.party,
-					Params: cloneRingPedersenParams(ringPedersenParams),
+					Params: ringPedersenParams.Clone(),
 					Proof:  ringPedersenProof.Clone(),
 				},
 			}
@@ -345,12 +345,12 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		pd.commitments = p.Commitments
 		pd.paillierPub = paillierPublicMaterial{
 			Party:     env.From,
-			PublicKey: clonePaillierPublicKey(&p.PaillierPublicKey),
+			PublicKey: p.PaillierPublicKey.Clone(),
 			Proof:     p.PaillierProof.Clone(),
 		}
 		pd.ringPedersen = ringPedersenPublicMaterial{
 			Party:  env.From,
-			Params: cloneRingPedersenParams(&p.RingPedersenParams),
+			Params: p.RingPedersenParams.Clone(),
 			Proof:  p.RingPedersenProof.Clone(),
 		}
 	case payloadRefreshShare:

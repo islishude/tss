@@ -243,9 +243,13 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	if paillierBits < int(securityParams.MinPaillierBits) {
 		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
 	}
-	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.verificationShares))
-	for _, vs := range oldKey.state.verificationShares {
-		verificationShares[vs.Party] = append([]byte(nil), vs.PublicKey...)
+	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.parties))
+	for _, id := range oldKey.state.parties {
+		verificationShare, ok := oldKey.verificationShare(id)
+		if !ok {
+			return nil, invalidPlanConfig(party, fmt.Errorf("missing verification share for party %d", id))
+		}
+		verificationShares[id] = append([]byte(nil), verificationShare...)
 	}
 	plan := &ResharePlan{state: &resharePlanState{
 		sessionID:             option.SessionID,

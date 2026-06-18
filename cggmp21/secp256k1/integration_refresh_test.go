@@ -42,6 +42,15 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties tss.Part
 			queue = append(queue, out...)
 		}
 	}
+	for _, id := range parties {
+		share, ok := sessions[id].KeyShare()
+		if !ok {
+			t.Fatalf("refresh did not complete for party %d", id)
+		}
+		if err := validateKeySharePartyDataSet(share, parties); err != nil {
+			t.Fatalf("refresh party %d: %v", id, err)
+		}
+	}
 	return sessions
 }
 
@@ -72,6 +81,9 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 		t.Fatal("refresh did not complete")
 	}
 	if err := newShare.ValidateWithLimits(testLimits()); err != nil {
+		t.Fatal(err)
+	}
+	if err := validateKeySharePartyDataSet(newShare, tss.NewPartySet(1)); err != nil {
 		t.Fatal(err)
 	}
 	if !bytes.Equal(oldPub, newShare.PublicKeyBytes()) {

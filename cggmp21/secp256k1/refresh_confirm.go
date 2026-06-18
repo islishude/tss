@@ -78,7 +78,11 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
 		}
 	}
-	s.newShare.state.keygenConfirmations = tss.CloneSlices(confirmations)
+	for _, confirmation := range confirmations {
+		data := s.newShare.state.partyData[confirmation.Sender]
+		data.keygenConfirmation = confirmation.Clone()
+		s.newShare.state.partyData[confirmation.Sender] = data
+	}
 	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
@@ -88,7 +92,7 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
 	}
-	confirmationSetHash := keygenConfirmationSetHash(s.newShare.state.keygenConfirmations)
+	confirmationSetHash := keygenConfirmationSetHash(confirmations)
 	s.log.Info(s.cfg.Ctx(), "refresh complete",
 		"party_id", s.oldKey.state.party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

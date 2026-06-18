@@ -1,7 +1,10 @@
 package paillier
 
 import (
+	"bytes"
 	"math/big"
+
+	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const proofVersion = 1
@@ -51,16 +54,16 @@ func (p *ModulusProof) Clone() *ModulusProof {
 	}
 	cp := &ModulusProof{
 		Version:        p.Version,
-		W:              append([]byte(nil), p.W...),
-		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
-		A:              append([]byte(nil), p.A...),
-		B:              append([]byte(nil), p.B...),
+		W:              bytes.Clone(p.W),
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
+		A:              bytes.Clone(p.A),
+		B:              bytes.Clone(p.B),
 	}
 	for _, x := range p.X {
-		cp.X = append(cp.X, append([]byte(nil), x...))
+		cp.X = append(cp.X, bytes.Clone(x))
 	}
 	for _, z := range p.Z {
-		cp.Z = append(cp.Z, append([]byte(nil), z...))
+		cp.Z = append(cp.Z, bytes.Clone(z))
 	}
 	return cp
 }
@@ -78,6 +81,30 @@ func (RingPedersenParams) WireType() string { return ringPedersenParamsWireType 
 
 // WireVersion returns the wire format version for RingPedersenParams.
 func (RingPedersenParams) WireVersion() uint16 { return proofVersion }
+
+// Clone returns a deep copy of RingPedersenParams
+func (params *RingPedersenParams) Clone() *RingPedersenParams {
+	if params == nil {
+		return nil
+	}
+	var n *big.Int
+	if params.N != nil {
+		n = new(big.Int).Set(params.N)
+	}
+	var s *big.Int
+	if params.S != nil {
+		s = new(big.Int).Set(params.S)
+	}
+	var t *big.Int
+	if params.T != nil {
+		t = new(big.Int).Set(params.T)
+	}
+	return &RingPedersenParams{
+		N: n,
+		S: s,
+		T: t,
+	}
+}
 
 // RingPedersenProof is CGGMP24 Πprm proving knowledge of lambda such that
 // s = t^lambda mod N for Ring-Pedersen parameters (N, s, t).
@@ -102,14 +129,10 @@ func (p *RingPedersenProof) Clone() *RingPedersenProof {
 	}
 	cp := &RingPedersenProof{
 		Version:        p.Version,
-		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
-		Challenges:     append([]byte(nil), p.Challenges...),
-	}
-	for _, c := range p.Commitments {
-		cp.Commitments = append(cp.Commitments, append([]byte(nil), c...))
-	}
-	for _, r := range p.Responses {
-		cp.Responses = append(cp.Responses, append([]byte(nil), r...))
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
+		Challenges:     bytes.Clone(p.Challenges),
+		Commitments:    wireutil.CloneByteSlices(p.Commitments),
+		Responses:      wireutil.CloneByteSlices(p.Responses),
 	}
 	return cp
 }

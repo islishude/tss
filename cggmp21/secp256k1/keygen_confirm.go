@@ -42,6 +42,10 @@ func (KeygenConfirmation) WireVersion() uint16 { return keygenConfirmationWireVe
 
 // Clone returns a deep copy of the confirmation.
 func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
+	if c == nil {
+		return nil
+	}
+
 	return &KeygenConfirmation{
 		SessionID:       c.SessionID,
 		Sender:          c.Sender,
@@ -271,7 +275,11 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := verifyFinalizedKeygenConfirmationSet(local, confirmations); err != nil {
 		return err
 	}
-	local.state.keygenConfirmations = tss.CloneSlices(confirmations)
+	for _, confirmation := range confirmations {
+		data := local.state.partyData[confirmation.Sender]
+		data.keygenConfirmation = confirmation.Clone()
+		local.state.partyData[confirmation.Sender] = data
+	}
 	return nil
 }
 func keygenConfirmationSetHash(confirmations []*KeygenConfirmation) []byte {
@@ -414,7 +422,11 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	}
 	finalShare.state.keygenTranscriptHash = finalTranscriptHash
 	// Store parsed confirmation structs directly.
-	finalShare.state.keygenConfirmations = tss.CloneSlices(confirmations)
+	for _, confirmation := range confirmations {
+		data := finalShare.state.partyData[confirmation.Sender]
+		data.keygenConfirmation = confirmation.Clone()
+		finalShare.state.partyData[confirmation.Sender] = data
+	}
 	if err := finalShare.ValidateWithLimits(s.limits); err != nil {
 		finalShare.Destroy()
 		s.abort()
@@ -426,7 +438,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	s.completed = true
 	s.state = keygenConfirmed
 	pubKeyHash := sha256.Sum256(finalShare.state.publicKey)
-	confirmationSetHash := keygenConfirmationSetHash(finalShare.state.keygenConfirmations)
+	confirmationSetHash := keygenConfirmationSetHash(confirmations)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

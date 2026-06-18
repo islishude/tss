@@ -101,12 +101,12 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 				chainCodeCommit: bytes.Clone(chainCodeCommit),
 				paillierPub: paillierPublicMaterial{
 					Party:     id,
-					PublicKey: clonePaillierPublicKey(&paillierKey.PublicKey),
+					PublicKey: paillierKey.PublicKey.Clone(),
 					Proof:     modProof.Clone(),
 				},
 				ringPedersen: ringPedersenPublicMaterial{
 					Party:  id,
-					Params: cloneRingPedersenParams(ringPedersenParams),
+					Params: ringPedersenParams.Clone(),
 					Proof:  ringPedersenProof.Clone(),
 				},
 			}
@@ -174,7 +174,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 // Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](env.Payload, s.limits)
+	p, err := tss.DecodeBinaryWithLimits[keygenCommitmentsPayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -283,12 +283,12 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 	pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
 	pd.paillierPub = paillierPublicMaterial{
 		Party:     env.From,
-		PublicKey: clonePaillierPublicKey(&p.PaillierPublicKey),
+		PublicKey: p.PaillierPublicKey.Clone(),
 		Proof:     p.PaillierProof.Clone(),
 	}
 	pd.ringPedersen = ringPedersenPublicMaterial{
 		Party:  env.From,
-		Params: cloneRingPedersenParams(&p.RingPedersenParams),
+		Params: p.RingPedersenParams.Clone(),
 		Proof:  p.RingPedersenProof.Clone(),
 	}
 
