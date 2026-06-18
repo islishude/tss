@@ -7,11 +7,13 @@ This directory is the **single canonical location** for all test vectors: binary
 ```
 wire/v1/                          — binary golden vectors (wire format stability)
   envelope/   1 file               — Envelope.golden
-  frost/      5 files              — KeyShare, KeygenCommitmentsPayload, KeygenSharePayload,
-                                     NonceCommitmentPayload, SignPartialPayload
-  cggmp21/    8 files              — KeyShare, KeygenSharePayload, Presign,
-                                     Presign.fast, PresignRound3Payload,
-                                     ResharePlan, SignAttemptRecord, SignPartialPayload
+  tss/        3 files              — SigningContext, BroadcastAck, BroadcastCertificate
+  frost/      6 files              — KeyShare, VerificationShare, KeygenCommitmentsPayload,
+                                     KeygenSharePayload, NonceCommitmentPayload, SignPartialPayload
+  cggmp21/    12 files             — KeyShare, VerificationShare, PaillierPublicShare,
+                                     RingPedersenPublicShare, SignVerifyShare, KeygenSharePayload,
+                                     Presign, Presign.fast, PresignRound3Payload, ResharePlan,
+                                     SignAttemptRecord, SignPartialPayload
   zk/         11 files             — SecurityParams, ModulusProof, RingPedersenParams,
                                      RingPedersenProof, EncryptionProof, MTAResponseProof, LogProof,
                                      EncProof, AffGProof, LogStarProof, SchnorrProof
@@ -21,7 +23,7 @@ protocol/                           — JSON cross-implementation vectors (proto
   cggmp21-secp256k1/   1 file      — cggmp21_secp256k1_vectors.json
 ```
 
-**Total: 25 binary wire vectors + 2 JSON protocol vectors = 27 files.**
+**Total: 33 binary wire vectors + 2 JSON protocol vectors = 35 files.**
 
 ## Golden Files (`wire/v1/`)
 

@@ -363,7 +363,11 @@ func MarshalRingPedersenParams(params *RingPedersenParams) ([]byte, error) {
 
 // UnmarshalRingPedersenParams decodes Ring-Pedersen parameters.
 func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
-	return UnmarshalRingPedersenParamsWithMaxModulusBits(in, 0)
+	params := new(RingPedersenParams)
+	if err := params.UnmarshalBinary(in); err != nil {
+		return nil, err
+	}
+	return params, nil
 }
 
 // UnmarshalRingPedersenParamsWithMaxModulusBits decodes Ring-Pedersen
@@ -371,6 +375,26 @@ func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
 // The modulus size check is enforced by wire.Unmarshal via the
 // max_bits=paillier_modulus_bits wire tag on ringPedersenParamsWire.
 func UnmarshalRingPedersenParamsWithMaxModulusBits(in []byte, maxBits int) (*RingPedersenParams, error) {
+	params := new(RingPedersenParams)
+	if err := params.UnmarshalBinaryWithMaxModulusBits(in, maxBits); err != nil {
+		return nil, err
+	}
+	return params, nil
+}
+
+// MarshalBinary encodes Ring-Pedersen parameters canonically.
+func (params *RingPedersenParams) MarshalBinary() ([]byte, error) {
+	return MarshalRingPedersenParams(params)
+}
+
+// UnmarshalBinary decodes Ring-Pedersen parameters.
+func (params *RingPedersenParams) UnmarshalBinary(in []byte) error {
+	return params.UnmarshalBinaryWithMaxModulusBits(in, 0)
+}
+
+// UnmarshalBinaryWithMaxModulusBits decodes Ring-Pedersen parameters and
+// rejects an oversized modulus before validation.
+func (params *RingPedersenParams) UnmarshalBinaryWithMaxModulusBits(in []byte, maxBits int) error {
 	if maxBits <= 0 {
 		maxBits = tss.DefaultMaxPaillierModulusBits
 	}
@@ -378,25 +402,31 @@ func UnmarshalRingPedersenParamsWithMaxModulusBits(in []byte, maxBits int) (*Rin
 	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(wire.FieldLimits{
 		"paillier_modulus_bits": maxBits,
 	})); err != nil {
-		return nil, err
+		return err
 	}
 	n := new(big.Int).SetBytes(w.N)
 	nLen := modulusBytes(n)
 	if nLen == 0 || len(w.N) != nLen {
-		return nil, errors.New("invalid Ring-Pedersen modulus encoding")
+		return errors.New("invalid Ring-Pedersen modulus encoding")
 	}
 	if len(w.S) != nLen || len(w.T) != nLen {
-		return nil, errors.New("invalid Ring-Pedersen parameter width")
+		return errors.New("invalid Ring-Pedersen parameter width")
 	}
-	params := &RingPedersenParams{
+	decoded := RingPedersenParams{
 		N: n,
 		S: new(big.Int).SetBytes(w.S),
 		T: new(big.Int).SetBytes(w.T),
 	}
-	if err := ValidateRingPedersenParams(params); err != nil {
-		return nil, err
+	if err := ValidateRingPedersenParams(&decoded); err != nil {
+		return err
 	}
-	return params, nil
+	*params = decoded
+	return nil
+}
+
+// Validate checks Ring-Pedersen parameter structure.
+func (params *RingPedersenParams) Validate() error {
+	return ValidateRingPedersenParams(params)
 }
 
 func marshalRingPedersenProof(p *RingPedersenProof) ([]byte, error) {
@@ -406,17 +436,39 @@ func marshalRingPedersenProof(p *RingPedersenProof) ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalBinary encodes a Ring-Pedersen proof canonically.
+func (p *RingPedersenProof) MarshalBinary() ([]byte, error) {
+	return marshalRingPedersenProof(p)
+}
+
 // UnmarshalRingPedersenProof decodes and structurally validates Πprm.
 func UnmarshalRingPedersenProof(in []byte) (*RingPedersenProof, error) {
-	var p RingPedersenProof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(RingPedersenProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
+
+// UnmarshalBinary decodes and structurally validates a Ring-Pedersen proof.
+func (p *RingPedersenProof) UnmarshalBinary(in []byte) error {
+	var decoded RingPedersenProof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
+}
+
+// AfterUnmarshalWire restores the derived proof version.
+func (p *RingPedersenProof) AfterUnmarshalWire() error {
 	p.Version = proofVersion
-	if err := validateRingPedersenProof(&p); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return nil
+}
+
+// Validate checks the Ring-Pedersen proof structure.
+func (p *RingPedersenProof) Validate() error {
+	return validateRingPedersenProof(p)
 }
 
 func validateRingPedersenProof(p *RingPedersenProof) error {

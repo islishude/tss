@@ -302,14 +302,23 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 
 // UnmarshalLogStarProof decodes a canonical TLV LogStarProof.
 func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
-	var w logStarProofWire
-	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	p := new(LogStarProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
-	if w.Version != logStarProofVersion {
-		return nil, fmt.Errorf("unsupported LogStarProof version %d", w.Version)
+	return p, nil
+}
+
+// UnmarshalBinary decodes a canonical TLV LogStarProof.
+func (p *LogStarProof) UnmarshalBinary(in []byte) error {
+	var w logStarProofWire
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+		return err
 	}
-	return &LogStarProof{
+	if w.Version != logStarProofVersion {
+		return fmt.Errorf("unsupported LogStarProof version %d", w.Version)
+	}
+	decoded := LogStarProof{
 		Version:        w.Version,
 		S:              w.S,
 		A:              w.A,
@@ -319,7 +328,9 @@ func UnmarshalLogStarProof(in []byte) (*LogStarProof, error) {
 		Z2:             w.Z2,
 		Z3:             w.Z3,
 		TranscriptHash: w.TranscriptHash,
-	}, nil
+	}
+	*p = decoded
+	return nil
 }
 
 func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w LogStarWitness) error {

@@ -43,7 +43,7 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
-	return unmarshalKeygenCommitmentsPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](in, testLimits())
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
@@ -51,7 +51,7 @@ func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 }
 
 func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
-	return unmarshalKeygenSharePayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[keygenSharePayload](in, testLimits())
 }
 
 func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
@@ -59,7 +59,7 @@ func marshalPresignRound1Payload(p presignRound1Payload) ([]byte, error) {
 }
 
 func unmarshalPresignRound1Payload(in []byte) (presignRound1Payload, error) {
-	return unmarshalPresignRound1PayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[presignRound1Payload](in, testLimits())
 }
 
 func marshalPresignRound1ProofPayload(p presignRound1ProofPayload) ([]byte, error) {
@@ -67,7 +67,7 @@ func marshalPresignRound1ProofPayload(p presignRound1ProofPayload) ([]byte, erro
 }
 
 func unmarshalPresignRound1ProofPayload(in []byte) (presignRound1ProofPayload, error) {
-	return unmarshalPresignRound1ProofPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[presignRound1ProofPayload](in, testLimits())
 }
 
 func marshalPresignRound2Payload(p presignRound2Payload) ([]byte, error) {
@@ -75,7 +75,7 @@ func marshalPresignRound2Payload(p presignRound2Payload) ([]byte, error) {
 }
 
 func unmarshalPresignRound2Payload(in []byte) (presignRound2Payload, error) {
-	return unmarshalPresignRound2PayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[presignRound2Payload](in, testLimits())
 }
 
 func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
@@ -83,7 +83,7 @@ func marshalPresignRound3Payload(p presignRound3Payload) ([]byte, error) {
 }
 
 func unmarshalPresignRound3Payload(in []byte) (presignRound3Payload, error) {
-	return unmarshalPresignRound3PayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[presignRound3Payload](in, testLimits())
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
@@ -91,7 +91,7 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
-	return unmarshalSignPartialPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[signPartialPayload](in, testLimits())
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -99,11 +99,11 @@ func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 }
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
-	return unmarshalReshareSharePayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[reshareSharePayload](in, testLimits())
 }
 
 func unmarshalRefreshCommitmentsPayload(in []byte) (refreshCommitmentsPayload, error) {
-	return unmarshalRefreshCommitmentsPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[refreshCommitmentsPayload](in, testLimits())
 }
 
 func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
@@ -111,5 +111,5 @@ func marshalRefreshSharePayload(p refreshSharePayload) ([]byte, error) {
 }
 
 func unmarshalRefreshSharePayload(in []byte) (refreshSharePayload, error) {
-	return unmarshalRefreshSharePayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[refreshSharePayload](in, testLimits())
 }

@@ -18,145 +18,251 @@ const (
 )
 
 func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
-	if len(p.ChainCodeCommit) != 32 {
-		return nil, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit))
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("keygen commitments plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the keygen commitments payload.
+func (p keygenCommitmentsPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the keygen commitments payload with limits.
+func (p keygenCommitmentsPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalKeygenCommitmentsPayloadWithLimits(in []byte, limits Limits) (keygenCommitmentsPayload, error) {
-	var p keygenCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return keygenCommitmentsPayload{}, err
+// UnmarshalBinary decodes the keygen commitments payload.
+func (p *keygenCommitmentsPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the keygen commitments payload with limits.
+func (p *keygenCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded keygenCommitmentsPayload
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the keygen commitments payload structure.
+func (p keygenCommitmentsPayload) Validate() error {
 	if len(p.ChainCodeCommit) != 32 {
-		return keygenCommitmentsPayload{}, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit))
+		return fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit))
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return keygenCommitmentsPayload{}, fmt.Errorf("keygen commitments plan hash must be 32 bytes")
+		return fmt.Errorf("keygen commitments plan hash must be 32 bytes")
 	}
-	return p, nil
+	for i, commitment := range p.Commitments {
+		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
+			return fmt.Errorf("invalid keygen commitment %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func marshalKeygenSharePayloadWithLimits(p keygenSharePayload, limits Limits) ([]byte, error) {
-	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("keygen share plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the keygen share payload.
+func (p keygenSharePayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the keygen share payload with limits.
+func (p keygenSharePayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalKeygenSharePayloadWithLimits(in []byte, limits Limits) (keygenSharePayload, error) {
-	var p keygenSharePayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return keygenSharePayload{}, err
+// UnmarshalBinary decodes the keygen share payload.
+func (p *keygenSharePayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the keygen share payload with limits.
+func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded keygenSharePayload
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the keygen share payload structure.
+func (p keygenSharePayload) Validate() error {
 	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
-		return keygenSharePayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return keygenSharePayload{}, fmt.Errorf("keygen share plan hash must be 32 bytes")
+		return fmt.Errorf("keygen share plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalNonceCommitmentPayloadWithLimits(p nonceCommitment, limits Limits) ([]byte, error) {
-	if _, err := edcurve.PointFromBytes(p.D); err != nil {
-		return nil, err
-	}
-	if _, err := edcurve.PointFromBytes(p.E); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("nonce commitment plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the nonce commitment payload.
+func (p nonceCommitment) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the nonce commitment payload with limits.
+func (p nonceCommitment) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalNonceCommitmentPayloadWithLimits(in []byte, limits Limits) (nonceCommitment, error) {
-	var p nonceCommitment
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return nonceCommitment{}, err
+// UnmarshalBinary decodes the nonce commitment payload.
+func (p *nonceCommitment) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the nonce commitment payload with limits.
+func (p *nonceCommitment) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded nonceCommitment
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the nonce commitment payload structure.
+func (p nonceCommitment) Validate() error {
 	if _, err := edcurve.PointFromBytes(p.D); err != nil {
-		return nonceCommitment{}, err
+		return err
 	}
 	if _, err := edcurve.PointFromBytes(p.E); err != nil {
-		return nonceCommitment{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return nonceCommitment{}, fmt.Errorf("nonce commitment plan hash must be 32 bytes")
+		return fmt.Errorf("nonce commitment plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalSignPartialPayloadWithLimits(p signPartialPayload, limits Limits) ([]byte, error) {
-	if _, err := edcurve.ScalarFromCanonical(p.Z); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("sign partial plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the partial signature payload.
+func (p signPartialPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the partial signature payload with limits.
+func (p signPartialPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalSignPartialPayloadWithLimits(in []byte, limits Limits) (signPartialPayload, error) {
-	var p signPartialPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return signPartialPayload{}, err
+// UnmarshalBinary decodes the partial signature payload.
+func (p *signPartialPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the partial signature payload with limits.
+func (p *signPartialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded signPartialPayload
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the partial signature payload structure.
+func (p signPartialPayload) Validate() error {
 	if _, err := edcurve.ScalarFromCanonical(p.Z); err != nil {
-		return signPartialPayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return signPartialPayload{}, fmt.Errorf("sign partial plan hash must be 32 bytes")
+		return fmt.Errorf("sign partial plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalReshareCommitmentsPayloadWithLimits(p reshareCommitmentsPayload, limits Limits) ([]byte, error) {
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("reshare commitments plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the reshare commitments payload.
+func (p reshareCommitmentsPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the reshare commitments payload with limits.
+func (p reshareCommitmentsPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalReshareCommitmentsPayloadWithLimits(in []byte, limits Limits) (reshareCommitmentsPayload, error) {
-	var p reshareCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return reshareCommitmentsPayload{}, err
+// UnmarshalBinary decodes the reshare commitments payload.
+func (p *reshareCommitmentsPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the reshare commitments payload with limits.
+func (p *reshareCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded reshareCommitmentsPayload
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the reshare commitments payload structure.
+func (p reshareCommitmentsPayload) Validate() error {
 	if len(p.PlanHash) != sha256.Size {
-		return reshareCommitmentsPayload{}, fmt.Errorf("reshare commitments plan hash must be 32 bytes")
+		return fmt.Errorf("reshare commitments plan hash must be 32 bytes")
 	}
-	return p, nil
+	for i, commitment := range p.Commitments {
+		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
+			return fmt.Errorf("invalid reshare commitment %d: %w", i, err)
+		}
+	}
+	return nil
 }
 
 func marshalReshareSharePayloadWithLimits(p reshareSharePayload, limits Limits) ([]byte, error) {
-	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, fmt.Errorf("reshare share plan hash must be 32 bytes")
-	}
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+// MarshalBinary encodes the reshare share payload.
+func (p reshareSharePayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the reshare share payload with limits.
+func (p reshareSharePayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalReshareSharePayloadWithLimits(in []byte, limits Limits) (reshareSharePayload, error) {
-	var p reshareSharePayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return reshareSharePayload{}, err
+// UnmarshalBinary decodes the reshare share payload.
+func (p *reshareSharePayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the reshare share payload with limits.
+func (p *reshareSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	var decoded reshareSharePayload
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	*p = decoded
+	return nil
+}
+
+// Validate checks the reshare share payload structure.
+func (p reshareSharePayload) Validate() error {
 	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
-		return reshareSharePayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return reshareSharePayload{}, fmt.Errorf("reshare share plan hash must be 32 bytes")
+		return fmt.Errorf("reshare share plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }

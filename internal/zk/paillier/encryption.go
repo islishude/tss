@@ -175,17 +175,39 @@ func marshalEncryptionProof(p *EncryptionProof) ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalBinary encodes an encryption proof canonically.
+func (p *EncryptionProof) MarshalBinary() ([]byte, error) {
+	return marshalEncryptionProof(p)
+}
+
 // UnmarshalEncryptionProof decodes and validates an encryption proof.
 func UnmarshalEncryptionProof(in []byte) (*EncryptionProof, error) {
-	var p EncryptionProof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(EncryptionProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
+
+// UnmarshalBinary decodes and validates an encryption proof.
+func (p *EncryptionProof) UnmarshalBinary(in []byte) error {
+	var decoded EncryptionProof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
+}
+
+// AfterUnmarshalWire restores the derived proof version.
+func (p *EncryptionProof) AfterUnmarshalWire() error {
 	p.Version = proofVersion
-	if err := validateEncryptionProof(&p); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return nil
+}
+
+// Validate checks the encryption proof structure.
+func (p *EncryptionProof) Validate() error {
+	return validateEncryptionProof(p)
 }
 
 func encryptionTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, scalarCommitment, bound []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

@@ -11,6 +11,26 @@ field_count = uint16
 field      = tag:uint16 || value_len:uint32 || value
 ```
 
+## Public Binary API
+
+Exported types that callers persist, transmit, or restore implement the standard
+`encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler` contracts:
+
+```go
+raw, err := value.MarshalBinary()
+
+var restored SomeType
+err = restored.UnmarshalBinary(raw)
+```
+
+Types with caller-provided resource policy also expose
+`MarshalBinaryWithLimits` and `UnmarshalBinaryWithLimits`. Existing
+`UnmarshalFoo` and `UnmarshalFooWithLimits` functions remain convenience
+wrappers around those methods; they do not contain separate decoding logic.
+
+External callers must not depend on `internal/wire`. That package remains the
+single canonical TLV implementation used behind the standard binary methods.
+
 ## Object-Level API (Preferred)
 
 All production message types use the object-level `wire.Marshal` / `wire.Unmarshal` API driven by struct tags:
@@ -186,7 +206,8 @@ func (myMessageWire) WireType() string    { return "my.type" }
 func (myMessageWire) WireVersion() uint16 { return 1 }
 ```
 
-Conversion functions (`toWire()` / `toDomain()`) handle structural mapping and domain validation; field-level byte encoding is handled by the wire codec.
+Conversion helpers (`encodeFooWire` / `decodeFooWire`) handle structural mapping
+and domain validation; field-level byte encoding is handled by the wire codec.
 
 ## Canonical Rules
 
@@ -277,9 +298,17 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 ## Current Records
 
 - `tss.BlameEvidence` (direct struct encoding; `PublicInputs` as `[]EvidenceField` record list)
+- `tss.BroadcastAck`
+- `tss.BroadcastCertificate` (`Acks` as a canonical `BroadcastAck` record list)
+- `tss.SigningContext`
 - `tss.Envelope`
 - `cggmp21/secp256k1.KeyShare`
 - `cggmp21/secp256k1.Presign`
+- `cggmp21/secp256k1.VerificationShare`
+- `cggmp21/secp256k1.PaillierPublicShare`
+- `cggmp21/secp256k1.RingPedersenPublicShare`
+- `cggmp21/secp256k1.SignVerifyShare`
+- `cggmp21/secp256k1.SignAttemptRecord`
 - `cggmp21/secp256k1` keygen commitments payload
 - `cggmp21/secp256k1` keygen share payload
 - `cggmp21/secp256k1` presign round 1 payload
@@ -293,6 +322,7 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 - `cggmp21/secp256k1` refresh commitments payload
 - `cggmp21/secp256k1` refresh share payload
 - `frost/ed25519.KeyShare`
+- `frost/ed25519.VerificationShare`
 - `frost/ed25519` keygen commitments payload
 - `frost/ed25519` keygen share payload
 - `frost/ed25519` signing nonce commitment payload
@@ -331,13 +361,26 @@ Current presign wire shapes are:
 
 Legacy `EncryptionProof` bytes are not accepted by production presign decoders.
 
+`SignVerifyShare` implements the standard binary marshal/unmarshal interfaces
+with wire type `cggmp21.secp256k1.sign-verify-share`. Its fields are party ID,
+`KPoint`, `ChiPoint`, and signprep proof bytes.
+
+The public verification, Paillier, and Ring-Pedersen share records also expose
+standalone standard binary codecs. Their record bodies remain the same bodies
+embedded in KeyShare record lists.
+
 The canonical `cggmp21.secp256k1.presign` record contains the local fixed-length
 secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
 hashes, additive HD shift, consumed flag, key binding fields for the group
 public key, keygen transcript hash, and participant-set hash, and per-party
-`VerifyShares` (tag 17, one `SignVerifyShare` per signer: party ID + KPoint +
-ChiPoint + signprep proof bytes). Decoders require this complete 17-field set;
-prior presign records without the VerifyShares field are rejected.
+`VerifyShares` (tag 16, a canonical `SignVerifyShare` record list with one entry
+per signer). Decoders require the complete 19-field presign set. The former
+opaque party-triple byte field is intentionally not accepted.
+
+`SignAttemptRecord` stores delivery acknowledgments directly as a canonical
+`tss.BroadcastAck` record list. Its optional certificate field contains the
+complete canonical `tss.BroadcastCertificate` TLV encoding, so nil remains an
+empty field while non-nil certificates use the public standard codec.
 
 ## Decoder Policy
 

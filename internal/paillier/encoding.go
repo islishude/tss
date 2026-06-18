@@ -22,7 +22,11 @@ func (pk PublicKey) MarshalBinary() ([]byte, error) {
 // UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
 // wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
-	return UnmarshalPublicKeyWithMaxModulusBits(in, 0)
+	pk := new(PublicKey)
+	if err := pk.UnmarshalBinary(in); err != nil {
+		return nil, err
+	}
+	return pk, nil
 }
 
 // UnmarshalPublicKeyWithMaxModulusBits decodes a public key and rejects an
@@ -30,18 +34,34 @@ func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
 // The modulus bit-length check is enforced by wire.Unmarshal via the
 // max_bits=paillier_modulus_bits wire tag on PublicKey.
 func UnmarshalPublicKeyWithMaxModulusBits(in []byte, maxBits int) (*PublicKey, error) {
+	pk := new(PublicKey)
+	if err := pk.UnmarshalBinaryWithMaxModulusBits(in, maxBits); err != nil {
+		return nil, err
+	}
+	return pk, nil
+}
+
+// UnmarshalBinary decodes and rejects non-canonical public-key encodings.
+func (pk *PublicKey) UnmarshalBinary(in []byte) error {
+	return pk.UnmarshalBinaryWithMaxModulusBits(in, 0)
+}
+
+// UnmarshalBinaryWithMaxModulusBits decodes a public key and rejects an
+// oversized modulus before reconstructing derived fields.
+func (pk *PublicKey) UnmarshalBinaryWithMaxModulusBits(in []byte, maxBits int) error {
 	if maxBits <= 0 {
 		maxBits = tss.DefaultMaxPaillierModulusBits
 	}
-	var pk PublicKey
-	if err := wire.Unmarshal(in, &pk, wire.WithFieldLimits(wire.FieldLimits{
+	var decoded PublicKey
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(wire.FieldLimits{
 		"paillier_modulus_bits": maxBits,
 	})); err != nil {
-		return nil, err
+		return err
 	}
 	// Validate is called automatically by wire.Unmarshal after AfterUnmarshalWire
 	// (which reconstructs NSquared). No manual validation needed.
-	return &pk, nil
+	*pk = decoded
+	return nil
 }
 
 // MarshalBinary returns a deterministic TLV private-key record.
@@ -78,44 +98,53 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 
 // UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
 func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
+	sk := new(PrivateKey)
+	if err := sk.UnmarshalBinary(in); err != nil {
+		return nil, err
+	}
+	return sk, nil
+}
+
+// UnmarshalBinary decodes and rejects non-canonical private-key encodings.
+func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 	var w privateKeyWire
 	if err := wire.Unmarshal(in, &w); err != nil {
-		return nil, err
+		return err
 	}
 	n, err := decodePositiveIntBytes(w.N)
 	if err != nil {
-		return nil, fmt.Errorf("invalid public modulus: %w", err)
+		return fmt.Errorf("invalid public modulus: %w", err)
 	}
 	g, err := decodePositiveIntBytes(w.G)
 	if err != nil {
-		return nil, fmt.Errorf("invalid public generator: %w", err)
+		return fmt.Errorf("invalid public generator: %w", err)
 	}
 	lambdaBig, err := decodePositiveIntBytes(w.Lambda)
 	if err != nil {
-		return nil, fmt.Errorf("invalid lambda: %w", err)
+		return fmt.Errorf("invalid lambda: %w", err)
 	}
 	muBig, err := decodePositiveIntBytes(w.Mu)
 	if err != nil {
-		return nil, fmt.Errorf("invalid mu: %w", err)
+		return fmt.Errorf("invalid mu: %w", err)
 	}
 	p, err := decodePositiveIntBytes(w.P)
 	if err != nil {
-		return nil, fmt.Errorf("invalid p: %w", err)
+		return fmt.Errorf("invalid p: %w", err)
 	}
 	q, err := decodePositiveIntBytes(w.Q)
 	if err != nil {
-		return nil, fmt.Errorf("invalid q: %w", err)
+		return fmt.Errorf("invalid q: %w", err)
 	}
 	nLen := (n.BitLen() + 7) / 8
 	lambdaSec, err := secret.NewScalar(paillierct.FixedEncode(lambdaBig, nLen), nLen)
 	if err != nil {
-		return nil, fmt.Errorf("invalid lambda: %w", err)
+		return fmt.Errorf("invalid lambda: %w", err)
 	}
 	muSec, err := secret.NewScalar(paillierct.FixedEncode(muBig, nLen), nLen)
 	if err != nil {
-		return nil, fmt.Errorf("invalid mu: %w", err)
+		return fmt.Errorf("invalid mu: %w", err)
 	}
-	sk := &PrivateKey{
+	decoded := PrivateKey{
 		PublicKey: PublicKey{
 			N:        n,
 			NSquared: new(big.Int).Mul(n, n),
@@ -126,10 +155,11 @@ func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 		P:      p,
 		Q:      q,
 	}
-	if err := sk.Validate(); err != nil {
-		return nil, err
+	if err := decoded.Validate(); err != nil {
+		return err
 	}
-	return sk, nil
+	*sk = decoded
+	return nil
 }
 
 // encodePositiveInt returns the minimal big-endian encoding of a positive integer.

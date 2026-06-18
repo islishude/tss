@@ -331,14 +331,20 @@ func (r *DerivationResult) VerificationKeyBytes() []byte {
 
 // UnmarshalDerivationResult decodes a canonical derivation result record.
 func UnmarshalDerivationResult(in []byte) (*DerivationResult, error) {
+	return DecodeBinary[DerivationResult](in)
+}
+
+// UnmarshalBinary decodes a canonical derivation result record.
+func (r *DerivationResult) UnmarshalBinary(in []byte) error {
 	if len(in) == 0 {
-		return nil, errors.New("empty derivation result")
+		return errors.New("empty derivation result")
 	}
-	var r DerivationResult
-	if err := wire.Unmarshal(in, &r); err != nil {
-		return nil, err
+	var decoded DerivationResult
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
 	}
-	return &r, nil
+	*r = decoded
+	return nil
 }
 
 // SigningContext binds a signing request to key, chain, derivation, policy, and
@@ -356,6 +362,32 @@ func (SigningContext) WireType() string { return signingContextWireType }
 
 // WireVersion returns the wire format version for SigningContext.
 func (SigningContext) WireVersion() uint16 { return Version }
+
+// MarshalBinary encodes the signing context using canonical TLV.
+func (c SigningContext) MarshalBinary() ([]byte, error) {
+	return wire.Marshal(c)
+}
+
+// UnmarshalSigningContext decodes a canonical signing context.
+func UnmarshalSigningContext(in []byte) (*SigningContext, error) {
+	return DecodeBinary[SigningContext](in)
+}
+
+// UnmarshalBinary decodes a canonical signing context.
+func (c *SigningContext) UnmarshalBinary(in []byte) error {
+	if c == nil {
+		return errors.New("nil signing context")
+	}
+	if len(in) == 0 {
+		return errors.New("empty signing context")
+	}
+	var decoded SigningContext
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*c = decoded
+	return nil
+}
 
 // Validate checks required context fields and the non-hardened derivation path.
 func (c SigningContext) Validate() error {

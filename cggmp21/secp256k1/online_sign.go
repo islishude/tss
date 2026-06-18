@@ -326,7 +326,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	payload, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits)
+	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -495,7 +495,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate sign partial"))
 	}
 	payload := base.Payload
-	p, err := unmarshalSignPartialPayloadWithLimits(payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,

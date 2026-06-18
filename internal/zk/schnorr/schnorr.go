@@ -93,11 +93,21 @@ func (p *Proof) MarshalBinary() ([]byte, error) {
 
 // UnmarshalProof decodes a TLV Schnorr proof record using the object-level wire codec.
 func UnmarshalProof(in []byte) (*Proof, error) {
-	var proof Proof
-	if err := wire.Unmarshal(in, &proof); err != nil {
+	proof := new(Proof)
+	if err := proof.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
-	return &proof, nil
+	return proof, nil
+}
+
+// UnmarshalBinary decodes a TLV Schnorr proof record.
+func (p *Proof) UnmarshalBinary(in []byte) error {
+	var decoded Proof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
 }
 
 // Validate checks the canonical curve point and scalar encodings in the proof.

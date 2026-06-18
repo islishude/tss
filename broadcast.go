@@ -336,12 +336,12 @@ func (v *InMemoryAckVerifier) VerifyAck(party PartyID, digest [32]byte, signatur
 
 // BroadcastAck is one party's signed acknowledgment of a broadcast message.
 type BroadcastAck struct {
-	Party PartyID
+	Party PartyID `wire:"1,u32"`
 
-	PayloadHash    [32]byte
-	EnvelopeDigest EnvelopeDigest
+	PayloadHash    [32]byte       `wire:"2,bytes,len=32"`
+	EnvelopeDigest EnvelopeDigest `wire:"3,bytes,len=32"`
 
-	Signature []byte
+	Signature []byte `wire:"4,bytes,max_bytes=broadcast_signature"`
 }
 
 // Clone returns a deep copy of the broadcast ack.
@@ -356,17 +356,17 @@ func (a BroadcastAck) Clone() BroadcastAck {
 
 // BroadcastCertificate proves that all parties received the same broadcast payload.
 type BroadcastCertificate struct {
-	Protocol    ProtocolID
-	SessionID   SessionID
-	Round       uint8
-	From        PartyID
-	PayloadType PayloadType
+	Protocol    ProtocolID  `wire:"1,string,max_bytes=protocol_name"`
+	SessionID   SessionID   `wire:"2,bytes,len=32"`
+	Round       uint8       `wire:"3,u8"`
+	From        PartyID     `wire:"4,u32"`
+	PayloadType PayloadType `wire:"5,string,max_bytes=payload_type"`
 
-	PayloadHash    [32]byte
-	EnvelopeDigest EnvelopeDigest
+	PayloadHash    [32]byte       `wire:"6,bytes,len=32"`
+	EnvelopeDigest EnvelopeDigest `wire:"7,bytes,len=32"`
 
-	Recipients PartySet
-	Acks       []BroadcastAck
+	Recipients PartySet       `wire:"8,u32list,max_items=broadcast_recipients"`
+	Acks       []BroadcastAck `wire:"9,recordlist,max_items=broadcast_recipients"`
 }
 
 // Clone returns a deep copy of the broadcast certificate.

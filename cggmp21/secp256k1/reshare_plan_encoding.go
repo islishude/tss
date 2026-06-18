@@ -38,10 +38,29 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil reshare plan")
 	}
-	limits := p.limits
+	return p.MarshalBinaryWithLimits(p.limits)
+}
+
+// MarshalBinaryWithLimits returns the canonical wire encoding of p using
+// explicit local resource limits.
+func (p *ResharePlan) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil reshare plan")
+	}
 	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
+	raw, err := p.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > limits.State.MaxSerializedResharePlanBytes {
+		return nil, fmt.Errorf("reshare plan too large: %d > %d", len(raw), limits.State.MaxSerializedResharePlanBytes)
+	}
+	return raw, nil
+}
+
+func encodeResharePlanWire(p *ResharePlan) *resharePlanWire {
 	verificationShares := make([]wire.PartyBytes[tss.PartyID], len(p.state.oldParties))
 	for i, party := range p.state.oldParties {
 		verificationShares[i] = wire.PartyBytes[tss.PartyID]{
@@ -49,7 +68,7 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 			Bytes: p.state.oldVerificationShares[party],
 		}
 	}
-	raw, err := wire.Marshal(&resharePlanWire{
+	return &resharePlanWire{
 		SessionID:             p.state.sessionID[:],
 		CurveID:               p.state.curveID,
 		OldGroupPublicKey:     p.state.oldGroupPublicKey,
@@ -63,35 +82,49 @@ func (p *ResharePlan) MarshalBinary() ([]byte, error) {
 		ChainCode:             p.state.chainCode,
 		PaillierBits:          p.state.paillierBits,
 		SecurityParams:        p.state.securityParams,
-	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	if err != nil {
-		return nil, err
 	}
-	if len(raw) > limits.State.MaxSerializedResharePlanBytes {
-		return nil, fmt.Errorf("reshare plan too large: %d > %d", len(raw), limits.State.MaxSerializedResharePlanBytes)
-	}
-	return raw, nil
 }
 
 // UnmarshalResharePlan decodes and validates a canonical reshare plan.
 func UnmarshalResharePlan(in []byte) (*ResharePlan, error) {
-	return unmarshalResharePlanWithLimits(in, DefaultLimits())
+	return tss.DecodeBinary[ResharePlan](in)
 }
 
 // UnmarshalResharePlanWithLimits decodes and validates a canonical reshare plan
 // using explicit local resource limits.
 func UnmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, error) {
-	return unmarshalResharePlanWithLimits(in, limits)
+	return tss.DecodeBinaryWithLimits[ResharePlan](in, limits)
 }
 
-func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, error) {
+// UnmarshalBinary decodes and validates a canonical reshare plan.
+func (p *ResharePlan) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical reshare plan into the receiver
+// using explicit local resource limits.
+func (p *ResharePlan) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var w resharePlanWire
 	if err := wire.Unmarshal(in, &w,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedResharePlanBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
-		return nil, err
+		return err
 	}
+	state, err := decodeResharePlanWire(&w, limits)
+	if err != nil {
+		return err
+	}
+	decoded := ResharePlan{state: state, limits: limits}
+	if err := decoded.ValidateWithLimits(limits); err != nil {
+		return err
+	}
+	p.state = decoded.state
+	p.limits = limits
+	return nil
+}
+
+func decodeResharePlanWire(w *resharePlanWire, limits Limits) (*resharePlanState, error) {
 	if w.OldThreshold > limits.Threshold.MaxThreshold {
 		return nil, fmt.Errorf("old threshold too large: %d > %d", w.OldThreshold, limits.Threshold.MaxThreshold)
 	}
@@ -118,7 +151,7 @@ func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, err
 	if err != nil {
 		return nil, fmt.Errorf("invalid reshare session id: %w", err)
 	}
-	plan := &ResharePlan{state: &resharePlanState{
+	return &resharePlanState{
 		sessionID:             sessionID,
 		curveID:               w.CurveID,
 		oldGroupPublicKey:     w.OldGroupPublicKey,
@@ -132,9 +165,31 @@ func unmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, err
 		chainCode:             w.ChainCode,
 		paillierBits:          w.PaillierBits,
 		securityParams:        w.SecurityParams,
-	}, limits: limits}
-	if err := plan.ValidateWithLimits(limits); err != nil {
-		return nil, err
+	}, nil
+}
+
+// WireType returns the canonical wire type identifier for ResharePlan.
+func (*ResharePlan) WireType() string { return resharePlanWireType }
+
+// WireVersion returns the wire format version for ResharePlan.
+func (*ResharePlan) WireVersion() uint16 { return tss.Version }
+
+// MarshalWireMessage encodes ResharePlan through its private wire DTO.
+func (p *ResharePlan) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+	return wire.Marshal(encodeResharePlanWire(p), opts...)
+}
+
+// UnmarshalWireMessage decodes ResharePlan through its private wire DTO.
+func (p *ResharePlan) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	var w resharePlanWire
+	if err := wire.Unmarshal(in, &w, opts...); err != nil {
+		return err
 	}
-	return plan, nil
+	state, err := decodeResharePlanWire(&w, DefaultLimits())
+	if err != nil {
+		return err
+	}
+	p.state = state
+	p.limits = DefaultLimits()
+	return nil
 }

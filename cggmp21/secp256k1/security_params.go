@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -16,7 +17,7 @@ func DefaultSecurityParams() SecurityParams {
 
 // UnmarshalSecurityParams decodes and validates a canonical security profile.
 func UnmarshalSecurityParams(raw []byte) (SecurityParams, error) {
-	return zkpai.UnmarshalSecurityParams(raw)
+	return tss.DecodeBinaryValue[SecurityParams](raw)
 }
 
 func securityParamsOrDefault(params *SecurityParams) SecurityParams {

@@ -162,7 +162,13 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[0].Payload, err = wire.Marshal(payload, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
+	out2[0].Payload, err = testutil.RewriteWireFieldByName(
+		out2[0].Payload,
+		refreshCommitmentsPayloadWireType,
+		refreshCommitmentsPayload{},
+		"Commitments",
+		wire.EncodeBytesList(payload.Commitments),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}

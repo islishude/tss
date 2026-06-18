@@ -22,7 +22,7 @@ import (
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound3PayloadWithLimits(env.Payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[presignRound3Payload](env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(

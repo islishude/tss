@@ -129,11 +129,17 @@ func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
 // UnmarshalKeygenConfirmation decodes a canonical TLV keygen confirmation.
 // wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
-	var c KeygenConfirmation
-	if err := wire.Unmarshal(in, &c); err != nil {
-		return nil, err
+	return tss.DecodeBinary[KeygenConfirmation](in)
+}
+
+// UnmarshalBinary decodes a canonical TLV keygen confirmation.
+func (c *KeygenConfirmation) UnmarshalBinary(in []byte) error {
+	var decoded KeygenConfirmation
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
 	}
-	return &c, nil
+	*c = decoded
+	return nil
 }
 
 // compareKeygenConfirmation checks that a received confirmation matches the local

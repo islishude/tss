@@ -61,9 +61,19 @@ func (p *Proof) MarshalBinary() ([]byte, error) {
 // UnmarshalProof decodes a TLV signprep proof record using the object-level wire codec.
 // wire.Unmarshal calls Validate via the Validator interface.
 func UnmarshalProof(in []byte) (*Proof, error) {
-	var p Proof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(Proof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
-	return &p, nil
+	return p, nil
+}
+
+// UnmarshalBinary decodes a TLV signprep proof record.
+func (p *Proof) UnmarshalBinary(in []byte) error {
+	var decoded Proof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
 }

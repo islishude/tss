@@ -351,7 +351,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if dd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare dealer commitments"))
 		}
-		p, err := unmarshalReshareDealerCommitmentsPayloadWithLimits(env.Payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[reshareDealerCommitmentsPayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -372,7 +372,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if !s.isReceiver {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("local party is not a reshare receiver"))
 		}
-		p, err := unmarshalReshareSharePayloadWithLimits(env.Payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -407,7 +407,7 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		if len(npd.paillierPub.PublicKey) > 0 {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare receiver material"))
 		}
-		p, err := unmarshalReshareReceiverMaterialPayloadWithLimits(env.Payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[reshareReceiverMaterialPayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}

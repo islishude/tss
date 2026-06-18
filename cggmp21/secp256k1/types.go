@@ -7,7 +7,6 @@ import (
 	"io"
 
 	"github.com/islishude/tss"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 )
@@ -71,10 +70,10 @@ func (p PaillierPublicShare) Clone() PaillierPublicShare {
 // round 3. It is bound to the presign transcript via the signprep proof and used
 // during online signing to verify each partial independently.
 type SignVerifyShare struct {
-	Party    tss.PartyID `json:"party"`
-	KPoint   []byte      `json:"k_point"`
-	ChiPoint []byte      `json:"chi_point"`
-	Proof    []byte      `json:"proof"`
+	Party    tss.PartyID `json:"party" wire:"1,u32"`
+	KPoint   []byte      `json:"k_point" wire:"2,bytes,max_bytes=point"`
+	ChiPoint []byte      `json:"chi_point" wire:"3,bytes,max_bytes=point"`
+	Proof    []byte      `json:"proof" wire:"4,bytes,max_bytes=signprep_proof"`
 }
 
 // Clone returns a deep copy of the SignVerifyShare.
@@ -145,14 +144,15 @@ type keyShareState struct {
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer
-// set: one entry per signer, no extras, no duplicates, canonical point encodings,
-// and non-empty proofs within size limits.
+// set: one canonically ordered entry per signer, no extras, no duplicates,
+// canonical point encodings, and non-empty proofs within size limits.
 func validateSignVerifyShares(signers tss.PartySet, shares []SignVerifyShare, limits Limits) error {
 	if len(shares) != len(signers) {
 		return fmt.Errorf("verify shares count %d != signers %d", len(shares), len(signers))
 	}
+	totalBytes := 4 // recordlist item count
 	seen := make(map[tss.PartyID]bool, len(shares))
-	for _, share := range shares {
+	for i, share := range shares {
 		if !tss.ContainsParty(signers, share.Party) {
 			return fmt.Errorf("verify share for non-signer party %d", share.Party)
 		}
@@ -160,18 +160,16 @@ func validateSignVerifyShares(signers tss.PartySet, shares []SignVerifyShare, li
 			return fmt.Errorf("duplicate verify share for party %d", share.Party)
 		}
 		seen[share.Party] = true
-		if _, err := secp.PointFromBytes(share.KPoint); err != nil {
-			return fmt.Errorf("verify share party %d: invalid KPoint: %w", share.Party, err)
+		if share.Party != signers[i] {
+			return fmt.Errorf("verify share party %d out of canonical signer order at index %d", share.Party, i)
 		}
-		if _, err := secp.PointFromBytes(share.ChiPoint); err != nil {
-			return fmt.Errorf("verify share party %d: invalid ChiPoint: %w", share.Party, err)
+		if err := share.ValidateWithLimits(limits); err != nil {
+			return fmt.Errorf("verify share party %d: %w", share.Party, err)
 		}
-		if len(share.Proof) == 0 {
-			return fmt.Errorf("verify share party %d: empty proof", share.Party)
-		}
-		if len(share.Proof) > limits.SignPrep.MaxProofBytes {
-			return fmt.Errorf("verify share party %d: proof too large: %d > %d", share.Party, len(share.Proof), limits.SignPrep.MaxProofBytes)
-		}
+		totalBytes += 4 + signVerifyShareRecordSize(share)
+	}
+	if totalBytes > limits.SignPrep.MaxVerifySharesBytes {
+		return fmt.Errorf("verify shares too large: %d > %d", totalBytes, limits.SignPrep.MaxVerifySharesBytes)
 	}
 	return nil
 }

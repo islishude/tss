@@ -11,10 +11,11 @@ const (
 	maxCGGMPThreshold = 16
 	maxCGGMPSigners   = 16
 
-	maxSignPrepProofBytes      = 512 << 10
-	maxSignVerifyShareBytes    = 65*2 + maxSignPrepProofBytes + 8
-	maxSignVerifySharesBytes   = maxCGGMPSigners * maxSignVerifyShareBytes
-	maxSignPartialPayloadBytes = 32*6 + maxSignPrepProofBytes + 256
+	maxSignPrepProofBytes         = 512 << 10
+	maxSignVerifyShareRecordBytes = signVerifyShareRecordFixedBytes + 65*2 + maxSignPrepProofBytes
+	maxSignVerifyShareBytes       = signVerifyShareEnvelopeFixedBytes + maxSignVerifyShareRecordBytes
+	maxSignVerifySharesBytes      = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
+	maxSignPartialPayloadBytes    = 32*6 + maxSignPrepProofBytes + 256
 )
 
 // StateLimits caps serialized CGGMP21 key material.
@@ -163,9 +164,8 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"mta_response":               l.Paillier.MaxMTAResponseBytes,
 		"zk_proof":                   l.ZK.MaxProofBytes,
 		"signprep_proof":             l.SignPrep.MaxProofBytes,
-		"signprep_verify_share":      l.SignPrep.MaxVerifyShareBytes,
-		"signprep_verify_shares":     l.SignPrep.MaxVerifySharesBytes,
 		"signprep_partial_signature": l.SignPrep.MaxSignPartialPayloadBytes,
 		"envelope":                   tss.DefaultMaxEnvelopeBytes,
+		"broadcast_signature":        tss.DefaultMaxWireFieldBytes,
 	}
 }

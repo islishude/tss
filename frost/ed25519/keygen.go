@@ -206,7 +206,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	payload := base.Payload
 	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		p, err := unmarshalKeygenCommitmentsPayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -232,7 +232,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		}
 		pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
 	case payloadKeygenShare:
-		p, err := unmarshalKeygenSharePayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}

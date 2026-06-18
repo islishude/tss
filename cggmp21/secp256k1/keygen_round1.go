@@ -167,7 +167,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 // Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalKeygenCommitmentsPayloadWithLimits(env.Payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, protocolErrorWithEvidence(
 			tss.ErrCodeInvalidMessage,
@@ -322,7 +322,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 // Follows the handler template (see doc.go).
 func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalKeygenSharePayloadWithLimits(env.Payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

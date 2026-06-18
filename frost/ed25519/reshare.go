@@ -414,7 +414,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 	payload := base.Payload
 	switch base.PayloadType {
 	case payloadReshareCommitments:
-		p, err := unmarshalReshareCommitmentsPayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[reshareCommitmentsPayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -432,7 +432,7 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 		}
 		s.commits[base.From] = p.Commitments
 	case payloadReshareShare:
-		p, err := unmarshalReshareSharePayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}

@@ -25,21 +25,21 @@ type keyShareWire struct {
 	ChainCode              []byte                    `wire:"5,bytes"`
 	Secret                 *secret.Scalar            `wire:"6,custom,len=32"`
 	GroupCommitments       [][]byte                  `wire:"7,byteslist,max_bytes=point,max_items=threshold"`
-	VerificationShares     []VerificationShare       `wire:"8,recordlist"`
+	VerificationShares     []VerificationShare       `wire:"8,recordlist,max_items=parties"`
 	PaillierPublicKey      []byte                    `wire:"9,bytes,max_bytes=paillier_public_key"`
 	PaillierPrivateKey     []byte                    `wire:"10,bytes,max_bytes=paillier_private_key"`
 	PaillierProof          []byte                    `wire:"11,bytes,max_bytes=zk_proof"`
 	RingPedersenParams     []byte                    `wire:"12,bytes,max_bytes=ring_pedersen_params"`
 	RingPedersenProof      []byte                    `wire:"13,bytes,max_bytes=paillier_proof"`
-	RingPedersenPublic     []RingPedersenPublicShare `wire:"14,recordlist"`
-	PaillierPublicKeys     []PaillierPublicShare     `wire:"15,recordlist"`
+	RingPedersenPublic     []RingPedersenPublicShare `wire:"14,recordlist,max_items=parties"`
+	PaillierPublicKeys     []PaillierPublicShare     `wire:"15,recordlist,max_items=parties"`
 	ShareProof             []byte                    `wire:"16,bytes,max_bytes=zk_proof"`
 	KeygenTranscriptHash   []byte                    `wire:"17,bytes"`
 	PaillierProofSessionID []byte                    `wire:"18,bytes,len=32"`
 	PaillierProofDomain    string                    `wire:"19,string"`
 	LogCiphertext          []byte                    `wire:"20,bytes,max_bytes=paillier_ciphertext"`
 	LogProof               []byte                    `wire:"21,bytes,max_bytes=zk_proof"`
-	KeygenConfirmations    []*KeygenConfirmation     `wire:"22,recordlist"`
+	KeygenConfirmations    []*KeygenConfirmation     `wire:"22,recordlist,max_items=parties"`
 	ResharePlanHash        []byte                    `wire:"23,bytes"`
 	PlanHash               []byte                    `wire:"24,bytes,len=32"`
 	SecurityParams         SecurityParams            `wire:"25,record"`
@@ -51,7 +51,7 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 // WireVersion returns the wire format version for keyShareWire.
 func (keyShareWire) WireVersion() uint16 { return tss.Version }
 
-func (k *KeyShare) toWire() (*keyShareWire, error) {
+func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 	return &keyShareWire{
 		Party:                  k.state.party,
 		Threshold:              k.state.threshold,
@@ -81,50 +81,7 @@ func (k *KeyShare) toWire() (*keyShareWire, error) {
 	}, nil
 }
 
-func marshalKeyShare(k *KeyShare, limits Limits) ([]byte, error) {
-	if err := k.ValidateWithLimits(limits); err != nil {
-		return nil, err
-	}
-	w, err := k.toWire()
-	if err != nil {
-		return nil, err
-	}
-	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-}
-
-func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
-	var w keyShareWire
-	if err := wire.Unmarshal(in, &w,
-		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
-	); err != nil {
-		return nil, err
-	}
-	if w.Threshold > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("threshold too large: %d > %d", w.Threshold, limits.Threshold.MaxThreshold)
-	}
-	if len(w.Parties) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("parties too large: %d > %d", len(w.Parties), limits.Threshold.MaxParties)
-	}
-	if len(w.GroupCommitments) > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("group commitments too large: %d > %d", len(w.GroupCommitments), limits.Threshold.MaxThreshold)
-	}
-	for i, c := range w.GroupCommitments {
-		if len(c) > limits.Curve.MaxPointBytes {
-			return nil, fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.Curve.MaxPointBytes)
-		}
-	}
-	if len(w.VerificationShares) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("verification shares too large: %d > %d", len(w.VerificationShares), limits.Threshold.MaxParties)
-	}
-	for i, s := range w.VerificationShares {
-		if len(s.PublicKey) > limits.Curve.MaxPointBytes {
-			return nil, fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.Curve.MaxPointBytes)
-		}
-	}
-	if len(w.KeygenConfirmations) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("keygen confirmations too large: %d > %d", len(w.KeygenConfirmations), limits.Threshold.MaxParties)
-	}
+func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 	if _, err := secpScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
@@ -132,7 +89,7 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid paillier proof session id: %w", err)
 	}
-	k := &KeyShare{state: &keyShareState{
+	return &keyShareState{
 		securityParams:         w.SecurityParams,
 		party:                  w.Party,
 		threshold:              w.Threshold,
@@ -158,28 +115,47 @@ func unmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
 		keygenConfirmations:    w.KeygenConfirmations,
 		resharePlanHash:        w.ResharePlanHash,
 		planHash:               w.PlanHash,
-	}}
-	if err := k.ValidateWithLimits(limits); err != nil {
+	}, nil
+}
+
+// WireType returns the canonical wire type identifier for KeyShare.
+func (*KeyShare) WireType() string { return keyShareWireType }
+
+// WireVersion returns the wire format version for KeyShare.
+func (*KeyShare) WireVersion() uint16 { return tss.Version }
+
+// MarshalWireMessage encodes KeyShare through its private wire DTO.
+func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+	w, err := encodeKeyShareWire(k)
+	if err != nil {
 		return nil, err
 	}
-	return k, nil
+	return wire.Marshal(w, opts...)
+}
+
+// UnmarshalWireMessage decodes KeyShare through its private wire DTO.
+func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	var w keyShareWire
+	if err := wire.Unmarshal(in, &w, opts...); err != nil {
+		return err
+	}
+	state, err := decodeKeyShareWire(&w)
+	if err != nil {
+		return err
+	}
+	k.state = state
+	return nil
 }
 
 // UnmarshalPresign decodes a canonical CGGMP21 presign record with size caps.
 func UnmarshalPresign(in []byte) (*Presign, error) {
-	return UnmarshalPresignWithLimits(in, DefaultLimits())
+	return tss.DecodeBinary[Presign](in)
 }
 
 // UnmarshalPresignWithLimits decodes a canonical presign record using explicit
 // local resource limits.
 func UnmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
-	if len(in) == 0 {
-		return nil, errors.New("empty presign")
-	}
-	if len(in) > limits.State.MaxSerializedPresignBytes {
-		return nil, fmt.Errorf("presign too large: %d > %d", len(in), limits.State.MaxSerializedPresignBytes)
-	}
-	return unmarshalPresignWithLimits(in, limits)
+	return tss.DecodeBinaryWithLimits[Presign](in, limits)
 }
 
 // presignWire is the wire DTO for Presign.
@@ -199,7 +175,7 @@ type presignWire struct {
 	PublicKey            []byte                `wire:"13,bytes,max_bytes=point"`
 	KeygenTranscriptHash []byte                `wire:"14,bytes"`
 	PartiesHash          []byte                `wire:"15,bytes"`
-	VerifyShares         []byte                `wire:"16,bytes,max_bytes=signprep_verify_shares"`
+	VerifyShares         []SignVerifyShare     `wire:"16,recordlist,max_items=signers"`
 	PlanHash             []byte                `wire:"17,bytes,len=32"`
 	SecurityParams       SecurityParams        `wire:"18,record"`
 	Derivation           *tss.DerivationResult `wire:"19,record"`
@@ -211,20 +187,7 @@ func (presignWire) WireType() string { return presignWireType }
 // WireVersion returns the wire format version for presignWire.
 func (presignWire) WireVersion() uint16 { return tss.Version }
 
-func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
-	var w presignWire
-	if err := wire.Unmarshal(in, &w,
-		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedPresignBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
-	); err != nil {
-		return nil, err
-	}
-	if w.Threshold > limits.Threshold.MaxThreshold {
-		return nil, fmt.Errorf("threshold too large: %d > %d", w.Threshold, limits.Threshold.MaxThreshold)
-	}
-	if len(w.Signers) > limits.Threshold.MaxSigners {
-		return nil, fmt.Errorf("signers too large: %d > %d", len(w.Signers), limits.Threshold.MaxSigners)
-	}
+func decodePresignWire(w *presignWire) (*presignState, error) {
 	if _, err := secpScalarFromSecret(w.KShare); err != nil {
 		return nil, fmt.Errorf("invalid k share: %w", err)
 	}
@@ -233,10 +196,6 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	}
 	if _, err := secpScalarFromSecret(w.Delta); err != nil {
 		return nil, fmt.Errorf("invalid delta: %w", err)
-	}
-	verifyShares, err := decodeSignVerifySharesBytesWithLimit(w.VerifyShares, limits)
-	if err != nil {
-		return nil, fmt.Errorf("invalid verify shares: %w", err)
 	}
 	consumed := new(atomic.Bool)
 	consumed.Store(w.Consumed)
@@ -247,7 +206,7 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 	if err := validateDerivationResult(derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
 		return nil, fmt.Errorf("presign derivation result: %w", err)
 	}
-	p := &Presign{state: &presignState{
+	return &presignState{
 		version:              tss.Version,
 		securityParams:       w.SecurityParams,
 		party:                w.Party,
@@ -263,58 +222,60 @@ func unmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
 		publicKey:            w.PublicKey,
 		keygenTranscriptHash: w.KeygenTranscriptHash,
 		partiesHash:          w.PartiesHash,
-		verifyShares:         verifyShares,
+		verifyShares:         w.VerifyShares,
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
 		consumed:             consumed,
 		attempt:              newPresignAttemptBinding(w.Consumed),
-	}}
-	if err := p.ValidateWithLimits(limits); err != nil {
-		return nil, err
-	}
-	return p, nil
+	}, nil
 }
 
-// encodeSignVerifyShares encodes a slice of SignVerifyShare into a deterministic
-// TLV structure sorted by party ID.
-func encodeSignVerifyShares(shares []SignVerifyShare) []byte {
-	if len(shares) == 0 {
-		return nil
-	}
-	records := make([]wire.PartyTriple[tss.PartyID], len(shares))
-	for i, share := range shares {
-		records[i] = wire.PartyTriple[tss.PartyID]{
-			Party:  share.Party,
-			First:  share.KPoint,
-			Second: share.ChiPoint,
-			Third:  share.Proof,
-		}
-	}
-	return wire.EncodePartyTriples(records)
+// WireType returns the canonical wire type identifier for Presign.
+func (*Presign) WireType() string { return presignWireType }
+
+// WireVersion returns the wire format version for Presign.
+func (*Presign) WireVersion() uint16 { return tss.Version }
+
+// MarshalWireMessage encodes Presign through its private wire DTO.
+func (p *Presign) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+	return wire.Marshal(encodePresignWire(p), opts...)
 }
 
-// decodeSignVerifySharesBytesWithLimit decodes a SignVerifyShare slice with
-// per-field size caps.
-func decodeSignVerifySharesBytesWithLimit(raw []byte, limits Limits) ([]SignVerifyShare, error) {
-	records, err := wire.DecodePartyTriplesWithLimit[tss.PartyID](raw,
-		limits.Threshold.MaxSigners,
-		limits.Curve.MaxPointBytes,
-		limits.Curve.MaxPointBytes,
-		limits.SignPrep.MaxProofBytes,
-		"sign verify share",
-	)
+// UnmarshalWireMessage decodes Presign through its private wire DTO.
+func (p *Presign) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	var w presignWire
+	if err := wire.Unmarshal(in, &w, opts...); err != nil {
+		return err
+	}
+	state, err := decodePresignWire(&w)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	out := make([]SignVerifyShare, 0, len(records))
-	for _, record := range records {
-		out = append(out, SignVerifyShare{
-			Party:    record.Party,
-			KPoint:   record.First,
-			ChiPoint: record.Second,
-			Proof:    record.Third,
-		})
+	p.state = state
+	return nil
+}
+
+func encodePresignWire(p *Presign) presignWire {
+	return presignWire{
+		Party:                p.state.party,
+		Threshold:            p.state.threshold,
+		Signers:              p.state.signers,
+		R:                    p.state.r,
+		LittleR:              p.state.littleR,
+		KShare:               p.state.kShare,
+		ChiShare:             p.state.chiShare,
+		Delta:                p.state.delta,
+		TranscriptHash:       p.state.transcriptHash,
+		Context:              p.state.context,
+		ContextHash:          p.state.contextHash,
+		PlanHash:             p.state.planHash,
+		Consumed:             IsPresignConsumed(p),
+		PublicKey:            p.state.publicKey,
+		KeygenTranscriptHash: p.state.keygenTranscriptHash,
+		PartiesHash:          p.state.partiesHash,
+		VerifyShares:         p.state.verifyShares,
+		SecurityParams:       p.state.securityParams,
+		Derivation:           p.state.derivation,
 	}
-	return out, nil
 }

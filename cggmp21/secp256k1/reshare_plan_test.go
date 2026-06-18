@@ -216,7 +216,7 @@ func TestResharePlanSerializedSizeLimit(t *testing.T) {
 	}
 	limits := testLimits()
 	limits.State.MaxSerializedResharePlanBytes = len(raw) - 1
-	if _, err := unmarshalResharePlanWithLimits(raw, limits); err == nil {
+	if _, err := UnmarshalResharePlanWithLimits(raw, limits); err == nil {
 		t.Fatal("reshare plan exceeded serialized size limit")
 	}
 }

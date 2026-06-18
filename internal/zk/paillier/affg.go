@@ -495,14 +495,23 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 
 // UnmarshalAffGProof decodes a canonical TLV AffGProof.
 func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
-	var w affGProofWire
-	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	p := new(AffGProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
-	if w.Version != affGProofVersion {
-		return nil, fmt.Errorf("unsupported AffGProof version %d", w.Version)
+	return p, nil
+}
+
+// UnmarshalBinary decodes a canonical TLV AffGProof.
+func (p *AffGProof) UnmarshalBinary(in []byte) error {
+	var w affGProofWire
+	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+		return err
 	}
-	return &AffGProof{
+	if w.Version != affGProofVersion {
+		return fmt.Errorf("unsupported AffGProof version %d", w.Version)
+	}
+	decoded := AffGProof{
 		Version:        w.Version,
 		A:              w.A,
 		Bx:             w.Bx.P,
@@ -519,7 +528,9 @@ func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
 		W:              w.W,
 		WY:             w.WY,
 		TranscriptHash: w.TranscriptHash,
-	}, nil
+	}
+	*p = decoded
+	return nil
 }
 
 func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitness) error {

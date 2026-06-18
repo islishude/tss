@@ -291,28 +291,40 @@ func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
-	consumed := IsPresignConsumed(p)
-	return wire.Marshal(presignWire{
-		Party:                p.state.party,
-		Threshold:            p.state.threshold,
-		Signers:              p.state.signers,
-		R:                    p.state.r,
-		LittleR:              p.state.littleR,
-		KShare:               p.state.kShare,
-		ChiShare:             p.state.chiShare,
-		Delta:                p.state.delta,
-		TranscriptHash:       p.state.transcriptHash,
-		Context:              p.state.context,
-		ContextHash:          p.state.contextHash,
-		PlanHash:             p.state.planHash,
-		Consumed:             consumed,
-		PublicKey:            p.state.publicKey,
-		KeygenTranscriptHash: p.state.keygenTranscriptHash,
-		PartiesHash:          p.state.partiesHash,
-		VerifyShares:         encodeSignVerifyShares(p.state.verifyShares),
-		SecurityParams:       p.state.securityParams,
-		Derivation:           p.state.derivation,
-	}, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
+// UnmarshalBinary decodes a canonical CGGMP21 presign record with size caps.
+func (p *Presign) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical presign record into the
+// receiver using explicit local resource limits.
+func (p *Presign) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	if len(in) == 0 {
+		return errors.New("empty presign")
+	}
+	if len(in) > limits.State.MaxSerializedPresignBytes {
+		return fmt.Errorf("presign too large: %d > %d", len(in), limits.State.MaxSerializedPresignBytes)
+	}
+	var w presignWire
+	if err := wire.Unmarshal(in, &w,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedPresignBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return err
+	}
+	state, err := decodePresignWire(&w)
+	if err != nil {
+		return err
+	}
+	decoded := Presign{state: state}
+	if err := decoded.ValidateWithLimits(limits); err != nil {
+		return err
+	}
+	p.state = decoded.state
+	return nil
 }
 
 // ID returns a content-derived presign identifier suitable for use as an

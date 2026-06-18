@@ -107,10 +107,20 @@ func (sp SecurityParams) MarshalBinary() ([]byte, error) {
 // UnmarshalSecurityParams decodes and validates a canonical security profile.
 func UnmarshalSecurityParams(in []byte) (SecurityParams, error) {
 	var sp SecurityParams
-	if err := wire.Unmarshal(in, &sp); err != nil {
+	if err := sp.UnmarshalBinary(in); err != nil {
 		return SecurityParams{}, err
 	}
 	return sp, nil
+}
+
+// UnmarshalBinary decodes and validates a canonical security profile.
+func (sp *SecurityParams) UnmarshalBinary(in []byte) error {
+	var decoded SecurityParams
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*sp = decoded
+	return nil
 }
 
 // CheckPaillierModulus verifies that a Paillier modulus N satisfies the minimum

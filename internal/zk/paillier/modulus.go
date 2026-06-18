@@ -146,17 +146,39 @@ func marshalModulusProof(p *ModulusProof) ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalBinary encodes a modulus proof canonically.
+func (p *ModulusProof) MarshalBinary() ([]byte, error) {
+	return marshalModulusProof(p)
+}
+
 // UnmarshalModulusProof decodes and structurally validates a modulus proof.
 func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
-	var p ModulusProof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(ModulusProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
+
+// UnmarshalBinary decodes and structurally validates a modulus proof.
+func (p *ModulusProof) UnmarshalBinary(in []byte) error {
+	var decoded ModulusProof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
+}
+
+// AfterUnmarshalWire restores the derived proof version.
+func (p *ModulusProof) AfterUnmarshalWire() error {
 	p.Version = proofVersion
-	if err := validateModulusProof(&p); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return nil
+}
+
+// Validate checks the modulus proof structure.
+func (p *ModulusProof) Validate() error {
+	return validateModulusProof(p)
 }
 
 func validateModulusProof(p *ModulusProof) error {

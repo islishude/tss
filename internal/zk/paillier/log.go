@@ -162,17 +162,39 @@ func marshalLogProof(p *LogProof) ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalBinary encodes a log proof canonically.
+func (p *LogProof) MarshalBinary() ([]byte, error) {
+	return marshalLogProof(p)
+}
+
 // UnmarshalLogProof decodes and validates a Π^log proof.
 func UnmarshalLogProof(in []byte) (*LogProof, error) {
-	var p LogProof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(LogProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
+
+// UnmarshalBinary decodes and validates a log proof.
+func (p *LogProof) UnmarshalBinary(in []byte) error {
+	var decoded LogProof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
+}
+
+// AfterUnmarshalWire restores the derived proof version.
+func (p *LogProof) AfterUnmarshalWire() error {
 	p.Version = proofVersion
-	if err := validateLogProof(&p); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return nil
+}
+
+// Validate checks the log proof structure.
+func (p *LogProof) Validate() error {
+	return validateLogProof(p)
 }
 
 func logTranscript(domain []byte, pk *pai.PublicKey, ciphertext *big.Int, pointBytes []byte, cipherCommitment *big.Int, pointCommitment []byte) []byte {

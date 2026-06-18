@@ -185,6 +185,15 @@ func (k *KeyShare) MarshalBinary() ([]byte, error) {
 	return marshalKeyShare(k)
 }
 
+// MarshalBinaryWithLimits encodes the share using canonical TLV wire format
+// with explicit local resource limits.
+func (k *KeyShare) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	if err := k.ValidateWithLimits(limits); err != nil {
+		return nil, err
+	}
+	return wire.Marshal(k, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+}
+
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
 func (k KeyShare) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("frost ed25519 key share contains secret material; use MarshalBinary")
@@ -232,19 +241,41 @@ func (k KeyShare) redactedString() string {
 
 // UnmarshalKeyShare decodes a canonical FROST key-share record with size caps.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	return UnmarshalKeyShareWithLimits(in, DefaultLimits())
+	return tss.DecodeBinary[KeyShare](in)
 }
 
 // UnmarshalKeyShareWithLimits decodes a canonical FROST key-share record using
 // explicit local resource limits.
 func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
+	return tss.DecodeBinaryWithLimits[KeyShare](in, limits)
+}
+
+// UnmarshalBinary decodes a canonical FROST key-share record with size caps.
+func (k *KeyShare) UnmarshalBinary(in []byte) error {
+	return k.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical FROST key-share record into the
+// receiver using explicit local resource limits.
+func (k *KeyShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) == 0 {
-		return nil, errors.New("empty key share")
+		return errors.New("empty key share")
 	}
 	if len(in) > limits.State.MaxSerializedKeyShareBytes {
-		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
+		return fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
-	return unmarshalKeyShareWithLimits(in, limits)
+	var decoded KeyShare
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return err
+	}
+	if err := decoded.ValidateWithLimits(limits); err != nil {
+		return err
+	}
+	k.state = decoded.state
+	return nil
 }
 
 func (k *KeyShare) validateWithoutConfirmations() error {

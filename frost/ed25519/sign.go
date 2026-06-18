@@ -256,7 +256,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if base.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("commitment must be round 1"))
 		}
-		p, err := unmarshalNonceCommitmentPayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[nonceCommitment](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -275,7 +275,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if base.Round != 2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("partial signature must be round 2"))
 		}
-		p, err := unmarshalSignPartialPayloadWithLimits(payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}

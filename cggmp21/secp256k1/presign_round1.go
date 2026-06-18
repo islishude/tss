@@ -250,7 +250,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound1PayloadWithLimits(env.Payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[presignRound1Payload](env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(
@@ -305,7 +305,7 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 // Follows the handler template (see doc.go).
 func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envelope, error) {
 	// ---- 1. PARSE ----
-	p, err := unmarshalPresignRound1ProofPayloadWithLimits(env.Payload, s.limits)
+	p, err := tss.DecodeBinaryValueWithLimits[presignRound1ProofPayload](env.Payload, s.limits)
 	if err != nil {
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 		return nil, protocolErrorWithEvidence(

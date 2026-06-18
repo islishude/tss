@@ -61,6 +61,17 @@ func TestGoldenKeyShare(t *testing.T) {
 	}
 }
 
+func TestGoldenVerificationShare(t *testing.T) {
+	t.Parallel()
+	share := testFROSTVerificationShare(t)
+	raw, err := share.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "VerificationShare.golden")
+	testutil.CheckGolden(t, golden, raw)
+}
+
 func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 	t.Parallel()
 	point, err := edcurve.ScalarBaseMultBig(big.NewInt(1))

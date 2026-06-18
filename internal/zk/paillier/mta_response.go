@@ -260,17 +260,39 @@ func marshalMTAResponseProof(p *MTAResponseProof) ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalBinary encodes an MtA response proof canonically.
+func (p *MTAResponseProof) MarshalBinary() ([]byte, error) {
+	return marshalMTAResponseProof(p)
+}
+
 // UnmarshalMTAResponseProof decodes and validates an MtA response proof shell.
 func UnmarshalMTAResponseProof(in []byte) (*MTAResponseProof, error) {
-	var p MTAResponseProof
-	if err := wire.Unmarshal(in, &p); err != nil {
+	p := new(MTAResponseProof)
+	if err := p.UnmarshalBinary(in); err != nil {
 		return nil, err
 	}
+	return p, nil
+}
+
+// UnmarshalBinary decodes and validates an MtA response proof shell.
+func (p *MTAResponseProof) UnmarshalBinary(in []byte) error {
+	var decoded MTAResponseProof
+	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
+}
+
+// AfterUnmarshalWire restores the derived proof version.
+func (p *MTAResponseProof) AfterUnmarshalWire() error {
 	p.Version = proofVersion
-	if err := validateMTAResponseProof(&p); err != nil {
-		return nil, err
-	}
-	return &p, nil
+	return nil
+}
+
+// Validate checks the MtA response proof structure.
+func (p *MTAResponseProof) Validate() error {
+	return validateMTAResponseProof(p)
 }
 
 func mtaTranscript(domain []byte, pk *pai.PublicKey, encA, response *big.Int, bCommitment, betaCommitment []byte, cipherCommitment *big.Int, bNonce, betaNonce []byte) []byte {

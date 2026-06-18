@@ -233,7 +233,10 @@ func (k *KeyShare) MarshalBinary() ([]byte, error) {
 
 // MarshalBinaryWithLimits encodes the share using explicit local limits.
 func (k *KeyShare) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	return marshalKeyShare(k, limits)
+	if err := k.ValidateWithLimits(limits); err != nil {
+		return nil, err
+	}
+	return k.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
@@ -295,19 +298,41 @@ func (k KeyShare) redactedString() string {
 
 // UnmarshalKeyShare decodes a canonical CGGMP21 key-share record with size caps.
 func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	return UnmarshalKeyShareWithLimits(in, DefaultLimits())
+	return tss.DecodeBinary[KeyShare](in)
 }
 
 // UnmarshalKeyShareWithLimits decodes a canonical key-share record using
 // explicit local resource limits.
 func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
+	return tss.DecodeBinaryWithLimits[KeyShare](in, limits)
+}
+
+// UnmarshalBinary decodes a canonical CGGMP21 key-share record with size caps.
+func (k *KeyShare) UnmarshalBinary(in []byte) error {
+	return k.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical key-share record into the
+// receiver using explicit local resource limits.
+func (k *KeyShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) == 0 {
-		return nil, errors.New("empty key share")
+		return errors.New("empty key share")
 	}
 	if len(in) > limits.State.MaxSerializedKeyShareBytes {
-		return nil, fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
+		return fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
-	return unmarshalKeyShareWithLimits(in, limits)
+	var decoded KeyShare
+	if err := decoded.UnmarshalWireMessage(in,
+		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		return err
+	}
+	if err := decoded.ValidateWithLimits(limits); err != nil {
+		return err
+	}
+	k.state = decoded.state
+	return nil
 }
 
 func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
@@ -566,14 +591,11 @@ func (k *KeyShare) Validate() error {
 // It enforces hard caps on party count and threshold, and rejects configurations
 // below the production minimum threshold unless explicitly allowed by the limits.
 func (k *KeyShare) ValidateWithLimits(limits Limits) error {
-	if err := k.validateWithoutConfirmations(limits); err != nil {
+	if err := k.validateResourceLimits(limits); err != nil {
 		return err
 	}
-	if len(k.state.parties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many parties: %d > %d", len(k.state.parties), limits.Threshold.MaxParties)
-	}
-	if k.state.threshold > limits.Threshold.MaxThreshold {
-		return fmt.Errorf("threshold too large: %d > %d", k.state.threshold, limits.Threshold.MaxThreshold)
+	if err := k.validateWithoutConfirmations(limits); err != nil {
+		return err
 	}
 	if err := limits.Threshold.ValidateThreshold(k.state.threshold, len(k.state.parties)); err != nil {
 		return err
@@ -590,6 +612,84 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 		if err := verifyFinalizedKeygenConfirmationSet(k, k.state.keygenConfirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
+	}
+	return nil
+}
+
+func (k *KeyShare) validateResourceLimits(limits Limits) error {
+	if k == nil || k.state == nil {
+		return errors.New("nil key share")
+	}
+	if len(k.state.parties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many parties: %d > %d", len(k.state.parties), limits.Threshold.MaxParties)
+	}
+	if k.state.threshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("threshold too large: %d > %d", k.state.threshold, limits.Threshold.MaxThreshold)
+	}
+	if len(k.state.groupCommitments) > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("group commitments too large: %d > %d", len(k.state.groupCommitments), limits.Threshold.MaxThreshold)
+	}
+	for i, commitment := range k.state.groupCommitments {
+		if len(commitment) > limits.Curve.MaxPointBytes {
+			return fmt.Errorf("group commitment %d too large: %d > %d", i, len(commitment), limits.Curve.MaxPointBytes)
+		}
+	}
+	if len(k.state.verificationShares) > limits.Threshold.MaxParties {
+		return fmt.Errorf("verification shares too large: %d > %d", len(k.state.verificationShares), limits.Threshold.MaxParties)
+	}
+	for i, share := range k.state.verificationShares {
+		if len(share.PublicKey) > limits.Curve.MaxPointBytes {
+			return fmt.Errorf("verification share %d too large: %d > %d", i, len(share.PublicKey), limits.Curve.MaxPointBytes)
+		}
+	}
+	if len(k.state.paillierPublicKey) > limits.Paillier.MaxPublicKeyBytes {
+		return fmt.Errorf("paillier public key too large: %d > %d", len(k.state.paillierPublicKey), limits.Paillier.MaxPublicKeyBytes)
+	}
+	if len(k.state.paillierPrivateKey) > limits.Paillier.MaxPrivateKeyBytes {
+		return fmt.Errorf("paillier private key too large: %d > %d", len(k.state.paillierPrivateKey), limits.Paillier.MaxPrivateKeyBytes)
+	}
+	if len(k.state.paillierProof) > limits.ZK.MaxProofBytes {
+		return fmt.Errorf("paillier proof too large: %d > %d", len(k.state.paillierProof), limits.ZK.MaxProofBytes)
+	}
+	if len(k.state.ringPedersenParams) > limits.Paillier.MaxRingPedersenBytes {
+		return fmt.Errorf("Ring-Pedersen parameters too large: %d > %d", len(k.state.ringPedersenParams), limits.Paillier.MaxRingPedersenBytes)
+	}
+	if len(k.state.ringPedersenProof) > limits.Paillier.MaxProofBytes {
+		return fmt.Errorf("Ring-Pedersen proof too large: %d > %d", len(k.state.ringPedersenProof), limits.Paillier.MaxProofBytes)
+	}
+	if len(k.state.ringPedersenPublic) > limits.Threshold.MaxParties {
+		return fmt.Errorf("Ring-Pedersen public shares too large: %d > %d", len(k.state.ringPedersenPublic), limits.Threshold.MaxParties)
+	}
+	for i, share := range k.state.ringPedersenPublic {
+		if len(share.Params) > limits.Paillier.MaxRingPedersenBytes {
+			return fmt.Errorf("Ring-Pedersen public share %d parameters too large: %d > %d", i, len(share.Params), limits.Paillier.MaxRingPedersenBytes)
+		}
+		if len(share.Proof) > limits.Paillier.MaxProofBytes {
+			return fmt.Errorf("Ring-Pedersen public share %d proof too large: %d > %d", i, len(share.Proof), limits.Paillier.MaxProofBytes)
+		}
+	}
+	if len(k.state.paillierPublicKeys) > limits.Threshold.MaxParties {
+		return fmt.Errorf("paillier public shares too large: %d > %d", len(k.state.paillierPublicKeys), limits.Threshold.MaxParties)
+	}
+	for i, share := range k.state.paillierPublicKeys {
+		if len(share.PublicKey) > limits.Paillier.MaxPublicKeyBytes {
+			return fmt.Errorf("paillier public share %d key too large: %d > %d", i, len(share.PublicKey), limits.Paillier.MaxPublicKeyBytes)
+		}
+		if len(share.Proof) > limits.ZK.MaxProofBytes {
+			return fmt.Errorf("paillier public share %d proof too large: %d > %d", i, len(share.Proof), limits.ZK.MaxProofBytes)
+		}
+	}
+	if len(k.state.shareProof) > limits.ZK.MaxProofBytes {
+		return fmt.Errorf("share proof too large: %d > %d", len(k.state.shareProof), limits.ZK.MaxProofBytes)
+	}
+	if len(k.state.logCiphertext) > limits.Paillier.MaxCiphertextBytes {
+		return fmt.Errorf("log ciphertext too large: %d > %d", len(k.state.logCiphertext), limits.Paillier.MaxCiphertextBytes)
+	}
+	if len(k.state.logProof) > limits.ZK.MaxProofBytes {
+		return fmt.Errorf("log proof too large: %d > %d", len(k.state.logProof), limits.ZK.MaxProofBytes)
+	}
+	if len(k.state.keygenConfirmations) > limits.Threshold.MaxParties {
+		return fmt.Errorf("keygen confirmations too large: %d > %d", len(k.state.keygenConfirmations), limits.Threshold.MaxParties)
 	}
 	return nil
 }

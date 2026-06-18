@@ -188,6 +188,11 @@ proving all parties received the same payload. Use
 performs structural checks only and is intended for test code and low-level
 parsing.
 
+`BroadcastAck` and `BroadcastCertificate` implement
+`encoding.BinaryMarshaler` and `encoding.BinaryUnmarshaler`. Certificate
+encoding sorts recipients and acknowledgments canonically and rejects duplicate,
+out-of-order, or mismatched acknowledgment records during decoding.
+
 ```go
 type BroadcastCertificate struct {
     Protocol       ProtocolID

@@ -265,7 +265,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if pd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh commitments"))
 		}
-		p, err := unmarshalRefreshCommitmentsPayloadWithLimits(env.Payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[refreshCommitmentsPayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -364,7 +364,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if pd.share != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh share"))
 		}
-		p, err := unmarshalRefreshSharePayloadWithLimits(env.Payload, s.limits)
+		p, err := tss.DecodeBinaryValueWithLimits[refreshSharePayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}

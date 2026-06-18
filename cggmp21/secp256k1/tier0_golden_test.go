@@ -40,6 +40,65 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	}
 }
 
+// TestFast_GoldenSignVerifyShare verifies the standalone verification-share
+// wire contract used by the Presign VerifyShares record list.
+func TestFast_GoldenSignVerifyShare(t *testing.T) {
+	t.Parallel()
+	share := minimalCGGMP21Presign(t).VerifyShares()[0]
+	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignVerifyShare.golden")
+	testutil.CheckGolden(t, golden, raw)
+
+	var decoded SignVerifyShare
+	if err := decoded.UnmarshalBinaryWithLimits(raw, testLimits()); err != nil {
+		t.Fatal(err)
+	}
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw, raw2) {
+		t.Error("round-trip produced different encoding")
+	}
+	if err := decoded.UnmarshalBinaryWithLimits(append(raw, 0), testLimits()); err == nil {
+		t.Error("accepted trailing byte")
+	}
+}
+
+func TestFast_GoldenVerificationShare(t *testing.T) {
+	t.Parallel()
+	share := testVerificationShare(t)
+	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "VerificationShare.golden"), raw)
+}
+
+func TestFast_GoldenPaillierPublicShare(t *testing.T) {
+	t.Parallel()
+	share := testPaillierPublicShare(t)
+	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PaillierPublicShare.golden"), raw)
+}
+
+func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
+	t.Parallel()
+	share := testRingPedersenPublicShare(t)
+	raw, err := share.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "RingPedersenPublicShare.golden"), raw)
+}
+
 // TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {

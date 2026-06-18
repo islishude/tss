@@ -187,7 +187,13 @@ func validateEnvelopeFields(env *Envelope, limits EnvelopeLimits) error {
 // MarshalBinary encodes the envelope using the object-level wire codec with
 // conservative default limits. Use [MarshalEnvelopeWithLimits] for explicit control.
 func (e Envelope) MarshalBinary() ([]byte, error) {
-	return MarshalEnvelopeWithLimits(e, defaultEnvelopeLimits())
+	return e.MarshalBinaryWithLimits(defaultEnvelopeLimits())
+}
+
+// MarshalBinaryWithLimits encodes the envelope using the object-level wire
+// codec, enforcing the provided size limits.
+func (e Envelope) MarshalBinaryWithLimits(limits EnvelopeLimits) ([]byte, error) {
+	return MarshalEnvelopeWithLimits(e, limits)
 }
 
 // MarshalEnvelopeWithLimits encodes the envelope using the object-level wire
@@ -202,8 +208,27 @@ func MarshalEnvelopeWithLimits(env Envelope, limits EnvelopeLimits) ([]byte, err
 // UnmarshalBinary decodes a canonical TLV envelope using the object-level wire codec
 // with conservative default limits. Use [UnmarshalEnvelopeWithLimits] for explicit control.
 func (e *Envelope) UnmarshalBinary(in []byte) error {
-	env, err := UnmarshalEnvelopeWithLimits(in, defaultEnvelopeLimits())
-	if err != nil {
+	return e.UnmarshalBinaryWithLimits(in, defaultEnvelopeLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical TLV envelope into the receiver,
+// enforcing the provided size limits.
+func (e *Envelope) UnmarshalBinaryWithLimits(in []byte, limits EnvelopeLimits) error {
+	if len(in) == 0 {
+		return errors.New("empty envelope")
+	}
+	if len(in) > limits.MaxBytes {
+		return fmt.Errorf("envelope too large: %d > %d", len(in), limits.MaxBytes)
+	}
+	var env Envelope
+	if err := wire.Unmarshal(in, &env, wire.WithFrameLimits(wire.FrameLimits{
+		MaxTotalBytes: limits.MaxBytes,
+		MaxFields:     limits.TLV.MaxFields,
+		MaxFieldBytes: limits.TLV.MaxFieldBytes,
+	})); err != nil {
+		return err
+	}
+	if err := validateEnvelopeFields(&env, limits); err != nil {
 		return err
 	}
 	*e = env
@@ -213,24 +238,7 @@ func (e *Envelope) UnmarshalBinary(in []byte) error {
 // UnmarshalEnvelopeWithLimits decodes a canonical TLV envelope enforcing the
 // provided size limits. It returns a decoded envelope or an error.
 func UnmarshalEnvelopeWithLimits(in []byte, limits EnvelopeLimits) (Envelope, error) {
-	if len(in) == 0 {
-		return Envelope{}, errors.New("empty envelope")
-	}
-	if len(in) > limits.MaxBytes {
-		return Envelope{}, fmt.Errorf("envelope too large: %d > %d", len(in), limits.MaxBytes)
-	}
-	var env Envelope
-	if err := wire.Unmarshal(in, &env, wire.WithFrameLimits(wire.FrameLimits{
-		MaxTotalBytes: limits.MaxBytes,
-		MaxFields:     limits.TLV.MaxFields,
-		MaxFieldBytes: limits.TLV.MaxFieldBytes,
-	})); err != nil {
-		return Envelope{}, err
-	}
-	if err := validateEnvelopeFields(&env, limits); err != nil {
-		return Envelope{}, err
-	}
-	return env, nil
+	return DecodeBinaryValueWithLimits[Envelope](in, limits)
 }
 
 // NewEnvelope constructs an envelope from caller-provided fields using

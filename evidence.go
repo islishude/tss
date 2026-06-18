@@ -218,7 +218,13 @@ func (e *BlameEvidence) BeforeMarshalWire() error {
 // MarshalBinary encodes BlameEvidence using the object-level wire codec with
 // conservative default limits. Use [MarshalEvidenceWithLimits] for explicit control.
 func (e *BlameEvidence) MarshalBinary() ([]byte, error) {
-	return MarshalEvidenceWithLimits(e, defaultEvidenceLimits())
+	return e.MarshalBinaryWithLimits(defaultEvidenceLimits())
+}
+
+// MarshalBinaryWithLimits encodes BlameEvidence using the object-level wire
+// codec with explicit limits.
+func (e *BlameEvidence) MarshalBinaryWithLimits(l EvidenceLimits) ([]byte, error) {
+	return MarshalEvidenceWithLimits(e, l)
 }
 
 // MarshalEvidenceWithLimits encodes BlameEvidence using the object-level wire
@@ -232,18 +238,30 @@ func MarshalEvidenceWithLimits(e *BlameEvidence, l EvidenceLimits) ([]byte, erro
 // conservative default limits. Use [UnmarshalBlameEvidenceWithLimits] for
 // explicit control.
 func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
-	return UnmarshalBlameEvidenceWithLimits(in, defaultEvidenceLimits())
+	return DecodeBinary[BlameEvidence](in)
 }
 
 // UnmarshalBlameEvidenceWithLimits decodes and validates public blame evidence
 // with explicit size limits.
 func UnmarshalBlameEvidenceWithLimits(in []byte, l EvidenceLimits) (*BlameEvidence, error) {
+	return DecodeBinaryWithLimits[BlameEvidence](in, l)
+}
+
+// UnmarshalBinary decodes and validates public blame evidence using
+// conservative default limits.
+func (e *BlameEvidence) UnmarshalBinary(in []byte) error {
+	return e.UnmarshalBinaryWithLimits(in, defaultEvidenceLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes and validates public blame evidence into
+// the receiver with explicit size limits.
+func (e *BlameEvidence) UnmarshalBinaryWithLimits(in []byte, l EvidenceLimits) error {
 	if len(in) == 0 {
-		return nil, errors.New("empty blame evidence")
+		return errors.New("empty blame evidence")
 	}
 
 	if len(in) > l.MaxBytes {
-		return nil, fmt.Errorf("blame evidence too large: %d > %d", len(in), l.MaxBytes)
+		return fmt.Errorf("blame evidence too large: %d > %d", len(in), l.MaxBytes)
 	}
 
 	var evidence BlameEvidence
@@ -257,10 +275,11 @@ func UnmarshalBlameEvidenceWithLimits(in []byte, l EvidenceLimits) (*BlameEviden
 		}),
 		wire.WithFieldLimits(evidenceFieldLimits(l)),
 	); err != nil {
-		return nil, err
+		return err
 	}
 
-	return &evidence, nil
+	*e = evidence
+	return nil
 }
 
 // Hash returns the SHA-256 digest of the deterministic evidence encoding.

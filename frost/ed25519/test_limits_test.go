@@ -1,5 +1,7 @@
 package ed25519
 
+import "github.com/islishude/tss"
+
 func testLimits() Limits {
 	limits := DefaultLimits()
 	limits.Threshold.MaxParties = 8
@@ -16,7 +18,7 @@ func marshalKeygenCommitmentsPayload(p keygenCommitmentsPayload) ([]byte, error)
 }
 
 func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, error) {
-	return unmarshalKeygenCommitmentsPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](in, testLimits())
 }
 
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
@@ -24,7 +26,7 @@ func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 }
 
 func unmarshalKeygenSharePayload(in []byte) (keygenSharePayload, error) {
-	return unmarshalKeygenSharePayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[keygenSharePayload](in, testLimits())
 }
 
 func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
@@ -32,7 +34,7 @@ func marshalNonceCommitmentPayload(p nonceCommitment) ([]byte, error) {
 }
 
 func unmarshalNonceCommitmentPayload(in []byte) (nonceCommitment, error) {
-	return unmarshalNonceCommitmentPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[nonceCommitment](in, testLimits())
 }
 
 func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
@@ -40,7 +42,7 @@ func marshalSignPartialPayload(p signPartialPayload) ([]byte, error) {
 }
 
 func unmarshalSignPartialPayload(in []byte) (signPartialPayload, error) {
-	return unmarshalSignPartialPayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[signPartialPayload](in, testLimits())
 }
 
 func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
@@ -48,5 +50,5 @@ func marshalReshareSharePayload(p reshareSharePayload) ([]byte, error) {
 }
 
 func unmarshalReshareSharePayload(in []byte) (reshareSharePayload, error) {
-	return unmarshalReshareSharePayloadWithLimits(in, testLimits())
+	return tss.DecodeBinaryValueWithLimits[reshareSharePayload](in, testLimits())
 }

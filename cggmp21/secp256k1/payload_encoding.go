@@ -30,273 +30,357 @@ const (
 )
 
 func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
-	if err := validateCommitmentPoints(p.Commitments); err != nil {
+	return p.MarshalBinaryWithLimits(limits)
+}
+
+type payloadValidatorWithLimits interface {
+	ValidateWithLimits(Limits) error
+}
+
+func marshalPayloadWithLimits[T any](p T, limits Limits) ([]byte, error) {
+	if err := validatePayloadWithLimits(p, limits); err != nil {
 		return nil, err
-	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
-		return nil, err
-	}
-	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
-		return nil, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
-		return nil, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
-		return nil, err
-	}
-	if len(p.ChainCodeCommit) != 32 {
-		return nil, errors.New("chain code must be 32 bytes")
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("keygen plan hash must be 32 bytes")
 	}
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func unmarshalKeygenCommitmentsPayloadWithLimits(in []byte, limits Limits) (keygenCommitmentsPayload, error) {
-	var p keygenCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return keygenCommitmentsPayload{}, err
+func unmarshalPayloadWithLimits[T any](dst *T, in []byte, limits Limits) error {
+	var decoded T
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+		return err
 	}
+	if err := validatePayloadWithLimits(decoded, limits); err != nil {
+		return err
+	}
+	*dst = decoded
+	return nil
+}
+
+func validatePayloadWithLimits[T any](p T, limits Limits) error {
+	if v, ok := any(p).(payloadValidatorWithLimits); ok {
+		return v.ValidateWithLimits(limits)
+	}
+	if v, ok := any(&p).(payloadValidatorWithLimits); ok {
+		return v.ValidateWithLimits(limits)
+	}
+	return nil
+}
+
+// MarshalBinary encodes the keygen commitments payload.
+func (p keygenCommitmentsPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the keygen commitments payload with limits.
+func (p keygenCommitmentsPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the keygen commitments payload.
+func (p *keygenCommitmentsPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the keygen commitments payload with limits.
+func (p *keygenCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the keygen commitments payload structure.
+func (p keygenCommitmentsPayload) Validate() error {
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
-		return keygenCommitmentsPayload{}, err
+		return err
 	}
 	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
-		return keygenCommitmentsPayload{}, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
-		return keygenCommitmentsPayload{}, err
+		return err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
-		return keygenCommitmentsPayload{}, err
+		return err
 	}
 	if len(p.ChainCodeCommit) != 32 {
-		return keygenCommitmentsPayload{}, errors.New("chain code must be 32 bytes")
+		return errors.New("chain code must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return keygenCommitmentsPayload{}, errors.New("keygen plan hash must be 32 bytes")
+		return errors.New("keygen plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
+}
+
+// ValidateWithLimits checks the keygen commitments payload with resource limits.
+func (p keygenCommitmentsPayload) ValidateWithLimits(limits Limits) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	return nil
 }
 
 func marshalKeygenSharePayloadWithLimits(p keygenSharePayload, limits Limits) ([]byte, error) {
-	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("keygen plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalKeygenSharePayloadWithLimits(in []byte, limits Limits) (keygenSharePayload, error) {
-	var p keygenSharePayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return keygenSharePayload{}, err
-	}
+// MarshalBinary encodes the keygen share payload.
+func (p keygenSharePayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the keygen share payload with limits.
+func (p keygenSharePayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the keygen share payload.
+func (p *keygenSharePayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the keygen share payload with limits.
+func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the keygen share payload structure.
+func (p keygenSharePayload) Validate() error {
 	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return keygenSharePayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return keygenSharePayload{}, errors.New("keygen plan hash must be 32 bytes")
+		return errors.New("keygen plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalPresignRound1PayloadWithLimits(p presignRound1Payload, limits Limits) ([]byte, error) {
-	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
-		return nil, err
-	}
-	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
-		return nil, err
-	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("presign round1 plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalPresignRound1PayloadWithLimits(in []byte, limits Limits) (presignRound1Payload, error) {
-	var p presignRound1Payload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return presignRound1Payload{}, err
-	}
+// MarshalBinary encodes the presign round-one payload.
+func (p presignRound1Payload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the presign round-one payload with limits.
+func (p presignRound1Payload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the presign round-one payload.
+func (p *presignRound1Payload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the presign round-one payload with limits.
+func (p *presignRound1Payload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the presign round-one payload structure.
+func (p presignRound1Payload) Validate() error {
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
-		return presignRound1Payload{}, err
+		return err
 	}
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
-		return presignRound1Payload{}, err
-	}
-	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
-		return presignRound1Payload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return presignRound1Payload{}, errors.New("presign round1 plan hash must be 32 bytes")
+		return errors.New("presign round1 plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
+}
+
+// ValidateWithLimits checks the presign round-one payload with resource limits.
+func (p presignRound1Payload) ValidateWithLimits(limits Limits) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	_, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits)
+	return err
 }
 
 func marshalPresignRound1ProofPayloadWithLimits(p presignRound1ProofPayload, limits Limits) ([]byte, error) {
-	if len(p.PublicRound1Hash) != sha256.Size {
-		return nil, errors.New("round1 public hash must be 32 bytes")
-	}
-	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("presign round1 proof plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalPresignRound1ProofPayloadWithLimits(in []byte, limits Limits) (presignRound1ProofPayload, error) {
-	var p presignRound1ProofPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return presignRound1ProofPayload{}, err
-	}
+// MarshalBinary encodes the presign round-one proof payload.
+func (p presignRound1ProofPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the presign round-one proof payload with limits.
+func (p presignRound1ProofPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the presign round-one proof payload.
+func (p *presignRound1ProofPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the presign round-one proof payload with limits.
+func (p *presignRound1ProofPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the presign round-one proof payload structure.
+func (p presignRound1ProofPayload) Validate() error {
 	if len(p.PublicRound1Hash) != sha256.Size {
-		return presignRound1ProofPayload{}, errors.New("round1 public hash must be 32 bytes")
+		return errors.New("round1 public hash must be 32 bytes")
 	}
 	if _, err := zkpai.UnmarshalEncProof(p.EncKProof); err != nil {
-		return presignRound1ProofPayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return presignRound1ProofPayload{}, errors.New("presign round1 proof plan hash must be 32 bytes")
+		return errors.New("presign round1 proof plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalPresignRound2PayloadWithLimits(p presignRound2Payload, limits Limits) ([]byte, error) {
-	if len(p.Round1Echo) != sha256.Size {
-		return nil, errors.New("round1 echo must be 32 bytes")
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("presign round2 plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalPresignRound2PayloadWithLimits(in []byte, limits Limits) (presignRound2Payload, error) {
-	var p presignRound2Payload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return presignRound2Payload{}, err
-	}
+// MarshalBinary encodes the presign round-two payload.
+func (p presignRound2Payload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the presign round-two payload with limits.
+func (p presignRound2Payload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the presign round-two payload.
+func (p *presignRound2Payload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the presign round-two payload with limits.
+func (p *presignRound2Payload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the presign round-two payload structure.
+func (p presignRound2Payload) Validate() error {
 	if len(p.Round1Echo) != sha256.Size {
-		return presignRound2Payload{}, errors.New("round1 echo must be 32 bytes")
+		return errors.New("round1 echo must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return presignRound2Payload{}, errors.New("presign round2 plan hash must be 32 bytes")
+		return errors.New("presign round2 plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalPresignRound3PayloadWithLimits(p presignRound3Payload, limits Limits) ([]byte, error) {
-	if err := validateScalarRangeStrict(p.Delta); err != nil {
-		return nil, err
-	}
-	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
-		return nil, err
-	}
-	if _, err := secp.PointFromBytes(p.ChiPoint); err != nil {
-		return nil, err
-	}
-	if len(p.Proof) == 0 {
-		return nil, errors.New("empty signprep proof")
-	}
-	if len(p.Proof) > limits.SignPrep.MaxProofBytes {
-		return nil, fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.SignPrep.MaxProofBytes)
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("presign round3 plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalPresignRound3PayloadWithLimits(in []byte, limits Limits) (presignRound3Payload, error) {
+// MarshalBinary encodes the presign round-three payload.
+func (p presignRound3Payload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the presign round-three payload with limits.
+func (p presignRound3Payload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the presign round-three payload.
+func (p *presignRound3Payload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the presign round-three payload with limits.
+func (p *presignRound3Payload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) > limits.SignPrep.MaxVerifyShareBytes*2 {
-		return presignRound3Payload{}, fmt.Errorf("presign round3 payload too large: %d", len(in))
+		return fmt.Errorf("presign round3 payload too large: %d", len(in))
 	}
-	var p presignRound3Payload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return presignRound3Payload{}, err
-	}
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the presign round-three payload structure.
+func (p presignRound3Payload) Validate() error {
 	if err := validateScalarRangeStrict(p.Delta); err != nil {
-		return presignRound3Payload{}, err
+		return err
 	}
 	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
-		return presignRound3Payload{}, err
+		return err
 	}
 	if _, err := secp.PointFromBytes(p.ChiPoint); err != nil {
-		return presignRound3Payload{}, err
+		return err
 	}
 	if len(p.Proof) == 0 {
-		return presignRound3Payload{}, errors.New("empty signprep proof")
-	}
-	if len(p.Proof) > limits.SignPrep.MaxProofBytes {
-		return presignRound3Payload{}, fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.SignPrep.MaxProofBytes)
+		return errors.New("empty signprep proof")
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return presignRound3Payload{}, errors.New("presign round3 plan hash must be 32 bytes")
+		return errors.New("presign round3 plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
+}
+
+// ValidateWithLimits checks the presign round-three payload with resource limits.
+func (p presignRound3Payload) ValidateWithLimits(limits Limits) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if len(p.Proof) > limits.SignPrep.MaxProofBytes {
+		return fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.SignPrep.MaxProofBytes)
+	}
+	return nil
 }
 
 func marshalSignPartialPayloadWithLimits(p signPartialPayload, limits Limits) ([]byte, error) {
-	if err := validateScalarRangeAllowZero(p.S); err != nil {
-		return nil, err
-	}
-	if len(p.PresignTranscript) != sha256.Size {
-		return nil, errors.New("presign transcript must be 32 bytes")
-	}
-	if len(p.PresignContext) != sha256.Size {
-		return nil, errors.New("presign context must be 32 bytes")
-	}
-	if len(p.DigestHash) != sha256.Size {
-		return nil, errors.New("digest hash must be 32 bytes")
-	}
-	if len(p.PartialEquationHash) != sha256.Size {
-		return nil, errors.New("partial equation hash must be 32 bytes")
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("sign partial plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalSignPartialPayloadWithLimits(in []byte, limits Limits) (signPartialPayload, error) {
+// MarshalBinary encodes the sign partial payload.
+func (p signPartialPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the sign partial payload with limits.
+func (p signPartialPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the sign partial payload.
+func (p *signPartialPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the sign partial payload with limits.
+func (p *signPartialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) > limits.SignPrep.MaxSignPartialPayloadBytes {
-		return signPartialPayload{}, fmt.Errorf("sign partial payload too large: %d > %d", len(in), limits.SignPrep.MaxSignPartialPayloadBytes)
+		return fmt.Errorf("sign partial payload too large: %d > %d", len(in), limits.SignPrep.MaxSignPartialPayloadBytes)
 	}
-	var p signPartialPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return signPartialPayload{}, err
-	}
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the sign partial payload structure.
+func (p signPartialPayload) Validate() error {
 	if err := validateScalarRangeAllowZero(p.S); err != nil {
-		return signPartialPayload{}, err
+		return err
 	}
 	if len(p.PresignTranscript) != sha256.Size {
-		return signPartialPayload{}, errors.New("presign transcript must be 32 bytes")
+		return errors.New("presign transcript must be 32 bytes")
 	}
 	if len(p.PresignContext) != sha256.Size {
-		return signPartialPayload{}, errors.New("presign context must be 32 bytes")
+		return errors.New("presign context must be 32 bytes")
 	}
 	if len(p.DigestHash) != sha256.Size {
-		return signPartialPayload{}, errors.New("digest hash must be 32 bytes")
+		return errors.New("digest hash must be 32 bytes")
 	}
 	if len(p.PartialEquationHash) != sha256.Size {
-		return signPartialPayload{}, errors.New("partial equation hash must be 32 bytes")
+		return errors.New("partial equation hash must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return signPartialPayload{}, errors.New("sign partial plan hash must be 32 bytes")
+		return errors.New("sign partial plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func validateCommitmentPoints(commitments [][]byte) error {
@@ -325,87 +409,134 @@ func validatePositiveIntegerBytes(in []byte) error {
 }
 
 func marshalReshareDealerCommitmentsPayloadWithLimits(p reshareDealerCommitmentsPayload, limits Limits) ([]byte, error) {
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("reshare dealer commitments plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalReshareDealerCommitmentsPayloadWithLimits(in []byte, limits Limits) (reshareDealerCommitmentsPayload, error) {
-	var p reshareDealerCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return reshareDealerCommitmentsPayload{}, err
+// MarshalBinary encodes the reshare dealer commitments payload.
+func (p reshareDealerCommitmentsPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the reshare dealer commitments payload with limits.
+func (p reshareDealerCommitmentsPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the reshare dealer commitments payload.
+func (p *reshareDealerCommitmentsPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the reshare dealer commitments payload with limits.
+func (p *reshareDealerCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the reshare dealer commitments payload structure.
+func (p reshareDealerCommitmentsPayload) Validate() error {
+	if err := validateCommitmentPoints(p.Commitments); err != nil {
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return reshareDealerCommitmentsPayload{}, errors.New("reshare dealer commitments plan hash must be 32 bytes")
+		return errors.New("reshare dealer commitments plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalReshareSharePayloadWithLimits(p reshareSharePayload, limits Limits) ([]byte, error) {
-	if p.Dealer == 0 {
-		return nil, errors.New("reshare share dealer is zero")
-	}
-	if p.Receiver == 0 {
-		return nil, errors.New("reshare share receiver is zero")
-	}
-	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return nil, err
-	}
-	if len(p.DealerCommitmentHash) != sha256.Size {
-		return nil, errors.New("reshare share commitment hash must be 32 bytes")
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("reshare share plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalReshareSharePayloadWithLimits(in []byte, limits Limits) (reshareSharePayload, error) {
-	var p reshareSharePayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return reshareSharePayload{}, err
-	}
+// MarshalBinary encodes the reshare share payload.
+func (p reshareSharePayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the reshare share payload with limits.
+func (p reshareSharePayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the reshare share payload.
+func (p *reshareSharePayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the reshare share payload with limits.
+func (p *reshareSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the reshare share payload structure.
+func (p reshareSharePayload) Validate() error {
 	if p.Dealer == 0 {
-		return reshareSharePayload{}, errors.New("reshare share dealer is zero")
+		return errors.New("reshare share dealer is zero")
 	}
 	if p.Receiver == 0 {
-		return reshareSharePayload{}, errors.New("reshare share receiver is zero")
+		return errors.New("reshare share receiver is zero")
 	}
 	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return reshareSharePayload{}, err
+		return err
 	}
 	if len(p.DealerCommitmentHash) != sha256.Size {
-		return reshareSharePayload{}, errors.New("reshare share commitment hash must be 32 bytes")
+		return errors.New("reshare share commitment hash must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return reshareSharePayload{}, errors.New("reshare share plan hash must be 32 bytes")
+		return errors.New("reshare share plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 func marshalReshareReceiverMaterialPayloadWithLimits(p reshareReceiverMaterialPayload, limits Limits) ([]byte, error) {
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("reshare receiver material plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalReshareReceiverMaterialPayloadWithLimits(in []byte, limits Limits) (reshareReceiverMaterialPayload, error) {
-	var p reshareReceiverMaterialPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return reshareReceiverMaterialPayload{}, err
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
-		return reshareReceiverMaterialPayload{}, err
+// MarshalBinary encodes the reshare receiver material payload.
+func (p reshareReceiverMaterialPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the reshare receiver material payload with limits.
+func (p reshareReceiverMaterialPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the reshare receiver material payload.
+func (p *reshareReceiverMaterialPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the reshare receiver material payload with limits.
+func (p *reshareReceiverMaterialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the reshare receiver material payload structure.
+func (p reshareReceiverMaterialPayload) Validate() error {
+	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+		return err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
-		return reshareReceiverMaterialPayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return reshareReceiverMaterialPayload{}, errors.New("reshare receiver material plan hash must be 32 bytes")
+		return errors.New("reshare receiver material plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
+}
+
+// ValidateWithLimits checks the reshare receiver material payload with resource limits.
+func (p reshareReceiverMaterialPayload) ValidateWithLimits(limits Limits) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	return nil
 }
 
 type refreshCommitmentsPayload struct {
@@ -435,57 +566,93 @@ func (refreshSharePayload) WireType() string { return refreshSharePayloadWireTyp
 func (refreshSharePayload) WireVersion() uint16 { return tss.Version }
 
 func marshalRefreshCommitmentsPayloadWithLimits(p refreshCommitmentsPayload, limits Limits) ([]byte, error) {
-	if err := validateRefreshCommitments(p.Commitments, len(p.Commitments)); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("refresh plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalRefreshCommitmentsPayloadWithLimits(in []byte, limits Limits) (refreshCommitmentsPayload, error) {
-	var p refreshCommitmentsPayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return refreshCommitmentsPayload{}, err
+// MarshalBinary encodes the refresh commitments payload.
+func (p refreshCommitmentsPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the refresh commitments payload with limits.
+func (p refreshCommitmentsPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the refresh commitments payload.
+func (p *refreshCommitmentsPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the refresh commitments payload with limits.
+func (p *refreshCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the refresh commitments payload structure.
+func (p refreshCommitmentsPayload) Validate() error {
+	if err := validateRefreshCommitments(p.Commitments, len(p.Commitments)); err != nil {
+		return err
 	}
-	if len(p.Commitments) == 0 {
-		return refreshCommitmentsPayload{}, errors.New("empty refresh commitments")
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return refreshCommitmentsPayload{}, errors.New("refresh plan hash must be 32 bytes")
-	}
-	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
-		return refreshCommitmentsPayload{}, err
+	if _, err := zkpai.UnmarshalModulusProof(p.PaillierProof); err != nil {
+		return err
 	}
 	if _, err := zkpai.UnmarshalRingPedersenProof(p.RingPedersenProof); err != nil {
-		return refreshCommitmentsPayload{}, err
+		return err
 	}
-	return p, nil
+	if len(p.PlanHash) != sha256.Size {
+		return errors.New("refresh plan hash must be 32 bytes")
+	}
+	return nil
+}
+
+// ValidateWithLimits checks the refresh commitments payload with resource limits.
+func (p refreshCommitmentsPayload) ValidateWithLimits(limits Limits) error {
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	if _, err := pai.UnmarshalPublicKeyWithMaxModulusBits(p.PaillierPublicKey, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	if _, err := zkpai.UnmarshalRingPedersenParamsWithMaxModulusBits(p.RingPedersenParams, limits.Paillier.MaxModulusBits); err != nil {
+		return err
+	}
+	return nil
 }
 
 func marshalRefreshSharePayloadWithLimits(p refreshSharePayload, limits Limits) ([]byte, error) {
-	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return nil, err
-	}
-	if len(p.PlanHash) != sha256.Size {
-		return nil, errors.New("refresh plan hash must be 32 bytes")
-	}
-	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.MarshalBinaryWithLimits(limits)
 }
 
-func unmarshalRefreshSharePayloadWithLimits(in []byte, limits Limits) (refreshSharePayload, error) {
-	var p refreshSharePayload
-	if err := wire.Unmarshal(in, &p, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
-		return refreshSharePayload{}, err
-	}
+// MarshalBinary encodes the refresh share payload.
+func (p refreshSharePayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the refresh share payload with limits.
+func (p refreshSharePayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes the refresh share payload.
+func (p *refreshSharePayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes the refresh share payload with limits.
+func (p *refreshSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
+}
+
+// Validate checks the refresh share payload structure.
+func (p refreshSharePayload) Validate() error {
 	if err := validateScalarRangeStrict(p.Share); err != nil {
-		return refreshSharePayload{}, err
+		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
-		return refreshSharePayload{}, errors.New("refresh plan hash must be 32 bytes")
+		return errors.New("refresh plan hash must be 32 bytes")
 	}
-	return p, nil
+	return nil
 }
 
 // newEnvelope creates a protocol newEnvelope with the cggmp21-secp256k1 protocol id

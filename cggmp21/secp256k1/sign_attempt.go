@@ -17,7 +17,6 @@ import (
 const (
 	signAttemptRecordVersion       uint16 = 1
 	signAttemptWireType                   = "cggmp21.secp256k1.sign-attempt"
-	signAttemptCertificateWireType        = "cggmp21.secp256k1.sign-attempt.certificate"
 	signAttemptIntentLabel                = "cggmp21-secp256k1-sign-attempt-intent-v1"
 	signAttemptHashLabel                  = "cggmp21-secp256k1-sign-attempt-hash-v1"
 	signAttemptSignerSetLabel             = "cggmp21-secp256k1-sign-attempt-signers-v1"
@@ -242,33 +241,58 @@ func (r SignAttemptRecord) MarshalBinaryWithLimits(limits Limits) ([]byte, error
 	if err := validateSignAttemptRecordWithLimits(r, limits); err != nil {
 		return nil, err
 	}
-	return wire.Marshal(signAttemptWireFromRecord(r), wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	w, err := signAttemptWireFromRecord(r)
+	if err != nil {
+		return nil, err
+	}
+	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // UnmarshalSignAttemptRecord decodes and validates a canonical sign-attempt record.
 func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
-	return UnmarshalSignAttemptRecordWithLimits(in, DefaultLimits())
+	return tss.DecodeBinaryValue[SignAttemptRecord](in)
 }
 
 // UnmarshalSignAttemptRecordWithLimits decodes a canonical sign-attempt record
 // using explicit local resource limits.
 func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttemptRecord, error) {
+	return tss.DecodeBinaryValueWithLimits[SignAttemptRecord](in, limits)
+}
+
+// UnmarshalBinary decodes and validates a canonical sign-attempt record.
+func (r *SignAttemptRecord) UnmarshalBinary(in []byte) error {
+	return r.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical sign-attempt record into the
+// receiver using explicit local resource limits.
+func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	if r == nil {
+		return errors.New("nil sign attempt")
+	}
 	if len(in) == 0 {
-		return SignAttemptRecord{}, errors.New("empty sign attempt")
+		return errors.New("empty sign attempt")
 	}
 	if len(in) > limits.State.MaxSerializedSignAttemptBytes {
-		return SignAttemptRecord{}, fmt.Errorf("sign attempt too large: %d > %d", len(in), limits.State.MaxSerializedSignAttemptBytes)
+		return fmt.Errorf("sign attempt too large: %d > %d", len(in), limits.State.MaxSerializedSignAttemptBytes)
 	}
 	var w signAttemptWire
 	if err := wire.Unmarshal(in, &w,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
-		return SignAttemptRecord{}, err
+		return err
 	}
 	sessionID, err := tss.SessionIDFromBytes(w.SessionID)
 	if err != nil {
-		return SignAttemptRecord{}, err
+		return err
+	}
+	var certificate *tss.BroadcastCertificate
+	if len(w.Certificate) > 0 {
+		certificate, err = tss.DecodeBinary[tss.BroadcastCertificate](w.Certificate)
+		if err != nil {
+			return fmt.Errorf("invalid delivery certificate: %w", err)
+		}
 	}
 	record := SignAttemptRecord{
 		RecordVersion:              w.RecordVersion,
@@ -296,8 +320,8 @@ func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttempt
 			Recipients:           w.Recipients,
 		},
 		DeliveryState: SignAttemptDeliveryState{
-			Acks:             signAttemptAcksFromWire(w.Acks),
-			Certificate:      signAttemptCertificateFromWire(w.Certificate),
+			Acks:             tss.CloneSlices(w.Acks),
+			Certificate:      certificate,
 			DeliveryComplete: w.DeliveryComplete,
 		},
 		Completed:           w.Completed,
@@ -306,9 +330,21 @@ func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttempt
 		SignatureRecoveryID: w.SignatureRecoveryID,
 	}
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
-		return SignAttemptRecord{}, err
+		return err
 	}
-	return record, nil
+	*r = record
+	return nil
+}
+
+// Validate checks the sign-attempt record against default local limits.
+func (r SignAttemptRecord) Validate() error {
+	return validateSignAttemptRecord(r)
+}
+
+// ValidateWithLimits checks the sign-attempt record against explicit local
+// resource limits.
+func (r SignAttemptRecord) ValidateWithLimits(limits Limits) error {
+	return validateSignAttemptRecordWithLimits(r, limits)
 }
 
 // SignAttemptResult supplies the final signature for an existing durable attempt.
@@ -338,35 +374,35 @@ func (r SignAttemptResult) validate() error {
 }
 
 type signAttemptWire struct {
-	RecordVersion              uint16      `wire:"1,u16"`
-	Protocol                   string      `wire:"2,string"`
-	Version                    uint16      `wire:"3,u16"`
-	PresignID                  []byte      `wire:"4,bytes,len=32"`
-	AttemptHash                []byte      `wire:"5,bytes,len=32"`
-	IntentHash                 []byte      `wire:"6,bytes,len=32"`
-	SessionID                  []byte      `wire:"7,bytes,len=32"`
-	Party                      tss.PartyID `wire:"8,u32"`
-	SignerSetHash              []byte      `wire:"9,bytes,len=32"`
-	SignPlanHash               []byte      `wire:"10,bytes,len=32"`
-	ContextHash                []byte      `wire:"11,bytes,len=32"`
-	Digest                     []byte      `wire:"12,bytes,len=32"`
-	DigestBindingHash          []byte      `wire:"13,bytes,len=32"`
-	LowS                       bool        `wire:"14,bool"`
-	CanonicalBaseEnvelopeBytes []byte      `wire:"15,bytes,max_bytes=envelope"`
-	CanonicalBaseEnvelopeHash  []byte      `wire:"16,bytes,len=32"`
-	EnvelopeDigest             []byte      `wire:"17,bytes,len=32"`
-	PayloadHash                []byte      `wire:"18,bytes,len=32"`
-	DeliveryMode               uint8       `wire:"19,u8"`
-	Confidentiality            uint8       `wire:"20,u8"`
-	BroadcastConsistency       uint8       `wire:"21,u8"`
-	Recipients                 []uint32    `wire:"22,u32list"`
-	Acks                       []ackWire   `wire:"23,recordlist"`
-	Certificate                []byte      `wire:"24,bytes,max_bytes=envelope"`
-	DeliveryComplete           bool        `wire:"25,bool"`
-	Completed                  bool        `wire:"26,bool"`
-	SignatureR                 []byte      `wire:"27,bytes,max_bytes=scalar"`
-	SignatureS                 []byte      `wire:"28,bytes,max_bytes=scalar"`
-	SignatureRecoveryID        uint8       `wire:"29,u8"`
+	RecordVersion              uint16             `wire:"1,u16"`
+	Protocol                   string             `wire:"2,string"`
+	Version                    uint16             `wire:"3,u16"`
+	PresignID                  []byte             `wire:"4,bytes,len=32"`
+	AttemptHash                []byte             `wire:"5,bytes,len=32"`
+	IntentHash                 []byte             `wire:"6,bytes,len=32"`
+	SessionID                  []byte             `wire:"7,bytes,len=32"`
+	Party                      tss.PartyID        `wire:"8,u32"`
+	SignerSetHash              []byte             `wire:"9,bytes,len=32"`
+	SignPlanHash               []byte             `wire:"10,bytes,len=32"`
+	ContextHash                []byte             `wire:"11,bytes,len=32"`
+	Digest                     []byte             `wire:"12,bytes,len=32"`
+	DigestBindingHash          []byte             `wire:"13,bytes,len=32"`
+	LowS                       bool               `wire:"14,bool"`
+	CanonicalBaseEnvelopeBytes []byte             `wire:"15,bytes,max_bytes=envelope"`
+	CanonicalBaseEnvelopeHash  []byte             `wire:"16,bytes,len=32"`
+	EnvelopeDigest             []byte             `wire:"17,bytes,len=32"`
+	PayloadHash                []byte             `wire:"18,bytes,len=32"`
+	DeliveryMode               uint8              `wire:"19,u8"`
+	Confidentiality            uint8              `wire:"20,u8"`
+	BroadcastConsistency       uint8              `wire:"21,u8"`
+	Recipients                 []uint32           `wire:"22,u32list"`
+	Acks                       []tss.BroadcastAck `wire:"23,recordlist"`
+	Certificate                []byte             `wire:"24,bytes,max_bytes=envelope"`
+	DeliveryComplete           bool               `wire:"25,bool"`
+	Completed                  bool               `wire:"26,bool"`
+	SignatureR                 []byte             `wire:"27,bytes,max_bytes=scalar"`
+	SignatureS                 []byte             `wire:"28,bytes,max_bytes=scalar"`
+	SignatureRecoveryID        uint8              `wire:"29,u8"`
 }
 
 // WireType returns the canonical sign-attempt wire type.
@@ -375,32 +411,15 @@ func (signAttemptWire) WireType() string { return signAttemptWireType }
 // WireVersion returns the sign-attempt wire version.
 func (signAttemptWire) WireVersion() uint16 { return tss.Version }
 
-type ackWire struct {
-	Party          tss.PartyID `wire:"1,u32"`
-	PayloadHash    []byte      `wire:"2,bytes,len=32"`
-	EnvelopeDigest []byte      `wire:"3,bytes,len=32"`
-	Signature      []byte      `wire:"4,bytes"`
-}
-
-type certWire struct {
-	Protocol       string    `wire:"1,string"`
-	SessionID      []byte    `wire:"2,bytes,len=32"`
-	Round          uint8     `wire:"3,u8"`
-	From           uint32    `wire:"4,u32"`
-	PayloadType    string    `wire:"5,string"`
-	PayloadHash    []byte    `wire:"6,bytes,len=32"`
-	EnvelopeDigest []byte    `wire:"7,bytes,len=32"`
-	Recipients     []uint32  `wire:"8,u32list"`
-	Acks           []ackWire `wire:"9,recordlist"`
-}
-
-// WireType returns the canonical certificate wire type.
-func (certWire) WireType() string { return signAttemptCertificateWireType }
-
-// WireVersion returns the certificate wire version.
-func (certWire) WireVersion() uint16 { return tss.Version }
-
-func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
+func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
+	var certificate []byte
+	var err error
+	if r.DeliveryState.Certificate != nil {
+		certificate, err = r.DeliveryState.Certificate.MarshalBinary()
+		if err != nil {
+			return signAttemptWire{}, fmt.Errorf("encode delivery certificate: %w", err)
+		}
+	}
 	return signAttemptWire{
 		RecordVersion:              r.RecordVersion,
 		Protocol:                   string(r.Protocol),
@@ -424,14 +443,14 @@ func signAttemptWireFromRecord(r SignAttemptRecord) signAttemptWire {
 		Confidentiality:            uint8(r.DeliveryPolicy.Confidentiality),
 		BroadcastConsistency:       uint8(r.DeliveryPolicy.BroadcastConsistency),
 		Recipients:                 r.DeliveryPolicy.Recipients,
-		Acks:                       signAttemptAcksToWire(r.DeliveryState.Acks),
-		Certificate:                signAttemptCertificateToWire(r.DeliveryState.Certificate),
+		Acks:                       tss.CloneSlices(r.DeliveryState.Acks),
+		Certificate:                certificate,
 		DeliveryComplete:           r.DeliveryState.DeliveryComplete,
 		Completed:                  r.Completed,
 		SignatureR:                 r.SignatureR,
 		SignatureS:                 r.SignatureS,
 		SignatureRecoveryID:        r.SignatureRecoveryID,
-	}
+	}, nil
 }
 
 func validateSignAttemptRecord(r SignAttemptRecord) error {
@@ -482,7 +501,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		env.Round != 1 || env.From != r.Party || env.To != 0 || env.PayloadType != payloadSignPartial {
 		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
 	}
-	payload, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits)
+	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -596,7 +615,7 @@ func validateSignAttemptDeliveryState(r SignAttemptRecord, env tss.Envelope) err
 			}
 			prev = index
 		}
-		if _, err := marshalSignAttemptCertificate(r.DeliveryState.Certificate); err != nil {
+		if _, err := r.DeliveryState.Certificate.MarshalBinary(); err != nil {
 			return fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
 		}
 	}
@@ -652,7 +671,7 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 		}
 		cert.Recipients = updated.DeliveryPolicy.Recipients.Clone()
 		orderSignAttemptCertificateAcks(cert, updated.DeliveryPolicy.Recipients)
-		if _, err := marshalSignAttemptCertificate(cert); err != nil {
+		if _, err := cert.MarshalBinary(); err != nil {
 			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
 		}
 		for _, ack := range cert.Acks {
@@ -737,7 +756,7 @@ func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelop
 	if !bytes.Equal(raw, canonical) {
 		return tss.Envelope{}, errors.New("non-canonical envelope")
 	}
-	if _, err := unmarshalSignPartialPayloadWithLimits(env.Payload, limits); err != nil {
+	if _, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits); err != nil {
 		return tss.Envelope{}, err
 	}
 	return env, nil
@@ -781,89 +800,6 @@ func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
 
 func signAttemptSignerSetHash(signers tss.PartySet) []byte {
 	return wireutil.PartySetHash(signers, signAttemptSignerSetLabel)
-}
-
-func signAttemptAcksToWire(acks []tss.BroadcastAck) []ackWire {
-	if acks == nil {
-		return nil
-	}
-	out := make([]ackWire, len(acks))
-	for i, ack := range acks {
-		out[i] = ackWire{
-			Party:          ack.Party,
-			PayloadHash:    ack.PayloadHash[:],
-			EnvelopeDigest: ack.EnvelopeDigest[:],
-			Signature:      ack.Signature,
-		}
-	}
-	return out
-}
-
-func signAttemptAcksFromWire(acks []ackWire) []tss.BroadcastAck {
-	if acks == nil {
-		return nil
-	}
-	out := make([]tss.BroadcastAck, len(acks))
-	for i, ack := range acks {
-		out[i] = tss.BroadcastAck{
-			Party:     ack.Party,
-			Signature: slices.Clone(ack.Signature),
-		}
-		copy(out[i].PayloadHash[:], ack.PayloadHash)
-		copy(out[i].EnvelopeDigest[:], ack.EnvelopeDigest)
-	}
-	return out
-}
-
-func signAttemptCertificateToWire(cert *tss.BroadcastCertificate) []byte {
-	raw, err := marshalSignAttemptCertificate(cert)
-	if err != nil {
-		return []byte{0}
-	}
-	return raw
-}
-
-func marshalSignAttemptCertificate(cert *tss.BroadcastCertificate) ([]byte, error) {
-	if cert == nil {
-		return nil, nil
-	}
-	return wire.Marshal(certWire{
-		Protocol:       string(cert.Protocol),
-		SessionID:      cert.SessionID[:],
-		Round:          cert.Round,
-		From:           cert.From,
-		PayloadType:    string(cert.PayloadType),
-		PayloadHash:    cert.PayloadHash[:],
-		EnvelopeDigest: cert.EnvelopeDigest[:],
-		Recipients:     cert.Recipients,
-		Acks:           signAttemptAcksToWire(cert.Acks),
-	})
-}
-
-func signAttemptCertificateFromWire(raw []byte) *tss.BroadcastCertificate {
-	if len(raw) == 0 {
-		return nil
-	}
-	var w certWire
-	if err := wire.Unmarshal(raw, &w); err != nil {
-		return &tss.BroadcastCertificate{}
-	}
-	sessionID, err := tss.SessionIDFromBytes(w.SessionID)
-	if err != nil {
-		return &tss.BroadcastCertificate{}
-	}
-	cert := &tss.BroadcastCertificate{
-		Protocol:    tss.ProtocolID(w.Protocol),
-		SessionID:   sessionID,
-		Round:       w.Round,
-		From:        w.From,
-		PayloadType: tss.PayloadType(w.PayloadType),
-		Recipients:  w.Recipients,
-		Acks:        signAttemptAcksFromWire(w.Acks),
-	}
-	copy(cert.PayloadHash[:], w.PayloadHash)
-	copy(cert.EnvelopeDigest[:], w.EnvelopeDigest)
-	return cert
 }
 
 func broadcastAckEqual(a, b tss.BroadcastAck) bool {
