@@ -59,6 +59,17 @@ func chooseTestGuard(guards []*tss.EnvelopeGuard, fallback func() *tss.EnvelopeG
 	return fallback()
 }
 
+// clonePresignForTest returns a new Presign handle that deep-copies
+// immutable public metadata (signers, keys, transcripts, context, etc.)
+// while sharing the one-use lifecycle pointers (consumed, attempt).
+//
+// consumed (*atomic.Bool) and attempt (*presignAttemptBinding) are
+// deliberately shared rather than deep-copied: every copy of a Presign is
+// a handle to the same one-use lifecycle.  Marking any handle consumed
+// must be immediately visible to every other handle so that a second
+// StartSignDigest through a different handle is reliably rejected.
+// Independent consumed flags would allow nonce reuse, which leaks the
+// private key.
 func clonePresignForTest(p *Presign) *Presign {
 	if p == nil || p.state == nil {
 		return nil
