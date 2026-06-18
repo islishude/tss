@@ -169,7 +169,6 @@ func testPaillierPublicShare(t testing.TB) PaillierPublicShare {
 		z[i] = []byte{byte(i + 2)}
 	}
 	proofRaw, err := (&zkpai.ModulusProof{
-		Version:        1,
 		W:              []byte{1},
 		TranscriptHash: bytes.Repeat([]byte{2}, sha256.Size),
 		X:              x,
@@ -200,7 +199,6 @@ func testRingPedersenPublicShare(t testing.TB) RingPedersenPublicShare {
 		responses[i] = []byte{byte(i + 2)}
 	}
 	proofRaw, err := (&zkpai.RingPedersenProof{
-		Version:        1,
 		TranscriptHash: bytes.Repeat([]byte{3}, sha256.Size),
 		Commitments:    commitments,
 		Challenges:     make([]byte, publicShareProofRounds),

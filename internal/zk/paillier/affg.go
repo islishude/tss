@@ -49,8 +49,6 @@ type AffGWitness struct {
 // Y is included in the proof so the verifier can check equation 3 without
 // separately receiving the responder's encryption of y.
 type AffGProof struct {
-	Version uint16
-
 	A  *big.Int    // (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
 	Bx *secp.Point // alpha * G
 	By *big.Int    // Enc_Ni(beta; rY)
@@ -83,7 +81,6 @@ func (p *AffGProof) Clone() *AffGProof {
 		return nil
 	}
 	cp := &AffGProof{
-		Version:        p.Version,
 		A:              new(big.Int).Set(p.A),
 		Bx:             secp.Clone(p.Bx),
 		By:             new(big.Int).Set(p.By),
@@ -107,9 +104,6 @@ func (p *AffGProof) Clone() *AffGProof {
 func (p *AffGProof) Validate() error {
 	if p == nil {
 		return errors.New("nil AffGProof")
-	}
-	if p.Version != affGProofVersion {
-		return fmt.Errorf("unsupported AffGProof version %d", p.Version)
 	}
 	if p.A == nil || p.Bx == nil || p.By == nil || p.E == nil || p.S == nil || p.F == nil || p.T == nil ||
 		p.Y == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil || p.Z4 == nil || p.W == nil || p.WY == nil {
@@ -369,7 +363,6 @@ func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWi
 	wY.Mod(wY, Ni.N)
 
 	return &AffGProof{
-		Version:        affGProofVersion,
 		A:              new(big.Int).Set(A),
 		Bx:             Bx,
 		By:             new(big.Int).Set(By),
@@ -396,10 +389,6 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if proof == nil {
 		return errors.New("nil AffGProof")
 	}
-	if proof.Version != affGProofVersion {
-		return fmt.Errorf("unsupported AffGProof version %d", proof.Version)
-	}
-
 	Ni := stmt.ProverPaillierN
 	Nj := stmt.ReceiverPaillierN
 	Nhat := stmt.VerifierAux.N
@@ -580,7 +569,6 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 
 // affGProofWire is the wire DTO for AffGProof.
 type affGProofWire struct {
-	Version        uint16         `wire:"1,u16"`
 	A              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
 	Bx             secp.WirePoint `wire:"3,custom,max_bytes=point"`
 	By             *big.Int       `wire:"4,bigpos,max_bytes=paillier_modulus"`
@@ -616,7 +604,6 @@ func (p *AffGProof) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, erro
 		opts = []wire.MarshalOption{wire.WithFieldLimitsForMarshal(zkFieldLimits())}
 	}
 	return wire.Marshal(affGProofWire{
-		Version:        p.Version,
 		A:              p.A,
 		Bx:             secp.WirePoint{P: p.Bx},
 		By:             p.By,
@@ -661,11 +648,7 @@ func (p *AffGProof) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption
 	if err := wire.Unmarshal(in, &w, opts...); err != nil {
 		return err
 	}
-	if w.Version != affGProofVersion {
-		return fmt.Errorf("unsupported AffGProof version %d", w.Version)
-	}
 	decoded := AffGProof{
-		Version:        w.Version,
 		A:              w.A,
 		Bx:             w.Bx.P,
 		By:             w.By,

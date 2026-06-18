@@ -40,8 +40,6 @@ type LogStarWitness struct {
 // and a curve point share the same discrete logarithm, with the scalar in the
 // configured range.
 type LogStarProof struct {
-	Version uint16
-
 	S *big.Int    // RP: s_j^x * t_j^m mod N_j
 	A *big.Int    // Enc_N(alpha; r)
 	Y *secp.Point // alpha * B
@@ -60,7 +58,6 @@ func (p *LogStarProof) Clone() *LogStarProof {
 		return nil
 	}
 	return &LogStarProof{
-		Version:        p.Version,
 		S:              new(big.Int).Set(p.S),
 		A:              new(big.Int).Set(p.A),
 		Y:              secp.Clone(p.Y),
@@ -203,7 +200,6 @@ func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w 
 	z3.Add(z3, gammaBig)
 
 	return &LogStarProof{
-		Version:        logStarProofVersion,
 		S:              new(big.Int).Set(S),
 		A:              new(big.Int).Set(A),
 		Y:              Y,
@@ -222,9 +218,6 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	}
 	if proof == nil {
 		return errors.New("nil LogStarProof")
-	}
-	if proof.Version != logStarProofVersion {
-		return fmt.Errorf("unsupported LogStarProof version %d", proof.Version)
 	}
 
 	N := stmt.PaillierN
@@ -325,7 +318,6 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 
 // logStarProofWire is the wire DTO for LogStarProof.
 type logStarProofWire struct {
-	Version        uint16         `wire:"1,u16"`
 	S              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
 	A              *big.Int       `wire:"3,bigpos,max_bytes=paillier_modulus"`
 	Y              secp.WirePoint `wire:"4,custom,max_bytes=point"`
@@ -348,7 +340,6 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 		return nil, errors.New("nil LogStarProof")
 	}
 	return wire.Marshal(logStarProofWire{
-		Version:        p.Version,
 		S:              p.S,
 		A:              p.A,
 		Y:              secp.WirePoint{P: p.Y},
@@ -375,11 +366,7 @@ func (p *LogStarProof) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
-	if w.Version != logStarProofVersion {
-		return fmt.Errorf("unsupported LogStarProof version %d", w.Version)
-	}
 	decoded := LogStarProof{
-		Version:        w.Version,
 		S:              w.S,
 		A:              w.A,
 		Y:              w.Y.P,

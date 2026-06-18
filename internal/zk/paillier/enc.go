@@ -38,8 +38,6 @@ type EncWitness struct {
 // encrypts a plaintext in the range ±2^Ell. It uses Ring-Pedersen commitments
 // and large integer masks for statistical zero-knowledge.
 type EncProof struct {
-	Version uint16 `wire:"1,u16"`
-
 	S  *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^k * t_j^mu mod N_j
 	A  *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"` // Paillier encryption: Enc_Ni(alpha; r)
 	C  *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^alpha * t_j^gamma mod N_j
@@ -62,7 +60,6 @@ func (p *EncProof) Clone() *EncProof {
 		return nil
 	}
 	return &EncProof{
-		Version:        p.Version,
 		S:              new(big.Int).Set(p.S),
 		A:              new(big.Int).Set(p.A),
 		C:              new(big.Int).Set(p.C),
@@ -75,9 +72,6 @@ func (p *EncProof) Clone() *EncProof {
 
 // Validate checks that the EncProof is structurally complete.
 func (p *EncProof) Validate() error {
-	if p.Version != encProofVersion {
-		return fmt.Errorf("unsupported EncProof version %d", p.Version)
-	}
 	if p.S == nil || p.A == nil || p.C == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
 		return errors.New("incomplete EncProof")
 	}
@@ -214,7 +208,6 @@ func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witne
 	z3.Add(z3, gammaBig)
 
 	return &EncProof{
-		Version:        encProofVersion,
 		S:              new(big.Int).Set(S),
 		A:              new(big.Int).Set(A),
 		C:              new(big.Int).Set(C),
@@ -233,9 +226,6 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	}
 	if proof == nil {
 		return errors.New("nil EncProof")
-	}
-	if proof.Version != encProofVersion {
-		return fmt.Errorf("unsupported EncProof version %d", proof.Version)
 	}
 
 	Ni := statement.ProverPaillierN

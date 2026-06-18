@@ -80,7 +80,6 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 		bBits[i] = byte(b)
 	}
 	return &ModulusProof{
-		Version:        proofVersion,
 		W:              wBytes,
 		TranscriptHash: transcript,
 		X:              xs,
@@ -182,12 +181,6 @@ func (p *ModulusProof) UnmarshalBinary(in []byte) error {
 	return nil
 }
 
-// AfterUnmarshalWire restores the derived proof version.
-func (p *ModulusProof) AfterUnmarshalWire() error {
-	p.Version = proofVersion
-	return nil
-}
-
 // Validate checks the modulus proof structure.
 func (p *ModulusProof) Validate() error {
 	return validateModulusProof(p)
@@ -196,9 +189,6 @@ func (p *ModulusProof) Validate() error {
 func validateModulusProof(p *ModulusProof) error {
 	if p == nil {
 		return errors.New("nil modulus proof")
-	}
-	if p.Version != proofVersion {
-		return fmt.Errorf("unexpected modulus proof version %d", p.Version)
 	}
 	if len(p.W) == 0 || len(p.TranscriptHash) != sha256.Size {
 		return errors.New("incomplete modulus proof")

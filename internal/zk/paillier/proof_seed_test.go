@@ -21,7 +21,6 @@ func seedModulusProof() *ModulusProof {
 		zs[i] = []byte{byte(i + 2)}
 	}
 	return &ModulusProof{
-		Version:        proofVersion,
 		W:              []byte{1},
 		TranscriptHash: proofSeedHash(2),
 		X:              xs,
@@ -39,7 +38,6 @@ func seedRingPedersenProof() *RingPedersenProof {
 		responses[i] = []byte{byte(i + 2)}
 	}
 	return &RingPedersenProof{
-		Version:        proofVersion,
 		TranscriptHash: proofSeedHash(3),
 		Commitments:    commitments,
 		Challenges:     make([]byte, ringPedersenProofRounds),
@@ -49,7 +47,6 @@ func seedRingPedersenProof() *RingPedersenProof {
 
 func seedEncProof() *EncProof {
 	return &EncProof{
-		Version:        encProofVersion,
 		S:              big.NewInt(31),
 		A:              big.NewInt(32),
 		C:              big.NewInt(33),
@@ -63,7 +60,6 @@ func seedEncProof() *EncProof {
 func seedAffGProof(tb proofFataler) *AffGProof {
 	tb.Helper()
 	return &AffGProof{
-		Version:        affGProofVersion,
 		A:              big.NewInt(41),
 		Bx:             seedCurvePoint(42),
 		By:             big.NewInt(43),
@@ -84,7 +80,6 @@ func seedAffGProof(tb proofFataler) *AffGProof {
 
 func seedLogStarProof() *LogStarProof {
 	return &LogStarProof{
-		Version:        logStarProofVersion,
 		S:              big.NewInt(61),
 		A:              big.NewInt(62),
 		Y:              seedCurvePoint(63),

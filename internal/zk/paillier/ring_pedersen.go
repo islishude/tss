@@ -317,7 +317,6 @@ func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, para
 		secret.ClearBigInt(z)
 	}
 	return &RingPedersenProof{
-		Version:        proofVersion,
 		TranscriptHash: transcript,
 		Commitments:    commitments,
 		Challenges:     challenges,
@@ -527,12 +526,6 @@ func (p *RingPedersenProof) UnmarshalBinary(in []byte) error {
 	return nil
 }
 
-// AfterUnmarshalWire restores the derived proof version.
-func (p *RingPedersenProof) AfterUnmarshalWire() error {
-	p.Version = proofVersion
-	return nil
-}
-
 // Validate checks the Ring-Pedersen proof structure.
 func (p *RingPedersenProof) Validate() error {
 	return validateRingPedersenProof(p)
@@ -541,9 +534,6 @@ func (p *RingPedersenProof) Validate() error {
 func validateRingPedersenProof(p *RingPedersenProof) error {
 	if p == nil {
 		return errors.New("nil Ring-Pedersen proof")
-	}
-	if p.Version != proofVersion {
-		return fmt.Errorf("unexpected Ring-Pedersen proof version %d", p.Version)
 	}
 	if len(p.TranscriptHash) != sha256.Size {
 		return errors.New("invalid Ring-Pedersen transcript hash")

@@ -66,7 +66,7 @@ func TestFinishErrors(t *testing.T) {
 
 	t.Run("invalid response proof", func(t *testing.T) {
 		badResponse := *response
-		badResponse.Proof.Version = 99
+		badResponse.Proof.A = new(big.Int)
 		_, err := Finish(params, []byte("response"), start.Message, badResponse, bCommit, skA, &skB.PublicKey, *rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid response proof")

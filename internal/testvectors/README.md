@@ -141,6 +141,7 @@ UPDATE_GOLDEN=1 go test -tags=integration -run 'TestGolden' -count=1 ./cggmp21/s
 
 # 2. JSON protocol vectors (cross-implementation)
 go test -run 'TestGenerateVectors$' -tags='vectorgen' -count=1 ./frost/ed25519 ./cggmp21/secp256k1
+go test -run '^TestGenerateKeygenFixtures' -tags='vectorgen' -count=1  ./cggmp21/secp256k1
 # Alternative: CGGMP21 only, without vectorgen tag
 GENERATE_VECTORS=1 go test -run 'TestGenerateCGGMP21Vectors' -tags='integration' -count=1 ./cggmp21/secp256k1
 

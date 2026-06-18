@@ -18,7 +18,7 @@ func TestGenerateVectors(t *testing.T) {
 
 func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 	t.Helper()
-	vectors := []cggmp21TestVector{
+	vectors := []*cggmp21TestVector{
 		{
 			Description: "CGGMP21 secp256k1 1-of-1 keygen",
 			Threshold:   1, N: 1, Parties: []int{1},
@@ -31,9 +31,15 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 			Seed:   "0000000000000000000000000000000000000000000000000000000000000004",
 			Digest: hex.EncodeToString(hashBytes([]byte("CGGMP21 2-of-3 test digest"))),
 		},
+		{
+			Description: "CGGMP21 secp256k1 3-of-5 keygen",
+			Threshold:   3, N: 5, Parties: []int{1, 2, 3, 4, 5},
+			Seed:   "0000000000000000000000000000000000000000000000000000000000000005",
+			Digest: hex.EncodeToString(hashBytes([]byte("CGGMP21 3-of-5 test digest"))),
+		},
 	}
 	for i := range vectors {
-		v := &vectors[i]
+		v := vectors[i]
 		shares := secpKeygen(t, v.Threshold, v.N)
 		pk1 := shares[tss.PartyID(v.Parties[0])]
 		v.GroupPublicKey = hex.EncodeToString(pk1.PublicKeyBytes())
@@ -41,10 +47,7 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 			raw, _ := shares[tss.PartyID(pid)].MarshalBinaryWithLimits(testLimits())
 			v.KeygenShares = append(v.KeygenShares, hex.EncodeToString(raw))
 		}
-		signerCount := 2
-		if v.N == 1 {
-			signerCount = 1
-		}
+		signerCount := v.Threshold
 		signers := make(tss.PartySet, signerCount)
 		signerShares := make([]*KeyShare, signerCount)
 		for j := range signers {

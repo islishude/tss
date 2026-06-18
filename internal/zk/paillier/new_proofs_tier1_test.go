@@ -184,18 +184,6 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 
 func TestProofsUseV1Version(t *testing.T) {
 	t.Parallel()
-	sk := testPaillierKey(t, 1024)
-	domain := []byte("version check")
-	modProof, _ := ProveModulus(nil, domain, sk, 1)
-	if modProof.Version != 1 {
-		t.Fatalf("modulus proof version %d, want 1", modProof.Version)
-	}
-
-	params, lambda, _ := GenerateRingPedersenParams(nil, sk)
-	rpProof, _ := ProveRingPedersen(nil, domain, sk, params, lambda, 1)
-	if rpProof.Version != 1 {
-		t.Fatalf("Ring-Pedersen proof version %d, want 1", rpProof.Version)
-	}
 	if encProofVersion != 1 || affGProofVersion != 1 || logStarProofVersion != 1 {
 		t.Fatal("retained proof version changed")
 	}

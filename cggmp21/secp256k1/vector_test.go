@@ -88,6 +88,7 @@ func generateCGGMP21Vectors(t *testing.T) []cggmp21TestVector {
 	return []cggmp21TestVector{
 		run(1, 1, tss.NewPartySet(1)),
 		run(2, 3, tss.NewPartySet(1, 2)),
+		run(3, 5, tss.NewPartySet(1, 2, 3, 4, 5)),
 	}
 }
 
@@ -120,6 +121,8 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 
 	for _, v := range vectors {
 		t.Run(v.Description, func(t *testing.T) {
+			t.Parallel()
+
 			for i, pid := range v.Parties {
 				raw, err := hex.DecodeString(v.KeygenShares[i])
 				if err != nil {
@@ -171,10 +174,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			signerCount := 2
-			if v.N == 1 {
-				signerCount = 1
-			}
+			signerCount := v.Threshold
 			signerIDs := make(tss.PartySet, signerCount)
 			signerShares := make([]*KeyShare, signerCount)
 			for j := range signerIDs {

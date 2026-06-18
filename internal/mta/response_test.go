@@ -17,7 +17,7 @@ func TestResponseMessageValidate(t *testing.T) {
 	// the seedMessages helper and validate it.
 	_, validResponse := seedMessages(t)
 	badProof := validResponse.Proof
-	badProof.Version = 99
+	badProof.A = nil // garble the proof
 
 	tests := []struct {
 		name       string

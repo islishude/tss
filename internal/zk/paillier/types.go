@@ -32,7 +32,6 @@ const (
 // knowledge of the factorization of N using verifier-derived challenges y_i;
 // the proof never carries y_i values supplied by the prover.
 type ModulusProof struct {
-	Version        uint16   `json:"version"`
 	W              []byte   `json:"w" wire:"1,bytes"`
 	TranscriptHash []byte   `json:"transcript_hash" wire:"2,bytes"`
 	X              [][]byte `json:"x" wire:"3,byteslist"`
@@ -53,7 +52,6 @@ func (p *ModulusProof) Clone() *ModulusProof {
 		return nil
 	}
 	cp := &ModulusProof{
-		Version:        p.Version,
 		W:              bytes.Clone(p.W),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 		A:              bytes.Clone(p.A),
@@ -109,7 +107,6 @@ func (params *RingPedersenParams) Clone() *RingPedersenParams {
 // RingPedersenProof is CGGMP24 Πprm proving knowledge of lambda such that
 // s = t^lambda mod N for Ring-Pedersen parameters (N, s, t).
 type RingPedersenProof struct {
-	Version        uint16   `json:"version"`
 	TranscriptHash []byte   `json:"transcript_hash" wire:"1,bytes"`
 	Commitments    [][]byte `json:"commitments" wire:"2,byteslist"`
 	Challenges     []byte   `json:"challenges" wire:"3,bytes"`
@@ -128,7 +125,6 @@ func (p *RingPedersenProof) Clone() *RingPedersenProof {
 		return nil
 	}
 	cp := &RingPedersenProof{
-		Version:        p.Version,
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 		Challenges:     bytes.Clone(p.Challenges),
 		Commitments:    wireutil.CloneByteSlices(p.Commitments),
