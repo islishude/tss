@@ -421,7 +421,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	s.state = keygenConfirmed
 	pubKeyHash := sha256.Sum256(finalShare.state.publicKey)
 	confirmationSetHash := keygenConfirmationSetHash(finalShare.state.keygenConfirmations)
-	s.log.Info(s.cfg.Ctx(), "keygen complete",
+	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),

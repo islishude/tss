@@ -46,7 +46,6 @@ type KeygenSession struct {
 	mu sync.Mutex
 
 	cfg            tss.ThresholdConfig              // Local threshold runtime view fixed by the keygen plan.
-	log            tss.Logger                       // Optional protocol logger.
 	limits         Limits                           // Local fail-closed resource policy.
 	securityParams SecurityParams                   // Cryptographic profile for Paillier and proof material.
 	planHash       []byte                           // Digest every keygen payload must echo.

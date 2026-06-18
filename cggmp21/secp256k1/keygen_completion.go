@@ -35,7 +35,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		if err := secp.VerifyShare(d.commitments, s.cfg.Self, share); err != nil {
-			s.log.Warn(s.cfg.Ctx(), "invalid DKG share",
+			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", id,
 			)
@@ -219,7 +219,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	out := []tss.Envelope{confirmationEnv}
 	pubKeyHash := sha256.Sum256(groupCommitments[0])
-	s.log.Info(s.cfg.Ctx(), "keygen local material complete",
+	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),

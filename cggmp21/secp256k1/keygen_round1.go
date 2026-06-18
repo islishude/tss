@@ -117,7 +117,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 	s := &KeygenSession{
 		cfg:            config,
-		log:            config.Logger(),
 		limits:         limits,
 		securityParams: plan.securityParams,
 		planHash:       bytes.Clone(planHash),
@@ -245,7 +244,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 		)
 	}
 	if !zkpai.VerifyModulus(keygenModulusDomain(s.cfg, env.From, p.PaillierPublicKey, s.planHash), pk, env.From, proof) {
-		s.log.Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
+		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid Paillier modulus proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
 		)
@@ -297,7 +296,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 		)
 	}
 	if !zkpai.VerifyRingPedersen(keygenRingPedersenDomain(s.cfg, env.From, p.RingPedersenParams, s.planHash), ringParams, env.From, ringProof) {
-		s.log.Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
+		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,
 		)
@@ -354,7 +353,7 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 	// once every party's commitments are in).
 	if pd := s.partyData[env.From]; pd.commitments != nil {
 		if err := secp.VerifyShare(pd.commitments, s.cfg.Self, share); err != nil {
-			s.log.Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
+			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
 				"party_id", s.cfg.Self,
 				"dealer", env.From,
 			)
