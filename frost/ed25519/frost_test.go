@@ -721,7 +721,7 @@ func deliverFROSTKeygenMessages(t testing.TB, parties tss.PartySet, sessions map
 	t.Helper()
 	for _, id := range parties {
 		s := sessions[id]
-		if s.Guard() == nil {
+		if s.guard == nil {
 			t.Fatalf("missing guard for keygen session %d", id)
 		}
 	}

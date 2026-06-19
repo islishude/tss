@@ -165,14 +165,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	return s, out, nil
 }
 
-// Guard returns the session's envelope guard for use by transport adapters.
-func (s *KeygenSession) Guard() *tss.EnvelopeGuard {
-	if s == nil {
-		return nil
-	}
-	return s.guard
-}
-
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
