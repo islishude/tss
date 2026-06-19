@@ -797,7 +797,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		chainCode:              slices.Clone(k.state.chainCode),
 		secret:                 k.state.secret.Clone(),
 		groupCommitments:       tss.CloneByteSlices(k.state.groupCommitments),
-		partyData:              cloneKeySharePartyDataMap(k.state.partyData),
+		partyData:              tss.CloneMap(k.state.partyData),
 		paillierPrivateKey:     k.state.paillierPrivateKey.Clone(),
 		paillierProofSessionID: k.state.paillierProofSessionID,
 		paillierProofDomain:    k.state.paillierProofDomain,

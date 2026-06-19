@@ -25,17 +25,6 @@ type ringPedersenPublicMaterial struct {
 	Proof  *zkpai.RingPedersenProof
 }
 
-func cloneKeySharePartyDataMap(in map[tss.PartyID]keySharePartyData) map[tss.PartyID]keySharePartyData {
-	if in == nil {
-		return nil
-	}
-	out := make(map[tss.PartyID]keySharePartyData, len(in))
-	for id, data := range in {
-		out[id] = data.Clone()
-	}
-	return out
-}
-
 func (m paillierPublicMaterial) snapshot(limits Limits) (PaillierPublicShare, error) {
 	if m.Party == tss.BroadcastPartyId {
 		return PaillierPublicShare{}, errors.New("paillier public material: zero party")

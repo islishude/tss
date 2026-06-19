@@ -50,7 +50,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 		if !fromFixture {
 			t.Logf("no committed keygen fixture for %d-of-%d; running full DKG fallback", threshold, n)
 		}
-		entry.shares = cloneKeyShareMap(shares)
+		entry.shares = tss.CloneMap(shares)
 	})
 	if entry.err != nil {
 		keygenFixtureCache.Delete(key)
@@ -60,7 +60,7 @@ func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 		keygenFixtureCache.Delete(key)
 		t.Fatalf("cached keygen fixture %d-of-%d was not initialized", threshold, n)
 	}
-	return cloneKeyShareMap(entry.shares)
+	return tss.CloneMap(entry.shares)
 }
 
 // cachedKeygenFixture is a convenience wrapper around CachedKeygenShares for
@@ -68,14 +68,6 @@ func CachedKeygenShares(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShar
 func cachedKeygenFixture(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 	return CachedKeygenShares(t, threshold, n)
-}
-
-func cloneKeyShareMap(shares map[tss.PartyID]*KeyShare) map[tss.PartyID]*KeyShare {
-	out := make(map[tss.PartyID]*KeyShare, len(shares))
-	for id, ks := range shares {
-		out[id] = cloneKeyShareValue(ks)
-	}
-	return out
 }
 
 type protocolHarness struct {

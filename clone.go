@@ -33,3 +33,18 @@ func CloneSlice[T Cloner[T]](in []T) []T {
 	}
 	return out
 }
+
+// CloneMap returns a cloned copy of a map whose values implement Cloner.
+//
+// A nil input returns nil. Map keys are copied as ordinary comparable values;
+// only map values are cloned through Clone.
+func CloneMap[K comparable, V Cloner[V]](in map[K]V) map[K]V {
+	if in == nil {
+		return nil
+	}
+	out := make(map[K]V, len(in))
+	for key, value := range in {
+		out[key] = value.Clone()
+	}
+	return out
+}

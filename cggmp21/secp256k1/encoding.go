@@ -246,6 +246,15 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 	return nil
 }
 
+// Clone returns an independently owned deep copy of the key share.
+//
+// The clone contains secret material and must be destroyed separately when it is
+// no longer needed. Destroying the clone does not destroy the original, and
+// destroying the original does not destroy the clone.
+func (k *KeyShare) Clone() *KeyShare {
+	return cloneKeyShareValue(k)
+}
+
 // UnmarshalPresign decodes a canonical CGGMP21 presign record with size caps.
 func UnmarshalPresign(in []byte) (*Presign, error) {
 	return tss.DecodeBinary[Presign](in)

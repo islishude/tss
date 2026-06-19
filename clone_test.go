@@ -187,3 +187,54 @@ func TestCloneSliceDoesNotReuseBackingStorage(t *testing.T) {
 		t.Fatal("CloneSlice() reused element backing storage")
 	}
 }
+
+func TestCloneMapNilInput(t *testing.T) {
+	t.Parallel()
+
+	got := CloneMap[PartyID, testShare](nil)
+	if got != nil {
+		t.Fatalf("CloneMap(nil) = %#v, want nil", got)
+	}
+}
+
+func TestCloneMapEmptyInput(t *testing.T) {
+	t.Parallel()
+
+	got := CloneMap(map[PartyID]testShare{})
+	if got == nil {
+		t.Fatal("CloneMap(empty) returned nil, want empty non-nil map")
+	}
+	if len(got) != 0 {
+		t.Fatalf("len(CloneMap(empty)) = %d, want 0", len(got))
+	}
+}
+
+func TestCloneMapPreservesEntries(t *testing.T) {
+	t.Parallel()
+
+	in := map[PartyID]testShare{
+		1: {id: "alice", data: []byte{1, 2, 3}},
+		2: {id: "bob", data: []byte{4, 5, 6}},
+	}
+
+	got := CloneMap(in)
+
+	if !reflect.DeepEqual(got, in) {
+		t.Fatalf("CloneMap() = %#v, want %#v", got, in)
+	}
+}
+
+func TestCloneMapDeepCopiesValues(t *testing.T) {
+	t.Parallel()
+
+	in := map[PartyID]testShare{
+		1: {id: "alice", data: []byte{1, 2, 3}},
+	}
+
+	got := CloneMap(in)
+	got[1].data[0] = 99
+
+	if in[1].data[0] != 1 {
+		t.Fatalf("mutating cloned value mutated original: got original data[0] = %d, want 1", in[1].data[0])
+	}
+}

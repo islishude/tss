@@ -288,7 +288,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 			if oldFixture == nil {
 				t.Fatalf("missing old key fixture for %d-of-%d", oldKey.threshold, oldKey.n)
 			}
-			oldShares := cloneKeyShareMap(oldFixture)
+			oldShares := tss.CloneMap(oldFixture)
 			oldPub := mustKeySharePublicKey(t, oldShares[1])
 
 			var newShares map[tss.PartyID]*KeyShare
