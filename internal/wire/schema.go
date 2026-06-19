@@ -45,6 +45,7 @@ type fieldSchema struct {
 	maxBytes string // limit name for max_bytes= option
 	maxItems string // limit name for max_items= option
 	maxBits  string // limit name for max_bits= option
+	optional bool   // optional pointer field; nil/missing is encoded as absent
 
 	mapKeyType   reflect.Type
 	mapValueType reflect.Type
@@ -203,6 +204,10 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			// Documented but no-op; empty is allowed by default.
 			continue
 		}
+		if opt == "optional" {
+			fs.optional = true
+			continue
+		}
 		kv := strings.SplitN(opt, "=", 2)
 		if len(kv) != 2 {
 			return fieldSchema{}, fmt.Errorf("invalid option %q", opt)
@@ -237,6 +242,9 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			return fieldSchema{}, fmt.Errorf("field %s: len=%d does not match array length %d", f.Name, fs.fixedLen, f.Type.Len())
 		}
 	}
+	if fs.optional && f.Type.Kind() != reflect.Pointer {
+		return fieldSchema{}, fmt.Errorf("optional requires pointer field, got %s", f.Type)
+	}
 
 	// Map kind requires additional schema initialization for key/value types.
 	if fs.kind == kindMap {
@@ -246,6 +254,40 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 	}
 
 	return fs, nil
+}
+
+func (fs fieldSchema) shouldOmit(fv reflect.Value) bool {
+	return fs.optional && fv.Kind() == reflect.Pointer && fv.IsNil()
+}
+
+func (s *schema) matchFields(fields []Field, context string) ([]*Field, error) {
+	matched := make([]*Field, len(s.fields))
+	fieldIndex := 0
+	for schemaIndex := range s.fields {
+		fs := &s.fields[schemaIndex]
+		if fieldIndex >= len(fields) {
+			if fs.optional {
+				continue
+			}
+			return nil, fmt.Errorf("%s: missing required field tag %d at index %d", context, fs.tag, schemaIndex)
+		}
+		field := &fields[fieldIndex]
+		switch {
+		case field.Tag == fs.tag:
+			matched[schemaIndex] = field
+			fieldIndex++
+		case field.Tag > fs.tag && fs.optional:
+			continue
+		case field.Tag > fs.tag:
+			return nil, fmt.Errorf("%s: missing required field tag %d at index %d, got %d", context, fs.tag, schemaIndex, field.Tag)
+		default:
+			return nil, fmt.Errorf("%s: unexpected field tag %d at index %d, want %d", context, field.Tag, fieldIndex, fs.tag)
+		}
+	}
+	if fieldIndex != len(fields) {
+		return nil, fmt.Errorf("%s: unexpected field tag %d at index %d", context, fields[fieldIndex].Tag, fieldIndex)
+	}
+	return matched, nil
 }
 
 // parseKind validates and returns the wireKind for a given string and Go type.

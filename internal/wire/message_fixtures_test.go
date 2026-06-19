@@ -131,6 +131,14 @@ type nestedPointerMessage struct {
 func (m nestedPointerMessage) WireType() string    { return "test.nestedpointer" }
 func (m nestedPointerMessage) WireVersion() uint16 { return 1 }
 
+type optionalNestedPointerMessage struct {
+	Inner *nestedOuterLimitInnerMessage `wire:"1,nested,max_bytes=field,optional"`
+	Tag   uint32                        `wire:"2,u32"`
+}
+
+func (m optionalNestedPointerMessage) WireType() string    { return "test.optionalnestedpointer" }
+func (m optionalNestedPointerMessage) WireVersion() uint16 { return 1 }
+
 type nestedHookInnerMessage struct {
 	AfterCalled bool
 	Value       uint16 `wire:"1,u16"`

@@ -34,6 +34,22 @@ type pointerRecordMessage struct {
 func (m pointerRecordMessage) WireType() string    { return "test.pointerrecord" }
 func (m pointerRecordMessage) WireVersion() uint16 { return 1 }
 
+type optionalRecordMessage struct {
+	Name  string       `wire:"1,max_bytes=name"`
+	Inner *innerRecord `wire:"2,record,optional"`
+	Tail  uint32       `wire:"3,u32"`
+}
+
+func (m optionalRecordMessage) WireType() string    { return "test.optionalrecord" }
+func (m optionalRecordMessage) WireVersion() uint16 { return 1 }
+
+type invalidOptionalRecordMessage struct {
+	Inner innerRecord `wire:"1,record,optional"`
+}
+
+func (m invalidOptionalRecordMessage) WireType() string    { return "test.invalidoptionalrecord" }
+func (m invalidOptionalRecordMessage) WireVersion() uint16 { return 1 }
+
 type itemRecord struct {
 	Key   string `wire:"1,max_bytes=key"`
 	Value []byte `wire:"2,max_bytes=value"`
@@ -227,6 +243,90 @@ func TestRecordPointerRoundTrip(t *testing.T) {
 	}
 	if decoded.Inner.Name != orig.Inner.Name {
 		t.Fatalf("Name: got %q, want %q", decoded.Inner.Name, orig.Inner.Name)
+	}
+}
+
+func TestOptionalRecordPointerNilOmitted(t *testing.T) {
+	t.Parallel()
+	orig := optionalRecordMessage{
+		Name: "optional",
+		Tail: 7,
+	}
+	limits := FieldLimits{
+		"name": 32,
+		"data": 1024,
+	}
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(limits))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fields, err := UnmarshalFields(raw, orig.WireType())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 2 || fields[0].Tag != 1 || fields[1].Tag != 3 {
+		t.Fatalf("got top-level tags %v, want [1 3]", fieldTagsForTest(fields))
+	}
+
+	var decoded optionalRecordMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(limits)); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Inner != nil {
+		t.Fatal("expected absent optional record to decode as nil")
+	}
+	if decoded.Name != orig.Name || decoded.Tail != orig.Tail {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, orig)
+	}
+}
+
+func TestOptionalRecordPointerPresentRoundTrip(t *testing.T) {
+	t.Parallel()
+	orig := optionalRecordMessage{
+		Name: "optional",
+		Inner: &innerRecord{
+			Name: "inner",
+			Data: []byte{1, 2, 3},
+		},
+		Tail: 9,
+	}
+	limits := FieldLimits{
+		"name": 32,
+		"data": 1024,
+	}
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(limits))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded optionalRecordMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(limits)); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Inner == nil {
+		t.Fatal("expected optional record to decode as non-nil")
+	}
+	if decoded.Inner.Name != orig.Inner.Name || !bytes.Equal(decoded.Inner.Data, orig.Inner.Data) {
+		t.Fatalf("inner mismatch: got %+v, want %+v", decoded.Inner, orig.Inner)
+	}
+}
+
+func TestOptionalRecordMissingRequiredFieldRejected(t *testing.T) {
+	t.Parallel()
+	raw, err := MarshalFields(1, "test.optionalrecord", []Field{
+		{Tag: 1, Value: []byte("name")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded optionalRecordMessage
+	err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{
+		"name": 32,
+		"data": 1024,
+	}))
+	if err == nil {
+		t.Fatal("expected missing required field after optional field to be rejected")
 	}
 }
 
@@ -609,6 +709,14 @@ func TestNilRecordPointerEncodeRejected(t *testing.T) {
 	}
 }
 
+func TestOptionalRequiresPointerField(t *testing.T) {
+	t.Parallel()
+	_, err := getSchema(reflect.TypeFor[invalidOptionalRecordMessage]())
+	if err == nil {
+		t.Fatal("expected optional non-pointer field to be rejected")
+	}
+}
+
 // ---- schema parse test --------------------------------------------------------
 
 func TestRecordSchemaParse(t *testing.T) {
@@ -648,4 +756,12 @@ func TestRecordSchemaParse(t *testing.T) {
 	if s4.fields[0].kind != kindRecordList {
 		t.Fatalf("expected explicit kindRecordList, got %d", s4.fields[0].kind)
 	}
+}
+
+func fieldTagsForTest(fields []Field) []uint16 {
+	tags := make([]uint16, len(fields))
+	for i, field := range fields {
+		tags[i] = field.Tag
+	}
+	return tags
 }

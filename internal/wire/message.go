@@ -23,6 +23,12 @@
 // from the Go field type. Named primitive types (e.g. type SessionID [32]byte)
 // are handled correctly. big.Int must always be declared explicitly.
 //
+// Pointer fields may be marked with the "optional" option, for example
+// `wire:"2,record,optional"`. An optional nil pointer is omitted during
+// marshaling. When decoding, an absent optional field is left nil. Fields
+// without "optional" remain required and nil pointer records/nested messages
+// are rejected.
+//
 // The "custom" kind delegates field value encoding to the field type via
 // the ValueMarshaler and ValueUnmarshaler interfaces. This lets domain types
 // define their own canonical bytes without internal/wire importing them.
@@ -161,9 +167,9 @@ func runAfterUnmarshalHook(msg any) error {
 // canonical TLV envelope. msg must be a struct or pointer-to-struct
 // implementing Message.
 //
-// Fields are encoded in ascending tag order. Missing, extra, or
-// duplicate tags are rejected. See the package documentation for the
-// struct tag grammar.
+// Fields are encoded in ascending tag order. Missing, extra, or duplicate tags
+// are rejected, except explicit optional pointer fields are omitted when nil.
+// See the package documentation for the struct tag grammar.
 func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 	v := reflect.ValueOf(msg)
 	if v.Kind() == reflect.Pointer {
@@ -242,6 +248,9 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 	for i := range s.fields {
 		fs := &s.fields[i]
 		fv := v.FieldByIndex(fs.index)
+		if fs.shouldOmit(fv) {
+			continue
+		}
 		value, err := fs.encode(fv, cfg.fieldLimits)
 		if err != nil {
 			return nil, fmt.Errorf("wire %s field %s tag %d: %w", v.Type().Name(), fs.name, fs.tag, err)
@@ -257,8 +266,9 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 // Message.
 //
 // The decoded type ID and version are validated against dst's
-// WireType() and WireVersion().  The exact field set must match the
-// schema — missing and extra fields are rejected.
+// WireType() and WireVersion(). The exact field set must match the schema:
+// missing and extra fields are rejected, except explicit optional pointer fields
+// may be absent and then remain nil.
 func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 	v := reflect.ValueOf(dst)
 	if v.Kind() != reflect.Pointer || v.IsNil() {
@@ -320,21 +330,19 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 		return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 	}
 
-	// Exact field set: require same count and matching tag sequence.
-	if len(fields) != len(s.fields) {
-		return fmt.Errorf("wire %s: got %d fields, want %d", v.Type().Name(), len(fields), len(s.fields))
-	}
-	for i := range s.fields {
-		if fields[i].Tag != s.fields[i].tag {
-			return fmt.Errorf("wire %s: unexpected field tag %d at index %d, want %d",
-				v.Type().Name(), fields[i].Tag, i, s.fields[i].tag)
-		}
+	matched, err := s.matchFields(fields, "wire "+v.Type().Name())
+	if err != nil {
+		return err
 	}
 
 	for i := range s.fields {
+		field := matched[i]
+		if field == nil {
+			continue
+		}
 		fs := &s.fields[i]
 		fv := work.FieldByIndex(fs.index)
-		if err := fs.decode(fv, fields[i].Value, cfg.fieldLimits, limits); err != nil {
+		if err := fs.decode(fv, field.Value, cfg.fieldLimits, limits); err != nil {
 			return fmt.Errorf("wire %s field %s tag %d: %w", v.Type().Name(), fs.name, fs.tag, err)
 		}
 	}

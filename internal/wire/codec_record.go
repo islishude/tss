@@ -116,7 +116,8 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Fi
 // ---- marshal / unmarshal record value ----------------------------------------
 
 // marshalRecordValue encodes a struct value into the canonical record body format.
-// The value may be a struct or pointer-to-struct. Nil pointers are rejected.
+// The value may be a struct or pointer-to-struct. Nil record values are rejected,
+// while explicit optional pointer fields inside the record are omitted when nil.
 // When v is not addressable (e.g., a slice element from []T), an addressable copy
 // is created so that pointer-receiver hooks (BeforeMarshalWire, Validate) are visible.
 func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
@@ -173,6 +174,9 @@ func marshalRecordValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	for i := range s.fields {
 		fs2 := &s.fields[i]
 		fv := v.FieldByIndex(fs2.index)
+		if fs2.shouldOmit(fv) {
+			continue
+		}
 		value, err := fs2.encode(fv, limitSet)
 		if err != nil {
 			return nil, fmt.Errorf("record %s field %s tag %d: %w", v.Type().Name(), fs2.name, fs2.tag, err)
@@ -211,21 +215,19 @@ func unmarshalRecordValue(raw []byte, dst reflect.Value, limitSet FieldLimits, f
 		return fmt.Errorf("record %s: trailing bytes", typ.Name())
 	}
 
-	// Exact field set: require same count and matching tag sequence.
-	if len(fields) != len(s.fields) {
-		return fmt.Errorf("record %s: got %d fields, want %d", typ.Name(), len(fields), len(s.fields))
-	}
-	for i := range s.fields {
-		if fields[i].Tag != s.fields[i].tag {
-			return fmt.Errorf("record %s: unexpected field tag %d at index %d, want %d",
-				typ.Name(), fields[i].Tag, i, s.fields[i].tag)
-		}
+	matched, err := s.matchFields(fields, "record "+typ.Name())
+	if err != nil {
+		return err
 	}
 
 	for i := range s.fields {
+		field := matched[i]
+		if field == nil {
+			continue
+		}
 		fs2 := &s.fields[i]
 		fv := work.FieldByIndex(fs2.index)
-		if err := fs2.decode(fv, fields[i].Value, limitSet, frameLimits); err != nil {
+		if err := fs2.decode(fv, field.Value, limitSet, frameLimits); err != nil {
 			return fmt.Errorf("record %s field %s tag %d: %w", typ.Name(), fs2.name, fs2.tag, err)
 		}
 	}

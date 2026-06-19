@@ -72,6 +72,20 @@ type mapPtrRecordMessage struct {
 func (m mapPtrRecordMessage) WireType() string    { return "wire.test.map.ptrrecord" }
 func (m mapPtrRecordMessage) WireVersion() uint16 { return 1 }
 
+// mapRecordWithOptional is a record map value with an optional record field.
+type mapRecordWithOptional struct {
+	Value uint32     `wire:"1,u32"`
+	Inner *mapRecord `wire:"2,record,optional"`
+}
+
+// mapOptionalRecordMessage uses record values with optional record fields.
+type mapOptionalRecordMessage struct {
+	Items map[uint32]mapRecordWithOptional `wire:"1,map,max_items=parties"`
+}
+
+func (m mapOptionalRecordMessage) WireType() string    { return "wire.test.map.optionalrecord" }
+func (m mapOptionalRecordMessage) WireVersion() uint16 { return 1 }
+
 // mapCustomValue implements ValueMarshaler/ValueUnmarshaler.
 type mapCustomValue struct {
 	data []byte
@@ -526,6 +540,41 @@ func TestMapPtrRecordValueRoundtrip(t *testing.T) {
 
 	if decoded.Items[1].Name != "hello" || decoded.Items[1].Value != 42 {
 		t.Fatalf("record roundtrip mismatch: %+v", decoded.Items[1])
+	}
+}
+
+func TestMapRecordValueOptionalRecordRoundtrip(t *testing.T) {
+	t.Parallel()
+
+	orig := mapOptionalRecordMessage{
+		Items: map[uint32]mapRecordWithOptional{
+			1: {Value: 10},
+			2: {Value: 20, Inner: &mapRecord{Name: "present", Value: 99}},
+		},
+	}
+
+	limits := FieldLimits{"parties": 10}
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(limits))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded mapOptionalRecordMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(limits)); err != nil {
+		t.Fatal(err)
+	}
+
+	if decoded.Items[1].Inner != nil {
+		t.Fatal("expected absent optional map record field to decode as nil")
+	}
+	if decoded.Items[1].Value != 10 {
+		t.Fatalf("value: got %d, want 10", decoded.Items[1].Value)
+	}
+	if decoded.Items[2].Inner == nil {
+		t.Fatal("expected present optional map record field to decode as non-nil")
+	}
+	if decoded.Items[2].Inner.Name != "present" || decoded.Items[2].Inner.Value != 99 {
+		t.Fatalf("inner roundtrip mismatch: %+v", decoded.Items[2].Inner)
 	}
 }
 

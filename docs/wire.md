@@ -90,7 +90,8 @@ When the kind is omitted or the second segment is not a recognised kind name, th
 explicitly. A struct field typed as `SomeStruct` infers to `record`; a field
 typed as `[]SomeStruct` or `[]*SomeStruct` infers to `recordlist`. Both
 enforce the same strict canonical rules as top-level messages: exact field
-set, ascending tags, no duplicates, no trailing bytes.
+set, ascending tags, no duplicates, no trailing bytes, except for fields
+explicitly tagged `optional`.
 
 `big.Int` and `map[K]V` are **not** auto-inferred — callers must declare `bigint`,
 `biguint`, or `bigpos` explicitly, and map fields must declare `map` explicitly.
@@ -128,6 +129,9 @@ the wire format of existing fields if their Go type were refactored to a map.
 - `max_bytes=name` — semantic byte limit (from `wire.WithFieldLimits`)
 - `max_bits=name` — semantic bit-length limit for bigint/biguint/bigpos (validates `BitLen()`) or conservative `len*8` upper bound for bytes (from `wire.WithFieldLimits`)
 - `max_items=name` — semantic item count limit
+- `optional` — only valid on pointer fields; nil is omitted on marshal and an
+  absent tag decodes as nil. Without `optional`, pointer fields remain
+  required, and nil record/nested pointers are rejected.
 - `allow_empty` — documents that empty is permitted (no-op)
 
 ### Interfaces
@@ -167,8 +171,10 @@ FROST and CGGMP21 KeyShare DTOs encode participant-owned public material as
 canonical `PartyID` maps. The map key is the sole owner identity; nested values
 do not duplicate it. Decoders require the map key set to match `Parties`
 exactly, reject the broadcast ID and unknown/missing parties, and validate any
-confirmation sender against its map key. Protocol ordering is still derived
-from `Parties`, not map iteration.
+confirmation sender against its map key. FROST per-party keygen confirmations
+use `wire:"...,record,optional"` so missing confirmations are represented by an
+absent tag rather than a zero-length or one-element record list. Protocol
+ordering is still derived from `Parties`, not map iteration.
 
 When a type must completely control its TLV envelope (type ID, version, field
 order) without exposing wire-tagged exported fields, implement `MessageMarshaler`
@@ -281,12 +287,12 @@ kinds remain for existing per-party encodings. New code may use `map` when the
 wire format is being designed for the first time; converting existing
 per-party encodings is a separate refactoring decision.
 
-CGGMP21 secp256k1 `KeyShare` uses this map encoding for its per-party public
-material. The map key is the sole party identity source and must exactly match
-the share's canonical `Parties` set. The value does not repeat a party field.
-Transcript, hash, confirmation, and public getter paths iterate `Parties`; they
-never depend on Go map iteration order. The retired record-list key-share
-layout is not decoded.
+FROST Ed25519 and CGGMP21 secp256k1 `KeyShare` records use this map encoding
+for per-party public material. The map key is the sole party identity source and
+must exactly match the share's canonical `Parties` set. The value does not
+repeat a party field. Transcript, hash, confirmation, and public getter paths
+iterate `Parties`; they never depend on Go map iteration order. The retired
+record-list key-share layout is not decoded.
 
 These rules ensure one semantic record has one binary representation. This matters for transcript binding, storage integrity, and regression tests.
 

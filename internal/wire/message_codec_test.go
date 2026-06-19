@@ -730,6 +730,58 @@ func TestNestedPointerNilRejected(t *testing.T) {
 	}
 }
 
+func TestOptionalNestedPointerNilOmitted(t *testing.T) {
+	t.Parallel()
+
+	orig := optionalNestedPointerMessage{Tag: 42}
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"field": 1000}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fields, err := UnmarshalFields(raw, orig.WireType())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(fields) != 1 || fields[0].Tag != 2 {
+		t.Fatalf("got top-level tags %v, want [2]", fieldTagsForTest(fields))
+	}
+
+	var decoded optionalNestedPointerMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 1000})); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Inner != nil {
+		t.Fatal("expected absent optional nested field to decode as nil")
+	}
+	if decoded.Tag != orig.Tag {
+		t.Fatalf("tag: got %d, want %d", decoded.Tag, orig.Tag)
+	}
+}
+
+func TestOptionalNestedPointerPresentRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	orig := optionalNestedPointerMessage{
+		Inner: &nestedOuterLimitInnerMessage{Payload: []byte("ok")},
+		Tag:   9,
+	}
+	raw, err := Marshal(orig, WithFieldLimitsForMarshal(FieldLimits{"field": 1000}))
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var decoded optionalNestedPointerMessage
+	if err := Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"field": 1000})); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Inner == nil {
+		t.Fatal("expected optional nested field to decode as non-nil")
+	}
+	if !bytes.Equal(decoded.Inner.Payload, orig.Inner.Payload) || decoded.Tag != orig.Tag {
+		t.Fatalf("round-trip mismatch: got %+v, want %+v", decoded, orig)
+	}
+}
+
 func TestNestedErrorIncludesFieldPath(t *testing.T) {
 	t.Parallel()
 
