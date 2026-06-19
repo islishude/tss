@@ -87,4 +87,4 @@ type Proof struct {
 func (Proof) WireType() string { return proofWireType }
 
 // WireVersion returns the wire format version for Proof.
-func (Proof) WireVersion() uint16 { return proofVersion }
+func (Proof) WireVersion() uint16 { return proofWireVersion }

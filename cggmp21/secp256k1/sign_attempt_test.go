@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/wire"
 )
 
 func TestFast_SignAttemptRecordCanonicalRoundTrip(t *testing.T) {
@@ -46,6 +47,7 @@ func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 		name   string
 		mutate func(*SignAttemptRecord)
 	}{
+		{"protocol_version", func(r *SignAttemptRecord) { r.ProtocolVersion++ }},
 		{"presign", func(r *SignAttemptRecord) { r.PresignID[0] ^= 1 }},
 		{"session", func(r *SignAttemptRecord) { r.SessionID[0] ^= 1 }},
 		{"digest", func(r *SignAttemptRecord) { r.Digest[0] ^= 1 }},
@@ -68,6 +70,41 @@ func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 				t.Fatal("tampered sign attempt encoded")
 			}
 		})
+	}
+}
+
+func TestFast_SignAttemptRecordRejectsRetiredEnvelopeLayoutOnRestore(t *testing.T) {
+	t.Parallel()
+	record := testSignAttemptRecord(t, 1)
+	envWireType := (tss.Envelope{}).WireType()
+	envVersion, fields, err := wire.UnmarshalFields(record.CanonicalBaseEnvelopeBytes, envWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retiredEnvelope, err := wire.MarshalFields(envVersion, envWireType, []wire.Field{
+		{Tag: 1, Value: fields[0].Value},
+		{Tag: 2, Value: wire.Uint16(envVersion)},
+		{Tag: 3, Value: fields[1].Value},
+		{Tag: 4, Value: fields[2].Value},
+		{Tag: 5, Value: fields[3].Value},
+		{Tag: 6, Value: fields[4].Value},
+		{Tag: 7, Value: fields[5].Value},
+		{Tag: 8, Value: fields[6].Value},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	w, err := signAttemptWireFromRecord(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.CanonicalBaseEnvelopeBytes = retiredEnvelope
+	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalSignAttemptRecordWithLimits(raw, testLimits()); err == nil {
+		t.Fatal("restored sign attempt accepted retired embedded envelope layout")
 	}
 }
 
@@ -404,7 +441,6 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,
@@ -428,7 +464,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	record := SignAttemptRecord{
 		RecordVersion:              signAttemptRecordVersion,
 		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
-		Version:                    tss.Version,
+		ProtocolVersion:            tss.ProtocolVersion,
 		PresignID:                  bytes.Repeat([]byte{0x55}, sha256.Size),
 		SessionID:                  sessionID,
 		Party:                      1,

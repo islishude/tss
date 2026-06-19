@@ -76,7 +76,6 @@ func clonePresignForTest(p *Presign) *Presign {
 		return nil
 	}
 	return &Presign{state: &presignState{
-		version:              p.state.version,
 		consumed:             p.state.consumed,
 		attempt:              p.state.attempt,
 		securityParams:       p.state.securityParams,
@@ -508,7 +507,6 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{state: &presignState{
-		version:        tss.Version,
 		consumed:       new(atomic.Bool),
 		attempt:        newPresignAttemptBinding(false),
 		securityParams: testSecurityParams(),

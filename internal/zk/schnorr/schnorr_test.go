@@ -213,19 +213,19 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 		version uint16
 		fields  []wire.Field
 	}{
-		{name: "wrong version", version: proofVersion + 1, fields: []wire.Field{
+		{name: "wrong version", version: proofWireVersion + 1, fields: []wire.Field{
 			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 			{Tag: testutil.MustFieldTag(Proof{}, "Response"), Value: validResponse},
 		}},
-		{name: "missing response", version: proofVersion, fields: []wire.Field{
+		{name: "missing response", version: proofWireVersion, fields: []wire.Field{
 			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 		}},
-		{name: "extra field", version: proofVersion, fields: []wire.Field{
+		{name: "extra field", version: proofWireVersion, fields: []wire.Field{
 			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 			{Tag: testutil.MustFieldTag(Proof{}, "Response"), Value: validResponse},
 			{Tag: 99, Value: []byte{1}},
 		}},
-		{name: "wrong response tag", version: proofVersion, fields: []wire.Field{
+		{name: "wrong response tag", version: proofWireVersion, fields: []wire.Field{
 			{Tag: testutil.MustFieldTag(Proof{}, "Commitment"), Value: validCommitment},
 			{Tag: 99, Value: validResponse},
 		}},

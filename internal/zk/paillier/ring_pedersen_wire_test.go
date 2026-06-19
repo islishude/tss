@@ -87,7 +87,7 @@ func TestRingPedersenParamsWireRejectsOversizedModulus(t *testing.T) {
 		t.Fatal("expected oversized modulus rejection during marshal")
 	}
 
-	raw, err := wire.MarshalFields(proofVersion, ringPedersenParamsWireType, []wire.Field{
+	raw, err := wire.MarshalFields(ringPedersenParamsWireVersion, ringPedersenParamsWireType, []wire.Field{
 		{Tag: 1, Value: []byte{0x01, 0x00}},
 		{Tag: 2, Value: []byte{0x00, 0x02}},
 		{Tag: 3, Value: []byte{0x00, 0x04}},

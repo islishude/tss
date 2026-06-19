@@ -18,7 +18,6 @@ func TestBlameEvidenceField(t *testing.T) {
 		}
 		env := Envelope{
 			Protocol:    "test-protocol",
-			Version:     Version,
 			SessionID:   session,
 			Round:       1,
 			From:        1,
@@ -146,7 +145,6 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 	}
 	env := Envelope{
 		Protocol:    "test-protocol",
-		Version:     Version,
 		SessionID:   session,
 		Round:       2,
 		From:        1,
@@ -208,7 +206,6 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 	}
 	env := Envelope{
 		Protocol:    "test-protocol",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -222,6 +219,69 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 	}
 }
 
+func TestBlameEvidenceRejectsRetiredVersionFieldAndWrongFrameVersion(t *testing.T) {
+	t.Parallel()
+	session, err := NewSessionID(bytes.NewReader(bytes.Repeat([]byte{0x35}, 32)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := NewBlameEvidence(Envelope{
+		Protocol:    "test-protocol",
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		PayloadType: "test.payload",
+		Payload:     []byte("payload"),
+	}, EvidenceKindSignPartial, "invalid partial", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := evidence.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, blameWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if version != blameWireVersion {
+		t.Fatalf("wire version = %d, want %d", version, blameWireVersion)
+	}
+	if len(fields) != 11 || fields[0].Tag != 1 {
+		t.Fatalf("unexpected evidence field layout: count=%d first_tag=%d", len(fields), fields[0].Tag)
+	}
+
+	retiredFields := []wire.Field{
+		{Tag: 1, Value: wire.Uint16(blameWireVersion)},
+		{Tag: 2, Value: fields[0].Value},
+		{Tag: 3, Value: fields[1].Value},
+		{Tag: 4, Value: fields[2].Value},
+		{Tag: 5, Value: fields[3].Value},
+		{Tag: 6, Value: fields[4].Value},
+		{Tag: 7, Value: fields[5].Value},
+		{Tag: 8, Value: fields[6].Value},
+		{Tag: 9, Value: fields[7].Value},
+		{Tag: 10, Value: fields[8].Value},
+		{Tag: 11, Value: fields[9].Value},
+		{Tag: 12, Value: fields[10].Value},
+	}
+	retired, err := wire.MarshalFields(blameWireVersion, blameWireType, retiredFields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalBlameEvidence(retired); err == nil {
+		t.Fatal("retired evidence version field accepted")
+	}
+
+	wrongVersion, err := wire.MarshalFields(blameWireVersion+1, blameWireType, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalBlameEvidence(wrongVersion); err == nil {
+		t.Fatal("wrong evidence frame version accepted")
+	}
+}
+
 func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
 	t.Parallel()
 	session, err := NewSessionID(nil)
@@ -230,7 +290,6 @@ func TestBlameEvidenceDoesNotNameSecretFields(t *testing.T) {
 	}
 	env := Envelope{
 		Protocol:    "test-protocol",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -273,7 +332,6 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 	// Helper: build a valid evidence, marshal it, then replace tag 12 value.
 	env := Envelope{
 		Protocol:    "test-protocol",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -295,7 +353,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 	t.Run("malformed recordlist truncated count", func(t *testing.T) {
 		// Build a field body with tag 12 value truncated (only 2 bytes of the uint32 count).
 		malformed := []byte{0x00, 0x01} // truncated count
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for truncated recordlist count")
 		}
@@ -304,7 +362,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 	t.Run("malformed recordlist count too large", func(t *testing.T) {
 		// count=0xFFFFFFFF exceeds maxRecordCount (65535).
 		malformed := wire.Uint32(0xFFFFFFFF)
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for oversized recordlist count")
 		}
@@ -315,7 +373,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		malformed := make([]byte, 0, 6)
 		malformed = append(malformed, wire.Uint32(1)...) // count=1
 		malformed = append(malformed, 0x00, 0x10)        // truncated rec_len (only 2 of 4 bytes)
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for truncated recordlist item")
 		}
@@ -333,7 +391,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		malformed = append(malformed, wire.Uint32(uint32(len(recBody)))...)
 		malformed = append(malformed, recBody...)
 		malformed = append(malformed, 0xFF) // trailing byte
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for trailing bytes in recordlist")
 		}
@@ -354,7 +412,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 			// tag 1 (Key) intentionally absent
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for missing Key field in EvidenceField record")
 		}
@@ -367,7 +425,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 			// tag 2 (Value) intentionally absent
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for missing Value field in EvidenceField record")
 		}
@@ -380,7 +438,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 			{Tag: 99, Value: []byte("extra")}, // unexpected field
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
-		raw := buildEvidenceWithField12(t, session, malformed)
+		raw := buildEvidenceWithField11(t, session, malformed)
 		if _, err := UnmarshalBlameEvidence(raw); err == nil {
 			t.Fatal("expected error for extra field in EvidenceField record")
 		}
@@ -400,7 +458,7 @@ func TestBlameEvidenceRecordListNonUTF8KeyRejected(t *testing.T) {
 		{Tag: 2, Value: []byte{}},
 	})
 	malformed := buildRecordListBytes([][]byte{recBody})
-	raw := buildEvidenceWithField12(t, session, malformed)
+	raw := buildEvidenceWithField11(t, session, malformed)
 	if _, err := UnmarshalBlameEvidence(raw); err == nil {
 		t.Fatal("expected error for non-UTF-8 Key in EvidenceField record")
 	}
@@ -435,7 +493,7 @@ func TestBlameEvidenceRecordListValueExceedsLimitRejected(t *testing.T) {
 		{Tag: 2, Value: []byte{}},
 	})
 	malformed := buildRecordListBytes([][]byte{recBody})
-	raw := buildEvidenceWithField12(t, session, malformed)
+	raw := buildEvidenceWithField11(t, session, malformed)
 	if _, err := UnmarshalBlameEvidence(raw); err == nil {
 		t.Fatal("expected error for oversized Key in EvidenceField record")
 	}
@@ -443,33 +501,32 @@ func TestBlameEvidenceRecordListValueExceedsLimitRejected(t *testing.T) {
 
 // ---- helpers for building malformed evidence wire messages --------------------
 
-// buildEvidenceWithField12 constructs a valid BlameEvidence envelope but
-// replaces the tag-12 field value with the given malformed bytes.
-func buildEvidenceWithField12(t *testing.T, session SessionID, field12Value []byte) []byte {
+// buildEvidenceWithField11 constructs a valid BlameEvidence envelope but
+// replaces the tag-11 field value with the given malformed bytes.
+func buildEvidenceWithField11(t *testing.T, session SessionID, field11Value []byte) []byte {
 	t.Helper()
 
 	maxBlameEvidenceBytes := DefaultMaxBlameEvidenceBytes
 	fields := []wire.Field{
-		{Tag: 1, Value: wire.Uint16(uint16(Version))}, // Version
-		{Tag: 2, Value: []byte("test-protocol")},      // Protocol
-		{Tag: 3, Value: session[:]},                   // SessionID (32 bytes)
-		{Tag: 4, Value: []byte{1}},                    // Round
-		{Tag: 5, Value: wire.Uint32(1)},               // From
-		{Tag: 6, Value: wire.Uint32(0)},               // To
-		{Tag: 7, Value: []byte("test.payload")},       // PayloadType
-		{Tag: 8, Value: make([]byte, 32)},             // PayloadHash (32 zero bytes)
-		{Tag: 9, Value: []byte{}},                     // EnvelopeDigest
-		{Tag: 10, Value: []byte("sign_partial")},      // Kind
-		{Tag: 11, Value: []byte("mutation test")},     // Reason
-		{Tag: 12, Value: field12Value},                // PublicInputs (recordlist)
+		{Tag: 1, Value: []byte("test-protocol")},  // Protocol
+		{Tag: 2, Value: session[:]},               // SessionID (32 bytes)
+		{Tag: 3, Value: []byte{1}},                // Round
+		{Tag: 4, Value: wire.Uint32(1)},           // From
+		{Tag: 5, Value: wire.Uint32(0)},           // To
+		{Tag: 6, Value: []byte("test.payload")},   // PayloadType
+		{Tag: 7, Value: make([]byte, 32)},         // PayloadHash (32 zero bytes)
+		{Tag: 8, Value: []byte{}},                 // EnvelopeDigest
+		{Tag: 9, Value: []byte("sign_partial")},   // Kind
+		{Tag: 10, Value: []byte("mutation test")}, // Reason
+		{Tag: 11, Value: field11Value},            // PublicInputs (recordlist)
 	}
-	raw, err := wire.MarshalFields(Version, blameWireType, fields)
+	raw, err := wire.MarshalFields(blameWireVersion, blameWireType, fields)
 	if err != nil {
-		t.Fatalf("buildEvidenceWithField12: %v", err)
+		t.Fatalf("buildEvidenceWithField11: %v", err)
 	}
 	// Ensure total size respects the blame evidence limit.
 	if len(raw) > maxBlameEvidenceBytes {
-		t.Fatalf("buildEvidenceWithField12: constructed message too large: %d > %d",
+		t.Fatalf("buildEvidenceWithField11: constructed message too large: %d > %d",
 			len(raw), maxBlameEvidenceBytes)
 	}
 	return raw

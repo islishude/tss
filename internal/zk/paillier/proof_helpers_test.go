@@ -73,7 +73,7 @@ func testPaillierKey(tb testing.TB, bits int) *pai.PrivateKey {
 
 func mustWireProof(t *testing.T, typeID string, fields []wire.Field) []byte {
 	t.Helper()
-	raw, err := wire.MarshalFields(proofVersion, typeID, fields)
+	raw, err := wire.MarshalFields(modulusProofWireVersion, typeID, fields)
 	if err != nil {
 		t.Fatal(err)
 	}

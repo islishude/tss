@@ -150,7 +150,7 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 	if o.RingPedersenProof != nil {
 		rpProof = o.RingPedersenProof
 	}
-	return testutil.MarshalFieldsByName(tss.Version, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, map[string][]byte{
+	return testutil.MarshalFieldsByName(keygenCommitmentsPayloadWireVersion, keygenCommitmentsPayloadWireType, keygenCommitmentsPayload{}, map[string][]byte{
 		"Commitments":        wire.EncodeBytesList(p.Commitments),
 		"PaillierPublicKey":  wire.NonNilBytes(pkBytes),
 		"PaillierProof":      wire.NonNilBytes(modProof),

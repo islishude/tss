@@ -1,11 +1,14 @@
 package tss
 
-// Version is the library wire/protocol version used by current messages.
-const Version = 1
+// ProtocolVersion is the semantic protocol version bound into transcripts and
+// durable protocol records.
+const ProtocolVersion uint16 = 1
 
 const envelopeHashLabel = "github.com/islishude/tss/envelope/v1"
 
 const envelopeWireType = "tss.envelope"
+
+const envelopeWireVersion uint16 = 1
 
 // PartyID identifies a protocol participant.
 // The zero value is reserved to mean unset and broadcast mode for Envelope.
@@ -101,7 +104,6 @@ type ReplayCache interface {
 // EnvelopeInput carries the caller-provided fields for constructing an Envelope.
 type EnvelopeInput struct {
 	Protocol    ProtocolID
-	Version     uint16
 	SessionID   SessionID
 	Round       uint8
 	From        PartyID

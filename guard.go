@@ -105,32 +105,27 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, errors.New("session mismatch"))
 	}
 
-	// 3. Version check.
-	if base.Version != Version {
-		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected version %d", base.Version))
-	}
-
-	// 4. Sender membership in the provided party set.
+	// 3. Sender membership in the provided party set.
 	if !parties.Contains(base.From) {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("sender %d is not a participant", base.From))
 	}
 
-	// 5. Transport authentication.
+	// 4. Transport authentication.
 	if info.Peer == BroadcastPartyId {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrUnauthenticatedTransport)
 	}
 
-	// 6. Transport identity must match envelope sender.
+	// 5. Transport identity must match envelope sender.
 	if info.Peer != base.From {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, info.Peer, base.From))
 	}
 
-	// 7. Channel protection must be set.
+	// 6. Channel protection must be set.
 	if info.Protection == ChannelProtectionUnknown {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingChannelProtection)
 	}
 
-	// 8. Recipient check for direct messages.
+	// 7. Recipient check for direct messages.
 	if base.To != BroadcastPartyId && base.To != g.Self {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: expected %d, got %d", ErrWrongRecipient, g.Self, base.To))
 	}

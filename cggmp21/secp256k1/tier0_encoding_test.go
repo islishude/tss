@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"testing"
 
-	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -13,21 +12,21 @@ import (
 // This test does not require any key generation or crypto.
 func TestFast_RejectsWrongWireTypes(t *testing.T) {
 	t.Parallel()
-	wrongKeyShare, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.keyshare", nil)
+	wrongKeyShare, err := wire.MarshalFields(keyShareWireVersion, "wrong.secp256k1.keyshare", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UnmarshalKeyShare(wrongKeyShare); err == nil {
 		t.Fatal("wrong key share wire type accepted")
 	}
-	wrongPresign, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.presign", nil)
+	wrongPresign, err := wire.MarshalFields(presignWireVersion, "wrong.secp256k1.presign", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := UnmarshalPresign(wrongPresign); err == nil {
 		t.Fatal("wrong presign wire type accepted")
 	}
-	wrongAttempt, err := wire.MarshalFields(tss.Version, "wrong.secp256k1.sign-attempt", nil)
+	wrongAttempt, err := wire.MarshalFields(signAttemptWireVersion, "wrong.secp256k1.sign-attempt", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

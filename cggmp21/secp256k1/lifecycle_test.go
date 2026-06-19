@@ -416,7 +416,6 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	resolvedPath := tss.DerivationPath{1, 2}
 	additiveShift := []byte{0x08, 0x09, 0x0a}
 	p := &Presign{state: &presignState{
-		version: tss.Version,
 
 		consumed: new(atomic.Bool),
 		attempt:  newPresignAttemptBinding(false),

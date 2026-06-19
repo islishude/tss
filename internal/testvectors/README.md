@@ -7,14 +7,16 @@ This directory is the **single canonical location** for all test vectors: binary
 ```
 wire/v1/                          — binary golden vectors (wire format stability)
   envelope/   1 file               — Envelope.golden
-  tss/        3 files              — SigningContext, BroadcastAck, BroadcastCertificate
+  tss/        4 files              — BlameEvidence, SigningContext, BroadcastAck,
+                                     BroadcastCertificate
   frost/      6 files              — KeyShare, VerificationShare, KeygenCommitmentsPayload,
                                      KeygenSharePayload, NonceCommitmentPayload, SignPartialPayload
-  cggmp21/    12 files             — KeyShare, VerificationShare, PaillierPublicShare,
+  cggmp21/    14 files             — KeyShare, VerificationShare, PaillierPublicShare,
                                      RingPedersenPublicShare, SignVerifyShare, KeygenSharePayload,
-                                     Presign, Presign.fast, PresignRound3Payload, ResharePlan,
+                                     RefreshSharePayload, ReshareSharePayload, Presign,
+                                     Presign.fast, PresignRound3Payload, ResharePlan,
                                      SignAttemptRecord, SignPartialPayload
-  zk/         11 files             — SecurityParams, ModulusProof, RingPedersenParams,
+  zk/         8 files              — SecurityParams, ModulusProof, RingPedersenParams,
                                      RingPedersenProof,
                                      EncProof, AffGProof, LogStarProof, SchnorrProof
 

@@ -10,16 +10,17 @@ import (
 )
 
 const (
-	signVerifyShareWireType           = "cggmp21.secp256k1.sign-verify-share"
-	signVerifyShareRecordFixedBytes   = 2 + 4*(2+4) + 4
-	signVerifyShareEnvelopeFixedBytes = 4 + 2 + len(signVerifyShareWireType) + 2
+	signVerifyShareWireType                  = "cggmp21.secp256k1.sign-verify-share"
+	signVerifyShareWireVersion        uint16 = 1
+	signVerifyShareRecordFixedBytes          = 2 + 4*(2+4) + 4
+	signVerifyShareEnvelopeFixedBytes        = 4 + 2 + len(signVerifyShareWireType) + 2
 )
 
 // WireType returns the canonical wire type identifier for SignVerifyShare.
 func (SignVerifyShare) WireType() string { return signVerifyShareWireType }
 
 // WireVersion returns the wire format version for SignVerifyShare.
-func (SignVerifyShare) WireVersion() uint16 { return tss.Version }
+func (SignVerifyShare) WireVersion() uint16 { return signVerifyShareWireVersion }
 
 // MarshalBinary encodes the verification share using canonical TLV wire format.
 func (s SignVerifyShare) MarshalBinary() ([]byte, error) {

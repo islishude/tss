@@ -14,8 +14,10 @@ import (
 )
 
 const (
-	keyShareWireType = "cggmp21.secp256k1.keyshare"
-	presignWireType  = "cggmp21.secp256k1.presign"
+	keyShareWireType           = "cggmp21.secp256k1.keyshare"
+	presignWireType            = "cggmp21.secp256k1.presign"
+	keyShareWireVersion uint16 = 1
+	presignWireVersion  uint16 = 1
 )
 
 // keyShareWire is the wire DTO for KeyShare.
@@ -56,7 +58,7 @@ type keySharePartyDataWire struct {
 func (keyShareWire) WireType() string { return keyShareWireType }
 
 // WireVersion returns the wire format version for keyShareWire.
-func (keyShareWire) WireVersion() uint16 { return tss.Version }
+func (keyShareWire) WireVersion() uint16 { return keyShareWireVersion }
 
 func keySharePartyDataWireFromState(id tss.PartyID, data keySharePartyData, limits Limits) (keySharePartyDataWire, error) {
 	paillierPublicKey, err := canonicalWireMessageBytes(data.paillierPublicKey, limits)
@@ -219,7 +221,7 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 func (*KeyShare) WireType() string { return keyShareWireType }
 
 // WireVersion returns the wire format version for KeyShare.
-func (*KeyShare) WireVersion() uint16 { return tss.Version }
+func (*KeyShare) WireVersion() uint16 { return keyShareWireVersion }
 
 // MarshalWireMessage encodes KeyShare through its private wire DTO.
 func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
@@ -282,7 +284,7 @@ type presignWire struct {
 func (presignWire) WireType() string { return presignWireType }
 
 // WireVersion returns the wire format version for presignWire.
-func (presignWire) WireVersion() uint16 { return tss.Version }
+func (presignWire) WireVersion() uint16 { return presignWireVersion }
 
 func decodePresignWire(w *presignWire) (*presignState, error) {
 	if _, err := secpScalarFromSecret(w.KShare); err != nil {
@@ -304,7 +306,6 @@ func decodePresignWire(w *presignWire) (*presignState, error) {
 		return nil, fmt.Errorf("presign derivation result: %w", err)
 	}
 	return &presignState{
-		version:              tss.Version,
 		securityParams:       w.SecurityParams,
 		party:                w.Party,
 		threshold:            w.Threshold,
@@ -332,7 +333,7 @@ func decodePresignWire(w *presignWire) (*presignState, error) {
 func (*Presign) WireType() string { return presignWireType }
 
 // WireVersion returns the wire format version for Presign.
-func (*Presign) WireVersion() uint16 { return tss.Version }
+func (*Presign) WireVersion() uint16 { return presignWireVersion }
 
 // MarshalWireMessage encodes Presign through its private wire DTO.
 func (p *Presign) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {

@@ -49,22 +49,28 @@ type reshareCommitmentsPayload struct {
 	PlanHash    []byte   `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
+const reshareCommitmentsPayloadWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for reshareCommitmentsPayload.
 func (reshareCommitmentsPayload) WireType() string { return reshareCommitmentsPayloadWireType }
 
 // WireVersion returns the wire format version for reshareCommitmentsPayload.
-func (reshareCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+func (reshareCommitmentsPayload) WireVersion() uint16 {
+	return reshareCommitmentsPayloadWireVersion
+}
 
 type reshareSharePayload struct {
 	Share    []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
 	PlanHash []byte `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
+const reshareSharePayloadWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for reshareSharePayload.
 func (reshareSharePayload) WireType() string { return reshareSharePayloadWireType }
 
 // WireVersion returns the wire format version for reshareSharePayload.
-func (reshareSharePayload) WireVersion() uint16 { return tss.Version }
+func (reshareSharePayload) WireVersion() uint16 { return reshareSharePayloadWireVersion }
 
 // MarshalJSON rejects default JSON encoding of secret reshare shares.
 func (reshareSharePayload) MarshalJSON() ([]byte, error) {

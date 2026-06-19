@@ -47,6 +47,8 @@ const (
 // blameWireType is the TLV type identifier for blame evidence records.
 const blameWireType = "tss.blame"
 
+const blameWireVersion uint16 = 1
+
 // EvidenceField carries one public input or public-input hash for blame evidence.
 type EvidenceField struct {
 	Key   string `wire:"1,max_bytes=evidence_field_key"`
@@ -64,25 +66,24 @@ func (f EvidenceField) Clone() EvidenceField {
 // BlameEvidence is intentionally public-only. Confidential protocol messages
 // should be represented by hashes or other public inputs, not by plaintext.
 type BlameEvidence struct {
-	Version        uint16          `wire:"1"`
-	Protocol       ProtocolID      `wire:"2"`
-	SessionID      SessionID       `wire:"3,len=32"`
-	Round          uint8           `wire:"4"`
-	From           PartyID         `wire:"5"`
-	To             PartyID         `wire:"6"`
-	PayloadType    PayloadType     `wire:"7,max_bytes=payload_type"`
-	PayloadHash    []byte          `wire:"8,len=32"`
-	EnvelopeDigest []byte          `wire:"9"`
-	Kind           EvidenceKind    `wire:"10"`
-	Reason         string          `wire:"11,max_bytes=evidence_reason"`
-	PublicInputs   []EvidenceField `wire:"12,max_items=evidence_fields"`
+	Protocol       ProtocolID      `wire:"1"`
+	SessionID      SessionID       `wire:"2,len=32"`
+	Round          uint8           `wire:"3"`
+	From           PartyID         `wire:"4"`
+	To             PartyID         `wire:"5"`
+	PayloadType    PayloadType     `wire:"6,max_bytes=payload_type"`
+	PayloadHash    []byte          `wire:"7,len=32"`
+	EnvelopeDigest []byte          `wire:"8"`
+	Kind           EvidenceKind    `wire:"9"`
+	Reason         string          `wire:"10,max_bytes=evidence_reason"`
+	PublicInputs   []EvidenceField `wire:"11,max_items=evidence_fields"`
 }
 
 // WireType returns the canonical wire type identifier for BlameEvidence.
 func (BlameEvidence) WireType() string { return blameWireType }
 
 // WireVersion returns the wire format version for BlameEvidence.
-func (BlameEvidence) WireVersion() uint16 { return Version }
+func (BlameEvidence) WireVersion() uint16 { return blameWireVersion }
 
 // defaultEvidenceLimits returns conservative evidence limits suitable for
 // production use.
@@ -121,7 +122,6 @@ func NewBlameEvidence(env Envelope, kind EvidenceKind, reason string, inputs []E
 	payloadHash := sha256.Sum256(env.Payload)
 	envelopeDigest := env.Digest()
 	evidence := &BlameEvidence{
-		Version:        Version,
 		Protocol:       env.Protocol,
 		SessionID:      env.SessionID,
 		Round:          env.Round,
@@ -154,9 +154,6 @@ func (e *BlameEvidence) Validate() error {
 func (e *BlameEvidence) ValidateWithLimits(l EvidenceLimits) error {
 	if e == nil {
 		return errors.New("nil blame evidence")
-	}
-	if e.Version != Version {
-		return fmt.Errorf("unexpected evidence version %d", e.Version)
 	}
 	if e.Protocol == "" {
 		return errors.New("missing evidence protocol")

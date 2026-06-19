@@ -119,7 +119,6 @@ func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
 
 	s := &SignSession{
 		presign: &Presign{state: &presignState{
-			version: tss.Version,
 
 			signers:        tss.NewPartySet(1, 2),
 			transcriptHash: bytes.Repeat([]byte{0x41}, 32),

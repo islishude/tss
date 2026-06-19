@@ -24,7 +24,6 @@ func TestPresignSessionRejectsNil(t *testing.T) {
 	}
 	env := tss.Envelope{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        2,
@@ -47,7 +46,6 @@ func TestSignSessionRejectsNil(t *testing.T) {
 	}
 	env := tss.Envelope{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        2,
@@ -70,7 +68,6 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 	}
 	env := tss.Envelope{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        2,

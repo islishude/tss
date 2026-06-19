@@ -52,7 +52,6 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	// Construct a commitments broadcast without certificate.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        12,
@@ -86,7 +85,6 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	// Construct a direct share envelope without confidentiality.
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        22,
@@ -119,7 +117,6 @@ func TestCGGMP21KeygenRejectsUnauthenticatedTransport(t *testing.T) {
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        32,
@@ -151,7 +148,6 @@ func TestCGGMP21KeygenRejectsSenderSpoofing(t *testing.T) {
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        42,
@@ -187,7 +183,6 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 	// First delivery of a valid broadcast message.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        52,
@@ -229,7 +224,6 @@ func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        62,

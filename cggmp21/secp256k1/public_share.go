@@ -12,16 +12,19 @@ import (
 )
 
 const (
-	verificationShareWireType       = "cggmp21.secp256k1.verification-share"
-	paillierPublicShareWireType     = "cggmp21.secp256k1.paillier-public-share"
-	ringPedersenPublicShareWireType = "cggmp21.secp256k1.ring-pedersen-public-share"
+	verificationShareWireType                 = "cggmp21.secp256k1.verification-share"
+	paillierPublicShareWireType               = "cggmp21.secp256k1.paillier-public-share"
+	ringPedersenPublicShareWireType           = "cggmp21.secp256k1.ring-pedersen-public-share"
+	verificationShareWireVersion       uint16 = 1
+	paillierPublicShareWireVersion     uint16 = 1
+	ringPedersenPublicShareWireVersion uint16 = 1
 )
 
 // WireType returns the canonical wire type identifier for VerificationShare.
 func (VerificationShare) WireType() string { return verificationShareWireType }
 
 // WireVersion returns the wire format version for VerificationShare.
-func (VerificationShare) WireVersion() uint16 { return tss.Version }
+func (VerificationShare) WireVersion() uint16 { return verificationShareWireVersion }
 
 // MarshalBinary encodes the verification share using canonical TLV.
 func (v VerificationShare) MarshalBinary() ([]byte, error) {
@@ -83,7 +86,7 @@ func (v VerificationShare) ValidateWithLimits(limits Limits) error {
 func (PaillierPublicShare) WireType() string { return paillierPublicShareWireType }
 
 // WireVersion returns the wire format version for PaillierPublicShare.
-func (PaillierPublicShare) WireVersion() uint16 { return tss.Version }
+func (PaillierPublicShare) WireVersion() uint16 { return paillierPublicShareWireVersion }
 
 // MarshalBinary encodes the Paillier public share using canonical TLV.
 func (p PaillierPublicShare) MarshalBinary() ([]byte, error) {
@@ -161,7 +164,9 @@ func (p PaillierPublicShare) validateWithMaxModulusBits(maxBits int) error {
 func (RingPedersenPublicShare) WireType() string { return ringPedersenPublicShareWireType }
 
 // WireVersion returns the wire format version for RingPedersenPublicShare.
-func (RingPedersenPublicShare) WireVersion() uint16 { return tss.Version }
+func (RingPedersenPublicShare) WireVersion() uint16 {
+	return ringPedersenPublicShareWireVersion
+}
 
 // MarshalBinary encodes the Ring-Pedersen public share using canonical TLV.
 func (r RingPedersenPublicShare) MarshalBinary() ([]byte, error) {

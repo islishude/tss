@@ -20,8 +20,8 @@ The signing path never transmits or reconstructs private key shares or nonce sha
 is stored in private package state so callers cannot invalidate a validated
 share by mutating slices or nested records.
 
-Scalar metadata is exposed by value through `Version()`, `PartyID()`, and
-`Threshold()`. Byte getters such as `PublicKeyBytes()`, `ChainCodeBytes()`,
+Scalar metadata is exposed by value through `PartyID()` and `Threshold()`. Byte
+getters such as `PublicKeyBytes()`, `ChainCodeBytes()`,
 `PaillierPublicKeyBytes()`, and `KeygenTranscriptHashBytes()` return copies.
 Collection getters such as `Parties()`, `GroupCommitments()`,
 `VerificationShares()`, `PaillierPublicKeys()`, `RingPedersenPublic()`, and

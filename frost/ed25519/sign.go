@@ -46,11 +46,13 @@ type nonceCommitment struct {
 	PlanHash []byte `wire:"3,bytes,len=32"`
 }
 
+const nonceCommitmentWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for nonceCommitment.
 func (nonceCommitment) WireType() string { return nonceCommitmentPayloadWireType }
 
 // WireVersion returns the wire format version for nonceCommitment.
-func (nonceCommitment) WireVersion() uint16 { return tss.Version }
+func (nonceCommitment) WireVersion() uint16 { return nonceCommitmentWireVersion }
 
 // MarshalJSON rejects default JSON encoding of nonce commitments.
 func (nonceCommitment) MarshalJSON() ([]byte, error) {
@@ -62,11 +64,13 @@ type signPartialPayload struct {
 	PlanHash []byte `wire:"2,bytes,len=32"`
 }
 
+const signPartialPayloadWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for signPartialPayload.
 func (signPartialPayload) WireType() string { return signPartialPayloadWireType }
 
 // WireVersion returns the wire format version for signPartialPayload.
-func (signPartialPayload) WireVersion() uint16 { return tss.Version }
+func (signPartialPayload) WireVersion() uint16 { return signPartialPayloadWireVersion }
 
 // MarshalJSON rejects default JSON encoding of partial signature payloads.
 func (signPartialPayload) MarshalJSON() ([]byte, error) {
@@ -167,7 +171,6 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   plan.state.sessionID,
 		Round:       1,
 		From:        key.state.party,

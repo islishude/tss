@@ -40,7 +40,6 @@ func ExampleEnvelope_roundtrip() {
 	// constructing the struct directly.
 	envelope, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    "example",
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,
@@ -84,7 +83,6 @@ func ExampleBlameEvidence_lifecycle() {
 	// --- 1. Construct the envelope that triggered the fault ---
 	envelope := tss.Envelope{
 		Protocol:    "example",
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,

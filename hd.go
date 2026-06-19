@@ -12,8 +12,10 @@ import (
 )
 
 const (
-	signingContextWireType   = "tss.signing-context"
-	derivationResultWireType = "tss.derivation-result"
+	signingContextWireType             = "tss.signing-context"
+	derivationResultWireType           = "tss.derivation-result"
+	signingContextWireVersion   uint16 = 1
+	derivationResultWireVersion uint16 = 1
 )
 
 // HardenedKeyStart is the first index reserved for hardened BIP32 derivation.
@@ -279,7 +281,7 @@ func (r *DerivationResult) Equal(other *DerivationResult) bool {
 func (DerivationResult) WireType() string { return derivationResultWireType }
 
 // WireVersion returns the wire format version for DerivationResult.
-func (DerivationResult) WireVersion() uint16 { return Version }
+func (DerivationResult) WireVersion() uint16 { return derivationResultWireVersion }
 
 // Validate checks structural invariants for a derivation result.
 func (r *DerivationResult) Validate() error {
@@ -361,7 +363,7 @@ type SigningContext struct {
 func (SigningContext) WireType() string { return signingContextWireType }
 
 // WireVersion returns the wire format version for SigningContext.
-func (SigningContext) WireVersion() uint16 { return Version }
+func (SigningContext) WireVersion() uint16 { return signingContextWireVersion }
 
 // MarshalBinary encodes the signing context using canonical TLV.
 func (c SigningContext) MarshalBinary() ([]byte, error) {

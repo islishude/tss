@@ -13,7 +13,7 @@ import (
 
 const schnorrChallengeLabel = "github.com/islishude/tss/internal/zk/schnorr/v1"
 
-const proofVersion = 1
+const proofWireVersion = 1
 
 const proofWireType = "zk.schnorr.proof"
 
@@ -35,7 +35,7 @@ func (in *Proof) Clone() *Proof {
 func (Proof) WireType() string { return proofWireType }
 
 // WireVersion returns the wire format version for Proof.
-func (Proof) WireVersion() uint16 { return proofVersion }
+func (Proof) WireVersion() uint16 { return proofWireVersion }
 
 // Prove creates a Fiat-Shamir Schnorr proof for secret and returns its public key.
 func Prove(domain []byte, secretScalar *secret.Scalar) (*Proof, []byte, error) {

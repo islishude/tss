@@ -65,7 +65,6 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   s.sessionID,
 		Round:       2,
 		From:        s.key.state.party,

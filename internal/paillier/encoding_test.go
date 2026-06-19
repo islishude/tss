@@ -98,7 +98,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if _, err := UnmarshalPrivateKey(badPrivate); err == nil {
 		t.Fatal("expected non-minimal private factor rejection")
 	}
-	wrongType, err := wire.MarshalFields(paillierWireVersion, "wrong.paillier.public-key", nil)
+	wrongType, err := wire.MarshalFields(publicKeyWireVersion, "wrong.paillier.public-key", nil)
 	if err != nil {
 		t.Fatal(err)
 	}

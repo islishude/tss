@@ -17,7 +17,7 @@ import (
 
 func proofTranscript(tag string, domain []byte, statementParts, commitmentParts [][]byte) []byte {
 	t := transcript.New(proofTranscriptLabel)
-	t.AppendUint32("proof_version", uint32(proofVersion))
+	t.AppendUint32("proof_version", uint32(proofTranscriptVersion))
 	t.AppendString("curve", "secp256k1")
 	t.AppendString("proof_tag", tag)
 	t.AppendBytes("outer_domain", domain)

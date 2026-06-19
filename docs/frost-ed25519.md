@@ -16,8 +16,8 @@ The group public key is a standard Ed25519 verification key. Signatures are stan
 ## KeyShare API and Ownership
 
 `KeyShare` is an opaque handle. Public metadata cannot be changed through struct
-fields after validation. `Version()`, `PartyID()`, `Threshold()`, and
-`KeygenSessionID()` return values. `PublicKeyBytes()`, `ChainCodeBytes()`, and
+fields after validation. `PartyID()`, `Threshold()`, and `KeygenSessionID()`
+return values. `PublicKeyBytes()`, `ChainCodeBytes()`, and
 `KeygenTranscriptHashBytes()` return copied bytes. `Parties()`,
 `GroupCommitments()`, `VerificationShares()`, and `KeygenConfirmations()` return
 deep copies, including nested byte slices.

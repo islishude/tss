@@ -14,7 +14,8 @@ import (
 )
 
 const (
-	startMessageWireType = "mta.start-message"
+	startMessageWireType    = "mta.start-message"
+	startMessageWireVersion = 1
 )
 
 // StartMessage carries an encrypted multiplicand.
@@ -26,7 +27,7 @@ type StartMessage struct {
 func (StartMessage) WireType() string { return startMessageWireType }
 
 // WireVersion returns the wire format version for StartMessage.
-func (StartMessage) WireVersion() uint16 { return messageVersion }
+func (StartMessage) WireVersion() uint16 { return startMessageWireVersion }
 
 // StartOpening carries the local witness for an MtA start ciphertext.
 type StartOpening struct {

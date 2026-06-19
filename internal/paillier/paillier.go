@@ -18,7 +18,7 @@ type PublicKey struct {
 func (PublicKey) WireType() string { return publicKeyWireType }
 
 // WireVersion returns the wire format version for PublicKey.
-func (PublicKey) WireVersion() uint16 { return paillierWireVersion }
+func (PublicKey) WireVersion() uint16 { return publicKeyWireVersion }
 
 // AfterUnmarshalWire reconstructs the cached NSquared value after wire decoding.
 func (pk *PublicKey) AfterUnmarshalWire() error {
@@ -100,11 +100,11 @@ func (sk *PrivateKey) Destroy() {
 	sk.Q.Destroy()
 }
 
-const paillierWireVersion = 1
-
 const (
-	publicKeyWireType  = "paillier.public-key"
-	privateKeyWireType = "paillier.private-key"
+	publicKeyWireType     = "paillier.public-key"
+	privateKeyWireType    = "paillier.private-key"
+	publicKeyWireVersion  = 1
+	privateKeyWireVersion = 1
 )
 
 // privateKeyWire is the wire DTO for PrivateKey.
@@ -121,4 +121,4 @@ type privateKeyWire struct {
 func (privateKeyWire) WireType() string { return privateKeyWireType }
 
 // WireVersion returns the wire format version for privateKeyWire.
-func (privateKeyWire) WireVersion() uint16 { return paillierWireVersion }
+func (privateKeyWire) WireVersion() uint16 { return privateKeyWireVersion }

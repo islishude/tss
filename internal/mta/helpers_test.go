@@ -165,7 +165,7 @@ func TestRandomSecretScalar(t *testing.T) {
 func TestMessageVersion(t *testing.T) {
 	t.Parallel()
 
-	if messageVersion != 1 {
-		t.Fatal("messageVersion changed; wire format may be incompatible")
+	if startMessageWireVersion != 1 || responseMessageWireVersion != 1 {
+		t.Fatal("MtA wire version changed; wire format may be incompatible")
 	}
 }

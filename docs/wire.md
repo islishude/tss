@@ -313,6 +313,12 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 - `cggmp21/secp256k1.Presign`
 - `cggmp21/secp256k1.VerificationShare`
 - `cggmp21/secp256k1.PaillierPublicShare`
+
+`Envelope` and `BlameEvidence` carry their schema version only in the TLV frame
+header. Their field tags are contiguous and do not include a duplicate body
+version field. Semantic protocol-version binding uses `tss.ProtocolVersion`
+inside transcripts instead.
+
 - `cggmp21/secp256k1.RingPedersenPublicShare`
 - `cggmp21/secp256k1.SignVerifyShare`
 - `cggmp21/secp256k1.SignAttemptRecord`

@@ -7,12 +7,15 @@ import (
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
-const proofVersion = 1
+const proofTranscriptVersion = 1
 
 const (
-	modulusProofWireType       = "zk.paillier.modulus-proof"
-	ringPedersenParamsWireType = "zk.paillier.ring-pedersen-params"
-	ringPedersenProofWireType  = "zk.paillier.ring-pedersen-proof"
+	modulusProofWireType          = "zk.paillier.modulus-proof"
+	ringPedersenParamsWireType    = "zk.paillier.ring-pedersen-params"
+	ringPedersenProofWireType     = "zk.paillier.ring-pedersen-proof"
+	modulusProofWireVersion       = 1
+	ringPedersenParamsWireVersion = 1
+	ringPedersenProofWireVersion  = 1
 )
 
 const (
@@ -44,7 +47,7 @@ type ModulusProof struct {
 func (ModulusProof) WireType() string { return modulusProofWireType }
 
 // WireVersion returns the wire format version for ModulusProof.
-func (ModulusProof) WireVersion() uint16 { return proofVersion }
+func (ModulusProof) WireVersion() uint16 { return modulusProofWireVersion }
 
 // Clone returns a deep copy of the ModulusProof.
 func (p *ModulusProof) Clone() *ModulusProof {
@@ -78,7 +81,7 @@ type RingPedersenParams struct {
 func (RingPedersenParams) WireType() string { return ringPedersenParamsWireType }
 
 // WireVersion returns the wire format version for RingPedersenParams.
-func (RingPedersenParams) WireVersion() uint16 { return proofVersion }
+func (RingPedersenParams) WireVersion() uint16 { return ringPedersenParamsWireVersion }
 
 // Clone returns a deep copy of RingPedersenParams
 func (params *RingPedersenParams) Clone() *RingPedersenParams {
@@ -117,7 +120,7 @@ type RingPedersenProof struct {
 func (RingPedersenProof) WireType() string { return ringPedersenProofWireType }
 
 // WireVersion returns the wire format version for RingPedersenProof.
-func (RingPedersenProof) WireVersion() uint16 { return proofVersion }
+func (RingPedersenProof) WireVersion() uint16 { return ringPedersenProofWireVersion }
 
 // Clone returns a deep copy of the RingPedersenProof.
 func (p *RingPedersenProof) Clone() *RingPedersenProof {

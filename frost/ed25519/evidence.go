@@ -96,7 +96,6 @@ func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *t
 func frostAggregateBlame(sessionID tss.SessionID, signers tss.PartySet, publicKey, message, sig []byte) *tss.Blame {
 	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       2,
 		PayloadType: payloadSignPartial,

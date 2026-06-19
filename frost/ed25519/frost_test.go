@@ -1400,7 +1400,6 @@ func TestFROSTReshareRejectsUnknownSender(t *testing.T) {
 	// Construct a fake envelope from a non-participant.
 	fakeEnv := tss.Envelope{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        99, // not in participant set

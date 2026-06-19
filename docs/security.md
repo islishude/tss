@@ -68,11 +68,12 @@ wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
 set `ReceiveInfo.Peer`; `OpenEnvelope` and the guard both check that this peer
 matches `Envelope.From`.
 
-The envelope digest is computed from the protocol, version, session, round,
-sender, recipient, payload type, and payload. It is not carried as a wire field
-or stored as mutable state. Callers use `Envelope.Digest()` or
-`InboundEnvelope.Digest()`, both of which return the distinct `EnvelopeDigest`
-type.
+The envelope digest is computed from the protocol, semantic
+`tss.ProtocolVersion`, session, round, sender, recipient, payload type, and
+payload. The protocol version is a constant rather than mutable envelope state;
+the TLV frame schema version is validated separately during decoding. Callers
+use `Envelope.Digest()` or `InboundEnvelope.Digest()`, both of which return the
+distinct `EnvelopeDigest` type.
 
 All repository-defined SHA-256 transcripts use labeled entries through
 `internal/transcript`. The domain is the first entry, and every field binds both

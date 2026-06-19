@@ -15,7 +15,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const affGProofVersion = 1
+const affGProofWireVersion = 1
 
 const affGProofWireType = "zk.paillier.aff-g-proof"
 
@@ -73,7 +73,7 @@ type AffGProof struct {
 func (AffGProof) WireType() string { return affGProofWireType }
 
 // WireVersion returns the wire format version for AffGProof.
-func (AffGProof) WireVersion() uint16 { return affGProofVersion }
+func (AffGProof) WireVersion() uint16 { return affGProofWireVersion }
 
 // Clone returns a deep copy of the AffGProof.
 func (p *AffGProof) Clone() *AffGProof {
@@ -590,7 +590,7 @@ type affGProofWire struct {
 func (affGProofWire) WireType() string { return affGProofWireType }
 
 // WireVersion returns the wire format version for affGProofWire.
-func (affGProofWire) WireVersion() uint16 { return affGProofVersion }
+func (affGProofWire) WireVersion() uint16 { return affGProofWireVersion }
 
 // MarshalWireMessage encodes AffGProof as a canonical TLV message.
 func (p *AffGProof) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {

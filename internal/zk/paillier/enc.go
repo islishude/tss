@@ -16,7 +16,7 @@ import (
 )
 
 // Proof version for the new CGGMP-compatible proofs.
-const encProofVersion = 1
+const encProofWireVersion = 1
 
 const encProofWireType = "zk.paillier.enc-proof"
 
@@ -52,7 +52,7 @@ type EncProof struct {
 func (EncProof) WireType() string { return encProofWireType }
 
 // WireVersion returns the wire format version for EncProof.
-func (EncProof) WireVersion() uint16 { return encProofVersion }
+func (EncProof) WireVersion() uint16 { return encProofWireVersion }
 
 // Clone returns a deep copy of the EncProof.
 func (p *EncProof) Clone() *EncProof {

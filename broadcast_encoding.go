@@ -10,8 +10,10 @@ import (
 )
 
 const (
-	broadcastAckWireType         = "tss.broadcast-ack"
-	broadcastCertificateWireType = "tss.broadcast-certificate"
+	broadcastAckWireType            = "tss.broadcast-ack"
+	broadcastCertificateWireType    = "tss.broadcast-certificate"
+	broadcastAckWireVersion         = 1
+	broadcastCertificateWireVersion = 1
 )
 
 func broadcastFieldLimits() wire.FieldLimits {
@@ -27,7 +29,7 @@ func broadcastFieldLimits() wire.FieldLimits {
 func (BroadcastAck) WireType() string { return broadcastAckWireType }
 
 // WireVersion returns the wire format version for BroadcastAck.
-func (BroadcastAck) WireVersion() uint16 { return Version }
+func (BroadcastAck) WireVersion() uint16 { return broadcastAckWireVersion }
 
 // MarshalBinary encodes the broadcast acknowledgment using canonical TLV.
 func (a BroadcastAck) MarshalBinary() ([]byte, error) {
@@ -62,7 +64,7 @@ func (a BroadcastAck) Validate() error {
 func (BroadcastCertificate) WireType() string { return broadcastCertificateWireType }
 
 // WireVersion returns the wire format version for BroadcastCertificate.
-func (BroadcastCertificate) WireVersion() uint16 { return Version }
+func (BroadcastCertificate) WireVersion() uint16 { return broadcastCertificateWireVersion }
 
 // BeforeMarshalWire canonicalizes recipient and acknowledgment ordering.
 func (c *BroadcastCertificate) BeforeMarshalWire() error {

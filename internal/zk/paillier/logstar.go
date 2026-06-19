@@ -15,7 +15,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const logStarProofVersion = 1
+const logStarProofWireVersion = 1
 
 const logStarProofWireType = "zk.paillier.logstar-proof"
 
@@ -332,7 +332,7 @@ type logStarProofWire struct {
 func (logStarProofWire) WireType() string { return logStarProofWireType }
 
 // WireVersion returns the wire format version for logStarProofWire.
-func (logStarProofWire) WireVersion() uint16 { return logStarProofVersion }
+func (logStarProofWire) WireVersion() uint16 { return logStarProofWireVersion }
 
 // MarshalBinary encodes the LogStarProof using the object-level wire codec.
 func (p *LogStarProof) MarshalBinary() ([]byte, error) {

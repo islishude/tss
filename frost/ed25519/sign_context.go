@@ -41,7 +41,7 @@ func signContextHash(ctx tss.SigningContext) []byte {
 	}
 	t := transcript.New(signContextHashLabel)
 	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
-	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendUint32("version", uint32(tss.ProtocolVersion))
 	t.AppendString("curve", "ed25519")
 	t.AppendString("key_id", ctx.KeyID)
 	t.AppendString("chain_id", ctx.ChainID)

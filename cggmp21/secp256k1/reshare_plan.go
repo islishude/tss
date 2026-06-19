@@ -407,7 +407,7 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	}
 	t := transcript.New(resharePlanDigestLabel)
 	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
-	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendUint32("version", uint32(tss.ProtocolVersion))
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendString("curve", p.state.curveID)
 	t.AppendBytes("old_group_public_key", p.state.oldGroupPublicKey)

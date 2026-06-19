@@ -74,7 +74,9 @@ type keygenCommitmentsPayload struct {
 func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayloadWireType }
 
 // WireVersion returns the wire format version for keygenCommitmentsPayload.
-func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+func (keygenCommitmentsPayload) WireVersion() uint16 {
+	return keygenCommitmentsPayloadWireVersion
+}
 
 type keygenSharePayload struct {
 	Share    *secret.Scalar `wire:"1,custom,len=32"`
@@ -85,7 +87,7 @@ type keygenSharePayload struct {
 func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType }
 
 // WireVersion returns the wire format version for keygenSharePayload.
-func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
+func (keygenSharePayload) WireVersion() uint16 { return keygenSharePayloadWireVersion }
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {

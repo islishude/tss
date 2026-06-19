@@ -400,7 +400,7 @@ type ringPedersenParamsWire struct {
 func (ringPedersenParamsWire) WireType() string { return ringPedersenParamsWireType }
 
 // WireVersion returns the wire format version for ringPedersenParamsWire.
-func (ringPedersenParamsWire) WireVersion() uint16 { return proofVersion }
+func (ringPedersenParamsWire) WireVersion() uint16 { return ringPedersenParamsWireVersion }
 
 // MarshalWireMessage encodes RingPedersenParams as a canonical TLV message.
 func (params *RingPedersenParams) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {

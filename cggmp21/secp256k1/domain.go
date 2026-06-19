@@ -89,7 +89,7 @@ func newDomainBuilder(label string) (*domainBuilder, error) {
 	}
 	t := transcript.New(proofDomainVersion)
 	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
-	t.AppendUint32("version", uint32(tss.Version))
+	t.AppendUint32("version", uint32(tss.ProtocolVersion))
 	t.AppendString("proof_label", label)
 	return &domainBuilder{t: t}, nil
 }

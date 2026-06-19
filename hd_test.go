@@ -373,7 +373,7 @@ func TestDerivationResultRejectsMalformed(t *testing.T) {
 	t.Run("wrong wire type", func(t *testing.T) {
 		t.Parallel()
 		// Build a valid TLV with the wrong type.
-		raw, err := wire.MarshalFields(Version, "tss.wrong-type", nil)
+		raw, err := wire.MarshalFields(derivationResultWireVersion, "tss.wrong-type", nil)
 		if err != nil {
 			t.Fatal(err)
 		}

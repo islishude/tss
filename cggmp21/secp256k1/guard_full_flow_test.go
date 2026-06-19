@@ -318,7 +318,6 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	// Create a valid broadcast envelope.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        72,

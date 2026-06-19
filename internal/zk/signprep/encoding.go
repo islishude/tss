@@ -8,7 +8,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const proofVersion = 1
+const proofWireVersion = 1
 const proofWireType = "zk.signprep.proof"
 
 // Validate checks the proof's structural invariants.

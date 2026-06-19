@@ -17,7 +17,8 @@ import (
 )
 
 const (
-	responseMessageWireType = "mta.response-message"
+	responseMessageWireType    = "mta.response-message"
+	responseMessageWireVersion = 1
 )
 
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
@@ -30,7 +31,7 @@ type ResponseMessage struct {
 func (ResponseMessage) WireType() string { return responseMessageWireType }
 
 // WireVersion returns the wire format version for ResponseMessage.
-func (ResponseMessage) WireVersion() uint16 { return messageVersion }
+func (ResponseMessage) WireVersion() uint16 { return responseMessageWireVersion }
 
 // MarshalBinary encodes the MtA response message using the object-level wire codec.
 func (m ResponseMessage) MarshalBinary() ([]byte, error) {

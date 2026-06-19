@@ -315,7 +315,6 @@ func testBroadcastEnvelope(t *testing.T, sid SessionID) Envelope {
 	t.Helper()
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   sid,
 		Round:       1,
 		From:        2,

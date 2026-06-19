@@ -111,10 +111,11 @@ Unexpected input must:
 Guard-level rejection happens before the protocol handler and does not create
 cryptographic blame. Protocol-level rejection happens before state advancement.
 
-| Boundary | Required reject cases                                                                                                                                                                            |
-| -------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Guard    | Unknown, non-committee, or self sender; wrong protocol, version, session, round, or recipient; direct/broadcast mismatch; missing confidentiality; missing broadcast certificate; replay.        |
-| Protocol | Wrong payload type; malformed payload; payload in the wrong round; lifecycle plan hash mismatch; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature. |
+| Boundary    | Required reject cases                                                                                                                                                                            |
+| ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Decode/Open | Wrong wire type or frame schema version; retired body layout; duplicate, missing, malformed, or trailing fields.                                                                                 |
+| Guard       | Unknown, non-committee, or self sender; wrong protocol, session, round, or recipient; direct/broadcast mismatch; missing confidentiality; missing broadcast certificate; replay.                 |
+| Protocol    | Wrong payload type; malformed payload; payload in the wrong round; lifecycle plan hash mismatch; payload/proof identity mismatch; equivocation; invalid commitment, proof, or partial signature. |
 
 For every rejection, snapshot the relevant public state before delivery and verify
 it is unchanged afterward. Depending on the phase, that includes round, outbound
@@ -144,6 +145,8 @@ Golden vectors are wire compatibility contracts:
 - Reject vectors must continue to fail with the intended error category.
 - Never update golden bytes merely to make a test pass. Any intentional wire
   change must be reviewed as a protocol compatibility change.
+- When a retired body version field is removed, renumber the remaining schema
+  tags contiguously and add a reject test for the complete retired layout.
 
 Canonical vectors and generation instructions live in
 [`internal/testvectors/README.md`](../internal/testvectors/README.md).
@@ -191,7 +194,7 @@ explicitly defines otherwise.
 Proofs, commitments, challenges, transcript hashes, presigns, and signature shares
 must bind all context relevant to their phase:
 
-- protocol and version;
+- protocol and semantic protocol version;
 - session and round;
 - sender and direct-message recipient;
 - committee, signer set, and threshold;

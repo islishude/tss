@@ -9,7 +9,10 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const securityParamsWireType = "zk.paillier.security-params"
+const (
+	securityParamsWireType    = "zk.paillier.security-params"
+	securityParamsWireVersion = 1
+)
 
 const (
 	maxSecurityParameterBits uint32 = tss.DefaultMaxPaillierModulusBits
@@ -45,7 +48,7 @@ type SecurityParams struct {
 func (SecurityParams) WireType() string { return securityParamsWireType }
 
 // WireVersion returns the wire format version for SecurityParams.
-func (SecurityParams) WireVersion() uint16 { return 1 }
+func (SecurityParams) WireVersion() uint16 { return securityParamsWireVersion }
 
 // DefaultSecurityParams returns the production CGGMP security parameters for
 // secp256k1 with 128-bit statistical and computational security.

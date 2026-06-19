@@ -86,7 +86,9 @@ type reshareDealerCommitmentsPayload struct {
 func (reshareDealerCommitmentsPayload) WireType() string { return reshareDealerCommitmentsWireType }
 
 // WireVersion returns the wire format version for reshareDealerCommitmentsPayload.
-func (reshareDealerCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+func (reshareDealerCommitmentsPayload) WireVersion() uint16 {
+	return reshareDealerCommitmentsWireVersion
+}
 
 type reshareReceiverMaterialPayload struct {
 	PaillierPublicKey  pai.PublicKey            `wire:"1,nested,max_bytes=paillier_public_key"`
@@ -100,7 +102,9 @@ type reshareReceiverMaterialPayload struct {
 func (reshareReceiverMaterialPayload) WireType() string { return reshareReceiverMaterialWireType }
 
 // WireVersion returns the wire format version for reshareReceiverMaterialPayload.
-func (reshareReceiverMaterialPayload) WireVersion() uint16 { return tss.Version }
+func (reshareReceiverMaterialPayload) WireVersion() uint16 {
+	return reshareReceiverMaterialWireVersion
+}
 
 type reshareSharePayload struct {
 	Dealer               tss.PartyID    `wire:"1,u32"`
@@ -125,7 +129,7 @@ func (p reshareSharePayload) Clone() reshareSharePayload {
 func (reshareSharePayload) WireType() string { return reshareSharePayloadWireType }
 
 // WireVersion returns the wire format version for reshareSharePayload.
-func (reshareSharePayload) WireVersion() uint16 { return tss.Version }
+func (reshareSharePayload) WireVersion() uint16 { return reshareSharePayloadWireVersion }
 
 type pendingReshareShare struct {
 	payload reshareSharePayload

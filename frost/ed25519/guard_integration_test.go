@@ -86,7 +86,6 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        12,
@@ -126,7 +125,6 @@ func TestFROSTKeygenRejectsPlaintextShare(t *testing.T) {
 
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        22,
@@ -163,7 +161,6 @@ func TestFROSTRejectsSenderSpoofing(t *testing.T) {
 	// Send a spoofed sign commitment.
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   signSessionID,
 		Round:       1,
 		From:        32,
@@ -207,7 +204,6 @@ func TestFROSTKeygenRejectsReplay(t *testing.T) {
 	// Round-2 confirmation — passes guard policy check but handler rejects invalid payload.
 	confirmEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   sessionID,
 		Round:       2,
 		From:        42,
@@ -264,7 +260,6 @@ func TestFROSTReshareRejectsPlaintextShare(t *testing.T) {
 	// Send a plaintext reshare share.
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   reshareSessionID,
 		Round:       1,
 		From:        52,

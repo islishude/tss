@@ -11,11 +11,13 @@ import (
 
 const verificationShareWireType = "frost.ed25519.verification-share"
 
+const verificationShareWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for VerificationShare.
 func (VerificationShare) WireType() string { return verificationShareWireType }
 
 // WireVersion returns the wire format version for VerificationShare.
-func (VerificationShare) WireVersion() uint16 { return tss.Version }
+func (VerificationShare) WireVersion() uint16 { return verificationShareWireVersion }
 
 // MarshalBinary encodes the verification share using canonical TLV.
 func (v VerificationShare) MarshalBinary() ([]byte, error) {

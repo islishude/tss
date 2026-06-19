@@ -118,7 +118,6 @@ type Presign struct {
 }
 
 type presignState struct {
-	version              uint16                 // Canonical private wire version of this presign record.
 	securityParams       SecurityParams         // Cryptographic profile inherited from the key share.
 	party                tss.PartyID            // Local owner of this presign share.
 	threshold            int                    // Number of signer partials required to complete ECDSA signing.
@@ -139,14 +138,6 @@ type presignState struct {
 	delta                *secret.Scalar         // Local aggregate-delta share from presign completion.
 	consumed             *atomic.Bool           // Shared in-process one-use marker across shallow copies.
 	attempt              *presignAttemptBinding // Durable attempt binding/outbox state for one-use signing.
-}
-
-// Version returns the presign wire version.
-func (p *Presign) Version() uint16 {
-	if p == nil || p.state == nil {
-		return 0
-	}
-	return p.state.version
 }
 
 // PartyID returns the owner of the local presign share.
@@ -388,9 +379,6 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	}
 	if p.state.attempt == nil {
 		return errors.New("presign attempt state unavailable")
-	}
-	if p.state.version != tss.Version {
-		return fmt.Errorf("unexpected presign version %d", p.state.version)
 	}
 	if p.state.threshold <= 0 || p.state.threshold > len(p.state.signers) {
 		return errors.New("invalid presign threshold")
@@ -648,7 +636,7 @@ type presignRound1Payload struct {
 func (presignRound1Payload) WireType() string { return presignRound1PayloadWireType }
 
 // WireVersion returns the wire format version for presignRound1Payload.
-func (presignRound1Payload) WireVersion() uint16 { return tss.Version }
+func (presignRound1Payload) WireVersion() uint16 { return presignRound1PayloadWireVersion }
 
 type presignRound1ProofPayload struct {
 	PublicRound1Hash []byte         `json:"public_round1_hash" wire:"1,bytes,len=32"`
@@ -660,7 +648,9 @@ type presignRound1ProofPayload struct {
 func (presignRound1ProofPayload) WireType() string { return presignRound1ProofPayloadWireType }
 
 // WireVersion returns the wire format version for presignRound1ProofPayload.
-func (presignRound1ProofPayload) WireVersion() uint16 { return tss.Version }
+func (presignRound1ProofPayload) WireVersion() uint16 {
+	return presignRound1ProofPayloadWireVersion
+}
 
 type presignRound2Payload struct {
 	Delta      mta.ResponseMessage `json:"delta" wire:"1,nested,max_bytes=mta_response"`
@@ -673,7 +663,7 @@ type presignRound2Payload struct {
 func (presignRound2Payload) WireType() string { return presignRound2PayloadWireType }
 
 // WireVersion returns the wire format version for presignRound2Payload.
-func (presignRound2Payload) WireVersion() uint16 { return tss.Version }
+func (presignRound2Payload) WireVersion() uint16 { return presignRound2PayloadWireVersion }
 
 type presignRound3Payload struct {
 	Delta    *big.Int `json:"-" wire:"1,bigpos,max_bytes=scalar"`
@@ -687,7 +677,7 @@ type presignRound3Payload struct {
 func (presignRound3Payload) WireType() string { return presignRound3PayloadWireType }
 
 // WireVersion returns the wire format version for presignRound3Payload.
-func (presignRound3Payload) WireVersion() uint16 { return tss.Version }
+func (presignRound3Payload) WireVersion() uint16 { return presignRound3PayloadWireVersion }
 
 type signPartialPayload struct {
 	S                   *big.Int `wire:"1,biguint,max_bytes=scalar"`
@@ -702,7 +692,7 @@ type signPartialPayload struct {
 func (signPartialPayload) WireType() string { return signPartialPayloadWireType }
 
 // WireVersion returns the wire format version for signPartialPayload.
-func (signPartialPayload) WireVersion() uint16 { return tss.Version }
+func (signPartialPayload) WireVersion() uint16 { return signPartialPayloadWireVersion }
 
 // Guard returns the session's envelope guard for use by transport adapters.
 func (s *PresignSession) Guard() *tss.EnvelopeGuard {

@@ -16,13 +16,12 @@ type EnvelopeDigest [32]byte
 // Envelope is a transport-neutral protocol wire message.
 type Envelope struct {
 	Protocol    ProtocolID  `wire:"1,string"`
-	Version     uint16      `wire:"2,u16"`
-	SessionID   SessionID   `wire:"3,bytes,len=32"`
-	Round       uint8       `wire:"4,u8"`
-	From        PartyID     `wire:"5,u32"`
-	To          PartyID     `wire:"6,u32"` // zero means broadcast
-	PayloadType PayloadType `wire:"7,string"`
-	Payload     []byte      `wire:"8,bytes"`
+	SessionID   SessionID   `wire:"2,bytes,len=32"`
+	Round       uint8       `wire:"3,u8"`
+	From        PartyID     `wire:"4,u32"`
+	To          PartyID     `wire:"5,u32"` // zero means broadcast
+	PayloadType PayloadType `wire:"6,string"`
+	Payload     []byte      `wire:"7,bytes"`
 }
 
 // ChannelProtection describes the channel protection actually observed by the
@@ -61,13 +60,12 @@ type InboundEnvelope struct {
 func (Envelope) WireType() string { return envelopeWireType }
 
 // WireVersion returns the wire format version for Envelope.
-func (Envelope) WireVersion() uint16 { return Version }
+func (Envelope) WireVersion() uint16 { return envelopeWireVersion }
 
 // Clone returns a deep copy of the envelope.
 func (e Envelope) Clone() Envelope {
 	clone := Envelope{
 		Protocol:    e.Protocol,
-		Version:     e.Version,
 		SessionID:   e.SessionID,
 		Round:       e.Round,
 		From:        e.From,
@@ -96,11 +94,6 @@ func (in InboundEnvelope) BroadcastCertificate() *BroadcastCertificate {
 // Protocol returns the envelope protocol identifier.
 func (in InboundEnvelope) Protocol() ProtocolID {
 	return in.env.Protocol
-}
-
-// Version returns the envelope wire version.
-func (in InboundEnvelope) Version() uint16 {
-	return in.env.Version
 }
 
 // SessionID returns the envelope session ID.
@@ -162,9 +155,6 @@ func validateEnvelopeFields(env *Envelope, limits EnvelopeLimits) error {
 	}
 	if len(env.Protocol) > limits.MaxProtocolNameBytes {
 		return fmt.Errorf("envelope protocol name too long: %d > %d", len(env.Protocol), limits.MaxProtocolNameBytes)
-	}
-	if env.Version != Version {
-		return fmt.Errorf("unexpected envelope version %d", env.Version)
 	}
 	if env.PayloadType == "" {
 		return errors.New("envelope payload type is empty")
@@ -253,9 +243,6 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 	if input.Protocol == "" {
 		return Envelope{}, errors.New("envelope protocol is empty")
 	}
-	if input.Version != Version {
-		return Envelope{}, fmt.Errorf("unexpected envelope version %d", input.Version)
-	}
 	if input.PayloadType == "" {
 		return Envelope{}, errors.New("envelope payload type is empty")
 	}
@@ -276,7 +263,6 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 	}
 	e := Envelope{
 		Protocol:    input.Protocol,
-		Version:     input.Version,
 		SessionID:   input.SessionID,
 		Round:       input.Round,
 		From:        input.From,
@@ -357,7 +343,7 @@ func (e Envelope) Digest() EnvelopeDigest {
 	// algorithm or session from being replayed into another.
 	t := transcript.New(envelopeHashLabel)
 	t.AppendString("protocol", string(e.Protocol))
-	t.AppendUint16("version", e.Version)
+	t.AppendUint16("version", ProtocolVersion)
 	t.AppendBytes("session_id", e.SessionID[:])
 	t.AppendUint8("round", e.Round)
 	t.AppendUint32("from", e.From)

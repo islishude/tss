@@ -423,7 +423,11 @@ Before first production deployment, verify:
 
 ## Version Upgrades
 
-- Wire format version is encoded in every `Envelope.Version` and key-share record.
-- Decoders reject unknown versions. Multi-version deployments must coordinate upgrades.
+- Each TLV record carries its schema-local wire version in the frame header.
+- Envelope and blame records do not duplicate that version in their field body.
+- `tss.ProtocolVersion` is a separate semantic version bound into protocol
+  transcripts and durable signing intent.
+- Decoders reject unknown wire versions. Multi-version deployments must coordinate upgrades.
 - Binary TLV encoding uses canonical tags. The decoder rejects unknown tags and trailing bytes.
-- Before upgrading, verify that all participants are running the same library version.
+- Before upgrading, verify that all participants use matching protocol and wire
+  schema versions.

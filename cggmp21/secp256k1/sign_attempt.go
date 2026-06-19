@@ -16,6 +16,7 @@ import (
 
 const (
 	signAttemptRecordVersion       uint16 = 1
+	signAttemptWireVersion         uint16 = 1
 	signAttemptWireType                   = "cggmp21.secp256k1.sign-attempt"
 	signAttemptIntentLabel                = "cggmp21-secp256k1-sign-attempt-intent-v1"
 	signAttemptHashLabel                  = "cggmp21-secp256k1-sign-attempt-hash-v1"
@@ -115,12 +116,12 @@ type SignAttemptBurn struct {
 // one online signing intent. CanonicalBaseEnvelopeBytes contains a confidential
 // partial signature and must be encrypted at rest.
 type SignAttemptRecord struct {
-	RecordVersion uint16
-	Protocol      tss.ProtocolID
-	Version       uint16
-	PresignID     []byte
-	AttemptHash   []byte
-	IntentHash    []byte
+	RecordVersion   uint16
+	Protocol        tss.ProtocolID
+	ProtocolVersion uint16
+	PresignID       []byte
+	AttemptHash     []byte
+	IntentHash      []byte
 
 	SessionID     tss.SessionID
 	Party         tss.PartyID
@@ -151,7 +152,7 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 	return SignAttemptRecord{
 		RecordVersion:              r.RecordVersion,
 		Protocol:                   r.Protocol,
-		Version:                    r.Version,
+		ProtocolVersion:            r.ProtocolVersion,
 		PresignID:                  slices.Clone(r.PresignID),
 		AttemptHash:                slices.Clone(r.AttemptHash),
 		IntentHash:                 slices.Clone(r.IntentHash),
@@ -201,7 +202,7 @@ func (r SignAttemptRecord) SameAttempt(other SignAttemptRecord) bool {
 func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
 	return r.RecordVersion == other.RecordVersion &&
 		r.Protocol == other.Protocol &&
-		r.Version == other.Version &&
+		r.ProtocolVersion == other.ProtocolVersion &&
 		r.SessionID == other.SessionID &&
 		r.Party == other.Party &&
 		r.LowS == other.LowS &&
@@ -297,7 +298,7 @@ func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) 
 	record := SignAttemptRecord{
 		RecordVersion:              w.RecordVersion,
 		Protocol:                   tss.ProtocolID(w.Protocol),
-		Version:                    w.Version,
+		ProtocolVersion:            w.ProtocolVersion,
 		PresignID:                  w.PresignID,
 		AttemptHash:                w.AttemptHash,
 		IntentHash:                 w.IntentHash,
@@ -376,7 +377,7 @@ func (r SignAttemptResult) validate() error {
 type signAttemptWire struct {
 	RecordVersion              uint16             `wire:"1,u16"`
 	Protocol                   string             `wire:"2,string"`
-	Version                    uint16             `wire:"3,u16"`
+	ProtocolVersion            uint16             `wire:"3,u16"`
 	PresignID                  []byte             `wire:"4,bytes,len=32"`
 	AttemptHash                []byte             `wire:"5,bytes,len=32"`
 	IntentHash                 []byte             `wire:"6,bytes,len=32"`
@@ -409,7 +410,7 @@ type signAttemptWire struct {
 func (signAttemptWire) WireType() string { return signAttemptWireType }
 
 // WireVersion returns the sign-attempt wire version.
-func (signAttemptWire) WireVersion() uint16 { return tss.Version }
+func (signAttemptWire) WireVersion() uint16 { return signAttemptWireVersion }
 
 func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
 	var certificate []byte
@@ -423,7 +424,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
 	return signAttemptWire{
 		RecordVersion:              r.RecordVersion,
 		Protocol:                   string(r.Protocol),
-		Version:                    r.Version,
+		ProtocolVersion:            r.ProtocolVersion,
 		PresignID:                  r.PresignID,
 		AttemptHash:                r.AttemptHash,
 		IntentHash:                 r.IntentHash,
@@ -464,8 +465,8 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if r.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 		return fmt.Errorf("%w: unexpected protocol %q", ErrSignAttemptCorrupt, r.Protocol)
 	}
-	if r.Version != tss.Version {
-		return fmt.Errorf("%w: unexpected version %d", ErrSignAttemptCorrupt, r.Version)
+	if r.ProtocolVersion != tss.ProtocolVersion {
+		return fmt.Errorf("%w: unexpected protocol version %d", ErrSignAttemptCorrupt, r.ProtocolVersion)
 	}
 	if len(r.PresignID) != sha256.Size || len(r.AttemptHash) != sha256.Size ||
 		len(r.IntentHash) != sha256.Size || len(r.SignerSetHash) != sha256.Size ||
@@ -497,7 +498,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if !bytes.Equal(r.EnvelopeDigest, envelopeDigest[:]) {
 		return fmt.Errorf("%w: envelope digest mismatch", ErrSignAttemptCorrupt)
 	}
-	if env.Protocol != r.Protocol || env.Version != r.Version || env.SessionID != r.SessionID ||
+	if env.Protocol != r.Protocol || env.SessionID != r.SessionID ||
 		env.Round != 1 || env.From != r.Party || env.To != 0 || env.PayloadType != payloadSignPartial {
 		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
 	}
@@ -766,7 +767,7 @@ func signAttemptIntentHash(r SignAttemptRecord) []byte {
 	t := transcript.New(signAttemptIntentLabel)
 	t.AppendUint16("record_version", r.RecordVersion)
 	t.AppendString("protocol", string(r.Protocol))
-	t.AppendUint16("protocol_version", r.Version)
+	t.AppendUint16("protocol_version", r.ProtocolVersion)
 	t.AppendBytes("presign_id", r.PresignID)
 	t.AppendBytes("session_id", r.SessionID[:])
 	t.AppendUint32("party", r.Party)

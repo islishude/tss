@@ -9,8 +9,6 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
-const messageVersion = 1
-
 func randomSecretScalar(reader io.Reader) (*secret.Scalar, error) {
 	x, err := secp.RandomScalar(reader)
 	if err != nil {

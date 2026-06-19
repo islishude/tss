@@ -176,7 +176,7 @@ func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 		t.Fatal("shallow KeyShare copy did not share Destroy lifecycle")
 	}
 
-	presign := &Presign{state: &presignState{version: tss.Version, consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
+	presign := &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
 	presignHandle := *presign
 	if err := MarkPresignConsumed(&presignHandle); err != nil {
 		t.Fatal(err)

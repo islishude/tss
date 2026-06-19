@@ -10,7 +10,10 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const keyShareWireType = "frost.ed25519.keyshare"
+const (
+	keyShareWireType    = "frost.ed25519.keyshare"
+	keyShareWireVersion = 1
+)
 
 // keyShareWire is the wire DTO for KeyShare.
 type keyShareWire struct {
@@ -32,7 +35,7 @@ type keyShareWire struct {
 func (keyShareWire) WireType() string { return keyShareWireType }
 
 // WireVersion returns the wire format version for keyShareWire.
-func (keyShareWire) WireVersion() uint16 { return tss.Version }
+func (keyShareWire) WireVersion() uint16 { return keyShareWireVersion }
 
 func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 	return &keyShareWire{
@@ -83,7 +86,7 @@ func marshalKeyShare(k *KeyShare) ([]byte, error) {
 func (*KeyShare) WireType() string { return keyShareWireType }
 
 // WireVersion returns the wire format version for KeyShare.
-func (*KeyShare) WireVersion() uint16 { return tss.Version }
+func (*KeyShare) WireVersion() uint16 { return keyShareWireVersion }
 
 // MarshalWireMessage encodes KeyShare through its private wire DTO.
 func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {

@@ -184,7 +184,7 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 
 func TestProofsUseV1Version(t *testing.T) {
 	t.Parallel()
-	if encProofVersion != 1 || affGProofVersion != 1 || logStarProofVersion != 1 {
+	if encProofWireVersion != 1 || affGProofWireVersion != 1 || logStarProofWireVersion != 1 {
 		t.Fatal("retained proof version changed")
 	}
 }

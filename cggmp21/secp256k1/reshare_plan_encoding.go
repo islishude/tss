@@ -8,7 +8,10 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const resharePlanWireType = "cggmp21.secp256k1.reshare-plan"
+const (
+	resharePlanWireType           = "cggmp21.secp256k1.reshare-plan"
+	resharePlanWireVersion uint16 = 1
+)
 
 // resharePlanWire is the private wire DTO for ResharePlan.
 type resharePlanWire struct {
@@ -31,7 +34,7 @@ type resharePlanWire struct {
 func (resharePlanWire) WireType() string { return resharePlanWireType }
 
 // WireVersion returns the wire format version for resharePlanWire.
-func (resharePlanWire) WireVersion() uint16 { return tss.Version }
+func (resharePlanWire) WireVersion() uint16 { return resharePlanWireVersion }
 
 // MarshalBinary returns the canonical wire encoding of p.
 func (p *ResharePlan) MarshalBinary() ([]byte, error) {
@@ -172,7 +175,7 @@ func decodeResharePlanWire(w *resharePlanWire, limits Limits) (*resharePlanState
 func (*ResharePlan) WireType() string { return resharePlanWireType }
 
 // WireVersion returns the wire format version for ResharePlan.
-func (*ResharePlan) WireVersion() uint16 { return tss.Version }
+func (*ResharePlan) WireVersion() uint16 { return resharePlanWireVersion }
 
 // MarshalWireMessage encodes ResharePlan through its private wire DTO.
 func (p *ResharePlan) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {

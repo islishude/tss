@@ -91,7 +91,6 @@ func (e guardTestEnv) envelope(t *testing.T, payloadType PayloadType, to PartyID
 	t.Helper()
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test-proto",
-		Version:     Version,
 		SessionID:   e.sessionID,
 		Round:       1,
 		From:        2,
@@ -541,7 +540,6 @@ func TestValidateEnvelopePolicy(t *testing.T) {
 func testEnvelope(protocol ProtocolID, round uint8, payloadType PayloadType, from, to PartyID) Envelope {
 	return Envelope{
 		Protocol:    protocol,
-		Version:     Version,
 		SessionID:   SessionID{1},
 		Round:       round,
 		From:        from,
@@ -766,7 +764,6 @@ func TestOpenEnvelopeClonesPayload(t *testing.T) {
 	payload := []byte("original")
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -803,7 +800,6 @@ func TestInboundEnvelopeAccessorsReturnCopies(t *testing.T) {
 	payload := []byte("test-payload")
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -862,7 +858,6 @@ func TestOpenEnvelopeRoundTrip(t *testing.T) {
 	session, _ := NewSessionID(nil)
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -901,7 +896,6 @@ func TestOpenEnvelopeRejectsInvalidReceiveInfo(t *testing.T) {
 	session, _ := NewSessionID(nil)
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -939,7 +933,6 @@ func TestMarshalEnvelopeWithLimits(t *testing.T) {
 	session, _ := NewSessionID(nil)
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,
@@ -969,7 +962,6 @@ func TestMarshalEnvelopeWithLimitsExceeded(t *testing.T) {
 	session, _ := NewSessionID(nil)
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test",
-		Version:     Version,
 		SessionID:   session,
 		Round:       1,
 		From:        1,

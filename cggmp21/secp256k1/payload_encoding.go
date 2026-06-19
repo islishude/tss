@@ -30,6 +30,21 @@ const (
 	refreshSharePayloadWireType       = "cggmp21.secp256k1.payload.refresh.share"
 )
 
+const (
+	keygenCommitmentsPayloadWireVersion  uint16 = 1
+	keygenSharePayloadWireVersion        uint16 = 1
+	presignRound1PayloadWireVersion      uint16 = 1
+	presignRound1ProofPayloadWireVersion uint16 = 1
+	presignRound2PayloadWireVersion      uint16 = 1
+	presignRound3PayloadWireVersion      uint16 = 1
+	signPartialPayloadWireVersion        uint16 = 1
+	reshareDealerCommitmentsWireVersion  uint16 = 1
+	reshareSharePayloadWireVersion       uint16 = 1
+	reshareReceiverMaterialWireVersion   uint16 = 1
+	refreshCommitmentsPayloadWireVersion uint16 = 1
+	refreshSharePayloadWireVersion       uint16 = 1
+)
+
 func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
 	return p.MarshalBinaryWithLimits(limits)
 }
@@ -572,7 +587,9 @@ type refreshCommitmentsPayload struct {
 func (refreshCommitmentsPayload) WireType() string { return refreshCommitmentsPayloadWireType }
 
 // WireVersion returns the wire format version for refreshCommitmentsPayload.
-func (refreshCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+func (refreshCommitmentsPayload) WireVersion() uint16 {
+	return refreshCommitmentsPayloadWireVersion
+}
 
 type refreshSharePayload struct {
 	Share    *secret.Scalar `wire:"1,custom,len=32"`
@@ -583,7 +600,7 @@ type refreshSharePayload struct {
 func (refreshSharePayload) WireType() string { return refreshSharePayloadWireType }
 
 // WireVersion returns the wire format version for refreshSharePayload.
-func (refreshSharePayload) WireVersion() uint16 { return tss.Version }
+func (refreshSharePayload) WireVersion() uint16 { return refreshSharePayloadWireVersion }
 
 func marshalRefreshCommitmentsPayloadWithLimits(p refreshCommitmentsPayload, limits Limits) ([]byte, error) {
 	return p.MarshalBinaryWithLimits(limits)
@@ -675,12 +692,10 @@ func (p refreshSharePayload) Validate() error {
 	return nil
 }
 
-// newEnvelope creates a protocol newEnvelope with the cggmp21-secp256k1 protocol id
-// and current wire version.
+// newEnvelope creates a protocol envelope with the cggmp21-secp256k1 protocol ID.
 func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
 	return tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		Version:     tss.Version,
 		SessionID:   config.SessionID,
 		Round:       round,
 		From:        from,

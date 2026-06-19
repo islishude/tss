@@ -34,7 +34,7 @@ func TestBroadcastAckCanonicalBinaryEncoding(t *testing.T) {
 		t.Fatal("broadcast ack accepted trailing byte")
 	}
 
-	mutated, err := wire.MarshalFields(Version, broadcastAckWireType, []wire.Field{
+	mutated, err := wire.MarshalFields(broadcastAckWireVersion, broadcastAckWireType, []wire.Field{
 		{Tag: 1, Value: wire.Uint32(BroadcastPartyId)},
 		{Tag: 2, Value: ack.PayloadHash[:]},
 		{Tag: 3, Value: ack.EnvelopeDigest[:]},

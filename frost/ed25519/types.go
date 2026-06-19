@@ -81,14 +81,6 @@ func (k *KeyShare) PartyID() tss.PartyID {
 	return k.state.party
 }
 
-// Version returns the key-share wire version.
-func (k *KeyShare) Version() uint16 {
-	if k == nil || k.state == nil {
-		return 0
-	}
-	return tss.Version
-}
-
 // Threshold returns the signing threshold.
 func (k *KeyShare) Threshold() int {
 	if k == nil || k.state == nil {

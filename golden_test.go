@@ -16,7 +16,6 @@ func TestGoldenEnvelope(t *testing.T) {
 	}
 	env, err := NewEnvelope(EnvelopeInput{
 		Protocol:    "test.v1",
-		Version:     Version,
 		SessionID:   sessionID,
 		Round:       1,
 		From:        1,
@@ -67,6 +66,33 @@ func TestGoldenEnvelope(t *testing.T) {
 	if err := (&Envelope{}).UnmarshalBinary(append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
+}
+
+func TestGoldenBlameEvidence(t *testing.T) {
+	t.Parallel()
+	sessionID, err := SessionIDFromBytes(bytes.Repeat([]byte{0x55}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := NewBlameEvidence(Envelope{
+		Protocol:    "test.v1",
+		SessionID:   sessionID,
+		Round:       2,
+		From:        1,
+		To:          2,
+		PayloadType: "test.payload",
+		Payload:     []byte{0x01, 0x02, 0x03},
+	}, EvidenceKindSignPartial, "invalid partial", []EvidenceField{
+		{Key: "public", Value: []byte{0x04, 0x05}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := evidence.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	checkRootGolden(t, filepath.Join("internal", "testvectors", "wire", "v1", "tss", "BlameEvidence.golden"), raw)
 }
 
 func TestGoldenSigningContext(t *testing.T) {

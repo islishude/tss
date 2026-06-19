@@ -48,22 +48,28 @@ type keygenCommitmentsPayload struct {
 	PlanHash        []byte   `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
+const keygenCommitmentsPayloadWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for keygenCommitmentsPayload.
 func (keygenCommitmentsPayload) WireType() string { return keygenCommitmentsPayloadWireType }
 
 // WireVersion returns the wire format version for keygenCommitmentsPayload.
-func (keygenCommitmentsPayload) WireVersion() uint16 { return tss.Version }
+func (keygenCommitmentsPayload) WireVersion() uint16 {
+	return keygenCommitmentsPayloadWireVersion
+}
 
 type keygenSharePayload struct {
 	Share    []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
 	PlanHash []byte `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
+const keygenSharePayloadWireVersion uint16 = 1
+
 // WireType returns the canonical wire type identifier for keygenSharePayload.
 func (keygenSharePayload) WireType() string { return keygenSharePayloadWireType }
 
 // WireVersion returns the wire format version for keygenSharePayload.
-func (keygenSharePayload) WireVersion() uint16 { return tss.Version }
+func (keygenSharePayload) WireVersion() uint16 { return keygenSharePayloadWireVersion }
 
 // MarshalJSON rejects default JSON encoding of secret DKG shares.
 func (keygenSharePayload) MarshalJSON() ([]byte, error) {
@@ -299,7 +305,6 @@ func (s *KeygenSession) partyEntry(id tss.PartyID) (*keygenPartyData, error) {
 func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
 	return tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
-		Version:     tss.Version,
 		SessionID:   config.SessionID,
 		Round:       round,
 		From:        from,

@@ -55,7 +55,6 @@ wire bytes with transport-verified `ReceiveInfo`.
 ```go
 type Envelope struct {
     Protocol       ProtocolID       // e.g. ProtocolCGGMP21Secp256k1
-    Version        uint16           // wire version (currently 1)
     SessionID      SessionID        // scopes this message to a run
     Round          uint8            // protocol round number
     From           PartyID          // sender
@@ -86,7 +85,7 @@ env, err := tss.NewEnvelope(tss.EnvelopeInput{
 ```
 
 `OpenEnvelope(raw, receiveInfo, opts...)` decodes wire bytes and returns an
-`InboundEnvelope`. It rejects missing peer
+`InboundEnvelope`. It rejects the wrong wire type/schema version, missing peer
 identity, missing channel protection, and peer/envelope sender mismatch before
 the guard runs.
 
@@ -95,7 +94,7 @@ the guard runs.
 `MarshalBinary()` produces canonical TLV bytes. `UnmarshalBinary()` decodes and rejects:
 
 - Wrong wire type identifier (JSON fallback, legacy GG20 identifiers).
-- Mismatched version.
+- Mismatched frame schema version.
 - Missing or malformed fields.
 - Trailing bytes.
 
@@ -106,9 +105,11 @@ See [docs/wire.md](wire.md) for the full canonical encoding specification.
 `Digest()` uses the canonical labeled SHA-256 transcript encoding from
 [`wire.md`](wire.md). Its domain label is followed by named entries for
 `protocol`, `version`, `session_id`, `round`, `from`, `to`, `payload_type`, and
-`payload`. It computes from the current fields on every call and returns the
-distinct `EnvelopeDigest` type. Protocol transcript hashes such as keygen and
-presign transcripts are separate concepts.
+`payload`. The `version` entry is the semantic `tss.ProtocolVersion` constant,
+not mutable envelope state or the TLV frame schema version. It computes from the
+current fields on every call and returns the distinct `EnvelopeDigest` type.
+Protocol transcript hashes such as keygen and presign transcripts are separate
+concepts.
 
 ### Transport Semantics
 
@@ -159,17 +160,16 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 
 1. Protocol match
 2. Session ID match
-3. Version check
-4. Sender membership in party set
-5. Authenticated transport peer is present
-6. `ReceiveInfo.Peer == Envelope.From`
-7. Channel protection is set
-8. Recipient correctness
-9. Policy lookup (fail-closed for unknown payloads)
-10. Delivery mode enforcement (direct vs broadcast)
-11. Confidentiality enforcement against policy
-12. Broadcast consistency certificate verification with `VerifyFull` (when required)
-13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
+3. Sender membership in party set
+4. Authenticated transport peer is present
+5. `ReceiveInfo.Peer == Envelope.From`
+6. Channel protection is set
+7. Recipient correctness
+8. Policy lookup (fail-closed for unknown payloads)
+9. Delivery mode enforcement (direct vs broadcast)
+10. Confidentiality enforcement against policy
+11. Broadcast consistency certificate verification with `VerifyFull` (when required)
+12. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
 Each protocol session must be constructed with an `EnvelopeGuard` passed to its
 `Start*` entry point, and handlers call `Validate(inbound)` as their first step.
@@ -275,7 +275,7 @@ type Blame struct {
 
 `BlameEvidence` is a canonical TLV binary record binding:
 
-- Protocol, version, session ID.
+- Protocol and session ID.
 - Round, sender, payload type.
 - Payload hash and envelope digest.
 - Evidence kind (see `EvidenceKind` constants) and reason.
@@ -283,7 +283,13 @@ type Blame struct {
 
 It **never** contains private shares, nonces, or Paillier secret-key material. Evidence is safe to log and share across operators.
 
-`NewBlameEvidence` constructs a validated record from an envelope. `UnmarshalBlameEvidence` decodes and re-validates. CGGMP21-specific evidence is validated against trusted session context by `secp256k1.VerifyBlameEvidence`.
+The evidence schema version is carried only in the TLV frame header. The
+`EnvelopeDigest` field binds the semantic `ProtocolVersion` used by the
+referenced envelope.
+
+`NewBlameEvidence` constructs a validated record from an envelope.
+`UnmarshalBlameEvidence` decodes and re-validates. CGGMP21-specific evidence is
+validated against trusted session context by `secp256k1.VerifyBlameEvidence`.
 
 `EvidenceKind` constants cover keygen, presign, sign, refresh, reshare, and FROST failure classes.
 

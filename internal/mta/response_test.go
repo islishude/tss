@@ -76,7 +76,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name: "wrong wire type",
 			data: func() []byte {
-				b, _ := wire.MarshalFields(messageVersion, startMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(responseMessageWireVersion, startMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(StartMessage{}, "Ciphertext"), Value: []byte{0x01}},
 				})
 				return b
@@ -90,7 +90,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name: "missing proof field",
 			data: func() []byte {
-				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(responseMessageWireVersion, responseMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
 				})
 				return b
@@ -99,7 +99,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 		{
 			name: "extra field",
 			data: func() []byte {
-				b, _ := wire.MarshalFields(messageVersion, responseMessageWireType, []wire.Field{
+				b, _ := wire.MarshalFields(responseMessageWireVersion, responseMessageWireType, []wire.Field{
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Ciphertext"), Value: validResponse.Ciphertext},
 					{Tag: testutil.MustFieldTag(ResponseMessage{}, "Proof"), Value: validProofRaw},
 					{Tag: 99, Value: []byte{0x01}},
