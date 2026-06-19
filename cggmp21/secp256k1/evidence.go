@@ -62,7 +62,7 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 	if evidence.Protocol != tss.ProtocolCGGMP21Secp256k1 {
 		return fmt.Errorf("unexpected evidence protocol %q", evidence.Protocol)
 	}
-	if ctx.SessionID != (tss.SessionID{}) && evidence.SessionID != ctx.SessionID {
+	if ctx.SessionID.Valid() && evidence.SessionID != ctx.SessionID {
 		return errors.New("evidence session mismatch")
 	}
 	if err := validateEvidenceShape(evidence); err != nil {

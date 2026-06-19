@@ -305,7 +305,7 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if err := p.state.securityParams.Validate(); err != nil {
 		return fmt.Errorf("invalid security params: %w", err)
 	}
-	if p.state.sessionID == (tss.SessionID{}) {
+	if !p.state.sessionID.Valid() {
 		return errors.New("reshare plan session id must not be zero")
 	}
 	if p.state.curveID != reshareCurveID {

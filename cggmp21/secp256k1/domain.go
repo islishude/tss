@@ -131,7 +131,7 @@ func (b *domainBuilder) appendLifecycleBinding(binding lifecycleBinding) error {
 	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
 		return err
 	}
-	if binding.SessionID == (tss.SessionID{}) {
+	if !binding.SessionID.Valid() {
 		return errors.New("proof domain lifecycle session id must not be zero")
 	}
 	if err := requireDomainParty("sender", binding.Sender, binding.Parties); err != nil {
@@ -176,7 +176,7 @@ func (b *domainBuilder) appendPresignBinding(binding presignBinding) error {
 	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
 		return err
 	}
-	if binding.SessionID == (tss.SessionID{}) {
+	if !binding.SessionID.Valid() {
 		return errors.New("proof domain presign session id must not be zero")
 	}
 	if err := wire.ValidateStrictSortedIDs(binding.Signers); err != nil {
@@ -220,7 +220,7 @@ func (b *domainBuilder) appendLogProofBinding(binding logProofBinding) error {
 	if err := validateDomainParticipants(binding.Threshold, binding.Parties); err != nil {
 		return err
 	}
-	if binding.SessionID == (tss.SessionID{}) {
+	if !binding.SessionID.Valid() {
 		return errors.New("proof domain log session id must not be zero")
 	}
 	if err := requireDomainParty("sender", binding.Sender, binding.Parties); err != nil {

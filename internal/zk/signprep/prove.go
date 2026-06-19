@@ -7,7 +7,6 @@ import (
 	"io"
 	"math/big"
 
-	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 )
@@ -151,7 +150,7 @@ func validateStatement(stmt Statement) error {
 	if stmt.Protocol == "" {
 		return errors.New("signprep: missing protocol")
 	}
-	if stmt.SessionID == (tss.SessionID{}) {
+	if !stmt.SessionID.Valid() {
 		return errors.New("signprep: missing session id")
 	}
 	if stmt.Party == 0 {
