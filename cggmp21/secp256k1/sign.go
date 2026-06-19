@@ -83,7 +83,6 @@ type SignAttemptStore interface {
 type SignRequest struct {
 	Context      PresignContext   `json:"context"`
 	Message      []byte           `json:"message"`
-	LowS         bool             `json:"low_s"`
 	AttemptStore SignAttemptStore `json:"-"` // required durable attempt/outbox store
 
 	// DurableStoreTimeout bounds durable commit/completion work after local
@@ -98,7 +97,6 @@ func (r SignRequest) Clone() SignRequest {
 	return SignRequest{
 		Context:             r.Context.Clone(),
 		Message:             slices.Clone(r.Message),
-		LowS:                r.LowS,
 		AttemptStore:        r.AttemptStore,
 		DurableStoreTimeout: r.DurableStoreTimeout,
 	}
@@ -541,7 +539,6 @@ type SignSession struct {
 	log       tss.Logger               // Optional protocol logger.
 	limits    Limits                   // Local fail-closed resource policy.
 	digest    []byte                   // Context-bound message digest signed by ECDSA.
-	lowS      bool                     // Whether final signatures must be normalized to low-S form.
 	planHash  []byte                   // Digest every sign partial must echo.
 	publicKey []byte                   // Verification key used for final ECDSA self-checking.
 	partials  map[tss.PartyID]*big.Int // Validated ECDSA partial scalars keyed by signer.

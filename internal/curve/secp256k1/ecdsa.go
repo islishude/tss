@@ -11,8 +11,9 @@ const (
 	PubkeyLength = 33
 )
 
-// SignECDSA signs a 32-byte digest with a fresh random nonce.
-func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s Scalar, err error) {
+// SignECDSA signs a 32-byte digest with a fresh random nonce and always
+// returns the canonical low-S form.
+func SignECDSA(reader io.Reader, digest []byte, secret Scalar) (r, s Scalar, err error) {
 	if len(digest) != 32 {
 		return Scalar{}, Scalar{}, errors.New("ECDSA digest must be 32 bytes")
 	}
@@ -41,10 +42,8 @@ func SignECDSA(reader io.Reader, digest []byte, secret Scalar, lowS bool) (r, s 
 		if s.IsZero() {
 			continue
 		}
-		if lowS {
-			if !scalarLessOrEqual(s, halfOrder) {
-				s = ScalarNeg(s)
-			}
+		if !IsLowS(s) {
+			s = ScalarNeg(s)
 		}
 		return r, s, nil
 	}

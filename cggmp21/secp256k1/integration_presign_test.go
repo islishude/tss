@@ -226,7 +226,7 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 	}
 
 	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
-	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], mustPresignContextHash(t, presigns[1]), true, store, guard, testLimits())
+	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], mustPresignContextHash(t, presigns[1]), store, guard, testLimits())
 	if err != nil {
 		t.Fatalf("resume same attempt: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestThresholdECDSA_SignAttemptConcurrentSameIntentIsIdempotent(t *testing.T
 	for range workers {
 		wg.Go(func() {
 			guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
-			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], mustPresignContextHash(t, presigns[1]), true, store, guard, testLimits())
+			_, out, err := startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], mustPresignContextHash(t, presigns[1]), store, guard, testLimits())
 			if err != nil {
 				results <- result{err: err}
 				return
@@ -625,7 +625,7 @@ func TestThresholdECDSA_SignAttemptConcurrentConflictsHaveOneWinner(t *testing.T
 		candidate := candidate
 		wg.Go(func() {
 			guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), candidate.session)
-			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], mustPresignContextHash(t, presigns[1]), true, store, guard, testLimits())
+			_, _, err := startSignDigestBound(context.Background(), shares[1], presigns[1], candidate.session, candidate.digest[:], mustPresignContextHash(t, presigns[1]), store, guard, testLimits())
 			errs <- err
 		})
 	}
@@ -666,7 +666,6 @@ func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 		Request: SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("missing store"),
-			LowS:    true,
 		},
 		Limits: testLimitsPtr(),
 	})

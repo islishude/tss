@@ -131,7 +131,6 @@ type SignAttemptRecord struct {
 	ContextHash       []byte
 	Digest            []byte
 	DigestBindingHash []byte
-	LowS              bool
 
 	CanonicalBaseEnvelopeBytes []byte
 	CanonicalBaseEnvelopeHash  []byte
@@ -163,7 +162,6 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 		ContextHash:                slices.Clone(r.ContextHash),
 		Digest:                     slices.Clone(r.Digest),
 		DigestBindingHash:          slices.Clone(r.DigestBindingHash),
-		LowS:                       r.LowS,
 		CanonicalBaseEnvelopeBytes: slices.Clone(r.CanonicalBaseEnvelopeBytes),
 		CanonicalBaseEnvelopeHash:  slices.Clone(r.CanonicalBaseEnvelopeHash),
 		EnvelopeDigest:             slices.Clone(r.EnvelopeDigest),
@@ -205,7 +203,6 @@ func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
 		r.ProtocolVersion == other.ProtocolVersion &&
 		r.SessionID == other.SessionID &&
 		r.Party == other.Party &&
-		r.LowS == other.LowS &&
 		bytes.Equal(r.PresignID, other.PresignID) &&
 		bytes.Equal(r.AttemptHash, other.AttemptHash) &&
 		bytes.Equal(r.IntentHash, other.IntentHash) &&
@@ -309,7 +306,6 @@ func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) 
 		ContextHash:                w.ContextHash,
 		Digest:                     w.Digest,
 		DigestBindingHash:          w.DigestBindingHash,
-		LowS:                       w.LowS,
 		CanonicalBaseEnvelopeBytes: w.CanonicalBaseEnvelopeBytes,
 		CanonicalBaseEnvelopeHash:  w.CanonicalBaseEnvelopeHash,
 		EnvelopeDigest:             w.EnvelopeDigest,
@@ -365,8 +361,12 @@ func (r SignAttemptResult) validate() error {
 	if _, err := scalarBytesStrict(r.Signature.R); err != nil {
 		return fmt.Errorf("invalid result signature r: %w", err)
 	}
-	if _, err := scalarBytesStrict(r.Signature.S); err != nil {
+	s, err := scalarStrict(r.Signature.S)
+	if err != nil {
 		return fmt.Errorf("invalid result signature s: %w", err)
+	}
+	if !secp.IsLowS(s) {
+		return errors.New("invalid result signature s: high-S signatures are not canonical")
 	}
 	if r.Signature.RecoveryID > 3 {
 		return errors.New("invalid result signature recovery id")
@@ -388,22 +388,21 @@ type signAttemptWire struct {
 	ContextHash                []byte             `wire:"11,bytes,len=32"`
 	Digest                     []byte             `wire:"12,bytes,len=32"`
 	DigestBindingHash          []byte             `wire:"13,bytes,len=32"`
-	LowS                       bool               `wire:"14,bool"`
-	CanonicalBaseEnvelopeBytes []byte             `wire:"15,bytes,max_bytes=envelope"`
-	CanonicalBaseEnvelopeHash  []byte             `wire:"16,bytes,len=32"`
-	EnvelopeDigest             []byte             `wire:"17,bytes,len=32"`
-	PayloadHash                []byte             `wire:"18,bytes,len=32"`
-	DeliveryMode               uint8              `wire:"19,u8"`
-	Confidentiality            uint8              `wire:"20,u8"`
-	BroadcastConsistency       uint8              `wire:"21,u8"`
-	Recipients                 []uint32           `wire:"22,u32list"`
-	Acks                       []tss.BroadcastAck `wire:"23,recordlist"`
-	Certificate                []byte             `wire:"24,bytes,max_bytes=envelope"`
-	DeliveryComplete           bool               `wire:"25,bool"`
-	Completed                  bool               `wire:"26,bool"`
-	SignatureR                 []byte             `wire:"27,bytes,max_bytes=scalar"`
-	SignatureS                 []byte             `wire:"28,bytes,max_bytes=scalar"`
-	SignatureRecoveryID        uint8              `wire:"29,u8"`
+	CanonicalBaseEnvelopeBytes []byte             `wire:"14,bytes,max_bytes=envelope"`
+	CanonicalBaseEnvelopeHash  []byte             `wire:"15,bytes,len=32"`
+	EnvelopeDigest             []byte             `wire:"16,bytes,len=32"`
+	PayloadHash                []byte             `wire:"17,bytes,len=32"`
+	DeliveryMode               uint8              `wire:"18,u8"`
+	Confidentiality            uint8              `wire:"19,u8"`
+	BroadcastConsistency       uint8              `wire:"20,u8"`
+	Recipients                 []uint32           `wire:"21,u32list"`
+	Acks                       []tss.BroadcastAck `wire:"22,recordlist"`
+	Certificate                []byte             `wire:"23,bytes,max_bytes=envelope"`
+	DeliveryComplete           bool               `wire:"24,bool"`
+	Completed                  bool               `wire:"25,bool"`
+	SignatureR                 []byte             `wire:"26,bytes,max_bytes=scalar"`
+	SignatureS                 []byte             `wire:"27,bytes,max_bytes=scalar"`
+	SignatureRecoveryID        uint8              `wire:"28,u8"`
 }
 
 // WireType returns the canonical sign-attempt wire type.
@@ -435,7 +434,6 @@ func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
 		ContextHash:                r.ContextHash,
 		Digest:                     r.Digest,
 		DigestBindingHash:          r.DigestBindingHash,
-		LowS:                       r.LowS,
 		CanonicalBaseEnvelopeBytes: r.CanonicalBaseEnvelopeBytes,
 		CanonicalBaseEnvelopeHash:  r.CanonicalBaseEnvelopeHash,
 		EnvelopeDigest:             r.EnvelopeDigest,
@@ -534,8 +532,12 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		if _, err := scalarBytesStrict(r.SignatureR); err != nil {
 			return fmt.Errorf("%w: invalid signature r", ErrSignAttemptCorrupt)
 		}
-		if _, err := scalarBytesStrict(r.SignatureS); err != nil {
+		s, err := scalarStrict(r.SignatureS)
+		if err != nil {
 			return fmt.Errorf("%w: invalid signature s", ErrSignAttemptCorrupt)
+		}
+		if !secp.IsLowS(s) {
+			return fmt.Errorf("%w: high-S signature is not canonical", ErrSignAttemptCorrupt)
 		}
 		if r.SignatureRecoveryID > 3 {
 			return fmt.Errorf("%w: invalid signature recovery id", ErrSignAttemptCorrupt)
@@ -732,13 +734,17 @@ func signAttemptRecipientOrder(recipients tss.PartySet) map[tss.PartyID]int {
 }
 
 func scalarBytesStrict(in []byte) ([]byte, error) {
-	if len(in) != 32 {
-		return nil, errors.New("scalar must be 32 bytes")
-	}
-	if _, err := secp.ScalarFromBytes(in); err != nil {
+	if _, err := scalarStrict(in); err != nil {
 		return nil, err
 	}
 	return in, nil
+}
+
+func scalarStrict(in []byte) (secp.Scalar, error) {
+	if len(in) != 32 {
+		return secp.Scalar{}, errors.New("scalar must be 32 bytes")
+	}
+	return secp.ScalarFromBytes(in)
 }
 
 func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, error) {
@@ -776,7 +782,6 @@ func signAttemptIntentHash(r SignAttemptRecord) []byte {
 	t.AppendBytes("context_hash", r.ContextHash)
 	t.AppendBytes("digest", r.Digest)
 	t.AppendBytes("digest_binding_hash", r.DigestBindingHash)
-	t.AppendBool("low_s", r.LowS)
 	return t.Sum()
 }
 

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -60,6 +61,11 @@ func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 		{"attempt", func(r *SignAttemptRecord) { r.AttemptHash[0] ^= 1 }},
 		{"policy_recipient", func(r *SignAttemptRecord) { r.DeliveryPolicy.Recipients = append(r.DeliveryPolicy.Recipients, 3) }},
 		{"incomplete_signature", func(r *SignAttemptRecord) { r.SignatureR = bytes.Repeat([]byte{1}, 32) }},
+		{"completed_high_s", func(r *SignAttemptRecord) {
+			r.Completed = true
+			r.SignatureR = secp.ScalarFromUint64(1).Bytes()
+			r.SignatureS = secp.ScalarNeg(secp.ScalarFromUint64(1)).Bytes()
+		}},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -105,6 +111,38 @@ func TestFast_SignAttemptRecordRejectsRetiredEnvelopeLayoutOnRestore(t *testing.
 	}
 	if _, err := UnmarshalSignAttemptRecordWithLimits(raw, testLimits()); err == nil {
 		t.Fatal("restored sign attempt accepted retired embedded envelope layout")
+	}
+}
+
+func TestFast_SignAttemptRecordRejectsRetiredLowSLayout(t *testing.T) {
+	t.Parallel()
+
+	record := testSignAttemptRecord(t, 1)
+	raw, err := record.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, signAttemptWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := make([]wire.Field, 0, len(fields)+1)
+	for _, field := range fields {
+		if field.Tag <= 13 {
+			retired = append(retired, field)
+			continue
+		}
+		if field.Tag == 14 {
+			retired = append(retired, wire.Field{Tag: 14, Value: wire.Bool(true)})
+		}
+		retired = append(retired, wire.Field{Tag: field.Tag + 1, Value: field.Value})
+	}
+	retiredRaw, err := wire.MarshalFields(version, signAttemptWireType, retired)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalSignAttemptRecord(retiredRaw); err == nil {
+		t.Fatal("sign attempt accepted retired layout with configurable LowS")
 	}
 }
 
@@ -473,7 +511,6 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		ContextHash:                contextHash,
 		Digest:                     digest,
 		DigestBindingHash:          digestBindingHash,
-		LowS:                       true,
 		CanonicalBaseEnvelopeBytes: envelopeBytes,
 		CanonicalBaseEnvelopeHash:  envelopeHash[:],
 		EnvelopeDigest:             envelopeDigest[:],

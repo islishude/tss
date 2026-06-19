@@ -16,7 +16,7 @@ import (
 // Y parity is read directly from the SEC1 prefix byte (0x02 = even, 0x03 = odd).
 // X comparison is performed on the raw 32-byte coordinate via [secp.XCoordGTEOrder].
 //
-// When sWasNegated is true (lowS triggered), the recovery point becomes -R:
+// When sWasNegated is true (low-S normalization occurred), the recovery point becomes -R:
 // X is unchanged but Y parity flips, so bit 0 is inverted.
 func recoveryIDFromPresignR(rPointBytes []byte, sWasNegated bool) (uint8, error) {
 	if len(rPointBytes) != 33 || (rPointBytes[0] != 0x02 && rPointBytes[0] != 0x03) {

@@ -406,7 +406,10 @@ opaque party-triple byte field is intentionally not accepted.
 `SignAttemptRecord` stores delivery acknowledgments directly as a canonical
 `tss.BroadcastAck` record list. Its optional certificate field contains the
 complete canonical `tss.BroadcastCertificate` TLV encoding, so nil remains an
-empty field while non-nil certificates use the public standard codec.
+empty field while non-nil certificates use the public standard codec. The
+record has 28 contiguous fields. Low-S is mandatory protocol behavior and is
+not encoded as an attempt option; the retired 29-field layout containing a
+`LowS` field is rejected.
 
 ## Decoder Policy
 

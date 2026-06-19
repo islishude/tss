@@ -24,7 +24,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
-	request := SignRequest{Context: ctx, Message: []byte("hd additive shift"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("hd additive shift")}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -74,7 +74,7 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	derived := result.ChildPublicKey
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
-	request := SignRequest{Context: ctx, Message: []byte("interactive hd"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("interactive hd")}
 	pub, sig, err := Sign(request.Message, signers, ctx)
 	if err != nil {
 		t.Fatal(err)
@@ -171,7 +171,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
-	request := SignRequest{Context: ctx, Message: []byte("bip32 derived signing"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("bip32 derived signing")}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -244,7 +244,7 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 	// Empty derivation path: the public key should be the parent key.
 	ctx.Derivation.Path = tss.DerivationPath(nil).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
-	request := SignRequest{Context: ctx, Message: []byte("empty path signing"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("empty path signing")}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -279,7 +279,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := secpPresignWithContext(t, shares, signers, ctx)
-	request := SignRequest{Context: ctx, Message: []byte("child key verify"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("child key verify")}
 	signID, _ := tss.NewSessionID(nil)
 	session, out, err := startCGGMP21Sign(shares[1], presigns[1], signID, request)
 	if err != nil {
@@ -315,7 +315,7 @@ func TestPresignCannotBeReusedAcrossDerivedPaths(t *testing.T) {
 	// Attempt to sign with path B using presign from path A.
 	ctxB := testPresignContext()
 	ctxB.Derivation.Path = tss.DerivationPath([]uint32{1}).Clone()
-	requestB := SignRequest{Context: ctxB, Message: []byte("cross path"), LowS: true}
+	requestB := SignRequest{Context: ctxB, Message: []byte("cross path")}
 	signID, _ := tss.NewSessionID(nil)
 	cloned := clonePresignForTest(presignA)
 	_, _, err := startCGGMP21Sign(shares[1], cloned, signID, requestB)

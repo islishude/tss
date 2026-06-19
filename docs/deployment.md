@@ -156,7 +156,6 @@ message := []byte("payload")
 request := secp256k1.SignRequest{
     Context:      ctx,
     Message:      message,
-    LowS:         true,
     AttemptStore: store, // required durable intent and encrypted outbox
 }
 signGuard, err := (tss.GuardConfig{

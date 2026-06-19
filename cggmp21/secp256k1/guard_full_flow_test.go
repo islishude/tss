@@ -254,7 +254,6 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signSessionID, SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
-			LowS:    true,
 		}, g)
 		if err != nil {
 			t.Fatal(err)

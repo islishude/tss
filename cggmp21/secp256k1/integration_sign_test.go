@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -34,6 +35,13 @@ func TestThresholdECDSASignScenarios(t *testing.T) {
 			}
 			if !VerifyDigest(pub, digest[:], sig) {
 				t.Fatal("signature did not verify")
+			}
+			s, err := secp.ScalarFromBytes(sig.S)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !secp.IsLowS(s) {
+				t.Fatal("online signing produced high-S signature")
 			}
 		})
 	}

@@ -52,22 +52,21 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 		plan.state.digest,
 		plan.state.contextHash,
 		planHash,
-		plan.state.request.LowS,
 		plan.state.request.AttemptStore,
 		guard, durableStoreTimeout(plan.state.request.DurableStoreTimeout),
 		plan.limits,
 	)
 }
 
-func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	var planHash []byte
 	if presign != nil && presign.state != nil {
 		planHash = presign.state.planHash
 	}
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, store, guard, DefaultSignAttemptStoreTimeout, limits)
+	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, store, guard, DefaultSignAttemptStoreTimeout, limits)
 }
 
-func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
+func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
 	}
@@ -104,7 +103,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 
 	// Build and locally verify the exact outbound partial before touching the
 	// durable store. A malformed candidate must not consume the presign.
-	candidate, err := buildSignAttemptRecord(ctx, key, presign, sessionID, digest32, contextHash, planHash, lowS, guard, limits)
+	candidate, err := buildSignAttemptRecord(ctx, key, presign, sessionID, digest32, contextHash, planHash, guard, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -154,7 +153,7 @@ func signAttemptConsumedError(err error) bool {
 		errors.Is(err, ErrSignAttemptNonDeterminism)
 }
 
-func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, lowS bool, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
+func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
 	kShare, err := secpScalarFromSecret(presign.state.kShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -229,7 +228,6 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 		ContextHash:                slices.Clone(contextHash),
 		Digest:                     slices.Clone(digest32),
 		DigestBindingHash:          digestBindingHash,
-		LowS:                       lowS,
 		CanonicalBaseEnvelopeBytes: envelopeBytes,
 		CanonicalBaseEnvelopeHash:  envelopeHash[:],
 		EnvelopeDigest:             envelopeDigest[:],
@@ -337,7 +335,6 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		log:       tss.NopLogger(),
 		limits:    limits,
 		digest:    slices.Clone(record.Digest),
-		lowS:      record.LowS,
 		planHash:  slices.Clone(record.SignPlanHash),
 		publicKey: verifyKey,
 		partials:  make(map[tss.PartyID]*big.Int),
@@ -607,11 +604,8 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	if sigS.Sign() == 0 {
 		return errors.New("zero ECDSA s")
 	}
-	sWasNegated := false
-	if s.lowS && sigS.Cmp(new(big.Int).Rsh(new(big.Int).Set(secp.Order()), 1)) > 0 {
-		sigS.Sub(secp.Order(), sigS)
-		sWasNegated = true
-	}
+	normalizedS, sWasNegated := secp.NormalizeLowS(secp.ScalarFromBigInt(sigS))
+	sigS = normalizedS.BigInt()
 
 	recoveryID, err := recoveryIDFromPresignR(s.presign.state.r, sWasNegated)
 	if err != nil {
@@ -666,7 +660,8 @@ func (s *SignSession) tryCompleteSign(ctx context.Context) error {
 	return nil
 }
 
-// VerifyDigest verifies a secp256k1 ECDSA signature over a 32-byte digest.
+// VerifyDigest verifies a canonical low-S secp256k1 ECDSA signature over a
+// 32-byte digest. High-S signatures are rejected.
 func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	public, err := secp.PointFromBytes(publicKey)
 	if err != nil {
@@ -683,10 +678,14 @@ func VerifyDigest(publicKey, digest32 []byte, sig *Signature) bool {
 	if err != nil {
 		return false
 	}
+	if !secp.IsLowS(s) {
+		return false
+	}
 	return secp.VerifyECDSA(public, digest32, r, s)
 }
 
-// VerifySignature verifies a context-bound secp256k1 ECDSA signature.
+// VerifySignature verifies a context-bound canonical low-S secp256k1 ECDSA
+// signature.
 func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool {
 	if err := validatePresignContext(request.Context); err != nil {
 		return false
@@ -706,7 +705,8 @@ func VerificationKeyForContext(key *KeyShare, ctx tss.SigningContext) ([]byte, e
 	return slices.Clone(derivation.ChildPublicKey), nil
 }
 
-// VerifySignatureForContext verifies a context-bound signature against the child key derived from parentPublicKey and chainCode.
+// VerifySignatureForContext verifies a context-bound canonical low-S signature
+// against the child key derived from parentPublicKey and chainCode.
 func VerifySignatureForContext(parentPublicKey []byte, chainCode []byte, ctx tss.SigningContext, request SignRequest, sig *Signature) bool {
 	if err := validatePresignContext(ctx); err != nil {
 		return false

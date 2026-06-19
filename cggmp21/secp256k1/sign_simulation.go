@@ -110,12 +110,11 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 			return nil, nil, err
 		}
 		if rawDigest {
-			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, true, attemptStore, guard, limits)
+			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.contextHash, attemptStore, guard, limits)
 		} else {
 			request := SignRequest{
 				Context:      ctx,
 				Message:      input,
-				LowS:         true,
 				AttemptStore: attemptStore,
 			}
 			plan, planErr := NewSignPlan(SignPlanOption{

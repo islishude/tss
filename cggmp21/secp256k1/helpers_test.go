@@ -315,7 +315,7 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		}
 		return testCGGMP21Guard(key.state.party, key.state.parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, newTestSignAttemptStore(), guard, testLimits())
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, newTestSignAttemptStore(), guard, testLimits())
 }
 
 func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store SignAttemptStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
@@ -331,7 +331,7 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 		}
 		return testCGGMP21Guard(key.state.party, key.state.parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, true, store, guard, testLimits())
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, store, guard, testLimits())
 }
 
 type testSignAttemptStore struct {

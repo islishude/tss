@@ -37,7 +37,6 @@ func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 			session, out, err := startCGGMP21Sign(shares[1], candidate, signID, SignRequest{
 				Context: requestCtx,
 				Message: []byte("presign policy"),
-				LowS:    true,
 			})
 			if err == nil || session != nil || out != nil {
 				t.Fatalf("StartSign accepted mismatched %s context", tc.name)

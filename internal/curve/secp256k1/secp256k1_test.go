@@ -30,12 +30,42 @@ func TestECDSASignVerify(t *testing.T) {
 	secret := deterministicScalar(t, 1)
 	pub := ScalarBaseMult(secret)
 	digest := sha256.Sum256([]byte("test"))
-	r, s, err := SignECDSA(testutil.DeterministicReader(2), digest[:], secret, true)
+	r, s, err := SignECDSA(testutil.DeterministicReader(2), digest[:], secret)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !IsLowS(s) {
+		t.Fatal("signature is not low-S")
+	}
 	if !VerifyECDSA(pub, digest[:], r, s) {
 		t.Fatal("signature did not verify")
+	}
+}
+
+func TestLowSCanonicalization(t *testing.T) {
+	t.Parallel()
+
+	if !IsLowS(halfOrder) {
+		t.Fatal("half order must be low-S")
+	}
+	high := ScalarAdd(halfOrder, ScalarFromUint64(1))
+	if IsLowS(high) {
+		t.Fatal("half order plus one must be high-S")
+	}
+	normalized, negated := NormalizeLowS(high)
+	if !negated {
+		t.Fatal("high-S scalar was not negated")
+	}
+	if !IsLowS(normalized) {
+		t.Fatal("normalized scalar is not low-S")
+	}
+	if !normalized.Equal(ScalarNeg(high)) {
+		t.Fatal("normalized scalar is not the modular negation")
+	}
+
+	unchanged, negated := NormalizeLowS(halfOrder)
+	if negated || !unchanged.Equal(halfOrder) {
+		t.Fatal("low-S scalar changed during normalization")
 	}
 }
 

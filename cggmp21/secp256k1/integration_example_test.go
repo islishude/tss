@@ -48,7 +48,6 @@ func Example_full_lifecycle() {
 	request := cggmp.SignRequest{
 		Context:      ctx,
 		Message:      []byte("example full lifecycle"),
-		LowS:         true,
 		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)
@@ -81,7 +80,6 @@ func Example_multiParty() {
 	request := cggmp.SignRequest{
 		Context:      ctx,
 		Message:      []byte("multi-party threshold signature"),
-		LowS:         true,
 		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, signers, request)
@@ -157,7 +155,6 @@ func ExampleStartRefresh() {
 	request := cggmp.SignRequest{
 		Context:      ctx,
 		Message:      []byte("post-refresh signing"),
-		LowS:         true,
 		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(refreshed, presigns, parties, request)
@@ -252,7 +249,6 @@ func ExampleStartReshareDealer() {
 	request := cggmp.SignRequest{
 		Context:      ctx,
 		Message:      []byte("post-reshare signing"),
-		LowS:         true,
 		AttemptStore: store,
 	}
 	publicKey, signature, err := runExampleCGGMPSign(reshared, presigns, newParties, request)
@@ -293,7 +289,6 @@ func ExampleDeriveNonHardenedBIP32() {
 	request := cggmp.SignRequest{
 		Context:      ctx,
 		Message:      []byte("bip32 derived signing"),
-		LowS:         true,
 		AttemptStore: store,
 	}
 	_, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)

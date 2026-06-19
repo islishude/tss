@@ -102,7 +102,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
 	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sid)
-	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], mustPresignContextHash(t, restored), true, nil, guard, testLimits()); err == nil {
+	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], mustPresignContextHash(t, restored), nil, guard, testLimits()); err == nil {
 		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)

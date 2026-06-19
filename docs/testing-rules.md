@@ -230,6 +230,9 @@ Required behavior:
 - Concurrent different intents permit exactly one committed winner.
 - Concurrent identical intents return the exact same canonical envelope.
 - All conflicting intents receive the consumed error category.
+- Online completion always emits canonical low-S signatures; public verification
+  rejects the mathematically equivalent high-S form, and recovery ID parity
+  reflects any `S -> n-S` normalization.
 - Shallow copies and test-only deep copies cannot create independent claims.
 - Marshal/unmarshal and encrypt/decrypt preserve consumed state.
 - Independently restored copies are still serialized by the same durable

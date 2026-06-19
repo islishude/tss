@@ -354,3 +354,17 @@ func scalarLessOrEqual(a, b Scalar) bool {
 	}
 	return true // equal
 }
+
+// IsLowS reports whether s is in the canonical lower half of the scalar field.
+func IsLowS(s Scalar) bool {
+	return scalarLessOrEqual(s, halfOrder)
+}
+
+// NormalizeLowS returns the canonical low-S representative and reports whether
+// the input was negated modulo the subgroup order.
+func NormalizeLowS(s Scalar) (Scalar, bool) {
+	if IsLowS(s) {
+		return s, false
+	}
+	return ScalarNeg(s), true
+}

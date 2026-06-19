@@ -246,7 +246,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	presigns := slowCryptoPresignWithContext(t, shares, signers, ctx)
 
-	request := SignRequest{Context: ctx, Message: []byte("slowcrypto bip32 production"), LowS: true}
+	request := SignRequest{Context: ctx, Message: []byte("slowcrypto bip32 production")}
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

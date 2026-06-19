@@ -364,11 +364,17 @@ DurableStoreTimeout)` so user cancellation after local validation does not
 unnecessarily abandon a presign whose durable outcome is unknown.
 
 `IntentHash` binds protocol/version, presign ID, session ID, local party, signer
-set hash, context hash, 32-byte digest, digest binding hash, and Low-S setting.
+set hash, context hash, 32-byte digest, and digest binding hash.
 `AttemptHash` additionally binds the exact canonical base envelope hash, envelope
 digest, payload hash, and delivery policy snapshot. The digest stored
 in the record is the raw 32-byte ECDSA digest; `DigestBindingHash` matches the
 online partial payload's digest hash.
+
+Online signing always normalizes the aggregate ECDSA scalar to canonical low-S
+form (`S <= n/2`). This is not caller-configurable. Recovery ID parity is
+adjusted when normalization replaces `S` with `n-S`. `VerifyDigest`,
+`VerifySignature`, and `VerifySignatureForContext` reject high-S signatures even
+though the corresponding ECDSA equation is mathematically valid.
 
 Delivery progress is part of the durable attempt. `UpdateSignAttemptDelivery`
 stores structurally valid ACKs and a final broadcast certificate for the exact
@@ -792,7 +798,7 @@ context := metadata.Context // includes a copied derivation path
 ### Online Signing
 
 ```go
-request := SignRequest{Context: ctx, Message: message, LowS: true, AttemptStore: store}
+request := SignRequest{Context: ctx, Message: message, AttemptStore: store}
 // AttemptStore atomically binds the internal presign ID to the exact encrypted outbox.
 plan, err := NewSignPlan(SignPlanOption{
     Key: share, Presign: presign, SessionID: sessionID, Request: request,

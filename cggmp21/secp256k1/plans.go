@@ -614,7 +614,6 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	req := SignRequest{
 		Context:             normalizedContext.Clone(),
 		Message:             slices.Clone(request.Message),
-		LowS:                request.LowS,
 		AttemptStore:        request.AttemptStore,
 		DurableStoreTimeout: request.DurableStoreTimeout,
 	}
@@ -666,7 +665,6 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("message_digest", p.state.digest)
-	t.AppendBool("low_s", p.state.request.LowS)
 	t.AppendBool("has_attempt_store", p.state.request.AttemptStore != nil)
 	t.AppendUint64("durable_store_timeout_ns", uint64(durableStoreTimeout(p.state.request.DurableStoreTimeout)))
 	return t.Sum(), nil
