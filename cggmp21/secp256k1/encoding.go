@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 	"sync/atomic"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -259,8 +261,8 @@ type presignWire struct {
 	Party                tss.PartyID           `wire:"1,u32"`
 	Threshold            int                   `wire:"2,u32"`
 	Signers              tss.PartySet          `wire:"3,u32list"`
-	R                    []byte                `wire:"4,bytes,max_bytes=point"`
-	LittleR              []byte                `wire:"5,bytes,max_bytes=point"`
+	R                    secp.WirePoint        `wire:"4,custom,len=33"`
+	LittleR              secp.WireScalar       `wire:"5,custom,len=32"`
 	KShare               *secret.Scalar        `wire:"6,custom,len=32"`
 	ChiShare             *secret.Scalar        `wire:"7,custom,len=32"`
 	Delta                *secret.Scalar        `wire:"8,custom,len=32"`
@@ -268,10 +270,10 @@ type presignWire struct {
 	Context              PresignContext        `wire:"10,nested"`
 	ContextHash          []byte                `wire:"11,bytes"`
 	Consumed             bool                  `wire:"12,bool"`
-	PublicKey            []byte                `wire:"13,bytes,max_bytes=point"`
+	PublicKey            secp.WirePoint        `wire:"13,custom,len=33"`
 	KeygenTranscriptHash []byte                `wire:"14,bytes"`
 	PartiesHash          []byte                `wire:"15,bytes"`
-	VerifyShares         []SignVerifyShare     `wire:"16,recordlist,max_items=signers"`
+	VerifyShares         []signVerifyShareWire `wire:"16,recordlist,max_items=signers"`
 	PlanHash             []byte                `wire:"17,bytes,len=32"`
 	SecurityParams       SecurityParams        `wire:"18,record"`
 	Derivation           *tss.DerivationResult `wire:"19,record"`
@@ -284,6 +286,19 @@ func (presignWire) WireType() string { return presignWireType }
 func (presignWire) WireVersion() uint16 { return presignWireVersion }
 
 func decodePresignWire(w *presignWire) (*presignState, error) {
+	if w.R.P == nil {
+		return nil, errors.New("missing presign R")
+	}
+	if w.LittleR.S.IsZero() {
+		return nil, errors.New("zero presign little r")
+	}
+	if w.PublicKey.P == nil {
+		return nil, errors.New("missing presign public key")
+	}
+	verifyShares, err := decodeSignVerifyShareWires(w.VerifyShares)
+	if err != nil {
+		return nil, err
+	}
 	if _, err := secpScalarFromSecret(w.KShare); err != nil {
 		return nil, fmt.Errorf("invalid k share: %w", err)
 	}
@@ -307,17 +322,17 @@ func decodePresignWire(w *presignWire) (*presignState, error) {
 		party:                w.Party,
 		threshold:            w.Threshold,
 		signers:              w.Signers,
-		r:                    w.R,
-		littleR:              w.LittleR,
-		transcriptHash:       w.TranscriptHash,
+		r:                    secp.Clone(w.R.P),
+		littleR:              w.LittleR.S,
+		transcriptHash:       slices.Clone(w.TranscriptHash),
 		context:              w.Context,
-		contextHash:          w.ContextHash,
+		contextHash:          slices.Clone(w.ContextHash),
 		derivation:           derivation,
-		planHash:             w.PlanHash,
-		publicKey:            w.PublicKey,
-		keygenTranscriptHash: w.KeygenTranscriptHash,
-		partiesHash:          w.PartiesHash,
-		verifyShares:         w.VerifyShares,
+		planHash:             slices.Clone(w.PlanHash),
+		publicKey:            secp.Clone(w.PublicKey.P),
+		keygenTranscriptHash: slices.Clone(w.KeygenTranscriptHash),
+		partiesHash:          slices.Clone(w.PartiesHash),
+		verifyShares:         verifyShares,
 		kShare:               w.KShare,
 		chiShare:             w.ChiShare,
 		delta:                w.Delta,
@@ -356,8 +371,8 @@ func encodePresignWire(p *Presign) presignWire {
 		Party:                p.state.party,
 		Threshold:            p.state.threshold,
 		Signers:              p.state.signers,
-		R:                    p.state.r,
-		LittleR:              p.state.littleR,
+		R:                    secp.WirePoint{P: p.state.r},
+		LittleR:              secp.WireScalar{S: p.state.littleR},
 		KShare:               p.state.kShare,
 		ChiShare:             p.state.chiShare,
 		Delta:                p.state.delta,
@@ -366,10 +381,10 @@ func encodePresignWire(p *Presign) presignWire {
 		ContextHash:          p.state.contextHash,
 		PlanHash:             p.state.planHash,
 		Consumed:             IsPresignConsumed(p),
-		PublicKey:            p.state.publicKey,
+		PublicKey:            secp.WirePoint{P: p.state.publicKey},
 		KeygenTranscriptHash: p.state.keygenTranscriptHash,
 		PartiesHash:          p.state.partiesHash,
-		VerifyShares:         p.state.verifyShares,
+		VerifyShares:         encodeSignVerifyShareWires(p.state.verifyShares),
 		SecurityParams:       p.state.securityParams,
 		Derivation:           p.state.derivation,
 	}

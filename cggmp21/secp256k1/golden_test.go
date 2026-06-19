@@ -80,13 +80,13 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 	t.Parallel()
 
 	proof := mustMinimalSignPrepProofForTest(t)
-	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+	kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
 	twoScalar := secp.ScalarFromBigInt(big.NewInt(2))
-	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
+	chiPoint := secp.ScalarBaseMult(twoScalar)
 	payload := presignRound3Payload{
 		Delta:    big.NewInt(42),
-		KPoint:   kPoint,
-		ChiPoint: chiPoint,
+		KPoint:   secp.WirePoint{P: kPoint},
+		ChiPoint: secp.WirePoint{P: chiPoint},
 		Proof:    proof,
 		PlanHash: bytes.Repeat([]byte{0x91}, 32),
 	}

@@ -62,7 +62,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 					signID, presign.PartyID(), p.PresignTranscript,
 					p.PresignContext, p.PlanHash, digest[:],
 					mustPresignLittleR(t, presign), scalarBytes(p.S),
-					vs.KPoint, vs.ChiPoint,
+					mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
 				)
 			},
 		},
@@ -197,22 +197,11 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 				if len(r.state.verifyShares) == 0 {
 					continue
 				}
-				var original []byte
 				switch tc.field {
 				case "KPoint":
-					original = r.state.verifyShares[0].KPoint
+					r.state.verifyShares[0].kPoint = nil
 				case "ChiPoint":
-					original = r.state.verifyShares[0].ChiPoint
-				}
-				tampered := make([]byte, len(original))
-				copy(tampered, original)
-				tampered[len(tampered)-1] ^= 0x01
-
-				switch tc.field {
-				case "KPoint":
-					r.state.verifyShares[0].KPoint = tampered
-				case "ChiPoint":
-					r.state.verifyShares[0].ChiPoint = tampered
+					r.state.verifyShares[0].chiPoint = nil
 				}
 
 				err := r.VerifySignMaterial()
@@ -329,10 +318,17 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "bit-flipped KPoint",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedK := make([]byte, len(p.KPoint))
-				copy(tamperedK, p.KPoint)
+				tamperedK, err := secp.PointBytes(p.KPoint.P)
+				if err != nil {
+					t.Fatal(err)
+				}
 				tamperedK[len(tamperedK)-1] ^= 0x01
-				p.KPoint = tamperedK
+				kPoint, err := secp.PointFromBytes(tamperedK)
+				if err != nil {
+					t.Logf("KPoint tampering caused point rejection (valid): %v", err)
+					return nil
+				}
+				p.KPoint = secp.WirePoint{P: kPoint}
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("KPoint tampering caused marshal rejection (valid): %v", err)
@@ -344,11 +340,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "replaced KPoint with different valid point",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				twoG, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
-				if err != nil {
-					t.Fatal(err)
-				}
-				p.KPoint = twoG
+				p.KPoint = secp.WirePoint{P: secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))}
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Fatal(err)
@@ -359,10 +351,17 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "bit-flipped ChiPoint",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedChi := make([]byte, len(p.ChiPoint))
-				copy(tamperedChi, p.ChiPoint)
+				tamperedChi, err := secp.PointBytes(p.ChiPoint.P)
+				if err != nil {
+					t.Fatal(err)
+				}
 				tamperedChi[len(tamperedChi)-1] ^= 0x01
-				p.ChiPoint = tamperedChi
+				chiPoint, err := secp.PointFromBytes(tamperedChi)
+				if err != nil {
+					t.Logf("ChiPoint tampering caused point rejection (valid): %v", err)
+					return nil
+				}
+				p.ChiPoint = secp.WirePoint{P: chiPoint}
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("ChiPoint tampering caused marshal rejection (valid): %v", err)
@@ -372,13 +371,9 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 			},
 		},
 		{
-			name: "corrupted proof bytes",
+			name: "corrupted proof scalar",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				if len(p.Proof) > 10 {
-					p.Proof[len(p.Proof)/2] ^= 0xFF
-				} else {
-					p.Proof = []byte{0x00}
-				}
+				p.Proof.KResponse = testSecretScalar(t, 123)
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("proof tampering caused marshal rejection: %v", err)
@@ -454,7 +449,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, p.PlanHash, digest[:],
 		mustPresignLittleR(t, presigns[maliciousSigner]), scalarBytes(p.S),
-		vs.KPoint, vs.ChiPoint,
+		mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
 	)
 	mutated, err := marshalSignPartialPayload(p)
 	if err != nil {

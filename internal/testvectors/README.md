@@ -33,8 +33,8 @@ wire/v1/
   frost/      6 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
                        KeygenSharePayload, NonceCommitmentPayload,
                        SignPartialPayload
-  cggmp21/    14 files KeyShare, VerificationShare, PaillierPublicShare,
-                       RingPedersenPublicShare, SignVerifyShare,
+  cggmp21/    13 files KeyShare, VerificationShare, PaillierPublicShare,
+                       RingPedersenPublicShare,
                        KeygenSharePayload, RefreshSharePayload,
                        ReshareSharePayload, Presign, Presign.fast,
                        PresignRound3Payload, ResharePlan,

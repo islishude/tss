@@ -41,6 +41,28 @@ func (p *WirePoint) UnmarshalWireValue(in []byte) error {
 	return nil
 }
 
+// WireScalar wraps a Scalar for use with internal/wire's custom field kind.
+// It accepts the zero scalar on decode; callers enforce context-specific
+// non-zero requirements after unmarshaling.
+type WireScalar struct {
+	S Scalar
+}
+
+// MarshalWireValue encodes the scalar as a fixed-width canonical value.
+func (s WireScalar) MarshalWireValue() ([]byte, error) {
+	return s.S.Bytes(), nil
+}
+
+// UnmarshalWireValue decodes a fixed-width canonical scalar.
+func (s *WireScalar) UnmarshalWireValue(in []byte) error {
+	v, err := ScalarFromBytesAllowZero(in)
+	if err != nil {
+		return err
+	}
+	s.S = v
+	return nil
+}
+
 // PointFromBytes parses canonical compressed SEC 1 point bytes.
 func PointFromBytes(in []byte) (*Point, error) {
 	if len(in) != 33 || (in[0] != 0x02 && in[0] != 0x03) {

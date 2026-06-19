@@ -49,7 +49,13 @@ func (s *PresignSession) handlePresignRound2(env tss.Envelope) ([]tss.Envelope, 
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.round2[env.From] = p
+	st, ok := s.partyState(env.From)
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	}
+	st.round2.payload = p
+	st.round2.havePayload = true
+	s.round2Count++
 
 	// ---- 5. EMIT ----
 	return s.tryEmitRound3()
@@ -65,16 +71,10 @@ func (s *PresignSession) presignRound2EvidenceFields(p presignRound2Payload) []t
 }
 
 func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
-	if s.round2Sent || len(s.round1) != len(s.signers) {
+	if s.round2Sent ||
+		s.round1Count != len(s.parties) ||
+		s.round1VerifiedCount != len(s.parties) {
 		return nil, nil
-	}
-	for _, peer := range s.signers {
-		if peer == s.key.state.party {
-			continue
-		}
-		if !s.round1Verified[peer] {
-			return nil, nil
-		}
 	}
 	out := make([]tss.Envelope, 0, len(s.signers)-1)
 	selfPK, err := s.key.paillierPublic(s.limits)
@@ -97,8 +97,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		start := mta.StartMessage{Ciphertext: s.round1[peer].EncK}
-		peerRound1 := s.round1[peer]
+		peerState, ok := s.partyState(peer)
+		if !ok || !peerState.round1.havePayload || !peerState.round1.haveProof {
+			return nil, fmt.Errorf("missing presign round1 state for party %d", peer)
+		}
+		peerRound1 := peerState.round1.payload
+		start := mta.StartMessage{Ciphertext: peerRound1.EncK}
 		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, err
@@ -111,7 +115,7 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		startProofPayload := s.round1Proofs[peer]
+		startProofPayload := peerState.round1.proof
 		startProof := &startProofPayload.EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
 		deltaResp, betaDelta, err := mta.Respond(
@@ -151,8 +155,8 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 			betaDelta.Destroy()
 			return nil, err
 		}
-		s.betaDelta[peer] = betaDelta
-		s.betaSigma[peer] = betaSigma
+		peerState.mta.betaDelta = betaDelta
+		peerState.mta.betaSigma = betaSigma
 		payload, err := marshalPresignRound2PayloadWithLimits(presignRound2Payload{
 			Delta:      *deltaResp,
 			Sigma:      *sigmaResp,
@@ -176,8 +180,16 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
 		return errors.New("presign round1 echo mismatch")
 	}
-	start := mta.StartMessage{Ciphertext: s.round1[s.key.state.party].EncK}
-	gammaCommit := s.round1[from].Gamma
+	selfState, ok := s.partyState(s.key.state.party)
+	if !ok || !selfState.round1.havePayload {
+		return errors.New("missing local presign round1 state")
+	}
+	fromState, ok := s.partyState(from)
+	if !ok || !fromState.round1.havePayload {
+		return fmt.Errorf("missing presign round1 state for party %d", from)
+	}
+	start := mta.StartMessage{Ciphertext: selfState.round1.payload.EncK}
+	gammaCommit := fromState.round1.payload.Gamma
 
 	// Responder's Paillier public key (for verifying the Y commitment in Πaff-g).
 	responderPK, err := s.key.paillierPublicFor(from, s.limits)
@@ -228,8 +240,8 @@ func (s *PresignSession) finishRound2(from tss.PartyID, p presignRound2Payload) 
 	if err != nil {
 		return err
 	}
-	s.alphaDelta[from] = alphaDelta
-	s.alphaSigma[from] = alphaSigma
+	fromState.mta.alphaDelta = alphaDelta
+	fromState.mta.alphaSigma = alphaSigma
 	return nil
 }
 

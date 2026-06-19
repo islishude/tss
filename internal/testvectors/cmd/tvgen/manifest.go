@@ -71,7 +71,6 @@ var manifest = []target{
 		Secret:   true,
 		Outputs: []string{
 			"wire/v1/cggmp21/Presign.fast.golden",
-			"wire/v1/cggmp21/SignVerifyShare.golden",
 			"wire/v1/cggmp21/VerificationShare.golden",
 			"wire/v1/cggmp21/PaillierPublicShare.golden",
 			"wire/v1/cggmp21/RingPedersenPublicShare.golden",

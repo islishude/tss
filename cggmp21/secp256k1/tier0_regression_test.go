@@ -10,6 +10,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/zk/signprep"
 )
 
 // TestFast_StaticNoSecretShareRegression scans sign.go for forbidden
@@ -62,7 +63,7 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 		},
 		{
 			name:    "empty VerifyShares",
-			mutate:  func(p *Presign) { p.state.verifyShares = []SignVerifyShare{} },
+			mutate:  func(p *Presign) { p.state.verifyShares = []signVerifyShare{} },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "empty VerifyShares",
 		},
@@ -76,8 +77,8 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 			name: "duplicate VerifyShare",
 			mutate: func(p *Presign) {
 				vs := p.state.verifyShares[0]
-				p.state.signers = tss.NewPartySet(1, 1)
-				p.state.verifyShares = []SignVerifyShare{vs, vs}
+				p.state.signers = tss.PartySet{1, 1}
+				p.state.verifyShares = []signVerifyShare{vs, vs}
 			},
 			check: func(p *Presign) error {
 				return validateSignVerifyShares(p.state.signers, p.state.verifyShares, testLimits())
@@ -88,8 +89,8 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 			name: "non-signer party",
 			mutate: func(p *Presign) {
 				vs := p.state.verifyShares[0]
-				vs.Party = 999
-				p.state.verifyShares = []SignVerifyShare{vs}
+				vs.party = 999
+				p.state.verifyShares = []signVerifyShare{vs}
 			},
 			check: func(p *Presign) error {
 				return validateSignVerifyShares(p.state.signers, p.state.verifyShares, testLimits())
@@ -98,29 +99,31 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 		},
 		{
 			name:    "non-canonical KPoint",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].KPoint = []byte{0xFF} },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].kPoint = nil },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical KPoint",
 		},
 		{
 			name:    "non-canonical ChiPoint",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].ChiPoint = []byte{0xFF} },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].chiPoint = nil },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical ChiPoint",
 		},
 		{
 			name:    "empty proof",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].Proof = nil },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].proof = signprep.Proof{} },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "empty proof",
 		},
 		{
 			name: "oversize proof",
-			mutate: func(p *Presign) {
-				limits := testLimits()
-				p.state.verifyShares[0].Proof = make([]byte, limits.SignPrep.MaxProofBytes+1)
+			mutate: func(_ *Presign) {
 			},
-			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
+			check: func(p *Presign) error {
+				limits := testLimits()
+				limits.SignPrep.MaxProofBytes = 1
+				return p.ValidateWithLimits(limits)
+			},
 			wantMsg: "oversize proof",
 		},
 	}
@@ -286,8 +289,14 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 			name: "empty proof",
 			payload: func() presignRound3Payload {
 				one := big.NewInt(1)
-				kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
-				return presignRound3Payload{Delta: one, KPoint: kPoint, ChiPoint: kPoint, Proof: nil, PlanHash: bytes.Repeat([]byte{0xef}, 32)}
+				kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
+				return presignRound3Payload{
+					Delta:    one,
+					KPoint:   secp.WirePoint{P: kPoint},
+					ChiPoint: secp.WirePoint{P: kPoint},
+					Proof:    signprep.Proof{},
+					PlanHash: bytes.Repeat([]byte{0xef}, 32),
+				}
 			}(),
 			wantMsg: "empty proof in round3 payload",
 		},
@@ -295,9 +304,15 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 			name: "non-canonical KPoint",
 			payload: func() presignRound3Payload {
 				one := big.NewInt(1)
-				chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(one)))
+				chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 				proof := mustMinimalSignPrepProofForTest(t)
-				return presignRound3Payload{Delta: one, KPoint: []byte{0xFF}, ChiPoint: chiPoint, Proof: proof, PlanHash: bytes.Repeat([]byte{0xef}, 32)}
+				return presignRound3Payload{
+					Delta:    one,
+					KPoint:   secp.WirePoint{},
+					ChiPoint: secp.WirePoint{P: chiPoint},
+					Proof:    proof,
+					PlanHash: bytes.Repeat([]byte{0xef}, 32),
+				}
 			}(),
 			wantMsg: "non-canonical KPoint in round3 payload",
 		},

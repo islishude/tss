@@ -146,15 +146,41 @@ func testAffGProof(seed int64) zkpai.AffGProof {
 // and abort cleanup.
 func newTestPresignSession(t *testing.T) *PresignSession {
 	t.Helper()
+	party := presignPartyState{
+		id: 2,
+		round1: presignRound1State{
+			payload:       presignRound1Payload{Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: testPaillierPublicKey(600)},
+			havePayload:   true,
+			proof:         presignRound1ProofPayload{PublicRound1Hash: []byte{0xdd}, EncKProof: testEncProof(700)},
+			proofEnvelope: tss.Envelope{},
+			haveProof:     true,
+			verified:      true,
+		},
+		round2: presignRound2State{
+			payload: presignRound2Payload{
+				Delta:      mta.ResponseMessage{Ciphertext: []byte{0x01}, Proof: testAffGProof(800)},
+				Sigma:      mta.ResponseMessage{Ciphertext: []byte{0x03}, Proof: testAffGProof(900)},
+				Round1Echo: []byte{0x05},
+			},
+			havePayload: true,
+		},
+		round3: presignRound3State{
+			delta:     mustTestSecretScalar(t, 100),
+			haveDelta: true,
+		},
+		mta: presignMTAState{
+			alphaDelta: mustTestSecretScalar(t, 200),
+			betaDelta:  mustTestSecretScalar(t, 300),
+			alphaSigma: mustTestSecretScalar(t, 400),
+			betaSigma:  mustTestSecretScalar(t, 500),
+		},
+	}
 	return &PresignSession{
 		kShare:     fillSecretScalar(t, 0x01),
 		gamma:      fillSecretScalar(t, 0x11),
 		xBar:       fillSecretScalar(t, 0x21),
-		deltas:     map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 100)},
-		alphaDelta: map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 200)},
-		betaDelta:  map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 300)},
-		alphaSigma: map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 400)},
-		betaSigma:  map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 500)},
+		partyIndex: map[tss.PartyID]int{2: 0},
+		parties:    []presignPartyState{party},
 		derivation: &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: []byte{0x02, 0x03, 0x04},
@@ -162,22 +188,6 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 			RequestedPath:  tss.DerivationPath{1, 2},
 			ResolvedPath:   tss.DerivationPath{1, 2},
 			AdditiveShift:  []byte{0x08, 0x09, 0x0a},
-		},
-		round1: map[tss.PartyID]presignRound1Payload{
-			2: {Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: testPaillierPublicKey(600)},
-		},
-		round1Proofs: map[tss.PartyID]presignRound1ProofPayload{
-			2: {PublicRound1Hash: []byte{0xdd}, EncKProof: testEncProof(700)},
-		},
-		round1ProofEnvelopes: map[tss.PartyID]tss.Envelope{
-			2: {},
-		},
-		round2: map[tss.PartyID]presignRound2Payload{
-			2: {
-				Delta:      mta.ResponseMessage{Ciphertext: []byte{0x01}, Proof: testAffGProof(800)},
-				Sigma:      mta.ResponseMessage{Ciphertext: []byte{0x03}, Proof: testAffGProof(900)},
-				Round1Echo: []byte{0x05},
-			},
 		},
 	}
 }
@@ -202,6 +212,10 @@ func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
 	requestedPath := s.derivation.RequestedPath
 	resolvedPath := s.derivation.ResolvedPath
 	additiveShift := s.derivation.AdditiveShift
+	round1Gamma := s.parties[0].round1.payload.Gamma
+	round1EncK := s.parties[0].round1.payload.EncK
+	round2Delta := s.parties[0].round2.payload.Delta.Ciphertext
+	round2Sigma := s.parties[0].round2.payload.Sigma.Ciphertext
 
 	s.Destroy()
 
@@ -216,20 +230,16 @@ func TestPresignSession_Destroy_ClearsSecrets(t *testing.T) {
 		t.Error("xBar not nil after Destroy")
 	}
 
-	// big.Int maps must be empty.
-	testutil.AssertMapCleared(t, s.deltas)
-	testutil.AssertMapCleared(t, s.alphaDelta)
-	testutil.AssertMapCleared(t, s.betaDelta)
-	testutil.AssertMapCleared(t, s.alphaSigma)
-	testutil.AssertMapCleared(t, s.betaSigma)
-
-	// Round payload maps must be empty (secret-bearing: round1, round2).
-	testutil.AssertMapCleared(t, s.round1)
-	testutil.AssertMapCleared(t, s.round2)
-
-	// Non-secret cleanup: round1Proofs map cleared, envelope map cleared.
-	testutil.AssertMapCleared(t, s.round1Proofs)
-	testutil.AssertMapCleared(t, s.round1ProofEnvelopes)
+	if len(s.partyIndex) != 0 {
+		t.Error("partyIndex not cleared after Destroy")
+	}
+	if s.parties != nil {
+		t.Error("parties not nil after Destroy")
+	}
+	testutil.AssertBytesCleared(t, round1Gamma)
+	testutil.AssertBytesCleared(t, round1EncK)
+	testutil.AssertBytesCleared(t, round2Delta)
+	testutil.AssertBytesCleared(t, round2Sigma)
 
 	if s.derivation != nil {
 		t.Error("derivation not nil after Destroy")
@@ -290,6 +300,10 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 	requestedPath := s.derivation.RequestedPath
 	resolvedPath := s.derivation.ResolvedPath
 	additiveShift := s.derivation.AdditiveShift
+	round1Gamma := s.parties[0].round1.payload.Gamma
+	round1EncK := s.parties[0].round1.payload.EncK
+	round2Delta := s.parties[0].round2.payload.Delta.Ciphertext
+	round2Sigma := s.parties[0].round2.payload.Sigma.Ciphertext
 
 	s.abort()
 
@@ -305,13 +319,16 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 	if s.xBar != nil {
 		t.Error("xBar not nil after abort")
 	}
-	testutil.AssertMapCleared(t, s.deltas)
-	testutil.AssertMapCleared(t, s.alphaDelta)
-	testutil.AssertMapCleared(t, s.betaDelta)
-	testutil.AssertMapCleared(t, s.alphaSigma)
-	testutil.AssertMapCleared(t, s.betaSigma)
-	testutil.AssertMapCleared(t, s.round1)
-	testutil.AssertMapCleared(t, s.round2)
+	if len(s.partyIndex) != 0 {
+		t.Error("partyIndex not cleared after abort")
+	}
+	if s.parties != nil {
+		t.Error("parties not nil after abort")
+	}
+	testutil.AssertBytesCleared(t, round1Gamma)
+	testutil.AssertBytesCleared(t, round1EncK)
+	testutil.AssertBytesCleared(t, round2Delta)
+	testutil.AssertBytesCleared(t, round2Sigma)
 	if s.derivation != nil {
 		t.Error("derivation not nil after abort")
 	}
@@ -476,15 +493,12 @@ func TestDestroy_Idempotent(t *testing.T) {
 	// PresignSession double-Destroy.
 	kShare := fillSecretScalar(t, 0x01)
 	ps := &PresignSession{
-		kShare:       kShare,
-		deltas:       map[tss.PartyID]*secret.Scalar{2: mustTestSecretScalar(t, 1)},
-		alphaDelta:   make(map[tss.PartyID]*secret.Scalar),
-		betaDelta:    make(map[tss.PartyID]*secret.Scalar),
-		alphaSigma:   make(map[tss.PartyID]*secret.Scalar),
-		betaSigma:    make(map[tss.PartyID]*secret.Scalar),
-		round1:       make(map[tss.PartyID]presignRound1Payload),
-		round1Proofs: make(map[tss.PartyID]presignRound1ProofPayload),
-		round2:       make(map[tss.PartyID]presignRound2Payload),
+		kShare:     kShare,
+		partyIndex: map[tss.PartyID]int{2: 0},
+		parties: []presignPartyState{{
+			id:     2,
+			round3: presignRound3State{delta: mustTestSecretScalar(t, 1), haveDelta: true},
+		}},
 	}
 	ps.Destroy()
 	ps.Destroy() // must not panic

@@ -256,28 +256,21 @@ Presign produces a one-use opaque `Presign` record containing local nonce shares
 and per-party verification material. It must be run in advance of signing and
 the result persisted securely. Global public metadata is available through
 `PublicMetadata()`, which returns a caller-owned `PresignPublicMetadata`
-snapshot. Per-signer verification material is queried by party ID through
-`VerifyShare(party)`. Nested derivation paths, proof records, and point
-encodings are deep copied. A shallow Go copy shares the same secret and consumed
-lifecycle state and cannot bypass `Destroy()` or one-use claiming.
+snapshot. Per-signer verification material is internal to the opaque presign
+record and is not exposed as a public accessor. Nested derivation paths and
+public encodings returned through metadata are deep copied. A shallow Go copy
+shares the same secret and consumed lifecycle state and cannot bypass
+`Destroy()` or one-use claiming.
 
 `PresignSession.Presign()` returns an independently owned completed record so
 callers can persist or hand it to the online signer without mutating
 session-owned material.
 
-Each `Presign.VerifyShare(party)` snapshot contains one signer's
-`SignVerifyShare`:
-
-```go
-type SignVerifyShare struct {
-    Party    tss.PartyID
-    KPoint   []byte // k_i·G (33 bytes compressed)
-    ChiPoint []byte // χ_i·G (33 bytes compressed)
-    Proof    []byte // signprep proof binding KPoint/ChiPoint to the presign transcript
-}
-```
-
-Each `SignVerifyShare` is bound into the presign transcript hash. `StartSign` calls `Presign.VerifySignMaterial()` to validate the structural integrity of all verify shares before entering online signing.
+Each internal verify-share entry contains the signer ID, `KPoint_i = k_i·G`,
+`ChiPoint_i = χ_i·G`, and a signprep proof binding those points to the presign
+transcript. Each entry is bound into the presign transcript hash. `StartSign`
+calls `Presign.VerifySignMaterial()` to validate the structural integrity of all
+verify shares before entering online signing.
 
 ### Round 1: Nonce Commitments
 
@@ -348,7 +341,7 @@ R = δ^{-1} · Γ
 r = x(R) mod q
 ```
 
-The `Presign` record stores fixed-length secret scalars `(k_i, χ_i, δ)`, public values `(R, r)`, per-party verification material (`SignVerifyShare` each containing `KPoint`, `ChiPoint`, and a signprep proof), the presign transcript hash, the presign context hash, additive HD shift, and key binding metadata `(group public key, keygen transcript hash, participant-set hash)`. It is local-only and must not be shared with other parties.
+The `Presign` record stores fixed-length secret scalars `(k_i, χ_i, δ)`, public values `(R, r)`, private per-party verification material (`KPoint`, `ChiPoint`, and a signprep proof), the presign transcript hash, the presign context hash, additive HD shift, and key binding metadata `(group public key, keygen transcript hash, participant-set hash)`. It is local-only and must not be shared with other parties.
 
 ### Signprep Proof (Πsignprep)
 
@@ -390,14 +383,14 @@ Each receiving signer independently verifies every incoming partial before accep
 s_i·G == m·KPoint_i + r·ChiPoint_i
 ```
 
-Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the `SignVerifyShare` in the presign record. The partial payload also carries:
+Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the internal verification material in the presign record. The partial payload also carries:
 
 - `DigestHash`: binds the signing request to prevent the same presign context from being confused across different digest requests.
 - `PartialEquationHash`: a stable evidence hash binding `(session ID, party, presign transcript hash, context hash, digest hash, r, S, KPoint, ChiPoint)`.
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 
-Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and derivation result (including the child verification key) as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all `SignVerifyShare` entries (valid point encodings, non-empty proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
+Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and derivation result (including the child verification key) as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all internal verify-share entries (valid points and signprep proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
 
 No private key share, nonce share, or Paillier secret material leaves the process.
 

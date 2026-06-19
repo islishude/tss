@@ -120,17 +120,17 @@ type presignState struct {
 	party                tss.PartyID            // Local owner of this presign share.
 	threshold            int                    // Number of signer partials required to complete ECDSA signing.
 	signers              tss.PartySet           // Canonical signer set authorized for this presign.
-	r                    []byte                 // Aggregate nonce point R encoded for ECDSA.
-	littleR              []byte                 // ECDSA r scalar derived from R.
+	r                    *secp.Point            // Aggregate nonce point R.
+	littleR              secp.Scalar            // ECDSA r scalar derived from R.
 	transcriptHash       []byte                 // Cross-party presign transcript hash.
 	context              PresignContext         // Normalized context bound before online signing.
 	contextHash          []byte                 // Hash of context, used to reject cross-context reuse.
 	derivation           *tss.DerivationResult  // Resolved child key/path; ChildPublicKey is the verification key.
 	planHash             []byte                 // Digest of the presign lifecycle plan accepted by all signers.
-	publicKey            []byte                 // Parent group public key before request-time HD derivation.
+	publicKey            *secp.Point            // Parent group public key before request-time HD derivation.
 	keygenTranscriptHash []byte                 // Transcript hash of the keygen that produced publicKey.
 	partiesHash          []byte                 // Hash of the full key-share participant set.
-	verifyShares         []SignVerifyShare      // Per-signer public verification material for online partials.
+	verifyShares         []signVerifyShare      // Per-signer public verification material for online partials.
 	kShare               *secret.Scalar         // Local nonce-share secret used once during online signing.
 	chiShare             *secret.Scalar         // Local chi-share secret used once during online signing.
 	delta                *secret.Scalar         // Local aggregate-delta share from presign completion.
@@ -160,36 +160,31 @@ func (p *Presign) PublicMetadata() (PresignPublicMetadata, bool) {
 	if p == nil || p.state == nil {
 		return PresignPublicMetadata{}, false
 	}
+	rBytes, err := secp.PointBytes(p.state.r)
+	if err != nil {
+		return PresignPublicMetadata{}, false
+	}
+	publicKeyBytes, err := secp.PointBytes(p.state.publicKey)
+	if err != nil {
+		return PresignPublicMetadata{}, false
+	}
 	return PresignPublicMetadata{
 		SecurityParams:       p.state.securityParams,
 		Party:                p.state.party,
 		Threshold:            p.state.threshold,
 		Signers:              p.state.signers.Clone(),
-		R:                    bytes.Clone(p.state.r),
-		LittleR:              bytes.Clone(p.state.littleR),
+		R:                    rBytes,
+		LittleR:              p.state.littleR.Bytes(),
 		TranscriptHash:       bytes.Clone(p.state.transcriptHash),
 		Context:              p.state.context.Clone(),
 		ContextHash:          bytes.Clone(p.state.contextHash),
 		Derivation:           p.state.derivation.Clone(),
 		VerificationKey:      p.verificationKey(),
 		PlanHash:             bytes.Clone(p.state.planHash),
-		PublicKey:            bytes.Clone(p.state.publicKey),
+		PublicKey:            publicKeyBytes,
 		KeygenTranscriptHash: bytes.Clone(p.state.keygenTranscriptHash),
 		PartiesHash:          bytes.Clone(p.state.partiesHash),
 	}, true
-}
-
-// VerifyShare returns a caller-owned online verification record for party.
-func (p *Presign) VerifyShare(party tss.PartyID) (SignVerifyShare, bool) {
-	if p == nil || p.state == nil {
-		return SignVerifyShare{}, false
-	}
-	for _, share := range p.state.verifyShares {
-		if share.Party == party {
-			return share.Clone(), true
-		}
-	}
-	return SignVerifyShare{}, false
 }
 
 // SecurityParams returns the cryptographic profile persisted with the presign.
@@ -267,19 +262,24 @@ func (p *Presign) id() []byte {
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
 	t.AppendBytes("plan_hash", p.state.planHash)
-	t.AppendBytes("public_key", p.state.publicKey)
+	publicKeyBytes, _ := secp.PointBytes(p.state.publicKey)
+	t.AppendBytes("public_key", publicKeyBytes)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenTranscriptHash)
 	t.AppendBytes("parties_hash", p.state.partiesHash)
 	t.AppendUint32List("signers", p.state.signers)
 	for _, vs := range p.state.verifyShares {
-		t.AppendUint32("verify_share_party", vs.Party)
-		t.AppendBytes("k_point", vs.KPoint)
-		t.AppendBytes("chi_point", vs.ChiPoint)
-		proofHash := sha256.Sum256(vs.Proof)
+		kPointBytes, _ := vs.kPointBytes()
+		chiPointBytes, _ := vs.chiPointBytes()
+		proofBytes, _ := vs.proofBytes()
+		t.AppendUint32("verify_share_party", vs.party)
+		t.AppendBytes("k_point", kPointBytes)
+		t.AppendBytes("chi_point", chiPointBytes)
+		proofHash := sha256.Sum256(proofBytes)
 		t.AppendBytes("proof_hash", proofHash[:])
 	}
-	t.AppendBytes("r_point", p.state.r)
-	t.AppendBytes("little_r", p.state.littleR)
+	rBytes, _ := secp.PointBytes(p.state.r)
+	t.AppendBytes("r_point", rBytes)
+	t.AppendBytes("little_r", p.state.littleR.Bytes())
 	t.AppendBytes("k_share", p.state.kShare.FixedBytes())
 	t.AppendBytes("chi_share", p.state.chiShare.FixedBytes())
 	t.AppendBytes("delta", p.state.delta.FixedBytes())
@@ -334,11 +334,11 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if !tss.ContainsParty(p.state.signers, p.state.party) {
 		return errors.New("presign party is not in signer set")
 	}
-	if _, err := secp.PointFromBytes(p.state.r); err != nil {
+	if _, err := secp.PointBytes(p.state.r); err != nil {
 		return fmt.Errorf("invalid presign R: %w", err)
 	}
-	if _, err := secp.ScalarFromBytes(p.state.littleR); err != nil {
-		return fmt.Errorf("invalid little r: %w", err)
+	if p.state.littleR.IsZero() {
+		return errors.New("invalid little r: zero")
 	}
 	if _, err := secpScalarFromSecret(p.state.kShare); err != nil {
 		return fmt.Errorf("invalid k share: %w", err)
@@ -369,7 +369,7 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if len(p.state.planHash) != sha256.Size {
 		return errors.New("invalid presign plan hash")
 	}
-	if _, err := secp.PointFromBytes(p.state.publicKey); err != nil {
+	if _, err := secp.PointBytes(p.state.publicKey); err != nil {
 		return fmt.Errorf("invalid presign public key binding: %w", err)
 	}
 	if _, err := secp.PointFromBytes(p.state.derivation.ChildPublicKey); err != nil {
@@ -390,7 +390,7 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	return nil
 }
 
-// VerifySignMaterial performs a structural integrity check on all SignVerifyShare
+// VerifySignMaterial performs a structural integrity check on all sign verify share
 // entries in the presign record. Full cryptographic verification of each signprep
 // proof happens during presign round 3 (with session ID bound). At StartSign time
 // the presign transcript hash already binds every proof hash, so tampering would
@@ -408,11 +408,6 @@ func (p *Presign) VerifySignMaterialWithLimits(limits Limits) error {
 	}
 	if err := validateSignVerifyShares(p.state.signers, p.state.verifyShares, limits); err != nil {
 		return err
-	}
-	for _, share := range p.state.verifyShares {
-		if _, err := signprep.UnmarshalProof(share.Proof); err != nil {
-			return fmt.Errorf("verify share party %d: invalid proof: %w", share.Party, err)
-		}
 	}
 	return nil
 }
@@ -467,19 +462,16 @@ type PresignSession struct {
 	gammaComm []byte         // Public commitment to gamma used in round-1 proof binding.
 	xBarComm  []byte         // Public commitment to xBar used in round-3 proof binding.
 
-	round1               map[tss.PartyID]presignRound1Payload      // Validated round-1 public/MtA start payloads by sender.
-	round1Proofs         map[tss.PartyID]presignRound1ProofPayload // Validated proofs for round-1 public payloads by sender.
-	round1ProofEnvelopes map[tss.PartyID]tss.Envelope              // Original proof envelopes retained for blame evidence.
-	round1Verified       map[tss.PartyID]bool                      // Senders whose round-1 proof has been checked.
-	round2               map[tss.PartyID]presignRound2Payload      // MtA response payloads by sender; contains secret-derived ciphertexts.
-	deltas               map[tss.PartyID]*secret.Scalar            // Delta shares collected for aggregate nonce computation.
-	verifyShares         map[tss.PartyID]SignVerifyShare           // Round-3 public verification shares by signer.
-	startOpening         *mta.StartOpening                         // Local MtA opening material; secret-bearing until round 2 completes.
+	partyIndex map[tss.PartyID]int // Index into parties; initialized once at StartPresign.
+	parties    []presignPartyState // Ordered by canonical signer set.
 
-	alphaDelta map[tss.PartyID]*secret.Scalar // Local MtA alpha terms for delta, keyed by peer.
-	betaDelta  map[tss.PartyID]*secret.Scalar // Local MtA beta terms for delta, keyed by peer.
-	alphaSigma map[tss.PartyID]*secret.Scalar // Local MtA alpha terms for sigma, keyed by peer.
-	betaSigma  map[tss.PartyID]*secret.Scalar // Local MtA beta terms for sigma, keyed by peer.
+	round1Count         int // Count of signers with accepted round-1 public payload.
+	round1ProofCount    int // Count of signers with accepted round-1 proof payload.
+	round1VerifiedCount int // Count of signers whose round-1 proof is verified.
+	round2Count         int // Count of accepted round-2 direct responses.
+	round3Count         int // Count of accepted round-3 delta/verify-share records.
+
+	startOpening *mta.StartOpening // Local MtA opening material; secret-bearing until round 2 completes.
 
 	round2Sent      bool     // Whether this party already emitted round-2 MtA responses.
 	round3Sent      bool     // Whether this party already emitted round-3 verification material.
@@ -487,6 +479,64 @@ type PresignSession struct {
 	aborted         bool     // Terminal failure/destruction flag.
 	presign         *Presign // Completed local presign record, destroyed if the session aborts.
 	presignReturned bool     // Tracks whether the completed presign has been handed to the caller.
+}
+
+type presignPartyState struct {
+	id tss.PartyID
+
+	round1 presignRound1State
+	round2 presignRound2State
+	round3 presignRound3State
+	mta    presignMTAState
+}
+
+type presignRound1State struct {
+	payload       presignRound1Payload
+	havePayload   bool
+	proof         presignRound1ProofPayload
+	proofEnvelope tss.Envelope
+	haveProof     bool
+	verified      bool
+}
+
+type presignRound2State struct {
+	payload     presignRound2Payload
+	havePayload bool
+}
+
+type presignRound3State struct {
+	delta           *secret.Scalar
+	verifyShare     signVerifyShare
+	haveDelta       bool
+	haveVerifyShare bool
+}
+
+type presignMTAState struct {
+	alphaDelta *secret.Scalar
+	betaDelta  *secret.Scalar
+	alphaSigma *secret.Scalar
+	betaSigma  *secret.Scalar
+}
+
+func newPresignPartyStates(signers tss.PartySet) ([]presignPartyState, map[tss.PartyID]int) {
+	parties := make([]presignPartyState, len(signers))
+	index := make(map[tss.PartyID]int, len(signers))
+	for i, id := range signers {
+		parties[i] = presignPartyState{id: id}
+		index[id] = i
+	}
+	return parties, index
+}
+
+func (s *PresignSession) partyState(id tss.PartyID) (*presignPartyState, bool) {
+	if s == nil {
+		return nil, false
+	}
+	i, ok := s.partyIndex[id]
+	if !ok {
+		return nil, false
+	}
+	return &s.parties[i], true
 }
 
 // abort marks the presign session aborted and clears all secret-bearing
@@ -507,13 +557,11 @@ func (s *PresignSession) abort() {
 		s.paillier.Destroy()
 		s.paillier = nil
 	}
-	clearSecretScalarMap(s.deltas)
-	clearSecretScalarMap(s.alphaDelta)
-	clearSecretScalarMap(s.betaDelta)
-	clearSecretScalarMap(s.alphaSigma)
-	clearSecretScalarMap(s.betaSigma)
-	clearPresignRound1Map(s.round1)
-	clearPresignRound2Map(s.round2)
+	for i := range s.parties {
+		s.parties[i].destroy()
+	}
+	clear(s.partyIndex)
+	s.parties = nil
 	if s.derivation != nil {
 		s.derivation.Destroy()
 		s.derivation = nil
@@ -526,6 +574,72 @@ func (s *PresignSession) abort() {
 		s.presign.Destroy()
 		s.presign = nil
 	}
+}
+
+func (p *presignPartyState) destroy() {
+	if p == nil {
+		return
+	}
+	p.round1.destroy()
+	p.round2.destroy()
+	p.round3.destroy()
+	p.mta.destroy()
+	*p = presignPartyState{}
+}
+
+func (r *presignRound1State) destroy() {
+	if r == nil {
+		return
+	}
+	clear(r.payload.Gamma)
+	clear(r.payload.EncK)
+	secret.ClearBigInt(r.payload.PaillierPublicKey.N)
+	secret.ClearBigInt(r.payload.PaillierPublicKey.G)
+	secret.ClearBigInt(r.payload.PaillierPublicKey.NSquared)
+	clear(r.proof.PublicRound1Hash)
+	clearEncProof(&r.proof.EncKProof)
+	*r = presignRound1State{}
+}
+
+func (r *presignRound2State) destroy() {
+	if r == nil {
+		return
+	}
+	clear(r.payload.Delta.Ciphertext)
+	clearAffGProof(&r.payload.Delta.Proof)
+	clear(r.payload.Sigma.Ciphertext)
+	clearAffGProof(&r.payload.Sigma.Proof)
+	clear(r.payload.Round1Echo)
+	*r = presignRound2State{}
+}
+
+func (r *presignRound3State) destroy() {
+	if r == nil {
+		return
+	}
+	if r.delta != nil {
+		r.delta.Destroy()
+	}
+	*r = presignRound3State{}
+}
+
+func (m *presignMTAState) destroy() {
+	if m == nil {
+		return
+	}
+	if m.alphaDelta != nil {
+		m.alphaDelta.Destroy()
+	}
+	if m.betaDelta != nil {
+		m.betaDelta.Destroy()
+	}
+	if m.alphaSigma != nil {
+		m.alphaSigma.Destroy()
+	}
+	if m.betaSigma != nil {
+		m.betaSigma.Destroy()
+	}
+	*m = presignMTAState{}
 }
 
 // SignSession tracks the online threshold ECDSA signing exchange.
@@ -604,11 +718,11 @@ func (presignRound2Payload) WireType() string { return presignRound2PayloadWireT
 func (presignRound2Payload) WireVersion() uint16 { return presignRound2PayloadWireVersion }
 
 type presignRound3Payload struct {
-	Delta    *big.Int `json:"-" wire:"1,bigpos,max_bytes=scalar"`
-	KPoint   []byte   `json:"k_point" wire:"2,bytes,max_bytes=point"`
-	ChiPoint []byte   `json:"chi_point" wire:"3,bytes,max_bytes=point"`
-	Proof    []byte   `json:"proof" wire:"4,bytes,max_bytes=signprep_proof"`
-	PlanHash []byte   `json:"plan_hash" wire:"5,bytes,len=32"`
+	Delta    *big.Int       `json:"-" wire:"1,bigpos,max_bytes=scalar"`
+	KPoint   secp.WirePoint `json:"k_point" wire:"2,custom,len=33"`
+	ChiPoint secp.WirePoint `json:"chi_point" wire:"3,custom,len=33"`
+	Proof    signprep.Proof `json:"proof" wire:"4,nested,max_bytes=signprep_proof"`
+	PlanHash []byte         `json:"plan_hash" wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.
@@ -675,13 +789,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 	if !tss.ContainsParty(s.signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
+	st, ok := s.partyState(base.From)
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
+	}
 
 	switch base.PayloadType {
 	case payloadPresignRound1:
 		if base.Round != 1 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
 		}
-		if _, ok := s.round1[base.From]; ok {
+		if st.round1.havePayload {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1"))
 		}
 		return s.handlePresignRound1(base)
@@ -693,7 +811,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if base.From == s.key.state.party {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("self presign round1 proof is not expected"))
 		}
-		if _, ok := s.round1Proofs[base.From]; ok {
+		if st.round1.haveProof {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1 proof"))
 		}
 		return s.handlePresignRound1Proof(base)
@@ -702,7 +820,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if base.Round != 2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
 		}
-		if _, ok := s.round2[base.From]; ok {
+		if st.round2.havePayload {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round2"))
 		}
 		return s.handlePresignRound2(base)
@@ -711,7 +829,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if base.Round != 3 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
 		}
-		if _, ok := s.deltas[base.From]; ok {
+		if st.round3.haveDelta {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate delta share"))
 		}
 		return s.handlePresignRound3(base)

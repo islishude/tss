@@ -33,10 +33,6 @@ func (s *PresignSession) Destroy() {
 		return
 	}
 	s.abort()
-	clearPresignRound1ProofMap(s.round1Proofs)
-	for id := range s.round1ProofEnvelopes {
-		delete(s.round1ProofEnvelopes, id)
-	}
 }
 
 // Destroy clears local online signing state retained by the signing session.
@@ -67,43 +63,6 @@ func (s *SignSession) Destroy() {
 func clearBigIntMap(xs map[tss.PartyID]*big.Int) {
 	for _, x := range xs {
 		secret.ClearBigInt(x)
-	}
-	clear(xs)
-}
-
-func clearSecretScalarMap(xs map[tss.PartyID]*secret.Scalar) {
-	for _, x := range xs {
-		x.Destroy()
-	}
-	clear(xs)
-}
-
-func clearPresignRound1Map(xs map[tss.PartyID]presignRound1Payload) {
-	for _, payload := range xs {
-		clear(payload.Gamma)
-		clear(payload.EncK)
-		secret.ClearBigInt(payload.PaillierPublicKey.N)
-		secret.ClearBigInt(payload.PaillierPublicKey.G)
-		secret.ClearBigInt(payload.PaillierPublicKey.NSquared)
-	}
-	clear(xs)
-}
-
-func clearPresignRound1ProofMap(xs map[tss.PartyID]presignRound1ProofPayload) {
-	for _, payload := range xs {
-		clear(payload.PublicRound1Hash)
-		clearEncProof(&payload.EncKProof)
-	}
-	clear(xs)
-}
-
-func clearPresignRound2Map(xs map[tss.PartyID]presignRound2Payload) {
-	for _, payload := range xs {
-		clear(payload.Delta.Ciphertext)
-		clearAffGProof(&payload.Delta.Proof)
-		clear(payload.Sigma.Ciphertext)
-		clearAffGProof(&payload.Sigma.Proof)
-		clear(payload.Round1Echo)
 	}
 	clear(xs)
 }

@@ -79,13 +79,31 @@ func mustPresignLittleR(t testing.TB, presign *Presign) []byte {
 	return mustPresignMetadata(t, presign).LittleR
 }
 
-func mustPresignVerifyShare(t testing.TB, presign *Presign, party tss.PartyID) SignVerifyShare {
+func mustPresignVerifyShare(t testing.TB, presign *Presign, party tss.PartyID) signVerifyShare {
 	t.Helper()
-	share, ok := presign.VerifyShare(party)
+	share, ok := presignVerifyShare(presign, party)
 	if !ok {
 		t.Fatalf("missing presign verify share for party %d", party)
 	}
-	return share
+	return share.clone()
+}
+
+func mustSignVerifyShareKPointBytes(t testing.TB, share signVerifyShare) []byte {
+	t.Helper()
+	out, err := share.kPointBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
+func mustSignVerifyShareChiPointBytes(t testing.TB, share signVerifyShare) []byte {
+	t.Helper()
+	out, err := share.chiPointBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
 }
 
 // testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
@@ -134,21 +152,29 @@ func clonePresignForTest(p *Presign) *Presign {
 		party:                p.state.party,
 		threshold:            p.state.threshold,
 		signers:              slices.Clone(p.state.signers),
-		r:                    slices.Clone(p.state.r),
-		littleR:              slices.Clone(p.state.littleR),
+		r:                    secp.Clone(p.state.r),
+		littleR:              p.state.littleR,
 		transcriptHash:       slices.Clone(p.state.transcriptHash),
 		context:              p.state.context.Clone(),
 		contextHash:          slices.Clone(p.state.contextHash),
 		derivation:           p.state.derivation.Clone(),
 		planHash:             slices.Clone(p.state.planHash),
-		publicKey:            slices.Clone(p.state.publicKey),
+		publicKey:            secp.Clone(p.state.publicKey),
 		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
 		partiesHash:          slices.Clone(p.state.partiesHash),
-		verifyShares:         tss.CloneSlice(p.state.verifyShares),
+		verifyShares:         cloneSignVerifySharesForTest(p.state.verifyShares),
 		kShare:               p.state.kShare.Clone(),
 		chiShare:             p.state.chiShare.Clone(),
 		delta:                p.state.delta.Clone(),
 	}}
+}
+
+func cloneSignVerifySharesForTest(in []signVerifyShare) []signVerifyShare {
+	out := make([]signVerifyShare, 0, len(in))
+	for _, share := range in {
+		out = append(out, share.clone())
+	}
+	return out
 }
 
 func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
@@ -565,8 +591,8 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		party:          1,
 		threshold:      1,
 		signers:        tss.NewPartySet(1),
-		r:              R,
-		littleR:        scalarBytes(littleR),
+		r:              secp.Clone(RPoint),
+		littleR:        secp.ScalarFromBigInt(littleR),
 		transcriptHash: transcript[:],
 		context:        ctx,
 		contextHash:    contextHash,
@@ -577,14 +603,14 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 			AdditiveShift:  slices.Clone(zeroShift),
 		},
 		planHash:             planHash[:],
-		publicKey:            R,
+		publicKey:            secp.Clone(RPoint),
 		keygenTranscriptHash: transcript[:],
 		partiesHash:          wireutil.PartySetHash(tss.NewPartySet(1), partySetHashLabel),
-		verifyShares: []SignVerifyShare{{
-			Party:    1,
-			KPoint:   R,
-			ChiPoint: R,
-			Proof:    minimalProof,
+		verifyShares: []signVerifyShare{{
+			party:    1,
+			kPoint:   secp.Clone(RPoint),
+			chiPoint: secp.Clone(RPoint),
+			proof:    minimalProof,
 		}},
 		kShare:   kShare,
 		chiShare: chiShare,
@@ -602,7 +628,7 @@ func testSecurityParamsPtr() *SecurityParams {
 	return &params
 }
 
-func mustMinimalSignPrepProofForTest(tb testing.TB) []byte {
+func mustMinimalSignPrepProofForTest(tb testing.TB) signprep.Proof {
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	kScalar := secp.ScalarFromBigInt(one)
@@ -636,9 +662,5 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) []byte {
 	if err != nil {
 		tb.Fatal("signprep.Prove: " + err.Error())
 	}
-	proofBytes, err := proof.MarshalBinary()
-	if err != nil {
-		tb.Fatal("proof.MarshalBinary: " + err.Error())
-	}
-	return proofBytes
+	return *proof
 }

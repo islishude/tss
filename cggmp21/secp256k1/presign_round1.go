@@ -10,7 +10,6 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
-	"github.com/islishude/tss/internal/secret"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 )
@@ -164,37 +163,35 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
+	parties, partyIndex := newPresignPartyStates(signers)
+	selfState := &parties[partyIndex[key.state.party]]
+	selfState.round1.payload = presignPayload
+	selfState.round1.havePayload = true
+	selfState.round1.verified = true
 	s = &PresignSession{
-		key:                  key,
-		sessionID:            sessionID,
-		config:               config,
-		log:                  config.Logger(),
-		limits:               limits,
-		securityParams:       plan.securityParams,
-		signers:              signers,
-		context:              ctx,
-		contextHash:          contextHash,
-		derivation:           derivation,
-		planHash:             slices.Clone(planHash),
-		paillier:             paillierKey,
-		kShare:               kShareSecret,
-		gamma:                gammaSecret,
-		xBar:                 xBarSecret,
-		gammaComm:            gammaComm,
-		xBarComm:             xBarComm,
-		round1:               map[tss.PartyID]presignRound1Payload{key.state.party: presignPayload},
-		round1Proofs:         make(map[tss.PartyID]presignRound1ProofPayload),
-		round1ProofEnvelopes: make(map[tss.PartyID]tss.Envelope),
-		round1Verified:       map[tss.PartyID]bool{key.state.party: true},
-		round2:               make(map[tss.PartyID]presignRound2Payload),
-		deltas:               make(map[tss.PartyID]*secret.Scalar),
-		verifyShares:         make(map[tss.PartyID]SignVerifyShare),
-		alphaDelta:           make(map[tss.PartyID]*secret.Scalar),
-		betaDelta:            make(map[tss.PartyID]*secret.Scalar),
-		alphaSigma:           make(map[tss.PartyID]*secret.Scalar),
-		betaSigma:            make(map[tss.PartyID]*secret.Scalar),
-		startOpening:         startOpening,
-		guard:                guard,
+		key:                 key,
+		sessionID:           sessionID,
+		config:              config,
+		log:                 config.Logger(),
+		limits:              limits,
+		securityParams:      plan.securityParams,
+		signers:             signers,
+		context:             ctx,
+		contextHash:         contextHash,
+		derivation:          derivation,
+		planHash:            slices.Clone(planHash),
+		paillier:            paillierKey,
+		kShare:              kShareSecret,
+		gamma:               gammaSecret,
+		xBar:                xBarSecret,
+		gammaComm:           gammaComm,
+		xBarComm:            xBarComm,
+		partyIndex:          partyIndex,
+		parties:             parties,
+		round1Count:         1,
+		round1VerifiedCount: 1,
+		startOpening:        startOpening,
+		guard:               guard,
 	}
 	// Defensive: clear local secret scalar references so only session fields
 	// own the secrets. The defer guards above will not fire since err is nil.
@@ -294,18 +291,24 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 	}
 
 	// ---- 4. MUTATE STATE ----
-	s.round1[env.From] = p
+	st, ok := s.partyState(env.From)
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	}
+	st.round1.payload = p
+	st.round1.havePayload = true
+	s.round1Count++
 
 	// ---- 5. EMIT ----
 	if err := s.maybeValidateRound1Proof(env.From); err != nil {
-		proofEnv := s.round1ProofEnvelopes[env.From]
+		proofEnv := st.round1.proofEnvelope
 		return nil, verificationErrorWithEvidence(
 			proofEnv,
 			tss.EvidenceKindPresignRound1,
 			"invalid presign round1 proof",
 			tss.NewPartySet(env.From),
 			err,
-			s.presignRound1ProofEvidenceFields(env.From, p, s.round1Proofs[env.From])...,
+			s.presignRound1ProofEvidenceFields(env.From, p, st.round1.proof)...,
 		)
 	}
 	return s.tryEmitRound2()
@@ -340,12 +343,18 @@ func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envel
 	// (deferred until both public and proof are available — see maybeValidateRound1Proof)
 
 	// ---- 4. MUTATE STATE ----
-	s.round1Proofs[env.From] = p
-	s.round1ProofEnvelopes[env.From] = env
+	st, ok := s.partyState(env.From)
+	if !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+	}
+	st.round1.proof = p
+	st.round1.proofEnvelope = env
+	st.round1.haveProof = true
+	s.round1ProofCount++
 
 	// ---- 5. EMIT ----
 	if err := s.maybeValidateRound1Proof(env.From); err != nil {
-		public := s.round1[env.From]
+		public := st.round1.payload
 		return nil, verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindPresignRound1,
@@ -415,22 +424,30 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 }
 
 func (s *PresignSession) maybeValidateRound1Proof(from tss.PartyID) error {
+	st, ok := s.partyState(from)
+	if !ok {
+		return errors.New("sender is not in signer set")
+	}
 	if from == s.key.state.party {
-		s.round1Verified[from] = true
+		if !st.round1.verified {
+			st.round1.verified = true
+			s.round1VerifiedCount++
+		}
 		return nil
 	}
-	if s.round1Verified[from] {
+	if st.round1.verified {
 		return nil
 	}
-	public, havePublic := s.round1[from]
-	proof, haveProof := s.round1Proofs[from]
-	if !havePublic || !haveProof {
+	if !st.round1.havePayload || !st.round1.haveProof {
 		return nil
 	}
+	public := st.round1.payload
+	proof := st.round1.proof
 	if err := s.validateRound1Proof(from, public, proof); err != nil {
 		return err
 	}
-	s.round1Verified[from] = true
+	st.round1.verified = true
+	s.round1VerifiedCount++
 	return nil
 }
 

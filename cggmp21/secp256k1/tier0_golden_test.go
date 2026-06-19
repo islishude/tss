@@ -38,34 +38,6 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	}
 }
 
-// TestFast_GoldenSignVerifyShare verifies the standalone verification-share
-// wire contract used by the Presign VerifyShares record list.
-func TestFast_GoldenSignVerifyShare(t *testing.T) {
-	t.Parallel()
-	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
-	raw, err := share.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignVerifyShare.golden", raw)
-
-	var decoded SignVerifyShare
-	if err := decoded.UnmarshalBinaryWithLimits(raw, testLimits()); err != nil {
-		t.Fatal(err)
-	}
-	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(raw, raw2) {
-		t.Error("round-trip produced different encoding")
-	}
-	if err := decoded.UnmarshalBinaryWithLimits(append(raw, 0), testLimits()); err == nil {
-		t.Error("accepted trailing byte")
-	}
-}
-
 func TestFast_GoldenVerificationShare(t *testing.T) {
 	t.Parallel()
 	share := testVerificationShare(t)
@@ -253,13 +225,13 @@ func TestFast_GoldenSignAttemptRecord(t *testing.T) {
 // presign round 3 payloads. No keygen or crypto is required.
 func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 	t.Parallel()
-	kPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
-	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2))))
+	kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
+	chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))
 	proof := mustMinimalSignPrepProofForTest(t)
 	payload := presignRound3Payload{
 		Delta:    big.NewInt(42),
-		KPoint:   kPoint,
-		ChiPoint: chiPoint,
+		KPoint:   secp.WirePoint{P: kPoint},
+		ChiPoint: secp.WirePoint{P: chiPoint},
 		Proof:    proof,
 		PlanHash: bytes.Repeat([]byte{0x91}, 32),
 	}

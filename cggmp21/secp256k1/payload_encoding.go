@@ -342,14 +342,14 @@ func (p presignRound3Payload) Validate() error {
 	if err := validateScalarRangeStrict(p.Delta); err != nil {
 		return err
 	}
-	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
-		return err
+	if _, err := secp.PointBytes(p.KPoint.P); err != nil {
+		return fmt.Errorf("invalid KPoint: %w", err)
 	}
-	if _, err := secp.PointFromBytes(p.ChiPoint); err != nil {
-		return err
+	if _, err := secp.PointBytes(p.ChiPoint.P); err != nil {
+		return fmt.Errorf("invalid ChiPoint: %w", err)
 	}
-	if len(p.Proof) == 0 {
-		return errors.New("empty signprep proof")
+	if err := p.Proof.Validate(); err != nil {
+		return fmt.Errorf("invalid signprep proof: %w", err)
 	}
 	if len(p.PlanHash) != sha256.Size {
 		return errors.New("presign round3 plan hash must be 32 bytes")
@@ -362,8 +362,12 @@ func (p presignRound3Payload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if len(p.Proof) > limits.SignPrep.MaxProofBytes {
-		return fmt.Errorf("signprep proof too large: %d > %d", len(p.Proof), limits.SignPrep.MaxProofBytes)
+	proofBytes, err := p.Proof.MarshalBinary()
+	if err != nil {
+		return err
+	}
+	if len(proofBytes) > limits.SignPrep.MaxProofBytes {
+		return fmt.Errorf("signprep proof too large: %d > %d", len(proofBytes), limits.SignPrep.MaxProofBytes)
 	}
 	return nil
 }

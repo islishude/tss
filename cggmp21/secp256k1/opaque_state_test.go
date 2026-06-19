@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 func TestFast_LongLivedStateTypesHaveNoExportedFields(t *testing.T) {
@@ -181,21 +182,25 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	meta := mustPresignMetadata(t, p)
 	meta.Signers[0] = 99
 	meta.Context.Derivation.Path[0] = 99
-	verifyShare, ok := p.VerifyShare(1)
-	if !ok {
-		t.Fatal("missing verify share")
-	}
-	verifyShare.KPoint[0] ^= 1
-	verifyShare.ChiPoint[0] ^= 1
-	verifyShare.Proof[0] ^= 1
+	meta.R[0] ^= 1
+	meta.LittleR[0] ^= 1
+	meta.PublicKey[0] ^= 1
 	meta.Derivation.AdditiveShift[0] = 99
 	meta.VerificationKey[0] ^= 1
 
+	rBytes, err := secp.PointBytes(p.state.r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	publicKeyBytes, err := secp.PointBytes(p.state.publicKey)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if p.state.signers[0] != 1 ||
 		p.state.context.Derivation.Path[0] != 1 ||
-		p.state.verifyShares[0].KPoint[0] == verifyShare.KPoint[0] ||
-		p.state.verifyShares[0].ChiPoint[0] == verifyShare.ChiPoint[0] ||
-		p.state.verifyShares[0].Proof[0] == verifyShare.Proof[0] ||
+		rBytes[0] == meta.R[0] ||
+		p.state.littleR.Bytes()[0] == meta.LittleR[0] ||
+		publicKeyBytes[0] == meta.PublicKey[0] ||
 		p.state.derivation.AdditiveShift[0] != 9 ||
 		p.state.derivation.ChildPublicKey[0] == meta.VerificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")

@@ -3,7 +3,6 @@ package secp256k1
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"io"
 
 	"github.com/islishude/tss"
@@ -64,26 +63,6 @@ func (p PaillierPublicShare) Clone() PaillierPublicShare {
 		Party:     p.Party,
 		PublicKey: bytes.Clone(p.PublicKey),
 		Proof:     bytes.Clone(p.Proof),
-	}
-}
-
-// SignVerifyShare records per-party verification material produced during presign
-// round 3. It is bound to the presign transcript via the signprep proof and used
-// during online signing to verify each partial independently.
-type SignVerifyShare struct {
-	Party    tss.PartyID `json:"party" wire:"1,u32"`
-	KPoint   []byte      `json:"k_point" wire:"2,bytes,max_bytes=point"`
-	ChiPoint []byte      `json:"chi_point" wire:"3,bytes,max_bytes=point"`
-	Proof    []byte      `json:"proof" wire:"4,bytes,max_bytes=signprep_proof"`
-}
-
-// Clone returns a deep copy of the SignVerifyShare.
-func (s SignVerifyShare) Clone() SignVerifyShare {
-	return SignVerifyShare{
-		Party:    s.Party,
-		KPoint:   bytes.Clone(s.KPoint),
-		ChiPoint: bytes.Clone(s.ChiPoint),
-		Proof:    bytes.Clone(s.Proof),
 	}
 }
 
@@ -241,37 +220,6 @@ type keyShareState struct {
 	logCiphertext          []byte                            // Public ciphertext used by auxiliary logarithm proofs.
 	logProof               []byte                            // Public proof for the auxiliary logarithm statement.
 	securityParams         SecurityParams                    // Cryptographic profile used to create this share.
-}
-
-// validateSignVerifyShares checks that the verify shares set matches the signer
-// set: one canonically ordered entry per signer, no extras, no duplicates,
-// canonical point encodings, and non-empty proofs within size limits.
-func validateSignVerifyShares(signers tss.PartySet, shares []SignVerifyShare, limits Limits) error {
-	if len(shares) != len(signers) {
-		return fmt.Errorf("verify shares count %d != signers %d", len(shares), len(signers))
-	}
-	totalBytes := 4 // recordlist item count
-	seen := make(map[tss.PartyID]bool, len(shares))
-	for i, share := range shares {
-		if !tss.ContainsParty(signers, share.Party) {
-			return fmt.Errorf("verify share for non-signer party %d", share.Party)
-		}
-		if seen[share.Party] {
-			return fmt.Errorf("duplicate verify share for party %d", share.Party)
-		}
-		seen[share.Party] = true
-		if share.Party != signers[i] {
-			return fmt.Errorf("verify share party %d out of canonical signer order at index %d", share.Party, i)
-		}
-		if err := share.ValidateWithLimits(limits); err != nil {
-			return fmt.Errorf("verify share party %d: %w", share.Party, err)
-		}
-		totalBytes += 4 + signVerifyShareRecordSize(share)
-	}
-	if totalBytes > limits.SignPrep.MaxVerifySharesBytes {
-		return fmt.Errorf("verify shares too large: %d > %d", totalBytes, limits.SignPrep.MaxVerifySharesBytes)
-	}
-	return nil
 }
 
 // Signature is a canonical low-S secp256k1 ECDSA signature encoded as r and s

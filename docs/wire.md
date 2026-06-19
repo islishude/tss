@@ -342,7 +342,6 @@ version field. Semantic protocol-version binding uses `tss.ProtocolVersion`
 inside transcripts instead.
 
 - `cggmp21/secp256k1.RingPedersenPublicShare`
-- `cggmp21/secp256k1.SignVerifyShare`
 - `cggmp21/secp256k1.SignAttemptRecord`
 - `cggmp21/secp256k1` keygen commitments payload
 - `cggmp21/secp256k1` keygen share payload
@@ -396,15 +395,12 @@ Current presign wire shapes are:
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
 - `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
-- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (signprep proof bytes).
+- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (nested signprep proof).
 - `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
-Retired `EncryptionProof`, `MTAResponseProof`, and `LogProof` wire types have no
-decoder or compatibility path.
-
-`SignVerifyShare` implements the standard binary marshal/unmarshal interfaces
-with wire type `cggmp21.secp256k1.sign-verify-share`. Its fields are party ID,
-`KPoint`, `ChiPoint`, and signprep proof bytes.
+Retired `EncryptionProof`, `MTAResponseProof`, `LogProof`, and standalone
+`cggmp21.secp256k1.sign-verify-share` wire types have no decoder or
+compatibility path.
 
 The public verification, Paillier, and Ring-Pedersen share records also expose
 standalone standard binary codecs. Their record bodies remain the same bodies
@@ -414,9 +410,10 @@ The canonical `cggmp21.secp256k1.presign` record contains the local fixed-length
 secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
 hashes, additive HD shift, consumed flag, key binding fields for the group
 public key, keygen transcript hash, and participant-set hash, and per-party
-`VerifyShares` (tag 16, a canonical `SignVerifyShare` record list with one entry
-per signer). Decoders require the complete 19-field presign set. The former
-opaque party-triple byte field is intentionally not accepted.
+`VerifyShares` (tag 16, a private canonical record list with one entry per
+signer: party ID, `KPoint`, `ChiPoint`, and nested signprep proof). Decoders
+require the complete 19-field presign set. The former opaque party-triple byte
+field and standalone sign-verify-share object are intentionally not accepted.
 
 `SignAttemptRecord` stores delivery acknowledgments directly as a canonical
 `tss.BroadcastAck` record list. Its optional certificate field contains the

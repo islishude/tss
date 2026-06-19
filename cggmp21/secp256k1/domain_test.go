@@ -154,8 +154,16 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	selfState, ok := s1.partyState(s1.key.PartyID())
+	if !ok {
+		t.Fatal("missing local party state")
+	}
+	peerState, ok := s1.partyState(2)
+	if !ok {
+		t.Fatal("missing peer party state")
+	}
 	localStart := mta.StartMessage{
-		Ciphertext: s1.round1[s1.key.PartyID()].EncK,
+		Ciphertext: selfState.round1.payload.EncK,
 	}
 	responseDomain, err := mtaDeltaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, &s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
 	if err != nil {
@@ -171,14 +179,14 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := mta.Finish(s1.securityParams, responseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err != nil {
+	if _, err := mta.Finish(s1.securityParams, responseDomain, localStart, round2Payload.Delta, peerState.round1.payload.Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
 	wrongResponseDomain, err := mtaSigmaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, &s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := mta.Finish(s1.securityParams, wrongResponseDomain, localStart, round2Payload.Delta, s1.round1[2].Gamma, s1.paillier, responderPK, selfRP); err == nil {
+	if _, err := mta.Finish(s1.securityParams, wrongResponseDomain, localStart, round2Payload.Delta, peerState.round1.payload.Gamma, s1.paillier, responderPK, selfRP); err == nil {
 		t.Fatal("MtA response proof verified under wrong response kind")
 	}
 }

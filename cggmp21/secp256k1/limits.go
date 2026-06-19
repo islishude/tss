@@ -13,7 +13,7 @@ const (
 
 	maxSignPrepProofBytes         = 512 << 10
 	maxSignVerifyShareRecordBytes = signVerifyShareRecordFixedBytes + 65*2 + maxSignPrepProofBytes
-	maxSignVerifyShareBytes       = signVerifyShareEnvelopeFixedBytes + maxSignVerifyShareRecordBytes
+	maxSignVerifyShareBytes       = maxSignVerifyShareRecordBytes
 	maxSignVerifySharesBytes      = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
 	maxSignPartialPayloadBytes    = 32*6 + maxSignPrepProofBytes + 256
 )

@@ -1,84 +1,80 @@
 package secp256k1
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
+	"github.com/islishude/tss/internal/zk/signprep"
 )
 
-func TestFast_SignVerifyShareCanonicalEncoding(t *testing.T) {
+func TestFast_SignVerifyShareWireRoundTrip(t *testing.T) {
 	t.Parallel()
 
 	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
-	raw1, err := share.MarshalBinaryWithLimits(testLimits())
+	decoded, err := decodeSignVerifyShareWire(encodeSignVerifyShareWire(share))
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := share.MarshalBinaryWithLimits(testLimits())
+	if decoded.party != share.party {
+		t.Fatal("party changed after round trip")
+	}
+	if !secp.Equal(decoded.kPoint, share.kPoint) {
+		t.Fatal("KPoint changed after round trip")
+	}
+	if !secp.Equal(decoded.chiPoint, share.chiPoint) {
+		t.Fatal("ChiPoint changed after round trip")
+	}
+	gotProof, err := decoded.proofBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(raw1, raw2) {
-		t.Fatal("sign verify share encoding is not deterministic")
-	}
-
-	decoded, err := tss.DecodeBinaryValueWithLimits[SignVerifyShare](raw1, testLimits())
+	wantProof, err := share.proofBytes()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Party != share.Party ||
-		!bytes.Equal(decoded.KPoint, share.KPoint) ||
-		!bytes.Equal(decoded.ChiPoint, share.ChiPoint) ||
-		!bytes.Equal(decoded.Proof, share.Proof) {
-		t.Fatal("sign verify share changed after round trip")
-	}
-	if err := decoded.UnmarshalBinaryWithLimits(append(raw1, 0), testLimits()); err == nil {
-		t.Fatal("sign verify share accepted trailing bytes")
+	if string(gotProof) != string(wantProof) {
+		t.Fatal("proof changed after round trip")
 	}
 }
 
-func TestFast_SignVerifyShareRejectsMalformedOrOversizedFields(t *testing.T) {
+func TestFast_SignVerifyShareWireRejectsMalformedFields(t *testing.T) {
 	t.Parallel()
 
 	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
-	raw, err := share.MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-
+	valid := encodeSignVerifyShareWire(share)
 	for _, tc := range []struct {
-		name  string
-		field string
-		value []byte
+		name string
+		w    signVerifyShareWire
 	}{
-		{name: "zero party", field: "Party", value: wire.Uint32(0)},
-		{name: "invalid KPoint", field: "KPoint", value: []byte{2}},
-		{name: "invalid ChiPoint", field: "ChiPoint", value: []byte{3}},
-		{name: "empty proof", field: "Proof", value: []byte{}},
+		{name: "zero party", w: func() signVerifyShareWire {
+			w := valid
+			w.Party = tss.BroadcastPartyId
+			return w
+		}()},
+		{name: "missing KPoint", w: func() signVerifyShareWire {
+			w := valid
+			w.KPoint = secp.WirePoint{}
+			return w
+		}()},
+		{name: "missing ChiPoint", w: func() signVerifyShareWire {
+			w := valid
+			w.ChiPoint = secp.WirePoint{}
+			return w
+		}()},
+		{name: "empty proof", w: func() signVerifyShareWire {
+			w := valid
+			w.Proof = signprep.Proof{}
+			return w
+		}()},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			mutated, err := testutil.RewriteWireFieldByName(raw, signVerifyShareWireType, SignVerifyShare{}, tc.field, tc.value)
-			if err != nil {
-				t.Fatal(err)
-			}
-			var decoded SignVerifyShare
-			if err := decoded.UnmarshalBinaryWithLimits(mutated, testLimits()); err == nil {
-				t.Fatalf("accepted malformed %s", tc.field)
+			if _, err := decodeSignVerifyShareWire(tc.w); err == nil {
+				t.Fatalf("accepted malformed %s", tc.name)
 			}
 		})
-	}
-
-	limits := testLimits()
-	limits.SignPrep.MaxProofBytes = len(share.Proof) - 1
-	if _, err := share.MarshalBinaryWithLimits(limits); err == nil {
-		t.Fatal("encoded proof above configured limit")
-	}
-	var decoded SignVerifyShare
-	if err := decoded.UnmarshalBinaryWithLimits(raw, limits); err == nil {
-		t.Fatal("decoded proof above configured limit")
 	}
 }
 
@@ -91,11 +87,23 @@ func TestFast_PresignRejectsLegacyVerifyShareBytes(t *testing.T) {
 		t.Fatal(err)
 	}
 	share := mustPresignVerifyShare(t, presign, 1)
+	kPoint, err := share.kPointBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	chiPoint, err := share.chiPointBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
+	proof, err := share.proofBytes()
+	if err != nil {
+		t.Fatal(err)
+	}
 	legacy := wire.EncodePartyTriples([]wire.PartyTriple[tss.PartyID]{{
-		Party:  share.Party,
-		First:  share.KPoint,
-		Second: share.ChiPoint,
-		Third:  share.Proof,
+		Party:  share.party,
+		First:  kPoint,
+		Second: chiPoint,
+		Third:  proof,
 	}})
 	mutated, err := testutil.RewriteWireFieldByName(raw, presignWireType, presignWire{}, "VerifyShares", legacy)
 	if err != nil {
@@ -121,11 +129,11 @@ func TestFast_PresignVerifySharesRequireCanonicalSignerOrder(t *testing.T) {
 	t.Parallel()
 
 	share1 := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
-	share2 := share1.Clone()
-	share2.Party = 2
+	share2 := share1.clone()
+	share2.party = 2
 	if err := validateSignVerifyShares(
 		tss.NewPartySet(1, 2),
-		[]SignVerifyShare{share2, share1},
+		[]signVerifyShare{share2, share1},
 		testLimits(),
 	); err == nil {
 		t.Fatal("accepted VerifyShares outside canonical signer order")

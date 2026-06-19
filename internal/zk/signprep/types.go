@@ -83,6 +83,23 @@ type Proof struct {
 	DLEQResponse *secret.Scalar `wire:"8,custom,len=32"`
 }
 
+// Clone returns an independently owned copy of the proof, or nil for nil.
+func (p *Proof) Clone() *Proof {
+	if p == nil {
+		return nil
+	}
+	return &Proof{
+		MPoint:       slices.Clone(p.MPoint),
+		KCommitment:  slices.Clone(p.KCommitment),
+		MCommitment:  slices.Clone(p.MCommitment),
+		DLEQA1:       slices.Clone(p.DLEQA1),
+		DLEQA2:       slices.Clone(p.DLEQA2),
+		KResponse:    p.KResponse.Clone(),
+		MResponse:    slices.Clone(p.MResponse),
+		DLEQResponse: p.DLEQResponse.Clone(),
+	}
+}
+
 // WireType returns the canonical wire type identifier for Proof.
 func (Proof) WireType() string { return proofWireType }
 
