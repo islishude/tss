@@ -31,7 +31,7 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	originalMetadata := mustKeyShareMetadata(t, shares[1])
 
 	// Verify structural integrity of the restored share.
-	if string(restoredMetadata.PublicKey) != string(originalMetadata.PublicKey) {
+	if !restoredMetadata.PublicKey.Equal(originalMetadata.PublicKey) {
 		t.Error("PublicKey mismatch after round-trip")
 	}
 	if restored.PartyID() != shares[1].PartyID() {

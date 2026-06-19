@@ -9,7 +9,6 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -27,15 +26,15 @@ const keygenConfirmationWireType = "frost.ed25519.keygen-confirmation"
 // chain code. If any confirmation disagrees, the transport may have equivocated
 // and the resulting key shares must not be used.
 type KeygenConfirmation struct {
-	SessionID       tss.SessionID `wire:"1,bytes,len=32"`
-	Sender          tss.PartyID   `wire:"2,u32"`
-	Threshold       int           `wire:"3,u32"`
-	Parties         tss.PartySet  `wire:"4,u32list"`
-	PublicKey       []byte        `wire:"5,bytes"`
-	TranscriptHash  []byte        `wire:"6,bytes"`
-	CommitmentsHash []byte        `wire:"7,bytes"`
-	ChainCode       []byte        `wire:"8,bytes"`
-	PlanHash        []byte        `wire:"9,bytes,len=32"`
+	SessionID       tss.SessionID  `wire:"1,bytes,len=32"`
+	Sender          tss.PartyID    `wire:"2,u32"`
+	Threshold       int            `wire:"3,u32"`
+	Parties         tss.PartySet   `wire:"4,u32list"`
+	PublicKey       PublicKeyPoint `wire:"5,custom,len=32"`
+	TranscriptHash  []byte         `wire:"6,bytes,len=32"`
+	CommitmentsHash []byte         `wire:"7,bytes,len=32"`
+	ChainCode       []byte         `wire:"8,bytes,len=32"`
+	PlanHash        []byte         `wire:"9,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for KeygenConfirmation.
@@ -62,9 +61,9 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		Sender:          k.state.party,
 		Threshold:       k.state.threshold,
 		Parties:         slices.Clone(k.state.parties),
-		PublicKey:       slices.Clone(k.state.publicKey),
+		PublicKey:       k.state.publicKey.Clone(),
 		TranscriptHash:  slices.Clone(k.state.keygenTranscriptHash),
-		CommitmentsHash: keygenGroupCommitmentsHash(k.state.groupCommitments),
+		CommitmentsHash: keygenGroupCommitmentsHash(k.state.groupCommitments.BytesList()),
 		ChainCode:       slices.Clone(k.state.chainCode),
 		PlanHash:        slices.Clone(k.state.planHash),
 	}, nil
@@ -80,7 +79,7 @@ func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
 		Sender:          c.Sender,
 		Threshold:       c.Threshold,
 		Parties:         slices.Clone(c.Parties),
-		PublicKey:       slices.Clone(c.PublicKey),
+		PublicKey:       c.PublicKey.Clone(),
 		TranscriptHash:  slices.Clone(c.TranscriptHash),
 		CommitmentsHash: slices.Clone(c.CommitmentsHash),
 		ChainCode:       slices.Clone(c.ChainCode),
@@ -99,7 +98,7 @@ func (c KeygenConfirmation) Validate() error {
 	if len(c.Parties) == 0 {
 		return errors.New("keygen confirmation: empty party set")
 	}
-	if _, err := edcurve.PointFromBytes(c.PublicKey); err != nil {
+	if err := c.PublicKey.Validate(); err != nil {
 		return fmt.Errorf("keygen confirmation: invalid public key: %w", err)
 	}
 	if len(c.TranscriptHash) != sha256.Size {
@@ -126,6 +125,9 @@ func (c KeygenConfirmation) Validate() error {
 // MarshalBinary encodes the confirmation using the object-level wire codec.
 // wire.Marshal calls Validate via the Validator interface.
 func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
 	return wire.Marshal(c)
 }
 
@@ -135,7 +137,10 @@ func (c *KeygenConfirmation) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &decoded); err != nil {
 		return err
 	}
-	*c = decoded
+	if err := decoded.Validate(); err != nil {
+		return err
+	}
+	*c = *decoded.Clone()
 	return nil
 }
 
@@ -151,7 +156,7 @@ func compareKeygenConfirmation(local, c *KeygenConfirmation) error {
 	if !slices.Equal(c.Parties, local.Parties) {
 		return fmt.Errorf("keygen confirmation party set mismatch from party %d", c.Sender)
 	}
-	if !bytes.Equal(c.PublicKey, local.PublicKey) {
+	if !c.PublicKey.Equal(local.PublicKey) {
 		return fmt.Errorf("keygen confirmation public key mismatch from party %d", c.Sender)
 	}
 	if !bytes.Equal(c.TranscriptHash, local.TranscriptHash) {
@@ -390,7 +395,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	}
 	dealerCommits := make(map[tss.PartyID][][]byte, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		dealerCommits[id] = s.partyData[id].commitments
+		dealerCommits[id] = s.partyData[id].commitments.BytesList()
 	}
 	verificationShares, err := finalShare.orderedVerificationShares()
 	if err != nil {
@@ -401,7 +406,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	finalShare.state.keygenTranscriptHash = frostKeygenTranscriptHash(
 		s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties,
 		chainCodeCommitAggregate, s.planHash, dealerCommits,
-		finalShare.state.groupCommitments, verificationShares,
+		finalShare.state.groupCommitments.BytesList(), verificationShares,
 	)
 	// Store parsed confirmation structs directly.
 	if err := applyKeygenConfirmationSet(finalShare, confirmations); err != nil {

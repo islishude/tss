@@ -53,15 +53,17 @@ func encodeGroupCommitmentList(signers tss.PartySet, commitments map[tss.PartyID
 		if err != nil {
 			return nil, err
 		}
-		if _, err := edcurve.PointFromBytes(commitment.D); err != nil {
+		d, err := commitment.D.MarshalWireValue()
+		if err != nil {
 			return nil, err
 		}
-		if _, err := edcurve.PointFromBytes(commitment.E); err != nil {
+		e, err := commitment.E.MarshalWireValue()
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, idEnc...)
-		out = append(out, commitment.D...)
-		out = append(out, commitment.E...)
+		out = append(out, d...)
+		out = append(out, e...)
 	}
 	return out, nil
 }

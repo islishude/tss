@@ -24,7 +24,7 @@ const (
 // All fields other than confirmation are populated during round 1;
 // confirmation is set during round 2 after the chain code is revealed.
 type keygenPartyData struct {
-	commitments     [][]byte
+	commitments     *keygenCommitments
 	share           *fed.Scalar
 	chainCode       []byte
 	chainCodeCommit []byte
@@ -114,11 +114,14 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitments := make([][]byte, len(poly))
+	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
 		// Each coefficient commitment lets receivers validate their private share.
-		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
-		commitments[i] = point.Bytes()
+		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
+	}
+	commitments, err := newKeygenCommitmentsFromPoints(commitmentPoints, config.Threshold)
+	if err != nil {
+		return nil, nil, err
 	}
 	chainCode := make([]byte, 32)
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
@@ -129,8 +132,9 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	for _, id := range parties {
 		partyData[id] = &keygenPartyData{}
 	}
+	ownCommitments := commitments.Clone()
 	partyData[config.Self] = &keygenPartyData{
-		commitments:     commitments,
+		commitments:     &ownCommitments,
 		share:           evalScalarPolynomial(poly, config.Self),
 		chainCode:       bytes.Clone(chainCode),
 		chainCodeCommit: bytes.Clone(chainCodeCommit),
@@ -145,7 +149,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments, ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
+	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments.BytesList(), ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -226,7 +230,8 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if err := validateCommitments(p.Commitments, s.cfg.Threshold); err != nil {
+		commitments, err := newKeygenCommitmentsFromBytesList(p.Commitments, s.cfg.Threshold)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		pd, err := s.partyEntry(base.From)
@@ -234,12 +239,12 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if pd.commitments != nil {
-			if equalByteSlices(pd.commitments, p.Commitments) && bytes.Equal(pd.chainCodeCommit, p.ChainCodeCommit) {
+			if pd.commitments.Equal(commitments) && bytes.Equal(pd.chainCodeCommit, p.ChainCodeCommit) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
 		}
-		pd.commitments = p.Commitments
+		pd.commitments = &commitments
 		if len(p.ChainCodeCommit) != sha256.Size {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
 		}

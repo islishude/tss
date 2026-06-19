@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -51,8 +53,11 @@ func TestFROSTKeygenConfirmationRejectsMismatchedPublicKey(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	confirmations := frostKeygenConfirmations(t, shares, tss.NewPartySet(1, 2, 3))
-	confirmations[1].PublicKey = bytes.Clone(confirmations[1].PublicKey)
-	confirmations[1].PublicKey[0] ^= 1
+	tampered, err := newPublicKeyPointFromPoint(edcurve.AddPoints(confirmations[1].PublicKey.Point(), fed.NewGeneratorPoint()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmations[1].PublicKey = tampered
 	if err := applyKeygenConfirmationSet(shares[1], confirmations); err == nil {
 		t.Fatal("expected rejection for mismatched public key")
 	}

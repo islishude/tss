@@ -12,22 +12,22 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if s.partialSent || len(s.commitments) != len(s.signers) {
 		return nil, nil
 	}
-	if len(s.dNonce) == 0 || len(s.eNonce) == 0 {
+	if s.dNonce == nil || s.eNonce == nil {
 		return nil, errors.New("signing nonce is unavailable")
 	}
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
-	d, err := edcurve.ScalarFromCanonical(s.dNonce)
+	d, err := edScalarFromSecret(s.dNonce)
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
-	e, err := edcurve.ScalarFromCanonical(s.eNonce)
+	e, err := edScalarFromSecret(s.eNonce)
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
 	verifyKey := s.derivation.VerificationKeyBytes()
@@ -35,12 +35,12 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 
 	lambda, err := lagrangeCoefficientScalar(s.key.state.party, s.signers)
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
 	x, err := s.key.secretScalar()
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
 
@@ -57,10 +57,9 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		z.Add(z, shiftTerm)
 	}
 	s.partials[s.key.state.party] = z
-	zBytes := z.Bytes()
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zBytes, PlanHash: s.planHash}, s.limits)
+	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: edcurve.WireScalar{S: z}, PlanHash: s.planHash}, s.limits)
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -72,7 +71,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		Payload:     payload,
 	})
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, err
 	}
 	if s.partialEnvelopes == nil {
@@ -80,7 +79,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	}
 	s.partialEnvelopes[s.key.state.party] = env.Clone()
 	s.partialSent = true
-	s.clearNonceBytes()
+	s.clearNonceScalars()
 	if err := s.tryAggregate(); err != nil {
 		return nil, err
 	}

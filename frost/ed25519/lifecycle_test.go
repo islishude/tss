@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -30,12 +31,12 @@ func TestFROSTKeyShareJSONAndDestroy(t *testing.T) {
 	if _, err := json.Marshal(*share); err == nil {
 		t.Fatal("value key share JSON encoded")
 	}
-	publicKey := append([]byte(nil), share.state.publicKey...)
+	publicKey := share.state.publicKey.Bytes()
 	share.Destroy()
 	if !testutil.IsZeroBytes(share.state.secret.FixedBytes()) {
 		t.Fatal("key share secret was not cleared")
 	}
-	if !bytes.Equal(share.state.publicKey, publicKey) {
+	if !bytes.Equal(share.state.publicKey.Bytes(), publicKey) {
 		t.Fatal("public key metadata changed")
 	}
 }
@@ -76,11 +77,11 @@ func TestFROSTKeyShareRedactsFormattingAndReturnsCopy(t *testing.T) {
 	if keygen.keyShare == nil {
 		t.Fatal("missing session-retained key share")
 	}
-	internalPublic := append([]byte(nil), keygen.keyShare.state.publicKey...)
+	internalPublic := keygen.keyShare.state.publicKey.Bytes()
 	internalSecret := keygen.keyShare.state.secret.FixedBytes()
-	share.state.publicKey[0] ^= 1
+	share.state.publicKey.p.Set(fed.NewIdentityPoint())
 	share.state.secret.Destroy()
-	if !bytes.Equal(keygen.keyShare.state.publicKey, internalPublic) {
+	if !bytes.Equal(keygen.keyShare.state.publicKey.Bytes(), internalPublic) {
 		t.Fatal("mutating returned key share changed session public key")
 	}
 	if !bytes.Equal(keygen.keyShare.state.secret.FixedBytes(), internalSecret) {
@@ -107,7 +108,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if !ok {
 		t.Fatal("keygen did not complete")
 	}
-	publicKey := append([]byte(nil), share.state.publicKey...)
+	publicKey := share.state.publicKey.Bytes()
 	keygen.Destroy()
 	for _, pd := range keygen.partyData {
 		if pd.share != nil {
@@ -120,7 +121,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if keygen.keyShare == nil || !testutil.IsZeroBytes(keygen.keyShare.state.secret.FixedBytes()) {
 		t.Fatal("completed key share secret was not cleared")
 	}
-	if !bytes.Equal(share.state.publicKey, publicKey) {
+	if !bytes.Equal(share.state.publicKey.Bytes(), publicKey) {
 		t.Fatal("keygen public metadata changed")
 	}
 
@@ -133,8 +134,8 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(sign.dNonce) == 0 || len(sign.eNonce) == 0 {
-		t.Fatal("sign session did not retain expected local nonce bytes before round 2")
+	if sign.dNonce == nil || sign.eNonce == nil {
+		t.Fatal("sign session did not retain expected local nonces before round 2")
 	}
 	_, out2, err := startFROSTSign(shares[2], signID, tss.NewPartySet(1, 2), []byte("message"))
 	if err != nil {

@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 )
 
@@ -21,11 +22,16 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
 	k.state.parties = tss.NewPartySet(1, 2)
-	k.state.groupCommitments = [][]byte{{1}, {2}}
+	k.state.groupCommitments = groupCommitments{points: []*fed.Point{
+		fed.NewGeneratorPoint(),
+		fed.NewIdentityPoint(),
+	}}
 	k.state.partyData = map[tss.PartyID]keySharePartyData{
-		1: {verificationShare: []byte{3}, keygenConfirmation: &KeygenConfirmation{Sender: 1}},
-		2: {verificationShare: []byte{4}, keygenConfirmation: &KeygenConfirmation{Sender: 2}},
+		1: {verificationShare: verificationSharePoint{p: fed.NewGeneratorPoint()}, keygenConfirmation: &KeygenConfirmation{Sender: 1}},
+		2: {verificationShare: verificationSharePoint{p: fed.NewIdentityPoint()}, keygenConfirmation: &KeygenConfirmation{Sender: 2}},
 	}
+	groupBefore := k.state.groupCommitments.BytesList()
+	shareBefore := k.state.partyData[1].verificationShare.Bytes()
 
 	metadata := mustKeyShareMetadata(t, k)
 	metadata.Parties[0] = 99
@@ -34,7 +40,7 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	if !ok {
 		t.Fatal("missing verification share")
 	}
-	verificationShare.PublicKey[0] = 99
+	verificationShare.PublicKey.p.Set(fed.NewIdentityPoint())
 	confirmation, ok := k.KeygenConfirmation(1)
 	if !ok {
 		t.Fatal("missing keygen confirmation")
@@ -42,8 +48,8 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	confirmation.Sender = 99
 
 	if k.state.parties[0] != 1 ||
-		k.state.groupCommitments[0][0] != 1 ||
-		k.state.partyData[1].verificationShare[0] != 3 ||
+		!reflect.DeepEqual(k.state.groupCommitments.BytesList(), groupBefore) ||
+		!reflect.DeepEqual(k.state.partyData[1].verificationShare.Bytes(), shareBefore) ||
 		k.state.partyData[1].keygenConfirmation.Sender != 1 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}

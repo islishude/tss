@@ -7,25 +7,32 @@ import (
 	"strings"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
 
 type retiredFROSTKeyShareWire struct {
-	Party                tss.PartyID           `wire:"1,u32"`
-	Threshold            int                   `wire:"2,u32"`
-	Parties              tss.PartySet          `wire:"3,u32list"`
-	PublicKey            []byte                `wire:"4,bytes,max_bytes=point"`
-	Secret               *secret.Scalar        `wire:"5,custom,len=32"`
-	GroupCommitments     [][]byte              `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
-	VerificationShares   []VerificationShare   `wire:"7,recordlist,max_items=parties"`
-	KeygenTranscriptHash []byte                `wire:"8,bytes"`
-	ChainCode            []byte                `wire:"9,bytes"`
-	KeygenSessionID      []byte                `wire:"10,bytes,len=32"`
-	KeygenConfirmations  []*KeygenConfirmation `wire:"11,recordlist,max_items=parties"`
-	PlanHash             []byte                `wire:"12,bytes,len=32"`
+	Party                tss.PartyID                         `wire:"1,u32"`
+	Threshold            int                                 `wire:"2,u32"`
+	Parties              tss.PartySet                        `wire:"3,u32list"`
+	PublicKey            []byte                              `wire:"4,bytes,max_bytes=point"`
+	Secret               *secret.Scalar                      `wire:"5,custom,len=32"`
+	GroupCommitments     [][]byte                            `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
+	VerificationShares   []retiredFROSTVerificationShareWire `wire:"7,recordlist,max_items=parties"`
+	KeygenTranscriptHash []byte                              `wire:"8,bytes"`
+	ChainCode            []byte                              `wire:"9,bytes"`
+	KeygenSessionID      []byte                              `wire:"10,bytes,len=32"`
+	KeygenConfirmations  []*KeygenConfirmation               `wire:"11,recordlist,max_items=parties"`
+	PlanHash             []byte                              `wire:"12,bytes,len=32"`
+}
+
+type retiredFROSTVerificationShareWire struct {
+	Party     tss.PartyID `wire:"1,u32"`
+	PublicKey []byte      `wire:"2,bytes,max_bytes=point"`
 }
 
 func (retiredFROSTKeyShareWire) WireType() string { return keyShareWireType }
@@ -63,7 +70,7 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(mustKeyShareMetadata(t, decoded).PublicKey, mustKeyShareMetadata(t, shares[1]).PublicKey) {
+	if !mustKeyShareMetadata(t, decoded).PublicKey.Equal(mustKeyShareMetadata(t, shares[1]).PublicKey) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
 	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
@@ -84,7 +91,7 @@ func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 		t.Fatal("unsorted party set encoded")
 	}
 	malformed := cloneKeyShareValue(shares[1])
-	malformed.state.publicKey = []byte{0x01}
+	malformed.state.publicKey = publicKeyPoint{p: fed.NewIdentityPoint()}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
 	}
@@ -126,15 +133,10 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 			t.Fatal(err)
 		}
 		data := w.PartyData[1]
-		confirmation, err := tss.DecodeBinary[KeygenConfirmation](data.KeygenConfirmation)
-		if err != nil {
-			t.Fatal(err)
+		if data.KeygenConfirmation == nil {
+			t.Fatal("missing keygen confirmation for party data")
 		}
-		confirmation.Sender = 2
-		data.KeygenConfirmation, err = confirmation.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
+		data.KeygenConfirmation.Sender = 2
 		w.PartyData[1] = data
 		if _, err := UnmarshalKeyShare(marshalFROSTKeyShareWireForTest(t, w)); err == nil {
 			t.Fatal("key share accepted confirmation sender that did not match party-data key")
@@ -159,6 +161,13 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	retiredVerificationShares := make([]retiredFROSTVerificationShareWire, 0, len(verificationShares))
+	for _, share := range verificationShares {
+		retiredVerificationShares = append(retiredVerificationShares, retiredFROSTVerificationShareWire{
+			Party:     share.Party,
+			PublicKey: share.PublicKey.Bytes(),
+		})
+	}
 	confirmations, err := share.orderedKeygenConfirmations()
 	if err != nil {
 		t.Fatal(err)
@@ -167,10 +176,10 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 		Party:                share.state.party,
 		Threshold:            share.state.threshold,
 		Parties:              share.state.parties,
-		PublicKey:            share.state.publicKey,
+		PublicKey:            share.state.publicKey.Bytes(),
 		Secret:               share.state.secret,
-		GroupCommitments:     share.state.groupCommitments,
-		VerificationShares:   verificationShares,
+		GroupCommitments:     share.state.groupCommitments.BytesList(),
+		VerificationShares:   retiredVerificationShares,
 		KeygenTranscriptHash: share.state.keygenTranscriptHash,
 		ChainCode:            share.state.chainCode,
 		KeygenSessionID:      share.state.keygenSessionID[:],
@@ -220,7 +229,7 @@ func minimalFROSTKeyShare() *KeyShare {
 		party:                1,
 		threshold:            2,
 		parties:              tss.NewPartySet(1, 2, 3),
-		publicKey:            make([]byte, 32),
+		publicKey:            publicKeyPoint{p: fed.NewGeneratorPoint()},
 		chainCode:            make([]byte, 32),
 		keygenSessionID:      tss.SessionID{},
 		keygenTranscriptHash: []byte{0x01, 0x02},
@@ -231,14 +240,14 @@ func TestFROSTKeySharePublicMetadataReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
 	k.state.chainCode[0] = 0xaa
-	k.state.publicKey[0] = 0x02
+	publicKey := k.state.publicKey.Bytes()
 	metadata := mustKeyShareMetadata(t, k)
 	metadata.ChainCode[0] = 0xbb
-	metadata.PublicKey[0] = 0x03
+	metadata.PublicKey.p.Set(fed.NewIdentityPoint())
 	if k.state.chainCode[0] != 0xaa {
 		t.Fatal("PublicMetadata() did not copy chain code")
 	}
-	if k.state.publicKey[0] != 0x02 {
+	if !bytes.Equal(k.state.publicKey.Bytes(), publicKey) {
 		t.Fatal("PublicMetadata() did not copy public key")
 	}
 }
@@ -277,11 +286,25 @@ func TestFROSTKeySharePartyID(t *testing.T) {
 func TestFROSTKeyShareInternalCloneIsDeepCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.publicKey[0] = 0xab
+	k.state.publicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
+	original := k.state.publicKey.Bytes()
 	clone := cloneKeyShareValue(k)
-	clone.state.publicKey[0] = 0xcd
-	if k.state.publicKey[0] != 0xab {
+	clone.state.publicKey.p.Set(fed.NewIdentityPoint())
+	if !bytes.Equal(k.state.publicKey.Bytes(), original) {
 		t.Fatal("internal clone shares public-key backing array")
+	}
+}
+
+func TestFROSTKeyShareWirePointRejectsMalformedPublicKey(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 3)
+	w, err := encodeKeyShareWire(shares[1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	w.PublicKey = edcurve.WirePoint{}
+	if _, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits())); err == nil {
+		t.Fatal("key share wire accepted nil public key")
 	}
 }
 

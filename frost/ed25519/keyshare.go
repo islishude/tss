@@ -9,7 +9,6 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -44,9 +43,9 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 		Party:                k.state.party,
 		Threshold:            k.state.threshold,
 		Parties:              k.state.parties.Clone(),
-		PublicKey:            bytes.Clone(k.state.publicKey),
+		PublicKey:            k.state.publicKey.Clone(),
 		ChainCode:            bytes.Clone(k.state.chainCode),
-		GroupCommitments:     tss.CloneByteSlices(k.state.groupCommitments),
+		GroupCommitments:     k.state.groupCommitments.BytesList(),
 		KeygenSessionID:      k.state.keygenSessionID,
 		KeygenTranscriptHash: bytes.Clone(k.state.keygenTranscriptHash),
 		PlanHash:             bytes.Clone(k.state.planHash),
@@ -58,16 +57,16 @@ func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*t
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")
 	}
-	return DeriveNonHardenedBIP32(k.state.publicKey, k.state.chainCode, path.Clone(), opts...)
+	return DeriveNonHardenedBIP32(k.state.publicKey.Bytes(), k.state.chainCode, path.Clone(), opts...)
 }
 
 // VerificationShare returns a caller-owned public verification share for party.
 func (k *KeyShare) VerificationShare(party tss.PartyID) (VerificationShare, bool) {
 	data, err := k.partyDataFor(party)
-	if err != nil || len(data.verificationShare) == 0 {
+	if err != nil || data.verificationShare.IsZero() {
 		return VerificationShare{}, false
 	}
-	return VerificationShare{Party: party, PublicKey: bytes.Clone(data.verificationShare)}, true
+	return VerificationShare{Party: party, PublicKey: data.verificationShare.Clone()}, true
 }
 
 // KeygenSessionID returns the DKG or resharing session that produced the share.
@@ -140,9 +139,9 @@ func (k KeyShare) redactedString() string {
 		k.state.party,
 		k.state.threshold,
 		k.state.parties,
-		k.state.publicKey,
+		k.state.publicKey.Bytes(),
 		len(k.state.chainCode),
-		len(k.state.groupCommitments),
+		k.state.groupCommitments.Len(),
 		len(k.state.partyData),
 		k.state.keygenSessionID,
 		k.state.keygenTranscriptHash,
@@ -225,7 +224,7 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 			return fmt.Errorf("party data for non-participant %d", id)
 		}
 	}
-	if _, err := edcurve.PointFromBytes(k.state.publicKey); err != nil {
+	if err := k.state.publicKey.Validate(); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
 	}
 	if len(k.state.chainCode) != 32 {
@@ -240,23 +239,15 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if _, err := edScalarFromSecret(k.state.secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
-	if len(k.state.groupCommitments) != k.state.threshold {
+	if k.state.groupCommitments.Len() != k.state.threshold {
 		return errors.New("group commitments length must equal threshold")
 	}
-	for i, commitment := range k.state.groupCommitments {
-		if i == 0 {
-			if _, err := edcurve.PointFromBytes(commitment); err != nil {
-				return fmt.Errorf("invalid group commitment %d: %w", i, err)
-			}
-			continue
-		}
-		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
-			return fmt.Errorf("invalid group commitment %d: %w", i, err)
-		}
+	if err := k.state.groupCommitments.Validate(); err != nil {
+		return fmt.Errorf("invalid group commitments: %w", err)
 	}
 	for _, id := range k.state.parties {
 		data := k.state.partyData[id]
-		if _, err := edcurve.PointFromBytesAllowIdentity(data.verificationShare); err != nil {
+		if err := data.verificationShare.Validate(); err != nil {
 			return fmt.Errorf("invalid verification share for %d: %w", id, err)
 		}
 		if data.keygenConfirmation != nil && data.keygenConfirmation.Sender != id {
@@ -311,19 +302,15 @@ func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
 	}
-	commit0, err := edcurve.EvalCommitments(k.state.groupCommitments, 0)
-	if err != nil {
-		return fmt.Errorf("cannot evaluate group commitments at 0: %w", err)
-	}
-	if !bytes.Equal(commit0, k.state.publicKey) {
+	if !k.state.groupCommitments.PublicKey().Equal(k.state.publicKey) {
 		return errors.New("group public key does not match first group commitment")
 	}
 	for _, id := range k.state.parties {
-		expected, err := edcurve.EvalCommitments(k.state.groupCommitments, id)
+		expected, err := k.state.groupCommitments.Eval(id)
 		if err != nil {
 			return fmt.Errorf("cannot evaluate commitments for party %d: %w", id, err)
 		}
-		if !bytes.Equal(expected, k.state.partyData[id].verificationShare) {
+		if !expected.Equal(k.state.partyData[id].verificationShare) {
 			return fmt.Errorf("verification share for party %d does not match group commitments", id)
 		}
 	}
@@ -331,12 +318,12 @@ func (k *KeyShare) validateConsistencyWithoutConfirmations() error {
 	if err != nil {
 		return fmt.Errorf("cannot decode secret share: %w", err)
 	}
-	wantPub, ok := k.verificationShare(k.state.party)
+	wantPub, ok := k.verificationSharePoint(k.state.party)
 	if !ok {
 		return errors.New("missing verification share for local party")
 	}
 	secretPub := fed.NewIdentityPoint().ScalarBaseMult(secretScalar)
-	if !bytes.Equal(secretPub.Bytes(), wantPub) {
+	if !pointEqual(secretPub, wantPub.Point()) {
 		return errors.New("secret share inconsistent with verification share")
 	}
 	return nil
@@ -380,12 +367,12 @@ func (k *KeyShare) partyDataFor(id tss.PartyID) (keySharePartyData, error) {
 	return data, nil
 }
 
-func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {
+func (k *KeyShare) verificationSharePoint(id tss.PartyID) (verificationSharePoint, bool) {
 	data, err := k.partyDataFor(id)
-	if err != nil || len(data.verificationShare) == 0 {
-		return nil, false
+	if err != nil || data.verificationShare.IsZero() {
+		return verificationSharePoint{}, false
 	}
-	return data.verificationShare, true
+	return data.verificationShare.Clone(), true
 }
 
 func (k *KeyShare) orderedVerificationShares() ([]VerificationShare, error) {
@@ -398,7 +385,7 @@ func (k *KeyShare) orderedVerificationShares() ([]VerificationShare, error) {
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, VerificationShare{Party: id, PublicKey: bytes.Clone(data.verificationShare)})
+		out = append(out, VerificationShare{Party: id, PublicKey: data.verificationShare.Clone()})
 	}
 	return out, nil
 }
@@ -432,11 +419,11 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		party:                k.state.party,
 		threshold:            k.state.threshold,
 		parties:              slices.Clone(k.state.parties),
-		publicKey:            slices.Clone(k.state.publicKey),
+		publicKey:            k.state.publicKey.Clone(),
 		chainCode:            slices.Clone(k.state.chainCode),
 		secret:               k.state.secret.Clone(),
-		groupCommitments:     tss.CloneByteSlices(k.state.groupCommitments),
-		partyData:            cloneKeySharePartyDataMap(k.state.partyData),
+		groupCommitments:     k.state.groupCommitments.Clone(),
+		partyData:            tss.CloneMap(k.state.partyData),
 		keygenSessionID:      k.state.keygenSessionID,
 		keygenTranscriptHash: slices.Clone(k.state.keygenTranscriptHash),
 		planHash:             slices.Clone(k.state.planHash),

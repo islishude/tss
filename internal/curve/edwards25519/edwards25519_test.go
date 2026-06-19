@@ -135,3 +135,88 @@ func TestPointFromBytesRejectsTorsionComponent(t *testing.T) {
 		t.Fatal("point with torsion component should be rejected even when identity is allowed")
 	}
 }
+
+func TestWirePointRoundTripAndIdentityPolicy(t *testing.T) {
+	t.Parallel()
+	generator := fed.NewGeneratorPoint()
+	encoded, err := (WirePoint{P: generator}).MarshalWireValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(encoded, generator.Bytes()) {
+		t.Fatal("WirePoint changed canonical point bytes")
+	}
+	var decoded WirePoint
+	if err := decoded.UnmarshalWireValue(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.P.Equal(generator) != 1 {
+		t.Fatal("WirePoint round trip mismatch")
+	}
+	if _, err := (WirePoint{}).MarshalWireValue(); err == nil {
+		t.Fatal("WirePoint accepted nil marshal")
+	}
+
+	identity := fed.NewIdentityPoint()
+	if _, err := (WirePoint{P: identity}).MarshalWireValue(); err == nil {
+		t.Fatal("WirePoint accepted identity")
+	}
+	identityEncoded, err := (WirePointAllowIdentity{P: identity}).MarshalWireValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var identityDecoded WirePointAllowIdentity
+	if err := identityDecoded.UnmarshalWireValue(identityEncoded); err != nil {
+		t.Fatal(err)
+	}
+	if !IsIdentity(identityDecoded.P) {
+		t.Fatal("WirePointAllowIdentity did not preserve identity")
+	}
+}
+
+func TestWirePointRejectsMalformedAndTorsionPoints(t *testing.T) {
+	t.Parallel()
+	for _, size := range []int{0, 31, 33} {
+		var point WirePoint
+		if err := point.UnmarshalWireValue(make([]byte, size)); err == nil {
+			t.Fatalf("WirePoint accepted %d-byte input", size)
+		}
+		var allowIdentity WirePointAllowIdentity
+		if err := allowIdentity.UnmarshalWireValue(make([]byte, size)); err == nil {
+			t.Fatalf("WirePointAllowIdentity accepted %d-byte input", size)
+		}
+	}
+
+	lowOrder, err := fed.NewIdentityPoint().SetBytes(make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	mixed := AddPoints(fed.NewGeneratorPoint(), lowOrder).Bytes()
+	var point WirePoint
+	if err := point.UnmarshalWireValue(mixed); err == nil {
+		t.Fatal("WirePoint accepted a torsion component")
+	}
+	var allowIdentity WirePointAllowIdentity
+	if err := allowIdentity.UnmarshalWireValue(mixed); err == nil {
+		t.Fatal("WirePointAllowIdentity accepted a torsion component")
+	}
+}
+
+func TestWireScalarRoundTrip(t *testing.T) {
+	t.Parallel()
+	scalar := ScalarFromUint64(7)
+	encoded, err := (WireScalar{S: scalar}).MarshalWireValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded WireScalar
+	if err := decoded.UnmarshalWireValue(encoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.S.Equal(scalar) != 1 {
+		t.Fatal("WireScalar round trip mismatch")
+	}
+	if _, err := (WireScalar{}).MarshalWireValue(); err == nil {
+		t.Fatal("WireScalar accepted nil marshal")
+	}
+}

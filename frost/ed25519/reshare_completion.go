@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 
@@ -25,7 +24,7 @@ func (s *ReshareSession) tryComplete() error {
 		if err != nil {
 			return err
 		}
-		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
+		if !newCommitments.PublicKey().Equal(s.oldPublicKey) {
 			return errors.New("reshared group public key does not match original")
 		}
 		s.completed = true
@@ -38,19 +37,19 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	// Verify each dealer's share against their commitments at the local party's ID.
 	for dealer, share := range s.shares {
-		if err := edcurve.VerifyScalarShare(s.commits[dealer], s.selfID, share); err != nil {
+		if err := s.commits[dealer].VerifyShare(s.selfID, share); err != nil {
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
-				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer]),
+				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer].BytesList()),
 				Err:   err,
 			}
 		}
 	}
 
 	newSecret := fed.NewScalar()
-	publicKey := append([]byte(nil), s.oldPublicKey...)
+	publicKey := s.oldPublicKey.Clone()
 	if s.refreshMode {
 		// Refresh: new_secret = old_secret + Σ f_i(self) mod L.
 		// New commitments = old_commitments + Σ dealer_commitments.
@@ -79,34 +78,38 @@ func (s *ReshareSession) tryComplete() error {
 	}
 
 	// Verify group public key is preserved.
-	if _, err := edcurve.PointFromBytes(newCommitments[0]); err != nil {
+	if err := newCommitments.Validate(); err != nil {
 		return fmt.Errorf("invalid reshared group public key: %w", err)
 	}
-	if !bytes.Equal(newCommitments[0], publicKey) {
+	if !newCommitments.PublicKey().Equal(publicKey) {
 		return errors.New("reshared group public key does not match original")
 	}
-	publicKey = append([]byte(nil), newCommitments[0]...)
+	publicKey = newCommitments.PublicKey()
 
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.newParties))
 	for _, id := range s.newParties {
-		pub, err := edcurve.EvalCommitments(newCommitments, id)
+		pub, err := newCommitments.Eval(id)
 		if err != nil {
 			return err
 		}
-		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
-		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
+		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
+		partyData[id] = keySharePartyData{verificationShare: pub}
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
-	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.planHash, s.refreshMode, s.commits, newCommitments, verificationShares)
+	dealerCommitments := make(map[tss.PartyID][][]byte, len(s.commits))
+	for dealer, commitments := range s.commits {
+		dealerCommitments[dealer] = commitments.BytesList()
+	}
+	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey.Bytes(), chainCode, s.planHash, s.refreshMode, dealerCommitments, newCommitments.BytesList(), verificationShares)
 	newShare := &KeyShare{state: &keyShareState{
 		party:                s.selfID,
 		threshold:            s.newThreshold,
 		parties:              s.newParties.Clone(),
-		publicKey:            append([]byte(nil), publicKey...),
+		publicKey:            publicKey.Clone(),
 		chainCode:            chainCode,
 		secret:               newSecretScalar,
-		groupCommitments:     newCommitments,
+		groupCommitments:     newCommitments.Clone(),
 		partyData:            partyData,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: reshareTranscriptHash,
@@ -126,40 +129,29 @@ func (s *ReshareSession) tryComplete() error {
 	return nil
 }
 
-func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
-	newCommitments := make([][]byte, s.newThreshold)
+func (s *ReshareSession) aggregateCommitments() (groupCommitments, error) {
+	newCommitments := make([]*fed.Point, s.newThreshold)
 	for degree := 0; degree < s.newThreshold; degree++ {
 		points := make([]*fed.Point, 0, len(s.oldParties)+1)
 		for _, dealer := range s.oldParties {
-			p, err := edcurve.PointFromBytesAllowIdentity(s.commits[dealer][degree])
+			p, err := s.commits[dealer].PointAt(degree)
 			if err != nil {
-				return nil, err
+				return groupCommitments{}, err
 			}
 			points = append(points, p)
 		}
-		if s.refreshMode && degree < len(s.oldKey.state.groupCommitments) {
-			oldCommitment, err := edcurve.PointFromBytesAllowIdentity(s.oldKey.state.groupCommitments[degree])
+		if s.refreshMode && degree < s.oldKey.state.groupCommitments.Len() {
+			oldCommitment, err := s.oldKey.state.groupCommitments.PointAtAllowIdentity(degree)
 			if err != nil {
-				return nil, err
+				return groupCommitments{}, err
 			}
 			points = append(points, oldCommitment)
 		}
-		newCommitments[degree] = edcurve.AddPoints(points...).Bytes()
+		newCommitments[degree] = edcurve.AddPoints(points...)
 	}
-	if _, err := edcurve.PointFromBytes(newCommitments[0]); err != nil {
-		return nil, fmt.Errorf("invalid reshared group public key: %w", err)
+	out, err := newGroupCommitmentsFromPoints(newCommitments, s.newThreshold)
+	if err != nil {
+		return groupCommitments{}, fmt.Errorf("invalid reshared group public key: %w", err)
 	}
-	return newCommitments, nil
-}
-
-func validateReshareCommitments(commitments [][]byte, threshold int) error {
-	if len(commitments) != threshold {
-		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
-	}
-	for _, commitment := range commitments {
-		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
-			return err
-		}
-	}
-	return nil
+	return out, nil
 }

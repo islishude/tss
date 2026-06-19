@@ -26,7 +26,7 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if !bytes.Equal(decoded.state.chainCode, shares[1].state.chainCode) {
 			t.Fatal("chain code mismatch after round-trip")
 		}
-		if !bytes.Equal(decoded.state.publicKey, shares[1].state.publicKey) {
+		if !decoded.state.publicKey.Equal(shares[1].state.publicKey) {
 			t.Fatal("public key mismatch after round-trip")
 		}
 	})

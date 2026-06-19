@@ -15,6 +15,13 @@ func newEdSecretScalar(data []byte) (*secret.Scalar, error) {
 	return secret.NewScalar(data, edcurve.ScalarSize)
 }
 
+func newEdSecretScalarFromFed(s *fed.Scalar) (*secret.Scalar, error) {
+	if s == nil {
+		return nil, errors.New("nil secret scalar")
+	}
+	return newEdSecretScalar(s.Bytes())
+}
+
 func edScalarFromSecret(s *secret.Scalar) (*fed.Scalar, error) {
 	if s == nil {
 		return nil, errors.New("nil secret scalar")

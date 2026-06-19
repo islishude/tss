@@ -41,7 +41,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 		messages = append(messages, out...)
 	}
 
-	recipient, err := startFROSTReshareRecipient(oldPublicKey, oldChainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldPublicKey.Bytes(), oldChainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   oldParties,
 		Self:      4,
@@ -65,11 +65,11 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	}
 
 	path := []uint32{0, 1, 2}
-	r2, err := DeriveNonHardenedBIP32(newShares[2].state.publicKey, newShares[2].state.chainCode, path)
+	r2, err := DeriveNonHardenedBIP32(newShares[2].state.publicKey.Bytes(), newShares[2].state.chainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r4, err := DeriveNonHardenedBIP32(newShares[4].state.publicKey, newShares[4].state.chainCode, path)
+	r4, err := DeriveNonHardenedBIP32(newShares[4].state.publicKey.Bytes(), newShares[4].state.chainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   oldParties,
 		Self:      4,
@@ -180,7 +180,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("recipient with config.Parties=oldParties should succeed: %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -189,7 +189,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("recipient with config.Parties=newParties should succeed: %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      5,
@@ -198,7 +198,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected self-not-in-newParties failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      2,
@@ -207,7 +207,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected old-party recipient failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, tss.NewPartySet(1, 1, 2), newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, tss.NewPartySet(1, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -216,7 +216,7 @@ func TestStartReshareRecipientValidatesAgainstNewParties(t *testing.T) {
 		t.Fatalf("expected duplicate old-party failure, got %v", err)
 	}
 
-	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldChainCode, tss.NewPartySet(0, 1, 2), newParties, 2, tss.ThresholdConfig{
+	if _, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldChainCode, tss.NewPartySet(0, 1, 2), newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,
@@ -235,7 +235,7 @@ func TestReshareNewRecipientBindsGuard(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey, oldShares[1].state.chainCode, oldParties, newParties, 2, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldShares[1].state.publicKey.Bytes(), oldShares[1].state.chainCode, oldParties, newParties, 2, tss.ThresholdConfig{
 		Threshold: 2,
 		Parties:   newParties,
 		Self:      4,

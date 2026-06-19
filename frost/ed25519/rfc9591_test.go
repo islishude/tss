@@ -99,8 +99,8 @@ func TestRFC9591Ed25519BindingFactorVector(t *testing.T) {
 	t.Parallel()
 	v := rfc9591Ed25519Vector(t)
 	commitments := map[tss.PartyID]nonceCommitment{
-		1: {D: v.p1HidingCommitment, E: v.p1BindingCommitment},
-		3: {D: v.p3HidingCommitment, E: v.p3BindingCommitment},
+		1: mustNonceCommitment(t, v.p1HidingCommitment, v.p1BindingCommitment),
+		3: mustNonceCommitment(t, v.p3HidingCommitment, v.p3BindingCommitment),
 	}
 
 	encoded, err := encodeGroupCommitmentList(v.signers, commitments)
@@ -168,10 +168,10 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if !bytes.Equal(s1.dNonce, v.p1HidingNonce) || !bytes.Equal(s1.eNonce, v.p1BindingNonce) {
+	if !bytes.Equal(s1.dNonce.FixedBytes(), v.p1HidingNonce) || !bytes.Equal(s1.eNonce.FixedBytes(), v.p1BindingNonce) {
 		t.Fatal("P1 nonce generation does not match RFC vector")
 	}
-	if !bytes.Equal(s3.dNonce, v.p3HidingNonce) || !bytes.Equal(s3.eNonce, v.p3BindingNonce) {
+	if !bytes.Equal(s3.dNonce.FixedBytes(), v.p3HidingNonce) || !bytes.Equal(s3.eNonce.FixedBytes(), v.p3BindingNonce) {
 		t.Fatal("P3 nonce generation does not match RFC vector")
 	}
 	assertCommitmentEnvelope(t, out1[0], v.p1HidingCommitment, v.p1BindingCommitment)
@@ -303,18 +303,21 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 	if err != nil {
 		t.Fatal(err)
 	}
-	groupCommitments := [][]byte{
+	groupCommitments, err := newGroupCommitmentsFromBytesList([][]byte{
 		append([]byte(nil), v.groupPublicKey...),
 		fed.NewIdentityPoint().ScalarBaseMult(coeff1).Bytes(),
+	}, 2)
+	if err != nil {
+		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2, 3)
 	partyData := make(map[tss.PartyID]keySharePartyData, len(parties))
 	for _, id := range parties {
-		pub, err := edcurve.EvalCommitments(groupCommitments, id)
+		pub, err := groupCommitments.Eval(id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
+		partyData[id] = keySharePartyData{verificationShare: pub}
 	}
 	secretScalar, err := newEdSecretScalar(secret)
 	if err != nil {
@@ -324,7 +327,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		party:                party,
 		threshold:            2,
 		parties:              parties,
-		publicKey:            append([]byte(nil), v.groupPublicKey...),
+		publicKey:            groupCommitments.PublicKey(),
 		chainCode:            bytes.Repeat([]byte{0x96}, 32),
 		secret:               secretScalar,
 		groupCommitments:     groupCommitments,
@@ -344,8 +347,8 @@ func assertCommitmentEnvelope(t *testing.T, env tss.Envelope, wantD, wantE []byt
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(commitment.D, wantD) || !bytes.Equal(commitment.E, wantE) {
-		t.Fatalf("commitment mismatch: got (%x, %x)", commitment.D, commitment.E)
+	if !bytes.Equal(commitment.DBytes(), wantD) || !bytes.Equal(commitment.EBytes(), wantE) {
+		t.Fatalf("commitment mismatch: got (%x, %x)", commitment.DBytes(), commitment.EBytes())
 	}
 }
 
@@ -355,8 +358,24 @@ func assertPartialEnvelope(t *testing.T, env tss.Envelope, want []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(partial.Z, want) {
-		t.Fatalf("partial mismatch: got %x want %x", partial.Z, want)
+	if !bytes.Equal(partial.Z.S.Bytes(), want) {
+		t.Fatalf("partial mismatch: got %x want %x", partial.Z.S.Bytes(), want)
+	}
+}
+
+func mustNonceCommitment(t testing.TB, d, e []byte) nonceCommitment {
+	t.Helper()
+	dPoint, err := edcurve.PointFromBytes(d)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ePoint, err := edcurve.PointFromBytes(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nonceCommitment{
+		D: edcurve.WirePoint{P: dPoint},
+		E: edcurve.WirePoint{P: ePoint},
 	}
 }
 

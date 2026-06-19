@@ -59,7 +59,7 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 	if env, ok := s.partialEnvelopes[id]; ok {
 		return env.Clone()
 	}
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: partial.Bytes(), PlanHash: s.planHash}, s.limits)
+	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: edcurve.WireScalar{S: partial}, PlanHash: s.planHash}, s.limits)
 	if err != nil {
 		return tss.Envelope{}
 	}
@@ -79,22 +79,16 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 
 func (s *SignSession) verifyPartial(id tss.PartyID, z *fed.Scalar, rho *fed.Scalar, challenge *fed.Scalar) error {
 	commitment := s.commitments[id]
-	D, err := edcurve.PointFromBytes(commitment.D)
-	if err != nil {
-		return err
+	D := clonePoint(commitment.D.P)
+	E := clonePoint(commitment.E.P)
+	if D == nil || E == nil {
+		return errors.New("missing nonce commitment point")
 	}
-	E, err := edcurve.PointFromBytes(commitment.E)
-	if err != nil {
-		return err
-	}
-	YBytes, ok := s.key.verificationShare(id)
+	YPoint, ok := s.key.verificationSharePoint(id)
 	if !ok {
 		return fmt.Errorf("missing verification share for %d", id)
 	}
-	Y, err := edcurve.PointFromBytesAllowIdentity(YBytes)
-	if err != nil {
-		return err
-	}
+	Y := YPoint.Point()
 	if s.deltaScalar != nil && s.deltaScalar.Equal(edcurve.ScalarZero()) != 1 {
 		deltaPoint := fed.NewIdentityPoint().ScalarBaseMult(s.deltaScalar)
 		Y = edcurve.AddPoints(Y, deltaPoint)
@@ -130,13 +124,10 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar
 		if !ok {
 			return nil, nil, fmt.Errorf("missing commitment for %d", id)
 		}
-		D, err := edcurve.PointFromBytes(commitment.D)
-		if err != nil {
-			return nil, nil, err
-		}
-		E, err := edcurve.PointFromBytes(commitment.E)
-		if err != nil {
-			return nil, nil, err
+		D := clonePoint(commitment.D.P)
+		E := clonePoint(commitment.E.P)
+		if D == nil || E == nil {
+			return nil, nil, fmt.Errorf("missing commitment point for %d", id)
 		}
 		rhoE := fed.NewIdentityPoint().ScalarMult(rhos[id], E)
 		terms = append(terms, edcurve.AddPoints(D, rhoE))

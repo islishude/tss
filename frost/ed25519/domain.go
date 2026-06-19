@@ -66,6 +66,6 @@ func appendVerificationShares(t *transcript.Builder, verificationShares []Verifi
 	})
 	for _, share := range sorted {
 		t.AppendUint32("verification_share_party", share.Party)
-		t.AppendBytes("verification_share_public_key", share.PublicKey)
+		t.AppendBytes("verification_share_public_key", share.PublicKey.Bytes())
 	}
 }

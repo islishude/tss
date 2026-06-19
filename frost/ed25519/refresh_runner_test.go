@@ -1,7 +1,6 @@
 package ed25519
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -71,7 +70,7 @@ func TestFROSTRefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 	if committed == nil {
 		t.Fatal("refresh did not commit a key share")
 	}
-	if !bytes.Equal(mustKeyShareMetadata(t, committed).PublicKey, oldPublicKey) {
+	if !mustKeyShareMetadata(t, committed).PublicKey.Equal(oldPublicKey) {
 		t.Fatal("refresh changed the group public key")
 	}
 	if transport.sent == 0 {

@@ -24,15 +24,15 @@ const (
 // VerificationShare is a caller-owned snapshot of a participant public share
 // derived from DKG commitments.
 type VerificationShare struct {
-	Party     tss.PartyID `json:"party" wire:"1,u32"`
-	PublicKey []byte      `json:"public_key" wire:"2,bytes,max_bytes=point"`
+	Party     tss.PartyID            `json:"party" wire:"1,u32"`
+	PublicKey VerificationSharePoint `json:"public_key" wire:"2,custom,len=32"`
 }
 
 // Clone returns a deep copy of VerificationShare.
 func (v VerificationShare) Clone() VerificationShare {
 	return VerificationShare{
 		Party:     v.Party,
-		PublicKey: slices.Clone(v.PublicKey),
+		PublicKey: v.PublicKey.Clone(),
 	}
 }
 
@@ -42,7 +42,7 @@ type KeySharePublicMetadata struct {
 	Party                tss.PartyID
 	Threshold            int
 	Parties              tss.PartySet
-	PublicKey            []byte
+	PublicKey            PublicKeyPoint
 	ChainCode            []byte
 	GroupCommitments     [][]byte
 	KeygenSessionID      tss.SessionID
@@ -56,7 +56,7 @@ func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
 		Party:                m.Party,
 		Threshold:            m.Threshold,
 		Parties:              m.Parties.Clone(),
-		PublicKey:            slices.Clone(m.PublicKey),
+		PublicKey:            m.PublicKey.Clone(),
 		ChainCode:            slices.Clone(m.ChainCode),
 		GroupCommitments:     tss.CloneByteSlices(m.GroupCommitments),
 		KeygenSessionID:      m.KeygenSessionID,
@@ -78,37 +78,26 @@ type KeyShare struct {
 }
 
 type keySharePartyData struct {
-	verificationShare  []byte
+	verificationShare  verificationSharePoint
 	keygenConfirmation *KeygenConfirmation
 }
 
 // Clone returns a deep copy of keySharePartyData.
 func (in keySharePartyData) Clone() keySharePartyData {
 	return keySharePartyData{
-		verificationShare:  slices.Clone(in.verificationShare),
+		verificationShare:  in.verificationShare.Clone(),
 		keygenConfirmation: in.keygenConfirmation.Clone(),
 	}
-}
-
-func cloneKeySharePartyDataMap(in map[tss.PartyID]keySharePartyData) map[tss.PartyID]keySharePartyData {
-	if in == nil {
-		return nil
-	}
-	out := make(map[tss.PartyID]keySharePartyData, len(in))
-	for id, data := range in {
-		out[id] = data.Clone()
-	}
-	return out
 }
 
 type keyShareState struct {
 	party                tss.PartyID                       // Local owner of the secret signing share.
 	threshold            int                               // Number of signers required for FROST signing.
 	parties              tss.PartySet                      // Canonical full participant set for the group key.
-	publicKey            []byte                            // Parent group public key before request-time derivation.
+	publicKey            publicKeyPoint                    // Parent group public key before request-time derivation.
 	chainCode            []byte                            // HD chain code paired with publicKey for non-hardened derivation.
 	secret               *secret.Scalar                    // Local Ed25519 signing share; never exposed through accessors.
-	groupCommitments     [][]byte                          // Public polynomial commitments from keygen/reshare.
+	groupCommitments     groupCommitments                  // Public polynomial commitments from keygen/reshare.
 	partyData            map[tss.PartyID]keySharePartyData // Per-party public material keyed by participant identity.
 	keygenSessionID      tss.SessionID                     // Session that produced this key share.
 	keygenTranscriptHash []byte                            // Transcript hash of completed keygen/reshare confirmation.

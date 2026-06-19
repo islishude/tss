@@ -41,7 +41,7 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 	recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
-		OldPublicKey: shares[1].state.publicKey, OldChainCode: shares[1].state.chainCode, OldParties: parties, SessionID: sessionID,
+		OldPublicKey: shares[1].state.publicKey.Bytes(), OldChainCode: shares[1].state.chainCode, OldParties: parties, SessionID: sessionID,
 		NewParties: newParties, NewThreshold: 2, Limits: &limits,
 	})
 	if err != nil {

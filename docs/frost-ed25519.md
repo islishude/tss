@@ -563,7 +563,7 @@ kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.KeyShare()
 metadata, ok := share.PublicMetadata()
-publicKey := metadata.PublicKey
+publicKey := metadata.PublicKey.Bytes()
 parties := metadata.Parties
 ```
 

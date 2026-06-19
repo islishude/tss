@@ -26,12 +26,12 @@ func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
 	sameRandom := bytes.Repeat([]byte{0x42}, 64)
 	commit1 := startSignCommitment(t, shares[1], sessionID, signers, message, sameRandom)
 	commit2 := startSignCommitment(t, shares[2], sessionID, signers, message, sameRandom)
-	if bytes.Equal(commit1.D, commit2.D) && bytes.Equal(commit1.E, commit2.E) {
+	if bytes.Equal(commit1.DBytes(), commit2.DBytes()) && bytes.Equal(commit1.EBytes(), commit2.EBytes()) {
 		t.Fatal("same randomness with different secret shares produced identical commitments")
 	}
 
 	commit3 := startSignCommitment(t, shares[1], sessionID, signers, message, bytes.Repeat([]byte{0x43}, 64))
-	if bytes.Equal(commit1.D, commit3.D) && bytes.Equal(commit1.E, commit3.E) {
+	if bytes.Equal(commit1.DBytes(), commit3.DBytes()) && bytes.Equal(commit1.EBytes(), commit3.EBytes()) {
 		t.Fatal("same secret share with different randomness produced identical commitments")
 	}
 
@@ -209,12 +209,9 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialScalar, err := edcurve.ScalarFromCanonical(partialPayload.Z)
-	if err != nil {
-		t.Fatal(err)
-	}
+	partialScalar := partialPayload.Z.S
 	badScalar := fed.NewScalar().Add(partialScalar, edcurve.ScalarOne())
-	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: badScalar.Bytes(), PlanHash: partialPayload.PlanHash})
+	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: edcurve.WireScalar{S: badScalar}, PlanHash: partialPayload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,15 +255,51 @@ func startSignCommitment(t *testing.T, key *KeyShare, sessionID tss.SessionID, s
 
 func TestNonceCommitmentMarshalJSONRejects(t *testing.T) {
 	t.Parallel()
-	nc := nonceCommitment{D: []byte{0x01}, E: []byte{0x02}}
+	nc := nonceCommitment{}
 	if _, err := nc.MarshalJSON(); err == nil {
 		t.Fatal("nonceCommitment.MarshalJSON should reject JSON encoding")
 	}
 }
 
+func TestNonceCommitmentWireRejectsIdentityAndMalformedPoints(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, out, err := startFROSTSign(shares[1], sessionID, tss.NewPartySet(1, 2), []byte("wire point validation"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw := out[0].Payload
+	identity := make([]byte, 32)
+	identity[0] = 1
+	for _, tc := range []struct {
+		name  string
+		field string
+		value []byte
+	}{
+		{name: "identity D", field: "D", value: identity},
+		{name: "identity E", field: "E", value: identity},
+		{name: "short D", field: "D", value: make([]byte, 31)},
+		{name: "short E", field: "E", value: make([]byte, 31)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated, err := testutil.RewriteWireFieldByName(raw, nonceCommitmentPayloadWireType, nonceCommitment{}, tc.field, tc.value)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := unmarshalNonceCommitmentPayload(mutated); err == nil {
+				t.Fatalf("nonce commitment accepted %s", tc.name)
+			}
+		})
+	}
+}
+
 func TestSignPartialPayloadMarshalJSONRejects(t *testing.T) {
 	t.Parallel()
-	sp := signPartialPayload{Z: []byte{0x03}}
+	sp := signPartialPayload{}
 	if _, err := sp.MarshalJSON(); err == nil {
 		t.Fatal("signPartialPayload.MarshalJSON should reject JSON encoding")
 	}

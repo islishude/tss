@@ -9,7 +9,6 @@
 package ed25519
 
 import (
-	"bytes"
 	"errors"
 
 	"github.com/islishude/tss"
@@ -35,16 +34,4 @@ func shouldAbortSession(err error) bool {
 		return false
 	}
 	return protocolErr.Code == tss.ErrCodeVerification || protocolErr.Blame != nil
-}
-
-func equalByteSlices(a, b [][]byte) bool {
-	if len(a) != len(b) {
-		return false
-	}
-	for i := range a {
-		if !bytes.Equal(a[i], b[i]) {
-			return false
-		}
-	}
-	return true
 }

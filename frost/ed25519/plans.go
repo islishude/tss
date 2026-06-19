@@ -9,7 +9,6 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -150,11 +149,11 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type refreshPlanState struct {
-	sessionID tss.SessionID // Refresh protocol session; every refresh envelope is scoped to it.
-	threshold int           // Existing signing threshold preserved by same-party refresh.
-	parties   tss.PartySet  // Canonical participant set preserved by same-party refresh.
-	publicKey []byte        // Parent group public key that must remain unchanged after refresh.
-	chainCode []byte        // HD chain code that must remain unchanged after refresh.
+	sessionID tss.SessionID  // Refresh protocol session; every refresh envelope is scoped to it.
+	threshold int            // Existing signing threshold preserved by same-party refresh.
+	parties   tss.PartySet   // Canonical participant set preserved by same-party refresh.
+	publicKey publicKeyPoint // Parent group public key that must remain unchanged after refresh.
+	chainCode []byte         // HD chain code that must remain unchanged after refresh.
 }
 
 // RefreshPlan is the shared FROST same-party refresh intent.
@@ -210,7 +209,7 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 		sessionID: option.SessionID,
 		threshold: oldKey.state.threshold,
 		parties:   slices.Clone(oldKey.state.parties),
-		publicKey: slices.Clone(oldKey.state.publicKey),
+		publicKey: oldKey.state.publicKey.Clone(),
 		chainCode: slices.Clone(oldKey.state.chainCode),
 	}, limits: limits}, nil
 }
@@ -240,7 +239,7 @@ func (p *RefreshPlan) Snapshot() (RefreshPlanSnapshot, bool) {
 		SessionID: p.state.sessionID,
 		Threshold: p.state.threshold,
 		Parties:   p.state.parties.Clone(),
-		PublicKey: bytes.Clone(p.state.publicKey),
+		PublicKey: p.state.publicKey.Bytes(),
 		ChainCode: bytes.Clone(p.state.chainCode),
 	}, true
 }
@@ -254,7 +253,7 @@ func (p *RefreshPlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.state.threshold))
 	t.AppendUint32List("parties", p.state.parties)
-	t.AppendBytes("public_key", p.state.publicKey)
+	t.AppendBytes("public_key", p.state.publicKey.Bytes())
 	t.AppendBytes("chain_code", p.state.chainCode)
 	return t.Sum(), nil
 }
@@ -279,12 +278,12 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 }
 
 type resharePlanState struct {
-	sessionID    tss.SessionID // Reshare protocol session; all reshare envelopes are scoped to it.
-	oldPublicKey []byte        // Existing parent group public key that resharing must preserve.
-	oldChainCode []byte        // Existing HD chain code preserved across reshare.
-	oldParties   tss.PartySet  // Canonical old dealer set.
-	newParties   tss.PartySet  // Canonical target key-holder set.
-	newThreshold int           // Target signing threshold for the reshared key.
+	sessionID    tss.SessionID  // Reshare protocol session; all reshare envelopes are scoped to it.
+	oldPublicKey publicKeyPoint // Existing parent group public key that resharing must preserve.
+	oldChainCode []byte         // Existing HD chain code preserved across reshare.
+	oldParties   tss.PartySet   // Canonical old dealer set.
+	newParties   tss.PartySet   // Canonical target key-holder set.
+	newThreshold int            // Target signing threshold for the reshared key.
 }
 
 // ResharePlan is the shared FROST reshare intent.
@@ -345,7 +344,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
 	return NewPublicResharePlan(PublicResharePlanOption{
-		OldPublicKey: oldKey.state.publicKey,
+		OldPublicKey: oldKey.state.publicKey.Bytes(),
 		OldChainCode: oldKey.state.chainCode,
 		OldParties:   oldKey.state.parties,
 		SessionID:    option.SessionID,
@@ -362,7 +361,8 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 	if !option.SessionID.Valid() {
 		return nil, invalidPlanConfig(0, tss.ErrInvalidSessionID)
 	}
-	if _, err := edcurve.PointFromBytes(option.OldPublicKey); err != nil {
+	oldPublicKey, err := newPublicKeyPointFromBytes(option.OldPublicKey)
+	if err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old public key: %w", err))
 	}
 	if len(option.OldChainCode) != bip32util.ChainCodeSize {
@@ -378,7 +378,7 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 	}
 	return &ResharePlan{state: &resharePlanState{
 		sessionID:    option.SessionID,
-		oldPublicKey: slices.Clone(option.OldPublicKey),
+		oldPublicKey: oldPublicKey,
 		oldChainCode: slices.Clone(option.OldChainCode),
 		oldParties:   oldParties,
 		newParties:   newParties,
@@ -401,7 +401,7 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 	}
 	return ResharePlanSnapshot{
 		SessionID:    p.state.sessionID,
-		OldPublicKey: bytes.Clone(p.state.oldPublicKey),
+		OldPublicKey: p.state.oldPublicKey.Bytes(),
 		OldChainCode: bytes.Clone(p.state.oldChainCode),
 		OldParties:   p.state.oldParties.Clone(),
 		NewParties:   p.state.newParties.Clone(),
@@ -424,7 +424,7 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	}
 	t := transcript.New(resharePlanDigestLabel)
 	t.AppendBytes("session_id", p.state.sessionID[:])
-	t.AppendBytes("old_public_key", p.state.oldPublicKey)
+	t.AppendBytes("old_public_key", p.state.oldPublicKey.Bytes())
 	t.AppendBytes("old_chain_code", p.state.oldChainCode)
 	t.AppendUint32List("old_parties", p.state.oldParties)
 	t.AppendUint32List("new_parties", p.state.newParties)
@@ -484,7 +484,7 @@ type signPlanState struct {
 	sessionID   tss.SessionID         // Signing session; commitment and partial envelopes are scoped to it.
 	threshold   int                   // Signing threshold inherited from the key share.
 	parties     tss.PartySet          // Canonical full key-share participant set.
-	publicKey   []byte                // Parent group public key before request-time HD derivation.
+	publicKey   publicKeyPoint        // Parent group public key before request-time HD derivation.
 	chainCode   []byte                // HD chain code paired with publicKey for path derivation.
 	keygenHash  []byte                // Transcript hash of the keygen/reshare that produced publicKey.
 	signers     tss.PartySet          // Canonical signer subset participating in this signature.
@@ -575,7 +575,7 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		sessionID:   option.SessionID,
 		threshold:   key.state.threshold,
 		parties:     slices.Clone(key.state.parties),
-		publicKey:   slices.Clone(key.state.publicKey),
+		publicKey:   key.state.publicKey.Clone(),
 		chainCode:   slices.Clone(key.state.chainCode),
 		keygenHash:  slices.Clone(key.state.keygenTranscriptHash),
 		signers:     signers,
@@ -607,7 +607,7 @@ func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 		SessionID:            p.state.sessionID,
 		Threshold:            p.state.threshold,
 		Parties:              p.state.parties.Clone(),
-		PublicKey:            bytes.Clone(p.state.publicKey),
+		PublicKey:            p.state.publicKey.Bytes(),
 		ChainCode:            bytes.Clone(p.state.chainCode),
 		KeygenTranscriptHash: bytes.Clone(p.state.keygenHash),
 		Signers:              p.state.signers.Clone(),
@@ -628,7 +628,7 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("session_id", p.state.sessionID[:])
 	t.AppendUint32("threshold", uint32(p.state.threshold))
 	t.AppendUint32List("parties", p.state.parties)
-	t.AppendBytes("public_key", p.state.publicKey)
+	t.AppendBytes("public_key", p.state.publicKey.Bytes())
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendBytes("keygen_transcript_hash", p.state.keygenHash)
 	t.AppendUint32List("signers", p.state.signers)
@@ -653,7 +653,7 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	}
 	if p.state.threshold != key.state.threshold ||
 		!slices.Equal(p.state.parties, key.state.parties) ||
-		!bytes.Equal(p.state.publicKey, key.state.publicKey) ||
+		!p.state.publicKey.Equal(key.state.publicKey) ||
 		!bytes.Equal(p.state.chainCode, key.state.chainCode) ||
 		!bytes.Equal(p.state.keygenHash, key.state.keygenTranscriptHash) {
 		return errors.New("sign plan does not match key share")

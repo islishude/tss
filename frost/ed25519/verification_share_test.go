@@ -29,7 +29,7 @@ func TestVerificationShareCanonicalBinaryEncoding(t *testing.T) {
 	if err := decoded.UnmarshalBinary(raw1); err != nil {
 		t.Fatal(err)
 	}
-	if decoded.Party != share.Party || !bytes.Equal(decoded.PublicKey, share.PublicKey) {
+	if decoded.Party != share.Party || !decoded.PublicKey.Equal(share.PublicKey) {
 		t.Fatal("verification share changed after round trip")
 	}
 	if err := decoded.UnmarshalBinary(append(raw1, 0)); err == nil {
@@ -60,7 +60,7 @@ func TestVerificationShareRejectsMalformedAndOversizedFields(t *testing.T) {
 	}
 
 	limits := DefaultLimits()
-	limits.Curve.MaxPointBytes = len(share.PublicKey) - 1
+	limits.Curve.MaxPointBytes = len(share.PublicKey.Bytes()) - 1
 	if _, err := share.MarshalBinaryWithLimits(limits); err == nil {
 		t.Fatal("encoded verification share above point limit")
 	}
@@ -72,5 +72,9 @@ func testFROSTVerificationShare(t testing.TB) VerificationShare {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return VerificationShare{Party: 1, PublicKey: point.Bytes()}
+	publicKey, err := newVerificationSharePointFromPoint(point)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return VerificationShare{Party: 1, PublicKey: publicKey}
 }

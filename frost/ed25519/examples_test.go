@@ -1,7 +1,6 @@
 package ed25519_test
 
 import (
-	"bytes"
 	stded25519 "crypto/ed25519"
 	"fmt"
 
@@ -143,7 +142,7 @@ func ExampleStartRefresh() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, refreshedMetadata.PublicKey))
+	fmt.Println("public key preserved:", oldPublicKey.Equal(refreshedMetadata.PublicKey))
 
 	message := []byte("post-refresh signing")
 	publicKey, signature, err := runExampleFROSTSign(refreshed, tss.NewPartySet(1, 2), message, frost.SignOptions{})
@@ -205,7 +204,7 @@ func ExampleStartReshare() {
 		panic(err)
 	}
 	recipientPlan, err := frost.NewPublicResharePlan(frost.PublicResharePlanOption{
-		OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties, SessionID: sessionID,
+		OldPublicKey: oldPublicKey.Bytes(), OldChainCode: oldChainCode, OldParties: oldParties, SessionID: sessionID,
 		NewParties: newParties, NewThreshold: 2,
 	})
 	if err != nil {
@@ -235,7 +234,7 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, resharedMetadata.PublicKey))
+	fmt.Println("public key preserved:", oldPublicKey.Equal(resharedMetadata.PublicKey))
 
 	message := []byte("post-reshare signing")
 	publicKey, signature, err := runExampleFROSTSign(reshared, tss.NewPartySet(2, 4), message, frost.SignOptions{})
@@ -262,7 +261,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	if err != nil {
 		panic(err)
 	}
-	derived, err := frost.DeriveNonHardenedBIP32(metadata.PublicKey, metadata.ChainCode, []uint32{0, 1})
+	derived, err := frost.DeriveNonHardenedBIP32(metadata.PublicKey.Bytes(), metadata.ChainCode, []uint32{0, 1})
 	if err != nil {
 		panic(err)
 	}
@@ -275,7 +274,7 @@ func ExampleDeriveNonHardenedBIP32() {
 		panic(err)
 	}
 	fmt.Println(stded25519.Verify(stded25519.PublicKey(derived.ChildPublicKey), message, signature))
-	fmt.Println(stded25519.Verify(stded25519.PublicKey(metadata.PublicKey), message, signature))
+	fmt.Println(stded25519.Verify(stded25519.PublicKey(metadata.PublicKey.Bytes()), message, signature))
 	// Output:
 	// true
 	// false

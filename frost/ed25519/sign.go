@@ -11,6 +11,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // SignSession tracks a two-round FROST signing exchange for one local party.
@@ -29,8 +30,8 @@ type SignSession struct {
 	commitments      map[tss.PartyID]nonceCommitment // Round-1 nonce commitments by signer.
 	partials         map[tss.PartyID]*fed.Scalar     // Validated partial signature scalars by signer.
 	partialEnvelopes map[tss.PartyID]tss.Envelope    // Original partial envelopes retained for blame evidence.
-	dNonce           []byte                          // Local hiding nonce bytes; secret until partial generation.
-	eNonce           []byte                          // Local binding nonce bytes; secret until partial generation.
+	dNonce           *secret.Scalar                  // Local hiding nonce; secret until partial generation.
+	eNonce           *secret.Scalar                  // Local binding nonce; secret until partial generation.
 	deltaScalar      *fed.Scalar                     // Additive HD shift applied to the local signing share.
 	partialSent      bool                            // Whether this party already emitted its partial signature.
 	completed        bool                            // Terminal success flag after signature aggregation.
@@ -41,9 +42,32 @@ type SignSession struct {
 }
 
 type nonceCommitment struct {
-	D        []byte `wire:"1,bytes,max_bytes=point"` // hiding nonce commitment
-	E        []byte `wire:"2,bytes,max_bytes=point"` // binding nonce commitment
-	PlanHash []byte `wire:"3,bytes,len=32"`
+	D        edcurve.WirePoint `wire:"1,custom,len=32"` // hiding nonce commitment
+	E        edcurve.WirePoint `wire:"2,custom,len=32"` // binding nonce commitment
+	PlanHash []byte            `wire:"3,bytes,len=32"`
+}
+
+// DBytes returns a caller-owned canonical hiding commitment encoding.
+func (c nonceCommitment) DBytes() []byte {
+	if c.D.P == nil {
+		return nil
+	}
+	return c.D.P.Bytes()
+}
+
+// EBytes returns a caller-owned canonical binding commitment encoding.
+func (c nonceCommitment) EBytes() []byte {
+	if c.E.P == nil {
+		return nil
+	}
+	return c.E.P.Bytes()
+}
+
+// Equal reports whether two nonce commitments bind the same points and plan.
+func (c nonceCommitment) Equal(other nonceCommitment) bool {
+	return pointEqual(c.D.P, other.D.P) &&
+		pointEqual(c.E.P, other.E.P) &&
+		bytes.Equal(c.PlanHash, other.PlanHash)
 }
 
 const nonceCommitmentWireVersion uint16 = 1
@@ -60,8 +84,8 @@ func (nonceCommitment) MarshalJSON() ([]byte, error) {
 }
 
 type signPartialPayload struct {
-	Z        []byte `wire:"1,bytes,max_bytes=scalar"`
-	PlanHash []byte `wire:"2,bytes,len=32"`
+	Z        edcurve.WireScalar `wire:"1,custom,len=32"`
+	PlanHash []byte             `wire:"2,bytes,len=32"`
 }
 
 const signPartialPayloadWireVersion uint16 = 1
@@ -138,35 +162,42 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	}
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	dBytes, err := signingNonceGenerate(x, local.Rand)
+	d, err := signingNonceGenerate(x, local.Rand)
 	if err != nil {
 		return nil, nil, err
 	}
-	eBytes, err := signingNonceGenerate(x, local.Rand)
+	e, err := signingNonceGenerate(x, local.Rand)
 	if err != nil {
-		clear(dBytes)
+		d.Set(fed.NewScalar())
 		return nil, nil, err
 	}
-
-	d, err := edcurve.ScalarFromCanonical(dBytes)
+	dNonce, err := newEdSecretScalarFromFed(d)
 	if err != nil {
-		clear(dBytes)
-		clear(eBytes)
+		d.Set(fed.NewScalar())
+		e.Set(fed.NewScalar())
 		return nil, nil, err
 	}
-	e, err := edcurve.ScalarFromCanonical(eBytes)
+	eNonce, err := newEdSecretScalarFromFed(e)
 	if err != nil {
-		clear(dBytes)
-		clear(eBytes)
+		dNonce.Destroy()
+		d.Set(fed.NewScalar())
+		e.Set(fed.NewScalar())
 		return nil, nil, err
 	}
 
 	dPoint := fed.NewIdentityPoint().ScalarBaseMult(d)
 	ePoint := fed.NewIdentityPoint().ScalarBaseMult(e)
-	payload, err := marshalNonceCommitmentPayloadWithLimits(nonceCommitment{D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: planHash}, limits)
+	d.Set(fed.NewScalar())
+	e.Set(fed.NewScalar())
+	commitment := nonceCommitment{
+		D:        edcurve.WirePoint{P: clonePoint(dPoint)},
+		E:        edcurve.WirePoint{P: clonePoint(ePoint)},
+		PlanHash: slices.Clone(planHash),
+	}
+	payload, err := marshalNonceCommitmentPayloadWithLimits(commitment, limits)
 	if err != nil {
-		clear(dBytes)
-		clear(eBytes)
+		dNonce.Destroy()
+		eNonce.Destroy()
 		return nil, nil, err
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
@@ -178,8 +209,8 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		Payload:     payload,
 	})
 	if err != nil {
-		clear(dBytes)
-		clear(eBytes)
+		dNonce.Destroy()
+		eNonce.Destroy()
 		return nil, nil, err
 	}
 	s := &SignSession{
@@ -193,11 +224,11 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		contextHash:      slices.Clone(plan.state.contextHash),
 		derivation:       plan.state.derivation.Clone(),
 		planHash:         slices.Clone(planHash),
-		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: {D: dPoint.Bytes(), E: ePoint.Bytes(), PlanHash: slices.Clone(planHash)}},
+		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: commitment},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
 		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
-		dNonce:           dBytes,
-		eNonce:           eBytes,
+		dNonce:           dNonce,
+		eNonce:           eNonce,
 		deltaScalar:      deltaScalar,
 		commitMessage:    env,
 		guard:            guard,
@@ -205,7 +236,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
 	if err != nil {
-		s.clearNonceBytes()
+		s.clearNonceScalars()
 		return nil, nil, err
 	}
 	out = append(out, partial...)
@@ -267,7 +298,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		if existing, ok := s.commitments[base.From]; ok {
-			if bytes.Equal(existing.D, p.D) && bytes.Equal(existing.E, p.E) && bytes.Equal(existing.PlanHash, p.PlanHash) {
+			if existing.Equal(p) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting nonce commitment"))
@@ -285,10 +316,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		partial, err := edcurve.ScalarFromCanonical(p.Z)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
+		partial := fed.NewScalar().Set(p.Z.S)
 		if existing, ok := s.partials[base.From]; ok {
 			if existing.Equal(partial) == 1 {
 				if _, ok := s.partialEnvelopes[base.From]; !ok {
@@ -356,12 +384,16 @@ func (s *SignSession) Derivation() *tss.DerivationResult {
 	return s.derivation.Clone()
 }
 
-func (s *SignSession) clearNonceBytes() {
+func (s *SignSession) clearNonceScalars() {
 	if s == nil {
 		return
 	}
-	clear(s.dNonce)
-	clear(s.eNonce)
+	if s.dNonce != nil {
+		s.dNonce.Destroy()
+	}
+	if s.eNonce != nil {
+		s.eNonce.Destroy()
+	}
 	s.dNonce = nil
 	s.eNonce = nil
 }

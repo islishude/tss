@@ -9,7 +9,7 @@ import (
 	fed "filippo.io/edwards25519"
 )
 
-func signingNonceGenerate(secret *fed.Scalar, reader io.Reader) ([]byte, error) {
+func signingNonceGenerate(secret *fed.Scalar, reader io.Reader) (*fed.Scalar, error) {
 	if secret == nil {
 		return nil, errors.New("nil signing secret")
 	}
@@ -36,5 +36,5 @@ func signingNonceGenerate(secret *fed.Scalar, reader io.Reader) ([]byte, error) 
 	if err != nil {
 		return nil, err
 	}
-	return nonce.Bytes(), nil
+	return nonce, nil
 }

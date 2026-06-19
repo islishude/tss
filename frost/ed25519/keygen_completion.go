@@ -26,7 +26,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	for _, id := range s.cfg.Parties {
 		d := s.partyData[id]
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		if err := edcurve.VerifyScalarShare(d.commitments, s.cfg.Self, d.share); err != nil {
+		if err := d.commitments.VerifyShare(s.cfg.Self, d.share); err != nil {
 			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", id,
@@ -35,7 +35,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: id,
-				Blame: frostKeygenBlame(s.cfg, id, d.commitments),
+				Blame: frostKeygenBlame(s.cfg, id, d.commitments.BytesList()),
 				Err:   err,
 			}
 		}
@@ -48,31 +48,32 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	groupCommitments := make([][]byte, s.cfg.Threshold)
+	groupPoints := make([]*fed.Point, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*fed.Point, 0, len(s.cfg.Parties))
 		for _, id := range s.cfg.Parties {
-			p, err := edcurve.PointFromBytesAllowIdentity(s.partyData[id].commitments[degree])
+			p, err := s.partyData[id].commitments.PointAt(degree)
 			if err != nil {
 				return nil, err
 			}
 			points = append(points, p)
 		}
 		// Summing same-degree commitments yields the public polynomial for the group secret.
-		groupCommitments[degree] = edcurve.AddPoints(points...).Bytes()
+		groupPoints[degree] = edcurve.AddPoints(points...)
 	}
-	if _, err := edcurve.PointFromBytes(groupCommitments[0]); err != nil {
+	groupCommitments, err := newGroupCommitmentsFromPoints(groupPoints, s.cfg.Threshold)
+	if err != nil {
 		return nil, fmt.Errorf("invalid group public key: %w", err)
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		pub, err := edcurve.EvalCommitments(groupCommitments, id)
+		pub, err := groupCommitments.Eval(id)
 		if err != nil {
 			return nil, err
 		}
-		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
-		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
+		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
+		partyData[id] = keySharePartyData{verificationShare: pub}
 	}
 	// Chain code commitment binds the aggregate of all round-1 chain code
 	// commitments into the transcript. Individual chain codes are revealed
@@ -87,17 +88,17 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	dealerCommits := make(map[tss.PartyID][][]byte, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		dealerCommits[id] = s.partyData[id].commitments
+		dealerCommits[id] = s.partyData[id].commitments.BytesList()
 	}
-	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, dealerCommits, groupCommitments, verificationShares)
+	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, dealerCommits, groupCommitments.BytesList(), verificationShares)
 	share := &KeyShare{state: &keyShareState{
 		party:                s.cfg.Self,
 		threshold:            s.cfg.Threshold,
 		parties:              s.cfg.Parties.Clone(),
-		publicKey:            append([]byte(nil), groupCommitments[0]...),
+		publicKey:            groupCommitments.PublicKey(),
 		chainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
 		secret:               secretScalar,
-		groupCommitments:     groupCommitments,
+		groupCommitments:     groupCommitments.Clone(),
 		partyData:            partyData,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: keygenTranscriptHash,
@@ -143,22 +144,4 @@ func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet
 		}
 	}
 	return true
-}
-
-func validateCommitments(commitments [][]byte, threshold int) error {
-	if len(commitments) != threshold {
-		return fmt.Errorf("got %d commitments, want %d", len(commitments), threshold)
-	}
-	for i, commitment := range commitments {
-		if i == 0 {
-			if _, err := edcurve.PointFromBytes(commitment); err != nil {
-				return err
-			}
-			continue
-		}
-		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
-			return err
-		}
-	}
-	return nil
 }

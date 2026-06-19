@@ -133,10 +133,10 @@ func (p *nonceCommitment) UnmarshalBinaryWithLimits(in []byte, limits Limits) er
 
 // Validate checks the nonce commitment payload structure.
 func (p nonceCommitment) Validate() error {
-	if _, err := edcurve.PointFromBytes(p.D); err != nil {
+	if _, err := p.D.MarshalWireValue(); err != nil {
 		return err
 	}
-	if _, err := edcurve.PointFromBytes(p.E); err != nil {
+	if _, err := p.E.MarshalWireValue(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -176,7 +176,7 @@ func (p *signPartialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 
 // Validate checks the partial signature payload structure.
 func (p signPartialPayload) Validate() error {
-	if _, err := edcurve.ScalarFromCanonical(p.Z); err != nil {
+	if _, err := p.Z.MarshalWireValue(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {

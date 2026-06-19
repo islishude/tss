@@ -33,7 +33,7 @@ func (s *SignSession) abort() {
 		return
 	}
 	s.aborted = true
-	s.clearNonceBytes()
+	s.clearNonceScalars()
 	if s.deltaScalar != nil {
 		s.deltaScalar.Set(fed.NewScalar())
 	}

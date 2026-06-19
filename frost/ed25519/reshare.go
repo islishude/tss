@@ -21,22 +21,22 @@ const (
 // The group public key is preserved through Lagrange-weighted constant terms.
 type ReshareSession struct {
 	mu           sync.Mutex
-	oldKey       *KeyShare    // Caller-owned old share for dealers; nil for recipient-only participants.
-	oldPublicKey []byte       // Existing parent group public key that must be preserved.
-	chainCode    []byte       // Existing HD chain code that must be preserved.
-	oldParties   tss.PartySet // Canonical dealer set of old key holders.
-	newParties   tss.PartySet // Canonical target key-holder set.
-	newThreshold int          // Target signing threshold.
-	isRecipient  bool         // Whether this party receives and assembles a new share.
-	selfID       tss.PartyID  // Local party ID for envelope recipient/sender checks.
-	refreshMode  bool         // True for same-party zero-constant-term refresh.
-	planHash     []byte       // Digest every reshare payload must echo.
+	oldKey       *KeyShare      // Caller-owned old share for dealers; nil for recipient-only participants.
+	oldPublicKey publicKeyPoint // Existing parent group public key that must be preserved.
+	chainCode    []byte         // Existing HD chain code that must be preserved.
+	oldParties   tss.PartySet   // Canonical dealer set of old key holders.
+	newParties   tss.PartySet   // Canonical target key-holder set.
+	newThreshold int            // Target signing threshold.
+	isRecipient  bool           // Whether this party receives and assembles a new share.
+	selfID       tss.PartyID    // Local party ID for envelope recipient/sender checks.
+	refreshMode  bool           // True for same-party zero-constant-term refresh.
+	planHash     []byte         // Digest every reshare payload must echo.
 
-	cfg     tss.ThresholdConfig         // Local threshold runtime view for this role.
-	log     tss.Logger                  // Optional protocol logger.
-	limits  Limits                      // Local fail-closed resource policy.
-	commits map[tss.PartyID][][]byte    // Public dealer polynomial commitments by dealer.
-	shares  map[tss.PartyID]*fed.Scalar // Secret dealer contributions received by this receiver.
+	cfg     tss.ThresholdConfig                // Local threshold runtime view for this role.
+	log     tss.Logger                         // Optional protocol logger.
+	limits  Limits                             // Local fail-closed resource policy.
+	commits map[tss.PartyID]reshareCommitments // Public dealer polynomial commitments by dealer.
+	shares  map[tss.PartyID]*fed.Scalar        // Secret dealer contributions received by this receiver.
 
 	completed bool               // Terminal success flag after newShare is available.
 	aborted   bool               // Terminal failure/destruction flag.
@@ -117,7 +117,7 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 	if oldKey == nil || oldKey.state == nil {
 		return errors.New("nil old key share")
 	}
-	if !bytes.Equal(plan.state.oldPublicKey, oldKey.state.publicKey) {
+	if !plan.state.oldPublicKey.Equal(oldKey.state.publicKey) {
 		return errors.New("old key public key does not match reshare plan")
 	}
 	if !bytes.Equal(plan.state.oldChainCode, oldKey.state.chainCode) {
@@ -190,14 +190,17 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitments := make([][]byte, len(poly))
+	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
-		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
-		commitments[i] = point.Bytes()
+		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
+	}
+	commitments, err := newReshareCommitmentsFromPoints(commitmentPoints, newThreshold)
+	if err != nil {
+		return nil, nil, err
 	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
-		oldPublicKey: bytes.Clone(oldKey.state.publicKey),
+		oldPublicKey: oldKey.state.publicKey.Clone(),
 		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   oldParties,
 		newParties:   newParties,
@@ -208,11 +211,11 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		log:          config.Logger(),
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
-		commits:      map[tss.PartyID][][]byte{oldKey.state.party: commitments},
+		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash}, limits)
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.BytesList(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -275,7 +278,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 	config.Parties = plan.state.oldParties.Clone()
 	config.Threshold = len(plan.state.oldParties)
 	return &ReshareSession{
-		oldPublicKey: append([]byte(nil), plan.state.oldPublicKey...),
+		oldPublicKey: plan.state.oldPublicKey.Clone(),
 		chainCode:    append([]byte(nil), plan.state.oldChainCode...),
 		oldParties:   plan.state.oldParties.Clone(),
 		newParties:   plan.state.newParties.Clone(),
@@ -286,7 +289,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		log:          config.Logger(),
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
-		commits:      make(map[tss.PartyID][][]byte),
+		commits:      make(map[tss.PartyID]reshareCommitments),
 		shares:       make(map[tss.PartyID]*fed.Scalar),
 		guard:        guard,
 	}, nil
@@ -316,7 +319,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if config.Self != oldKey.state.party {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
-	if plan.state.threshold != oldKey.state.threshold || !bytes.Equal(plan.state.publicKey, oldKey.state.publicKey) || !bytes.Equal(plan.state.chainCode, oldKey.state.chainCode) || !slices.Equal(plan.state.parties, oldKey.state.parties) {
+	if plan.state.threshold != oldKey.state.threshold || !plan.state.publicKey.Equal(oldKey.state.publicKey) || !bytes.Equal(plan.state.chainCode, oldKey.state.chainCode) || !slices.Equal(plan.state.parties, oldKey.state.parties) {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("refresh plan does not match old key share"))
 	}
 	planHash, err := plan.Digest()
@@ -335,14 +338,17 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitments := make([][]byte, len(poly))
+	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
-		point := fed.NewIdentityPoint().ScalarBaseMult(coeff)
-		commitments[i] = point.Bytes()
+		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
+	}
+	commitments, err := newReshareCommitmentsFromPoints(commitmentPoints, oldKey.state.threshold)
+	if err != nil {
+		return nil, nil, err
 	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
-		oldPublicKey: bytes.Clone(oldKey.state.publicKey),
+		oldPublicKey: oldKey.state.publicKey.Clone(),
 		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   parties,
 		newParties:   parties,
@@ -354,11 +360,11 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		log:          config.Logger(),
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
-		commits:      map[tss.PartyID][][]byte{oldKey.state.party: commitments},
+		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments, PlanHash: planHash}, limits)
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.BytesList(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -427,16 +433,17 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		if err := validateReshareCommitments(p.Commitments, s.newThreshold); err != nil {
+		commitments, err := newReshareCommitmentsFromBytesList(p.Commitments, s.newThreshold)
+		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
 		if existing, ok := s.commits[base.From]; ok {
-			if equalByteSlices(existing, p.Commitments) {
+			if existing.Equal(commitments) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare commitments"))
 		}
-		s.commits[base.From] = p.Commitments
+		s.commits[base.From] = commitments
 	case payloadReshareShare:
 		p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](payload, s.limits)
 		if err != nil {

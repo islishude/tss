@@ -5,7 +5,6 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -52,7 +51,7 @@ func (v *VerificationShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) 
 	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
-	*v = decoded
+	*v = decoded.Clone()
 	return nil
 }
 
@@ -61,7 +60,7 @@ func (v VerificationShare) Validate() error {
 	if v.Party == tss.BroadcastPartyId {
 		return errors.New("verification share: zero party")
 	}
-	if _, err := edcurve.PointFromBytesAllowIdentity(v.PublicKey); err != nil {
+	if err := v.PublicKey.Validate(); err != nil {
 		return fmt.Errorf("verification share: invalid public key: %w", err)
 	}
 	return nil
@@ -69,8 +68,9 @@ func (v VerificationShare) Validate() error {
 
 // ValidateWithLimits checks the verification share with resource limits.
 func (v VerificationShare) ValidateWithLimits(limits Limits) error {
-	if len(v.PublicKey) > limits.Curve.MaxPointBytes {
-		return fmt.Errorf("verification share public key too large: %d > %d", len(v.PublicKey), limits.Curve.MaxPointBytes)
+	publicKey := v.PublicKey.Bytes()
+	if len(publicKey) > limits.Curve.MaxPointBytes {
+		return fmt.Errorf("verification share public key too large: %d > %d", len(publicKey), limits.Curve.MaxPointBytes)
 	}
 	return v.Validate()
 }
