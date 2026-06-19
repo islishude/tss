@@ -8,6 +8,12 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
+/*
+Note:
+secret.Scalar is used here as a fixed-size redacted byte container;
+the bytes remain Ed25519 canonical scalar encoding.
+*/
+
 func newEdSecretScalar(data []byte) (*secret.Scalar, error) {
 	if _, err := edcurve.ScalarFromCanonical(data); err != nil {
 		return nil, err

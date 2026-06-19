@@ -55,7 +55,13 @@ func (p keygenCommitmentsPayload) Validate() error {
 		return fmt.Errorf("keygen commitments plan hash must be 32 bytes")
 	}
 	for i, commitment := range p.Commitments {
-		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
+		var err error
+		if i == 0 {
+			_, err = edcurve.PointFromBytes(commitment)
+		} else {
+			_, err = edcurve.PointFromBytesAllowIdentity(commitment)
+		}
+		if err != nil {
 			return fmt.Errorf("invalid keygen commitment %d: %w", i, err)
 		}
 	}
