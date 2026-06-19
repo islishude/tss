@@ -193,6 +193,9 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if k == nil || k.state == nil {
 		return errors.New("nil key share")
 	}
+	if !k.state.keygenSessionID.Valid() {
+		return errors.New("key share has no keygen/lifecycle session id")
+	}
 	if k.state.threshold <= 0 || k.state.threshold > len(k.state.parties) {
 		return errors.New("invalid threshold")
 	}

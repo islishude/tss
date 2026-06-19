@@ -26,7 +26,7 @@ type keyShareWire struct {
 	Secret               *secret.Scalar                        `wire:"6,custom,len=32"`
 	GroupCommitments     [][]byte                              `wire:"7,byteslist,max_bytes=point,max_items=threshold"`
 	PartyData            map[tss.PartyID]keySharePartyDataWire `wire:"8,map,max_items=parties"`
-	KeygenSessionID      []byte                                `wire:"9,bytes,len=32"`
+	KeygenSessionID      tss.SessionID                         `wire:"9,bytes,len=32"`
 	KeygenTranscriptHash []byte                                `wire:"10,bytes"`
 	PlanHash             []byte                                `wire:"11,bytes,len=32"`
 }
@@ -62,17 +62,13 @@ func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 		Secret:               k.state.secret,
 		GroupCommitments:     k.state.groupCommitments.BytesList(),
 		PartyData:            partyData,
-		KeygenSessionID:      k.state.keygenSessionID[:],
+		KeygenSessionID:      k.state.keygenSessionID,
 		KeygenTranscriptHash: k.state.keygenTranscriptHash,
 		PlanHash:             k.state.planHash,
 	}, nil
 }
 
 func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
-	sid, err := tss.SessionIDFromBytes(w.KeygenSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("keygen session id: %w", err)
-	}
 	if _, err := edScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
@@ -122,7 +118,7 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 		secret:               w.Secret,
 		groupCommitments:     groupCommitments,
 		partyData:            partyData,
-		keygenSessionID:      sid,
+		keygenSessionID:      w.KeygenSessionID,
 		keygenTranscriptHash: w.KeygenTranscriptHash,
 		planHash:             w.PlanHash,
 	}, nil
