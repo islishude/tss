@@ -98,7 +98,7 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 		var confirmation *KeygenConfirmation
 		if len(wireData.KeygenConfirmation) > 0 {
 			var err error
-			confirmation, err = UnmarshalKeygenConfirmation(wireData.KeygenConfirmation)
+			confirmation, err = tss.DecodeBinary[KeygenConfirmation](wireData.KeygenConfirmation)
 			if err != nil {
 				return nil, fmt.Errorf("decode keygen confirmation for party %d: %w", id, err)
 			}

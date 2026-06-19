@@ -129,12 +129,6 @@ func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(c)
 }
 
-// UnmarshalKeygenConfirmation decodes a canonical TLV keygen confirmation.
-// wire.Unmarshal calls Validate via the Validator interface.
-func UnmarshalKeygenConfirmation(in []byte) (*KeygenConfirmation, error) {
-	return tss.DecodeBinary[KeygenConfirmation](in)
-}
-
 // UnmarshalBinary decodes a canonical TLV keygen confirmation.
 func (c *KeygenConfirmation) UnmarshalBinary(in []byte) error {
 	var decoded KeygenConfirmation
@@ -289,7 +283,7 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("keygen confirmation in wrong round"))
 	}
-	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	confirmation, err := tss.DecodeBinary[KeygenConfirmation](env.Payload)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

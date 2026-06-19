@@ -1,6 +1,7 @@
 package secp256k1
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"sync"
@@ -58,6 +59,16 @@ type KeygenSession struct {
 	pending        *KeyShare                        // Completed but not yet confirmed key share.
 	keyShare       *KeyShare                        // Confirmed key share retained by the session.
 	guard          *tss.EnvelopeGuard               // Transport replay, identity, and policy guard.
+}
+
+// GetChainCodeCommitByPartyId gets a copy of chainCodeCommit by partyId
+// It returns nil if the id doesn't exist
+func (s *KeygenSession) GetChainCodeCommitByPartyId(id tss.PartyID) []byte {
+	data, err := s.partyEntry(id)
+	if err == nil {
+		return bytes.Clone(data.chainCodeCommit)
+	}
+	return nil
 }
 
 type keygenCommitmentsPayload struct {

@@ -15,6 +15,11 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
+const (
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
+)
+
 // keygenPartyData holds all per-party DKG state for a single participant.
 // All fields other than confirmation are populated during round 1;
 // confirmation is set during round 2 after the chain code is revealed.
@@ -40,6 +45,16 @@ type KeygenSession struct {
 	ownPoly     []*fed.Scalar                    // Local random polynomial coefficients; secret-bearing.
 	ownMessages []tss.Envelope                   // Secret outbound share envelopes retained until completion.
 	guard       *tss.EnvelopeGuard               // Transport replay, identity, and policy guard.
+}
+
+// GetChainCodeCommitByPartyId gets a copy of chainCodeCommit by partyId
+// It returns nil if the id doesn't exist
+func (s *KeygenSession) GetChainCodeCommitByPartyId(id tss.PartyID) []byte {
+	data, err := s.partyEntry(id)
+	if err == nil {
+		return bytes.Clone(data.chainCodeCommit)
+	}
+	return nil
 }
 
 type keygenCommitmentsPayload struct {
@@ -134,7 +149,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := newEnvelope(config, 1, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, keygenStartRound, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -150,7 +165,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			return nil, nil, err
 		}
 		// Shamir shares are secret-bearing and must be delivered over a confidential transport.
-		shareEnv, err := newEnvelope(config, 1, config.Self, id, payloadKeygenShare, payload)
+		shareEnv, err := newEnvelope(config, keygenStartRound, config.Self, id, payloadKeygenShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -198,13 +213,13 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 	if base.PayloadType == payloadKeygenConfirmation {
 		return s.handleKeygenConfirmation(base)
 	}
-	if base.Round != 1 {
+	if base.Round != keygenStartRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
 	}
 	payload := base.Payload
 	switch base.PayloadType {
 	case payloadKeygenCommitments:
-		p, err := tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](payload, s.limits)
+		p, err := tss.DecodeBinaryWithLimits[keygenCommitmentsPayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -230,7 +245,7 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		}
 		pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
 	case payloadKeygenShare:
-		p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](payload, s.limits)
+		p, err := tss.DecodeBinaryWithLimits[keygenSharePayload](payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
@@ -270,8 +285,6 @@ func (s *KeygenSession) KeyShare() (*KeyShare, bool) {
 	}
 	return cloneKeyShareValue(s.keyShare), true
 }
-
-const keygenConfirmationRound = 2
 
 func (s *KeygenSession) abort() {
 	if s == nil {

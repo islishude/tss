@@ -126,7 +126,7 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 			t.Fatal(err)
 		}
 		data := w.PartyData[1]
-		confirmation, err := UnmarshalKeygenConfirmation(data.KeygenConfirmation)
+		confirmation, err := tss.DecodeBinary[KeygenConfirmation](data.KeygenConfirmation)
 		if err != nil {
 			t.Fatal(err)
 		}
