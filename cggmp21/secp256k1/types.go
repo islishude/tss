@@ -223,7 +223,6 @@ func (in keySharePartyData) Clone() keySharePartyData {
 }
 
 type keyShareState struct {
-	securityParams         SecurityParams                    // Cryptographic profile used to create this share.
 	party                  tss.PartyID                       // Local owner of the secret signing share.
 	threshold              int                               // Number of signers required for CGGMP21 signing.
 	parties                tss.PartySet                      // Canonical full participant set for the group key.
@@ -235,12 +234,13 @@ type keyShareState struct {
 	paillierPrivateKey     *pai.PrivateKey                   // Local Paillier private key; secret-bearing.
 	paillierProofSessionID tss.SessionID                     // Session ID bound into local Paillier proof transcripts.
 	paillierProofDomain    string                            // Domain label bound into local Paillier proof transcripts.
-	resharePlanHash        []byte                            // Reshare plan digest when this share came from reshare.
 	shareProof             []byte                            // Public proof binding a reshare receiver's share to commitments.
-	planHash               []byte                            // Lifecycle plan digest that authorized this key share.
 	keygenTranscriptHash   []byte                            // Transcript hash of the completed keygen or reshare confirmation.
+	planHash               []byte                            // Lifecycle plan digest that authorized this key share.
+	resharePlanHash        []byte                            // Reshare plan digest when this share came from reshare.
 	logCiphertext          []byte                            // Public ciphertext used by auxiliary logarithm proofs.
 	logProof               []byte                            // Public proof for the auxiliary logarithm statement.
+	securityParams         SecurityParams                    // Cryptographic profile used to create this share.
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer

@@ -30,15 +30,15 @@ type keyShareWire struct {
 	Secret                 *secret.Scalar                        `wire:"6,custom,len=32"`
 	GroupCommitments       [][]byte                              `wire:"7,byteslist,max_bytes=point,max_items=threshold"`
 	PartyData              map[tss.PartyID]keySharePartyDataWire `wire:"8,map,max_items=parties"`
-	PaillierPrivateKey     []byte                                `wire:"9,bytes,max_bytes=paillier_private_key"`
+	PaillierPrivateKey     *pai.PrivateKey                       `wire:"9,custom,max_bytes=paillier_private_key"`
+	PaillierProofSessionID tss.SessionID                         `wire:"12,bytes,len=32"`
+	PaillierProofDomain    string                                `wire:"13,string"`
 	ShareProof             []byte                                `wire:"10,bytes,max_bytes=zk_proof"`
 	KeygenTranscriptHash   []byte                                `wire:"11,bytes"`
-	PaillierProofSessionID []byte                                `wire:"12,bytes,len=32"`
-	PaillierProofDomain    string                                `wire:"13,string"`
+	PlanHash               []byte                                `wire:"17,bytes,len=32"`
+	ResharePlanHash        []byte                                `wire:"16,bytes"`
 	LogCiphertext          []byte                                `wire:"14,bytes,max_bytes=paillier_ciphertext"`
 	LogProof               []byte                                `wire:"15,bytes,max_bytes=zk_proof"`
-	ResharePlanHash        []byte                                `wire:"16,bytes"`
-	PlanHash               []byte                                `wire:"17,bytes,len=32"`
 	SecurityParams         SecurityParams                        `wire:"18,record"`
 }
 
@@ -122,10 +122,6 @@ func keySharePartyDataFromWire(id tss.PartyID, w keySharePartyDataWire, limits L
 
 func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 	limits := DefaultLimits()
-	paillierPrivateKey, err := k.state.paillierPrivateKey.MarshalBinary()
-	if err != nil {
-		return nil, fmt.Errorf("encode Paillier private key: %w", err)
-	}
 	partyData := make(map[tss.PartyID]keySharePartyDataWire, len(k.state.partyData))
 	for id, data := range k.state.partyData {
 		wireData, err := keySharePartyDataWireFromState(id, data, limits)
@@ -143,15 +139,15 @@ func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 		Secret:                 k.state.secret,
 		GroupCommitments:       k.state.groupCommitments,
 		PartyData:              partyData,
-		PaillierPrivateKey:     paillierPrivateKey,
+		PaillierPrivateKey:     k.state.paillierPrivateKey,
+		PaillierProofSessionID: k.state.paillierProofSessionID,
+		PaillierProofDomain:    k.state.paillierProofDomain,
 		ShareProof:             k.state.shareProof,
 		KeygenTranscriptHash:   k.state.keygenTranscriptHash,
-		PaillierProofSessionID: k.state.paillierProofSessionID[:],
-		PaillierProofDomain:    k.state.paillierProofDomain,
+		PlanHash:               k.state.planHash,
+		ResharePlanHash:        k.state.resharePlanHash,
 		LogCiphertext:          k.state.logCiphertext,
 		LogProof:               k.state.logProof,
-		ResharePlanHash:        k.state.resharePlanHash,
-		PlanHash:               k.state.planHash,
 		SecurityParams:         k.state.securityParams,
 	}, nil
 }
@@ -160,14 +156,6 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 	limits := DefaultLimits()
 	if _, err := secpScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
-	}
-	sid, err := tss.SessionIDFromBytes(w.PaillierProofSessionID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid paillier proof session id: %w", err)
-	}
-	paillierPrivateKey, err := pai.UnmarshalPrivateKey(w.PaillierPrivateKey)
-	if err != nil {
-		return nil, fmt.Errorf("invalid Paillier private key: %w", err)
 	}
 	if len(w.PartyData) != len(w.Parties) {
 		return nil, fmt.Errorf("party data count %d != party count %d", len(w.PartyData), len(w.Parties))
@@ -205,10 +193,10 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 		secret:                 w.Secret,
 		groupCommitments:       w.GroupCommitments,
 		partyData:              partyData,
-		paillierPrivateKey:     paillierPrivateKey,
+		paillierPrivateKey:     w.PaillierPrivateKey,
 		shareProof:             w.ShareProof,
 		keygenTranscriptHash:   w.KeygenTranscriptHash,
-		paillierProofSessionID: sid,
+		paillierProofSessionID: w.PaillierProofSessionID,
 		paillierProofDomain:    w.PaillierProofDomain,
 		logCiphertext:          w.LogCiphertext,
 		logProof:               w.LogProof,

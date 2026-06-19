@@ -11,6 +11,11 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+var (
+	_ wire.ValueMarshaler   = (*PrivateKey)(nil)
+	_ wire.ValueUnmarshaler = (*PrivateKey)(nil)
+)
+
 // MarshalBinary returns a deterministic TLV public-key record.
 // wire.Marshal calls Validate via the Validator interface.
 func (pk PublicKey) MarshalBinary() ([]byte, error) {
@@ -100,6 +105,15 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(privateKeyWire{N: n, G: g, Lambda: lambda, Mu: mu, P: p, Q: q})
 }
 
+// MarshalWireValue returns the canonical private-key message encoding for use
+// as an opaque custom field in a containing wire message.
+func (sk *PrivateKey) MarshalWireValue() ([]byte, error) {
+	if sk == nil {
+		return nil, errors.New("nil Paillier private key")
+	}
+	return sk.MarshalBinary()
+}
+
 // UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
 func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
 	sk := new(PrivateKey)
@@ -184,6 +198,15 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 	}
 	*sk = decoded
 	return nil
+}
+
+// UnmarshalWireValue decodes a canonical private-key message from an opaque
+// custom field in a containing wire message.
+func (sk *PrivateKey) UnmarshalWireValue(in []byte) error {
+	if sk == nil {
+		return errors.New("nil Paillier private key")
+	}
+	return sk.UnmarshalBinary(in)
 }
 
 func encodePositiveSecretScalar(x *secret.Scalar) ([]byte, error) {

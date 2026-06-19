@@ -10,6 +10,18 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+type privateKeyCustomFieldMessage struct {
+	PrivateKey *PrivateKey `wire:"1,custom,max_bytes=paillier_private_key"`
+}
+
+func (privateKeyCustomFieldMessage) WireType() string {
+	return "test.paillier.private-key-custom-field"
+}
+
+func (privateKeyCustomFieldMessage) WireVersion() uint16 {
+	return 1
+}
+
 func TestMarshalRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -52,6 +64,66 @@ func TestMarshalRoundTrip(t *testing.T) {
 	}
 	if priv.N.Cmp(sk.N) != 0 || !priv.Lambda.Equal(sk.Lambda) || !priv.Mu.Equal(sk.Mu) {
 		t.Fatal("private key mismatch after round trip")
+	}
+}
+
+func TestPrivateKeyCustomWireValueRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want, err := sk.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	custom, err := sk.MarshalWireValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(custom, want) {
+		t.Fatal("custom private-key field encoding differs from MarshalBinary")
+	}
+
+	limits := wire.FieldLimits{"paillier_private_key": len(want)}
+	raw, err := wire.Marshal(
+		privateKeyCustomFieldMessage{PrivateKey: sk},
+		wire.WithFieldLimitsForMarshal(limits),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded privateKeyCustomFieldMessage
+	if err := wire.Unmarshal(raw, &decoded, wire.WithFieldLimits(limits)); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.PrivateKey == nil {
+		t.Fatal("custom private-key field was not allocated")
+	}
+	if decoded.PrivateKey.N.Cmp(sk.N) != 0 ||
+		!decoded.PrivateKey.Lambda.Equal(sk.Lambda) ||
+		!decoded.PrivateKey.Mu.Equal(sk.Mu) ||
+		!decoded.PrivateKey.P.Equal(sk.P) ||
+		!decoded.PrivateKey.Q.Equal(sk.Q) {
+		t.Fatal("custom private-key field mismatch after round trip")
+	}
+}
+
+func TestPrivateKeyCustomWireValueRejectsInvalidInput(t *testing.T) {
+	t.Parallel()
+
+	var nilKey *PrivateKey
+	if _, err := nilKey.MarshalWireValue(); err == nil {
+		t.Fatal("nil private key custom marshal succeeded")
+	}
+	if err := nilKey.UnmarshalWireValue([]byte{1}); err == nil {
+		t.Fatal("nil private key custom unmarshal succeeded")
+	}
+
+	var decoded PrivateKey
+	if err := decoded.UnmarshalWireValue([]byte(`{"private_key":true}`)); err == nil {
+		t.Fatal("custom private-key field accepted non-wire input")
 	}
 }
 
