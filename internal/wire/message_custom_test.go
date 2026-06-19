@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 )
 
@@ -232,6 +233,189 @@ func TestCustomFieldConstraintSuccessScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 	})
+}
+
+func TestCustomFieldMaxItems(t *testing.T) {
+	t.Parallel()
+
+	t.Run("marshal and decode within limit", func(t *testing.T) {
+		t.Parallel()
+
+		limits := FieldLimits{"items": 2}
+		orig := customMaxItemsMessage{
+			Data: customCountedList{items: [][]byte{{1}, {2}}},
+		}
+		raw, err := Marshal(orig, WithFieldLimitsForMarshal(limits))
+		if err != nil {
+			t.Fatal(err)
+		}
+
+		var decoded customMaxItemsMessage
+		if err := Unmarshal(raw, &decoded, WithFieldLimits(limits)); err != nil {
+			t.Fatal(err)
+		}
+		if len(decoded.Data.items) != 2 ||
+			!bytes.Equal(decoded.Data.items[0], []byte{1}) ||
+			!bytes.Equal(decoded.Data.items[1], []byte{2}) {
+			t.Fatalf("decoded items mismatch: %x", decoded.Data.items)
+		}
+	})
+
+	t.Run("marshal rejects count over field limit", func(t *testing.T) {
+		t.Parallel()
+
+		_, err := Marshal(
+			customMaxItemsMessage{
+				Data: customCountedList{items: [][]byte{{1}, {2}, {3}}},
+			},
+			WithFieldLimitsForMarshal(FieldLimits{"items": 2}),
+		)
+		if err == nil {
+			t.Fatal("expected max_items error")
+		}
+		if !strings.Contains(err.Error(), "custom item count") ||
+			!strings.Contains(err.Error(), "exceeds max_items") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("decode rejects count before custom unmarshal", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(
+			1,
+			"test.custom.maxitems.panic",
+			[]Field{{Tag: 1, Value: EncodeBytesList([][]byte{{1}, {2}, {3}})}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded panicCustomMaxItemsMessage
+		err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"items": 2}))
+		if err == nil {
+			t.Fatal("expected max_items error")
+		}
+		if !strings.Contains(err.Error(), "custom item count") ||
+			!strings.Contains(err.Error(), "exceeds max_items") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("decode rejects malformed count prefix", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(
+			1,
+			"test.custom.maxitems",
+			[]Field{{Tag: 1, Value: []byte{1, 2}}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded customMaxItemsMessage
+		err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"items": 2}))
+		if err == nil {
+			t.Fatal("expected malformed count error")
+		}
+		if !strings.Contains(err.Error(), "custom item count") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+
+	t.Run("custom without max_items remains opaque", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(
+			1,
+			"test.custom.valrecv",
+			[]Field{{Tag: 1, Value: []byte{1, 2}}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded customValueReceiverMessage
+		if err := Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(decoded.Data.raw, []byte{1, 2}) {
+			t.Fatalf("decoded raw mismatch: %x", decoded.Data.raw)
+		}
+	})
+
+	t.Run("optional custom may be absent without limits", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := Marshal(optionalCustomMaxItemsMessage{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded optionalCustomMaxItemsMessage
+		if err := Unmarshal(raw, &decoded); err != nil {
+			t.Fatal(err)
+		}
+		if decoded.Data != nil {
+			t.Fatal("absent optional custom field decoded as present")
+		}
+	})
+
+	t.Run("optional custom present still enforces limit", func(t *testing.T) {
+		t.Parallel()
+
+		raw, err := MarshalFields(
+			1,
+			"test.custom.maxitems.optional",
+			[]Field{{Tag: 1, Value: EncodeBytesList([][]byte{{1}, {2}, {3}})}},
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded optionalCustomMaxItemsMessage
+		err = Unmarshal(raw, &decoded, WithFieldLimits(FieldLimits{"items": 2}))
+		if err == nil {
+			t.Fatal("expected max_items error")
+		}
+		if !strings.Contains(err.Error(), "custom item count") ||
+			!strings.Contains(err.Error(), "exceeds max_items") {
+			t.Fatalf("unexpected error: %v", err)
+		}
+	})
+}
+
+func TestCustomFieldMaxItemsRejectsGlobalCount(t *testing.T) {
+	t.Parallel()
+
+	count := uint32(maxRecordCount + 1)
+	limits := FieldLimits{"items": maxRecordCount + 2}
+
+	_, err := Marshal(
+		rawCustomMaxItemsMessage{Data: customBytes{raw: Uint32(count)}},
+		WithFieldLimitsForMarshal(limits),
+	)
+	if err == nil {
+		t.Fatal("marshal accepted custom count over global limit")
+	}
+	if !strings.Contains(err.Error(), "custom item count") ||
+		!strings.Contains(err.Error(), "exceeds global limit") {
+		t.Fatalf("unexpected marshal error: %v", err)
+	}
+
+	raw, err := MarshalFields(
+		1,
+		"test.custom.maxitems.panic",
+		[]Field{{Tag: 1, Value: Uint32(count)}},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded panicCustomMaxItemsMessage
+	err = Unmarshal(raw, &decoded, WithFieldLimits(limits))
+	if err == nil {
+		t.Fatal("decode accepted custom count over global limit")
+	}
+	if !strings.Contains(err.Error(), "custom item count") ||
+		!strings.Contains(err.Error(), "exceeds global limit") {
+		t.Fatalf("unexpected decode error: %v", err)
+	}
 }
 
 func TestCustomFieldOrdering(t *testing.T) {

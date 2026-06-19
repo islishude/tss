@@ -168,6 +168,50 @@ func (fs fieldSchema) checkByteLimits(raw []byte, limitSet FieldLimits) error {
 	return nil
 }
 
+// checkCustomItemLimit validates the leading uint32 item count for custom
+// fields that declare max_items. The custom payload body remains opaque to the
+// wire package.
+func (fs fieldSchema) checkCustomItemLimit(raw []byte, limitSet FieldLimits) error {
+	if fs.maxItems == "" {
+		return nil
+	}
+
+	count, _, err := ReadUint32(raw, 0)
+	if err != nil {
+		return fmt.Errorf("wire: field %s tag %d custom item count: %w", fs.name, fs.tag, err)
+	}
+	if uint64(count) > uint64(maxRecordCount) {
+		return fmt.Errorf(
+			"wire: field %s tag %d custom item count %d exceeds global limit %d",
+			fs.name,
+			fs.tag,
+			count,
+			maxRecordCount,
+		)
+	}
+
+	maxItems, err := fs.getLimit(fs.maxItems, limitSet)
+	if err != nil {
+		return fmt.Errorf(
+			"wire: field %s tag %d custom item count max_items=%s: %w",
+			fs.name,
+			fs.tag,
+			fs.maxItems,
+			err,
+		)
+	}
+	if uint64(count) > uint64(maxItems) {
+		return fmt.Errorf(
+			"wire: field %s tag %d custom item count %d exceeds max_items=%d",
+			fs.name,
+			fs.tag,
+			count,
+			maxItems,
+		)
+	}
+	return nil
+}
+
 // ---- bit limit checks ---------------------------------------------------------
 
 // checkBitsLimit validates the bit length of a decoded big integer or the

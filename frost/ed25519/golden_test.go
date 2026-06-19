@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testvectors"
@@ -75,8 +76,12 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	commitments, err := newKeygenCommitmentsFromPoints([]*fed.Point{point}, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
 	payload := keygenCommitmentsPayload{
-		Commitments:     [][]byte{point.Bytes()},
+		Commitments:     commitments,
 		ChainCodeCommit: bytes.Repeat([]byte{0x91}, 32),
 		PlanHash:        bytes.Repeat([]byte{0x90}, 32),
 	}

@@ -391,7 +391,7 @@ func (fs fieldSchema) decodeNested(fv reflect.Value, raw []byte, limitSet FieldL
 
 // encodeCustom encodes a field value that implements ValueMarshaler.
 // It handles nil pointer rejection, interface dispatch (value or pointer
-// receiver), nil return rejection, and byte-limit validation.
+// receiver), nil return rejection, and byte/item-limit validation.
 func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	if fv.Kind() == reflect.Pointer && fv.IsNil() {
 		return nil, fmt.Errorf("wire: nil custom field %s", fs.name)
@@ -413,15 +413,22 @@ func (fs fieldSchema) encodeCustom(fv reflect.Value, limitSet FieldLimits) ([]by
 	if err := fs.checkByteLimits(out, limitSet); err != nil {
 		return nil, err
 	}
+	if err := fs.checkCustomItemLimit(out, limitSet); err != nil {
+		return nil, err
+	}
 	return out, nil
 }
 
 // decodeCustom decodes raw bytes into a field value that implements
-// ValueUnmarshaler. It validates byte limits first, auto-allocates nil
-// pointers, dispatches to the interface (value or pointer receiver), and
-// requires the implementation to copy the input bytes.
+// ValueUnmarshaler. It validates byte and declared item limits before
+// auto-allocating nil pointers or invoking custom code, dispatches to the
+// interface (value or pointer receiver), and requires the implementation to
+// copy the input bytes.
 func (fs fieldSchema) decodeCustom(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
 	if err := fs.checkByteLimits(raw, limitSet); err != nil {
+		return err
+	}
+	if err := fs.checkCustomItemLimit(raw, limitSet); err != nil {
 		return err
 	}
 

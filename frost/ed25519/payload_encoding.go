@@ -54,16 +54,8 @@ func (p keygenCommitmentsPayload) Validate() error {
 	if len(p.PlanHash) != sha256.Size {
 		return fmt.Errorf("keygen commitments plan hash must be 32 bytes")
 	}
-	for i, commitment := range p.Commitments {
-		var err error
-		if i == 0 {
-			_, err = edcurve.PointFromBytes(commitment)
-		} else {
-			_, err = edcurve.PointFromBytesAllowIdentity(commitment)
-		}
-		if err != nil {
-			return fmt.Errorf("invalid keygen commitment %d: %w", i, err)
-		}
+	if err := p.Commitments.Validate(); err != nil {
+		return fmt.Errorf("keygen commitments: %w", err)
 	}
 	return nil
 }
@@ -225,10 +217,8 @@ func (p reshareCommitmentsPayload) Validate() error {
 	if len(p.PlanHash) != sha256.Size {
 		return fmt.Errorf("reshare commitments plan hash must be 32 bytes")
 	}
-	for i, commitment := range p.Commitments {
-		if _, err := edcurve.PointFromBytesAllowIdentity(commitment); err != nil {
-			return fmt.Errorf("invalid reshare commitment %d: %w", i, err)
-		}
+	if err := p.Commitments.Validate(); err != nil {
+		return fmt.Errorf("reshare commitments: %w", err)
 	}
 	return nil
 }

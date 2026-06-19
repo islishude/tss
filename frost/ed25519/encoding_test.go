@@ -82,6 +82,66 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
+func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) {
+	t.Parallel()
+
+	share := frostKeygen(t, 2, 3)[1]
+	raw, err := share.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitments := share.state.groupCommitments.BytesList()
+	commitments = append(commitments, append([]byte(nil), commitments[0]...))
+	mutated, err := testutil.RewriteWireFieldByName(
+		raw,
+		keyShareWireType,
+		keyShareWire{},
+		"GroupCommitments",
+		wire.EncodeBytesList(commitments),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	limits := testLimits()
+	limits.Threshold.MaxThreshold = 2
+	_, err = UnmarshalKeyShareWithLimits(mutated, limits)
+	if err == nil {
+		t.Fatal("key share accepted group commitments over resource limit")
+	}
+	if !strings.Contains(err.Error(), "custom item count") ||
+		!strings.Contains(err.Error(), "exceeds max_items") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestFROSTKeyShareCustomGroupCommitmentsRequiresExactThreshold(t *testing.T) {
+	t.Parallel()
+
+	share := frostKeygen(t, 2, 3)[1]
+	raw, err := share.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitments := share.state.groupCommitments.BytesList()
+	mutated, err := testutil.RewriteWireFieldByName(
+		raw,
+		keyShareWireType,
+		keyShareWire{},
+		"GroupCommitments",
+		wire.EncodeBytesList(commitments[:1]),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = UnmarshalKeyShare(mutated)
+	if err == nil {
+		t.Fatal("key share accepted group commitment count below threshold")
+	}
+	if !strings.Contains(err.Error(), "got 1 commitments, want 2") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)

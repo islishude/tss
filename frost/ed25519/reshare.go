@@ -45,8 +45,8 @@ type ReshareSession struct {
 }
 
 type reshareCommitmentsPayload struct {
-	Commitments [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PlanHash    []byte   `json:"plan_hash" wire:"2,bytes,len=32"`
+	Commitments reshareCommitments `json:"commitments" wire:"1,custom,max_items=threshold"`
+	PlanHash    []byte             `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
 const reshareCommitmentsPayloadWireVersion uint16 = 1
@@ -215,7 +215,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.BytesList(), PlanHash: planHash}, limits)
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -364,7 +364,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
 		guard:        guard,
 	}
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.BytesList(), PlanHash: planHash}, limits)
+	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -433,10 +433,10 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		commitments, err := newReshareCommitmentsFromBytesList(p.Commitments, s.newThreshold)
-		if err != nil {
+		if err := p.Commitments.ValidateThreshold(s.newThreshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
+		commitments := p.Commitments.Clone()
 		if existing, ok := s.commits[base.From]; ok {
 			if existing.Equal(commitments) {
 				return nil, nil

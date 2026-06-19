@@ -58,9 +58,9 @@ func (s *KeygenSession) GetChainCodeCommitByPartyId(id tss.PartyID) []byte {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments     [][]byte `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	ChainCodeCommit []byte   `json:"chain_code_commit,omitempty" wire:"2,bytes"`
-	PlanHash        []byte   `json:"plan_hash" wire:"3,bytes,len=32"`
+	Commitments     keygenCommitments `json:"commitments" wire:"1,custom,max_items=threshold"`
+	ChainCodeCommit []byte            `json:"chain_code_commit,omitempty" wire:"2,bytes"`
+	PlanHash        []byte            `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
 const keygenCommitmentsPayloadWireVersion uint16 = 1
@@ -149,7 +149,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 
 	out := make([]tss.Envelope, 0, len(parties))
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments.BytesList(), ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
+	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments.Clone(), ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -230,10 +230,10 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		commitments, err := newKeygenCommitmentsFromBytesList(p.Commitments, s.cfg.Threshold)
-		if err != nil {
+		if err := p.Commitments.ValidateThreshold(s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
+		commitments := p.Commitments.Clone()
 		pd, err := s.partyEntry(base.From)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)

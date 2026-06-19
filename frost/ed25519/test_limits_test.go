@@ -21,6 +21,14 @@ func unmarshalKeygenCommitmentsPayload(in []byte) (keygenCommitmentsPayload, err
 	return tss.DecodeBinaryValueWithLimits[keygenCommitmentsPayload](in, testLimits())
 }
 
+func marshalReshareCommitmentsPayload(p reshareCommitmentsPayload) ([]byte, error) {
+	return marshalReshareCommitmentsPayloadWithLimits(p, testLimits())
+}
+
+func unmarshalReshareCommitmentsPayload(in []byte) (reshareCommitmentsPayload, error) {
+	return tss.DecodeBinaryValueWithLimits[reshareCommitmentsPayload](in, testLimits())
+}
+
 func marshalKeygenSharePayload(p keygenSharePayload) ([]byte, error) {
 	return marshalKeygenSharePayloadWithLimits(p, testLimits())
 }

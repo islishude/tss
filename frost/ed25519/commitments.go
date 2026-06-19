@@ -8,7 +8,10 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/wire"
 )
+
+const ed25519CommitmentBytes = 32
 
 type keygenCommitments struct {
 	points []*fed.Point
@@ -172,6 +175,51 @@ func (c keygenCommitments) Len() int {
 	return len(c.points)
 }
 
+// MarshalWireValue returns the canonical byteslist-compatible encoding of the
+// ordered keygen commitments.
+func (c keygenCommitments) MarshalWireValue() ([]byte, error) {
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid keygen commitments: %w", err)
+	}
+	return wire.EncodeBytesList(c.BytesList()), nil
+}
+
+// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
+// validates each point under the keygen commitment identity policy.
+func (c *keygenCommitments) UnmarshalWireValue(in []byte) error {
+	if c == nil {
+		return errors.New("nil keygen commitments receiver")
+	}
+	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
+	if err != nil {
+		return fmt.Errorf("decode keygen commitments: %w", err)
+	}
+	parsed, err := newKeygenCommitmentsFromBytesList(encoded, len(encoded))
+	if err != nil {
+		return err
+	}
+	*c = parsed
+	return nil
+}
+
+// Validate checks keygen commitment length-independent point invariants.
+func (c keygenCommitments) Validate() error {
+	_, err := parseCommitmentPoints(c.points, len(c.points), true)
+	return err
+}
+
+// ValidateThreshold checks the exact protocol threshold and all point
+// invariants. Wire max_items remains only a resource upper bound.
+func (c keygenCommitments) ValidateThreshold(threshold int) error {
+	if threshold <= 0 {
+		return errors.New("commitment threshold must be positive")
+	}
+	if len(c.points) != threshold {
+		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
+	}
+	return c.Validate()
+}
+
 // IsZero reports whether the keygen commitment set has not been initialized.
 func (c keygenCommitments) IsZero() bool {
 	return c.points == nil
@@ -226,6 +274,51 @@ func (c reshareCommitments) Len() int {
 	return len(c.points)
 }
 
+// MarshalWireValue returns the canonical byteslist-compatible encoding of the
+// ordered reshare commitments.
+func (c reshareCommitments) MarshalWireValue() ([]byte, error) {
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid reshare commitments: %w", err)
+	}
+	return wire.EncodeBytesList(c.BytesList()), nil
+}
+
+// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
+// validates each point under the reshare commitment identity policy.
+func (c *reshareCommitments) UnmarshalWireValue(in []byte) error {
+	if c == nil {
+		return errors.New("nil reshare commitments receiver")
+	}
+	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
+	if err != nil {
+		return fmt.Errorf("decode reshare commitments: %w", err)
+	}
+	parsed, err := newReshareCommitmentsFromBytesList(encoded, len(encoded))
+	if err != nil {
+		return err
+	}
+	*c = parsed
+	return nil
+}
+
+// Validate checks reshare commitment length-independent point invariants.
+func (c reshareCommitments) Validate() error {
+	_, err := parseCommitmentPoints(c.points, len(c.points), false)
+	return err
+}
+
+// ValidateThreshold checks the exact protocol threshold and all point
+// invariants. Wire max_items remains only a resource upper bound.
+func (c reshareCommitments) ValidateThreshold(threshold int) error {
+	if threshold <= 0 {
+		return errors.New("commitment threshold must be positive")
+	}
+	if len(c.points) != threshold {
+		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
+	}
+	return c.Validate()
+}
+
 // PointAt returns an independent copy of the commitment at index i.
 func (c reshareCommitments) PointAt(i int) (*fed.Point, error) {
 	if i < 0 || i >= len(c.points) {
@@ -275,10 +368,49 @@ func (c groupCommitments) Len() int {
 	return len(c.points)
 }
 
+// MarshalWireValue returns the canonical byteslist-compatible encoding of the
+// ordered group commitments.
+func (c groupCommitments) MarshalWireValue() ([]byte, error) {
+	if err := c.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid group commitments: %w", err)
+	}
+	return wire.EncodeBytesList(c.BytesList()), nil
+}
+
+// UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
+// validates each point under the group commitment identity policy.
+func (c *groupCommitments) UnmarshalWireValue(in []byte) error {
+	if c == nil {
+		return errors.New("nil group commitments receiver")
+	}
+	encoded, err := wire.DecodeBytesListWithLimit(in, 0, ed25519CommitmentBytes)
+	if err != nil {
+		return fmt.Errorf("decode group commitments: %w", err)
+	}
+	parsed, err := newGroupCommitmentsFromBytesList(encoded, len(encoded))
+	if err != nil {
+		return err
+	}
+	*c = parsed
+	return nil
+}
+
 // Validate checks group commitment length-independent point invariants.
 func (c groupCommitments) Validate() error {
 	_, err := parseCommitmentPoints(c.points, len(c.points), true)
 	return err
+}
+
+// ValidateThreshold checks the exact protocol threshold and all point
+// invariants. Wire max_items remains only a resource upper bound.
+func (c groupCommitments) ValidateThreshold(threshold int) error {
+	if threshold <= 0 {
+		return errors.New("commitment threshold must be positive")
+	}
+	if len(c.points) != threshold {
+		return fmt.Errorf("got %d commitments, want %d", len(c.points), threshold)
+	}
+	return c.Validate()
 }
 
 // PointAtAllowIdentity returns an independent copy of the commitment at index i.

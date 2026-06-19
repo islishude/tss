@@ -362,6 +362,73 @@ type customMaxBytesMessage struct {
 func (m customMaxBytesMessage) WireType() string    { return "test.custom.maxbytes" }
 func (m customMaxBytesMessage) WireVersion() uint16 { return 1 }
 
+type customCountedList struct {
+	items [][]byte
+}
+
+func (c customCountedList) MarshalWireValue() ([]byte, error) {
+	return EncodeBytesList(c.items), nil
+}
+
+func (c *customCountedList) UnmarshalWireValue(in []byte) error {
+	items, err := DecodeBytesList(in)
+	if err != nil {
+		return err
+	}
+	c.items = make([][]byte, len(items))
+	for i, item := range items {
+		c.items[i] = append([]byte(nil), item...)
+	}
+	return nil
+}
+
+type customMaxItemsMessage struct {
+	Data customCountedList `wire:"1,custom,max_items=items"`
+}
+
+func (m customMaxItemsMessage) WireType() string    { return "test.custom.maxitems" }
+func (m customMaxItemsMessage) WireVersion() uint16 { return 1 }
+
+type optionalCustomMaxItemsMessage struct {
+	Data *customCountedList `wire:"1,custom,optional,max_items=items"`
+}
+
+func (m optionalCustomMaxItemsMessage) WireType() string {
+	return "test.custom.maxitems.optional"
+}
+
+func (m optionalCustomMaxItemsMessage) WireVersion() uint16 { return 1 }
+
+type panicOnUnmarshalCustomList struct{}
+
+func (panicOnUnmarshalCustomList) MarshalWireValue() ([]byte, error) {
+	return Uint32(0), nil
+}
+
+func (*panicOnUnmarshalCustomList) UnmarshalWireValue([]byte) error {
+	panic("custom unmarshal should not be called")
+}
+
+type panicCustomMaxItemsMessage struct {
+	Data panicOnUnmarshalCustomList `wire:"1,custom,max_items=items"`
+}
+
+func (m panicCustomMaxItemsMessage) WireType() string {
+	return "test.custom.maxitems.panic"
+}
+
+func (m panicCustomMaxItemsMessage) WireVersion() uint16 { return 1 }
+
+type rawCustomMaxItemsMessage struct {
+	Data customBytes `wire:"1,custom,max_items=items"`
+}
+
+func (m rawCustomMaxItemsMessage) WireType() string {
+	return "test.custom.maxitems.raw"
+}
+
+func (m rawCustomMaxItemsMessage) WireVersion() uint16 { return 1 }
+
 type customNoUnmarshalMessage struct {
 	Data customNoUnmarshal `wire:"1,custom"`
 }

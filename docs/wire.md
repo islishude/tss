@@ -134,6 +134,15 @@ the wire format of existing fields if their Go type were refactored to a map.
   required, and nil record/nested pointers are rejected.
 - `allow_empty` — documents that empty is permitted (no-op)
 
+For custom fields, `max_items` is supported only for count-prefixed custom
+values. A field tagged `wire:"N,custom,max_items=name"` must encode its raw
+value with a leading big-endian `uint32 item_count`. The codec checks that count
+against the global repeated-field limit and the named field limit after
+`MarshalWireValue` and before `UnmarshalWireValue`. The wire package does not
+parse the custom payload body or validate individual items; those remain the
+custom type's responsibility. `max_items` is an upper bound, not an exact-count
+protocol invariant.
+
 ### Interfaces
 
 - **`Message`** — required: `WireType() string`, `WireVersion() uint16`

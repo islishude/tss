@@ -79,7 +79,9 @@ type AfterUnmarshaler interface {
 // importing internal/wire.
 //
 // MarshalWireValue must return a non-nil byte slice. The returned bytes
-// are validated against length options (len, max_bytes) by the codec.
+// are validated against length options (len, max_bytes) by the codec. When
+// the field declares max_items, the returned bytes must start with a uint32
+// item count, which the codec validates after marshaling.
 type ValueMarshaler interface {
 	MarshalWireValue() ([]byte, error)
 }
@@ -91,6 +93,8 @@ type ValueMarshaler interface {
 // The implementation must copy the input bytes — it must not retain a
 // reference to the underlying decode buffer. Length options (len,
 // max_bytes) are validated by the codec before UnmarshalWireValue is called.
+// When the field declares max_items, its raw bytes must start with a uint32
+// item count, which the codec validates before invoking UnmarshalWireValue.
 type ValueUnmarshaler interface {
 	UnmarshalWireValue([]byte) error
 }

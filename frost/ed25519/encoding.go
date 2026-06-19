@@ -24,7 +24,7 @@ type keyShareWire struct {
 	PublicKey            edcurve.WirePoint                     `wire:"4,custom,len=32"`
 	ChainCode            []byte                                `wire:"5,bytes"`
 	Secret               *secret.Scalar                        `wire:"6,custom,len=32"`
-	GroupCommitments     [][]byte                              `wire:"7,byteslist,max_bytes=point,max_items=threshold"`
+	GroupCommitments     groupCommitments                      `wire:"7,custom,max_items=threshold"`
 	PartyData            map[tss.PartyID]keySharePartyDataWire `wire:"8,map,max_items=parties"`
 	KeygenSessionID      tss.SessionID                         `wire:"9,bytes,len=32"`
 	KeygenTranscriptHash []byte                                `wire:"10,bytes"`
@@ -60,7 +60,7 @@ func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
 		PublicKey:            edcurve.WirePoint{P: k.state.publicKey.Point()},
 		ChainCode:            k.state.chainCode,
 		Secret:               k.state.secret,
-		GroupCommitments:     k.state.groupCommitments.BytesList(),
+		GroupCommitments:     k.state.groupCommitments.Clone(),
 		PartyData:            partyData,
 		KeygenSessionID:      k.state.keygenSessionID,
 		KeygenTranscriptHash: k.state.keygenTranscriptHash,
@@ -76,10 +76,10 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 	if err != nil {
 		return nil, fmt.Errorf("invalid group public key: %w", err)
 	}
-	groupCommitments, err := newGroupCommitmentsFromBytesList(w.GroupCommitments, w.Threshold)
-	if err != nil {
+	if err := w.GroupCommitments.ValidateThreshold(w.Threshold); err != nil {
 		return nil, fmt.Errorf("invalid group commitments: %w", err)
 	}
+	groupCommitments := w.GroupCommitments.Clone()
 	if len(w.PartyData) != len(w.Parties) {
 		return nil, fmt.Errorf("party data count %d != party count %d", len(w.PartyData), len(w.Parties))
 	}
