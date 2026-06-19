@@ -2,11 +2,20 @@
 
 This guide covers the end-to-end lifecycle of a TSS deployment using this library, from initial key generation through online signing and key rotation.
 
+This guide assumes the production protocol-run model described in
+[integration.md](integration.md). The examples below show local package APIs,
+not a complete cross-machine coordinator. In production, every interactive
+protocol run starts from one shared public run intent and one session ID, then
+each party reconstructs an equivalent local plan and starts its own party-local
+state machine.
+
 ## Key Lifecycle
 
 ### 1. Key Generation
 
 Each participant generates its share independently through the DKG protocol. See the package docs for `frost/ed25519` and `cggmp21/secp256k1` for per-protocol details.
+
+The control plane first creates a keygen job:
 
 ```go
 import (
@@ -14,18 +23,45 @@ import (
     "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
-parties := tss.NewPartySet(1, 2, 3)
-plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
+type KeygenJob struct {
+    RunID     string
+    SessionID tss.SessionID
+    Parties   tss.PartySet
+    Threshold int
+}
+
+job := KeygenJob{
+    RunID:     "keygen-2026-06-19",
     SessionID: sessionID,
-    Parties: parties,
+    Parties:   tss.NewPartySet(1, 2, 3),
     Threshold: 2,
+}
+```
+
+The same `KeygenJob` metadata is distributed to every party. Each party
+constructs its own `KeygenPlan` locally. The Go plan object is not shared across
+machines.
+
+```go
+plan, err := secp256k1.NewKeygenPlan(secp256k1.KeygenPlanOption{
+    SessionID: job.SessionID,
+    Parties:   job.Parties,
+    Threshold: job.Threshold,
 })
+planHash, err := plan.Digest()
+if err != nil {
+    return err
+}
+if err := runStore.AcceptRun(job.RunID, job.SessionID, planHash); err != nil {
+    return err
+}
+
 local := tss.LocalConfig{Self: 1}
 guard, err := (tss.GuardConfig{
     Self:        local.Self,
-    Parties:     tss.PartySet(parties),
+    Parties:     job.Parties,
     Protocol:    tss.ProtocolCGGMP21Secp256k1,
-    SessionID:   sessionID,
+    SessionID:   job.SessionID,
     Policies:    secp256k1.CGGMP21Policies(),
     Cache:       replayCache,
     AckVerifier: ackVerifier,
@@ -46,6 +82,11 @@ if !ok {
 ```
 
 ### 2. Persistence
+
+Persist accepted protocol runs and their plan hashes separately from key shares
+and presigns. This allows the application to reject duplicate session IDs,
+recover delivery state, and audit which public run metadata produced a local key
+share or presign.
 
 Serialise the key share to TLV bytes and encrypt before storage:
 
@@ -100,6 +141,11 @@ request or `ResumeSign`.
 
 **FROST Ed25519:**
 
+FROST signing starts from `SignRun` metadata that binds session ID, key ID,
+signer set, message, derivation request, policy domain, and message domain.
+Every signer reconstructs the same `SignPlan` locally from that accepted
+metadata.
+
 ```go
 signGuard, err := (tss.GuardConfig{
     Self:        share.PartyID(),
@@ -121,6 +167,12 @@ sig, ok := signSession.Signature()
 ```
 
 **CGGMP21 secp256k1:**
+
+CGGMP21 signing has two protocol runs. The presign run creates one local
+one-use `Presign` record per signer. The online sign run consumes that local
+record. The sign session ID belongs to the online signing attempt, not to the
+presign run. The durable boundary is `CommitSignAttempt`; after an unknown
+outcome, never reuse the presign with a new session or different digest.
 
 ```go
 // Offline presign (can be done in advance):
@@ -277,9 +329,17 @@ received, err := tss.OpenEnvelope(data, tss.ReceiveInfo{
 ### Message Routing Pattern
 
 ```go
-func routeMessages(session Session, transport Transport) error {
+func routeMessages(registry SessionRegistry, transport Transport) error {
     for {
-        env := transport.Recv()
+        raw, info, cert := transport.Recv()
+        env, err := tss.OpenEnvelope(raw, info, tss.WithBroadcastCertificate(cert))
+        if err != nil {
+            return err
+        }
+        session := registry.Lookup(env.Protocol(), env.SessionID())
+        if session == nil {
+            return ErrUnknownProtocolRun
+        }
         out, err := session.HandleMessage(env)
         if err != nil {
             var pe *tss.ProtocolError
@@ -297,6 +357,22 @@ func routeMessages(session Session, transport Transport) error {
     }
 }
 ```
+
+Applications should route inbound envelopes by `(Protocol, SessionID, To)`.
+Unknown-session envelopes should be rejected or durably buffered and revalidated
+after the matching run is accepted.
+
+## Refresh and Reshare Installation
+
+Refresh and reshare are not direct overwrites. Treat completion as a staged
+output. Install with compare-and-swap against the expected current key
+generation.
+
+Old-only dealers, new-only receivers, and overlap parties have different
+startup functions. Production systems must assign roles from the same
+`ReshareRun` metadata before any party starts. The control plane must not retire
+the old key generation until the required new-generation commit condition is
+satisfied.
 
 ## Proactive Refresh Scheduling
 

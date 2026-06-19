@@ -92,6 +92,11 @@ func (keygenSharePayload) MarshalJSON() ([]byte, error) {
 }
 
 // StartKeygen starts dealerless DKG from a shared immutable lifecycle plan.
+// In production, the shared plan is reconstructed independently by every party
+// from the same authenticated keygen-run metadata. It does not require or imply
+// sharing a Go object across parties. The run creator must generate one session
+// ID for the keygen run and distribute it to every participant before parties
+// call StartKeygen locally.
 func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	config, err := plan.thresholdConfig(local)
 	if err != nil {

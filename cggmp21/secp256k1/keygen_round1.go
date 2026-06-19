@@ -18,6 +18,12 @@ import (
 // StartKeygen starts CGGMP21-style threshold ECDSA key generation from a shared
 // keygen plan and local runtime configuration.
 //
+// In production, the shared plan is reconstructed independently by every party
+// from the same authenticated keygen-run metadata. It does not require or imply
+// sharing a Go object across parties. The run creator must generate one session
+// ID for the keygen run and distribute it to every participant before parties
+// call StartKeygen locally.
+//
 // Broadcast consistency: round 1 broadcasts commitments, Paillier keys, and proofs
 // to all parties. The caller MUST ensure that every recipient receives identical
 // broadcast payloads (equivocation-resistant transport). After keygen completes,

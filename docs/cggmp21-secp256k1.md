@@ -14,6 +14,111 @@ The `cggmp21/secp256k1` package implements a ([CGGMP21-style](https://eprint.iac
 
 The signing path never transmits or reconstructs private key shares or nonce shares. Each presign record is strictly one-use; reuse is caught before any partial signature leaves the process.
 
+## Production Run Recipes
+
+The recipes below describe production integration metadata. They do not add a
+new library API. A shared plan means equivalent authenticated run metadata, not
+a shared Go object.
+
+### CGGMP21 KeygenRun
+
+Public run metadata:
+
+- Fresh session ID generated once for the keygen run.
+- Parties.
+- Threshold.
+- Optional security parameters.
+
+Each party validates the metadata, reconstructs `NewKeygenPlan`, records the
+plan digest acceptance, builds an `EnvelopeGuard` for
+`tss.ProtocolCGGMP21Secp256k1` and the same session ID, calls `StartKeygen`
+locally, and routes outbox envelopes. Inbound envelopes are dispatched to
+`KeygenSession.HandleKeygenMessage`.
+
+`KeygenSession.KeyShare()` returns a key share only after the confirmation round
+completes. The local `KeyShare` must be encrypted and durably persisted before
+the control plane marks the party complete or the key usable.
+
+### CGGMP21 PresignRun
+
+Public run metadata:
+
+- Fresh presign session ID.
+- Key ID or key generation ID.
+- Signer set.
+- `PresignContext`.
+
+Each signer loads its local `KeyShare`, validates that it owns a share for the
+requested generation, validates signer-set threshold and membership,
+reconstructs `NewPresignPlan`, calls `StartPresign` locally, and routes
+`PresignSession.HandlePresignMessage` output.
+
+`PresignSession.Presign()` returns the completed local record. Persist the
+encrypted `Presign` before exposing it to inventory. A completed presign is a
+per-party local record; there is no shared presign object across machines.
+
+### CGGMP21 SignRun
+
+Public run metadata:
+
+- Fresh signing session ID.
+- Key ID.
+- Local presign ID.
+- Signer set exactly matching the presign binding.
+- `SignRequest` intent including message or digest, context, LowS policy, and
+  `AttemptStore`.
+
+Each signer loads the local `KeyShare` and local `Presign`, verifies the presign
+is not consumed locally, reconstructs `NewSignPlan`, calls `StartSign`, and
+routes `SignSession.HandleSignMessage` output.
+
+The signing session ID identifies the online signing attempt, not the earlier
+presign run. `StartSign` must commit through `SignAttemptStore` before releasing
+outbound envelopes. If the commit outcome is unknown, the presign is
+operationally consumed; do not reuse it with a different session ID or digest.
+Recover the same attempt with the same request and `ResumeSign`.
+
+`SignSession.Signature()` is the completion accessor. Persist completion before
+making the signature visible to request handlers.
+
+### CGGMP21 RefreshRun
+
+Public run metadata:
+
+- Fresh refresh session ID.
+- Current key generation ID.
+- Same party set and threshold.
+- Current generation public metadata.
+
+Each party reconstructs `NewRefreshPlan` from its current local `KeyShare` and
+the shared session ID, calls `StartRefresh`, routes
+`RefreshSession.HandleRefreshMessage`, and obtains the staged output through
+`RefreshSession.KeyShare()`.
+
+Install the refreshed share only with compare-and-swap against the expected
+current key generation. Do not overwrite if the local current share changed.
+
+### CGGMP21 ReshareRun
+
+Public run metadata:
+
+- Fresh reshare session ID.
+- Old key generation ID.
+- Dealer parties.
+- New parties.
+- New threshold.
+- Old public key, chain code, and verification shares from the current key
+  generation.
+
+Old-only parties call `StartReshareDealer`. New-only parties call
+`StartReshareReceiver`. Overlap parties call `StartReshareOverlap`. All roles
+route `ReshareSession.HandleReshareMessage`.
+
+New receiver parties persist the new `KeyShare` returned by
+`ReshareSession.Result()`. Old-only parties do not install a new share. The
+control plane retires the old key generation only after the required
+new-generation commit condition is satisfied.
+
 ## KeyShare API and Ownership
 
 `KeyShare` is an opaque handle. All protocol state, including public metadata,

@@ -3,6 +3,7 @@
 package secp256k1_test
 
 import (
+	"bytes"
 	stded25519 "crypto/ed25519"
 	"encoding/binary"
 	"errors"
@@ -12,6 +13,41 @@ import (
 	"github.com/islishude/tss"
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
 )
+
+// The helpers in this file run multiple protocol parties in one Go process.
+// They simulate a distributed deployment for executable examples only.
+//
+// In production, each party runs in its own process. A coordinator or proposer
+// creates public run metadata containing one SessionID, party set, threshold,
+// signer set, and context. Every party validates that metadata, reconstructs an
+// equivalent local plan, starts its own local session, and routes envelopes over
+// authenticated transport.
+type exampleProtocolRun struct {
+	runID     string
+	protocol  tss.ProtocolID
+	kind      string
+	sessionID tss.SessionID
+	parties   tss.PartySet
+	signers   tss.PartySet
+	threshold int
+}
+
+type exampleKeygenJob struct {
+	run            exampleProtocolRun
+	limits         *cggmp.Limits
+	securityParams cggmp.SecurityParams
+	planHash       []byte
+}
+
+type examplePresignJob struct {
+	run     exampleProtocolRun
+	context cggmp.PresignContext
+}
+
+type exampleSignJob struct {
+	run     exampleProtocolRun
+	request cggmp.SignRequest
+}
 
 type exampleCGGMPSecurity struct {
 	// private contains the example transport identities used to acknowledge
@@ -187,22 +223,11 @@ func (s *exampleCGGMPSecurity) route(
 	return nil
 }
 
-// runExampleCGGMPKeygen executes a complete dealerless key-generation lifecycle
-// using only the package's public integration API. All parties share one global
-// plan, while each party owns an independent guard and KeygenSession.
-func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggmp.KeyShare, error) {
-	parties := option.Parties
-	security := newExampleCGGMPSecurity(parties)
-	// A fresh session ID prevents messages from another keygen execution from
-	// being accepted by these guards or bound into this lifecycle transcript.
+func newExampleCGGMPKeygenJob(option cggmp.KeygenPlanOption) (exampleKeygenJob, error) {
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
-		return nil, err
+		return exampleKeygenJob{}, err
 	}
-	sessions := make(map[tss.PartyID]*cggmp.KeygenSession, len(parties))
-	queue := make([]tss.Envelope, 0)
-	// Construct the plan once so threshold, committee, HD policy, and Paillier
-	// parameters are identical and transcript-bound for every participant.
 	option.SessionID = sessionID
 	if option.SecurityParams == nil {
 		params := cggmp.SecurityParams{
@@ -216,14 +241,72 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 	}
 	plan, err := cggmp.NewKeygenPlan(option)
 	if err != nil {
+		return exampleKeygenJob{}, err
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
+		return exampleKeygenJob{}, err
+	}
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		return exampleKeygenJob{}, errors.New("missing example keygen plan snapshot")
+	}
+	return exampleKeygenJob{
+		run: exampleProtocolRun{
+			runID:     "example-cggmp-keygen",
+			protocol:  tss.ProtocolCGGMP21Secp256k1,
+			kind:      "keygen",
+			sessionID: snapshot.SessionID,
+			parties:   snapshot.Parties,
+			threshold: snapshot.Threshold,
+		},
+		limits:         option.Limits,
+		securityParams: snapshot.SecurityParams,
+		planHash:       append([]byte(nil), planHash...),
+	}, nil
+}
+
+func startExampleCGGMPKeygenParty(job exampleKeygenJob, self tss.PartyID, security *exampleCGGMPSecurity) (*cggmp.KeygenSession, []tss.Envelope, error) {
+	securityParams := job.securityParams
+	plan, err := cggmp.NewKeygenPlan(cggmp.KeygenPlanOption{
+		SessionID:      job.run.sessionID,
+		Parties:        job.run.parties,
+		Threshold:      job.run.threshold,
+		Limits:         job.limits,
+		SecurityParams: &securityParams,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !bytes.Equal(planHash, job.planHash) {
+		return nil, nil, errors.New("example keygen plan hash mismatch")
+	}
+	guard, err := security.guard(self, job.run.parties, job.run.sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
+}
+
+// runExampleCGGMPKeygen executes a complete dealerless key-generation lifecycle
+// using only the package's public integration API. This is a single-process
+// simulator: it creates one keygen job, then starts each party as if that party
+// had reconstructed the plan locally from accepted run metadata.
+func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggmp.KeyShare, error) {
+	job, err := newExampleCGGMPKeygenJob(option)
+	if err != nil {
 		return nil, err
 	}
+	parties := job.run.parties
+	security := newExampleCGGMPSecurity(parties)
+	sessions := make(map[tss.PartyID]*cggmp.KeygenSession, len(parties))
+	queue := make([]tss.Envelope, 0)
 	for _, id := range parties {
-		guard, err := security.guard(id, parties, sessionID)
-		if err != nil {
-			return nil, err
-		}
-		session, out, err := cggmp.StartKeygen(plan, tss.LocalConfig{Self: id}, guard)
+		session, out, err := startExampleCGGMPKeygenParty(job, id, security)
 		if err != nil {
 			return nil, err
 		}
@@ -252,6 +335,46 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 	return shares, nil
 }
 
+func newExampleCGGMPPresignJob(signers tss.PartySet, ctx cggmp.PresignContext) (examplePresignJob, error) {
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		return examplePresignJob{}, err
+	}
+	return examplePresignJob{
+		run: exampleProtocolRun{
+			runID:     "example-cggmp-presign",
+			protocol:  tss.ProtocolCGGMP21Secp256k1,
+			kind:      "presign",
+			sessionID: sessionID,
+			parties:   signers.Clone(),
+			signers:   signers.Clone(),
+			threshold: len(signers),
+		},
+		context: ctx.Clone(),
+	}, nil
+}
+
+func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare, security *exampleCGGMPSecurity) (*cggmp.PresignSession, []tss.Envelope, error) {
+	if share == nil {
+		return nil, nil, errors.New("missing example key share")
+	}
+	self := share.PartyID()
+	guard, err := security.guard(self, job.run.signers, job.run.sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan, err := cggmp.NewPresignPlan(cggmp.PresignPlanOption{
+		Key:       share,
+		SessionID: job.run.sessionID,
+		Signers:   job.run.signers,
+		Context:   job.context,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartPresign(share, plan, tss.LocalConfig{Self: self}, guard)
+}
+
 // runExampleCGGMPPresign performs the offline phase for the selected signer set.
 // The resulting presigns contain one-use secret material and must remain paired
 // with the corresponding key share and signer identity.
@@ -260,28 +383,16 @@ func runExampleCGGMPPresign(
 	signers tss.PartySet,
 	ctx cggmp.PresignContext,
 ) (map[tss.PartyID]*cggmp.Presign, error) {
-	signerSet := signers
-	security := newExampleCGGMPSecurity(signerSet)
-	// Presign is a separate protocol lifecycle, so it receives a session ID
-	// distinct from keygen and from the later online-signing session.
-	sessionID, err := tss.NewSessionID(nil)
+	job, err := newExampleCGGMPPresignJob(signers, ctx)
 	if err != nil {
 		return nil, err
 	}
+	signerSet := job.run.signers
+	security := newExampleCGGMPSecurity(signerSet)
 	sessions := make(map[tss.PartyID]*cggmp.PresignSession, len(signers))
 	queue := make([]tss.Envelope, 0)
 	for _, id := range signers {
-		guard, err := security.guard(id, signerSet, sessionID)
-		if err != nil {
-			return nil, err
-		}
-		// NewPresignPlan binds the key, exact signer set, session, and caller
-		// context before any presign messages are exchanged.
-		plan, err := cggmp.NewPresignPlan(cggmp.PresignPlanOption{Key: shares[id], SessionID: sessionID, Signers: signers, Context: ctx})
-		if err != nil {
-			return nil, err
-		}
-		session, out, err := cggmp.StartPresign(shares[id], plan, tss.LocalConfig{Self: id}, guard)
+		session, out, err := startExampleCGGMPPresignParty(job, shares[id], security)
 		if err != nil {
 			return nil, err
 		}
@@ -312,6 +423,51 @@ func runExampleCGGMPPresign(
 	return presigns, nil
 }
 
+func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest) (exampleSignJob, error) {
+	// The signing session ID is generated for this online signing attempt.
+	// It is distinct from the earlier presign session ID.
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		return exampleSignJob{}, err
+	}
+	return exampleSignJob{
+		run: exampleProtocolRun{
+			runID:     "example-cggmp-sign",
+			protocol:  tss.ProtocolCGGMP21Secp256k1,
+			kind:      "sign",
+			sessionID: sessionID,
+			parties:   signers.Clone(),
+			signers:   signers.Clone(),
+			threshold: len(signers),
+		},
+		request: request.Clone(),
+	}, nil
+}
+
+func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presign *cggmp.Presign, security *exampleCGGMPSecurity) (*cggmp.SignSession, []tss.Envelope, error) {
+	if share == nil {
+		return nil, nil, errors.New("missing example key share")
+	}
+	if presign == nil {
+		return nil, nil, errors.New("missing example presign")
+	}
+	self := share.PartyID()
+	guard, err := security.guard(self, job.run.signers, job.run.sessionID)
+	if err != nil {
+		return nil, nil, err
+	}
+	plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{
+		Key:       share,
+		Presign:   presign,
+		SessionID: job.run.sessionID,
+		Request:   job.request,
+	})
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartSign(share, presign, plan, tss.LocalConfig{Self: self}, guard)
+}
+
 // runExampleCGGMPSign executes the online phase and returns the common group
 // public key together with the threshold signature. StartSign performs the
 // durable one-use claim through the SignRequest's configured presign store, so a
@@ -322,29 +478,16 @@ func runExampleCGGMPSign(
 	signers tss.PartySet,
 	request cggmp.SignRequest,
 ) ([]byte, *cggmp.Signature, error) {
-	signerSet := signers
-	security := newExampleCGGMPSecurity(signerSet)
-	// The online phase has its own session identity even though it consumes
-	// state created by the presign lifecycle.
-	sessionID, err := tss.NewSessionID(nil)
+	job, err := newExampleCGGMPSignJob(signers, request)
 	if err != nil {
 		return nil, nil, err
 	}
+	signerSet := job.run.signers
+	security := newExampleCGGMPSecurity(signerSet)
 	sessions := make(map[tss.PartyID]*cggmp.SignSession, len(signers))
 	queue := make([]tss.Envelope, 0, len(signers))
 	for _, id := range signers {
-		guard, err := security.guard(id, signerSet, sessionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		// Every signer builds the same logical plan from its matching share and
-		// presign. The plan binds the digest and all request context before any
-		// partial signature can be emitted.
-		plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{Key: shares[id], Presign: presigns[id], SessionID: sessionID, Request: request})
-		if err != nil {
-			return nil, nil, err
-		}
-		session, out, err := cggmp.StartSign(shares[id], presigns[id], plan, tss.LocalConfig{Self: id}, guard)
+		session, out, err := startExampleCGGMPSignParty(job, shares[id], presigns[id], security)
 		if err != nil {
 			return nil, nil, err
 		}

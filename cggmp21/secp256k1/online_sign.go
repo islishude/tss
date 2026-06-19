@@ -16,8 +16,13 @@ import (
 	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
-// StartSign starts or idempotently resumes online signing from a shared
-// immutable lifecycle plan using a context-bound presignature.
+// StartSign starts or idempotently resumes this party's local online signing
+// attempt from a shared immutable lifecycle plan using a context-bound
+// presignature. The session ID identifies the signing attempt, not the earlier
+// presign run. The supplied Presign is consumed through the SignAttemptStore
+// boundary before outbound messages are released. If the commit outcome is
+// unknown, the application must not reuse the presign with another session or
+// digest; recover the same attempt with ResumeSign.
 func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if key == nil || key.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
@@ -253,12 +258,18 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 }
 
 // ResumeSign loads and resumes the only durable attempt bound to presign.
+// Production recovery must use this function with the same presign and durable
+// store when a CGGMP21 sign attempt may already have committed or been sent. It
+// must not create a new signing session with a different session ID or digest
+// for that presign.
 func ResumeSign(ctx context.Context, key *KeyShare, presign *Presign, store SignAttemptStore, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	return ResumeSignWithLimits(ctx, key, presign, store, guard, DefaultLimits())
 }
 
 // ResumeSignWithLimits resumes a durable sign attempt using explicit local
-// validation and decoding limits.
+// validation and decoding limits. It has the same production recovery semantics
+// as ResumeSign: the durable attempt, not a fresh session ID, is the authority
+// for a presign whose online-signing outcome may be unknown.
 func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")

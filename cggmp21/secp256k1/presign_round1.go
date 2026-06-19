@@ -15,8 +15,12 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
-// StartPresign starts the offline CGGMP-style presign protocol from a shared
-// immutable lifecycle plan.
+// StartPresign starts this party's local offline CGGMP-style presign state
+// machine from a shared immutable lifecycle plan. Production applications should
+// create one presign run with one session ID, one signer set, and one context,
+// then have every signer reconstruct an equivalent plan locally. The resulting
+// Presign is a party-local one-use record and must be durably persisted before
+// it is made available for signing.
 func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (s *PresignSession, out []tss.Envelope, err error) {
 	if key == nil || key.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))

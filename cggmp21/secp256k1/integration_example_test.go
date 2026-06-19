@@ -108,6 +108,9 @@ func ExampleStartRefresh() {
 	security := newExampleCGGMPSecurity(partySet)
 	sessions := make(map[tss.PartyID]*cggmp.RefreshSession, len(parties))
 	queue := make([]tss.Envelope, 0)
+	// Production refresh is started from one refresh job. Each party
+	// reconstructs its own RefreshPlan from its current local KeyShare and the
+	// shared session ID.
 	for _, id := range parties {
 		guard, err := security.guard(id, partySet, sessionID)
 		if err != nil {
@@ -191,6 +194,8 @@ func ExampleStartReshareDealer() {
 	security := newExampleCGGMPSecurity(allParties)
 	sessions := make(map[tss.PartyID]*cggmp.ReshareSession, len(allParties))
 	queue := make([]tss.Envelope, 0)
+	// Production reshare assigns roles from the same reshare job. Old dealers
+	// and new receivers do not call the same start function.
 	for _, id := range oldParties {
 		guard, err := security.guard(id, allParties, sessionID)
 		if err != nil {

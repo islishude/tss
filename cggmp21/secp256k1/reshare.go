@@ -150,7 +150,11 @@ func (s *ReshareSession) validateInbound(env tss.InboundEnvelope, allowedParties
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, allowedParties, s.selfID)
 }
 
-// StartReshareDealer starts resharing for an old-party dealer.
+// StartReshareDealer starts resharing for an old-party dealer. Production
+// resharing uses one shared reshare-run metadata object, but parties start
+// different local roles. Old dealers call StartReshareDealer, new-only
+// receivers call StartReshareReceiver, and overlap parties call
+// StartReshareOverlap when applicable.
 func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
@@ -161,12 +165,20 @@ func StartReshareDealer(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConf
 	return startReshareSession(oldKey, plan, local, true, false, guard)
 }
 
-// StartReshareReceiver starts resharing for a new-party receiver.
+// StartReshareReceiver starts resharing for a new-party receiver. Production
+// resharing uses one shared reshare-run metadata object, but parties start
+// different local roles. Old dealers call StartReshareDealer, new-only
+// receivers call StartReshareReceiver, and overlap parties call
+// StartReshareOverlap when applicable.
 func StartReshareReceiver(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
 	return startReshareSession(nil, plan, local, false, true, guard)
 }
 
-// StartReshareOverlap starts resharing for a party that is both dealer and receiver.
+// StartReshareOverlap starts resharing for a party that is both dealer and
+// receiver. Production resharing uses one shared reshare-run metadata object,
+// but parties start different local roles. Old dealers call StartReshareDealer,
+// new-only receivers call StartReshareReceiver, and overlap parties call
+// StartReshareOverlap when applicable.
 func StartReshareOverlap(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))

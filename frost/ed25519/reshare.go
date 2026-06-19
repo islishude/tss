@@ -136,6 +136,10 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 //
 // newParties defines the target participant set and newThreshold the target
 // threshold. Both may differ from the old key's parties and threshold.
+//
+// In production, the shared reshare plan means equivalent authenticated
+// reshare-run metadata, not a shared Go object. Old parties start the dealer
+// role with StartReshare, while new-only recipients use StartReshareRecipient.
 func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
@@ -249,6 +253,10 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 // StartReshareRecipient starts a resharing session for a new participant.
 // config.Self is the recipient ID. The function validates membership against
 // newParties and validates incoming dealer messages against oldParties.
+//
+// In production, the shared reshare plan means equivalent authenticated
+// reshare-run metadata, not a shared Go object. New-only recipients use this
+// entry point while old parties start the dealer role with StartReshare.
 func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, error) {
 	limits := plan.limits
 	config, err := plan.receiverConfig(local)
@@ -298,6 +306,11 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 // StartRefresh starts a FROST same-party proactive key refresh using the
 // simpler zero-constant-term polynomial approach. The participant set and
 // threshold are unchanged.
+//
+// In production, StartRefresh starts this party's local refresh state machine
+// from equivalent authenticated refresh-run metadata. The refreshed KeyShare is
+// staged output and should be installed with compare-and-swap against the
+// expected current key generation.
 func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))

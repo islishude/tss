@@ -58,6 +58,11 @@ type RefreshSession struct {
 // The participant set and threshold are fixed to oldKey.state.parties and
 // oldKey.state.threshold. The group public key and chain code are preserved from the
 // original key share.
+//
+// In production, StartRefresh starts this party's local proactive refresh state
+// machine from shared refresh-run metadata. The refreshed KeyShare returned at
+// completion is staged output; applications should install it with
+// compare-and-swap against the expected current key generation.
 func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))

@@ -13,6 +13,59 @@ The `frost/ed25519` package implements a dealerless FROST-style threshold Ed2551
 
 The group public key is a standard Ed25519 verification key. Signatures are standard 64-byte `R || S` Ed25519 values verifiable with `crypto/ed25519.Verify`.
 
+## Production Run Recipes
+
+The recipes below describe production integration metadata. They do not add a
+new library API. A shared plan means equivalent authenticated run metadata, not
+a shared Go object.
+
+### FROST KeygenRun
+
+Public run metadata includes a fresh keygen session ID, parties, threshold, and
+any application key identifier. Each party validates the metadata, reconstructs
+`NewKeygenPlan`, records the plan digest acceptance, builds an `EnvelopeGuard`
+for `tss.ProtocolFROSTEd25519` and the same session ID, calls `StartKeygen`
+locally, and routes `KeygenSession.HandleKeygenMessage` output.
+
+The keygen session ID is stored in `KeyShare` metadata after completion.
+`KeygenSession.KeyShare()` becomes available only after the confirmation round.
+Persist the encrypted local key share before marking the party complete or the
+key usable.
+
+### FROST SignRun
+
+Public run metadata includes a fresh signing session ID, key ID or key
+generation ID, signer set, message, and any signing context or derivation
+request. Each signer reconstructs `NewSignPlan`, calls `StartSign`, routes
+nonce commitments and partial signatures through `SignSession.HandleSignMessage`,
+and verifies the final signature before exposing the result.
+
+HD derivation is local/public context resolution, not an interactive run. The
+signing run must bind the resolved derivation context.
+
+### FROST RefreshRun
+
+Public run metadata includes a fresh refresh session ID, current key generation
+ID, and the current public key metadata. Each party reconstructs
+`NewRefreshPlan` from its current local `KeyShare`, calls `StartRefresh`, routes
+`ReshareSession.HandleReshareMessage`, and obtains the staged output through
+`ReshareSession.KeyShare()`.
+
+Refresh preserves party set, threshold, group public key, and chain code.
+Install the refreshed `KeyShare` with compare-and-swap semantics against the
+expected current key generation.
+
+### FROST ReshareRun
+
+Public run metadata includes a fresh reshare session ID, old key generation ID,
+old parties, new parties, and new threshold. Old parties act as dealers and call
+`StartReshare`. New-only recipients call `StartReshareRecipient`. New-only
+recipients need public reshare metadata out of band before starting the
+recipient flow. All roles route `ReshareSession.HandleReshareMessage`.
+
+The control plane owns old/new generation cutover and must not retire the old
+generation until the required new-generation commit condition is satisfied.
+
 ## KeyShare API and Ownership
 
 `KeyShare` is an opaque handle. Public metadata cannot be changed through struct

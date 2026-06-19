@@ -102,7 +102,10 @@ func (signPartialPayload) MarshalJSON() ([]byte, error) {
 }
 
 // StartSign starts a FROST signing session from a shared immutable lifecycle
-// plan and local runtime configuration.
+// plan and local runtime configuration. In production, the shared plan means
+// equivalent authenticated sign-run metadata, not a shared Go object. The run
+// creator must distribute one signing session ID, signer set, message, and
+// derivation context so every signer reconstructs an equivalent plan locally.
 func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	if key == nil || key.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil key share"))

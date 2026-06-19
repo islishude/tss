@@ -37,13 +37,24 @@ Plan constructors canonicalize and validate global intent. Start functions valid
 
 `SessionID` is a 32-byte nonce separating independent protocol executions.
 
+In production, a session ID belongs to one application-level protocol run or
+job. It is not generated independently by each party. The party or coordinator
+that creates the run generates one session ID and distributes it as part of the
+authenticated public run metadata. Every participant reconstructing the same
+plan must use that same session ID.
+
+A party should persist recently accepted and completed session IDs per protocol
+namespace and reject accidental reuse. The session ID is public but must be
+fresh and unpredictable because it is bound into envelopes, plan digests,
+transcripts, proofs, and replay protection.
+
 ```go
 id, _ := tss.NewSessionID(nil)          // crypto/rand
 id, _ := tss.NewSessionID(myReader)     // custom reader
 id, _ := tss.SessionIDFromBytes(raw)    // parse from bytes
 ```
 
-It supports `MarshalText`/`UnmarshalText` (hex), `Bytes()` (copy), and `String()` (hex). Every protocol run must use a fresh, unpredictable session ID. Reusing a session ID across runs allows cross-session replay.
+It supports `MarshalText`/`UnmarshalText` (hex), `Bytes()` (copy), and `String()` (hex). Reusing a session ID across runs allows cross-session replay.
 
 ## Envelope
 
@@ -88,6 +99,10 @@ env, err := tss.NewEnvelope(tss.EnvelopeInput{
 `InboundEnvelope`. It rejects the wrong wire type/schema version, missing peer
 identity, missing channel protection, and peer/envelope sender mismatch before
 the guard runs.
+
+Applications should route inbound envelopes by `(Protocol, SessionID, To)`.
+`OpenEnvelope` validates transport metadata and returns an inbound envelope that
+must be dispatched to the locally registered session for that protocol run.
 
 ### Encoding
 
@@ -208,6 +223,11 @@ type BroadcastCertificate struct {
 ```
 
 CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates. All broadcast-mode policies in FROST and CGGMP21 policy sets now require `BroadcastConsistencyRequired`. In-memory test helpers relax this with `inProcessPolicies()` / `simulationCGGMP21Policies()`.
+
+In single-process examples, broadcast consistency may be simulated in memory.
+Production transports must collect and persist acknowledgments or certificates
+according to the configured policy before considering broadcast delivery
+complete.
 
 ### ReplayCache
 
