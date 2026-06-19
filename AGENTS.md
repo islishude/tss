@@ -71,7 +71,7 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 - `internal/shamir`: Shamir sharing and interpolation.
 - `internal/curve/*`: curve-specific scalar, point, commitment, and signature helpers.
 - `internal/testutil`/`internal/testharness`: shared test helpers, deterministic readers, party/session factories, mutation helpers, assertions, fixtures, and reduced-parameter test controls.
-- `internal/testvectors`: canonical test vector files. `wire/v1/` holds binary golden vectors (wire format compatibility contracts) for envelope, FROST, CGGMP21, and ZK proofs. `protocol/` holds JSON cross-implementation vectors for FROST Ed25519 and CGGMP21 secp256k1 full protocol flows. All golden tests and vector generation/verification tests reference this directory. Regenerate with `UPDATE_GOLDEN=1` (binary) or `-tags=vectorgen` (JSON). See `internal/testvectors/README.md` for the full command reference.
+- `internal/testvectors`: all canonical golden tests and vector generation/verification tests reference this directory. See `internal/testvectors/README.md` for the full command reference.
 
 ## Coding Rules
 
@@ -87,6 +87,6 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 ## Documentation Rules
 
 - Update `docs/*.md` when behavior, API, wire format, security assumptions, lifecycle requirements, or storage expectations change.
-- Update [`docs/testing-rules.md`](docs/testing-rules.md) when adding a new test tier, invariant class, protocol phase, or shared test harness pattern.
+- Update `docs/testing-rules.md` when adding a new test tier, invariant class, protocol phase, or shared test harness pattern.
 - Add or update executable examples when the public API changes.
 - Keep security notes precise. Do not claim production audit, constant-time behavior, zeroization guarantees, or crash safety unless the code and tests support the claim.
