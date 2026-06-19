@@ -1,7 +1,5 @@
 package wireutil
 
-import "slices"
-
 // IsAllZero reports whether every byte in b is zero. The scan is constant-time:
 // all bytes are accumulated with bitwise OR before the comparison, so the
 // runtime does not depend on the position or number of non-zero bytes. A nil
@@ -17,16 +15,4 @@ func IsAllZero(b []byte) bool {
 		acc |= x
 	}
 	return acc == 0
-}
-
-// CloneByteSlices returns a deep copy of a [][]byte slice. A nil input returns nil.
-func CloneByteSlices(in [][]byte) [][]byte {
-	if in == nil {
-		return nil
-	}
-	out := make([][]byte, len(in))
-	for i := range in {
-		out[i] = slices.Clone(in[i])
-	}
-	return out
 }

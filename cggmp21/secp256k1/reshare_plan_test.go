@@ -85,36 +85,36 @@ func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
 	}
 }
 
-func TestResharePlanGettersReturnOwnedSnapshots(t *testing.T) {
+func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
 	plan.state.chainCode = bytes.Repeat([]byte{1}, 32)
 
-	publicKey := plan.OldGroupPublicKeyBytes()
-	publicKey[0] ^= 1
-	commitments := plan.OldGroupCommitments()
-	commitments[0][0] ^= 1
-	shares := plan.OldVerificationShares()
-	shares[1][0] ^= 1
-	delete(shares, 2)
-	oldParties := plan.OldParties()
-	oldParties[0] = 99
-	dealers := plan.DealerParties()
-	dealers[0] = 99
-	newParties := plan.NewParties()
-	newParties[0] = 99
-	chainCode := plan.ChainCodeBytes()
-	chainCode[0] = 99
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("missing reshare plan snapshot")
+	}
+	snapshot.OldGroupPublicKey[0] ^= 1
+	snapshot.OldGroupCommitments[0][0] ^= 1
+	oldShare, ok := plan.OldVerificationShare(1)
+	if !ok {
+		t.Fatal("missing old verification share")
+	}
+	oldShare.PublicKey[0] ^= 1
+	snapshot.OldParties[0] = 99
+	snapshot.DealerParties[0] = 99
+	snapshot.NewParties[0] = 99
+	snapshot.ChainCode[0] = 99
 
-	if bytes.Equal(publicKey, plan.state.oldGroupPublicKey) ||
-		bytes.Equal(commitments[0], plan.state.oldGroupCommitments[0]) ||
-		bytes.Equal(shares[1], plan.state.oldVerificationShares[1]) ||
+	if bytes.Equal(snapshot.OldGroupPublicKey, plan.state.oldGroupPublicKey) ||
+		bytes.Equal(snapshot.OldGroupCommitments[0], plan.state.oldGroupCommitments[0]) ||
+		bytes.Equal(oldShare.PublicKey, plan.state.oldVerificationShares[1]) ||
 		len(plan.state.oldVerificationShares) != 3 ||
 		plan.state.oldParties[0] != 1 ||
 		plan.state.dealerParties[0] != 1 ||
 		plan.state.newParties[0] != 2 ||
 		plan.state.chainCode[0] != 1 {
-		t.Fatal("ResharePlan getter snapshot aliases internal state")
+		t.Fatal("ResharePlan snapshot aliases internal state")
 	}
 }
 

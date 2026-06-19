@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"bytes"
 	"reflect"
+	"strings"
 	"sync/atomic"
 	"testing"
 
@@ -16,6 +17,34 @@ func TestFast_LongLivedStateTypesHaveNoExportedFields(t *testing.T) {
 		for field := range typ.Fields() {
 			if field.IsExported() {
 				t.Errorf("%s has exported field %s", typ.Name(), field.Name)
+			}
+		}
+	}
+}
+
+func TestFast_PublicGettersDoNotReturnMutableContainers(t *testing.T) {
+	t.Parallel()
+	for _, typ := range []reflect.Type{
+		reflect.TypeFor[*KeyShare](),
+		reflect.TypeFor[*Presign](),
+		reflect.TypeFor[*KeygenPlan](),
+		reflect.TypeFor[*RefreshPlan](),
+		reflect.TypeFor[*PresignPlan](),
+		reflect.TypeFor[*SignPlan](),
+		reflect.TypeFor[*ResharePlan](),
+	} {
+		for method := range typ.Methods() {
+			if method.Name == "Derive" ||
+				method.Name == "Digest" ||
+				strings.HasPrefix(method.Name, "Marshal") ||
+				strings.HasPrefix(method.Name, "Unmarshal") {
+				continue
+			}
+			fn := method.Type
+			for returnType := range fn.Outs() {
+				if returnType.Kind() == reflect.Slice || returnType.Kind() == reflect.Map {
+					t.Fatalf("%s.%s returns mutable container type %s", typ, method.Name, returnType)
+				}
 			}
 		}
 	}
@@ -96,20 +125,31 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	parties := k.Parties()
-	parties[0] = 99
-	commitments := k.GroupCommitments()
-	commitments[0][0] = 99
-	verificationShares := k.VerificationShares()
-	verificationShares[0].PublicKey[0] = 99
-	paillierShares := k.PaillierPublicKeys()
-	paillierShares[0].PublicKey[0] = 99
-	paillierShares[0].Proof[0] = 99
-	ringPedersenShares := k.RingPedersenPublic()
-	ringPedersenShares[0].Params[0] = 99
-	ringPedersenShares[0].Proof[0] = 99
-	confirmations := k.KeygenConfirmations()
-	confirmations[0].Sender = 99
+	meta := mustKeyShareMetadata(t, k)
+	meta.Parties[0] = 99
+	meta.GroupCommitments[0][0] = 99
+	verificationShare, ok := k.VerificationShare(1)
+	if !ok {
+		t.Fatal("missing verification share")
+	}
+	verificationShare.PublicKey[0] = 99
+	paillierShare, ok := k.PaillierPublicShare(1)
+	if !ok {
+		t.Fatal("missing Paillier public share")
+	}
+	paillierShare.PublicKey[0] = 99
+	paillierShare.Proof[0] = 99
+	ringPedersenShare, ok := k.RingPedersenPublicShare(1)
+	if !ok {
+		t.Fatal("missing Ring-Pedersen public share")
+	}
+	ringPedersenShare.Params[0] = 99
+	ringPedersenShare.Proof[0] = 99
+	confirmation, ok := k.KeygenConfirmation(1)
+	if !ok {
+		t.Fatal("missing keygen confirmation")
+	}
+	confirmation.Sender = 99
 
 	dataAfter := k.state.partyData[1]
 	paillierAfter, err := (paillierPublicMaterial{Party: 1, PublicKey: dataAfter.paillierPublicKey, Proof: dataAfter.paillierProof}).snapshot(testLimits())
@@ -138,26 +178,26 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	p.state.derivation.ResolvedPath = tss.DerivationPath{1, 2}
 	p.state.derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
 
-	signers := p.Signers()
-	signers[0] = 99
-	context := p.Context()
-	context.Derivation.Path[0] = 99
-	verifyShares := p.VerifyShares()
-	verifyShares[0].KPoint[0] ^= 1
-	verifyShares[0].ChiPoint[0] ^= 1
-	verifyShares[0].Proof[0] ^= 1
-	derivation := p.Derivation()
-	derivation.AdditiveShift[0] = 99
-	verificationKey := p.VerificationKeyBytes()
-	verificationKey[0] ^= 1
+	meta := mustPresignMetadata(t, p)
+	meta.Signers[0] = 99
+	meta.Context.Derivation.Path[0] = 99
+	verifyShare, ok := p.VerifyShare(1)
+	if !ok {
+		t.Fatal("missing verify share")
+	}
+	verifyShare.KPoint[0] ^= 1
+	verifyShare.ChiPoint[0] ^= 1
+	verifyShare.Proof[0] ^= 1
+	meta.Derivation.AdditiveShift[0] = 99
+	meta.VerificationKey[0] ^= 1
 
 	if p.state.signers[0] != 1 ||
 		p.state.context.Derivation.Path[0] != 1 ||
-		p.state.verifyShares[0].KPoint[0] == verifyShares[0].KPoint[0] ||
-		p.state.verifyShares[0].ChiPoint[0] == verifyShares[0].ChiPoint[0] ||
-		p.state.verifyShares[0].Proof[0] == verifyShares[0].Proof[0] ||
+		p.state.verifyShares[0].KPoint[0] == verifyShare.KPoint[0] ||
+		p.state.verifyShares[0].ChiPoint[0] == verifyShare.ChiPoint[0] ||
+		p.state.verifyShares[0].Proof[0] == verifyShare.Proof[0] ||
 		p.state.derivation.AdditiveShift[0] != 9 ||
-		p.state.derivation.ChildPublicKey[0] == verificationKey[0] {
+		p.state.derivation.ChildPublicKey[0] == meta.VerificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")
 	}
 }

@@ -11,11 +11,9 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire"
-	"github.com/islishude/tss/internal/wire/wireutil"
-
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/wire"
 )
 
 const (
@@ -128,7 +126,7 @@ func (k *KeyShare) GroupCommitments() [][]byte {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return wireutil.CloneByteSlices(k.state.groupCommitments)
+	return tss.CloneByteSlices(k.state.groupCommitments)
 }
 
 // VerificationShares returns a deep copy of the participant verification shares.
@@ -136,7 +134,7 @@ func (k *KeyShare) VerificationShares() []VerificationShare {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return tss.CloneSlices(k.state.verificationShares)
+	return tss.CloneSlice(k.state.verificationShares)
 }
 
 // KeygenSessionID returns the DKG or resharing session that produced the share.
@@ -169,7 +167,7 @@ func (k *KeyShare) KeygenConfirmations() []*KeygenConfirmation {
 	if k == nil || k.state == nil {
 		return nil
 	}
-	return tss.CloneSlices(k.state.keygenConfirmations)
+	return tss.CloneSlice(k.state.keygenConfirmations)
 }
 
 // MarshalBinary encodes the share using canonical TLV wire format.
@@ -443,8 +441,8 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		publicKey:            slices.Clone(k.state.publicKey),
 		chainCode:            slices.Clone(k.state.chainCode),
 		secret:               k.state.secret.Clone(),
-		groupCommitments:     wireutil.CloneByteSlices(k.state.groupCommitments),
-		verificationShares:   tss.CloneSlices(k.state.verificationShares),
+		groupCommitments:     tss.CloneByteSlices(k.state.groupCommitments),
+		verificationShares:   tss.CloneSlice(k.state.verificationShares),
 		keygenSessionID:      k.state.keygenSessionID,
 		keygenTranscriptHash: slices.Clone(k.state.keygenTranscriptHash),
 		planHash:             slices.Clone(k.state.planHash),

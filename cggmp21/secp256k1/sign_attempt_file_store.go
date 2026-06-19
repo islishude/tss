@@ -411,7 +411,7 @@ func (s *FileSignAttemptStore) persistDeliveryCertificate(ctx context.Context, b
 	certRecord.SignatureS = nil
 	certRecord.SignatureRecoveryID = 0
 	certRecord.DeliveryState = SignAttemptDeliveryState{
-		Acks:             tss.CloneSlices(cert.Acks),
+		Acks:             tss.CloneSlice(cert.Acks),
 		Certificate:      cert.Clone(),
 		DeliveryComplete: true,
 	}

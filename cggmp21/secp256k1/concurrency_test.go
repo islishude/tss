@@ -78,8 +78,8 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 			t.Fatalf("keygen not complete for %d after concurrent delivery", id)
 		}
 		if pub == nil {
-			pub = share.PublicKeyBytes()
-		} else if string(pub) != string(share.PublicKeyBytes()) {
+			pub = mustKeySharePublicKey(t, share)
+		} else if string(pub) != string(mustKeySharePublicKey(t, share)) {
 			t.Fatal("group public key mismatch after concurrent keygen")
 		}
 	}

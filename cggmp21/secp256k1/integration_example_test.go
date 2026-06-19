@@ -101,7 +101,7 @@ func ExampleStartRefresh() {
 	if err != nil {
 		panic(err)
 	}
-	oldPublicKey := shares[1].PublicKeyBytes()
+	oldPublicKey := exampleKeyShareMetadata(shares[1]).PublicKey
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -142,7 +142,7 @@ func ExampleStartRefresh() {
 		}
 		refreshed[id] = share
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, refreshed[1].PublicKeyBytes()))
+	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, exampleKeyShareMetadata(refreshed[1]).PublicKey))
 
 	ctx := examplePresignContext()
 	presigns, err := runExampleCGGMPPresign(refreshed, parties, ctx)
@@ -181,7 +181,7 @@ func ExampleStartReshareDealer() {
 	if err != nil {
 		panic(err)
 	}
-	oldPublicKey := shares[1].PublicKeyBytes()
+	oldPublicKey := exampleKeyShareMetadata(shares[1]).PublicKey
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -237,7 +237,7 @@ func ExampleStartReshareDealer() {
 		}
 		reshared[id] = share
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, reshared[3].PublicKeyBytes()))
+	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, exampleKeyShareMetadata(reshared[3]).PublicKey))
 
 	ctx := examplePresignContext()
 	presigns, err := runExampleCGGMPPresign(reshared, newParties, ctx)
@@ -273,7 +273,8 @@ func ExampleDeriveNonHardenedBIP32() {
 		panic(err)
 	}
 	path := []uint32{0, 1}
-	derived, err := cggmp.DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	shareMetadata := exampleKeyShareMetadata(shares[1])
+	derived, err := cggmp.DeriveNonHardenedBIP32(shareMetadata.PublicKey, shareMetadata.ChainCode, path)
 	if err != nil {
 		panic(err)
 	}
@@ -300,7 +301,7 @@ func ExampleDeriveNonHardenedBIP32() {
 		panic(err)
 	}
 	fmt.Println(cggmp.VerifySignature(derived.ChildPublicKey, request, signature))
-	fmt.Println(cggmp.VerifySignature(shares[1].PublicKeyBytes(), request, signature))
+	fmt.Println(cggmp.VerifySignature(shareMetadata.PublicKey, request, signature))
 	// Output:
 	// true
 	// false
@@ -321,7 +322,7 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("key share round-trip:", bytes.Equal(restoredShare.PublicKeyBytes(), shares[1].PublicKeyBytes()))
+	fmt.Println("key share round-trip:", bytes.Equal(exampleKeyShareMetadata(restoredShare).PublicKey, exampleKeyShareMetadata(shares[1]).PublicKey))
 
 	ctx := examplePresignContext()
 	presigns, err := runExampleCGGMPPresign(shares, parties, ctx)

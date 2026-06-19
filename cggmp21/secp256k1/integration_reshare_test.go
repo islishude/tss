@@ -139,8 +139,9 @@ func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 2)
 	newShares, _ := runCGGMP21ReshareWithDealers(t, shares, tss.NewPartySet(1, 2), tss.NewPartySet(3, 4), 2)
 	share := cloneKeyShareValue(newShares[3])
-	if len(share.ResharePlanHashBytes()) != sha256.Size {
-		t.Fatalf("got reshare plan hash length %d, want %d", len(share.ResharePlanHashBytes()), sha256.Size)
+	meta := mustKeyShareMetadata(t, share)
+	if len(meta.ResharePlanHash) != sha256.Size {
+		t.Fatalf("got reshare plan hash length %d, want %d", len(meta.ResharePlanHash), sha256.Size)
 	}
 	share.state.resharePlanHash[0] ^= 1
 	if err := share.ValidateWithLimits(testLimits()); err == nil {
@@ -288,7 +289,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 				t.Fatalf("missing old key fixture for %d-of-%d", oldKey.threshold, oldKey.n)
 			}
 			oldShares := cloneKeyShareMap(oldFixture)
-			oldPub := oldShares[1].PublicKeyBytes()
+			oldPub := mustKeySharePublicKey(t, oldShares[1])
 
 			var newShares map[tss.PartyID]*KeyShare
 			var sessions map[tss.PartyID]*ReshareSession
@@ -306,7 +307,7 @@ func TestThresholdECDSAReshareMembershipChange(t *testing.T) {
 
 			// Verify public key preserved for all new parties.
 			for _, id := range tc.newParties {
-				if !bytes.Equal(newShares[id].PublicKeyBytes(), oldPub) {
+				if !bytes.Equal(mustKeySharePublicKey(t, newShares[id]), oldPub) {
 					t.Fatalf("party %d public key changed after reshare", id)
 				}
 			}

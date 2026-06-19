@@ -79,7 +79,7 @@ type SignAttemptDeliveryState struct {
 // Clone returns an independent copy of the delivery state.
 func (s SignAttemptDeliveryState) Clone() SignAttemptDeliveryState {
 	return SignAttemptDeliveryState{
-		Acks:             tss.CloneSlices(s.Acks),
+		Acks:             tss.CloneSlice(s.Acks),
 		Certificate:      s.Certificate.Clone(),
 		DeliveryComplete: s.DeliveryComplete,
 	}
@@ -321,7 +321,7 @@ func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) 
 			Recipients:           w.Recipients,
 		},
 		DeliveryState: SignAttemptDeliveryState{
-			Acks:             tss.CloneSlices(w.Acks),
+			Acks:             tss.CloneSlice(w.Acks),
 			Certificate:      certificate,
 			DeliveryComplete: w.DeliveryComplete,
 		},
@@ -444,7 +444,7 @@ func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
 		Confidentiality:            uint8(r.DeliveryPolicy.Confidentiality),
 		BroadcastConsistency:       uint8(r.DeliveryPolicy.BroadcastConsistency),
 		Recipients:                 r.DeliveryPolicy.Recipients,
-		Acks:                       tss.CloneSlices(r.DeliveryState.Acks),
+		Acks:                       tss.CloneSlice(r.DeliveryState.Acks),
 		Certificate:                certificate,
 		DeliveryComplete:           r.DeliveryState.DeliveryComplete,
 		Completed:                  r.Completed,

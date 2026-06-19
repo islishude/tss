@@ -33,8 +33,8 @@ func TestFast_KeyShareAlgorithm(t *testing.T) {
 	if nilKey.PartyID() != 0 {
 		t.Fatal("nil KeyShare.PartyID() should return 0")
 	}
-	if nilKey.PublicKeyBytes() != nil {
-		t.Fatal("nil KeyShare.PublicKeyBytes() should return nil")
+	if _, ok := nilKey.PublicMetadata(); ok {
+		t.Fatal("nil KeyShare.PublicMetadata() should report false")
 	}
 }
 
@@ -65,79 +65,48 @@ func TestFast_KeyShareRedactedStringNoSecrets(t *testing.T) {
 	}
 }
 
-func TestFast_KeySharePublicKeyBytesReturnsCopy(t *testing.T) {
+func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
 	k.state.publicKey[0] = 0x02
-	cp := k.PublicKeyBytes()
-	cp[0] = 0x03
-	if k.state.publicKey[0] != 0x02 {
-		t.Fatal("PublicKeyBytes() did not return a copy")
-	}
-}
-
-func TestFast_KeyShareChainCodeBytesReturnsCopy(t *testing.T) {
-	t.Parallel()
-	k := minimalKeyShare()
 	k.state.chainCode[0] = 0xaa
-	cp := k.ChainCodeBytes()
-	cp[0] = 0xbb
-	if k.state.chainCode[0] != 0xaa {
-		t.Fatal("ChainCodeBytes() did not return a copy")
-	}
-}
-
-func TestFast_KeyShareShareProofBytesReturnsCopy(t *testing.T) {
-	t.Parallel()
-	k := minimalKeyShare()
 	k.state.shareProof = []byte{0x01, 0x02, 0x03}
-	cp := k.ShareProofBytes()
-	cp[0] = 0xff
-	if k.state.shareProof[0] != 0x01 {
-		t.Fatal("ShareProofBytes() did not return a copy")
-	}
-}
-
-func TestFast_KeyShareKeygenTranscriptHashBytesReturnsCopy(t *testing.T) {
-	t.Parallel()
-	k := minimalKeyShare()
 	k.state.keygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
-	cp := k.KeygenTranscriptHashBytes()
-	cp[0] = 0x00
-	if k.state.keygenTranscriptHash[0] != 0xde {
-		t.Fatal("KeygenTranscriptHashBytes() did not return a copy")
-	}
-}
-
-func TestFast_KeyShareGroupCommitmentsReturnsCopy(t *testing.T) {
-	t.Parallel()
-	k := minimalKeyShare()
 	k.state.groupCommitments = [][]byte{{0x01, 0x02}, {0x03, 0x04}}
-	cp := k.GroupCommitments()
-	cp[0][0] = 0xff
-	if k.state.groupCommitments[0][0] != 0x01 {
-		t.Fatal("GroupCommitments() did not deep-copy inner slices")
+
+	meta := mustKeyShareMetadata(t, k)
+	meta.PublicKey[0] = 0x03
+	meta.ChainCode[0] = 0xbb
+	meta.ShareProof[0] = 0xff
+	meta.KeygenTranscriptHash[0] = 0x00
+	meta.GroupCommitments[0][0] = 0xff
+	meta.GroupCommitments[0] = []byte{0x99}
+
+	if k.state.publicKey[0] != 0x02 {
+		t.Fatal("PublicMetadata() did not deep-copy public key")
 	}
-	cp[0] = []byte{0x99}
+	if k.state.chainCode[0] != 0xaa {
+		t.Fatal("PublicMetadata() did not deep-copy chain code")
+	}
+	if k.state.shareProof[0] != 0x01 {
+		t.Fatal("PublicMetadata() did not deep-copy share proof")
+	}
+	if k.state.keygenTranscriptHash[0] != 0xde {
+		t.Fatal("PublicMetadata() did not deep-copy keygen transcript hash")
+	}
+	if k.state.groupCommitments[0][0] != 0x01 {
+		t.Fatal("PublicMetadata() did not deep-copy group commitment bytes")
+	}
 	if len(k.state.groupCommitments[0]) != 2 {
-		t.Fatal("GroupCommitments() did not deep-copy outer slice")
+		t.Fatal("PublicMetadata() did not deep-copy group commitment slice")
 	}
 }
 
-func TestFast_KeyShareNilAccessors(t *testing.T) {
+func TestFast_KeyShareNilMetadata(t *testing.T) {
 	t.Parallel()
 	var nilKey *KeyShare
-	if b := nilKey.ChainCodeBytes(); b != nil {
-		t.Fatal("nil ChainCodeBytes() should return nil")
-	}
-	if b := nilKey.ShareProofBytes(); b != nil {
-		t.Fatal("nil ShareProofBytes() should return nil")
-	}
-	if b := nilKey.KeygenTranscriptHashBytes(); b != nil {
-		t.Fatal("nil KeygenTranscriptHashBytes() should return nil")
-	}
-	if b := nilKey.GroupCommitments(); b != nil {
-		t.Fatal("nil GroupCommitments() should return nil")
+	if _, ok := nilKey.PublicMetadata(); ok {
+		t.Fatal("nil PublicMetadata() should report false")
 	}
 }
 

@@ -10,7 +10,6 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
-	"github.com/islishude/tss/internal/wire/wireutil"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -39,30 +38,29 @@ func (k *KeyShare) Threshold() int {
 	return k.state.threshold
 }
 
-// Parties returns a copy of the canonical participant set.
-func (k *KeyShare) Parties() tss.PartySet {
+// PublicMetadata returns a caller-owned snapshot of non-secret key-share
+// metadata that is not scoped to a single participant.
+func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 	if k == nil || k.state == nil {
-		return nil
+		return KeySharePublicMetadata{}, false
 	}
-	return slices.Clone(k.state.parties)
-}
-
-// PublicKeyBytes returns a copy of the group secp256k1 public key.
-func (k *KeyShare) PublicKeyBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.publicKey)
-}
-
-// ChainCodeBytes returns a copy of the HD chain code. The chain code is
-// cleared by [KeyShare.Destroy]; callers that need the value after Destroy
-// must capture it first.
-func (k *KeyShare) ChainCodeBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.chainCode)
+	return KeySharePublicMetadata{
+		SecurityParams:       k.state.securityParams,
+		Party:                k.state.party,
+		Threshold:            k.state.threshold,
+		Parties:              k.state.parties.Clone(),
+		PublicKey:            bytes.Clone(k.state.publicKey),
+		ChainCode:            bytes.Clone(k.state.chainCode),
+		GroupCommitments:     tss.CloneByteSlices(k.state.groupCommitments),
+		PaillierProofSession: k.state.paillierProofSessionID,
+		PaillierProofDomain:  k.state.paillierProofDomain,
+		ResharePlanHash:      bytes.Clone(k.state.resharePlanHash),
+		PlanHash:             bytes.Clone(k.state.planHash),
+		ShareProof:           bytes.Clone(k.state.shareProof),
+		KeygenTranscriptHash: bytes.Clone(k.state.keygenTranscriptHash),
+		LogCiphertext:        bytes.Clone(k.state.logCiphertext),
+		LogProof:             bytes.Clone(k.state.logProof),
+	}, true
 }
 
 // Derive resolves a non-hardened BIP32 derivation path from this key share.
@@ -73,128 +71,47 @@ func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*t
 	return DeriveNonHardenedBIP32Extended(k.state.publicKey, k.state.chainCode, path.Clone(), opts...)
 }
 
-// GroupCommitments returns a deep copy of the per-degree group commitments.
-func (k *KeyShare) GroupCommitments() [][]byte {
-	if k == nil || k.state == nil {
-		return nil
+// VerificationShare returns a caller-owned public verification share for party.
+func (k *KeyShare) VerificationShare(party tss.PartyID) (VerificationShare, bool) {
+	data, err := k.partyDataFor(party)
+	if err != nil || len(data.verificationShare) == 0 {
+		return VerificationShare{}, false
 	}
-	return wireutil.CloneByteSlices(k.state.groupCommitments)
+	return VerificationShare{Party: party, PublicKey: bytes.Clone(data.verificationShare)}, true
 }
 
-// VerificationShares returns a deep copy of the participant verification shares.
-func (k *KeyShare) VerificationShares() []VerificationShare {
-	if k == nil || k.state == nil {
-		return nil
+// PaillierPublicShare returns a caller-owned Paillier public-key snapshot for party.
+func (k *KeyShare) PaillierPublicShare(party tss.PartyID) (PaillierPublicShare, bool) {
+	data, err := k.partyDataFor(party)
+	if err != nil || data.paillierPublicKey == nil || data.paillierProof == nil {
+		return PaillierPublicShare{}, false
 	}
-	out := make([]VerificationShare, 0, len(k.state.parties))
-	for _, id := range k.state.parties {
-		data, ok := k.state.partyData[id]
-		if !ok {
-			return nil
-		}
-		out = append(out, VerificationShare{Party: id, PublicKey: bytes.Clone(data.verificationShare)})
-	}
-	return out
-}
-
-// PaillierPublicKeyBytes returns a copy of the local Paillier public key.
-func (k *KeyShare) PaillierPublicKeyBytes() []byte {
-	data, err := k.partyDataFor(k.PartyID())
-	if err != nil || data.paillierPublicKey == nil {
-		return nil
-	}
-	raw, err := canonicalWireMessageBytes(data.paillierPublicKey, DefaultLimits())
+	publicKey, err := canonicalWireMessageBytes(data.paillierPublicKey, DefaultLimits())
 	if err != nil {
-		return nil
+		return PaillierPublicShare{}, false
 	}
-	return raw
-}
-
-// PaillierProofBytes returns a copy of the local Paillier modulus proof.
-func (k *KeyShare) PaillierProofBytes() []byte {
-	data, err := k.partyDataFor(k.PartyID())
-	if err != nil || data.paillierProof == nil {
-		return nil
-	}
-	raw, err := canonicalWireMessageBytes(data.paillierProof, DefaultLimits())
+	proof, err := canonicalWireMessageBytes(data.paillierProof, DefaultLimits())
 	if err != nil {
-		return nil
+		return PaillierPublicShare{}, false
 	}
-	return raw
+	return PaillierPublicShare{Party: party, PublicKey: publicKey, Proof: proof}, true
 }
 
-// PaillierPublicKeys returns deep copies of all participant Paillier public keys.
-func (k *KeyShare) PaillierPublicKeys() []PaillierPublicShare {
-	if k == nil || k.state == nil {
-		return nil
+// RingPedersenPublicShare returns a caller-owned Ring-Pedersen snapshot for party.
+func (k *KeyShare) RingPedersenPublicShare(party tss.PartyID) (RingPedersenPublicShare, bool) {
+	data, err := k.partyDataFor(party)
+	if err != nil || data.ringPedersenParams == nil || data.ringPedersenProof == nil {
+		return RingPedersenPublicShare{}, false
 	}
-	out := make([]PaillierPublicShare, 0, len(k.state.parties))
-	for _, id := range k.state.parties {
-		data, ok := k.state.partyData[id]
-		if !ok {
-			return nil
-		}
-		publicKey, err := canonicalWireMessageBytes(data.paillierPublicKey, DefaultLimits())
-		if err != nil {
-			return nil
-		}
-		proof, err := canonicalWireMessageBytes(data.paillierProof, DefaultLimits())
-		if err != nil {
-			return nil
-		}
-		out = append(out, PaillierPublicShare{Party: id, PublicKey: publicKey, Proof: proof})
-	}
-	return out
-}
-
-// RingPedersenParamsBytes returns a copy of the local Ring-Pedersen parameters.
-func (k *KeyShare) RingPedersenParamsBytes() []byte {
-	data, err := k.partyDataFor(k.PartyID())
-	if err != nil || data.ringPedersenParams == nil {
-		return nil
-	}
-	raw, err := canonicalWireMessageBytes(data.ringPedersenParams, DefaultLimits())
+	params, err := canonicalWireMessageBytes(data.ringPedersenParams, DefaultLimits())
 	if err != nil {
-		return nil
+		return RingPedersenPublicShare{}, false
 	}
-	return raw
-}
-
-// RingPedersenProofBytes returns a copy of the local Ring-Pedersen proof.
-func (k *KeyShare) RingPedersenProofBytes() []byte {
-	data, err := k.partyDataFor(k.PartyID())
-	if err != nil || data.ringPedersenProof == nil {
-		return nil
-	}
-	raw, err := canonicalWireMessageBytes(data.ringPedersenProof, DefaultLimits())
+	proof, err := canonicalWireMessageBytes(data.ringPedersenProof, DefaultLimits())
 	if err != nil {
-		return nil
+		return RingPedersenPublicShare{}, false
 	}
-	return raw
-}
-
-// RingPedersenPublic returns deep copies of all public Ring-Pedersen records.
-func (k *KeyShare) RingPedersenPublic() []RingPedersenPublicShare {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	out := make([]RingPedersenPublicShare, 0, len(k.state.parties))
-	for _, id := range k.state.parties {
-		data, ok := k.state.partyData[id]
-		if !ok {
-			return nil
-		}
-		params, err := canonicalWireMessageBytes(data.ringPedersenParams, DefaultLimits())
-		if err != nil {
-			return nil
-		}
-		proof, err := canonicalWireMessageBytes(data.ringPedersenProof, DefaultLimits())
-		if err != nil {
-			return nil
-		}
-		out = append(out, RingPedersenPublicShare{Party: id, Params: params, Proof: proof})
-	}
-	return out
+	return RingPedersenPublicShare{Party: party, Params: params, Proof: proof}, true
 }
 
 // PaillierProofSessionID returns the session bound into the Paillier proof.
@@ -213,65 +130,13 @@ func (k *KeyShare) PaillierProofDomain() string {
 	return k.state.paillierProofDomain
 }
 
-// ResharePlanHashBytes returns a copy of the bound reshare-plan hash.
-func (k *KeyShare) ResharePlanHashBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
+// KeygenConfirmation returns a caller-owned keygen confirmation for party.
+func (k *KeyShare) KeygenConfirmation(party tss.PartyID) (*KeygenConfirmation, bool) {
+	data, err := k.partyDataFor(party)
+	if err != nil || data.keygenConfirmation == nil {
+		return nil, false
 	}
-	return slices.Clone(k.state.resharePlanHash)
-}
-
-// PlanHashBytes returns a copy of the lifecycle plan hash that produced this
-// key share.
-func (k *KeyShare) PlanHashBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.planHash)
-}
-
-// ShareProofBytes returns a copy of the Schnorr share-proof encoding.
-func (k *KeyShare) ShareProofBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.shareProof)
-}
-
-// KeygenTranscriptHashBytes returns a copy of the keygen transcript hash.
-func (k *KeyShare) KeygenTranscriptHashBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.keygenTranscriptHash)
-}
-
-// LogCiphertextBytes returns a copy of the local proof ciphertext.
-func (k *KeyShare) LogCiphertextBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.logCiphertext)
-}
-
-// LogProofBytes returns a copy of the local logarithm proof.
-func (k *KeyShare) LogProofBytes() []byte {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	return slices.Clone(k.state.logProof)
-}
-
-// KeygenConfirmations returns a deep copy of the keygen confirmation set.
-func (k *KeyShare) KeygenConfirmations() []*KeygenConfirmation {
-	if k == nil || k.state == nil {
-		return nil
-	}
-	confirmations, err := k.orderedKeygenConfirmations()
-	if err != nil {
-		return nil
-	}
-	return confirmations
+	return data.keygenConfirmation.Clone(), true
 }
 
 // SecurityParams returns the cryptographic profile persisted with the share.
@@ -876,6 +741,29 @@ func (k *KeyShare) paillierPublicFor(id tss.PartyID, limits Limits) (*pai.Public
 	return data.paillierPublicKey.Clone(), nil
 }
 
+func (k *KeyShare) paillierPublicShares(limits Limits) ([]PaillierPublicShare, error) {
+	if k == nil || k.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	out := make([]PaillierPublicShare, 0, len(k.state.parties))
+	for _, id := range k.state.parties {
+		data, err := k.partyDataFor(id)
+		if err != nil {
+			return nil, err
+		}
+		publicKey, err := canonicalWireMessageBytes(data.paillierPublicKey, limits)
+		if err != nil {
+			return nil, err
+		}
+		proof, err := canonicalWireMessageBytes(data.paillierProof, limits)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, PaillierPublicShare{Party: id, PublicKey: publicKey, Proof: proof})
+	}
+	return out, nil
+}
+
 // ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
 func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID, _ Limits) (zkpai.RingPedersenParams, error) {
 	data, err := k.partyDataFor(id)
@@ -908,7 +796,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		publicKey:              slices.Clone(k.state.publicKey),
 		chainCode:              slices.Clone(k.state.chainCode),
 		secret:                 k.state.secret.Clone(),
-		groupCommitments:       wireutil.CloneByteSlices(k.state.groupCommitments),
+		groupCommitments:       tss.CloneByteSlices(k.state.groupCommitments),
 		partyData:              cloneKeySharePartyDataMap(k.state.partyData),
 		paillierPrivateKey:     k.state.paillierPrivateKey.Clone(),
 		paillierProofSessionID: k.state.paillierProofSessionID,

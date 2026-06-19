@@ -160,7 +160,10 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 	if key == nil {
 		return nil
 	}
-	paillierPublicKeys := key.PaillierPublicKeys()
+	paillierPublicKeys, err := key.paillierPublicShares(DefaultLimits())
+	if err != nil {
+		paillierPublicKeys = nil
+	}
 	fields := []tss.EvidenceField{
 		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)),
 		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.publicKey),
@@ -206,7 +209,7 @@ func hashBytes(value []byte) []byte {
 
 func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	t := transcript.New(paillierPublicSharesHashLabel)
-	sorted := tss.CloneSlices(shares)
+	sorted := tss.CloneSlice(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
 		return int(a.Party) - int(b.Party)
 	})

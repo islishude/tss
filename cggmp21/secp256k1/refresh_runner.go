@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -48,9 +49,12 @@ func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare]
 
 // StartRefresh constructs one CGGMP21 refresh session.
 func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, config tss.RefreshRunConfig) (tss.RefreshSession[*KeyShare], []tss.Envelope, error) {
+	if current == nil || current.state == nil {
+		return nil, nil, errors.New("nil key share")
+	}
 	guard, err := (tss.GuardConfig{
 		Self:        current.PartyID(),
-		Parties:     current.Parties(),
+		Parties:     current.state.parties.Clone(),
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   config.SessionID,
 		Policies:    CGGMP21Policies(),

@@ -168,10 +168,14 @@ func validateDecodedKeygenFixtureShare(share *KeyShare, expectedID tss.PartyID, 
 	if share.Threshold() != fixture.Threshold {
 		return fmt.Errorf("threshold mismatch: got %d, want %d", share.Threshold(), fixture.Threshold)
 	}
-	if !slices.Equal(share.Parties(), parties) {
+	meta, ok := share.PublicMetadata()
+	if !ok {
+		return errors.New("missing key share metadata")
+	}
+	if !slices.Equal(meta.Parties, parties) {
 		return errors.New("participant set mismatch")
 	}
-	if !bytes.Equal(share.PublicKeyBytes(), groupPublicKey) {
+	if !bytes.Equal(meta.PublicKey, groupPublicKey) {
 		return errors.New("group public key mismatch")
 	}
 	if err := share.ValidateWithLimits(testLimits()); err != nil {

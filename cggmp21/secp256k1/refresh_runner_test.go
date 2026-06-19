@@ -35,7 +35,7 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 
 	shares := CachedKeygenShares(t, 1, 1)
 	current := shares[1]
-	oldPublicKey := current.PublicKeyBytes()
+	oldPublicKey := mustKeySharePublicKey(t, current)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -78,7 +78,7 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 	if committed == nil {
 		t.Fatal("refresh did not commit a key share")
 	}
-	if !bytes.Equal(committed.PublicKeyBytes(), oldPublicKey) {
+	if !bytes.Equal(mustKeySharePublicKey(t, committed), oldPublicKey) {
 		t.Fatal("refresh changed the group public key")
 	}
 	if transport.sent == 0 {

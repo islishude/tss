@@ -310,7 +310,7 @@ func canonicalEvidenceFields(fields []EvidenceField) []EvidenceField {
 	if len(fields) == 0 {
 		return nil
 	}
-	sorted := CloneSlices(fields)
+	sorted := CloneSlice(fields)
 	slices.SortFunc(sorted, func(a, b EvidenceField) int {
 		if a.Key < b.Key {
 			return -1

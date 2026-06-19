@@ -16,7 +16,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3)
 	signers := tss.NewPartySet(1, 2)
 	path := []uint32{0, 17}
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	result, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -56,7 +56,7 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	if !VerifySignature(derived, request, sig) {
 		t.Fatal("shifted signature did not verify against derived key")
 	}
-	if VerifySignature(shares[1].PublicKeyBytes(), request, sig) {
+	if VerifySignature(mustKeySharePublicKey(t, shares[1]), request, sig) {
 		t.Fatal("shifted signature verified against unshifted key")
 	}
 }
@@ -67,7 +67,7 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3)
 	signers := []*KeyShare{shares[1], shares[2]}
 	path := []uint32{0, 9}
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	result, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,8 +91,8 @@ func TestBIP32SingleLevel(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 1, 1)
-	pubKey := shares[1].PublicKeyBytes()
-	chainCode := shares[1].ChainCodeBytes()
+	pubKey := mustKeySharePublicKey(t, shares[1])
+	chainCode := mustKeyShareChainCode(t, shares[1])
 
 	result, err := DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0})
 	if err != nil {
@@ -120,8 +120,8 @@ func TestBIP32MultiLevel(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 1, 1)
-	pubKey := shares[1].PublicKeyBytes()
-	chainCode := shares[1].ChainCodeBytes()
+	pubKey := mustKeySharePublicKey(t, shares[1])
+	chainCode := mustKeyShareChainCode(t, shares[1])
 
 	result, err := DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0, 1, 2})
 	if err != nil {
@@ -162,7 +162,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 
 	shares := CachedKeygenShares(t, 2, 3)
 	path := []uint32{0, 5}
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	result, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -203,7 +203,7 @@ func TestBIP32DeriveAndSign(t *testing.T) {
 	if !VerifySignature(childPub, request, sig) {
 		t.Fatal("signature did not verify against derived BIP32 key")
 	}
-	if VerifySignature(shares[1].PublicKeyBytes(), request, sig) {
+	if VerifySignature(mustKeySharePublicKey(t, shares[1]), request, sig) {
 		t.Fatal("signature verified against master key (should use derived key)")
 	}
 }
@@ -212,11 +212,11 @@ func TestBIP32RejectsHardened(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 1, 1)
-	_, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{tss.HardenedKeyStart})
+	_, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), []uint32{tss.HardenedKeyStart})
 	if err == nil {
 		t.Fatal("expected error for hardened index")
 	}
-	_, err = DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{0, tss.HardenedKeyStart + 1})
+	_, err = DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), []uint32{0, tss.HardenedKeyStart + 1})
 	if err == nil {
 		t.Fatal("expected error for hardened index in path")
 	}
@@ -226,10 +226,10 @@ func TestBIP32RejectsEmptyChainCode(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 1, 1)
-	if len(shares[1].ChainCodeBytes()) > 0 {
+	if len(mustKeyShareChainCode(t, shares[1])) > 0 {
 		t.Skip("unexpected chain code with HD disabled")
 	}
-	_, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{0})
+	_, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), []uint32{0})
 	if err == nil {
 		t.Fatal("expected error for empty chain code")
 	}
@@ -261,7 +261,7 @@ func TestSignWithEmptyBIP32PathMatchesParentKey(t *testing.T) {
 		t.Fatal("signature not completed")
 	}
 	// The empty path should produce the parent key signature.
-	if !VerifySignature(shares[1].PublicKeyBytes(), request, sig) {
+	if !VerifySignature(mustKeySharePublicKey(t, shares[1]), request, sig) {
 		t.Fatal("empty path signature did not verify against parent key")
 	}
 }
@@ -272,7 +272,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 	shares := CachedKeygenShares(t, 1, 1)
 	signers := tss.NewPartySet(1)
 	path := []uint32{0, 1}
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	result, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -295,7 +295,7 @@ func TestSignWithDerivedBIP32PathVerifiesUnderChildPublicKey(t *testing.T) {
 	if !VerifySignature(result.ChildPublicKey, request, sig) {
 		t.Fatal("signature did not verify against child public key")
 	}
-	if VerifySignature(shares[1].PublicKeyBytes(), request, sig) {
+	if VerifySignature(mustKeySharePublicKey(t, shares[1]), request, sig) {
 		t.Fatal("signature verified against parent key (should not)")
 	}
 }
@@ -336,7 +336,7 @@ func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
 
 	// Verify the presign has a non-zero additive shift.
 	presign := presigns[1]
-	derivation := presign.Derivation()
+	derivation := mustPresignMetadata(t, presign).Derivation
 	if derivation == nil || len(derivation.AdditiveShift) != 32 {
 		t.Fatal("expected 32-byte additive shift in presign")
 	}
@@ -344,7 +344,7 @@ func TestPresignBIP32AdditiveShiftBoundToContext(t *testing.T) {
 		t.Fatal("additive shift should be non-zero for non-empty path")
 	}
 	// The context hash embeds the derivation path.
-	if len(presign.ContextHashBytes()) != 32 {
+	if len(mustPresignContextHash(t, presign)) != 32 {
 		t.Fatal("expected 32-byte context hash")
 	}
 }

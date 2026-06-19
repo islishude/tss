@@ -104,10 +104,92 @@ func (r RingPedersenPublicShare) Clone() RingPedersenPublicShare {
 	}
 }
 
+// KeySharePublicMetadata is a caller-owned snapshot of non-secret key-share
+// metadata that is not scoped to one participant.
+type KeySharePublicMetadata struct {
+	SecurityParams       SecurityParams
+	Party                tss.PartyID
+	Threshold            int
+	Parties              tss.PartySet
+	PublicKey            []byte
+	ChainCode            []byte
+	GroupCommitments     [][]byte
+	PaillierProofSession tss.SessionID
+	PaillierProofDomain  string
+	ResharePlanHash      []byte
+	PlanHash             []byte
+	ShareProof           []byte
+	KeygenTranscriptHash []byte
+	LogCiphertext        []byte
+	LogProof             []byte
+}
+
+// Clone returns a deep copy of the key-share metadata snapshot.
+func (m KeySharePublicMetadata) Clone() KeySharePublicMetadata {
+	return KeySharePublicMetadata{
+		SecurityParams:       m.SecurityParams,
+		Party:                m.Party,
+		Threshold:            m.Threshold,
+		Parties:              m.Parties.Clone(),
+		PublicKey:            bytes.Clone(m.PublicKey),
+		ChainCode:            bytes.Clone(m.ChainCode),
+		GroupCommitments:     tss.CloneByteSlices(m.GroupCommitments),
+		PaillierProofSession: m.PaillierProofSession,
+		PaillierProofDomain:  m.PaillierProofDomain,
+		ResharePlanHash:      bytes.Clone(m.ResharePlanHash),
+		PlanHash:             bytes.Clone(m.PlanHash),
+		ShareProof:           bytes.Clone(m.ShareProof),
+		KeygenTranscriptHash: bytes.Clone(m.KeygenTranscriptHash),
+		LogCiphertext:        bytes.Clone(m.LogCiphertext),
+		LogProof:             bytes.Clone(m.LogProof),
+	}
+}
+
+// PresignPublicMetadata is a caller-owned snapshot of non-secret presign
+// metadata that is not scoped to one signer.
+type PresignPublicMetadata struct {
+	SecurityParams       SecurityParams
+	Party                tss.PartyID
+	Threshold            int
+	Signers              tss.PartySet
+	R                    []byte
+	LittleR              []byte
+	TranscriptHash       []byte
+	Context              PresignContext
+	ContextHash          []byte
+	Derivation           *tss.DerivationResult
+	VerificationKey      []byte
+	PlanHash             []byte
+	PublicKey            []byte
+	KeygenTranscriptHash []byte
+	PartiesHash          []byte
+}
+
+// Clone returns a deep copy of the presign metadata snapshot.
+func (m PresignPublicMetadata) Clone() PresignPublicMetadata {
+	return PresignPublicMetadata{
+		SecurityParams:       m.SecurityParams,
+		Party:                m.Party,
+		Threshold:            m.Threshold,
+		Signers:              m.Signers.Clone(),
+		R:                    bytes.Clone(m.R),
+		LittleR:              bytes.Clone(m.LittleR),
+		TranscriptHash:       bytes.Clone(m.TranscriptHash),
+		Context:              m.Context.Clone(),
+		ContextHash:          bytes.Clone(m.ContextHash),
+		Derivation:           m.Derivation.Clone(),
+		VerificationKey:      bytes.Clone(m.VerificationKey),
+		PlanHash:             bytes.Clone(m.PlanHash),
+		PublicKey:            bytes.Clone(m.PublicKey),
+		KeygenTranscriptHash: bytes.Clone(m.KeygenTranscriptHash),
+		PartiesHash:          bytes.Clone(m.PartiesHash),
+	}
+}
+
 // KeyShare is one local CGGMP21-style secp256k1 ECDSA signing share.
 //
-// Its fields are intentionally opaque. Accessors that return slices, maps, or
-// nested records return caller-owned deep copies.
+// Its fields are intentionally opaque. Public metadata is exposed through
+// caller-owned snapshots, and per-party public material is exposed by PartyID.
 //
 // A shallow Go copy of KeyShare is another handle to the same lifecycle state:
 // destroying either handle destroys the shared secret material. Session

@@ -30,7 +30,9 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if string(restored.PublicKeyBytes()) != string(shares[1].PublicKeyBytes()) {
+	restoredMeta := mustKeyShareMetadata(t, restored)
+	shareMeta := mustKeyShareMetadata(t, shares[1])
+	if string(restoredMeta.PublicKey) != string(shareMeta.PublicKey) {
 		t.Error("PublicKey mismatch after round-trip")
 	}
 	if restored.PartyID() != shares[1].PartyID() {
@@ -39,13 +41,21 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !restored.Parties().Contains(restored.PartyID()) {
+	if !restoredMeta.Parties.Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
-	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {
+	if string(restoredMeta.KeygenTranscriptHash) != string(shareMeta.KeygenTranscriptHash) {
 		t.Error("KeygenTranscriptHash mismatch after round-trip")
 	}
-	if string(restored.PaillierPublicKeyBytes()) != string(shares[1].PaillierPublicKeyBytes()) {
+	restoredPaillier, ok := restored.PaillierPublicShare(restored.PartyID())
+	if !ok {
+		t.Fatal("missing restored Paillier public share")
+	}
+	sharePaillier, ok := shares[1].PaillierPublicShare(shares[1].PartyID())
+	if !ok {
+		t.Fatal("missing original Paillier public share")
+	}
+	if string(restoredPaillier.PublicKey) != string(sharePaillier.PublicKey) {
 		t.Error("PaillierPublicKey mismatch after round-trip")
 	}
 
@@ -91,8 +101,8 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	guard := testCGGMP21Guard(shares[1].PartyID(), shares[1].Parties(), sid)
-	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], restored.ContextHashBytes(), true, nil, guard, testLimits()); err == nil {
+	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sid)
+	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], mustPresignContextHash(t, restored), true, nil, guard, testLimits()); err == nil {
 		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
 	} else {
 		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)

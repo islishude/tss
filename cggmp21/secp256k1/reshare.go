@@ -9,7 +9,6 @@ import (
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -493,7 +492,7 @@ func cloneResharePlan(in *ResharePlan) *ResharePlan {
 		sessionID:           in.state.sessionID,
 		curveID:             in.state.curveID,
 		oldGroupPublicKey:   bytes.Clone(in.state.oldGroupPublicKey),
-		oldGroupCommitments: wireutil.CloneByteSlices(in.state.oldGroupCommitments),
+		oldGroupCommitments: tss.CloneByteSlices(in.state.oldGroupCommitments),
 		oldParties:          in.state.oldParties.Clone(),
 		oldThreshold:        in.state.oldThreshold,
 		dealerParties:       in.state.dealerParties.Clone(),

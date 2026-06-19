@@ -156,108 +156,42 @@ func (p *Presign) Threshold() int {
 	return p.state.threshold
 }
 
-// Signers returns a copy of the canonical signer set.
-func (p *Presign) Signers() tss.PartySet {
+// PublicMetadata returns a caller-owned snapshot of non-secret presign metadata
+// that is not scoped to a single signer.
+func (p *Presign) PublicMetadata() (PresignPublicMetadata, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return PresignPublicMetadata{}, false
 	}
-	return slices.Clone(p.state.signers)
+	return PresignPublicMetadata{
+		SecurityParams:       p.state.securityParams,
+		Party:                p.state.party,
+		Threshold:            p.state.threshold,
+		Signers:              p.state.signers.Clone(),
+		R:                    bytes.Clone(p.state.r),
+		LittleR:              bytes.Clone(p.state.littleR),
+		TranscriptHash:       bytes.Clone(p.state.transcriptHash),
+		Context:              p.state.context.Clone(),
+		ContextHash:          bytes.Clone(p.state.contextHash),
+		Derivation:           p.state.derivation.Clone(),
+		VerificationKey:      p.verificationKey(),
+		PlanHash:             bytes.Clone(p.state.planHash),
+		PublicKey:            bytes.Clone(p.state.publicKey),
+		KeygenTranscriptHash: bytes.Clone(p.state.keygenTranscriptHash),
+		PartiesHash:          bytes.Clone(p.state.partiesHash),
+	}, true
 }
 
-// RBytes returns a copy of the aggregate nonce point.
-func (p *Presign) RBytes() []byte {
+// VerifyShare returns a caller-owned online verification record for party.
+func (p *Presign) VerifyShare(party tss.PartyID) (SignVerifyShare, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return SignVerifyShare{}, false
 	}
-	return slices.Clone(p.state.r)
-}
-
-// LittleRBytes returns a copy of the ECDSA r scalar.
-func (p *Presign) LittleRBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
+	for _, share := range p.state.verifyShares {
+		if share.Party == party {
+			return share.Clone(), true
+		}
 	}
-	return slices.Clone(p.state.littleR)
-}
-
-// TranscriptHashBytes returns a copy of the presign transcript hash.
-func (p *Presign) TranscriptHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.transcriptHash)
-}
-
-// Context returns a copy of the bound presign context.
-func (p *Presign) Context() PresignContext {
-	if p == nil || p.state == nil {
-		return PresignContext{}
-	}
-	return p.state.context.Clone()
-}
-
-// ContextHashBytes returns a copy of the bound context hash.
-func (p *Presign) ContextHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.contextHash)
-}
-
-// Derivation returns a copy of the bound HD derivation result.
-func (p *Presign) Derivation() *tss.DerivationResult {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.derivation.Clone()
-}
-
-// VerificationKeyBytes returns a copy of the child public key used for signature verification.
-func (p *Presign) VerificationKeyBytes() []byte {
-	if p == nil || p.state == nil || p.state.derivation == nil {
-		return nil
-	}
-	return p.state.derivation.VerificationKeyBytes()
-}
-
-// PlanHashBytes returns a copy of the presign lifecycle plan hash.
-func (p *Presign) PlanHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.planHash)
-}
-
-// PublicKeyBytes returns a copy of the bound group public key.
-func (p *Presign) PublicKeyBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.publicKey)
-}
-
-// KeygenTranscriptHashBytes returns a copy of the bound keygen transcript hash.
-func (p *Presign) KeygenTranscriptHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.keygenTranscriptHash)
-}
-
-// PartiesHashBytes returns a copy of the bound participant-set hash.
-func (p *Presign) PartiesHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.partiesHash)
-}
-
-// VerifyShares returns deep copies of the per-signer verification records.
-func (p *Presign) VerifyShares() []SignVerifyShare {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return tss.CloneSlices(p.state.verifyShares)
+	return SignVerifyShare{}, false
 }
 
 // SecurityParams returns the cryptographic profile persisted with the presign.
@@ -319,13 +253,13 @@ func (p *Presign) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	return nil
 }
 
-// ID returns a content-derived presign identifier suitable for use as an
+// id returns a content-derived presign identifier suitable for use as an
 // idempotency key in a durable [SignAttemptStore]. The returned hash is computed
 // from all persisted presign fields, including secret material, and does not
 // depend on the public transcript hash or the local consumed claim. Tampering with any
 // persisted field changes the identifier, so a storage layer cannot alter the
 // idempotency key independently of the presign contents.
-func (p *Presign) ID() []byte {
+func (p *Presign) id() []byte {
 	if p == nil || p.state == nil {
 		return nil
 	}
@@ -352,6 +286,13 @@ func (p *Presign) ID() []byte {
 	t.AppendBytes("chi_share", p.state.chiShare.FixedBytes())
 	t.AppendBytes("delta", p.state.delta.FixedBytes())
 	return t.Sum()
+}
+
+func (p *Presign) verificationKey() []byte {
+	if p == nil || p.state == nil || p.state.derivation == nil {
+		return nil
+	}
+	return p.state.derivation.VerificationKeyBytes()
 }
 
 // Validate checks local presign structure and scalar/point encodings.

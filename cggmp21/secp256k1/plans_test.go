@@ -30,10 +30,18 @@ func TestCGGMP21KeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	assertSameCGGMPPlanDigest(t, plan, same)
 
 	parties[0] = 99
-	gotParties := plan.Parties()
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("missing keygen plan snapshot")
+	}
+	gotParties := snapshot.Parties
 	gotParties[0] = 99
-	if !bytes.Equal(cggmpPartyIDsBytes(plan.Parties()), cggmpPartyIDsBytes(tss.NewPartySet(1, 2, 3))) {
-		t.Fatal("keygen plan party getter or constructor aliases caller memory")
+	again, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("missing keygen plan snapshot")
+	}
+	if !bytes.Equal(cggmpPartyIDsBytes(again.Parties), cggmpPartyIDsBytes(tss.NewPartySet(1, 2, 3))) {
+		t.Fatal("keygen plan snapshot or constructor aliases caller memory")
 	}
 	localLimits := DefaultLimits()
 	localLimits.Payload.MaxMessageBytes--
@@ -192,14 +200,15 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		chainCode:    []byte{0x03, 0x04},
 		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
 	}}
-	refreshParties := refresh.Parties()
-	refreshParties[0] = 99
-	refreshPublic := refresh.PublicKeyBytes()
-	refreshPublic[0] ^= 0xff
-	refreshChain := refresh.ChainCodeBytes()
-	refreshChain[0] ^= 0xff
+	refreshSnapshot, ok := refresh.Snapshot()
+	if !ok {
+		t.Fatal("missing refresh plan snapshot")
+	}
+	refreshSnapshot.Parties[0] = 99
+	refreshSnapshot.PublicKey[0] ^= 0xff
+	refreshSnapshot.ChainCode[0] ^= 0xff
 	if refresh.state.parties[0] != 1 || refresh.state.publicKey[0] != 0x02 || refresh.state.chainCode[0] != 0x03 {
-		t.Fatal("refresh plan getter aliases internal state")
+		t.Fatal("refresh plan snapshot aliases internal state")
 	}
 
 	presign := &PresignPlan{state: &presignPlanState{
@@ -224,22 +233,18 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 			ChildChainCode: []byte{0x04},
 		},
 	}}
-	presignParties := presign.Parties()
-	presignParties[0] = 99
-	presignPublic := presign.PublicKeyBytes()
-	presignPublic[0] ^= 0xff
-	presignKeygen := presign.KeygenTranscriptHashBytes()
-	presignKeygen[0] ^= 0xff
-	presignSigners := presign.Signers()
-	presignSigners[0] = 99
-	presignContext := presign.Context()
-	presignContext.Derivation.Path[0] = 99
-	presignContextHash := presign.ContextHashBytes()
-	presignContextHash[0] ^= 0xff
-	presignDerivation := presign.Derivation()
-	presignDerivation.AdditiveShift[0] ^= 0xff
-	presignVerificationKey := presign.VerificationKeyBytes()
-	presignVerificationKey[0] ^= 0xff
+	presignSnapshot, ok := presign.Snapshot()
+	if !ok {
+		t.Fatal("missing presign plan snapshot")
+	}
+	presignSnapshot.Parties[0] = 99
+	presignSnapshot.PublicKey[0] ^= 0xff
+	presignSnapshot.KeygenTranscriptHash[0] ^= 0xff
+	presignSnapshot.Signers[0] = 99
+	presignSnapshot.Context.Derivation.Path[0] = 99
+	presignSnapshot.ContextHash[0] ^= 0xff
+	presignSnapshot.Derivation.AdditiveShift[0] ^= 0xff
+	presignSnapshot.VerificationKey[0] ^= 0xff
 	if presign.state.parties[0] != 1 ||
 		presign.state.publicKey[0] != 0x02 ||
 		presign.state.keygenHash[0] != 0x10 ||
@@ -248,7 +253,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presign.state.contextHash[0] != 0x20 ||
 		presign.state.derivation.AdditiveShift[0] != 0x30 ||
 		presign.state.derivation.ChildPublicKey[0] != 0x02 {
-		t.Fatal("presign plan getter aliases internal state")
+		t.Fatal("presign plan snapshot aliases internal state")
 	}
 
 	sign := &SignPlan{state: &signPlanState{
@@ -263,24 +268,23 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 			ResolvedPath: tss.DerivationPath{3, 4},
 		}}, Message: []byte("message")},
 	}}
-	presignID := sign.PresignIDBytes()
-	presignID[0] ^= 0xff
-	presignTranscript := sign.PresignTranscriptHashBytes()
-	presignTranscript[0] ^= 0xff
-	contextHash := sign.ContextHashBytes()
-	contextHash[0] ^= 0xff
-	digest := sign.MessageDigestBytes()
-	digest[0] ^= 0xff
-	request := sign.Request()
-	request.Message[0] ^= 0xff
-	request.Context.Derivation.Path[0] = 99
+	signSnapshot, ok := sign.Snapshot()
+	if !ok {
+		t.Fatal("missing sign plan snapshot")
+	}
+	signSnapshot.PresignID[0] ^= 0xff
+	signSnapshot.PresignTranscriptHash[0] ^= 0xff
+	signSnapshot.ContextHash[0] ^= 0xff
+	signSnapshot.MessageDigest[0] ^= 0xff
+	signSnapshot.Request.Message[0] ^= 0xff
+	signSnapshot.Request.Context.Derivation.Path[0] = 99
 	if sign.state.presignID[0] != 0x40 ||
 		sign.state.presignTranscript[0] != 0x45 ||
 		sign.state.contextHash[0] != 0x50 ||
 		sign.state.digest[0] != 0x60 ||
 		sign.state.request.Message[0] != 'm' ||
 		sign.state.request.Context.Derivation.Path[0] != 3 {
-		t.Fatal("sign plan getter aliases internal state")
+		t.Fatal("sign plan snapshot aliases internal state")
 	}
 }
 

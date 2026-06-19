@@ -17,11 +17,15 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	t.Parallel()
 	shares := secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{})
 	share := shares[1]
-	pk, err := pai.UnmarshalPublicKey(share.PaillierPublicKeyBytes())
+	paillierShare, ok := share.PaillierPublicShare(share.PartyID())
+	if !ok {
+		t.Fatal("missing Paillier public share")
+	}
+	pk, err := pai.UnmarshalPublicKey(paillierShare.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(share.PaillierProofBytes())
+	proof, err := zkpai.UnmarshalModulusProof(paillierShare.Proof)
 	if err != nil {
 		t.Fatal(err)
 	}

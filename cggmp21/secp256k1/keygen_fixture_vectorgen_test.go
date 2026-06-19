@@ -29,7 +29,7 @@ func TestGenerateKeygenFixtures(t *testing.T) {
 			fixture.Parties[i] = int(id)
 			share := shares[id]
 			if fixture.GroupPublicKey == "" {
-				fixture.GroupPublicKey = hex.EncodeToString(share.PublicKeyBytes())
+				fixture.GroupPublicKey = hex.EncodeToString(mustKeySharePublicKey(t, share))
 			}
 			raw, err := share.MarshalBinaryWithLimits(testLimits())
 			if err != nil {

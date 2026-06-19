@@ -36,6 +36,58 @@ func testCGGMP21GuardParties(parties tss.PartySet, self tss.PartyID) tss.PartySe
 	return ps.Sorted()
 }
 
+func mustKeyShareMetadata(t testing.TB, share *KeyShare) KeySharePublicMetadata {
+	t.Helper()
+	meta, ok := share.PublicMetadata()
+	if !ok {
+		t.Fatal("missing key share metadata")
+	}
+	return meta
+}
+
+func mustKeyShareParties(t testing.TB, share *KeyShare) tss.PartySet {
+	t.Helper()
+	return mustKeyShareMetadata(t, share).Parties
+}
+
+func mustKeySharePublicKey(t testing.TB, share *KeyShare) []byte {
+	t.Helper()
+	return mustKeyShareMetadata(t, share).PublicKey
+}
+
+func mustKeyShareChainCode(t testing.TB, share *KeyShare) []byte {
+	t.Helper()
+	return mustKeyShareMetadata(t, share).ChainCode
+}
+
+func mustPresignMetadata(t testing.TB, presign *Presign) PresignPublicMetadata {
+	t.Helper()
+	meta, ok := presign.PublicMetadata()
+	if !ok {
+		t.Fatal("missing presign metadata")
+	}
+	return meta
+}
+
+func mustPresignContextHash(t testing.TB, presign *Presign) []byte {
+	t.Helper()
+	return mustPresignMetadata(t, presign).ContextHash
+}
+
+func mustPresignLittleR(t testing.TB, presign *Presign) []byte {
+	t.Helper()
+	return mustPresignMetadata(t, presign).LittleR
+}
+
+func mustPresignVerifyShare(t testing.TB, presign *Presign, party tss.PartyID) SignVerifyShare {
+	t.Helper()
+	share, ok := presign.VerifyShare(party)
+	if !ok {
+		t.Fatalf("missing presign verify share for party %d", party)
+	}
+	return share
+}
+
 // testCGGMP21Policies returns the production CGGMP21 policy set with broadcast
 // consistency relaxed to None for all payload types. Tests that specifically
 // exercise broadcast consistency should use CGGMP21Policies directly.
@@ -92,7 +144,7 @@ func clonePresignForTest(p *Presign) *Presign {
 		publicKey:            slices.Clone(p.state.publicKey),
 		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
 		partiesHash:          slices.Clone(p.state.partiesHash),
-		verifyShares:         tss.CloneSlices(p.state.verifyShares),
+		verifyShares:         tss.CloneSlice(p.state.verifyShares),
 		kShare:               p.state.kShare.Clone(),
 		chiShare:             p.state.chiShare.Clone(),
 		delta:                p.state.delta.Clone(),

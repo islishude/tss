@@ -221,7 +221,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 		RecordVersion:              signAttemptRecordVersion,
 		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
 		ProtocolVersion:            tss.ProtocolVersion,
-		PresignID:                  presign.ID(),
+		PresignID:                  presign.id(),
 		SessionID:                  sessionID,
 		Party:                      key.state.party,
 		SignerSetHash:              signAttemptSignerSetHash(presign.state.signers),
@@ -280,7 +280,7 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, nil, err
 	}
-	record, err := store.LoadSignAttempt(ctx, presign.ID())
+	record, err := store.LoadSignAttempt(ctx, presign.id())
 	if err != nil {
 		if errors.Is(err, ErrSignAttemptCorrupt) {
 			_ = MarkPresignConsumed(presign)
@@ -329,7 +329,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
-	verifyKey := presign.VerificationKeyBytes()
+	verifyKey := presign.verificationKey()
 	s := &SignSession{
 		key:       key,
 		presign:   presign,
@@ -385,7 +385,7 @@ func validateSignAttemptBindings(key *KeyShare, presign *Presign, record SignAtt
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return err
 	}
-	if !bytes.Equal(record.PresignID, presign.ID()) ||
+	if !bytes.Equal(record.PresignID, presign.id()) ||
 		record.Party != key.state.party ||
 		!bytes.Equal(record.SignerSetHash, signAttemptSignerSetHash(presign.state.signers)) ||
 		!bytes.Equal(record.ContextHash, presign.state.contextHash) {
@@ -405,7 +405,7 @@ func BurnPresign(ctx context.Context, store SignAttemptStore, presign *Presign, 
 	if presign == nil || presign.state == nil {
 		return errors.New("nil presign")
 	}
-	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: presign.ID(), Reason: reason}); err != nil {
+	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: presign.id(), Reason: reason}); err != nil {
 		return err
 	}
 	return MarkPresignConsumed(presign)

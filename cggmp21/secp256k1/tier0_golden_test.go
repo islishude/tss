@@ -42,7 +42,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 // wire contract used by the Presign VerifyShares record list.
 func TestFast_GoldenSignVerifyShare(t *testing.T) {
 	t.Parallel()
-	share := minimalCGGMP21Presign(t).VerifyShares()[0]
+	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
 	raw, err := share.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)

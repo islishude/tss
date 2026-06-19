@@ -59,6 +59,14 @@ func newExampleCGGMPSecurity(parties tss.PartySet) *exampleCGGMPSecurity {
 	}
 }
 
+func exampleKeyShareMetadata(share *cggmp.KeyShare) cggmp.KeySharePublicMetadata {
+	metadata, ok := share.PublicMetadata()
+	if !ok {
+		panic("missing CGGMP key-share metadata")
+	}
+	return metadata
+}
+
 // guard constructs the receiving boundary for one local party. The guard checks
 // protocol/session identity, sender and recipient rules, replay state,
 // confidentiality metadata, and broadcast certificates before a message reaches
@@ -359,8 +367,8 @@ func runExampleCGGMPSign(
 		return nil, nil, errors.New("signing not complete")
 	}
 	// All key shares represent the same group public key; no private share
-	// material is exposed by PublicKeyBytes.
-	return shares[signers[0]].PublicKeyBytes(), signature, nil
+	// material is exposed by PublicMetadata.
+	return exampleKeyShareMetadata(shares[signers[0]]).PublicKey, signature, nil
 }
 
 func newExampleFileSignAttemptStore() (*cggmp.FileSignAttemptStore, func(), error) {

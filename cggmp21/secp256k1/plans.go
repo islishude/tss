@@ -44,6 +44,24 @@ type KeygenPlan struct {
 	securityParams SecurityParams
 }
 
+// KeygenPlanSnapshot is a caller-owned copy of keygen plan metadata.
+type KeygenPlanSnapshot struct {
+	SessionID      tss.SessionID
+	Threshold      int
+	Parties        tss.PartySet
+	SecurityParams SecurityParams
+}
+
+// Clone returns a deep copy of the keygen plan snapshot.
+func (s KeygenPlanSnapshot) Clone() KeygenPlanSnapshot {
+	return KeygenPlanSnapshot{
+		SessionID:      s.SessionID,
+		Threshold:      s.Threshold,
+		Parties:        s.Parties.Clone(),
+		SecurityParams: s.SecurityParams,
+	}
+}
+
 // NewKeygenPlan constructs a canonical keygen plan.
 func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
 	limits := limitsOrDefault(option.Limits)
@@ -86,12 +104,17 @@ func (p *KeygenPlan) Threshold() int {
 	return p.threshold
 }
 
-// Parties returns a copy of the canonical keygen party set.
-func (p *KeygenPlan) Parties() tss.PartySet {
+// Snapshot returns a caller-owned keygen plan snapshot.
+func (p *KeygenPlan) Snapshot() (KeygenPlanSnapshot, bool) {
 	if p == nil {
-		return nil
+		return KeygenPlanSnapshot{}, false
 	}
-	return slices.Clone(p.parties)
+	return KeygenPlanSnapshot{
+		SessionID:      p.sessionID,
+		Threshold:      p.threshold,
+		Parties:        p.parties.Clone(),
+		SecurityParams: p.securityParams,
+	}, true
 }
 
 // Digest returns the canonical keygen plan digest.
@@ -162,6 +185,30 @@ type RefreshPlan struct {
 	securityParams SecurityParams
 }
 
+// RefreshPlanSnapshot is a caller-owned copy of refresh plan metadata.
+type RefreshPlanSnapshot struct {
+	SessionID      tss.SessionID
+	Threshold      int
+	Parties        tss.PartySet
+	PublicKey      []byte
+	ChainCode      []byte
+	PaillierBits   int
+	SecurityParams SecurityParams
+}
+
+// Clone returns a deep copy of the refresh plan snapshot.
+func (s RefreshPlanSnapshot) Clone() RefreshPlanSnapshot {
+	return RefreshPlanSnapshot{
+		SessionID:      s.SessionID,
+		Threshold:      s.Threshold,
+		Parties:        s.Parties.Clone(),
+		PublicKey:      bytes.Clone(s.PublicKey),
+		ChainCode:      bytes.Clone(s.ChainCode),
+		PaillierBits:   s.PaillierBits,
+		SecurityParams: s.SecurityParams,
+	}
+}
+
 // RefreshPlanOption configures CGGMP21 refresh plan construction.
 type RefreshPlanOption struct {
 	OldKey         *KeyShare
@@ -219,14 +266,6 @@ func (p *RefreshPlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// Parties returns a copy of the fixed refresh party set.
-func (p *RefreshPlan) Parties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.parties)
-}
-
 // Threshold returns the fixed refresh threshold.
 func (p *RefreshPlan) Threshold() int {
 	if p == nil || p.state == nil {
@@ -235,20 +274,20 @@ func (p *RefreshPlan) Threshold() int {
 	return p.state.threshold
 }
 
-// PublicKeyBytes returns a copy of the group public key bound by the plan.
-func (p *RefreshPlan) PublicKeyBytes() []byte {
+// Snapshot returns a caller-owned refresh plan snapshot.
+func (p *RefreshPlan) Snapshot() (RefreshPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return RefreshPlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.publicKey)
-}
-
-// ChainCodeBytes returns a copy of the HD chain code bound by the plan.
-func (p *RefreshPlan) ChainCodeBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.chainCode)
+	return RefreshPlanSnapshot{
+		SessionID:      p.state.sessionID,
+		Threshold:      p.state.threshold,
+		Parties:        p.state.parties.Clone(),
+		PublicKey:      bytes.Clone(p.state.publicKey),
+		ChainCode:      bytes.Clone(p.state.chainCode),
+		PaillierBits:   p.state.paillierBits,
+		SecurityParams: p.securityParams,
+	}, true
 }
 
 // PaillierBits returns the shared Paillier modulus size.
@@ -313,6 +352,38 @@ type PresignPlan struct {
 	securityParams SecurityParams
 }
 
+// PresignPlanSnapshot is a caller-owned copy of presign plan metadata.
+type PresignPlanSnapshot struct {
+	SessionID            tss.SessionID
+	Threshold            int
+	Parties              tss.PartySet
+	PublicKey            []byte
+	KeygenTranscriptHash []byte
+	Signers              tss.PartySet
+	Context              PresignContext
+	ContextHash          []byte
+	Derivation           *tss.DerivationResult
+	VerificationKey      []byte
+	SecurityParams       SecurityParams
+}
+
+// Clone returns a deep copy of the presign plan snapshot.
+func (s PresignPlanSnapshot) Clone() PresignPlanSnapshot {
+	return PresignPlanSnapshot{
+		SessionID:            s.SessionID,
+		Threshold:            s.Threshold,
+		Parties:              s.Parties.Clone(),
+		PublicKey:            bytes.Clone(s.PublicKey),
+		KeygenTranscriptHash: bytes.Clone(s.KeygenTranscriptHash),
+		Signers:              s.Signers.Clone(),
+		Context:              s.Context.Clone(),
+		ContextHash:          bytes.Clone(s.ContextHash),
+		Derivation:           s.Derivation.Clone(),
+		VerificationKey:      bytes.Clone(s.VerificationKey),
+		SecurityParams:       s.SecurityParams,
+	}
+}
+
 // PresignPlanOption configures CGGMP21 presign plan construction.
 type PresignPlanOption struct {
 	Key            *KeyShare
@@ -372,14 +443,6 @@ func (p *PresignPlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// Signers returns a copy of the canonical signer set.
-func (p *PresignPlan) Signers() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.signers)
-}
-
 // Threshold returns the threshold bound by the presign plan.
 func (p *PresignPlan) Threshold() int {
 	if p == nil || p.state == nil {
@@ -388,61 +451,28 @@ func (p *PresignPlan) Threshold() int {
 	return p.state.threshold
 }
 
-// Parties returns a copy of the key participant set bound by the presign plan.
-func (p *PresignPlan) Parties() tss.PartySet {
+// Snapshot returns a caller-owned presign plan snapshot.
+func (p *PresignPlan) Snapshot() (PresignPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return PresignPlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.parties)
-}
-
-// PublicKeyBytes returns a copy of the group public key bound by the presign plan.
-func (p *PresignPlan) PublicKeyBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
+	var verificationKey []byte
+	if p.state.derivation != nil {
+		verificationKey = p.state.derivation.VerificationKeyBytes()
 	}
-	return slices.Clone(p.state.publicKey)
-}
-
-// KeygenTranscriptHashBytes returns a copy of the keygen transcript hash bound
-// by the presign plan.
-func (p *PresignPlan) KeygenTranscriptHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.keygenHash)
-}
-
-// Context returns a copy of the bound presign context.
-func (p *PresignPlan) Context() PresignContext {
-	if p == nil || p.state == nil {
-		return PresignContext{}
-	}
-	return p.state.context.Clone()
-}
-
-// ContextHashBytes returns a copy of the presign context hash.
-func (p *PresignPlan) ContextHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.contextHash)
-}
-
-// Derivation returns a copy of the HD derivation result bound by the plan.
-func (p *PresignPlan) Derivation() *tss.DerivationResult {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.derivation.Clone()
-}
-
-// VerificationKeyBytes returns a copy of the child public key bound by the plan.
-func (p *PresignPlan) VerificationKeyBytes() []byte {
-	if p == nil || p.state == nil || p.state.derivation == nil {
-		return nil
-	}
-	return p.state.derivation.VerificationKeyBytes()
+	return PresignPlanSnapshot{
+		SessionID:            p.state.sessionID,
+		Threshold:            p.state.threshold,
+		Parties:              p.state.parties.Clone(),
+		PublicKey:            bytes.Clone(p.state.publicKey),
+		KeygenTranscriptHash: bytes.Clone(p.state.keygenHash),
+		Signers:              p.state.signers.Clone(),
+		Context:              p.state.context.Clone(),
+		ContextHash:          bytes.Clone(p.state.contextHash),
+		Derivation:           p.state.derivation.Clone(),
+		VerificationKey:      verificationKey,
+		SecurityParams:       p.securityParams,
+	}, true
 }
 
 // Digest returns the canonical presign plan digest.
@@ -502,6 +532,30 @@ type signPlanState struct {
 type SignPlan struct {
 	state  *signPlanState
 	limits Limits
+}
+
+// SignPlanSnapshot is a caller-owned copy of online signing plan metadata.
+type SignPlanSnapshot struct {
+	SessionID             tss.SessionID
+	PresignID             []byte
+	PresignTranscriptHash []byte
+	ContextHash           []byte
+	Derivation            *tss.DerivationResult
+	MessageDigest         []byte
+	Request               SignRequest
+}
+
+// Clone returns a deep copy of the sign plan snapshot.
+func (s SignPlanSnapshot) Clone() SignPlanSnapshot {
+	return SignPlanSnapshot{
+		SessionID:             s.SessionID,
+		PresignID:             bytes.Clone(s.PresignID),
+		PresignTranscriptHash: bytes.Clone(s.PresignTranscriptHash),
+		ContextHash:           bytes.Clone(s.ContextHash),
+		Derivation:            s.Derivation.Clone(),
+		MessageDigest:         bytes.Clone(s.MessageDigest),
+		Request:               s.Request.Clone(),
+	}
 }
 
 // SignPlanOption configures CGGMP21 online signing plan construction.
@@ -567,7 +621,7 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
 	return &SignPlan{state: &signPlanState{
 		sessionID:         option.SessionID,
-		presignID:         presign.ID(),
+		presignID:         presign.id(),
 		presignTranscript: slices.Clone(presign.state.transcriptHash),
 		contextHash:       slices.Clone(contextHash),
 		derivation:        derivation.Clone(),
@@ -584,46 +638,21 @@ func (p *SignPlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// PresignIDBytes returns a copy of the bound presign identifier.
-func (p *SignPlan) PresignIDBytes() []byte {
+// Snapshot returns a caller-owned sign plan snapshot. The AttemptStore interface
+// value inside Request is preserved because it is an execution dependency.
+func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return SignPlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.presignID)
-}
-
-// PresignTranscriptHashBytes returns a copy of the cross-party presign
-// transcript hash bound by the plan digest.
-func (p *SignPlan) PresignTranscriptHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.presignTranscript)
-}
-
-// ContextHashBytes returns a copy of the bound presign context hash.
-func (p *SignPlan) ContextHashBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.contextHash)
-}
-
-// MessageDigestBytes returns a copy of the bound signing digest.
-func (p *SignPlan) MessageDigestBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.digest)
-}
-
-// Request returns a copy of the bound sign request. The AttemptStore interface
-// value is preserved because it is an execution dependency, not mutable data.
-func (p *SignPlan) Request() SignRequest {
-	if p == nil || p.state == nil {
-		return SignRequest{}
-	}
-	return p.state.request.Clone()
+	return SignPlanSnapshot{
+		SessionID:             p.state.sessionID,
+		PresignID:             bytes.Clone(p.state.presignID),
+		PresignTranscriptHash: bytes.Clone(p.state.presignTranscript),
+		ContextHash:           bytes.Clone(p.state.contextHash),
+		Derivation:            p.state.derivation.Clone(),
+		MessageDigest:         bytes.Clone(p.state.digest),
+		Request:               p.state.request.Clone(),
+	}, true
 }
 
 // Digest returns the canonical sign plan digest.
@@ -656,7 +685,7 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	if local.Self != key.state.party {
 		return errors.New("local self must match key share party")
 	}
-	if !bytes.Equal(p.state.presignID, presign.ID()) {
+	if !bytes.Equal(p.state.presignID, presign.id()) {
 		return errors.New("sign plan presign mismatch")
 	}
 	if !bytes.Equal(p.state.presignTranscript, presign.state.transcriptHash) {

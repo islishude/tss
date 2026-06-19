@@ -52,8 +52,10 @@ func TestKeygenConfirmationAcceptsMatching(t *testing.T) {
 	if err := applyKeygenConfirmationSet(shares[1], confirmations, testLimits()); err != nil {
 		t.Fatal(err)
 	}
-	if len(shares[1].KeygenConfirmations()) != len(confirmations) {
-		t.Fatal("confirmation evidence not stored after successful verification")
+	for _, confirmation := range confirmations {
+		if _, ok := shares[1].KeygenConfirmation(confirmation.Sender); !ok {
+			t.Fatalf("confirmation evidence for party %d not stored after successful verification", confirmation.Sender)
+		}
 	}
 	if err := shares[1].ValidateWithLimits(testLimits()); err != nil {
 		t.Fatalf("confirmed share did not validate: %v", err)

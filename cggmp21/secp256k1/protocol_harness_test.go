@@ -279,10 +279,14 @@ func bigOne() *big.Int {
 }
 
 func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign) EvidenceContext {
+	paillierPublicKeys, err := share.paillierPublicShares(testLimits())
+	if err != nil {
+		panic(err)
+	}
 	ctx := EvidenceContext{
 		Parties:              share.state.parties.Clone(),
 		PublicKey:            append([]byte(nil), share.state.publicKey...),
-		PaillierPublicKeys:   share.PaillierPublicKeys(),
+		PaillierPublicKeys:   paillierPublicKeys,
 		Signers:              signers.Clone(),
 		KeygenTranscriptHash: append([]byte(nil), share.state.keygenTranscriptHash...),
 	}

@@ -58,7 +58,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 1, 1)
-	oldPub := shares[1].PublicKeyBytes()
+	oldPub := mustKeySharePublicKey(t, shares[1])
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -86,10 +86,10 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 	if err := validateKeySharePartyDataSet(newShare, tss.NewPartySet(1)); err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(oldPub, newShare.PublicKeyBytes()) {
+	if !bytes.Equal(oldPub, mustKeySharePublicKey(t, newShare)) {
 		t.Fatal("public key changed after refresh")
 	}
-	if !bytes.Equal(shares[1].ChainCodeBytes(), newShare.ChainCodeBytes()) {
+	if !bytes.Equal(mustKeyShareChainCode(t, shares[1]), mustKeyShareChainCode(t, newShare)) {
 		t.Fatal("chain code changed after refresh")
 	}
 	digest := sha256.Sum256([]byte("refresh 1-of-1"))
@@ -240,7 +240,7 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			shares := CachedKeygenShares(t, tc.threshold, tc.n)
-			oldPub := shares[1].PublicKeyBytes()
+			oldPub := mustKeySharePublicKey(t, shares[1])
 
 			sessionID, err := tss.NewSessionID(nil)
 			if err != nil {
@@ -260,13 +260,13 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 					t.Fatalf("refresh not complete for %d", id)
 				}
 				newShares[id] = share
-				if !bytes.Equal(oldPub, share.PublicKeyBytes()) {
+				if !bytes.Equal(oldPub, mustKeySharePublicKey(t, share)) {
 					t.Fatalf("party %d public key changed after refresh", id)
 				}
-				if len(share.ChainCodeBytes()) != 32 {
+				if len(mustKeyShareChainCode(t, share)) != 32 {
 					t.Fatalf("party %d missing chain code after refresh", id)
 				}
-				if !bytes.Equal(shares[id].ChainCodeBytes(), share.ChainCodeBytes()) {
+				if !bytes.Equal(mustKeyShareChainCode(t, shares[id]), mustKeyShareChainCode(t, share)) {
 					t.Fatalf("party %d chain code changed after refresh", id)
 				}
 			}

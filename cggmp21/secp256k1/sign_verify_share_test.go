@@ -12,7 +12,7 @@ import (
 func TestFast_SignVerifyShareCanonicalEncoding(t *testing.T) {
 	t.Parallel()
 
-	share := minimalCGGMP21Presign(t).VerifyShares()[0]
+	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
 	raw1, err := share.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -43,7 +43,7 @@ func TestFast_SignVerifyShareCanonicalEncoding(t *testing.T) {
 func TestFast_SignVerifyShareRejectsMalformedOrOversizedFields(t *testing.T) {
 	t.Parallel()
 
-	share := minimalCGGMP21Presign(t).VerifyShares()[0]
+	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
 	raw, err := share.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -90,7 +90,7 @@ func TestFast_PresignRejectsLegacyVerifyShareBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	share := presign.VerifyShares()[0]
+	share := mustPresignVerifyShare(t, presign, 1)
 	legacy := wire.EncodePartyTriples([]wire.PartyTriple[tss.PartyID]{{
 		Party:  share.Party,
 		First:  share.KPoint,
@@ -120,7 +120,7 @@ func TestFast_PresignVerifySharesAggregateLimit(t *testing.T) {
 func TestFast_PresignVerifySharesRequireCanonicalSignerOrder(t *testing.T) {
 	t.Parallel()
 
-	share1 := minimalCGGMP21Presign(t).VerifyShares()[0]
+	share1 := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
 	share2 := share1.Clone()
 	share2.Party = 2
 	if err := validateSignVerifyShares(

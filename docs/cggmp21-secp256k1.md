@@ -20,18 +20,19 @@ The signing path never transmits or reconstructs private key shares or nonce sha
 is stored in private package state so callers cannot invalidate a validated
 share by mutating slices or nested records.
 
-Scalar metadata is exposed by value through `PartyID()` and `Threshold()`. Byte
-getters such as `PublicKeyBytes()`, `ChainCodeBytes()`,
-`PaillierPublicKeyBytes()`, and `KeygenTranscriptHashBytes()` return copies.
-Collection getters such as `Parties()`, `GroupCommitments()`,
-`VerificationShares()`, `PaillierPublicKeys()`, `RingPedersenPublic()`, and
-`KeygenConfirmations()` return deep copies, including nested byte slices.
+Scalar metadata is exposed by value through `PartyID()` and `Threshold()`.
+Global public metadata is exposed through `PublicMetadata()`, which returns a
+caller-owned `KeySharePublicMetadata` snapshot. Participant-scoped material is
+queried by party ID through `VerificationShare(party)`,
+`PaillierPublicShare(party)`, `RingPedersenPublicShare(party)`, and
+`KeygenConfirmation(party)`. Those APIs return deep-copy snapshots and report
+absence with `false`.
 
 The serialized share stores each participant's verification share, Paillier
 public key/proof, Ring-Pedersen parameters/proof, and final keygen confirmation
 in one party-keyed map. Its keys must exactly equal `Parties`; missing, extra,
 or broadcast-party entries are rejected. The wire codec sorts map keys
-canonically, while getters, transcript inputs, hashes, and confirmation sets are
+canonically, while snapshots, transcript inputs, hashes, and confirmation sets are
 materialized in `Parties` order. `GroupCommitments` remains an ordered list by
 polynomial degree, not a party-keyed map. This wire change is intentionally not
 backward compatible; persisted shares using the retired record-list layout must
@@ -148,18 +149,19 @@ repeated party-scoped records bind the party ID before their public fields.
 
 Presign produces a one-use opaque `Presign` record containing local nonce shares
 and per-party verification material. It must be run in advance of signing and
-the result persisted securely. Public metadata is available only through
-copy-returning getters such as `Signers()`, `Context()`,
-`TranscriptHashBytes()`, `ContextHashBytes()`, `PublicKeyBytes()`, and
-`VerifyShares()`. Nested derivation paths, proof records, and point encodings are
-deep copied. A shallow Go copy shares the same secret and consumed lifecycle
-state and cannot bypass `Destroy()` or one-use claiming.
+the result persisted securely. Global public metadata is available through
+`PublicMetadata()`, which returns a caller-owned `PresignPublicMetadata`
+snapshot. Per-signer verification material is queried by party ID through
+`VerifyShare(party)`. Nested derivation paths, proof records, and point
+encodings are deep copied. A shallow Go copy shares the same secret and consumed
+lifecycle state and cannot bypass `Destroy()` or one-use claiming.
 
 `PresignSession.Presign()` returns an independently owned completed record so
 callers can persist or hand it to the online signer without mutating
 session-owned material.
 
-The `Presign.VerifyShares()` snapshot contains one `SignVerifyShare` per signer:
+Each `Presign.VerifyShare(party)` snapshot contains one signer's
+`SignVerifyShare`:
 
 ```go
 type SignVerifyShare struct {
@@ -408,8 +410,9 @@ Reshare allows changing the participant set and threshold while preserving the
 group public key and chain code. `NewResharePlan` returns an opaque
 `*ResharePlan` fixing the old party set, dealer subset, new receiver set,
 thresholds, old commitments, old verification shares, chain code, and session
-id before any message is accepted. Metadata getters return values or deep
-copies. The canonical `ResharePlan.Digest()` is bound into new-receiver
+id before any message is accepted. `Snapshot()` returns global plan metadata,
+and `OldVerificationShare(party)` returns old-party verification material by
+party ID. The canonical `ResharePlan.Digest()` is bound into new-receiver
 Paillier/Ring-Pedersen proofs and into the final reshare `KeyShare` proof
 domains.
 
@@ -781,15 +784,16 @@ ps, out, err := StartPresign(share, plan, tss.LocalConfig{Self: share.PartyID(),
 out, err := ps.HandlePresignMessage(env)
 presign, ok := ps.Presign()
 // presign ownership has moved from the session to the caller; persist it immediately.
-signers := presign.Signers() // caller-owned copy
-context := presign.Context() // includes a copied derivation path
+metadata, ok := presign.PublicMetadata()
+signers := metadata.Signers // caller-owned copy
+context := metadata.Context // includes a copied derivation path
 ```
 
 ### Online Signing
 
 ```go
 request := SignRequest{Context: ctx, Message: message, LowS: true, AttemptStore: store}
-// AttemptStore atomically binds presign.ID() to the exact encrypted outbox.
+// AttemptStore atomically binds the internal presign ID to the exact encrypted outbox.
 plan, err := NewSignPlan(SignPlanOption{
     Key: share, Presign: presign, SessionID: sessionID, Request: request,
 })

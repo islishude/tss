@@ -333,14 +333,15 @@ type Signature struct {
 type KeyShare interface {
     Algorithm() Algorithm
     PartyID() PartyID
-    PublicKeyBytes() []byte
+    Derive(path DerivationPath, opts ...DeriveOption) (*DerivationResult, error)
     MarshalBinary() ([]byte, error)
     Destroy()
 }
 ```
 
 Both `frost/ed25519.KeyShare` and `cggmp21/secp256k1.KeyShare` implement this
-interface. They are opaque handles with copy-returning metadata getters.
+interface. They are opaque handles; algorithm-specific packages expose public
+metadata through their own snapshot APIs.
 `Destroy()` clears local secret material shared by all shallow copies of the
 same handle. `MarshalBinary()` produces deterministic TLV bytes for
 persistence. Algorithm session completion accessors return independently owned

@@ -116,7 +116,7 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 	if restoredPresign.SecurityParams() != want {
 		t.Fatalf("presign security params = %+v, want %+v", restoredPresign.SecurityParams(), want)
 	}
-	if !bytes.Equal(presign.ID(), restoredPresign.ID()) {
+	if !bytes.Equal(presign.id(), restoredPresign.id()) {
 		t.Fatal("presign ID changed after security-profile round trip")
 	}
 }

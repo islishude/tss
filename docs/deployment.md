@@ -219,7 +219,8 @@ Call `Destroy()` on sessions and key shares when they are no longer needed. Go z
 one value to another variable does not clone secret material: destroying or
 consuming either shallow copy affects every handle to that state. Session
 completion accessors return independent records; destroy each one separately.
-All slice, map, context, and nested-record getters return caller-owned copies.
+Algorithm-specific metadata snapshots and party-scoped public records return
+caller-owned copies.
 
 ```go
 share.Destroy()

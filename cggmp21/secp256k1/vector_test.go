@@ -53,7 +53,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err := share.ValidateWithLimits(testLimits()); err != nil {
 					t.Fatalf("key share %d validation: %v", pid, err)
 				}
-				if hex.EncodeToString(share.PublicKeyBytes()) != v.GroupPublicKey {
+				if hex.EncodeToString(mustKeySharePublicKey(t, share)) != v.GroupPublicKey {
 					t.Fatalf("party %d public key does not match group public key in vector", pid)
 				}
 				// Verify round-trip encoding is stable.
@@ -105,7 +105,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			if err != nil {
 				t.Fatalf("SignDigest: %v", err)
 			}
-			if !VerifyDigest(signerShares[0].PublicKeyBytes(), digest, sig) {
+			if !VerifyDigest(mustKeySharePublicKey(t, signerShares[0]), digest, sig) {
 				t.Fatal("signature from deserialized shares did not verify")
 			}
 

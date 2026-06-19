@@ -9,7 +9,6 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const reshareCurveID = "secp256k1"
@@ -17,11 +16,46 @@ const reshareCurveID = "secp256k1"
 const resharePlanDigestLabel = "cggmp21-secp256k1-reshare-plan-v1"
 
 // ResharePlan is the canonical public input agreed by old dealers and new
-// receivers. Its fields are opaque; collection accessors return caller-owned
-// deep copies.
+// receivers. Its fields are opaque; public metadata is exposed through
+// caller-owned snapshots, and old-party verification shares are exposed by
+// PartyID.
 type ResharePlan struct {
 	state  *resharePlanState
 	limits Limits
+}
+
+// ResharePlanSnapshot is a caller-owned copy of reshare plan metadata.
+type ResharePlanSnapshot struct {
+	SessionID           tss.SessionID
+	CurveID             string
+	OldGroupPublicKey   []byte
+	OldGroupCommitments [][]byte
+	OldParties          tss.PartySet
+	OldThreshold        int
+	DealerParties       tss.PartySet
+	NewParties          tss.PartySet
+	NewThreshold        int
+	ChainCode           []byte
+	PaillierBits        int
+	SecurityParams      SecurityParams
+}
+
+// Clone returns a deep copy of the reshare plan snapshot.
+func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
+	return ResharePlanSnapshot{
+		SessionID:           s.SessionID,
+		CurveID:             s.CurveID,
+		OldGroupPublicKey:   bytes.Clone(s.OldGroupPublicKey),
+		OldGroupCommitments: tss.CloneByteSlices(s.OldGroupCommitments),
+		OldParties:          s.OldParties.Clone(),
+		OldThreshold:        s.OldThreshold,
+		DealerParties:       s.DealerParties.Clone(),
+		NewParties:          s.NewParties.Clone(),
+		NewThreshold:        s.NewThreshold,
+		ChainCode:           bytes.Clone(s.ChainCode),
+		PaillierBits:        s.PaillierBits,
+		SecurityParams:      s.SecurityParams,
+	}
 }
 
 type resharePlanState struct {
@@ -56,64 +90,12 @@ func (p *ResharePlan) CurveID() string {
 	return p.state.curveID
 }
 
-// OldGroupPublicKeyBytes returns a copy of the old group public key.
-func (p *ResharePlan) OldGroupPublicKeyBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return append([]byte(nil), p.state.oldGroupPublicKey...)
-}
-
-// OldGroupCommitments returns a deep copy of the old group commitments.
-func (p *ResharePlan) OldGroupCommitments() [][]byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return wireutil.CloneByteSlices(p.state.oldGroupCommitments)
-}
-
-// OldVerificationShares returns a deep copy of the old verification-share map.
-func (p *ResharePlan) OldVerificationShares() map[tss.PartyID][]byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	out := make(map[tss.PartyID][]byte, len(p.state.oldVerificationShares))
-	for id, share := range p.state.oldVerificationShares {
-		out[id] = append([]byte(nil), share...)
-	}
-	return out
-}
-
-// OldParties returns a copy of the old participant set.
-func (p *ResharePlan) OldParties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.oldParties.Clone()
-}
-
 // OldThreshold returns the old signing threshold.
 func (p *ResharePlan) OldThreshold() int {
 	if p == nil || p.state == nil {
 		return 0
 	}
 	return p.state.oldThreshold
-}
-
-// DealerParties returns a copy of the selected old dealer set.
-func (p *ResharePlan) DealerParties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.dealerParties.Clone()
-}
-
-// NewParties returns a copy of the new participant set.
-func (p *ResharePlan) NewParties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.newParties.Clone()
 }
 
 // NewThreshold returns the new signing threshold.
@@ -124,12 +106,37 @@ func (p *ResharePlan) NewThreshold() int {
 	return p.state.newThreshold
 }
 
-// ChainCodeBytes returns a copy of the preserved HD chain code.
-func (p *ResharePlan) ChainCodeBytes() []byte {
+// Snapshot returns a caller-owned reshare plan snapshot.
+func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return ResharePlanSnapshot{}, false
 	}
-	return append([]byte(nil), p.state.chainCode...)
+	return ResharePlanSnapshot{
+		SessionID:           p.state.sessionID,
+		CurveID:             p.state.curveID,
+		OldGroupPublicKey:   bytes.Clone(p.state.oldGroupPublicKey),
+		OldGroupCommitments: tss.CloneByteSlices(p.state.oldGroupCommitments),
+		OldParties:          p.state.oldParties.Clone(),
+		OldThreshold:        p.state.oldThreshold,
+		DealerParties:       p.state.dealerParties.Clone(),
+		NewParties:          p.state.newParties.Clone(),
+		NewThreshold:        p.state.newThreshold,
+		ChainCode:           bytes.Clone(p.state.chainCode),
+		PaillierBits:        p.state.paillierBits,
+		SecurityParams:      p.state.securityParams,
+	}, true
+}
+
+// OldVerificationShare returns a caller-owned old verification share for party.
+func (p *ResharePlan) OldVerificationShare(party tss.PartyID) (VerificationShare, bool) {
+	if p == nil || p.state == nil {
+		return VerificationShare{}, false
+	}
+	share, ok := p.state.oldVerificationShares[party]
+	if !ok || len(share) == 0 {
+		return VerificationShare{}, false
+	}
+	return VerificationShare{Party: party, PublicKey: bytes.Clone(share)}, true
 }
 
 // PaillierBits returns the shared Paillier modulus size for new receiver
@@ -255,7 +262,7 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		sessionID:             option.SessionID,
 		curveID:               reshareCurveID,
 		oldGroupPublicKey:     append([]byte(nil), oldKey.state.publicKey...),
-		oldGroupCommitments:   wireutil.CloneByteSlices(oldKey.state.groupCommitments),
+		oldGroupCommitments:   tss.CloneByteSlices(oldKey.state.groupCommitments),
 		oldVerificationShares: verificationShares,
 		oldParties:            tss.SortParties(oldKey.state.parties),
 		oldThreshold:          oldKey.state.threshold,

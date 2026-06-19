@@ -61,7 +61,7 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 				p.PartialEquationHash = partialEquationHash(
 					signID, presign.PartyID(), p.PresignTranscript,
 					p.PresignContext, p.PlanHash, digest[:],
-					presign.LittleRBytes(), scalarBytes(p.S),
+					mustPresignLittleR(t, presign), scalarBytes(p.S),
 					vs.KPoint, vs.ChiPoint,
 				)
 			},
@@ -167,7 +167,7 @@ func TestIntegration_ValidPartialsProduceValidSignature(t *testing.T) {
 		if !ok {
 			t.Fatal("session did not complete")
 		}
-		if !VerifyDigest(s.key.PublicKeyBytes(), s.digest, sig) {
+		if !VerifyDigest(mustKeySharePublicKey(t, s.key), s.digest, sig) {
 			t.Fatal("valid partials produced invalid aggregate ECDSA signature")
 		}
 	}
@@ -453,7 +453,7 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, p.PlanHash, digest[:],
-		presigns[maliciousSigner].LittleRBytes(), scalarBytes(p.S),
+		mustPresignLittleR(t, presigns[maliciousSigner]), scalarBytes(p.S),
 		vs.KPoint, vs.ChiPoint,
 	)
 	mutated, err := marshalSignPartialPayload(p)

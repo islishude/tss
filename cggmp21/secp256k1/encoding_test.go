@@ -45,18 +45,36 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.PublicKeyBytes(), shares[1].PublicKeyBytes()) {
+	decodedMeta := mustKeyShareMetadata(t, decoded)
+	shareMeta := mustKeyShareMetadata(t, shares[1])
+	if !bytes.Equal(decodedMeta.PublicKey, shareMeta.PublicKey) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
-	if !slices.Equal(decoded.Parties(), shares[1].Parties()) {
+	if !slices.Equal(decodedMeta.Parties, shareMeta.Parties) {
 		t.Fatal("party order changed after canonical round trip")
 	}
-	for i, id := range decoded.Parties() {
-		if decoded.VerificationShares()[i].Party != id ||
-			decoded.PaillierPublicKeys()[i].Party != id ||
-			decoded.RingPedersenPublic()[i].Party != id ||
-			decoded.KeygenConfirmations()[i].Sender != id {
-			t.Fatalf("public getter order does not match Parties at index %d", i)
+	for i, id := range decodedMeta.Parties {
+		verificationShare, ok := decoded.VerificationShare(id)
+		if !ok {
+			t.Fatalf("missing verification share for party %d", id)
+		}
+		paillierShare, ok := decoded.PaillierPublicShare(id)
+		if !ok {
+			t.Fatalf("missing Paillier public share for party %d", id)
+		}
+		ringPedersenShare, ok := decoded.RingPedersenPublicShare(id)
+		if !ok {
+			t.Fatalf("missing Ring-Pedersen public share for party %d", id)
+		}
+		confirmation, ok := decoded.KeygenConfirmation(id)
+		if !ok {
+			t.Fatalf("missing keygen confirmation for party %d", id)
+		}
+		if verificationShare.Party != id ||
+			paillierShare.Party != id ||
+			ringPedersenShare.Party != id ||
+			confirmation.Sender != id {
+			t.Fatalf("party getter does not match Parties at index %d", i)
 		}
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
@@ -244,7 +262,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.TranscriptHashBytes(), presigns[1].TranscriptHashBytes()) {
+	if !bytes.Equal(mustPresignMetadata(t, decoded).TranscriptHash, mustPresignMetadata(t, presigns[1]).TranscriptHash) {
 		t.Fatal("presign transcript mismatch after round trip")
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)

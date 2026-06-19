@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"math/big"
 
-	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss"
 )
 
 const proofTranscriptVersion = 1
@@ -130,8 +130,8 @@ func (p *RingPedersenProof) Clone() *RingPedersenProof {
 	cp := &RingPedersenProof{
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 		Challenges:     bytes.Clone(p.Challenges),
-		Commitments:    wireutil.CloneByteSlices(p.Commitments),
-		Responses:      wireutil.CloneByteSlices(p.Responses),
+		Commitments:    tss.CloneByteSlices(p.Commitments),
+		Responses:      tss.CloneByteSlices(p.Responses),
 	}
 	return cp
 }

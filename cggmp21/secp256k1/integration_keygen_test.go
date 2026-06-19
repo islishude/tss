@@ -32,7 +32,7 @@ func TestThresholdECDSAKeygenHDChainCode(t *testing.T) {
 		if !ok {
 			t.Fatalf("keygen not complete for %d", id)
 		}
-		if len(share.ChainCodeBytes()) != 32 {
+		if len(mustKeyShareChainCode(t, share)) != 32 {
 			t.Fatalf("party %d missing chain code", id)
 		}
 	}
@@ -81,7 +81,7 @@ func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if string(decoded.PublicKeyBytes()) != string(shares[1].PublicKeyBytes()) {
+	if string(mustKeySharePublicKey(t, decoded)) != string(mustKeySharePublicKey(t, shares[1])) {
 		t.Fatal("public key mismatch after round trip")
 	}
 }
