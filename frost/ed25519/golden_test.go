@@ -4,12 +4,11 @@ import (
 	"bytes"
 	"math/big"
 	"math/rand"
-	"path/filepath"
 	"testing"
 
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
-	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGoldenKeyShare(t *testing.T) {
@@ -42,8 +41,7 @@ func TestGoldenKeyShare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeyShare.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/KeyShare.golden", raw)
 
 	decoded, err := UnmarshalKeyShare(raw)
 	if err != nil {
@@ -68,8 +66,7 @@ func TestGoldenVerificationShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "VerificationShare.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/VerificationShare.golden", raw)
 }
 
 func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
@@ -88,8 +85,7 @@ func TestGoldenKeygenCommitmentsPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenCommitmentsPayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/KeygenCommitmentsPayload.golden", raw)
 
 	decoded, err := unmarshalKeygenCommitmentsPayload(raw)
 	if err != nil {
@@ -119,8 +115,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "KeygenSharePayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/KeygenSharePayload.golden", raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -154,8 +149,7 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "NonceCommitmentPayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/NonceCommitmentPayload.golden", raw)
 
 	decoded, err := unmarshalNonceCommitmentPayload(raw)
 	if err != nil {
@@ -185,8 +179,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "frost", "SignPartialPayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/frost/SignPartialPayload.golden", raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {

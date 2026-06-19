@@ -2,10 +2,9 @@ package tss
 
 import (
 	"bytes"
-	"encoding/hex"
-	"os"
-	"path/filepath"
 	"testing"
+
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGoldenEnvelope(t *testing.T) {
@@ -31,23 +30,7 @@ func TestGoldenEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("internal", "testvectors", "wire", "v1", "envelope", "Envelope.golden")
-
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden file: %v (run with UPDATE_GOLDEN=1 to generate)", err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got: %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
+	testvectors.CheckHexGolden(t, "wire/v1/envelope/Envelope.golden", raw)
 
 	// Round-trip.
 	var decoded Envelope
@@ -92,7 +75,7 @@ func TestGoldenBlameEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkRootGolden(t, filepath.Join("internal", "testvectors", "wire", "v1", "tss", "BlameEvidence.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/tss/BlameEvidence.golden", raw)
 }
 
 func TestGoldenSigningContext(t *testing.T) {
@@ -102,7 +85,7 @@ func TestGoldenSigningContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkRootGolden(t, filepath.Join("internal", "testvectors", "wire", "v1", "tss", "SigningContext.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/tss/SigningContext.golden", raw)
 }
 
 func TestGoldenBroadcastAck(t *testing.T) {
@@ -118,7 +101,7 @@ func TestGoldenBroadcastAck(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkRootGolden(t, filepath.Join("internal", "testvectors", "wire", "v1", "tss", "BroadcastAck.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/tss/BroadcastAck.golden", raw)
 }
 
 func TestGoldenBroadcastCertificate(t *testing.T) {
@@ -141,7 +124,7 @@ func TestGoldenBroadcastCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	checkRootGolden(t, filepath.Join("internal", "testvectors", "wire", "v1", "tss", "BroadcastCertificate.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/tss/BroadcastCertificate.golden", raw)
 }
 
 func goldenBroadcastEnvelope(t *testing.T) Envelope {
@@ -151,24 +134,4 @@ func goldenBroadcastEnvelope(t *testing.T) Envelope {
 		t.Fatal(err)
 	}
 	return testBroadcastEnvelope(t, sessionID)
-}
-
-func checkRootGolden(t testing.TB, golden string, raw []byte) {
-	t.Helper()
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.MkdirAll(filepath.Dir(golden), 0o700); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0o600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // fixed test-vector path
-	if err != nil {
-		t.Fatalf("reading golden file: %v (run with UPDATE_GOLDEN=1 to generate)", err)
-	}
-	if gotHex := hex.EncodeToString(raw); gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Fatalf("golden mismatch:\n  got: %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
 }

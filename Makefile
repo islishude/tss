@@ -178,36 +178,65 @@ bench: ## Run integration-level benchmarks
 	$(GO) test -bench=. -benchtime=$(BENCHTIME) -count=$(BENCHCOUNT) -parallel=$(BENCH_PARALLEL) -timeout $(BENCH_TIMEOUT) -tags='tier1 integration' ./...
 
 # -----------------------------------------------------------------------------
-# Golden files & test vectors
+# Test vectors
 # -----------------------------------------------------------------------------
 
 GOLDEN_TIMEOUT ?= 30m
+TVGEN := $(GO) run ./internal/testvectors/cmd/tvgen
+
+.PHONY: vectors-list
+vectors-list: ## List test vector generation and verification targets.
+	$(TVGEN) list
+
+.PHONY: vectors-update-wire
+vectors-update-wire: ## Regenerate binary wire-format golden vectors.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) update wire
+
+.PHONY: vectors-update-protocol
+vectors-update-protocol: ## Regenerate JSON protocol cross-implementation vectors.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) update protocol
+
+.PHONY: vectors-update-fixtures
+vectors-update-fixtures: ## Regenerate committed test-only fixture caches.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) update fixtures
+
+.PHONY: vectors-update-all
+vectors-update-all: ## Regenerate wire, protocol, and fixture vectors.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) update all
+
+.PHONY: vectors-verify-wire
+vectors-verify-wire: ## Verify binary golden vectors match current wire format.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) verify wire
+
+.PHONY: vectors-verify-protocol
+vectors-verify-protocol: ## Verify JSON protocol vectors against library implementation.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) verify protocol
+
+.PHONY: vectors-verify-fixtures
+vectors-verify-fixtures: ## Verify committed test-only fixture caches.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) verify fixtures
+
+.PHONY: vectors-verify-all
+vectors-verify-all: ## Verify wire, protocol, and fixture vectors.
+	$(TVGEN) -timeout $(GOLDEN_TIMEOUT) verify all
 
 .PHONY: golden-update
-golden-update: ## Regenerate all binary wire-format golden vectors.
-	UPDATE_GOLDEN=1 $(GO) test -run 'TestGolden' -count=1 -timeout $(GOLDEN_TIMEOUT) . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
-	UPDATE_GOLDEN=1 $(GO) test -run 'TestFast_Golden' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
-	UPDATE_GOLDEN=1 $(GO) test -run 'TestGolden' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+golden-update: vectors-update-wire ## Alias: regenerate binary wire-format golden vectors.
 
 .PHONY: golden-update-protocol
-golden-update-protocol: ## Regenerate JSON protocol cross-implementation vectors.
-	$(GO) test -run 'TestGenerateVectors$$' -tags='vectorgen' -count=1 -timeout $(GOLDEN_TIMEOUT) ./frost/ed25519 ./cggmp21/secp256k1
+golden-update-protocol: vectors-update-protocol ## Alias: regenerate JSON protocol cross-implementation vectors.
 
 .PHONY: golden-update-all
-golden-update-all: golden-update golden-update-protocol ## Regenerate all golden and protocol vectors.
+golden-update-all: vectors-update-wire vectors-update-protocol ## Alias: regenerate legacy golden/protocol vector set.
 
 .PHONY: golden-verify
-golden-verify: ## Verify binary golden vectors match current wire format.
-	$(GO) test -run 'TestGolden' -count=1 -timeout $(GOLDEN_TIMEOUT) ./...
-	$(GO) test -run 'TestGolden' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+golden-verify: vectors-verify-wire ## Alias: verify binary golden vectors.
 
 .PHONY: golden-verify-protocol
-golden-verify-protocol: ## Verify JSON protocol vectors against library implementation.
-	$(GO) test -run 'CrossImplementation' -count=1 -timeout $(GOLDEN_TIMEOUT) ./frost/ed25519
-	$(GO) test -run 'CrossImplementation' -tags='integration' -count=1 -timeout $(GOLDEN_TIMEOUT) ./cggmp21/secp256k1
+golden-verify-protocol: vectors-verify-protocol ## Alias: verify JSON protocol vectors.
 
 .PHONY: golden-verify-all
-golden-verify-all: golden-verify golden-verify-protocol ## Verify all golden and protocol vectors.
+golden-verify-all: vectors-verify-wire vectors-verify-protocol ## Alias: verify legacy golden/protocol vector set.
 
 # -----------------------------------------------------------------------------
 # Static checks, fixes, and formatting

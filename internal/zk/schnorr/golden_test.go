@@ -2,12 +2,10 @@ package schnorr
 
 import (
 	"bytes"
-	"encoding/hex"
-	"os"
-	"path/filepath"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGoldenProof(t *testing.T) {
@@ -36,22 +34,7 @@ func TestGoldenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", "SchnorrProof.golden")
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		return
-	}
-
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatalf("reading golden file %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		t.Errorf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
+	testvectors.CheckHexGolden(t, "wire/v1/zk/SchnorrProof.golden", raw)
 
 	decoded, err := UnmarshalProof(raw)
 	if err != nil {

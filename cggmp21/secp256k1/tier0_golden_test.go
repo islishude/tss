@@ -3,11 +3,10 @@ package secp256k1
 import (
 	"bytes"
 	"math/big"
-	"path/filepath"
 	"testing"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 // TestFast_GoldenPresignMarshalBinary verifies deterministic wire encoding of
@@ -20,8 +19,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.fast.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/Presign.fast.golden", raw)
 
 	// Round-trip: unmarshal → marshal must produce identical bytes.
 	decoded, err := UnmarshalPresignWithLimits(raw, testLimits())
@@ -50,8 +48,7 @@ func TestFast_GoldenSignVerifyShare(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignVerifyShare.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignVerifyShare.golden", raw)
 
 	var decoded SignVerifyShare
 	if err := decoded.UnmarshalBinaryWithLimits(raw, testLimits()); err != nil {
@@ -76,7 +73,7 @@ func TestFast_GoldenVerificationShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "VerificationShare.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/VerificationShare.golden", raw)
 }
 
 func TestFast_GoldenPaillierPublicShare(t *testing.T) {
@@ -86,7 +83,7 @@ func TestFast_GoldenPaillierPublicShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PaillierPublicShare.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/PaillierPublicShare.golden", raw)
 }
 
 func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
@@ -96,7 +93,7 @@ func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	testutil.CheckGolden(t, filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "RingPedersenPublicShare.golden"), raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/RingPedersenPublicShare.golden", raw)
 }
 
 // TestFast_GoldenKeygenSharePayload verifies deterministic wire encoding of
@@ -109,8 +106,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeygenSharePayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/KeygenSharePayload.golden", raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -138,8 +134,7 @@ func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "RefreshSharePayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/RefreshSharePayload.golden", raw)
 
 	decoded, err := unmarshalRefreshSharePayload(raw)
 	if err != nil {
@@ -173,8 +168,7 @@ func TestFast_GoldenReshareSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "ReshareSharePayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/ReshareSharePayload.golden", raw)
 
 	decoded, err := unmarshalReshareSharePayload(raw)
 	if err != nil {
@@ -209,8 +203,7 @@ func TestFast_GoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignPartialPayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignPartialPayload.golden", raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
@@ -238,8 +231,7 @@ func TestFast_GoldenSignAttemptRecord(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignAttemptRecord.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignAttemptRecord.golden", raw)
 
 	decoded, err := UnmarshalSignAttemptRecord(raw)
 	if err != nil {
@@ -276,8 +268,7 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PresignRound3Payload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/PresignRound3Payload.golden", raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)
 	if err != nil {

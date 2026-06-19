@@ -1,160 +1,230 @@
 # Test Vectors
 
-This directory is the **single canonical location** for all test vectors: binary wire-format golden files and JSON cross-implementation protocol vectors. Previously these were scattered across per-package `testdata/` directories.
+`internal/testvectors` is the canonical committed store for wire golden vectors,
+protocol vectors, and expensive test fixture caches.
 
-## Structure
+These categories have different meanings:
 
+- Wire golden vectors are binary wire-format contracts.
+- Protocol vectors are JSON cross-implementation or format-regression vectors.
+- Fixtures are committed test-only caches used to avoid expensive setup during
+  tests.
+
+Current inventory: 33 binary wire golden files, 2 protocol JSON files, and 1
+fixture JSON file.
+
+## Categories
+
+### Wire golden vectors
+
+Location: `wire/v1/**/*.golden`
+
+Each `.golden` file contains one canonical hex-encoded binary object. Golden
+tests verify that current marshal output matches the committed bytes, that the
+bytes decode, and that re-encoding is canonical.
+
+Current files:
+
+```text
+wire/v1/
+  envelope/   1 file   Envelope.golden
+  tss/        4 files  BlameEvidence, SigningContext, BroadcastAck,
+                       BroadcastCertificate
+  frost/      6 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
+                       KeygenSharePayload, NonceCommitmentPayload,
+                       SignPartialPayload
+  cggmp21/    14 files KeyShare, VerificationShare, PaillierPublicShare,
+                       RingPedersenPublicShare, SignVerifyShare,
+                       KeygenSharePayload, RefreshSharePayload,
+                       ReshareSharePayload, Presign, Presign.fast,
+                       PresignRound3Payload, ResharePlan,
+                       SignAttemptRecord, SignPartialPayload
+  zk/         8 files  SecurityParams, ModulusProof, RingPedersenParams,
+                       RingPedersenProof, EncProof, AffGProof,
+                       LogStarProof, SchnorrProof
 ```
-wire/v1/                          — binary golden vectors (wire format stability)
-  envelope/   1 file               — Envelope.golden
-  tss/        4 files              — BlameEvidence, SigningContext, BroadcastAck,
-                                     BroadcastCertificate
-  frost/      6 files              — KeyShare, VerificationShare, KeygenCommitmentsPayload,
-                                     KeygenSharePayload, NonceCommitmentPayload, SignPartialPayload
-  cggmp21/    14 files             — KeyShare, VerificationShare, PaillierPublicShare,
-                                     RingPedersenPublicShare, SignVerifyShare, KeygenSharePayload,
-                                     RefreshSharePayload, ReshareSharePayload, Presign,
-                                     Presign.fast, PresignRound3Payload, ResharePlan,
-                                     SignAttemptRecord, SignPartialPayload
-  zk/         8 files              — SecurityParams, ModulusProof, RingPedersenParams,
-                                     RingPedersenProof,
-                                     EncProof, AffGProof, LogStarProof, SchnorrProof
 
-protocol/                           — JSON cross-implementation vectors (protocol flows)
-  frost-ed25519/       1 file      — frost_ed25519_vectors.json
-  cggmp21-secp256k1/   1 file      — cggmp21_secp256k1_vectors.json
+### Protocol vectors
+
+Location: `protocol/*/*_vectors.json`
+
+These JSON files are for cross-implementation or protocol-format regression
+checks.
+
+```text
+protocol/
+  frost-ed25519/frost_ed25519_vectors.json
+  cggmp21-secp256k1/cggmp21_secp256k1_vectors.json
 ```
 
-**Total: 33 binary wire vectors + 2 JSON protocol vectors = 35 files.**
+FROST Ed25519 vectors are deterministic for key generation: the stored seed
+reproduces the group public key and key-share encodings. Stored signatures are
+verified for validity; fresh signing uses fresh nonces and may produce different
+signatures.
 
-## Golden Files (`wire/v1/`)
+CGGMP21 secp256k1 vectors are non-deterministic to generate because the protocol
+uses `crypto/rand` for proof nonces. The committed file is a format regression
+check: stored TLV encodings must decode, validate, round-trip, and produce a
+verifiable signature.
 
-Binary golden files are compatibility contracts. Every `.golden` file encodes a single wire-format object as a hex string. They are validated by `golden_test.go` files in each protocol package.
+### Fixtures
 
-### Regeneration
+Location: `fixtures/cggmp21-secp256k1/keygen_fixtures.json`
 
-To regenerate **all** binary golden vectors after a wire format change:
+This file is a committed fixture cache, not a cross-implementation protocol
+vector. It contains reduced-parameter CGGMP21 keygen shares for test-only cache
+warmup and must not be used as production material.
+
+## Common commands
+
+Use the Makefile as the source of truth for exact command lines and timeouts.
 
 ```sh
-# Tier 0 + Tier 1 golden tests (envelope, FROST, ZK)
-UPDATE_GOLDEN=1 go test -run 'TestGolden' -count=1 . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
-
-# Tier 2 golden tests (CGGMP21 — requires full keygen/presign)
-UPDATE_GOLDEN=1 go test -run 'TestFast_Golden' -count=1 ./cggmp21/secp256k1
-UPDATE_GOLDEN=1 go test -tags=integration -run 'TestGolden' -count=1 ./cggmp21/secp256k1
+make vectors-list
+make vectors-update-wire
+make vectors-update-protocol
+make vectors-update-fixtures
+make vectors-update-all
+make vectors-verify-wire
+make vectors-verify-protocol
+make vectors-verify-fixtures
+make vectors-verify-all
 ```
 
-Or regenerate a single file:
+Legacy aliases remain available:
 
 ```sh
-UPDATE_GOLDEN=1 go test -run 'TestGoldenKeyShare$' -count=1 ./frost/ed25519
+make golden-update
+make golden-update-protocol
+make golden-update-all
+make golden-verify
+make golden-verify-protocol
+make golden-verify-all
 ```
 
-### Verification
+The `golden-*` aliases are compatibility entrypoints. Prefer `vectors-*` for new
+work because the repository now distinguishes wire golden vectors, protocol
+vectors, and fixture caches explicitly.
 
-Golden tests read the `.golden` file, compare it against a freshly marshaled object, and verify round-trip + trailing-byte rejection:
+## `tvgen` runner
+
+The Makefile delegates to `internal/testvectors/cmd/tvgen`. The runner is
+orchestration only: it executes package-local `go test` targets with the right
+tags, environment, and timeout. It does not construct vector objects centrally.
 
 ```sh
-go test -run 'TestGolden' ./...
-go test -tags=integration -run 'TestGolden' ./cggmp21/secp256k1
+go run ./internal/testvectors/cmd/tvgen list
+go run ./internal/testvectors/cmd/tvgen update wire
+go run ./internal/testvectors/cmd/tvgen update protocol
+go run ./internal/testvectors/cmd/tvgen update fixtures
+go run ./internal/testvectors/cmd/tvgen update all
+go run ./internal/testvectors/cmd/tvgen verify all
 ```
 
-### Versioning
-
-Files are versioned by directory (`v1`, `v2`, ...). When a wire format change is intentional:
-
-1. Create a new `v2/` directory tree.
-2. Copy `v1/` vectors as the starting point (or regenerate fresh).
-3. Update `golden_test.go` references to `v2/`.
-4. **Never modify `v1/` vectors in place** — they remain as the prior-format compatibility contract.
-
-Pre-production protocol-domain changes are the only exception. Because this
-repository has no legacy production records to preserve, an intentional change
-to embedded transcript or challenge bytes may regenerate the existing `v1`
-files in place after review. Do not add a compatibility decoder or a `v2`
-transcript label for such a change. Record the incompatibility in the change
-documentation and regenerate both binary and protocol vectors together.
-
-## Protocol Vectors (`protocol/`)
-
-JSON files for cross-implementation verification. Each file is a JSON array of test cases containing deterministic keygen parameters, key share encodings, group public keys, and (for FROST) message/signature pairs or (for CGGMP21) presign encodings and signatures.
-
-### FROST Ed25519 (`frost_ed25519_vectors.json`)
-
-Each case:
-
-- `threshold`, `n`, `parties` — keygen parameters
-- `seed` — hex-encoded 32-byte ChaCha8 seed (deterministic keygen)
-- `group_public_key` — hex-encoded public key
-- `keygen_shares` — array of hex-encoded key share TLV encodings
-- `message` — hex-encoded message bytes
-- `signers` — array of party IDs for signing
-- `signature` — hex-encoded 64-byte Ed25519 signature (`R || z`)
-
-FROST vectors are **deterministic**: re-running keygen with the same seed always produces the same group public key and key share encodings. Signatures are non-deterministic (fresh random nonces per sign call); the stored signature is verified for validity but fresh sign calls produce different signatures.
-
-### CGGMP21 secp256k1 (`cggmp21_secp256k1_vectors.json`)
-
-Each case:
-
-- `threshold`, `n`, `parties` — keygen parameters
-- `seed` — documentation only (CGGMP21 uses `crypto/rand` for Schnorr proof nonces)
-- `group_public_key` — hex-encoded public key
-- `keygen_shares` — array of hex-encoded key share TLV encodings
-- `presigns` — array of hex-encoded presign TLV encodings
-- `digest` — hex-encoded 32-byte SHA-256 digest
-- `signature` — object with `r` and `s` hex-encoded 32-byte scalars
-
-CGGMP21 vectors are **non-deterministic**: keygen and signing use `crypto/rand.Reader` for Schnorr proof nonces. The vector file acts as a format regression check — verifying that stored TLV encodings decode, validate, round-trip, and produce verifiable signatures.
-
-### Generation
-
-Generate fresh JSON protocol vectors:
+Single-target commands are available when only one vector group is affected:
 
 ```sh
-# Method 1: vectorgen build tag (generates full keygen + presign + sign vectors)
-go test -run 'TestGenerateVectors$' -tags='vectorgen' -count=1 ./frost/ed25519 ./cggmp21/secp256k1
-
-# Method 2: GENERATE_VECTORS env var (CGGMP21 only, requires integration tag)
-GENERATE_VECTORS=1 go test -run 'TestGenerateCGGMP21Vectors' -tags='integration' -count=1 ./cggmp21/secp256k1
+go run ./internal/testvectors/cmd/tvgen update wire/frost
+go run ./internal/testvectors/cmd/tvgen update fixtures/cggmp21-keygen
+go run ./internal/testvectors/cmd/tvgen verify protocol/frost-ed25519
 ```
 
-The `vectorgen` build-tag method is the primary path. `GENERATE_VECTORS=1` is provided as an alternative for regenerating CGGMP21 vectors within the integration test workflow without needing the `vectorgen` tag.
-
-### Verification
-
-Verify stored vectors against the library implementation:
+Use `-timeout` to override the default `30m` `go test` timeout:
 
 ```sh
-# FROST — verifies seed → keygen consistency and signature validity
-go test -run 'CrossImplementation' -count=1 ./frost/ed25519
-
-# CGGMP21 — verifies TLV decode/validate/round-trip and signature verification
-go test -tags=integration -run 'CrossImplementation' -count=1 ./cggmp21/secp256k1
+go run ./internal/testvectors/cmd/tvgen -timeout 45m verify all
 ```
 
-## All Regeneration Commands (one-shot)
+The canonical targets are:
 
-```sh
-# 1. Binary golden vectors (wire format)
-UPDATE_GOLDEN=1 go test -run 'TestGolden' -count=1 . ./frost/ed25519 ./internal/zk/paillier ./internal/zk/schnorr
-UPDATE_GOLDEN=1 go test -run 'TestFast_Golden' -count=1 ./cggmp21/secp256k1
-UPDATE_GOLDEN=1 go test -tags=integration -run 'TestGolden' -count=1 ./cggmp21/secp256k1
-
-# 2. JSON protocol vectors (cross-implementation)
-go test -run 'TestGenerateVectors$' -tags='vectorgen' -count=1 ./frost/ed25519 ./cggmp21/secp256k1
-go test -run '^TestGenerateKeygenFixtures' -tags='vectorgen' -count=1  ./cggmp21/secp256k1
-# Alternative: CGGMP21 only, without vectorgen tag
-GENERATE_VECTORS=1 go test -run 'TestGenerateCGGMP21Vectors' -tags='integration' -count=1 ./cggmp21/secp256k1
-
-# 3. Verify everything
-go test -run 'TestGolden|CrossImplementation' -count=1 ./...
-go test -tags=integration -run 'TestGolden|CrossImplementation' -count=1 ./cggmp21/secp256k1
+```text
+wire/envelope
+wire/tss
+wire/frost
+wire/zk
+wire/cggmp21-fast
+wire/cggmp21-integration
+protocol/frost-ed25519
+protocol/cggmp21-secp256k1
+fixtures/cggmp21-keygen
 ```
 
-## Adding New Vectors
+## Helper API
 
-1. **Binary wire vector**: Add the marshal call to the appropriate `golden_test.go`, run `UPDATE_GOLDEN=1` to generate, then verify without the flag.
-2. **JSON protocol vector**: Add a test case to the `vectorgen_test.go` array, run with `-tags=vectorgen`, then verify with the cross-implementation test.
-3. Use deterministic RNG with fixed seeds for reproducibility.
-4. Document the seed, parameters, and expected invariants in a comment header.
+Tests and generators should address files by slash-separated paths relative to
+`internal/testvectors`; callers should not derive paths from the current working
+directory, package depth, or `go.mod`.
+
+Verification reads use embedded committed files:
+
+```go
+data := testvectors.Read(t, "protocol/frost-ed25519/frost_ed25519_vectors.json")
+```
+
+Golden checks use the same embedded read path during verification and a real
+filesystem path during update:
+
+```go
+testvectors.CheckHexGolden(t, "wire/v1/frost/KeyShare.golden", raw)
+```
+
+Generators that must write committed artifacts use `testvectors.Path`:
+
+```go
+path, err := testvectors.Path("protocol/frost-ed25519/frost_ed25519_vectors.json")
+if err != nil {
+	t.Fatal(err)
+}
+```
+
+`testvectors.Path` is anchored to the `internal/testvectors` package source
+directory via `runtime.Caller`; it does not search upward for `go.mod`. If a
+trimpath or alternate-checkout workflow prevents an absolute source path,
+`TSS_TESTVECTORS_DIR=/absolute/path/to/internal/testvectors` may be set
+explicitly.
+
+## When to regenerate
+
+- Wire encoder or decoder shape changed intentionally: update affected wire
+  golden vectors.
+- Transcript, proof domain, or protocol binding changed intentionally: update
+  affected wire golden vectors and protocol vectors together.
+- Required fixture combinations or fixture shape changed intentionally: update
+  fixtures.
+- Ordinary implementation bugfix with unchanged wire/protocol shape: verify only;
+  do not update vectors.
+
+Never update vectors merely to make a failing test pass. Treat any vector churn as
+evidence of a wire, protocol, or fixture-lifecycle change that needs review.
+
+## Safety rules
+
+- Fixtures and some golden vectors contain private test material such as shares,
+  nonces, witnesses, or presign material.
+- Never paste vector contents into logs, issues, review comments, or failure
+  messages.
+- Golden mismatch output intentionally reports path, byte lengths, and SHA-256
+  digests only. It must not print raw got/want hex.
+- Committed fixtures are test-only material. They are not production keys,
+  reference secrets, or public cross-implementation vectors.
+
+## Versioning
+
+The repository is not yet production-stable. Before production compatibility is
+required, intentional wire or domain changes regenerate the existing `wire/v1`
+vectors after review. Do not add fallback decoders, compatibility versions, or
+`v2`/`v3` wire/proof/challenge-label trees unless a future production-stability
+decision explicitly requires them.
+
+## Adding vectors
+
+1. Add generation and verification in the package that owns the wire or protocol
+   helper. Do not export internal protocol APIs just for vector generation.
+2. Use `internal/testvectors.CheckHexGolden` for hex-encoded wire golden files.
+3. Keep protocol JSON generation behind the `vectorgen` build tag.
+4. Use `internal/testvectors.Read` for committed vector reads and
+   `internal/testvectors.Path` for generator writes.
+5. Document whether the new file is a wire golden vector, protocol vector, or
+   fixture cache.
+6. Run the smallest matching `make vectors-verify-*` target, then `make check`
+   when the change affects committed artifacts or shared helpers.

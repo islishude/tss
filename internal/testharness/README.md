@@ -149,6 +149,7 @@ Each function takes a valid envelope and returns a mutated copy. These are the b
 The following functionality lives outside `internal/testharness/` but serves the same cross-cutting role:
 
 - `crash_store.go` (in `internal/testharness/`) — `CrashPoint` enum (`BeforePersist`, `AfterPersist`, `BeforeOutbound`, `AfterOutbound`) and `CrashyStore` wrapper. Used by crash/restart tests (Section 8).
-- `internal/testutil/testutil.go` — `CheckGolden` helper with `UPDATE_GOLDEN=1` support. Used by all golden vector tests (Section 1). Also provides `AssertProtocolError`, `DeliverEnvelope`, `SeedFromEnv`, `RewriteWireField`, and other shared assertion helpers.
+- `internal/testvectors` — shared path and safe hex-golden comparison helpers. Mismatch output reports sizes and SHA-256 digests, never raw vector bytes.
+- `internal/testutil/testutil.go` — shared assertions and fixtures such as `AssertProtocolError`, `DeliverEnvelope`, `SeedFromEnv`, `RewriteWireField`, and other test helpers.
 - Fuzz corpus seeding — done programmatically via `f.Add()` in each fuzz target file (see Fuzzing Rules). Persistent corpora live in `internal/wire/testdata/fuzz/`.
 - `internal/testutil/cmd/testbudget/` — standalone tool that parses `go test -json` output and warns when individual tests exceed tier budgets (Test Budget section). Invoked via `make test-budget`.

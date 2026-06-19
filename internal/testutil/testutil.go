@@ -5,7 +5,6 @@
 package testutil
 
 import (
-	"bytes"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -13,7 +12,6 @@ import (
 	"math/big"
 	"math/rand/v2"
 	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -258,31 +256,4 @@ func OpenInboundEnvelope(env tss.Envelope, info tss.ReceiveInfo, cert *tss.Broad
 		return tss.InboundEnvelope{}, err
 	}
 	return tss.OpenEnvelope(raw, info, tss.WithBroadcastCertificate(cert))
-}
-
-// CheckGolden compares raw bytes against a golden file. When the environment
-// variable UPDATE_GOLDEN=1 is set, it writes the golden file (creating parent
-// directories as needed). Otherwise it reads and asserts exact match.
-func CheckGolden(tb testing.TB, golden string, raw []byte) {
-	tb.Helper()
-
-	if os.Getenv("UPDATE_GOLDEN") == "1" {
-		if err := os.MkdirAll(filepath.Dir(golden), 0o700); err != nil {
-			tb.Fatal(err)
-			return
-		}
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0o600); err != nil {
-			tb.Fatal(err)
-		}
-		return
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		tb.Fatalf("reading golden %s: %v (run with UPDATE_GOLDEN=1 to generate)", golden, err)
-		return
-	}
-	gotHex := hex.EncodeToString(raw)
-	if gotHex != string(bytes.TrimSpace(wantHex)) {
-		tb.Fatalf("golden mismatch:\n  got:  %s\n  want: %s", gotHex, string(bytes.TrimSpace(wantHex)))
-	}
 }

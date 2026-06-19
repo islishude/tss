@@ -6,11 +6,10 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"math/rand/v2"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 type frostTestVector struct {
@@ -69,11 +68,7 @@ func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeySha
 
 func TestFROSTCrossImplementationVectors(t *testing.T) {
 	t.Parallel()
-	vectorPath := filepath.Join("..", "..", "internal", "testvectors", "protocol", "frost-ed25519", "frost_ed25519_vectors.json")
-	data, err := os.ReadFile(vectorPath) //nolint:gosec
-	if err != nil {
-		t.Fatal(err)
-	}
+	data := testvectors.Read(t, "protocol/frost-ed25519/frost_ed25519_vectors.json")
 	var vectors []frostTestVector
 	if err := json.Unmarshal(data, &vectors); err != nil {
 		t.Fatal(err)

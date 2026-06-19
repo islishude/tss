@@ -10,13 +10,14 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGenerateVectors(t *testing.T) {
-	generateAndSaveCGGMP21Vectors(t, filepath.Join("..", "..", "internal", "testvectors", "protocol", "cggmp21-secp256k1", "cggmp21_secp256k1_vectors.json"))
+	generateAndSaveCGGMP21Vectors(t, "protocol/cggmp21-secp256k1/cggmp21_secp256k1_vectors.json")
 }
 
-func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
+func generateAndSaveCGGMP21Vectors(t *testing.T, name string) {
 	t.Helper()
 	vectors := []*cggmp21TestVector{
 		{
@@ -70,6 +71,10 @@ func generateAndSaveCGGMP21Vectors(t *testing.T, path string) {
 		v.Signature = &cggmpSigVector{R: hex.EncodeToString(sig.R), S: hex.EncodeToString(sig.S)}
 	}
 	raw, err := json.MarshalIndent(vectors, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := testvectors.Path(name)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -3,10 +3,9 @@ package paillier
 import (
 	"bytes"
 	"math/big"
-	"path/filepath"
 	"testing"
 
-	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGoldenProofPayloads(t *testing.T) {
@@ -110,7 +109,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			raw := tc.marshal(t)
-			testutil.CheckGolden(t, filepath.Join("..", "..", "testvectors", "wire", "v1", "zk", tc.name+".golden"), raw)
+			testvectors.CheckHexGolden(t, "wire/v1/zk/"+tc.name+".golden", raw)
 			tc.roundTrip(t, raw)
 		})
 	}

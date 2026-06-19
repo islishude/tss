@@ -4,12 +4,12 @@ import (
 	"bytes"
 	"encoding/binary"
 	"math/big"
-	"path/filepath"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/testvectors"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -227,8 +227,7 @@ func TestGoldenResharePlanMarshalBinary(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "ResharePlan.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/ResharePlan.golden", raw)
 }
 
 func TestNilResharePlanMarshalBinary(t *testing.T) {

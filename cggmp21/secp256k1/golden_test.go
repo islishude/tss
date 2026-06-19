@@ -8,12 +8,11 @@ import (
 	"math/big"
 	"math/rand"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGoldenKeygenSharePayload(t *testing.T) {
@@ -25,8 +24,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeygenSharePayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/KeygenSharePayload.golden", raw)
 
 	decoded, err := unmarshalKeygenSharePayload(raw)
 	if err != nil {
@@ -60,8 +58,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "SignPartialPayload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignPartialPayload.golden", raw)
 
 	decoded, err := unmarshalSignPartialPayload(raw)
 	if err != nil {
@@ -98,8 +95,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "PresignRound3Payload.golden")
-	testutil.CheckGolden(t, golden, raw)
+	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/PresignRound3Payload.golden", raw)
 
 	decoded, err := unmarshalPresignRound3Payload(raw)
 	if err != nil {
@@ -120,7 +116,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 func TestGoldenCGGMP21KeyShare(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "KeyShare.golden")
+	const golden = "wire/v1/cggmp21/KeyShare.golden"
 
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		// Run a deterministic keygen to generate the golden file.
@@ -158,21 +154,19 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
+		path, err := testvectors.Path(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
 
-	if _, err := os.Stat(golden); os.IsNotExist(err) {
-		t.Skipf("golden file %s does not exist; run with UPDATE_GOLDEN=1 to generate", golden)
-	}
 	// The golden file acts as a format regression check. It verifies that the
 	// stored bytes decode, round-trip, and reject trailing bytes.
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantHex := testvectors.Read(t, golden)
 	raw, err := hex.DecodeString(string(bytes.TrimSpace(wantHex)))
 	if err != nil {
 		t.Fatal(err)
@@ -196,7 +190,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 func TestGoldenCGGMP21Presign(t *testing.T) {
 	t.Parallel()
 
-	golden := filepath.Join("..", "..", "internal", "testvectors", "wire", "v1", "cggmp21", "Presign.golden")
+	const golden = "wire/v1/cggmp21/Presign.golden"
 	if os.Getenv("UPDATE_GOLDEN") == "1" {
 		shares := CachedKeygenShares(t, 1, 1)
 		presigns := secpPresign(t, shares, tss.NewPartySet(1))
@@ -204,18 +198,16 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if err := os.WriteFile(golden, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
+		path, err := testvectors.Path(golden)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(hex.EncodeToString(raw)+"\n"), 0600); err != nil {
 			t.Fatal(err)
 		}
 		return
 	}
-	if _, err := os.Stat(golden); os.IsNotExist(err) {
-		t.Skipf("golden file %s does not exist; run with UPDATE_GOLDEN=1 to generate", golden)
-	}
-	wantHex, err := os.ReadFile(golden) //nolint:gosec // path constructed within test package
-	if err != nil {
-		t.Fatal(err)
-	}
+	wantHex := testvectors.Read(t, golden)
 	raw, err := hex.DecodeString(string(bytes.TrimSpace(wantHex)))
 	if err != nil {
 		t.Fatal(err)

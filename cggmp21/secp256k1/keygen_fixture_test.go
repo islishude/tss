@@ -7,20 +7,18 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testvectors"
 )
 
-// keygenFixturePath points at committed test-only fixtures. These records
+const keygenFixtureVector = "fixtures/cggmp21-secp256k1/keygen_fixtures.json"
+
+// keygenFixtureVector points at committed test-only fixtures. These records
 // contain reduced-parameter private share material and must never be used as
 // production keys or printed in failure output.
-func keygenFixturePath() string {
-	return filepath.Join("..", "..", "internal", "testvectors", "protocol", "cggmp21-secp256k1", "keygen_fixtures.json")
-}
-
 var requiredKeygenFixtureOrder = []fixtureKey{
 	{threshold: 1, n: 1},
 	{threshold: 2, n: 2},
@@ -89,7 +87,7 @@ func loadKeygenFixture(threshold, n int) (map[tss.PartyID]*KeyShare, bool, error
 }
 
 func readKeygenFixtureFile() ([]keygenFixtureFile, error) {
-	data, err := os.ReadFile(keygenFixturePath())
+	data, err := testvectors.ReadFile(keygenFixtureVector)
 	if err != nil {
 		return nil, err
 	}

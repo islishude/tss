@@ -8,13 +8,15 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGenerateVectors(t *testing.T) {
-	generateFROSTVectors(t, filepath.Join("..", "..", "internal", "testvectors", "protocol", "frost-ed25519", "frost_ed25519_vectors.json"))
+	generateFROSTVectors(t, "protocol/frost-ed25519/frost_ed25519_vectors.json")
 }
 
-func generateFROSTVectors(t *testing.T, path string) {
+func generateFROSTVectors(t *testing.T, name string) {
 	t.Helper()
 	vectors := []frostTestVector{
 		{
@@ -64,6 +66,10 @@ func generateFROSTVectors(t *testing.T, path string) {
 		v.Signature = hex.EncodeToString(sig)
 	}
 	raw, err := json.MarshalIndent(vectors, "", "  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	path, err := testvectors.Path(name)
 	if err != nil {
 		t.Fatal(err)
 	}

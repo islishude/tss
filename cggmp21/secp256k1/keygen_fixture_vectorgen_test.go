@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/islishude/tss/internal/testvectors"
 )
 
 func TestGenerateKeygenFixtures(t *testing.T) {
@@ -42,7 +44,10 @@ func TestGenerateKeygenFixtures(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	path := keygenFixturePath()
+	path, err := testvectors.Path(keygenFixtureVector)
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil { //nolint:gosec
 		t.Fatal(err)
 	}
