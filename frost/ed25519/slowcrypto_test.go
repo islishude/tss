@@ -107,9 +107,9 @@ func TestSlowCrypto_Keygen3of5(t *testing.T) {
 		t.Fatalf("expected 5 shares, got %d", len(shares))
 	}
 	// Verify all shares share the same public key.
-	pk := shares[1].PublicKeyBytes()
+	pk := mustKeyShareMetadata(t, shares[1]).PublicKey
 	for i := 2; i <= 5; i++ {
-		if !bytes.Equal(pk, shares[tss.PartyID(i)].PublicKeyBytes()) {
+		if !bytes.Equal(pk, mustKeyShareMetadata(t, shares[tss.PartyID(i)]).PublicKey) {
 			t.Fatalf("party %d public key mismatch", i)
 		}
 	}
@@ -147,7 +147,7 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 
 	oldPubs := make(map[tss.PartyID][]byte, 3)
 	for id, share := range shares {
-		oldPubs[id] = share.PublicKeyBytes()
+		oldPubs[id] = mustKeyShareMetadata(t, share).PublicKey
 	}
 
 	sessions := make(map[tss.PartyID]*ReshareSession, 3)
@@ -193,7 +193,7 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 
 	// Verify group public key preserved.
 	for _, id := range parties {
-		if !bytes.Equal(oldPubs[id], refreshed[id].PublicKeyBytes()) {
+		if !bytes.Equal(oldPubs[id], mustKeyShareMetadata(t, refreshed[id]).PublicKey) {
 			t.Fatalf("party %d public key changed after refresh", id)
 		}
 	}
@@ -217,7 +217,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	oldParties := tss.NewPartySet(1, 2, 3)
 	newParties := tss.NewPartySet(1, 2, 3, 4)
 	newThreshold := 2
-	oldPublicKey := oldShares[1].PublicKeyBytes()
+	oldPublicKey := mustKeyShareMetadata(t, oldShares[1]).PublicKey
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -259,7 +259,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	newShares := collectReshareShares(t, newParties, reshareSessions)
 
 	// Verify group public key preserved.
-	if !bytes.Equal(oldPublicKey, newShares[1].PublicKeyBytes()) {
+	if !bytes.Equal(oldPublicKey, mustKeyShareMetadata(t, newShares[1]).PublicKey) {
 		t.Fatal("group public key changed after reshare")
 	}
 
@@ -282,7 +282,8 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 	path := []uint32{0, 17}
 
 	// Derive child public key.
-	result, err := DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), path)
+	metadata := mustKeyShareMetadata(t, shares[1])
+	result, err := DeriveNonHardenedBIP32(metadata.PublicKey, metadata.ChainCode, path)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -306,7 +307,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 	}
 
 	// Sanity check: signature must not verify against the original key.
-	if stded25519.Verify(stded25519.PublicKey(shares[1].PublicKeyBytes()), msg, sig) {
+	if stded25519.Verify(stded25519.PublicKey(metadata.PublicKey), msg, sig) {
 		t.Fatal("HD-derived signature incorrectly verified against parent key")
 	}
 }

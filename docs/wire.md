@@ -163,6 +163,13 @@ serialization. The `custom` kind eliminates `*secret.Scalar ↔ []byte`
 mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate
 `*big.Int ↔ []byte` conversions.
 
+FROST and CGGMP21 KeyShare DTOs encode participant-owned public material as
+canonical `PartyID` maps. The map key is the sole owner identity; nested values
+do not duplicate it. Decoders require the map key set to match `Parties`
+exactly, reject the broadcast ID and unknown/missing parties, and validate any
+confirmation sender against its map key. Protocol ordering is still derived
+from `Parties`, not map iteration.
+
 When a type must completely control its TLV envelope (type ID, version, field
 order) without exposing wire-tagged exported fields, implement `MessageMarshaler`
 and `MessageUnmarshaler`. These object-level hooks delegate to an internal DTO

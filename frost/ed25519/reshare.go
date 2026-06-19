@@ -197,7 +197,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
-		oldPublicKey: oldKey.PublicKeyBytes(),
+		oldPublicKey: bytes.Clone(oldKey.state.publicKey),
 		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   oldParties,
 		newParties:   newParties,
@@ -342,7 +342,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
-		oldPublicKey: oldKey.PublicKeyBytes(),
+		oldPublicKey: bytes.Clone(oldKey.state.publicKey),
 		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
 		oldParties:   parties,
 		newParties:   parties,

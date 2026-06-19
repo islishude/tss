@@ -27,9 +27,11 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	restoredMetadata := mustKeyShareMetadata(t, restored)
+	originalMetadata := mustKeyShareMetadata(t, shares[1])
 
 	// Verify structural integrity of the restored share.
-	if string(restored.PublicKeyBytes()) != string(shares[1].PublicKeyBytes()) {
+	if string(restoredMetadata.PublicKey) != string(originalMetadata.PublicKey) {
 		t.Error("PublicKey mismatch after round-trip")
 	}
 	if restored.PartyID() != shares[1].PartyID() {
@@ -38,10 +40,10 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	if restored.Threshold() != shares[1].Threshold() {
 		t.Error("Threshold mismatch after round-trip")
 	}
-	if !restored.Parties().Contains(restored.PartyID()) {
+	if !restoredMetadata.Parties.Contains(restored.PartyID()) {
 		t.Error("restored Party not in restored Parties")
 	}
-	if string(restored.KeygenTranscriptHashBytes()) != string(shares[1].KeygenTranscriptHashBytes()) {
+	if string(restoredMetadata.KeygenTranscriptHash) != string(originalMetadata.KeygenTranscriptHash) {
 		t.Error("KeygenTranscriptHash mismatch after round-trip")
 	}
 

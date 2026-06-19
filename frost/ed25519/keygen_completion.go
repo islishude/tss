@@ -65,12 +65,14 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, fmt.Errorf("invalid group public key: %w", err)
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
+	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		pub, err := edcurve.EvalCommitments(groupCommitments, id)
 		if err != nil {
 			return nil, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
+		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
 	}
 	// Chain code commitment binds the aggregate of all round-1 chain code
 	// commitments into the transcript. Individual chain codes are revealed
@@ -96,7 +98,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		chainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
 		secret:               secretScalar,
 		groupCommitments:     groupCommitments,
-		verificationShares:   verificationShares,
+		partyData:            partyData,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: keygenTranscriptHash,
 		planHash:             bytes.Clone(s.planHash),

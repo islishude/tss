@@ -8,9 +8,29 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
+
+type retiredFROSTKeyShareWire struct {
+	Party                tss.PartyID           `wire:"1,u32"`
+	Threshold            int                   `wire:"2,u32"`
+	Parties              tss.PartySet          `wire:"3,u32list"`
+	PublicKey            []byte                `wire:"4,bytes,max_bytes=point"`
+	Secret               *secret.Scalar        `wire:"5,custom,len=32"`
+	GroupCommitments     [][]byte              `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
+	VerificationShares   []VerificationShare   `wire:"7,recordlist,max_items=parties"`
+	KeygenTranscriptHash []byte                `wire:"8,bytes"`
+	ChainCode            []byte                `wire:"9,bytes"`
+	KeygenSessionID      []byte                `wire:"10,bytes,len=32"`
+	KeygenConfirmations  []*KeygenConfirmation `wire:"11,recordlist,max_items=parties"`
+	PlanHash             []byte                `wire:"12,bytes,len=32"`
+}
+
+func (retiredFROSTKeyShareWire) WireType() string { return keyShareWireType }
+
+func (retiredFROSTKeyShareWire) WireVersion() uint16 { return keyShareWireVersion }
 
 func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	t.Parallel()
@@ -26,11 +46,24 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("key share encoding is not deterministic")
 	}
+	reordered := cloneKeyShareValue(shares[1])
+	reordered.state.partyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.parties))
+	for i := len(reordered.state.parties) - 1; i >= 0; i-- {
+		id := reordered.state.parties[i]
+		reordered.state.partyData[id] = shares[1].state.partyData[id].Clone()
+	}
+	raw3, err := reordered.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(raw1, raw3) {
+		t.Fatal("key share map insertion order changed canonical encoding")
+	}
 	decoded, err := UnmarshalKeyShare(raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(decoded.PublicKeyBytes(), shares[1].PublicKeyBytes()) {
+	if !bytes.Equal(mustKeyShareMetadata(t, decoded).PublicKey, mustKeyShareMetadata(t, shares[1]).PublicKey) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
 	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
@@ -55,6 +88,111 @@ func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
 	}
+}
+
+func TestFROSTKeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 3)
+	for _, tc := range []struct {
+		name   string
+		mutate func(*keyShareWire)
+	}{
+		{name: "missing", mutate: func(w *keyShareWire) { delete(w.PartyData, 3) }},
+		{name: "extra", mutate: func(w *keyShareWire) { w.PartyData[4] = w.PartyData[3] }},
+		{name: "broadcast", mutate: func(w *keyShareWire) {
+			w.PartyData[tss.BroadcastPartyId] = w.PartyData[3]
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			w, err := encodeKeyShareWire(shares[1])
+			if err != nil {
+				t.Fatal(err)
+			}
+			tc.mutate(w)
+			if _, err := UnmarshalKeyShare(marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+				t.Fatalf("key share accepted %s party data", tc.name)
+			}
+		})
+	}
+}
+
+func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 3)
+
+	t.Run("confirmation sender mismatch", func(t *testing.T) {
+		w, err := encodeKeyShareWire(shares[1])
+		if err != nil {
+			t.Fatal(err)
+		}
+		data := w.PartyData[1]
+		confirmation, err := UnmarshalKeygenConfirmation(data.KeygenConfirmation)
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmation.Sender = 2
+		data.KeygenConfirmation, err = confirmation.MarshalBinary()
+		if err != nil {
+			t.Fatal(err)
+		}
+		w.PartyData[1] = data
+		if _, err := UnmarshalKeyShare(marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+			t.Fatal("key share accepted confirmation sender that did not match party-data key")
+		}
+	})
+
+	t.Run("partial confirmation set", func(t *testing.T) {
+		missing := cloneKeyShareValue(shares[1])
+		data := missing.state.partyData[1]
+		data.keygenConfirmation = nil
+		missing.state.partyData[1] = data
+		if _, err := missing.MarshalBinary(); err == nil {
+			t.Fatal("key share accepted partial confirmation set")
+		}
+	})
+}
+
+func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
+	t.Parallel()
+	share := frostKeygen(t, 2, 3)[1]
+	verificationShares, err := share.orderedVerificationShares()
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmations, err := share.orderedKeygenConfirmations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired := retiredFROSTKeyShareWire{
+		Party:                share.state.party,
+		Threshold:            share.state.threshold,
+		Parties:              share.state.parties,
+		PublicKey:            share.state.publicKey,
+		Secret:               share.state.secret,
+		GroupCommitments:     share.state.groupCommitments,
+		VerificationShares:   verificationShares,
+		KeygenTranscriptHash: share.state.keygenTranscriptHash,
+		ChainCode:            share.state.chainCode,
+		KeygenSessionID:      share.state.keygenSessionID[:],
+		KeygenConfirmations:  confirmations,
+		PlanHash:             share.state.planHash,
+	}
+	raw, err := wire.Marshal(retired, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalKeyShare(raw); err == nil {
+		t.Fatal("key share accepted retired record-list layout")
+	}
+}
+
+func marshalFROSTKeyShareWireForTest(t testing.TB, w *keyShareWire) []byte {
+	t.Helper()
+	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }
 
 func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
@@ -89,36 +227,27 @@ func minimalFROSTKeyShare() *KeyShare {
 	}}
 }
 
-func TestFROSTKeyShareChainCodeBytesReturnsCopy(t *testing.T) {
+func TestFROSTKeySharePublicMetadataReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
 	k.state.chainCode[0] = 0xaa
-	cp := k.ChainCodeBytes()
-	cp[0] = 0xbb
-	if k.state.chainCode[0] != 0xaa {
-		t.Fatal("ChainCodeBytes() did not return a copy")
-	}
-}
-
-func TestFROSTKeySharePublicKeyBytesReturnsCopy(t *testing.T) {
-	t.Parallel()
-	k := minimalFROSTKeyShare()
 	k.state.publicKey[0] = 0x02
-	cp := k.PublicKeyBytes()
-	cp[0] = 0x03
+	metadata := mustKeyShareMetadata(t, k)
+	metadata.ChainCode[0] = 0xbb
+	metadata.PublicKey[0] = 0x03
+	if k.state.chainCode[0] != 0xaa {
+		t.Fatal("PublicMetadata() did not copy chain code")
+	}
 	if k.state.publicKey[0] != 0x02 {
-		t.Fatal("PublicKeyBytes() did not return a copy")
+		t.Fatal("PublicMetadata() did not copy public key")
 	}
 }
 
 func TestFROSTKeyShareNilAccessors(t *testing.T) {
 	t.Parallel()
 	var nilKey *KeyShare
-	if b := nilKey.ChainCodeBytes(); b != nil {
-		t.Fatal("nil ChainCodeBytes() should return nil")
-	}
-	if b := nilKey.PublicKeyBytes(); b != nil {
-		t.Fatal("nil PublicKeyBytes() should return nil")
+	if _, ok := nilKey.PublicMetadata(); ok {
+		t.Fatal("nil PublicMetadata() should report false")
 	}
 	if nilKey.Algorithm() != tss.AlgorithmFROSTEd25519 {
 		t.Fatal("nil KeyShare.Algorithm() should return AlgorithmFROSTEd25519")

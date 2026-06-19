@@ -105,7 +105,7 @@ func TestFROSTSignDomainSeparation(t *testing.T) {
 			if !ok {
 				t.Fatal("expected signature after partial acceptance")
 			}
-			pubKey := shares[1].PublicKeyBytes()
+			pubKey := mustKeyShareMetadata(t, shares[1]).PublicKey
 			if !stded25519.Verify(stded25519.PublicKey(pubKey), messageA, sig) {
 				t.Fatal("signature did not verify")
 			}

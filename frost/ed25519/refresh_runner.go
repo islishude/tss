@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"context"
+	"errors"
 	"io"
 	"time"
 
@@ -39,9 +40,13 @@ func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare]
 
 // StartRefresh constructs one FROST refresh session.
 func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, config tss.RefreshRunConfig) (tss.RefreshSession[*KeyShare], []tss.Envelope, error) {
+	metadata, ok := current.PublicMetadata()
+	if !ok {
+		return nil, nil, errors.New("nil key share")
+	}
 	guard, err := (tss.GuardConfig{
 		Self:        current.PartyID(),
-		Parties:     current.Parties(),
+		Parties:     metadata.Parties,
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   config.SessionID,
 		Policies:    FROSTPolicies(),

@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
@@ -42,10 +43,26 @@ type KeygenPlan struct {
 	limits    Limits
 }
 
+// KeygenPlanSnapshot is a caller-owned copy of keygen plan metadata.
+type KeygenPlanSnapshot struct {
+	SessionID tss.SessionID
+	Threshold int
+	Parties   tss.PartySet
+}
+
+// Clone returns a deep copy of the keygen plan snapshot.
+func (s KeygenPlanSnapshot) Clone() KeygenPlanSnapshot {
+	return KeygenPlanSnapshot{
+		SessionID: s.SessionID,
+		Threshold: s.Threshold,
+		Parties:   s.Parties.Clone(),
+	}
+}
+
 // NewKeygenPlan constructs a FROST keygen plan.
 func NewKeygenPlan(option KeygenPlanOption) (*KeygenPlan, error) {
 	limits := limitsOrDefault(option.Limits)
-	parties, err := validatePlanParties(option.Parties, option.Threshold, limits)
+	parties, err := validatePlanPartySetVerbose(option.Parties, option.Threshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
 	}
@@ -76,12 +93,16 @@ func (p *KeygenPlan) Threshold() int {
 	return p.threshold
 }
 
-// Parties returns a copy of the canonical party set.
-func (p *KeygenPlan) Parties() tss.PartySet {
+// Snapshot returns a caller-owned keygen plan snapshot.
+func (p *KeygenPlan) Snapshot() (KeygenPlanSnapshot, bool) {
 	if p == nil {
-		return nil
+		return KeygenPlanSnapshot{}, false
 	}
-	return slices.Clone(p.parties)
+	return KeygenPlanSnapshot{
+		SessionID: p.sessionID,
+		Threshold: p.threshold,
+		Parties:   p.parties.Clone(),
+	}, true
 }
 
 // Digest returns the canonical keygen plan digest.
@@ -103,7 +124,7 @@ func (p *KeygenPlan) validate() error {
 	if !p.sessionID.Valid() {
 		return tss.ErrInvalidSessionID
 	}
-	if _, err := validatePlanParties(p.parties, p.threshold, p.limits); err != nil {
+	if _, err := validatePlanPartySetVerbose(p.parties, p.threshold, p.limits); err != nil {
 		return err
 	}
 	return nil
@@ -142,6 +163,26 @@ type RefreshPlan struct {
 	limits Limits
 }
 
+// RefreshPlanSnapshot is a caller-owned copy of refresh plan metadata.
+type RefreshPlanSnapshot struct {
+	SessionID tss.SessionID
+	Threshold int
+	Parties   tss.PartySet
+	PublicKey []byte
+	ChainCode []byte
+}
+
+// Clone returns a deep copy of the refresh plan snapshot.
+func (s RefreshPlanSnapshot) Clone() RefreshPlanSnapshot {
+	return RefreshPlanSnapshot{
+		SessionID: s.SessionID,
+		Threshold: s.Threshold,
+		Parties:   s.Parties.Clone(),
+		PublicKey: bytes.Clone(s.PublicKey),
+		ChainCode: bytes.Clone(s.ChainCode),
+	}
+}
+
 // RefreshPlanOption configures FROST refresh plan construction.
 type RefreshPlanOption struct {
 	OldKey    *KeyShare
@@ -162,7 +203,7 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 	if err := oldKey.ValidateConsistency(); err != nil {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
-	if _, err := validatePlanParties(oldKey.state.parties, oldKey.state.threshold, limits); err != nil {
+	if _, err := validatePlanPartySetVerbose(oldKey.state.parties, oldKey.state.threshold, limits); err != nil {
 		return nil, invalidPlanConfig(oldKey.state.party, err)
 	}
 	return &RefreshPlan{state: &refreshPlanState{
@@ -190,28 +231,18 @@ func (p *RefreshPlan) Threshold() int {
 	return p.state.threshold
 }
 
-// Parties returns a copy of the fixed refresh participant set.
-func (p *RefreshPlan) Parties() tss.PartySet {
+// Snapshot returns a caller-owned refresh plan snapshot.
+func (p *RefreshPlan) Snapshot() (RefreshPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return RefreshPlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.parties)
-}
-
-// PublicKeyBytes returns a copy of the group public key bound by the plan.
-func (p *RefreshPlan) PublicKeyBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.publicKey)
-}
-
-// ChainCodeBytes returns a copy of the HD chain code bound by the plan.
-func (p *RefreshPlan) ChainCodeBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.chainCode)
+	return RefreshPlanSnapshot{
+		SessionID: p.state.sessionID,
+		Threshold: p.state.threshold,
+		Parties:   p.state.parties.Clone(),
+		PublicKey: bytes.Clone(p.state.publicKey),
+		ChainCode: bytes.Clone(p.state.chainCode),
+	}, true
 }
 
 // Digest returns the canonical refresh plan digest.
@@ -260,6 +291,28 @@ type resharePlanState struct {
 type ResharePlan struct {
 	state  *resharePlanState
 	limits Limits
+}
+
+// ResharePlanSnapshot is a caller-owned copy of reshare plan metadata.
+type ResharePlanSnapshot struct {
+	SessionID    tss.SessionID
+	OldPublicKey []byte
+	OldChainCode []byte
+	OldParties   tss.PartySet
+	NewParties   tss.PartySet
+	NewThreshold int
+}
+
+// Clone returns a deep copy of the reshare plan snapshot.
+func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
+	return ResharePlanSnapshot{
+		SessionID:    s.SessionID,
+		OldPublicKey: bytes.Clone(s.OldPublicKey),
+		OldChainCode: bytes.Clone(s.OldChainCode),
+		OldParties:   s.OldParties.Clone(),
+		NewParties:   s.NewParties.Clone(),
+		NewThreshold: s.NewThreshold,
+	}
 }
 
 // ResharePlanOption configures FROST reshare plan construction from a key share.
@@ -312,14 +365,14 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 	if _, err := edcurve.PointFromBytes(option.OldPublicKey); err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old public key: %w", err))
 	}
-	if len(option.OldChainCode) != 32 {
+	if len(option.OldChainCode) != bip32util.ChainCodeSize {
 		return nil, invalidPlanConfig(0, errors.New("old chain code must be 32 bytes"))
 	}
 	oldParties, err := validatePlanPartySet(option.OldParties, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old participant set: %w", err))
 	}
-	newParties, err := validatePlanParties(option.NewParties, option.NewThreshold, limits)
+	newParties, err := validatePlanPartySetVerbose(option.NewParties, option.NewThreshold, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, err)
 	}
@@ -341,36 +394,19 @@ func (p *ResharePlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// OldPublicKeyBytes returns a copy of the old group public key.
-func (p *ResharePlan) OldPublicKeyBytes() []byte {
+// Snapshot returns a caller-owned reshare plan snapshot.
+func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return ResharePlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.oldPublicKey)
-}
-
-// OldChainCodeBytes returns a copy of the old HD chain code.
-func (p *ResharePlan) OldChainCodeBytes() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.oldChainCode)
-}
-
-// OldParties returns a copy of the old dealer set.
-func (p *ResharePlan) OldParties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.oldParties)
-}
-
-// NewParties returns a copy of the new recipient set.
-func (p *ResharePlan) NewParties() tss.PartySet {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return slices.Clone(p.state.newParties)
+	return ResharePlanSnapshot{
+		SessionID:    p.state.sessionID,
+		OldPublicKey: bytes.Clone(p.state.oldPublicKey),
+		OldChainCode: bytes.Clone(p.state.oldChainCode),
+		OldParties:   p.state.oldParties.Clone(),
+		NewParties:   p.state.newParties.Clone(),
+		NewThreshold: p.state.newThreshold,
+	}, true
 }
 
 // NewThreshold returns the target signing threshold.
@@ -464,6 +500,40 @@ type SignPlan struct {
 	limits Limits
 }
 
+// SignPlanSnapshot is a caller-owned copy of signing plan metadata.
+type SignPlanSnapshot struct {
+	SessionID            tss.SessionID
+	Threshold            int
+	Parties              tss.PartySet
+	PublicKey            []byte
+	ChainCode            []byte
+	KeygenTranscriptHash []byte
+	Signers              tss.PartySet
+	Context              tss.SigningContext
+	ContextHash          []byte
+	Derivation           *tss.DerivationResult
+	Message              []byte
+	VerificationKey      []byte
+}
+
+// Clone returns a deep copy of the sign plan snapshot.
+func (s SignPlanSnapshot) Clone() SignPlanSnapshot {
+	return SignPlanSnapshot{
+		SessionID:            s.SessionID,
+		Threshold:            s.Threshold,
+		Parties:              s.Parties.Clone(),
+		PublicKey:            bytes.Clone(s.PublicKey),
+		ChainCode:            bytes.Clone(s.ChainCode),
+		KeygenTranscriptHash: bytes.Clone(s.KeygenTranscriptHash),
+		Signers:              s.Signers.Clone(),
+		Context:              s.Context.Clone(),
+		ContextHash:          bytes.Clone(s.ContextHash),
+		Derivation:           s.Derivation.Clone(),
+		Message:              bytes.Clone(s.Message),
+		VerificationKey:      bytes.Clone(s.VerificationKey),
+	}
+}
+
 // SignPlanOption configures FROST signing plan construction.
 type SignPlanOption struct {
 	Key       *KeyShare
@@ -524,44 +594,29 @@ func (p *SignPlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// Signers returns a copy of the canonical signer set.
-func (p *SignPlan) Signers() tss.PartySet {
+// Snapshot returns a caller-owned signing plan snapshot.
+func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
-		return nil
+		return SignPlanSnapshot{}, false
 	}
-	return slices.Clone(p.state.signers)
-}
-
-// Message returns a copy of the bound signing message.
-func (p *SignPlan) Message() []byte {
-	if p == nil || p.state == nil {
-		return nil
+	verificationKey := []byte(nil)
+	if p.state.derivation != nil {
+		verificationKey = p.state.derivation.VerificationKeyBytes()
 	}
-	return slices.Clone(p.state.message)
-}
-
-// Context returns a copy of the signing context bound by the plan.
-func (p *SignPlan) Context() tss.SigningContext {
-	if p == nil || p.state == nil {
-		return tss.SigningContext{}
-	}
-	return p.state.context.Clone()
-}
-
-// Derivation returns a copy of the derivation result bound by the plan.
-func (p *SignPlan) Derivation() *tss.DerivationResult {
-	if p == nil || p.state == nil {
-		return nil
-	}
-	return p.state.derivation.Clone()
-}
-
-// VerificationKeyBytes returns the Ed25519 public key used for signature verification.
-func (p *SignPlan) VerificationKeyBytes() []byte {
-	if p == nil || p.state == nil || p.state.derivation == nil {
-		return nil
-	}
-	return p.state.derivation.VerificationKeyBytes()
+	return SignPlanSnapshot{
+		SessionID:            p.state.sessionID,
+		Threshold:            p.state.threshold,
+		Parties:              p.state.parties.Clone(),
+		PublicKey:            bytes.Clone(p.state.publicKey),
+		ChainCode:            bytes.Clone(p.state.chainCode),
+		KeygenTranscriptHash: bytes.Clone(p.state.keygenHash),
+		Signers:              p.state.signers.Clone(),
+		Context:              p.state.context.Clone(),
+		ContextHash:          bytes.Clone(p.state.contextHash),
+		Derivation:           p.state.derivation.Clone(),
+		Message:              bytes.Clone(p.state.message),
+		VerificationKey:      verificationKey,
+	}, true
 }
 
 // Digest returns the canonical sign plan digest.
@@ -616,16 +671,13 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	return nil
 }
 
-func validatePlanParties(parties tss.PartySet, threshold int, limits Limits) (tss.PartySet, error) {
-	parties = tss.SortParties(parties)
+func validatePlanPartySetVerbose(parties tss.PartySet, threshold int, limits Limits) (tss.PartySet, error) {
+	parties, err := validatePlanPartySet(parties, limits)
+	if err != nil {
+		return nil, err
+	}
 	if threshold <= 0 {
 		return nil, errors.New("threshold must be positive")
-	}
-	if len(parties) == 0 {
-		return nil, errors.New("parties must not be empty")
-	}
-	if len(parties) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("too many parties: %d > %d", len(parties), limits.Threshold.MaxParties)
 	}
 	if threshold > len(parties) {
 		return nil, errors.New("threshold exceeds party count")
@@ -634,9 +686,6 @@ func validatePlanParties(parties tss.PartySet, threshold int, limits Limits) (ts
 		return nil, fmt.Errorf("threshold too large: %d > %d", threshold, limits.Threshold.MaxThreshold)
 	}
 	if err := limits.Threshold.ValidateThreshold(threshold, len(parties)); err != nil {
-		return nil, err
-	}
-	if err := wire.ValidateStrictSortedIDs(parties); err != nil {
 		return nil, err
 	}
 	return parties, nil

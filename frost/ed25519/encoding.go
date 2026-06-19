@@ -17,18 +17,22 @@ const (
 
 // keyShareWire is the wire DTO for KeyShare.
 type keyShareWire struct {
-	Party                tss.PartyID           `wire:"1,u32"`
-	Threshold            int                   `wire:"2,u32"`
-	Parties              tss.PartySet          `wire:"3,u32list"`
-	PublicKey            []byte                `wire:"4,bytes,max_bytes=point"`
-	Secret               *secret.Scalar        `wire:"5,custom,len=32"`
-	GroupCommitments     [][]byte              `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
-	VerificationShares   []VerificationShare   `wire:"7,recordlist,max_items=parties"`
-	KeygenTranscriptHash []byte                `wire:"8,bytes"`
-	ChainCode            []byte                `wire:"9,bytes"`
-	KeygenSessionID      []byte                `wire:"10,bytes,len=32"`
-	KeygenConfirmations  []*KeygenConfirmation `wire:"11,recordlist,max_items=parties"`
-	PlanHash             []byte                `wire:"12,bytes,len=32"`
+	Party                tss.PartyID                           `wire:"1,u32"`
+	Threshold            int                                   `wire:"2,u32"`
+	Parties              tss.PartySet                          `wire:"3,u32list"`
+	PublicKey            []byte                                `wire:"4,bytes,max_bytes=point"`
+	ChainCode            []byte                                `wire:"5,bytes"`
+	Secret               *secret.Scalar                        `wire:"6,custom,len=32"`
+	GroupCommitments     [][]byte                              `wire:"7,byteslist,max_bytes=point,max_items=threshold"`
+	PartyData            map[tss.PartyID]keySharePartyDataWire `wire:"8,map,max_items=parties"`
+	KeygenSessionID      []byte                                `wire:"9,bytes,len=32"`
+	KeygenTranscriptHash []byte                                `wire:"10,bytes"`
+	PlanHash             []byte                                `wire:"11,bytes,len=32"`
+}
+
+type keySharePartyDataWire struct {
+	VerificationShare  []byte `wire:"1,bytes,max_bytes=point"`
+	KeygenConfirmation []byte `wire:"2,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for keyShareWire.
@@ -38,18 +42,35 @@ func (keyShareWire) WireType() string { return keyShareWireType }
 func (keyShareWire) WireVersion() uint16 { return keyShareWireVersion }
 
 func encodeKeyShareWire(k *KeyShare) (*keyShareWire, error) {
+	partyData := make(map[tss.PartyID]keySharePartyDataWire, len(k.state.partyData))
+	for id, data := range k.state.partyData {
+		if data.keygenConfirmation != nil && data.keygenConfirmation.Sender != id {
+			return nil, fmt.Errorf("keygen confirmation sender %d does not match party data key %d", data.keygenConfirmation.Sender, id)
+		}
+		var confirmation []byte
+		if data.keygenConfirmation != nil {
+			var err error
+			confirmation, err = data.keygenConfirmation.MarshalBinary()
+			if err != nil {
+				return nil, fmt.Errorf("encode keygen confirmation for party %d: %w", id, err)
+			}
+		}
+		partyData[id] = keySharePartyDataWire{
+			VerificationShare:  append([]byte(nil), data.verificationShare...),
+			KeygenConfirmation: confirmation,
+		}
+	}
 	return &keyShareWire{
 		Party:                k.state.party,
 		Threshold:            k.state.threshold,
 		Parties:              k.state.parties,
 		PublicKey:            k.state.publicKey,
+		ChainCode:            k.state.chainCode,
 		Secret:               k.state.secret,
 		GroupCommitments:     k.state.groupCommitments,
-		VerificationShares:   k.state.verificationShares,
-		KeygenTranscriptHash: k.state.keygenTranscriptHash,
-		ChainCode:            k.state.chainCode,
+		PartyData:            partyData,
 		KeygenSessionID:      k.state.keygenSessionID[:],
-		KeygenConfirmations:  k.state.keygenConfirmations,
+		KeygenTranscriptHash: k.state.keygenTranscriptHash,
 		PlanHash:             k.state.planHash,
 	}, nil
 }
@@ -62,6 +83,42 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 	if _, err := edScalarFromSecret(w.Secret); err != nil {
 		return nil, fmt.Errorf("invalid secret scalar: %w", err)
 	}
+	if len(w.PartyData) != len(w.Parties) {
+		return nil, fmt.Errorf("party data count %d != party count %d", len(w.PartyData), len(w.Parties))
+	}
+	partyData := make(map[tss.PartyID]keySharePartyData, len(w.PartyData))
+	for _, id := range w.Parties {
+		if id == tss.BroadcastPartyId {
+			return nil, errors.New("broadcast party cannot have key share party data")
+		}
+		wireData, ok := w.PartyData[id]
+		if !ok {
+			return nil, fmt.Errorf("missing party data for participant %d", id)
+		}
+		var confirmation *KeygenConfirmation
+		if len(wireData.KeygenConfirmation) > 0 {
+			var err error
+			confirmation, err = UnmarshalKeygenConfirmation(wireData.KeygenConfirmation)
+			if err != nil {
+				return nil, fmt.Errorf("decode keygen confirmation for party %d: %w", id, err)
+			}
+			if confirmation.Sender != id {
+				return nil, fmt.Errorf("keygen confirmation sender %d does not match party data key %d", confirmation.Sender, id)
+			}
+		}
+		partyData[id] = keySharePartyData{
+			verificationShare:  append([]byte(nil), wireData.VerificationShare...),
+			keygenConfirmation: confirmation,
+		}
+	}
+	for id := range w.PartyData {
+		if id == tss.BroadcastPartyId {
+			return nil, errors.New("broadcast party cannot have key share party data")
+		}
+		if !tss.ContainsParty(w.Parties, id) {
+			return nil, fmt.Errorf("party data for non-participant %d", id)
+		}
+	}
 	return &keyShareState{
 		party:                w.Party,
 		threshold:            w.Threshold,
@@ -70,16 +127,11 @@ func decodeKeyShareWire(w *keyShareWire) (*keyShareState, error) {
 		chainCode:            w.ChainCode,
 		secret:               w.Secret,
 		groupCommitments:     w.GroupCommitments,
-		verificationShares:   w.VerificationShares,
+		partyData:            partyData,
 		keygenSessionID:      sid,
 		keygenTranscriptHash: w.KeygenTranscriptHash,
 		planHash:             w.PlanHash,
-		keygenConfirmations:  w.KeygenConfirmations,
 	}, nil
-}
-
-func marshalKeyShare(k *KeyShare) ([]byte, error) {
-	return wire.Marshal(k, wire.WithFieldLimitsForMarshal(DefaultLimits().fieldLimits()))
 }
 
 // WireType returns the canonical wire type identifier for KeyShare.
@@ -130,16 +182,20 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 			return fmt.Errorf("group commitment %d too large: %d > %d", i, len(c), limits.Curve.MaxPointBytes)
 		}
 	}
-	if len(k.state.verificationShares) > limits.Threshold.MaxParties {
-		return fmt.Errorf("verification shares too large: %d > %d", len(k.state.verificationShares), limits.Threshold.MaxParties)
+	if len(k.state.partyData) > limits.Threshold.MaxParties {
+		return fmt.Errorf("party data too large: %d > %d", len(k.state.partyData), limits.Threshold.MaxParties)
 	}
-	for i, s := range k.state.verificationShares {
-		if len(s.PublicKey) > limits.Curve.MaxPointBytes {
-			return fmt.Errorf("verification share %d too large: %d > %d", i, len(s.PublicKey), limits.Curve.MaxPointBytes)
+	confirmationCount := 0
+	for id, data := range k.state.partyData {
+		if len(data.verificationShare) > limits.Curve.MaxPointBytes {
+			return fmt.Errorf("verification share for party %d too large: %d > %d", id, len(data.verificationShare), limits.Curve.MaxPointBytes)
+		}
+		if data.keygenConfirmation != nil {
+			confirmationCount++
 		}
 	}
-	if len(k.state.keygenConfirmations) > limits.Threshold.MaxParties {
-		return fmt.Errorf("keygen confirmations too large: %d > %d", len(k.state.keygenConfirmations), limits.Threshold.MaxParties)
+	if confirmationCount > limits.Threshold.MaxParties {
+		return fmt.Errorf("keygen confirmations too large: %d > %d", confirmationCount, limits.Threshold.MaxParties)
 	}
 	return k.ValidateConsistency()
 }

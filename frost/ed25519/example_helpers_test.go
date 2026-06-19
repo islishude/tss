@@ -32,6 +32,14 @@ func exampleFROSTSigningContext(paths ...[]uint32) tss.SigningContext {
 	}
 }
 
+func exampleFROSTKeyShareMetadata(key *frost.KeyShare) (frost.KeySharePublicMetadata, error) {
+	metadata, ok := key.PublicMetadata()
+	if !ok {
+		return frost.KeySharePublicMetadata{}, errors.New("missing key-share metadata")
+	}
+	return metadata, nil
+}
+
 func newExampleFROSTSecurity(parties tss.PartySet) *exampleFROSTSecurity {
 	privateKeys := make(map[tss.PartyID]stded25519.PrivateKey, len(parties))
 	publicKeys := make(map[tss.PartyID]stded25519.PublicKey, len(parties))
@@ -151,23 +159,21 @@ func (s *exampleFROSTSecurity) route(
 	return nil
 }
 
-func runExampleFROSTKeygen(parties tss.PartySet, threshold int, option frost.KeygenPlanOption) (map[tss.PartyID]*frost.KeyShare, error) {
-	partySet := parties
+func runExampleFROSTKeygen(option frost.KeygenPlanOption) (map[tss.PartyID]*frost.KeyShare, error) {
+	partySet := option.Parties
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		return nil, err
 	}
-	sessions := make(map[tss.PartyID]*frost.KeygenSession, len(parties))
-	queue := make([]tss.Envelope, 0)
 	option.SessionID = sessionID
-	option.Parties = parties
-	option.Threshold = threshold
+	sessions := make(map[tss.PartyID]*frost.KeygenSession, len(partySet))
+	queue := make([]tss.Envelope, 0)
 	plan, err := frost.NewKeygenPlan(option)
 	if err != nil {
 		return nil, err
 	}
-	for _, id := range parties {
+	for _, id := range partySet {
 		guard, err := security.guard(id, partySet, sessionID)
 		if err != nil {
 			return nil, err
@@ -187,8 +193,8 @@ func runExampleFROSTKeygen(parties tss.PartySet, threshold int, option frost.Key
 		return nil, err
 	}
 
-	shares := make(map[tss.PartyID]*frost.KeyShare, len(parties))
-	for _, id := range parties {
+	shares := make(map[tss.PartyID]*frost.KeyShare, len(partySet))
+	for _, id := range partySet {
 		share, ok := sessions[id].KeyShare()
 		if !ok {
 			return nil, fmt.Errorf("keygen not complete for party %d", id)
@@ -202,7 +208,11 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
-	partySet := shares[signers[0]].Parties()
+	metadata, err := exampleFROSTKeyShareMetadata(shares[signers[0]])
+	if err != nil {
+		return nil, nil, err
+	}
+	partySet := metadata.Parties
 	security := newExampleFROSTSecurity(partySet)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -245,19 +255,4 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 		return nil, nil, errors.New("signing not complete")
 	}
 	return sessions[signers[0]].VerifyKey(), signature, nil
-}
-
-func mergeExamplePartySets(sets ...tss.PartySet) tss.PartySet {
-	seen := make(map[tss.PartyID]struct{})
-	var merged tss.PartySet
-	for _, set := range sets {
-		for _, id := range set {
-			if _, ok := seen[id]; ok {
-				continue
-			}
-			seen[id] = struct{}{}
-			merged = append(merged, id)
-		}
-	}
-	return tss.SortParties(merged)
 }

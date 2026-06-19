@@ -17,7 +17,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	oldParties := tss.NewPartySet(1, 2, 3)
 	newParties := tss.NewPartySet(2, 3, 4)
 	newThreshold := 2
-	oldPublicKey := oldShares[1].PublicKeyBytes()
+	oldPublicKey := mustKeyShareMetadata(t, oldShares[1]).PublicKey
 	oldChainCode := append([]byte(nil), oldShares[1].state.chainCode...)
 
 	sessionID, err := tss.NewSessionID(nil)

@@ -30,6 +30,12 @@ package-specific state machines decode payloads.
 
 Keygen state machines produce algorithm-specific `KeyShare` records. `MarshalBinary` is deterministic and uses canonical TLV encoding for the share record. Secret material is not encrypted by this package; callers must encrypt persisted shares when needed and call `Destroy` when practical.
 
+FROST key shares store verification shares and optional keygen confirmations in
+a party-keyed map whose key set exactly matches the canonical participant set.
+The participant set remains the only ordering source for transcripts,
+confirmation sets, and public materialization. Retired record-list KeyShare
+encodings are rejected rather than decoded through compatibility paths.
+
 CGGMP21 key shares include Paillier private material, party-keyed public
 verification/Paillier/Ring-Pedersen material, proof data, and a mandatory
 32-byte HD chain code needed by the signing path. The party-data map key set

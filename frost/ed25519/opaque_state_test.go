@@ -22,22 +22,29 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	k := minimalFROSTKeyShare()
 	k.state.parties = tss.NewPartySet(1, 2)
 	k.state.groupCommitments = [][]byte{{1}, {2}}
-	k.state.verificationShares = []VerificationShare{{Party: 1, PublicKey: []byte{3}}}
-	k.state.keygenConfirmations = []*KeygenConfirmation{{Sender: 4}}
+	k.state.partyData = map[tss.PartyID]keySharePartyData{
+		1: {verificationShare: []byte{3}, keygenConfirmation: &KeygenConfirmation{Sender: 1}},
+		2: {verificationShare: []byte{4}, keygenConfirmation: &KeygenConfirmation{Sender: 2}},
+	}
 
-	parties := k.Parties()
-	parties[0] = 99
-	commitments := k.GroupCommitments()
-	commitments[0][0] = 99
-	verificationShares := k.VerificationShares()
-	verificationShares[0].PublicKey[0] = 99
-	confirmations := k.KeygenConfirmations()
-	confirmations[0].Sender = 99
+	metadata := mustKeyShareMetadata(t, k)
+	metadata.Parties[0] = 99
+	metadata.GroupCommitments[0][0] = 99
+	verificationShare, ok := k.VerificationShare(1)
+	if !ok {
+		t.Fatal("missing verification share")
+	}
+	verificationShare.PublicKey[0] = 99
+	confirmation, ok := k.KeygenConfirmation(1)
+	if !ok {
+		t.Fatal("missing keygen confirmation")
+	}
+	confirmation.Sender = 99
 
 	if k.state.parties[0] != 1 ||
 		k.state.groupCommitments[0][0] != 1 ||
-		k.state.verificationShares[0].PublicKey[0] != 3 ||
-		k.state.keygenConfirmations[0].Sender != 4 {
+		k.state.partyData[1].verificationShare[0] != 3 ||
+		k.state.partyData[1].keygenConfirmation.Sender != 1 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }

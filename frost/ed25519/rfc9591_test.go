@@ -308,13 +308,13 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		fed.NewIdentityPoint().ScalarBaseMult(coeff1).Bytes(),
 	}
 	parties := tss.NewPartySet(1, 2, 3)
-	verificationShares := make([]VerificationShare, 0, len(parties))
+	partyData := make(map[tss.PartyID]keySharePartyData, len(parties))
 	for _, id := range parties {
 		pub, err := edcurve.EvalCommitments(groupCommitments, id)
 		if err != nil {
 			t.Fatal(err)
 		}
-		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
+		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
 	}
 	secretScalar, err := newEdSecretScalar(secret)
 	if err != nil {
@@ -328,7 +328,7 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		chainCode:            bytes.Repeat([]byte{0x96}, 32),
 		secret:               secretScalar,
 		groupCommitments:     groupCommitments,
-		verificationShares:   verificationShares,
+		partyData:            partyData,
 		keygenTranscriptHash: []byte("rfc9591-appendix-e1"),
 		planHash:             bytes.Repeat([]byte{0x95}, 32),
 	}}

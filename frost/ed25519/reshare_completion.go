@@ -88,12 +88,14 @@ func (s *ReshareSession) tryComplete() error {
 	publicKey = append([]byte(nil), newCommitments[0]...)
 
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
+	partyData := make(map[tss.PartyID]keySharePartyData, len(s.newParties))
 	for _, id := range s.newParties {
 		pub, err := edcurve.EvalCommitments(newCommitments, id)
 		if err != nil {
 			return err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub})
+		partyData[id] = keySharePartyData{verificationShare: bytes.Clone(pub)}
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
 	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey, chainCode, s.planHash, s.refreshMode, s.commits, newCommitments, verificationShares)
@@ -105,7 +107,7 @@ func (s *ReshareSession) tryComplete() error {
 		chainCode:            chainCode,
 		secret:               newSecretScalar,
 		groupCommitments:     newCommitments,
-		verificationShares:   verificationShares,
+		partyData:            partyData,
 		keygenSessionID:      s.cfg.SessionID,
 		keygenTranscriptHash: reshareTranscriptHash,
 		planHash:             append([]byte(nil), s.planHash...),

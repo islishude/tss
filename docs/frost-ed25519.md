@@ -17,10 +17,19 @@ The group public key is a standard Ed25519 verification key. Signatures are stan
 
 `KeyShare` is an opaque handle. Public metadata cannot be changed through struct
 fields after validation. `PartyID()`, `Threshold()`, and `KeygenSessionID()`
-return values. `PublicKeyBytes()`, `ChainCodeBytes()`, and
-`KeygenTranscriptHashBytes()` return copied bytes. `Parties()`,
-`GroupCommitments()`, `VerificationShares()`, and `KeygenConfirmations()` return
-deep copies, including nested byte slices.
+return scalar values. `PublicMetadata()` returns a caller-owned snapshot of the
+party set, group public key, chain code, group commitments, session binding,
+transcript hash, and plan hash. Per-party public material is queried with
+`VerificationShare(party)` and `KeygenConfirmation(party)`.
+
+The persistent per-party material is keyed by `PartyID`. Its key set must match
+the canonical participant set exactly. Ordered transcript and confirmation
+material is always derived from the participant order, never Go map iteration.
+The current map-based KeyShare wire layout intentionally does not decode the
+retired record-list layout.
+
+Keygen, refresh, reshare, and sign plans expose aggregate caller-owned values
+through `Snapshot()` methods rather than independent slice and byte getters.
 
 The local share is stored as `internal/secret.Scalar` fixed-length bytes.
 `String()`, `GoString()`, and `Format()` redact it, while `MarshalJSON()` rejects
@@ -553,8 +562,9 @@ plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
 out, err := kg.HandleKeygenMessage(env)
 share, ok := kg.KeyShare()
-publicKey := share.PublicKeyBytes()
-parties := share.Parties()
+metadata, ok := share.PublicMetadata()
+publicKey := metadata.PublicKey
+parties := metadata.Parties
 ```
 
 ### Signing

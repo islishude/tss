@@ -63,7 +63,11 @@ func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
 	tampered.state.chainCode[0] ^= 1
-	if err := verifyFinalizedKeygenConfirmationSet(tampered, tampered.state.keygenConfirmations, true); err == nil {
+	confirmations, err := tampered.orderedKeygenConfirmations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyFinalizedKeygenConfirmationSet(tampered, confirmations, true); err == nil {
 		t.Fatal("expected tampered aggregate chain code to be rejected")
 	}
 }
@@ -72,11 +76,16 @@ func TestFROSTKeyShareRejectsTamperedConfirmationChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
-	cc := *tampered.state.keygenConfirmations[1]
-	cc.ChainCode = bytes.Clone(cc.ChainCode)
-	cc.ChainCode[0] ^= 1
-	tampered.state.keygenConfirmations[1] = &cc
-	if err := verifyFinalizedKeygenConfirmationSet(tampered, tampered.state.keygenConfirmations, true); err == nil {
+	data := tampered.state.partyData[2]
+	data.keygenConfirmation = data.keygenConfirmation.Clone()
+	data.keygenConfirmation.ChainCode = bytes.Clone(data.keygenConfirmation.ChainCode)
+	data.keygenConfirmation.ChainCode[0] ^= 1
+	tampered.state.partyData[2] = data
+	confirmations, err := tampered.orderedKeygenConfirmations()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := verifyFinalizedKeygenConfirmationSet(tampered, confirmations, true); err == nil {
 		t.Fatal("expected tampered confirmation chain code to be rejected")
 	}
 }

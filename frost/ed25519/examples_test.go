@@ -12,7 +12,10 @@ import (
 // ExampleSign demonstrates production-shaped FROST key generation and signing.
 func ExampleSign() {
 	parties := tss.NewPartySet(1, 2)
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   parties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -30,7 +33,10 @@ func ExampleSign() {
 // ExampleSign_multiParty demonstrates signing with a threshold subset.
 func ExampleSign_multiParty() {
 	parties := tss.NewPartySet(1, 2, 3)
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   parties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -49,7 +55,10 @@ func ExampleSign_multiParty() {
 // ExampleKeyShare demonstrates the canonical binary persistence format.
 func ExampleKeyShare() {
 	parties := tss.NewPartySet(1, 2)
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   parties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
@@ -78,11 +87,18 @@ func ExampleKeyShare() {
 func ExampleStartRefresh() {
 	parties := tss.NewPartySet(1, 2, 3)
 	partySet := parties
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   parties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
-	oldPublicKey := shares[1].PublicKeyBytes()
+	metadata, err := exampleFROSTKeyShareMetadata(shares[1])
+	if err != nil {
+		panic(err)
+	}
+	oldPublicKey := metadata.PublicKey
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -123,7 +139,11 @@ func ExampleStartRefresh() {
 		}
 		refreshed[id] = share
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, refreshed[1].PublicKeyBytes()))
+	refreshedMetadata, err := exampleFROSTKeyShareMetadata(refreshed[1])
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, refreshedMetadata.PublicKey))
 
 	message := []byte("post-refresh signing")
 	publicKey, signature, err := runExampleFROSTSign(refreshed, tss.NewPartySet(1, 2), message, frost.SignOptions{})
@@ -140,14 +160,20 @@ func ExampleStartRefresh() {
 func ExampleStartReshare() {
 	oldParties := tss.NewPartySet(1, 2, 3)
 	newParties := tss.NewPartySet(1, 2, 3, 4)
-	oldPartySet := oldParties
-	allParties := mergeExamplePartySets(oldParties, newParties)
-	shares, err := runExampleFROSTKeygen(oldParties, 2, frost.KeygenPlanOption{})
+	allParties := tss.MergePartySet(oldParties, newParties)
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   oldParties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
-	oldPublicKey := shares[1].PublicKeyBytes()
-	oldChainCode := shares[1].ChainCodeBytes()
+	metadata, err := exampleFROSTKeyShareMetadata(shares[1])
+	if err != nil {
+		panic(err)
+	}
+	oldPublicKey := metadata.PublicKey
+	oldChainCode := metadata.ChainCode
 
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -190,7 +216,7 @@ func ExampleStartReshare() {
 		panic(err)
 	}
 	if err := security.route(queue, allParties, func(tss.Envelope) tss.PartySet {
-		return oldPartySet
+		return oldParties
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].HandleReshareMessage(env)
 	}); err != nil {
@@ -205,7 +231,11 @@ func ExampleStartReshare() {
 		}
 		reshared[id] = share
 	}
-	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, reshared[4].PublicKeyBytes()))
+	resharedMetadata, err := exampleFROSTKeyShareMetadata(reshared[4])
+	if err != nil {
+		panic(err)
+	}
+	fmt.Println("public key preserved:", bytes.Equal(oldPublicKey, resharedMetadata.PublicKey))
 
 	message := []byte("post-reshare signing")
 	publicKey, signature, err := runExampleFROSTSign(reshared, tss.NewPartySet(2, 4), message, frost.SignOptions{})
@@ -221,11 +251,18 @@ func ExampleStartReshare() {
 // ExampleDeriveNonHardenedBIP32 demonstrates HD derivation and child-key signing.
 func ExampleDeriveNonHardenedBIP32() {
 	parties := tss.NewPartySet(1, 2)
-	shares, err := runExampleFROSTKeygen(parties, 2, frost.KeygenPlanOption{})
+	shares, err := runExampleFROSTKeygen(frost.KeygenPlanOption{
+		Parties:   parties,
+		Threshold: 2,
+	})
 	if err != nil {
 		panic(err)
 	}
-	derived, err := frost.DeriveNonHardenedBIP32(shares[1].PublicKeyBytes(), shares[1].ChainCodeBytes(), []uint32{0, 1})
+	metadata, err := exampleFROSTKeyShareMetadata(shares[1])
+	if err != nil {
+		panic(err)
+	}
+	derived, err := frost.DeriveNonHardenedBIP32(metadata.PublicKey, metadata.ChainCode, []uint32{0, 1})
 	if err != nil {
 		panic(err)
 	}
@@ -238,7 +275,7 @@ func ExampleDeriveNonHardenedBIP32() {
 		panic(err)
 	}
 	fmt.Println(stded25519.Verify(stded25519.PublicKey(derived.ChildPublicKey), message, signature))
-	fmt.Println(stded25519.Verify(stded25519.PublicKey(shares[1].PublicKeyBytes()), message, signature))
+	fmt.Println(stded25519.Verify(stded25519.PublicKey(metadata.PublicKey), message, signature))
 	// Output:
 	// true
 	// false

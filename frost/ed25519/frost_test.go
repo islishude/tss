@@ -67,6 +67,15 @@ func startFROSTKeygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) 
 	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
+func mustKeyShareMetadata(t testing.TB, key *KeyShare) KeySharePublicMetadata {
+	t.Helper()
+	metadata, ok := key.PublicMetadata()
+	if !ok {
+		t.Fatal("missing key-share metadata")
+	}
+	return metadata
+}
+
 func startFROSTKeygenWithPlanOption(config tss.ThresholdConfig, option KeygenPlanOption, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(config.Parties, config.Self), config.SessionID)
@@ -1034,7 +1043,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 			oldPubs := make(map[tss.PartyID][]byte, tc.parties)
 			oldSecrets := make(map[tss.PartyID][]byte, tc.parties)
 			for id, share := range shares {
-				oldPubs[id] = share.PublicKeyBytes()
+				oldPubs[id] = mustKeyShareMetadata(t, share).PublicKey
 				raw, err := share.MarshalBinary()
 				if err != nil {
 					t.Fatal(err)
@@ -1182,12 +1191,9 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 
 	t.Run("tampered verification share", func(t *testing.T) {
 		bad := cloneKeyShareValue(share)
-		for i := range bad.state.verificationShares {
-			if bad.state.verificationShares[i].Party == share.state.party {
-				bad.state.verificationShares[i].PublicKey[0] ^= 1
-				break
-			}
-		}
+		data := bad.state.partyData[share.state.party]
+		data.verificationShare[0] ^= 1
+		bad.state.partyData[share.state.party] = data
 		if err := bad.ValidateConsistency(); err == nil {
 			t.Fatal("tampered verification share should fail consistency check")
 		}

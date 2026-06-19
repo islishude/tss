@@ -27,10 +27,14 @@ func TestFROSTKeygenPlanDigestBindsGlobalIntentAndCopies(t *testing.T) {
 	assertSamePlanDigest(t, plan, same)
 
 	parties[0] = 99
-	gotParties := plan.Parties()
-	gotParties[0] = 99
-	if !bytes.Equal(partyIDsBytes(plan.Parties()), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
-		t.Fatal("keygen plan party getter or constructor aliases caller memory")
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("missing keygen plan snapshot")
+	}
+	snapshot.Parties[0] = 99
+	again, ok := plan.Snapshot()
+	if !ok || !bytes.Equal(partyIDsBytes(again.Parties), partyIDsBytes(tss.NewPartySet(1, 2, 3))) {
+		t.Fatal("keygen plan snapshot or constructor aliases caller memory")
 	}
 	localLimits := DefaultLimits()
 	localLimits.Payload.MaxMessageBytes--
@@ -79,6 +83,52 @@ func TestFROSTKeygenPlanZeroValueIsInvalid(t *testing.T) {
 	}
 }
 
+func TestFROSTRefreshAndResharePlanSnapshotsReturnOwnedCopies(t *testing.T) {
+	shares := frostKeygen(t, 2, 3)
+
+	refresh, err := NewRefreshPlan(RefreshPlanOption{
+		OldKey: shares[1], SessionID: frostPlanTestSession(0x19),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	refreshSnapshot, ok := refresh.Snapshot()
+	if !ok {
+		t.Fatal("missing refresh plan snapshot")
+	}
+	refreshSnapshot.Parties[0] = 99
+	refreshSnapshot.PublicKey[0] ^= 0xff
+	refreshSnapshot.ChainCode[0] ^= 0xff
+	refreshAgain, ok := refresh.Snapshot()
+	if !ok || refreshAgain.Parties[0] != 1 ||
+		bytes.Equal(refreshAgain.PublicKey, refreshSnapshot.PublicKey) ||
+		bytes.Equal(refreshAgain.ChainCode, refreshSnapshot.ChainCode) {
+		t.Fatal("refresh plan snapshot aliases internal state")
+	}
+
+	reshare, err := NewResharePlan(ResharePlanOption{
+		OldKey: shares[1], SessionID: frostPlanTestSession(0x1a),
+		NewParties: tss.NewPartySet(2, 3, 4), NewThreshold: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reshareSnapshot, ok := reshare.Snapshot()
+	if !ok {
+		t.Fatal("missing reshare plan snapshot")
+	}
+	reshareSnapshot.OldParties[0] = 99
+	reshareSnapshot.NewParties[0] = 99
+	reshareSnapshot.OldPublicKey[0] ^= 0xff
+	reshareSnapshot.OldChainCode[0] ^= 0xff
+	reshareAgain, ok := reshare.Snapshot()
+	if !ok || reshareAgain.OldParties[0] != 1 || reshareAgain.NewParties[0] != 2 ||
+		bytes.Equal(reshareAgain.OldPublicKey, reshareSnapshot.OldPublicKey) ||
+		bytes.Equal(reshareAgain.OldChainCode, reshareSnapshot.OldChainCode) {
+		t.Fatal("reshare plan snapshot aliases internal state")
+	}
+}
+
 func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 	shares := frostKeygen(t, 2, 3)
 	sessionID := frostPlanTestSession(0x21)
@@ -102,15 +152,18 @@ func TestFROSTSignPlanDigestBindsKeyMetadataAndCopies(t *testing.T) {
 
 	signers[0] = 99
 	message[0] ^= 0xff
-	gotSigners := plan.Signers()
-	gotSigners[0] = 99
-	gotMessage := plan.Message()
-	gotMessage[0] ^= 0xff
-	if !bytes.Equal(partyIDsBytes(plan.Signers()), partyIDsBytes(tss.NewPartySet(1, 2))) {
-		t.Fatal("sign plan signer getter or constructor aliases caller memory")
+	snapshot, ok := plan.Snapshot()
+	if !ok {
+		t.Fatal("missing sign plan snapshot")
 	}
-	if !bytes.Equal(plan.Message(), []byte("plan-bound message")) {
-		t.Fatal("sign plan message getter or constructor aliases caller memory")
+	snapshot.Signers[0] = 99
+	snapshot.Message[0] ^= 0xff
+	again, ok := plan.Snapshot()
+	if !ok || !bytes.Equal(partyIDsBytes(again.Signers), partyIDsBytes(tss.NewPartySet(1, 2))) {
+		t.Fatal("sign plan signer snapshot or constructor aliases caller memory")
+	}
+	if !bytes.Equal(again.Message, []byte("plan-bound message")) {
+		t.Fatal("sign plan message snapshot or constructor aliases caller memory")
 	}
 
 	otherMessage, err := NewSignPlan(SignPlanOption{
@@ -184,7 +237,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	}
 	s := &KeygenSession{
 		cfg:       tss.ThresholdConfig{SessionID: confirmation.SessionID},
-		planHash:  shares[1].PlanHashBytes(),
+		planHash:  mustKeyShareMetadata(t, shares[1]).PlanHash,
 		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
 	_, err = s.handleKeygenConfirmation(tss.Envelope{

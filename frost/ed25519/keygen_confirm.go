@@ -72,6 +72,9 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 
 // Clone returns a deep copy of the confirmation.
 func (c *KeygenConfirmation) Clone() *KeygenConfirmation {
+	if c == nil {
+		return nil
+	}
 	return &KeygenConfirmation{
 		SessionID:       c.SessionID,
 		Sender:          c.Sender,
@@ -256,21 +259,12 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := verifyFinalizedKeygenConfirmationSet(local, confirmations, false); err != nil {
 		return err
 	}
-	local.state.keygenConfirmations = cloneConfirmations(confirmations)
+	for _, confirmation := range confirmations {
+		data := local.state.partyData[confirmation.Sender]
+		data.keygenConfirmation = confirmation.Clone()
+		local.state.partyData[confirmation.Sender] = data
+	}
 	return nil
-}
-
-// cloneConfirmations returns a deep copy of a confirmation slice.
-func cloneConfirmations(src []*KeygenConfirmation) []*KeygenConfirmation {
-	if src == nil {
-		return nil
-	}
-	out := make([]*KeygenConfirmation, len(src))
-	for i, c := range src {
-		cc := *c
-		out[i] = &cc
-	}
-	return out
 }
 
 func keygenGroupCommitmentsHash(commitments [][]byte) []byte {
@@ -404,13 +398,23 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	for _, id := range s.cfg.Parties {
 		dealerCommits[id] = s.partyData[id].commitments
 	}
+	verificationShares, err := finalShare.orderedVerificationShares()
+	if err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
 	finalShare.state.keygenTranscriptHash = frostKeygenTranscriptHash(
 		s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties,
 		chainCodeCommitAggregate, s.planHash, dealerCommits,
-		finalShare.state.groupCommitments, finalShare.state.verificationShares,
+		finalShare.state.groupCommitments, verificationShares,
 	)
 	// Store parsed confirmation structs directly.
-	finalShare.state.keygenConfirmations = cloneConfirmations(confirmations)
+	if err := applyKeygenConfirmationSet(finalShare, confirmations); err != nil {
+		finalShare.Destroy()
+		s.abort()
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
 	if err := finalShare.ValidateConsistency(); err != nil {
 		finalShare.Destroy()
 		s.abort()
@@ -421,7 +425,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	s.keyShare = finalShare
 	s.completed = true
 	s.clearIntermediateSecrets()
-	confirmationSetHash := keygenConfirmationSetHash(finalShare.state.keygenConfirmations)
+	confirmationSetHash := keygenConfirmationSetHash(confirmations)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
