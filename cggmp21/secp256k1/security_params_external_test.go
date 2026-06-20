@@ -3,6 +3,7 @@ package secp256k1_test
 import (
 	"testing"
 
+	"github.com/islishude/tss"
 	cggmp "github.com/islishude/tss/cggmp21/secp256k1"
 )
 
@@ -20,7 +21,7 @@ func TestSecurityParamsPublicAliasWireAPI(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := cggmp.UnmarshalSecurityParams(raw)
+	decoded, err := tss.DecodeBinaryValue[cggmp.SecurityParams](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

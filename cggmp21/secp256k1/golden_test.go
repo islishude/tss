@@ -19,7 +19,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
 
 	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
-	raw, err := marshalKeygenSharePayload(payload)
+	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -30,7 +30,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := marshalKeygenSharePayload(decoded)
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -171,7 +171,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestGoldenCGGMP21KeyShare(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalKeyShare(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }
@@ -212,7 +212,7 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalPresignWithLimits(raw, testLimits())
+	decoded, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -223,7 +223,7 @@ func TestGoldenCGGMP21Presign(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalPresignWithLimits(append(raw, 0), testLimits()); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[Presign](append(raw, 0), testLimits()); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

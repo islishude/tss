@@ -46,7 +46,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				share, err := UnmarshalKeyShareWithLimits(raw, testLimits())
+				share, err := tss.DecodeBinaryWithLimits[KeyShare](raw, testLimits())
 				if err != nil {
 					t.Fatalf("UnmarshalKeyShare for party %d: %v", pid, err)
 				}
@@ -71,7 +71,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 				if err != nil {
 					t.Fatal(err)
 				}
-				presign, err := UnmarshalPresignWithLimits(raw, testLimits())
+				presign, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 				if err != nil {
 					t.Fatalf("UnmarshalPresign %d: %v", i, err)
 				}
@@ -98,7 +98,7 @@ func TestCGGMP21CrossImplementationVectors(t *testing.T) {
 			for j := range signerIDs {
 				signerIDs[j] = tss.PartyID(v.Parties[j])
 				raw, _ := hex.DecodeString(v.KeygenShares[j])
-				signerShares[j], _ = UnmarshalKeyShareWithLimits(raw, testLimits())
+				signerShares[j], _ = tss.DecodeBinaryWithLimits[KeyShare](raw, testLimits())
 			}
 			pubKey, _ := hex.DecodeString(v.GroupPublicKey)
 			_, sig, err := SignDigest(digest, signerShares)

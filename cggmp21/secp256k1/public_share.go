@@ -154,7 +154,7 @@ func (p PaillierPublicShare) validateWithMaxModulusBits(maxBits int) error {
 	if len(p.Proof) == 0 {
 		return errors.New("paillier public share: empty proof")
 	}
-	if _, err := zkpai.UnmarshalModulusProof(p.Proof); err != nil {
+	if _, err := tss.DecodeBinary[zkpai.ModulusProof](p.Proof); err != nil {
 		return fmt.Errorf("paillier public share: invalid proof: %w", err)
 	}
 	return nil
@@ -234,7 +234,7 @@ func (r RingPedersenPublicShare) validateWithMaxModulusBits(maxBits int) error {
 	if len(r.Proof) == 0 {
 		return errors.New("Ring-Pedersen public share: empty proof")
 	}
-	if _, err := zkpai.UnmarshalRingPedersenProof(r.Proof); err != nil {
+	if _, err := tss.DecodeBinary[zkpai.RingPedersenProof](r.Proof); err != nil {
 		return fmt.Errorf("Ring-Pedersen public share: invalid proof: %w", err)
 	}
 	return nil

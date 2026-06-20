@@ -448,15 +448,6 @@ func MarshalRingPedersenParams(params *RingPedersenParams) ([]byte, error) {
 	}))
 }
 
-// UnmarshalRingPedersenParams decodes Ring-Pedersen parameters.
-func UnmarshalRingPedersenParams(in []byte) (*RingPedersenParams, error) {
-	params := new(RingPedersenParams)
-	if err := params.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return params, nil
-}
-
 // UnmarshalRingPedersenParamsWithMaxModulusBits decodes Ring-Pedersen
 // parameters and rejects an oversized modulus before primality checks.
 // The modulus size check is enforced by wire.Unmarshal via the
@@ -495,25 +486,9 @@ func (params *RingPedersenParams) Validate() error {
 	return ValidateRingPedersenParams(params)
 }
 
-func marshalRingPedersenProof(p *RingPedersenProof) ([]byte, error) {
-	if err := validateRingPedersenProof(p); err != nil {
-		return nil, err
-	}
-	return wire.Marshal(p)
-}
-
 // MarshalBinary encodes a Ring-Pedersen proof canonically.
 func (p *RingPedersenProof) MarshalBinary() ([]byte, error) {
-	return marshalRingPedersenProof(p)
-}
-
-// UnmarshalRingPedersenProof decodes and structurally validates Πprm.
-func UnmarshalRingPedersenProof(in []byte) (*RingPedersenProof, error) {
-	p := new(RingPedersenProof)
-	if err := p.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return wire.Marshal(p)
 }
 
 // UnmarshalBinary decodes and structurally validates a Ring-Pedersen proof.

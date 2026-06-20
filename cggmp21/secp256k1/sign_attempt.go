@@ -246,17 +246,6 @@ func (r SignAttemptRecord) MarshalBinaryWithLimits(limits Limits) ([]byte, error
 	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-// UnmarshalSignAttemptRecord decodes and validates a canonical sign-attempt record.
-func UnmarshalSignAttemptRecord(in []byte) (SignAttemptRecord, error) {
-	return tss.DecodeBinaryValue[SignAttemptRecord](in)
-}
-
-// UnmarshalSignAttemptRecordWithLimits decodes a canonical sign-attempt record
-// using explicit local resource limits.
-func UnmarshalSignAttemptRecordWithLimits(in []byte, limits Limits) (SignAttemptRecord, error) {
-	return tss.DecodeBinaryValueWithLimits[SignAttemptRecord](in, limits)
-}
-
 // UnmarshalBinary decodes and validates a canonical sign-attempt record.
 func (r *SignAttemptRecord) UnmarshalBinary(in []byte) error {
 	return r.UnmarshalBinaryWithLimits(in, DefaultLimits())

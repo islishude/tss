@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testvectors"
 )
@@ -36,7 +37,7 @@ func TestGoldenProof(t *testing.T) {
 
 	testvectors.CheckHexGolden(t, "wire/v1/zk/SchnorrProof.golden", raw)
 
-	decoded, err := UnmarshalProof(raw)
+	decoded, err := tss.DecodeBinary[Proof](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -49,7 +50,7 @@ func TestGoldenProof(t *testing.T) {
 	}
 
 	// Reject trailing byte.
-	if _, err := UnmarshalProof(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinary[Proof](append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

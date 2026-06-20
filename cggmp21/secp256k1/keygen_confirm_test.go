@@ -22,7 +22,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeygenConfirmation(raw)
+	decoded, err := tss.DecodeBinary[KeygenConfirmation](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +33,7 @@ func TestKeygenConfirmationRoundTrip(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Fatal("confirmation did not remarshal deterministically")
 	}
-	if _, err := UnmarshalKeygenConfirmation(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinary[KeygenConfirmation](append(raw, 0)); err == nil {
 		t.Fatal("accepted trailing byte")
 	}
 }
@@ -256,7 +256,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	}
 
 	conflicting := fromParty2
-	decoded, err := UnmarshalKeygenConfirmation(conflicting.Payload)
+	decoded, err := tss.DecodeBinary[KeygenConfirmation](conflicting.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}

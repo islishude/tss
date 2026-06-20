@@ -109,7 +109,7 @@ func TestFast_PresignRejectsLegacyVerifyShareBytes(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalPresignWithLimits(mutated, testLimits()); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[Presign](mutated, testLimits()); err == nil {
 		t.Fatal("presign accepted legacy party-triple VerifyShares bytes")
 	}
 }

@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -41,7 +42,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 			wireType: encProofWireType,
 			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
-				_, err := UnmarshalEncProof(raw)
+				_, err := tss.DecodeBinary[EncProof](raw)
 				return err
 			},
 		},
@@ -51,7 +52,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 			wireType: affGProofWireType,
 			fields:   []string{"Z1", "Z2", "Z3", "Z4"},
 			unmarshal: func(raw []byte) error {
-				_, err := UnmarshalAffGProof(raw)
+				_, err := tss.DecodeBinary[AffGProof](raw)
 				return err
 			},
 		},
@@ -61,7 +62,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 			wireType: logStarProofWireType,
 			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
-				_, err := UnmarshalLogStarProof(raw)
+				_, err := tss.DecodeBinary[LogStarProof](raw)
 				return err
 			},
 		},

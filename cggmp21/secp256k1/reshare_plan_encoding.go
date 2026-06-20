@@ -88,17 +88,6 @@ func encodeResharePlanWire(p *ResharePlan) *resharePlanWire {
 	}
 }
 
-// UnmarshalResharePlan decodes and validates a canonical reshare plan.
-func UnmarshalResharePlan(in []byte) (*ResharePlan, error) {
-	return tss.DecodeBinary[ResharePlan](in)
-}
-
-// UnmarshalResharePlanWithLimits decodes and validates a canonical reshare plan
-// using explicit local resource limits.
-func UnmarshalResharePlanWithLimits(in []byte, limits Limits) (*ResharePlan, error) {
-	return tss.DecodeBinaryWithLimits[ResharePlan](in, limits)
-}
-
 // UnmarshalBinary decodes and validates a canonical reshare plan.
 func (p *ResharePlan) UnmarshalBinary(in []byte) error {
 	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())

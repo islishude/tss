@@ -3,6 +3,8 @@ package ed25519
 import (
 	"bytes"
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
@@ -16,7 +18,7 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decoded, err := UnmarshalKeyShare(raw)
+		decoded, err := tss.DecodeBinary[KeyShare](raw)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -39,7 +41,7 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decoded, err := UnmarshalKeyShare(raw)
+		decoded, err := tss.DecodeBinary[KeyShare](raw)
 		if err != nil {
 			t.Fatal(err)
 		}

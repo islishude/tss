@@ -81,7 +81,7 @@ func TestBroadcastCertificateCanonicalBinaryEncoding(t *testing.T) {
 		t.Fatal("broadcast certificate was not canonicalized")
 	}
 
-	decoded, err := UnmarshalBroadcastCertificate(raw1)
+	decoded, err := DecodeBinary[BroadcastCertificate](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}

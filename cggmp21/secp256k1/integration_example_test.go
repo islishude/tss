@@ -21,7 +21,7 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	shares[1], err = cggmp.UnmarshalKeyShare(rawShare)
+	shares[1], err = tss.DecodeBinary[cggmp.KeyShare](rawShare)
 	if err != nil {
 		panic(err)
 	}
@@ -35,7 +35,7 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	presigns[1], err = cggmp.UnmarshalPresign(rawPresign)
+	presigns[1], err = tss.DecodeBinary[cggmp.Presign](rawPresign)
 	if err != nil {
 		panic(err)
 	}
@@ -318,7 +318,7 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	restoredShare, err := cggmp.UnmarshalKeyShare(rawShare)
+	restoredShare, err := tss.DecodeBinary[cggmp.KeyShare](rawShare)
 	if err != nil {
 		panic(err)
 	}
@@ -333,7 +333,7 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	restoredPresign, err := cggmp.UnmarshalPresign(rawPresign)
+	restoredPresign, err := tss.DecodeBinary[cggmp.Presign](rawPresign)
 	if err != nil {
 		panic(err)
 	}

@@ -1,7 +1,6 @@
 package secp256k1
 
 import (
-	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -13,11 +12,6 @@ type SecurityParams = zkpai.SecurityParams
 // DefaultSecurityParams returns the production CGGMP21 security profile.
 func DefaultSecurityParams() SecurityParams {
 	return zkpai.DefaultSecurityParams()
-}
-
-// UnmarshalSecurityParams decodes and validates a canonical security profile.
-func UnmarshalSecurityParams(raw []byte) (SecurityParams, error) {
-	return tss.DecodeBinaryValue[SecurityParams](raw)
 }
 
 func securityParamsOrDefault(params *SecurityParams) SecurityParams {

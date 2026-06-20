@@ -41,7 +41,7 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw3) {
 		t.Fatal("key share map insertion order changed canonical encoding")
 	}
-	decoded, err := UnmarshalKeyShare(raw1)
+	decoded, err := tss.DecodeBinary[KeyShare](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -91,7 +91,7 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 		}
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
-	if _, err := UnmarshalKeyShare(trailing); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](trailing); err == nil {
 		t.Fatal("key share with trailing bytes accepted")
 	}
 }
@@ -123,7 +123,7 @@ func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	data := w.PartyData[1]
 	data.KeygenConfirmation.Sender = 2
 	w.PartyData[1] = data
-	if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
 		t.Fatal("key share accepted confirmation sender that did not match the party-data key")
 	}
 }
@@ -183,7 +183,7 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.mutate(w)
-			if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
+			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
 				t.Fatalf("key share missing %s decoded", tc.name)
 			}
 		})
@@ -223,7 +223,7 @@ func TestCGGMP21KeyShareRejectsInvalidTypedWireFields(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalKeyShareWithLimits(mutated, testLimits()); err == nil {
+			if _, err := tss.DecodeBinaryWithLimits[KeyShare](mutated, testLimits()); err == nil {
 				t.Fatalf("key share accepted %s", tc.name)
 			}
 		})
@@ -248,7 +248,7 @@ func TestCGGMP21KeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.mutate(w)
-			if _, err := UnmarshalKeyShare(marshalKeyShareWireForTest(t, w)); err == nil {
+			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
 				t.Fatalf("key share accepted %s party data", tc.name)
 			}
 		})
@@ -310,7 +310,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("presign encoding is not deterministic")
 	}
-	decoded, err := UnmarshalPresign(raw1)
+	decoded, err := tss.DecodeBinary[Presign](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,7 +318,7 @@ func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {
 		t.Fatal("presign transcript mismatch after round trip")
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
-	if _, err := UnmarshalPresign(trailing); err == nil {
+	if _, err := tss.DecodeBinary[Presign](trailing); err == nil {
 		t.Fatal("presign with trailing bytes accepted")
 	}
 }
@@ -349,7 +349,7 @@ func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := UnmarshalKeyShare(mutated); err == nil {
+		if _, err := tss.DecodeBinary[KeyShare](mutated); err == nil {
 			t.Fatalf("key share threshold %d accepted", overflow)
 		}
 	}
@@ -371,7 +371,7 @@ func mutatePresignRound1Payload(raw []byte, mutate func(*presignRound1Payload)) 
 	if !bytes.Equal(original.EncK, payload.EncK) {
 		return testutil.RewriteWireFieldByName(raw, presignRound1PayloadWireType, presignRound1Payload{}, "EncK", payload.EncK)
 	}
-	return marshalPresignRound1Payload(payload)
+	return payload.MarshalBinaryWithLimits(testLimits())
 }
 
 func mutatePresignRound1ProofPayload(raw []byte, mutate func(*presignRound1ProofPayload)) ([]byte, error) {

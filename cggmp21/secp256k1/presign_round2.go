@@ -157,12 +157,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 		}
 		peerState.mta.betaDelta = betaDelta
 		peerState.mta.betaSigma = betaSigma
-		payload, err := marshalPresignRound2PayloadWithLimits(presignRound2Payload{
+		payload, err := (presignRound2Payload{
 			Delta:      *deltaResp,
 			Sigma:      *sigmaResp,
 			Round1Echo: s.round1Echo(),
 			PlanHash:   s.planHash,
-		}, s.limits)
+		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, err
 		}

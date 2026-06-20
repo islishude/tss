@@ -24,16 +24,6 @@ func (pk PublicKey) MarshalBinary() ([]byte, error) {
 	}))
 }
 
-// UnmarshalPublicKey decodes and rejects non-canonical public-key encodings.
-// wire.Unmarshal calls Validate via the Validator interface.
-func UnmarshalPublicKey(in []byte) (*PublicKey, error) {
-	pk := new(PublicKey)
-	if err := pk.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return pk, nil
-}
-
 // UnmarshalPublicKeyWithMaxModulusBits decodes a public key and rejects an
 // oversized modulus before reconstructing N² or running primality checks.
 // The modulus bit-length check is enforced by wire.Unmarshal via the
@@ -112,15 +102,6 @@ func (sk *PrivateKey) MarshalWireValue() ([]byte, error) {
 		return nil, errors.New("nil Paillier private key")
 	}
 	return sk.MarshalBinary()
-}
-
-// UnmarshalPrivateKey decodes and rejects non-canonical private-key encodings.
-func UnmarshalPrivateKey(in []byte) (*PrivateKey, error) {
-	sk := new(PrivateKey)
-	if err := sk.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return sk, nil
 }
 
 // UnmarshalBinary decodes and rejects non-canonical private-key encodings.

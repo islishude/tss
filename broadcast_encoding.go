@@ -86,11 +86,6 @@ func (c *BroadcastCertificate) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(c, wire.WithFieldLimitsForMarshal(broadcastFieldLimits()))
 }
 
-// UnmarshalBroadcastCertificate decodes a canonical broadcast certificate.
-func UnmarshalBroadcastCertificate(in []byte) (*BroadcastCertificate, error) {
-	return DecodeBinary[BroadcastCertificate](in)
-}
-
 // UnmarshalBinary decodes a canonical broadcast certificate.
 func (c *BroadcastCertificate) UnmarshalBinary(in []byte) error {
 	if c == nil {

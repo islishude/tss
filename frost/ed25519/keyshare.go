@@ -150,11 +150,6 @@ func (k KeyShare) redactedString() string {
 	)
 }
 
-// UnmarshalKeyShare decodes a canonical FROST key-share record with size caps.
-func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	return tss.DecodeBinary[KeyShare](in)
-}
-
 // UnmarshalKeyShareWithLimits decodes a canonical FROST key-share record using
 // explicit local resource limits.
 func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {

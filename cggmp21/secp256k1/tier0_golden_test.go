@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testvectors"
 )
@@ -22,7 +23,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/Presign.fast.golden", raw)
 
 	// Round-trip: unmarshal → marshal must produce identical bytes.
-	decoded, err := UnmarshalPresignWithLimits(raw, testLimits())
+	decoded, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,7 +34,7 @@ func TestFast_GoldenPresignMarshalBinary(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalPresignWithLimits(append(raw, 0), testLimits()); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[Presign](append(raw, 0), testLimits()); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }
@@ -73,7 +74,7 @@ func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
 	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
-	raw, err := marshalKeygenSharePayload(payload)
+	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := marshalKeygenSharePayload(decoded)
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -101,7 +102,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 	t.Parallel()
 	payload := refreshSharePayload{Share: testSecretScalar(t, 2), PlanHash: bytes.Repeat([]byte{0x91}, 32)}
-	raw, err := marshalRefreshSharePayload(payload)
+	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -112,7 +113,7 @@ func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	raw2, err := marshalRefreshSharePayload(decoded)
+	raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -205,7 +206,7 @@ func TestFast_GoldenSignAttemptRecord(t *testing.T) {
 
 	testvectors.CheckHexGolden(t, "wire/v1/cggmp21/SignAttemptRecord.golden", raw)
 
-	decoded, err := UnmarshalSignAttemptRecord(raw)
+	decoded, err := tss.DecodeBinaryValue[SignAttemptRecord](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +217,7 @@ func TestFast_GoldenSignAttemptRecord(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalSignAttemptRecord(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinaryValue[SignAttemptRecord](append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

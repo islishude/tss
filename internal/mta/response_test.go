@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -110,7 +111,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := UnmarshalResponseMessage(tt.data)
+			_, err := tss.DecodeBinary[ResponseMessage](tt.data)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -121,7 +122,7 @@ func TestUnmarshalResponseMessageErrors(t *testing.T) {
 	}
 
 	// Decoding a valid message should succeed.
-	_, err = UnmarshalResponseMessage(validRaw)
+	_, err = tss.DecodeBinary[ResponseMessage](validRaw)
 	if err != nil {
 		t.Fatalf("valid response message not decoded: %v", err)
 	}
@@ -167,7 +168,7 @@ func TestResponseMessageBinaryRoundTrip(t *testing.T) {
 		t.Fatal("ResponseMessage encoding is not deterministic")
 	}
 
-	decoded, err := UnmarshalResponseMessage(raw1)
+	decoded, err := tss.DecodeBinary[ResponseMessage](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}

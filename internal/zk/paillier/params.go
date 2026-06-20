@@ -107,15 +107,6 @@ func (sp SecurityParams) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(sp)
 }
 
-// UnmarshalSecurityParams decodes and validates a canonical security profile.
-func UnmarshalSecurityParams(in []byte) (SecurityParams, error) {
-	var sp SecurityParams
-	if err := sp.UnmarshalBinary(in); err != nil {
-		return SecurityParams{}, err
-	}
-	return sp, nil
-}
-
 // UnmarshalBinary decodes and validates a canonical security profile.
 func (sp *SecurityParams) UnmarshalBinary(in []byte) error {
 	var decoded SecurityParams

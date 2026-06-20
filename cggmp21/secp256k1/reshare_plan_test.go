@@ -132,7 +132,7 @@ func TestResharePlanCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("reshare plan encoding is not deterministic")
 	}
-	decoded, err := UnmarshalResharePlan(raw1)
+	decoded, err := tss.DecodeBinary[ResharePlan](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -154,7 +154,7 @@ func TestResharePlanCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw3) {
 		t.Fatal("reshare plan wire bytes changed after round trip")
 	}
-	if _, err := UnmarshalResharePlan(append(raw1, 0)); err == nil {
+	if _, err := tss.DecodeBinary[ResharePlan](append(raw1, 0)); err == nil {
 		t.Fatal("reshare plan accepted trailing data")
 	}
 }
@@ -175,7 +175,7 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalResharePlan(missing); err == nil {
+	if _, err := tss.DecodeBinary[ResharePlan](missing); err == nil {
 		t.Fatal("reshare plan accepted missing tag")
 	}
 
@@ -183,13 +183,13 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 	offsets := resharePlanFieldTagOffsets(t, nonCanonical)
 	binary.BigEndian.PutUint16(nonCanonical[offsets[4]:], 6)
 	binary.BigEndian.PutUint16(nonCanonical[offsets[5]:], 5)
-	if _, err := UnmarshalResharePlan(nonCanonical); err == nil {
+	if _, err := tss.DecodeBinary[ResharePlan](nonCanonical); err == nil {
 		t.Fatal("reshare plan accepted non-canonical tag order")
 	}
 
 	duplicate := append([]byte(nil), raw...)
 	binary.BigEndian.PutUint16(duplicate[offsets[4]:], 6)
-	if _, err := UnmarshalResharePlan(duplicate); err == nil {
+	if _, err := tss.DecodeBinary[ResharePlan](duplicate); err == nil {
 		t.Fatal("reshare plan accepted duplicate tag")
 	}
 
@@ -202,7 +202,7 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalResharePlan(wrongShareOrder); err == nil {
+	if _, err := tss.DecodeBinary[ResharePlan](wrongShareOrder); err == nil {
 		t.Fatal("reshare plan accepted verification shares outside old-party order")
 	}
 }
@@ -216,7 +216,7 @@ func TestResharePlanSerializedSizeLimit(t *testing.T) {
 	}
 	limits := testLimits()
 	limits.State.MaxSerializedResharePlanBytes = len(raw) - 1
-	if _, err := UnmarshalResharePlanWithLimits(raw, limits); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[ResharePlan](raw, limits); err == nil {
 		t.Fatal("reshare plan exceeded serialized size limit")
 	}
 }

@@ -20,7 +20,7 @@ func TestSigningContextCanonicalBinaryEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("signing context encoding is not deterministic")
 	}
-	decoded, err := UnmarshalSigningContext(raw1)
+	decoded, err := DecodeBinary[SigningContext](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}

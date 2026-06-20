@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -100,7 +101,7 @@ func TestUnmarshalStartMessageErrors(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			_, err := UnmarshalStartMessage(tc.data)
+			_, err := tss.DecodeBinary[StartMessage](tc.data)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}

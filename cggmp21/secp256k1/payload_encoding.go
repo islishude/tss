@@ -45,10 +45,6 @@ const (
 	refreshSharePayloadWireVersion       uint16 = 1
 )
 
-func marshalKeygenCommitmentsPayloadWithLimits(p keygenCommitmentsPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 type payloadValidatorWithLimits interface {
 	ValidateWithLimits(Limits) error
 }
@@ -156,10 +152,6 @@ func (p keygenCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 	return nil
 }
 
-func marshalKeygenSharePayloadWithLimits(p keygenSharePayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the keygen share payload.
 func (p keygenSharePayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -189,10 +181,6 @@ func (p keygenSharePayload) Validate() error {
 		return errors.New("keygen plan hash must be 32 bytes")
 	}
 	return nil
-}
-
-func marshalPresignRound1PayloadWithLimits(p presignRound1Payload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the presign round-one payload.
@@ -237,10 +225,6 @@ func (p presignRound1Payload) ValidateWithLimits(limits Limits) error {
 	return validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits)
 }
 
-func marshalPresignRound1ProofPayloadWithLimits(p presignRound1ProofPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the presign round-one proof payload.
 func (p presignRound1ProofPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -275,10 +259,6 @@ func (p presignRound1ProofPayload) Validate() error {
 	return nil
 }
 
-func marshalPresignRound2PayloadWithLimits(p presignRound2Payload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the presign round-two payload.
 func (p presignRound2Payload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -308,10 +288,6 @@ func (p presignRound2Payload) Validate() error {
 		return errors.New("presign round2 plan hash must be 32 bytes")
 	}
 	return nil
-}
-
-func marshalPresignRound3PayloadWithLimits(p presignRound3Payload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the presign round-three payload.
@@ -370,10 +346,6 @@ func (p presignRound3Payload) ValidateWithLimits(limits Limits) error {
 		return fmt.Errorf("signprep proof too large: %d > %d", len(proofBytes), limits.SignPrep.MaxProofBytes)
 	}
 	return nil
-}
-
-func marshalSignPartialPayloadWithLimits(p signPartialPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the sign partial payload.
@@ -447,10 +419,6 @@ func validatePositiveIntegerBytes(in []byte) error {
 	return nil
 }
 
-func marshalReshareDealerCommitmentsPayloadWithLimits(p reshareDealerCommitmentsPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the reshare dealer commitments payload.
 func (p reshareDealerCommitmentsPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -480,10 +448,6 @@ func (p reshareDealerCommitmentsPayload) Validate() error {
 		return errors.New("reshare dealer commitments plan hash must be 32 bytes")
 	}
 	return nil
-}
-
-func marshalReshareSharePayloadWithLimits(p reshareSharePayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the reshare share payload.
@@ -524,10 +488,6 @@ func (p reshareSharePayload) Validate() error {
 		return errors.New("reshare share plan hash must be 32 bytes")
 	}
 	return nil
-}
-
-func marshalReshareReceiverMaterialPayloadWithLimits(p reshareReceiverMaterialPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the reshare receiver material payload.
@@ -606,10 +566,6 @@ func (refreshSharePayload) WireType() string { return refreshSharePayloadWireTyp
 // WireVersion returns the wire format version for refreshSharePayload.
 func (refreshSharePayload) WireVersion() uint16 { return refreshSharePayloadWireVersion }
 
-func marshalRefreshCommitmentsPayloadWithLimits(p refreshCommitmentsPayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
-}
-
 // MarshalBinary encodes the refresh commitments payload.
 func (p refreshCommitmentsPayload) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
@@ -659,10 +615,6 @@ func (p refreshCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 		return err
 	}
 	return nil
-}
-
-func marshalRefreshSharePayloadWithLimits(p refreshSharePayload, limits Limits) ([]byte, error) {
-	return p.MarshalBinaryWithLimits(limits)
 }
 
 // MarshalBinary encodes the refresh share payload.

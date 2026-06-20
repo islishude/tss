@@ -97,15 +97,6 @@ func (p *Proof) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(p)
 }
 
-// UnmarshalProof decodes a TLV Schnorr proof record using the object-level wire codec.
-func UnmarshalProof(in []byte) (*Proof, error) {
-	proof := new(Proof)
-	if err := proof.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return proof, nil
-}
-
 // UnmarshalBinary decodes a TLV Schnorr proof record.
 func (p *Proof) UnmarshalBinary(in []byte) error {
 	var decoded Proof

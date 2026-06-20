@@ -170,7 +170,7 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		t.Fatal("evidence encoding is not deterministic")
 	}
-	decoded, err := UnmarshalBlameEvidence(first)
+	decoded, err := DecodeBinary[BlameEvidence](first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -193,11 +193,11 @@ func TestBlameEvidenceMarshalDeterministic(t *testing.T) {
 func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 	t.Parallel()
 	// Garbage bytes that don't match the TLV magic prefix.
-	if _, err := UnmarshalBlameEvidence([]byte("not a valid TLV message")); err == nil {
+	if _, err := DecodeBinary[BlameEvidence]([]byte("not a valid TLV message")); err == nil {
 		t.Fatal("malformed evidence decoded")
 	}
 	// Valid TLV magic but wrong type ID.
-	if _, err := UnmarshalBlameEvidence(append([]byte("TSS1"), make([]byte, 100)...)); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](append([]byte("TSS1"), make([]byte, 100)...)); err == nil {
 		t.Fatal("malformed evidence with wrong type decoded")
 	}
 	session, err := NewSessionID(nil)
@@ -269,7 +269,7 @@ func TestBlameEvidenceRejectsRetiredVersionFieldAndWrongFrameVersion(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalBlameEvidence(retired); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](retired); err == nil {
 		t.Fatal("retired evidence version field accepted")
 	}
 
@@ -277,7 +277,7 @@ func TestBlameEvidenceRejectsRetiredVersionFieldAndWrongFrameVersion(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalBlameEvidence(wrongVersion); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](wrongVersion); err == nil {
 		t.Fatal("wrong evidence frame version accepted")
 	}
 }
@@ -354,7 +354,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		// Build a field body with tag 12 value truncated (only 2 bytes of the uint32 count).
 		malformed := []byte{0x00, 0x01} // truncated count
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for truncated recordlist count")
 		}
 	})
@@ -363,7 +363,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		// count=0xFFFFFFFF exceeds maxRecordCount (65535).
 		malformed := wire.Uint32(0xFFFFFFFF)
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for oversized recordlist count")
 		}
 	})
@@ -374,7 +374,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		malformed = append(malformed, wire.Uint32(1)...) // count=1
 		malformed = append(malformed, 0x00, 0x10)        // truncated rec_len (only 2 of 4 bytes)
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for truncated recordlist item")
 		}
 	})
@@ -392,7 +392,7 @@ func TestBlameEvidenceRecordListMutationRejected(t *testing.T) {
 		malformed = append(malformed, recBody...)
 		malformed = append(malformed, 0xFF) // trailing byte
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for trailing bytes in recordlist")
 		}
 	})
@@ -413,7 +413,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for missing Key field in EvidenceField record")
 		}
 	})
@@ -426,7 +426,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for missing Value field in EvidenceField record")
 		}
 	})
@@ -439,7 +439,7 @@ func TestBlameEvidenceRecordListMissingFieldRejected(t *testing.T) {
 		})
 		malformed := buildRecordListBytes([][]byte{recBody})
 		raw := buildEvidenceWithField11(t, session, malformed)
-		if _, err := UnmarshalBlameEvidence(raw); err == nil {
+		if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 			t.Fatal("expected error for extra field in EvidenceField record")
 		}
 	})
@@ -459,7 +459,7 @@ func TestBlameEvidenceRecordListNonUTF8KeyRejected(t *testing.T) {
 	})
 	malformed := buildRecordListBytes([][]byte{recBody})
 	raw := buildEvidenceWithField11(t, session, malformed)
-	if _, err := UnmarshalBlameEvidence(raw); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 		t.Fatal("expected error for non-UTF-8 Key in EvidenceField record")
 	}
 }
@@ -494,7 +494,7 @@ func TestBlameEvidenceRecordListValueExceedsLimitRejected(t *testing.T) {
 	})
 	malformed := buildRecordListBytes([][]byte{recBody})
 	raw := buildEvidenceWithField11(t, session, malformed)
-	if _, err := UnmarshalBlameEvidence(raw); err == nil {
+	if _, err := DecodeBinary[BlameEvidence](raw); err == nil {
 		t.Fatal("expected error for oversized Key in EvidenceField record")
 	}
 }

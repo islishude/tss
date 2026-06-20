@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -57,7 +58,7 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 			{Tag: testutil.MustFieldTag(ModulusProof{}, "Z"), Value: wire.EncodeBytesList(proof.Z)},
 			{Tag: 99, Value: wire.EncodeBytesList(proof.Z)},
 		})
-		if _, err := UnmarshalModulusProof(raw); err == nil {
+		if _, err := tss.DecodeBinary[ModulusProof](raw); err == nil {
 			t.Fatal("modulus proof accepted prover-supplied extra field")
 		}
 	})

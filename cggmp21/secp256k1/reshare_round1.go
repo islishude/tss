@@ -70,10 +70,10 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 			return nil, err
 		}
 	}
-	payload, err := marshalReshareDealerCommitmentsPayloadWithLimits(reshareDealerCommitmentsPayload{
+	payload, err := (reshareDealerCommitmentsPayload{
 		Commitments: commitments,
 		PlanHash:    s.planHash,
-	}, s.limits)
+	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -92,13 +92,13 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		sharePayload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{
+		sharePayload, err := (reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
 			Share:                share,
 			DealerCommitmentHash: commitmentsHash,
 			PlanHash:             s.planHash,
-		}, s.limits)
+		}).MarshalBinaryWithLimits(s.limits)
 		share.Destroy()
 		if err != nil {
 			return nil, err

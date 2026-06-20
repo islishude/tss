@@ -66,7 +66,7 @@ func ExampleKeyShare() {
 	if err != nil {
 		panic(err)
 	}
-	loaded, err := frost.UnmarshalKeyShare(raw)
+	loaded, err := tss.DecodeBinary[frost.KeyShare](raw)
 	if err != nil {
 		panic(err)
 	}

@@ -331,11 +331,6 @@ func (r *DerivationResult) VerificationKeyBytes() []byte {
 	return slices.Clone(r.ChildPublicKey)
 }
 
-// UnmarshalDerivationResult decodes a canonical derivation result record.
-func UnmarshalDerivationResult(in []byte) (*DerivationResult, error) {
-	return DecodeBinary[DerivationResult](in)
-}
-
 // UnmarshalBinary decodes a canonical derivation result record.
 func (r *DerivationResult) UnmarshalBinary(in []byte) error {
 	if len(in) == 0 {
@@ -368,11 +363,6 @@ func (SigningContext) WireVersion() uint16 { return signingContextWireVersion }
 // MarshalBinary encodes the signing context using canonical TLV.
 func (c SigningContext) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(c)
-}
-
-// UnmarshalSigningContext decodes a canonical signing context.
-func UnmarshalSigningContext(in []byte) (*SigningContext, error) {
-	return DecodeBinary[SigningContext](in)
 }
 
 // UnmarshalBinary decodes a canonical signing context.

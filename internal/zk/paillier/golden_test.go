@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testvectors"
 )
 
@@ -23,7 +24,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertBinaryProofWireRoundTrip(t, raw, UnmarshalSecurityParams)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinaryValue[SecurityParams])
 			},
 		},
 		{
@@ -34,7 +35,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertProofWireRoundTrip(t, raw, UnmarshalModulusProof, Marshal)
+				assertProofWireRoundTrip(t, raw, tss.DecodeBinary[ModulusProof], Marshal)
 			},
 		},
 		{
@@ -49,7 +50,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				decoded, err := UnmarshalRingPedersenParams(raw)
+				decoded, err := tss.DecodeBinary[RingPedersenParams](raw)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -70,7 +71,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertProofWireRoundTrip(t, raw, UnmarshalRingPedersenProof, Marshal)
+				assertProofWireRoundTrip(t, raw, tss.DecodeBinary[RingPedersenProof], Marshal)
 			},
 		},
 		{
@@ -81,7 +82,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertBinaryProofWireRoundTrip(t, raw, UnmarshalEncProof)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[EncProof])
 			},
 		},
 		{
@@ -92,7 +93,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertBinaryProofWireRoundTrip(t, raw, UnmarshalAffGProof)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[AffGProof])
 			},
 		},
 		{
@@ -103,7 +104,7 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 			roundTrip: func(t *testing.T, raw []byte) {
 				t.Helper()
-				assertBinaryProofWireRoundTrip(t, raw, UnmarshalLogStarProof)
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[LogStarProof])
 			},
 		},
 	} {

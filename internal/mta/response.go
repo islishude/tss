@@ -38,15 +38,6 @@ func (m ResponseMessage) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(m, wire.WithFieldLimitsForMarshal(responseMessageFieldLimits()))
 }
 
-// UnmarshalResponseMessage decodes a TLV MtA response message using the object-level wire codec.
-func UnmarshalResponseMessage(in []byte) (*ResponseMessage, error) {
-	msg := new(ResponseMessage)
-	if err := msg.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
 // UnmarshalBinary decodes a TLV MtA response message.
 func (m *ResponseMessage) UnmarshalBinary(in []byte) error {
 	var decoded ResponseMessage

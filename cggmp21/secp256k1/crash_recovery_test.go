@@ -25,7 +25,7 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored, err := UnmarshalKeyShare(raw)
+	restored, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -90,7 +90,7 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	restored, err := UnmarshalPresign(raw)
+	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -141,7 +141,7 @@ func TestCGGMP21_Presign_ConsumedPostCrash(t *testing.T) {
 		t.Fatalf("MarshalBinary on consumed presign failed: %v", err)
 	}
 
-	restored, err := UnmarshalPresign(raw)
+	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -198,7 +198,7 @@ func TestCGGMP21_KeyShare_DeterministicMarshal(t *testing.T) {
 		t.Fatal("MarshalBinary is not deterministic")
 	}
 
-	restored, err := UnmarshalKeyShare(raw1)
+	restored, err := tss.DecodeBinary[KeyShare](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}

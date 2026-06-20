@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -40,7 +41,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 	if !bytes.Equal(pubRaw, pubRaw2) {
 		t.Fatal("public key encoding is not deterministic")
 	}
-	pub, err := UnmarshalPublicKey(pubRaw)
+	pub, err := tss.DecodeBinary[PublicKey](pubRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,7 +59,7 @@ func TestMarshalRoundTrip(t *testing.T) {
 	if !bytes.Equal(privRaw, privRaw2) {
 		t.Fatal("private key encoding is not deterministic")
 	}
-	priv, err := UnmarshalPrivateKey(privRaw)
+	priv, err := tss.DecodeBinary[PrivateKey](privRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,20 +140,20 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	nonCanonical := append([]byte(" "), raw...)
-	if _, err := UnmarshalPublicKey(nonCanonical); err == nil {
+	if _, err := tss.DecodeBinary[PublicKey](nonCanonical); err == nil {
 		t.Fatal("expected non-canonical public key rejection")
 	}
-	if _, err := UnmarshalPublicKey([]byte(`{"n":"01","g":"02"}`)); err == nil {
+	if _, err := tss.DecodeBinary[PublicKey]([]byte(`{"n":"01","g":"02"}`)); err == nil {
 		t.Fatal("expected JSON public key rejection")
 	}
-	if _, err := UnmarshalPrivateKey([]byte(`{"public_key":{"n":"01","g":"02"}}`)); err == nil {
+	if _, err := tss.DecodeBinary[PrivateKey]([]byte(`{"public_key":{"n":"01","g":"02"}}`)); err == nil {
 		t.Fatal("expected JSON private key rejection")
 	}
 	withLeadingZero, err := testutil.RewriteWireFieldByName(raw, publicKeyWireType, PublicKey{}, "N", append([]byte{0}, sk.N.Bytes()...))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalPublicKey(withLeadingZero); err == nil {
+	if _, err := tss.DecodeBinary[PublicKey](withLeadingZero); err == nil {
 		t.Fatal("expected non-minimal public modulus rejection")
 	}
 	privRaw, err := sk.MarshalBinary()
@@ -167,14 +168,14 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalPrivateKey(badPrivate); err == nil {
+	if _, err := tss.DecodeBinary[PrivateKey](badPrivate); err == nil {
 		t.Fatal("expected non-minimal private factor rejection")
 	}
 	wrongType, err := wire.MarshalFields(publicKeyWireVersion, "wrong.paillier.public-key", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalPublicKey(wrongType); err == nil {
+	if _, err := tss.DecodeBinary[PublicKey](wrongType); err == nil {
 		t.Fatal("expected wrong public key type rejection")
 	}
 }

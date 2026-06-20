@@ -5,6 +5,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
@@ -73,7 +74,7 @@ func TestMTAProductShares(t *testing.T) {
 	if !bytes.Equal(startRaw, startRaw2) {
 		t.Fatal("MtA start encoding is not deterministic")
 	}
-	startDecoded, err := UnmarshalStartMessage(startRaw)
+	startDecoded, err := tss.DecodeBinary[StartMessage](startRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,7 +85,7 @@ func TestMTAProductShares(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	responseDecoded, err := UnmarshalResponseMessage(responseRaw)
+	responseDecoded, err := tss.DecodeBinary[ResponseMessage](responseRaw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -99,10 +100,10 @@ func TestMTAProductShares(t *testing.T) {
 	if !bytes.Equal(decodedProofRaw, responseProofRaw) {
 		t.Fatal("MtA response mismatch after round trip")
 	}
-	if _, err := UnmarshalStartMessage([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
+	if _, err := tss.DecodeBinary[StartMessage]([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
 		t.Fatal("JSON MtA start decoded")
 	}
-	if _, err := UnmarshalResponseMessage([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
+	if _, err := tss.DecodeBinary[ResponseMessage]([]byte(`{"ciphertext":"AQ=="}`)); err == nil {
 		t.Fatal("JSON MtA response decoded")
 	}
 	response.Proof.TranscriptHash[0] ^= 1

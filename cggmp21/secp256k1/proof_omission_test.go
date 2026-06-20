@@ -187,7 +187,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload.PaillierProof.TranscriptHash[0] ^= 1
-	mutated, err := marshalKeygenCommitmentsPayload(payload)
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload.RingPedersenProof.TranscriptHash[0] ^= 1
-	mutated, err := marshalKeygenCommitmentsPayload(payload)
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,7 +249,7 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -274,7 +274,7 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -302,7 +302,7 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -353,7 +353,7 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

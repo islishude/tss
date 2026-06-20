@@ -164,11 +164,11 @@ func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredA, err := UnmarshalPresign(raw)
+	restoredA, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredB, err := UnmarshalPresign(raw)
+	restoredB, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -269,7 +269,7 @@ func TestThresholdECDSA_CorruptSignAttemptLoadDiscardsPresign(t *testing.T) {
 	}
 	store := loadErrSignAttemptStore{err: ErrSignAttemptCorrupt}
 
-	resumePresign, err := UnmarshalPresign(raw)
+	resumePresign, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -314,7 +314,7 @@ func TestThresholdECDSA_SignAttemptRestartReplaysExactEnvelope(t *testing.T) {
 		"consumed snapshot": rawConsumed,
 	} {
 		t.Run(name, func(t *testing.T) {
-			restored, err := UnmarshalPresign(raw)
+			restored, err := tss.DecodeBinary[Presign](raw)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -362,7 +362,7 @@ func TestThresholdECDSA_SignAttemptResumeSkipsReplayAfterDeliveryComplete(t *tes
 	if err := session.UpdateDelivery(context.Background(), nil, cert); err != nil {
 		t.Fatal(err)
 	}
-	restored, err := UnmarshalPresign(rawPresign)
+	restored, err := tss.DecodeBinary[Presign](rawPresign)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -418,7 +418,7 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 		t.Fatal("signature was not completed")
 	}
 
-	restored, err := UnmarshalPresign(rawPresign)
+	restored, err := tss.DecodeBinary[Presign](rawPresign)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -494,7 +494,7 @@ func TestThresholdECDSA_BurnPresignBlocksRestoredCopies(t *testing.T) {
 	if !IsPresignConsumed(presigns[1]) {
 		t.Fatal("BurnPresign did not mark the local handle consumed")
 	}
-	restored, err := UnmarshalPresign(raw)
+	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -531,7 +531,7 @@ func TestThresholdECDSA_BurnPresignAfterCommitPreservesResume(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored, err := UnmarshalPresign(raw)
+	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -980,7 +980,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload.PaillierPublicKey = *paillierPublicKey
-	mutated, err := marshalPresignRound1Payload(payload)
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1046,7 +1046,7 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Presign MarshalBinary: %v", err)
 			}
-			restored, err := UnmarshalPresignWithLimits(raw, testLimits())
+			restored, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 			if err != nil {
 				t.Fatalf("UnmarshalPresign: %v", err)
 			}

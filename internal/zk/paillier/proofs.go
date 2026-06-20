@@ -17,14 +17,14 @@ func Marshal(v any) ([]byte, error) {
 	switch p := v.(type) {
 	// Πmod — used during keygen, refresh, and reshare.
 	case *ModulusProof:
-		return marshalModulusProof(p)
+		return p.MarshalBinary()
 	case ModulusProof:
-		return marshalModulusProof(&p)
+		return p.MarshalBinary()
 	// Πprm — used during keygen, refresh, and reshare.
 	case *RingPedersenProof:
-		return marshalRingPedersenProof(p)
+		return p.MarshalBinary()
 	case RingPedersenProof:
-		return marshalRingPedersenProof(&p)
+		return p.MarshalBinary()
 	default:
 		return nil, fmt.Errorf("unsupported Paillier proof type %T — modern proofs (EncProof, AffGProof, LogStarProof) use their own MarshalBinary method", v)
 	}

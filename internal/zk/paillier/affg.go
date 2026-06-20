@@ -630,15 +630,6 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(p)
 }
 
-// UnmarshalAffGProof decodes a canonical TLV AffGProof.
-func UnmarshalAffGProof(in []byte) (*AffGProof, error) {
-	p := new(AffGProof)
-	if err := p.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
 // UnmarshalWireMessage decodes AffGProof from a canonical TLV message.
 func (p *AffGProof) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
 	if len(opts) == 0 {

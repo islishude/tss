@@ -55,7 +55,7 @@ type EvidenceContext struct {
 // session context the caller already trusts. It does not authenticate transport
 // delivery; callers still need authenticated envelopes.
 func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
-	evidence, err := tss.UnmarshalBlameEvidence(encoded)
+	evidence, err := tss.DecodeBinary[tss.BlameEvidence](encoded)
 	if err != nil {
 		return err
 	}

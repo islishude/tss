@@ -7,6 +7,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
@@ -51,7 +52,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalEncProof(mutated); err == nil {
+			if _, err := tss.DecodeBinary[EncProof](mutated); err == nil {
 				t.Fatal("EncProof accepted non-canonical positive integer")
 			}
 		})
@@ -118,7 +119,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalAffGProof(mutated); err == nil {
+			if _, err := tss.DecodeBinary[AffGProof](mutated); err == nil {
 				t.Fatal("AffGProof accepted non-canonical positive integer")
 			}
 		})
@@ -156,7 +157,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalLogStarProof(mutated); err == nil {
+			if _, err := tss.DecodeBinary[LogStarProof](mutated); err == nil {
 				t.Fatal("LogStarProof accepted non-canonical positive integer")
 			}
 		})

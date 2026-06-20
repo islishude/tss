@@ -231,13 +231,6 @@ func MarshalEvidenceWithLimits(e *BlameEvidence, l EvidenceLimits) ([]byte, erro
 	return wire.Marshal(e, wire.WithFieldLimitsForMarshal(evidenceFieldLimits(l)))
 }
 
-// UnmarshalBlameEvidence decodes and validates public blame evidence using
-// conservative default limits. Use [UnmarshalBlameEvidenceWithLimits] for
-// explicit control.
-func UnmarshalBlameEvidence(in []byte) (*BlameEvidence, error) {
-	return DecodeBinary[BlameEvidence](in)
-}
-
 // UnmarshalBlameEvidenceWithLimits decodes and validates public blame evidence
 // with explicit size limits.
 func UnmarshalBlameEvidenceWithLimits(in []byte, l EvidenceLimits) (*BlameEvidence, error) {

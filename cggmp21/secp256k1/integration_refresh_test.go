@@ -141,7 +141,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1].Payload, err = marshalRefreshSharePayload(refreshSharePayload{Share: badShare, PlanHash: payload.PlanHash})
+	out2[1].Payload, err = (refreshSharePayload{Share: badShare, PlanHash: payload.PlanHash}).MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

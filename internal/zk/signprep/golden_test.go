@@ -63,7 +63,7 @@ func TestGoldenProof(t *testing.T) {
 	}
 
 	// Round-trip through MarshalBinary/UnmarshalProof.
-	decoded, err := UnmarshalProof(encoded)
+	decoded, err := tss.DecodeBinary[Proof](encoded)
 	if err != nil {
 		t.Fatal(err)
 	}

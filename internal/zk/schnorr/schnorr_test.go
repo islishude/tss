@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
@@ -45,17 +46,17 @@ func TestProof(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Fatal("proof encoding is not deterministic")
 	}
-	decoded, err := UnmarshalProof(raw)
+	decoded, err := tss.DecodeBinary[Proof](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !Verify([]byte("test"), public, decoded) {
 		t.Fatal("decoded proof did not verify")
 	}
-	if _, err := UnmarshalProof([]byte(`{"commitment":"x"}`)); err == nil {
+	if _, err := tss.DecodeBinary[Proof]([]byte(`{"commitment":"x"}`)); err == nil {
 		t.Fatal("JSON proof decoded")
 	}
-	if _, err := UnmarshalProof(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinary[Proof](append(raw, 0)); err == nil {
 		t.Fatal("proof with trailing byte decoded")
 	}
 	malformed := *proof
@@ -239,7 +240,7 @@ func TestProofUnmarshalRejectsWrongFieldSet(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if _, err := UnmarshalProof(raw); err == nil {
+			if _, err := tss.DecodeBinary[Proof](raw); err == nil {
 				t.Fatal("malformed proof field set decoded")
 			}
 		})

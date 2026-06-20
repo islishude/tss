@@ -247,9 +247,9 @@ func TestDerivationResultWireRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		decoded, err := UnmarshalDerivationResult(raw)
+		decoded, err := DecodeBinary[DerivationResult](raw)
 		if err != nil {
-			t.Fatalf("UnmarshalDerivationResult: %v", err)
+			t.Fatalf("DecodeBinary[DerivationResult]: %v", err)
 		}
 		if !decoded.Equal(r) {
 			t.Fatal("round-trip mismatch")
@@ -266,9 +266,9 @@ func TestDerivationResultWireRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		decoded, err := UnmarshalDerivationResult(raw)
+		decoded, err := DecodeBinary[DerivationResult](raw)
 		if err != nil {
-			t.Fatalf("UnmarshalDerivationResult: %v", err)
+			t.Fatalf("DecodeBinary[DerivationResult]: %v", err)
 		}
 		if !decoded.Equal(r) {
 			t.Fatal("round-trip mismatch for master path")
@@ -283,9 +283,9 @@ func TestDerivationResultWireRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		decoded, err := UnmarshalDerivationResult(raw)
+		decoded, err := DecodeBinary[DerivationResult](raw)
 		if err != nil {
-			t.Fatalf("UnmarshalDerivationResult: %v", err)
+			t.Fatalf("DecodeBinary[DerivationResult]: %v", err)
 		}
 		if !decoded.Equal(r) {
 			t.Fatal("round-trip mismatch without additive shift")
@@ -302,9 +302,9 @@ func TestDerivationResultWireRoundTrip(t *testing.T) {
 		if err != nil {
 			t.Fatalf("MarshalBinary: %v", err)
 		}
-		decoded, err := UnmarshalDerivationResult(raw)
+		decoded, err := DecodeBinary[DerivationResult](raw)
 		if err != nil {
-			t.Fatalf("UnmarshalDerivationResult: %v", err)
+			t.Fatalf("DecodeBinary[DerivationResult]: %v", err)
 		}
 		if !decoded.Equal(r) {
 			t.Fatal("round-trip mismatch for ed25519")
@@ -337,7 +337,7 @@ func TestDerivationResultMarshalDeterministic(t *testing.T) {
 	if !bytes.Equal(first, second) {
 		t.Fatal("derivation result encoding is not deterministic")
 	}
-	decoded, err := UnmarshalDerivationResult(first)
+	decoded, err := DecodeBinary[DerivationResult](first)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -355,17 +355,17 @@ func TestDerivationResultRejectsMalformed(t *testing.T) {
 
 	t.Run("empty input", func(t *testing.T) {
 		t.Parallel()
-		if _, err := UnmarshalDerivationResult(nil); err == nil {
+		if _, err := DecodeBinary[DerivationResult](nil); err == nil {
 			t.Fatal("nil input accepted")
 		}
-		if _, err := UnmarshalDerivationResult([]byte{}); err == nil {
+		if _, err := DecodeBinary[DerivationResult]([]byte{}); err == nil {
 			t.Fatal("empty input accepted")
 		}
 	})
 
 	t.Run("garbage bytes", func(t *testing.T) {
 		t.Parallel()
-		if _, err := UnmarshalDerivationResult([]byte("not a TLV message")); err == nil {
+		if _, err := DecodeBinary[DerivationResult]([]byte("not a TLV message")); err == nil {
 			t.Fatal("garbage input accepted")
 		}
 	})
@@ -377,7 +377,7 @@ func TestDerivationResultRejectsMalformed(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := UnmarshalDerivationResult(raw); err == nil {
+		if _, err := DecodeBinary[DerivationResult](raw); err == nil {
 			t.Fatal("wrong wire type accepted")
 		}
 	})
@@ -497,7 +497,7 @@ func TestDerivationResultCloneRoundTripViaWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalDerivationResult(raw)
+	decoded, err := DecodeBinary[DerivationResult](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

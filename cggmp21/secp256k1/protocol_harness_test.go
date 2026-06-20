@@ -306,7 +306,7 @@ func assertBlameEvidence(t testing.TB, err error, ctx EvidenceContext) *tss.Prot
 			t.Fatalf("evidence contains sensitive field marker %q: %s", forbidden, protocolErr.Blame.Evidence)
 		}
 	}
-	decoded, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	decoded, err := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
 	if err != nil {
 		t.Fatal(err)
 	}

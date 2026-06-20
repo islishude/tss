@@ -149,7 +149,7 @@ func decodeKeygenFixture(fixture keygenFixtureFile) (map[tss.PartyID]*KeyShare, 
 		if err != nil {
 			return nil, fmt.Errorf("%d-of-%d fixture party %d key share: %w", fixture.Threshold, fixture.N, id, err)
 		}
-		share, err := UnmarshalKeyShareWithLimits(raw, testLimits())
+		share, err := tss.DecodeBinaryWithLimits[KeyShare](raw, testLimits())
 		if err != nil {
 			return nil, fmt.Errorf("%d-of-%d fixture party %d unmarshal: %w", fixture.Threshold, fixture.N, id, err)
 		}
@@ -239,7 +239,7 @@ func TestKeygenFixtureCanonicalRoundTrip(t *testing.T) {
 				if err != nil {
 					t.Fatalf("party %d fixture decode: %v", id, err)
 				}
-				decoded, err := UnmarshalKeyShareWithLimits(raw, testLimits())
+				decoded, err := tss.DecodeBinaryWithLimits[KeyShare](raw, testLimits())
 				if err != nil {
 					t.Fatalf("party %d unmarshal: %v", id, err)
 				}

@@ -199,7 +199,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 			kPointBytes, chiPointBytes,
 		),
 	}
-	payloadBytes, err := marshalSignPartialPayloadWithLimits(payload, limits)
+	payloadBytes, err := payload.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}

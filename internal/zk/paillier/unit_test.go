@@ -6,6 +6,7 @@ import (
 	"math/big"
 	"testing"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 )
@@ -150,7 +151,7 @@ func TestRingPedersenParamsValidation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalRingPedersenParams(raw)
+	decoded, err := tss.DecodeBinary[RingPedersenParams](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

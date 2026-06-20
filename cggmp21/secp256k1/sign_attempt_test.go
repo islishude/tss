@@ -30,14 +30,14 @@ func TestFast_SignAttemptRecordCanonicalRoundTrip(t *testing.T) {
 	if !bytes.Equal(raw1, raw2) {
 		t.Fatal("sign attempt encoding is not deterministic")
 	}
-	decoded, err := UnmarshalSignAttemptRecord(raw1)
+	decoded, err := tss.DecodeBinaryValue[SignAttemptRecord](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !record.Equal(decoded) {
 		t.Fatal("sign attempt round trip changed the record")
 	}
-	if _, err := UnmarshalSignAttemptRecord(append(raw1, 0)); err == nil {
+	if _, err := tss.DecodeBinaryValue[SignAttemptRecord](append(raw1, 0)); err == nil {
 		t.Fatal("sign attempt accepted trailing data")
 	}
 }
@@ -109,7 +109,7 @@ func TestFast_SignAttemptRecordRejectsRetiredEnvelopeLayoutOnRestore(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalSignAttemptRecordWithLimits(raw, testLimits()); err == nil {
+	if _, err := tss.DecodeBinaryValueWithLimits[SignAttemptRecord](raw, testLimits()); err == nil {
 		t.Fatal("restored sign attempt accepted retired embedded envelope layout")
 	}
 }
@@ -141,7 +141,7 @@ func TestFast_SignAttemptRecordRejectsRetiredLowSLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalSignAttemptRecord(retiredRaw); err == nil {
+	if _, err := tss.DecodeBinaryValue[SignAttemptRecord](retiredRaw); err == nil {
 		t.Fatal("sign attempt accepted retired layout with configurable LowS")
 	}
 }
@@ -443,7 +443,7 @@ func FuzzSignAttemptRecord(f *testing.F) {
 	}
 	f.Add(raw)
 	f.Fuzz(func(t *testing.T, in []byte) {
-		decoded, err := UnmarshalSignAttemptRecord(in)
+		decoded, err := tss.DecodeBinaryValue[SignAttemptRecord](in)
 		if err != nil {
 			return
 		}

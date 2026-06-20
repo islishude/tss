@@ -317,15 +317,6 @@ func (p *EncProof) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
-// UnmarshalEncProof decodes a canonical TLV EncProof.
-func UnmarshalEncProof(in []byte) (*EncProof, error) {
-	p := new(EncProof)
-	if err := p.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return p, nil
-}
-
 // UnmarshalBinary decodes a canonical TLV EncProof.
 func (p *EncProof) UnmarshalBinary(in []byte) error {
 	var decoded EncProof

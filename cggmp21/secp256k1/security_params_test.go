@@ -89,7 +89,7 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredKey, err := UnmarshalKeyShareWithLimits(keyRaw, limits)
+	restoredKey, err := tss.DecodeBinaryWithLimits[KeyShare](keyRaw, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -109,7 +109,7 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	restoredPresign, err := UnmarshalPresignWithLimits(presignRaw, limits)
+	restoredPresign, err := tss.DecodeBinaryWithLimits[Presign](presignRaw, limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -169,7 +169,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, keyShareWire{}, shares[1].state.securityParams)
-	if _, err := UnmarshalKeyShareWithLimits(keyRaw, limits); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[KeyShare](keyRaw, limits); err == nil {
 		t.Fatal("key share accepted retired flattened security params")
 	}
 
@@ -179,7 +179,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	presignRaw = flattenSecurityParamsRecordForTest(t, presignRaw, presignWireType, presignWire{}, presigns[1].state.securityParams)
-	if _, err := UnmarshalPresignWithLimits(presignRaw, limits); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[Presign](presignRaw, limits); err == nil {
 		t.Fatal("presign accepted retired flattened security params")
 	}
 
@@ -189,7 +189,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 		t.Fatal(err)
 	}
 	reshareRaw = flattenSecurityParamsRecordForTest(t, reshareRaw, resharePlanWireType, resharePlanWire{}, resharePlan.state.securityParams)
-	if _, err := UnmarshalResharePlanWithLimits(reshareRaw, resharePlan.limits); err == nil {
+	if _, err := tss.DecodeBinaryWithLimits[ResharePlan](reshareRaw, resharePlan.limits); err == nil {
 		t.Fatal("reshare plan accepted retired flattened security params")
 	}
 }

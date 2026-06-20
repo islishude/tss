@@ -150,9 +150,9 @@ func TestSignPrepProofEncodingRoundTrip(t *testing.T) {
 		t.Fatalf("MarshalBinary: %v", err)
 	}
 
-	decoded, err := UnmarshalProof(encoded)
+	decoded, err := tss.DecodeBinary[Proof](encoded)
 	if err != nil {
-		t.Fatalf("UnmarshalProof: %v", err)
+		t.Fatalf("tss.DecodeBinary[Proof]: %v", err)
 	}
 
 	reEncoded, err := decoded.MarshalBinary()
@@ -230,7 +230,7 @@ func TestSignPrepProofRejectsInvalidProofEncoding(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := UnmarshalProof(tc.input(t)); err == nil {
+			if _, err := tss.DecodeBinary[Proof](tc.input(t)); err == nil {
 				t.Fatal("expected invalid proof encoding to reject")
 			}
 		})

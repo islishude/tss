@@ -44,7 +44,7 @@ func TestGoldenKeyShare(t *testing.T) {
 
 	testvectors.CheckHexGolden(t, "wire/v1/frost/KeyShare.golden", raw)
 
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -55,7 +55,7 @@ func TestGoldenKeyShare(t *testing.T) {
 	if !bytes.Equal(raw, raw2) {
 		t.Error("round-trip produced different encoding")
 	}
-	if _, err := UnmarshalKeyShare(append(raw, 0)); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
 	}
 }

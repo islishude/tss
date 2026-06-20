@@ -21,7 +21,7 @@ func TestDKGSharePayloadsRoundTripSecretScalars(t *testing.T) {
 		{
 			name: "keygen",
 			run: func(s *secret.Scalar) error {
-				raw, err := marshalKeygenSharePayload(keygenSharePayload{Share: s, PlanHash: planHash})
+				raw, err := (keygenSharePayload{Share: s, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					return err
 				}
@@ -32,7 +32,7 @@ func TestDKGSharePayloadsRoundTripSecretScalars(t *testing.T) {
 				if !decoded.Share.Equal(s) {
 					t.Fatal("decoded keygen share mismatch")
 				}
-				raw2, err := marshalKeygenSharePayload(decoded)
+				raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					return err
 				}
@@ -45,7 +45,7 @@ func TestDKGSharePayloadsRoundTripSecretScalars(t *testing.T) {
 		{
 			name: "refresh",
 			run: func(s *secret.Scalar) error {
-				raw, err := marshalRefreshSharePayload(refreshSharePayload{Share: s, PlanHash: planHash})
+				raw, err := (refreshSharePayload{Share: s, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					return err
 				}
@@ -56,7 +56,7 @@ func TestDKGSharePayloadsRoundTripSecretScalars(t *testing.T) {
 				if !decoded.Share.Equal(s) {
 					t.Fatal("decoded refresh share mismatch")
 				}
-				raw2, err := marshalRefreshSharePayload(decoded)
+				raw2, err := decoded.MarshalBinaryWithLimits(testLimits())
 				if err != nil {
 					return err
 				}
@@ -196,10 +196,10 @@ func TestDKGSharePayloadsRejectMalformedSecretScalars(t *testing.T) {
 	for _, tc := range scalarCases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if _, err := marshalKeygenSharePayload(keygenSharePayload{Share: tc.share, PlanHash: planHash}); err == nil {
+			if _, err := (keygenSharePayload{Share: tc.share, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits()); err == nil {
 				t.Fatal("keygen accepted malformed scalar")
 			}
-			if _, err := marshalRefreshSharePayload(refreshSharePayload{Share: tc.share, PlanHash: planHash}); err == nil {
+			if _, err := (refreshSharePayload{Share: tc.share, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits()); err == nil {
 				t.Fatal("refresh accepted malformed scalar")
 			}
 			if _, err := marshalReshareSharePayload(reshareSharePayload{
@@ -216,10 +216,10 @@ func TestDKGSharePayloadsRejectMalformedSecretScalars(t *testing.T) {
 
 	t.Run("zero_refresh_delta", func(t *testing.T) {
 		t.Parallel()
-		if _, err := marshalKeygenSharePayload(keygenSharePayload{Share: zero, PlanHash: planHash}); err == nil {
+		if _, err := (keygenSharePayload{Share: zero, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits()); err == nil {
 			t.Fatal("keygen accepted zero scalar")
 		}
-		raw, err := marshalRefreshSharePayload(refreshSharePayload{Share: zero, PlanHash: planHash})
+		raw, err := (refreshSharePayload{Share: zero, PlanHash: planHash}).MarshalBinaryWithLimits(testLimits())
 		if err != nil {
 			t.Fatal(err)
 		}

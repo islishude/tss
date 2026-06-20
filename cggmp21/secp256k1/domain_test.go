@@ -21,11 +21,11 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 	if !ok {
 		t.Fatal("missing Paillier public share")
 	}
-	pk, err := pai.UnmarshalPublicKey(paillierShare.PublicKey)
+	pk, err := tss.DecodeBinary[pai.PublicKey](paillierShare.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(paillierShare.Proof)
+	proof, err := tss.DecodeBinary[zkpai.ModulusProof](paillierShare.Proof)
 	if err != nil {
 		t.Fatal(err)
 	}

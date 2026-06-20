@@ -4,6 +4,8 @@ package secp256k1
 
 import (
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 // Serialization: envelope and key share encode/decode.
@@ -21,7 +23,7 @@ func BenchmarkCGGMP21WireKeyShareRoundTrip(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		if _, err := UnmarshalKeyShare(raw); err != nil {
+		if _, err := tss.DecodeBinary[KeyShare](raw); err != nil {
 			b.Fatal(err)
 		}
 	}

@@ -97,7 +97,7 @@ func keySharePartyDataFromWire(id tss.PartyID, w keySharePartyDataWire, limits L
 	if err != nil {
 		return keySharePartyData{}, fmt.Errorf("invalid Paillier public key for party %d: %w", id, err)
 	}
-	paillierProof, err := zkpai.UnmarshalModulusProof(w.PaillierProof)
+	paillierProof, err := tss.DecodeBinary[zkpai.ModulusProof](w.PaillierProof)
 	if err != nil {
 		return keySharePartyData{}, fmt.Errorf("invalid Paillier proof for party %d: %w", id, err)
 	}
@@ -105,7 +105,7 @@ func keySharePartyDataFromWire(id tss.PartyID, w keySharePartyDataWire, limits L
 	if err != nil {
 		return keySharePartyData{}, fmt.Errorf("invalid Ring-Pedersen parameters for party %d: %w", id, err)
 	}
-	ringPedersenProof, err := zkpai.UnmarshalRingPedersenProof(w.RingPedersenProof)
+	ringPedersenProof, err := tss.DecodeBinary[zkpai.RingPedersenProof](w.RingPedersenProof)
 	if err != nil {
 		return keySharePartyData{}, fmt.Errorf("invalid Ring-Pedersen proof for party %d: %w", id, err)
 	}
@@ -243,17 +243,6 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 // destroying the original does not destroy the clone.
 func (k *KeyShare) Clone() *KeyShare {
 	return cloneKeyShareValue(k)
-}
-
-// UnmarshalPresign decodes a canonical CGGMP21 presign record with size caps.
-func UnmarshalPresign(in []byte) (*Presign, error) {
-	return tss.DecodeBinary[Presign](in)
-}
-
-// UnmarshalPresignWithLimits decodes a canonical presign record using explicit
-// local resource limits.
-func UnmarshalPresignWithLimits(in []byte, limits Limits) (*Presign, error) {
-	return tss.DecodeBinaryWithLimits[Presign](in, limits)
 }
 
 // presignWire is the wire DTO for Presign.

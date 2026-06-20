@@ -210,7 +210,7 @@ func TestSignPrepProofFuzzVerify(t *testing.T) {
 		if p != nil {
 			enc, err := p.MarshalBinary()
 			if err == nil {
-				decoded, _ := UnmarshalProof(enc)
+				decoded, _ := tss.DecodeBinary[Proof](enc)
 				if decoded != nil {
 					_ = Verify(stmt, decoded)
 				}

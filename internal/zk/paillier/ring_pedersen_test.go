@@ -5,6 +5,8 @@ package paillier
 import (
 	"math/big"
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 func TestRingPedersenProofChecks(t *testing.T) {
@@ -33,7 +35,7 @@ func TestRingPedersenProofChecks(t *testing.T) {
 	if VerifyRingPedersen(domain, params, party+1, proof) {
 		t.Fatal("Ring-Pedersen proof verified under wrong party")
 	}
-	decodedParams, err := UnmarshalRingPedersenParams(paramsBytes)
+	decodedParams, err := tss.DecodeBinary[RingPedersenParams](paramsBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -233,17 +233,6 @@ func wireMessageSize(msg wire.Message) int {
 	return len(raw)
 }
 
-// UnmarshalKeyShare decodes a canonical CGGMP21 key-share record with size caps.
-func UnmarshalKeyShare(in []byte) (*KeyShare, error) {
-	return tss.DecodeBinary[KeyShare](in)
-}
-
-// UnmarshalKeyShareWithLimits decodes a canonical key-share record using
-// explicit local resource limits.
-func UnmarshalKeyShareWithLimits(in []byte, limits Limits) (*KeyShare, error) {
-	return tss.DecodeBinaryWithLimits[KeyShare](in, limits)
-}
-
 // UnmarshalBinary decodes a canonical CGGMP21 key-share record with size caps.
 func (k *KeyShare) UnmarshalBinary(in []byte) error {
 	return k.UnmarshalBinaryWithLimits(in, DefaultLimits())
@@ -424,7 +413,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
 		return errors.New("paillier public/private key mismatch")
 	}
-	shareProof, err := schnorr.UnmarshalProof(k.state.shareProof)
+	shareProof, err := tss.DecodeBinary[schnorr.Proof](k.state.shareProof)
 	if err != nil {
 		return fmt.Errorf("invalid share proof: %w", err)
 	}
@@ -435,7 +424,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if !schnorr.Verify(k.state.keygenTranscriptHash, verificationShare, shareProof) {
 		return errors.New("invalid local share proof")
 	}
-	logProof, err := zkpai.UnmarshalLogStarProof(k.state.logProof)
+	logProof, err := tss.DecodeBinary[zkpai.LogStarProof](k.state.logProof)
 	if err != nil {
 		return fmt.Errorf("invalid log proof: %w", err)
 	}

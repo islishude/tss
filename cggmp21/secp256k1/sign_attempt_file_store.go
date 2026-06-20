@@ -585,7 +585,7 @@ func (s *FileSignAttemptStore) decryptRecord(encrypted []byte) (SignAttemptRecor
 		return SignAttemptRecord{}, fmt.Errorf("%w: decrypt attempt: %w", ErrSignAttemptCorrupt, err)
 	}
 	defer clear(raw)
-	record, err := UnmarshalSignAttemptRecord(raw)
+	record, err := tss.DecodeBinaryValue[SignAttemptRecord](raw)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("%w: decode attempt: %w", ErrSignAttemptCorrupt, err)
 	}

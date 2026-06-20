@@ -41,15 +41,6 @@ func (m StartMessage) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(m)
 }
 
-// UnmarshalStartMessage decodes a TLV MtA start message using the object-level wire codec.
-func UnmarshalStartMessage(in []byte) (*StartMessage, error) {
-	msg := new(StartMessage)
-	if err := msg.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return msg, nil
-}
-
 // UnmarshalBinary decodes a TLV MtA start message.
 func (m *StartMessage) UnmarshalBinary(in []byte) error {
 	var decoded StartMessage

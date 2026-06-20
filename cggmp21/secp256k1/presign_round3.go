@@ -310,13 +310,13 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 
 	deltaShareBig := deltaShare.BigInt()
 	defer secret.ClearBigInt(deltaShareBig)
-	payload, err := marshalPresignRound3PayloadWithLimits(presignRound3Payload{
+	payload, err := (presignRound3Payload{
 		Delta:    deltaShareBig,
 		KPoint:   secp.WirePoint{P: kPoint},
 		ChiPoint: secp.WirePoint{P: chiPoint},
 		Proof:    *proof,
 		PlanHash: s.planHash,
-	}, s.limits)
+	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, err
 	}

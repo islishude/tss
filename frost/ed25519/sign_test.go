@@ -223,7 +223,7 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid partial did not carry blame evidence")
 	}
-	evidence, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	evidence, err := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
 	if err != nil {
 		t.Fatal(err)
 	}

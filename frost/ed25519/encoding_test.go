@@ -66,18 +66,18 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	if !bytes.Equal(raw1, raw3) {
 		t.Fatal("key share map insertion order changed canonical encoding")
 	}
-	decoded, err := UnmarshalKeyShare(raw1)
+	decoded, err := tss.DecodeBinary[KeyShare](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !mustKeyShareMetadata(t, decoded).PublicKey.Equal(mustKeyShareMetadata(t, shares[1]).PublicKey) {
 		t.Fatal("public key mismatch after canonical round trip")
 	}
-	if _, err := UnmarshalKeyShare([]byte(`{"version":1}`)); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare]([]byte(`{"version":1}`)); err == nil {
 		t.Fatal("JSON key share encoding accepted")
 	}
 	trailing := append(append([]byte(nil), raw1...), 0)
-	if _, err := UnmarshalKeyShare(trailing); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](trailing); err == nil {
 		t.Fatal("key share with trailing bytes accepted")
 	}
 }
@@ -133,7 +133,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsRequiresExactThreshold(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = UnmarshalKeyShare(mutated)
+	_, err = tss.DecodeBinary[KeyShare](mutated)
 	if err == nil {
 		t.Fatal("key share accepted group commitment count below threshold")
 	}
@@ -176,7 +176,7 @@ func TestFROSTKeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 				t.Fatal(err)
 			}
 			tc.mutate(w)
-			if _, err := UnmarshalKeyShare(marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+			if _, err := tss.DecodeBinary[KeyShare](marshalFROSTKeyShareWireForTest(t, w)); err == nil {
 				t.Fatalf("key share accepted %s party data", tc.name)
 			}
 		})
@@ -198,7 +198,7 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 		}
 		data.KeygenConfirmation.Sender = 2
 		w.PartyData[1] = data
-		if _, err := UnmarshalKeyShare(marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+		if _, err := tss.DecodeBinary[KeyShare](marshalFROSTKeyShareWireForTest(t, w)); err == nil {
 			t.Fatal("key share accepted confirmation sender that did not match party-data key")
 		}
 	})
@@ -250,7 +250,7 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := UnmarshalKeyShare(raw); err == nil {
+	if _, err := tss.DecodeBinary[KeyShare](raw); err == nil {
 		t.Fatal("key share accepted retired record-list layout")
 	}
 }
@@ -277,7 +277,7 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if _, err := UnmarshalKeyShare(mutated); err == nil {
+		if _, err := tss.DecodeBinary[KeyShare](mutated); err == nil {
 			t.Fatalf("threshold %d accepted", overflow)
 		}
 	}

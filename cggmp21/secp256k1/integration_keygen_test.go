@@ -58,7 +58,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 		t.Fatal(err)
 	}
 	payload.PaillierPublicKey = kg1.paillier.PublicKey
-	mutated, err := marshalKeygenCommitmentsPayload(payload)
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -77,7 +77,7 @@ func TestThresholdECDSAKeyShareRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}

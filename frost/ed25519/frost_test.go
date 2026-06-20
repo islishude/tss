@@ -233,7 +233,7 @@ func TestFROSTKeyShareRoundTrip(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	decoded, err := UnmarshalKeyShare(raw)
+	decoded, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -515,7 +515,7 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid FROST reshare share did not carry evidence")
 	}
-	evidence, err := tss.UnmarshalBlameEvidence(protocolErr.Blame.Evidence)
+	evidence, err := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -1224,7 +1224,7 @@ func TestFROSTValidateConsistencyTamperedKey(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		decoded, err := UnmarshalKeyShare(raw)
+		decoded, err := tss.DecodeBinary[KeyShare](raw)
 		if err != nil {
 			t.Fatalf("valid key share failed deserialization: %v", err)
 		}

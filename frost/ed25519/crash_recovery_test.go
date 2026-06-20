@@ -6,6 +6,8 @@ import (
 	"bytes"
 	stded25519 "crypto/ed25519"
 	"testing"
+
+	"github.com/islishude/tss"
 )
 
 // TestFROSTKeyShareCrashRecovery verifies that a FROST KeyShare
@@ -23,7 +25,7 @@ func TestFROSTKeyShareCrashRecovery(t *testing.T) {
 	}
 
 	// Unmarshal as if reloading after restart.
-	restored, err := UnmarshalKeyShare(raw)
+	restored, err := tss.DecodeBinary[KeyShare](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -110,11 +112,11 @@ func TestFROSTKeyShareDeterministicMarshal(t *testing.T) {
 	}
 
 	// Verify unmarshal consistency.
-	restored1, err := UnmarshalKeyShare(raw1)
+	restored1, err := tss.DecodeBinary[KeyShare](raw1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	restored2, err := UnmarshalKeyShare(raw2)
+	restored2, err := tss.DecodeBinary[KeyShare](raw2)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -94,7 +94,7 @@ func TestFROSTCrossImplementationVectors(t *testing.T) {
 					t.Fatalf("key share %d encoding changed — possible wire format regression", i+1)
 				}
 				// Verify deserialized share validates.
-				restored, err := UnmarshalKeyShare(raw)
+				restored, err := tss.DecodeBinary[KeyShare](raw)
 				if err != nil {
 					t.Fatalf("UnmarshalKeyShare: %v", err)
 				}

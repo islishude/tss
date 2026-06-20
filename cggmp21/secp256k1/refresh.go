@@ -172,14 +172,14 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		newPaillier: newPaillierKey,
 		guard:       guard,
 	}
-	commitPayload, err := marshalRefreshCommitmentsPayloadWithLimits(refreshCommitmentsPayload{
+	commitPayload, err := (refreshCommitmentsPayload{
 		Commitments:        commitments,
 		PaillierPublicKey:  newPaillierKey.PublicKey,
 		PaillierProof:      *modProof,
 		RingPedersenParams: *ringPedersenParams,
 		RingPedersenProof:  *ringPedersenProof,
 		PlanHash:           planHash,
-	}, s.limits)
+	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -196,7 +196,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		payload, err := marshalRefreshSharePayloadWithLimits(refreshSharePayload{Share: share, PlanHash: planHash}, s.limits)
+		payload, err := (refreshSharePayload{Share: share, PlanHash: planHash}).MarshalBinaryWithLimits(s.limits)
 		share.Destroy()
 		if err != nil {
 			return nil, nil, err

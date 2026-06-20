@@ -131,7 +131,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		guard:          guard,
 	}
 	out := make([]tss.Envelope, 0, len(config.Parties))
-	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{
+	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:        commitments,
 		PaillierPublicKey:  paillierKey.PublicKey,
 		PaillierProof:      *modProof,
@@ -139,7 +139,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		RingPedersenParams: *ringPedersenParams,
 		RingPedersenProof:  *ringPedersenProof,
 		PlanHash:           planHash,
-	}, s.limits)
+	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -156,7 +156,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		if err != nil {
 			return nil, nil, err
 		}
-		payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{Share: share, PlanHash: planHash}, s.limits)
+		payload, err := (keygenSharePayload{Share: share, PlanHash: planHash}).MarshalBinaryWithLimits(s.limits)
 		share.Destroy()
 		if err != nil {
 			return nil, nil, err

@@ -270,13 +270,13 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 			return nil, nil, err
 		}
 		selfNPD := s.newPartyData[s.selfID]
-		payload, err := marshalReshareReceiverMaterialPayloadWithLimits(reshareReceiverMaterialPayload{
+		payload, err := (reshareReceiverMaterialPayload{
 			PaillierPublicKey:  *(selfNPD.paillierPub.PublicKey.Clone()),
 			PaillierProof:      *(selfNPD.paillierPub.Proof.Clone()),
 			RingPedersenParams: *(selfNPD.ringPedersen.Params.Clone()),
 			RingPedersenProof:  *selfNPD.ringPedersen.Proof.Clone(),
 			PlanHash:           s.planHash,
-		}, s.limits)
+		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, nil, err
 		}

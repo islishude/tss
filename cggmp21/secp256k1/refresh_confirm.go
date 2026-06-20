@@ -12,7 +12,7 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh confirmation in wrong round"))
 	}
-	confirmation, err := UnmarshalKeygenConfirmation(env.Payload)
+	confirmation, err := tss.DecodeBinary[KeygenConfirmation](env.Payload)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

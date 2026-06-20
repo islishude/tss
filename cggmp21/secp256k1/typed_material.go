@@ -52,7 +52,7 @@ func paillierPublicMaterialFromSnapshot(in PaillierPublicShare, limits Limits) (
 	if err != nil {
 		return paillierPublicMaterial{}, fmt.Errorf("paillier public material key: %w", err)
 	}
-	proof, err := zkpai.UnmarshalModulusProof(in.Proof)
+	proof, err := tss.DecodeBinary[zkpai.ModulusProof](in.Proof)
 	if err != nil {
 		return paillierPublicMaterial{}, fmt.Errorf("paillier public material proof: %w", err)
 	}
@@ -90,7 +90,7 @@ func ringPedersenPublicMaterialFromSnapshot(in RingPedersenPublicShare, limits L
 	if err != nil {
 		return ringPedersenPublicMaterial{}, fmt.Errorf("Ring-Pedersen public material params: %w", err)
 	}
-	proof, err := zkpai.UnmarshalRingPedersenProof(in.Proof)
+	proof, err := tss.DecodeBinary[zkpai.RingPedersenProof](in.Proof)
 	if err != nil {
 		return ringPedersenPublicMaterial{}, fmt.Errorf("Ring-Pedersen public material proof: %w", err)
 	}

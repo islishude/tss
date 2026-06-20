@@ -115,7 +115,7 @@ func ExampleBlameEvidence_lifecycle() {
 	// --- 4. Deserialize using the typed unmarshaler ---
 	// UnmarshalBlameEvidence returns a *BlameEvidence (not a raw struct)
 	// so the Validate method is available on the decoded value.
-	decoded, err := tss.UnmarshalBlameEvidence(encoded)
+	decoded, err := tss.DecodeBinary[tss.BlameEvidence](encoded)
 	if err != nil {
 		panic(err)
 	}

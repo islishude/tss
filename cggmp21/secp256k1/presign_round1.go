@@ -151,7 +151,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		PaillierPublicKey: *paillierPub,
 		PlanHash:          slices.Clone(planHash),
 	}
-	payload, err := marshalPresignRound1PayloadWithLimits(presignPayload, limits)
+	payload, err := presignPayload.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -217,11 +217,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofPayload, err := marshalPresignRound1ProofPayloadWithLimits(presignRound1ProofPayload{
+		proofPayload, err := (presignRound1ProofPayload{
 			PublicRound1Hash: publicHash,
 			EncKProof:        *proof,
 			PlanHash:         slices.Clone(planHash),
-		}, s.limits)
+		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -476,7 +476,7 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 }
 
 func presignRound1PublicHash(p presignRound1Payload, limits Limits) ([]byte, error) {
-	payload, err := marshalPresignRound1PayloadWithLimits(p, limits)
+	payload, err := p.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		return nil, err
 	}

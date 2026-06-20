@@ -150,25 +150,9 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 	return true
 }
 
-func marshalModulusProof(p *ModulusProof) ([]byte, error) {
-	if err := validateModulusProof(p); err != nil {
-		return nil, err
-	}
-	return wire.Marshal(p)
-}
-
 // MarshalBinary encodes a modulus proof canonically.
 func (p *ModulusProof) MarshalBinary() ([]byte, error) {
-	return marshalModulusProof(p)
-}
-
-// UnmarshalModulusProof decodes and structurally validates a modulus proof.
-func UnmarshalModulusProof(in []byte) (*ModulusProof, error) {
-	p := new(ModulusProof)
-	if err := p.UnmarshalBinary(in); err != nil {
-		return nil, err
-	}
-	return p, nil
+	return wire.Marshal(p)
 }
 
 // UnmarshalBinary decodes and structurally validates a modulus proof.
