@@ -59,7 +59,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	// Chain code is aggregated from round 2 confirmation reveals (commit-reveal).
-	groupCommitments := make([][]byte, s.cfg.Threshold)
+	groupCommitments := make([]*secp.Point, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
 		points := make([]*secp.Point, 0, len(s.cfg.Parties))
 		for _, id := range s.cfg.Parties {
@@ -69,15 +69,15 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 			}
 			points = append(points, p)
 		}
-		enc, err := secp.PointBytes(secp.AddPoints(points...))
-		if err != nil {
-			return nil, err
-		}
-		groupCommitments[degree] = enc
+		groupCommitments[degree] = secp.AddPoints(points...)
+	}
+	publicKey, err := secp.PointBytes(groupCommitments[0])
+	if err != nil {
+		return nil, err
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
-		pub, err := secp.EvalCommitments(groupCommitments, id)
+		pub, err := secp.EvalCommitmentPoints(groupCommitments, id)
 		if err != nil {
 			return nil, err
 		}
@@ -104,17 +104,12 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		secretScalar.Destroy()
 		return nil, errors.New("local share proof public key mismatch")
 	}
-	shareProofBytes, err := shareProof.MarshalBinary()
-	if err != nil {
-		secretScalar.Destroy()
-		return nil, err
-	}
 	localProofShare := &KeyShare{state: &keyShareState{
 		securityParams: s.securityParams,
 		party:          s.cfg.Self,
 		threshold:      s.cfg.Threshold,
 		parties:        s.cfg.Parties,
-		publicKey:      groupCommitments[0],
+		publicKey:      publicKey,
 		partyData: map[tss.PartyID]keySharePartyData{
 			s.cfg.Self: {paillierPublicKey: s.paillier.PublicKey.Clone()},
 		},
@@ -156,7 +151,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		party:                  s.cfg.Self,
 		threshold:              s.cfg.Threshold,
 		parties:                s.cfg.Parties.Clone(),
-		publicKey:              bytes.Clone(groupCommitments[0]),
+		publicKey:              bytes.Clone(publicKey),
 		chainCode:              nil, // filled in after confirmation round
 		secret:                 secretScalar,
 		groupCommitments:       groupCommitments,
@@ -164,7 +159,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		paillierPrivateKey:     s.paillier.Clone(),
 		paillierProofSessionID: s.cfg.SessionID,
 		paillierProofDomain:    domainLabelKeygenModulus,
-		shareProof:             shareProofBytes,
+		shareProof:             shareProof.Clone(),
 		planHash:               bytes.Clone(s.planHash),
 		keygenTranscriptHash:   transcriptHash,
 	}}
@@ -196,12 +191,8 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	logProofBytes, err := logProof.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	share.state.logCiphertext = logCiphertext.Bytes()
-	share.state.logProof = logProofBytes
+	share.state.logCiphertext = cloneBigInt(logCiphertext)
+	share.state.logProof = logProof.Clone()
 	// Carry the local chain code into the confirmation for commit-reveal.
 	share.state.chainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)
 	if err := share.validateWithoutConfirmations(s.limits); err != nil {
@@ -225,7 +216,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	out := []tss.Envelope{confirmationEnv}
-	pubKeyHash := sha256.Sum256(groupCommitments[0])
+	pubKeyHash := sha256.Sum256(publicKey)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
@@ -310,7 +301,11 @@ func (s *KeygenSession) abort() {
 	}
 }
 
-func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) ([]byte, error) {
+func (s *KeygenSession) keygenTranscriptHash(groupCommitments []*secp.Point) ([]byte, error) {
+	groupCommitmentBytes, err := secp.CommitmentPointsBytes(groupCommitments)
+	if err != nil {
+		return nil, err
+	}
 	t := transcript.New(keygenTranscriptHashLabel)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
@@ -332,7 +327,7 @@ func (s *KeygenSession) keygenTranscriptHash(groupCommitments [][]byte) ([]byte,
 		t.AppendBytes("ring_pedersen_proof", ringPedersenSnapshot.Proof)
 		t.AppendBytes("chain_code_commitment", d.chainCodeCommit)
 	}
-	t.AppendBytesList("group_commitments", groupCommitments)
+	t.AppendBytesList("group_commitments", groupCommitmentBytes)
 	return t.Sum(), nil
 }
 

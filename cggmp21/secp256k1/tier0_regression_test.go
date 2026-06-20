@@ -89,7 +89,7 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 			name: "non-signer party",
 			mutate: func(p *Presign) {
 				vs := p.state.verifyShares[0]
-				vs.party = 999
+				vs.Party = 999
 				p.state.verifyShares = []signVerifyShare{vs}
 			},
 			check: func(p *Presign) error {
@@ -99,19 +99,19 @@ func TestFast_PresignVerifySharesValidation(t *testing.T) {
 		},
 		{
 			name:    "non-canonical KPoint",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].kPoint = nil },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].KPoint = nil },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical KPoint",
 		},
 		{
 			name:    "non-canonical ChiPoint",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].chiPoint = nil },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].ChiPoint = nil },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "non-canonical ChiPoint",
 		},
 		{
 			name:    "empty proof",
-			mutate:  func(p *Presign) { p.state.verifyShares[0].proof = signprep.Proof{} },
+			mutate:  func(p *Presign) { p.state.verifyShares[0].Proof = new(signprep.Proof) },
 			check:   func(p *Presign) error { return p.ValidateWithLimits(testLimits()) },
 			wantMsg: "empty proof",
 		},
@@ -292,9 +292,9 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 				kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 				return presignRound3Payload{
 					Delta:    one,
-					KPoint:   secp.WirePoint{P: kPoint},
-					ChiPoint: secp.WirePoint{P: kPoint},
-					Proof:    signprep.Proof{},
+					KPoint:   kPoint,
+					ChiPoint: kPoint,
+					Proof:    &signprep.Proof{},
 					PlanHash: bytes.Repeat([]byte{0xef}, 32),
 				}
 			}(),
@@ -308,8 +308,8 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 				proof := mustMinimalSignPrepProofForTest(t)
 				return presignRound3Payload{
 					Delta:    one,
-					KPoint:   secp.WirePoint{},
-					ChiPoint: secp.WirePoint{P: chiPoint},
+					KPoint:   nil,
+					ChiPoint: chiPoint,
 					Proof:    proof,
 					PlanHash: bytes.Repeat([]byte{0xef}, 32),
 				}

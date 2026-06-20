@@ -231,8 +231,8 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 	proof := mustMinimalSignPrepProofForTest(t)
 	payload := presignRound3Payload{
 		Delta:    big.NewInt(42),
-		KPoint:   secp.WirePoint{P: kPoint},
-		ChiPoint: secp.WirePoint{P: chiPoint},
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
 		Proof:    proof,
 		PlanHash: bytes.Repeat([]byte{0x91}, 32),
 	}

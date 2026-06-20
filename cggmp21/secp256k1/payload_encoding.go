@@ -318,10 +318,10 @@ func (p presignRound3Payload) Validate() error {
 	if err := validateScalarRangeStrict(p.Delta); err != nil {
 		return err
 	}
-	if _, err := secp.PointBytes(p.KPoint.P); err != nil {
+	if _, err := secp.PointBytes(p.KPoint); err != nil {
 		return fmt.Errorf("invalid KPoint: %w", err)
 	}
-	if _, err := secp.PointBytes(p.ChiPoint.P); err != nil {
+	if _, err := secp.PointBytes(p.ChiPoint); err != nil {
 		return fmt.Errorf("invalid ChiPoint: %w", err)
 	}
 	if err := p.Proof.Validate(); err != nil {

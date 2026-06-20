@@ -258,11 +258,15 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		}
 		verificationShares[id] = append([]byte(nil), verificationShare...)
 	}
+	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.groupCommitments)
+	if err != nil {
+		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old group commitments: %w", err))
+	}
 	plan := &ResharePlan{state: &resharePlanState{
 		sessionID:             option.SessionID,
 		curveID:               reshareCurveID,
 		oldGroupPublicKey:     append([]byte(nil), oldKey.state.publicKey...),
-		oldGroupCommitments:   tss.CloneByteSlices(oldKey.state.groupCommitments),
+		oldGroupCommitments:   oldGroupCommitments,
 		oldVerificationShares: verificationShares,
 		oldParties:            tss.SortParties(oldKey.state.parties),
 		oldThreshold:          oldKey.state.threshold,

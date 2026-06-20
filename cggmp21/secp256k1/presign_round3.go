@@ -79,20 +79,20 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 }
 
 func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRound3Payload) (signVerifyShare, error) {
-	if p.KPoint.P == nil {
+	if p.KPoint == nil {
 		return signVerifyShare{}, errors.New("missing KPoint")
 	}
-	if p.ChiPoint.P == nil {
+	if p.ChiPoint == nil {
 		return signVerifyShare{}, errors.New("missing ChiPoint")
 	}
 	if err := p.Proof.Validate(); err != nil {
 		return signVerifyShare{}, fmt.Errorf("invalid signprep proof: %w", err)
 	}
-	kPointBytes, err := secp.PointBytes(p.KPoint.P)
+	kPointBytes, err := secp.PointBytes(p.KPoint)
 	if err != nil {
 		return signVerifyShare{}, err
 	}
-	chiPointBytes, err := secp.PointBytes(p.ChiPoint.P)
+	chiPointBytes, err := secp.PointBytes(p.ChiPoint)
 	if err != nil {
 		return signVerifyShare{}, err
 	}
@@ -141,21 +141,21 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		Round1Echo:           s.round1Echo(),
 		Delta:                scalarBytes(p.Delta),
 	}
-	if err := signprep.Verify(stmt, &p.Proof); err != nil {
+	if err := signprep.Verify(stmt, p.Proof); err != nil {
 		return signVerifyShare{}, err
 	}
 	return signVerifyShare{
-		party:    from,
-		kPoint:   secp.Clone(p.KPoint.P),
-		chiPoint: secp.Clone(p.ChiPoint.P),
-		proof:    cloneSignPrepProof(p.Proof),
+		Party:    from,
+		KPoint:   secp.Clone(p.KPoint),
+		ChiPoint: secp.Clone(p.ChiPoint),
+		Proof:    p.Proof.Clone(),
 	}, nil
 }
 
 func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-	kPointBytes, _ := secp.PointBytes(p.KPoint.P)
-	chiPointBytes, _ := secp.PointBytes(p.ChiPoint.P)
+	kPointBytes, _ := secp.PointBytes(p.KPoint)
+	chiPointBytes, _ := secp.PointBytes(p.ChiPoint)
 	proofBytes, _ := p.Proof.MarshalBinary()
 	return append(fields,
 		hashEvidenceField("delta_hash", scalarBytes(p.Delta)),
@@ -312,9 +312,9 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	defer secret.ClearBigInt(deltaShareBig)
 	payload, err := (presignRound3Payload{
 		Delta:    deltaShareBig,
-		KPoint:   secp.WirePoint{P: kPoint},
-		ChiPoint: secp.WirePoint{P: chiPoint},
-		Proof:    *proof,
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
+		Proof:    proof,
 		PlanHash: s.planHash,
 	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
@@ -323,10 +323,10 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	s.round3Sent = true
 	selfState.round3.delta = deltaSecret
 	selfState.round3.verifyShare = signVerifyShare{
-		party:    s.key.state.party,
-		kPoint:   secp.Clone(kPoint),
-		chiPoint: secp.Clone(chiPoint),
-		proof:    cloneSignPrepProof(*proof),
+		Party:    s.key.state.party,
+		KPoint:   secp.Clone(kPoint),
+		ChiPoint: secp.Clone(chiPoint),
+		Proof:    proof.Clone(),
 	}
 	selfState.round3.haveDelta = true
 	selfState.round3.haveVerifyShare = true
@@ -414,7 +414,7 @@ func (s *PresignSession) tryComplete() error {
 		if !ok {
 			return fmt.Errorf("missing presign state for party %d", id)
 		}
-		s.presign.state.verifyShares = append(s.presign.state.verifyShares, st.round3.verifyShare.clone())
+		s.presign.state.verifyShares = append(s.presign.state.verifyShares, st.round3.verifyShare.Clone())
 	}
 	s.presign.state.r = secp.Clone(RPoint)
 	s.presign.state.littleR = littleR

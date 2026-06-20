@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 // minimalKeyShare returns a KeyShare with only public metadata populated.
@@ -70,11 +71,13 @@ func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	k := minimalKeyShare()
 	k.state.publicKey[0] = 0x02
 	k.state.chainCode[0] = 0xaa
-	k.state.shareProof = []byte{0x01, 0x02, 0x03}
+	k.state.shareProof = testSchnorrProof(t)
 	k.state.keygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
-	k.state.groupCommitments = [][]byte{{0x01, 0x02}, {0x03, 0x04}}
+	k.state.groupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
 
 	meta := mustKeyShareMetadata(t, k)
+	originalShareProof := append([]byte(nil), meta.ShareProof...)
+	originalCommitment := append([]byte(nil), meta.GroupCommitments[0]...)
 	meta.PublicKey[0] = 0x03
 	meta.ChainCode[0] = 0xbb
 	meta.ShareProof[0] = 0xff
@@ -88,16 +91,17 @@ func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	if k.state.chainCode[0] != 0xaa {
 		t.Fatal("PublicMetadata() did not deep-copy chain code")
 	}
-	if k.state.shareProof[0] != 0x01 {
+	metaAgain := mustKeyShareMetadata(t, k)
+	if metaAgain.ShareProof[0] != originalShareProof[0] {
 		t.Fatal("PublicMetadata() did not deep-copy share proof")
 	}
 	if k.state.keygenTranscriptHash[0] != 0xde {
 		t.Fatal("PublicMetadata() did not deep-copy keygen transcript hash")
 	}
-	if k.state.groupCommitments[0][0] != 0x01 {
+	if metaAgain.GroupCommitments[0][0] != originalCommitment[0] {
 		t.Fatal("PublicMetadata() did not deep-copy group commitment bytes")
 	}
-	if len(k.state.groupCommitments[0]) != 2 {
+	if len(metaAgain.GroupCommitments[0]) != len(originalCommitment) {
 		t.Fatal("PublicMetadata() did not deep-copy group commitment slice")
 	}
 }

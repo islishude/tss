@@ -4,6 +4,7 @@ package secp256k1
 
 import (
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -279,9 +280,8 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Tamper with the log proof bytes.
-	if len(decoded.state.logProof) > 0 {
-		decoded.state.logProof[len(decoded.state.logProof)-1] ^= 1
+	if decoded.state.logProof != nil && decoded.state.logProof.Z1 != nil {
+		decoded.state.logProof.Z1 = new(big.Int).Add(decoded.state.logProof.Z1, big.NewInt(1))
 	}
 	_, err = decoded.MarshalBinary()
 	if err == nil {

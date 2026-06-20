@@ -271,7 +271,7 @@ func (p *Presign) id() []byte {
 		kPointBytes, _ := vs.kPointBytes()
 		chiPointBytes, _ := vs.chiPointBytes()
 		proofBytes, _ := vs.proofBytes()
-		t.AppendUint32("verify_share_party", vs.party)
+		t.AppendUint32("verify_share_party", vs.Party)
 		t.AppendBytes("k_point", kPointBytes)
 		t.AppendBytes("chi_point", chiPointBytes)
 		proofHash := sha256.Sum256(proofBytes)
@@ -718,11 +718,11 @@ func (presignRound2Payload) WireType() string { return presignRound2PayloadWireT
 func (presignRound2Payload) WireVersion() uint16 { return presignRound2PayloadWireVersion }
 
 type presignRound3Payload struct {
-	Delta    *big.Int       `json:"-" wire:"1,bigpos,max_bytes=scalar"`
-	KPoint   secp.WirePoint `json:"k_point" wire:"2,custom,len=33"`
-	ChiPoint secp.WirePoint `json:"chi_point" wire:"3,custom,len=33"`
-	Proof    signprep.Proof `json:"proof" wire:"4,nested,max_bytes=signprep_proof"`
-	PlanHash []byte         `json:"plan_hash" wire:"5,bytes,len=32"`
+	Delta    *big.Int        `json:"-" wire:"1,bigpos,max_bytes=scalar"`
+	KPoint   *secp.Point     `json:"k_point" wire:"2,custom,len=33"`
+	ChiPoint *secp.Point     `json:"chi_point" wire:"3,custom,len=33"`
+	Proof    *signprep.Proof `json:"proof" wire:"4,custom,max_bytes=signprep_proof"`
+	PlanHash []byte          `json:"plan_hash" wire:"5,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.

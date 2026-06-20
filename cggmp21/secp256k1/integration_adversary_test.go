@@ -199,9 +199,9 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 				}
 				switch tc.field {
 				case "KPoint":
-					r.state.verifyShares[0].kPoint = nil
+					r.state.verifyShares[0].KPoint = nil
 				case "ChiPoint":
-					r.state.verifyShares[0].chiPoint = nil
+					r.state.verifyShares[0].ChiPoint = nil
 				}
 
 				err := r.VerifySignMaterial()
@@ -318,7 +318,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "bit-flipped KPoint",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedK, err := secp.PointBytes(p.KPoint.P)
+				tamperedK, err := secp.PointBytes(p.KPoint)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -328,7 +328,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 					t.Logf("KPoint tampering caused point rejection (valid): %v", err)
 					return nil
 				}
-				p.KPoint = secp.WirePoint{P: kPoint}
+				p.KPoint = kPoint
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("KPoint tampering caused marshal rejection (valid): %v", err)
@@ -340,7 +340,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "replaced KPoint with different valid point",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				p.KPoint = secp.WirePoint{P: secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))}
+				p.KPoint = secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Fatal(err)
@@ -351,7 +351,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 		{
 			name: "bit-flipped ChiPoint",
 			tamper: func(t *testing.T, p presignRound3Payload) []byte {
-				tamperedChi, err := secp.PointBytes(p.ChiPoint.P)
+				tamperedChi, err := secp.PointBytes(p.ChiPoint)
 				if err != nil {
 					t.Fatal(err)
 				}
@@ -361,7 +361,7 @@ func TestIntegration_PresignRound3TamperingBlamesSender(t *testing.T) {
 					t.Logf("ChiPoint tampering caused point rejection (valid): %v", err)
 					return nil
 				}
-				p.ChiPoint = secp.WirePoint{P: chiPoint}
+				p.ChiPoint = chiPoint
 				mutated, err := marshalPresignRound3Payload(p)
 				if err != nil {
 					t.Logf("ChiPoint tampering caused marshal rejection (valid): %v", err)

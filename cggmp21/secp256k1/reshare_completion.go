@@ -31,7 +31,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
+		publicKey, err := secp.PointBytes(newCommitments[0])
+		if err != nil {
+			return nil, err
+		}
+		if !bytes.Equal(publicKey, s.oldPublicKey) {
 			return nil, errors.New("reshared group public key does not match original")
 		}
 		if !s.allReshareConfirmationsReceived() {
@@ -94,13 +98,18 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		newSecretScalar.Destroy()
 		return nil, err
 	}
-	if !bytes.Equal(newCommitments[0], s.oldPublicKey) {
+	publicKey, err := secp.PointBytes(newCommitments[0])
+	if err != nil {
+		newSecretScalar.Destroy()
+		return nil, err
+	}
+	if !bytes.Equal(publicKey, s.oldPublicKey) {
 		newSecretScalar.Destroy()
 		return nil, errors.New("reshared group public key does not match original")
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.newParties))
 	for _, id := range s.newParties {
-		pub, err := secp.EvalCommitments(newCommitments, id)
+		pub, err := secp.EvalCommitmentPoints(newCommitments, id)
 		if err != nil {
 			return nil, err
 		}
@@ -127,18 +136,13 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		newSecretScalar.Destroy()
 		return nil, errors.New("local share proof public key mismatch")
 	}
-	shareProofBytes, err := shareProof.MarshalBinary()
-	if err != nil {
-		newSecretScalar.Destroy()
-		return nil, err
-	}
 	selfNPD := s.newPartyData[s.selfID]
 	localProofShare := &KeyShare{state: &keyShareState{
 		securityParams: s.securityParams,
 		party:          s.selfID,
 		threshold:      s.newThreshold,
 		parties:        s.newParties,
-		publicKey:      newCommitments[0],
+		publicKey:      publicKey,
 		partyData: map[tss.PartyID]keySharePartyData{
 			s.selfID: {paillierPublicKey: selfNPD.paillierPub.PublicKey.Clone()},
 		},
@@ -180,7 +184,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		party:                  s.selfID,
 		threshold:              s.newThreshold,
 		parties:                s.newParties.Clone(),
-		publicKey:              bytes.Clone(newCommitments[0]),
+		publicKey:              bytes.Clone(publicKey),
 		chainCode:              bytes.Clone(s.oldChainCode),
 		secret:                 newSecretScalar,
 		groupCommitments:       newCommitments,
@@ -190,7 +194,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		paillierProofDomain:    domainLabelResharePaillier,
 		resharePlanHash:        bytes.Clone(s.planHash),
 		planHash:               bytes.Clone(s.planHash),
-		shareProof:             shareProofBytes,
+		shareProof:             shareProof.Clone(),
 		keygenTranscriptHash:   transcriptHash,
 	}}
 	logCiphertext, logRandomness, err := s.newPaillier.EncryptSecret(s.cfg.Reader(), newSecretScalar)
@@ -219,12 +223,8 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	logProofBytes, err := logProof.MarshalBinary()
-	if err != nil {
-		return nil, err
-	}
-	s.newShare.state.logCiphertext = logCiphertext.Bytes()
-	s.newShare.state.logProof = logProofBytes
+	s.newShare.state.logCiphertext = cloneBigInt(logCiphertext)
+	s.newShare.state.logProof = logProof.Clone()
 	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
@@ -254,8 +254,8 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	return out, nil
 }
 
-func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
-	newCommitments := make([][]byte, s.newThreshold)
+func (s *ReshareSession) aggregateCommitments() ([]*secp.Point, error) {
+	newCommitments := make([]*secp.Point, s.newThreshold)
 	for degree := 0; degree < s.newThreshold; degree++ {
 		points := make([]*secp.Point, 0, len(s.dealerParties))
 		for _, dealer := range s.dealerParties {
@@ -266,19 +266,19 @@ func (s *ReshareSession) aggregateCommitments() ([][]byte, error) {
 			}
 			points = append(points, p)
 		}
-		enc, err := secp.PointBytes(secp.AddPoints(points...))
-		if err != nil {
-			return nil, err
-		}
-		newCommitments[degree] = enc
+		newCommitments[degree] = secp.AddPoints(points...)
 	}
-	if len(newCommitments[0]) == 0 {
+	if newCommitments[0] == nil {
 		return nil, errors.New("reshare produced empty group public key commitment")
 	}
 	return newCommitments, nil
 }
 
-func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) ([]byte, error) {
+func (s *ReshareSession) reshareTranscriptHash(newCommitments []*secp.Point) ([]byte, error) {
+	newCommitmentBytes, err := secp.CommitmentPointsBytes(newCommitments)
+	if err != nil {
+		return nil, err
+	}
 	t := transcript.New(reshareTranscriptHashLabel)
 	t.AppendString("curve", s.plan.state.curveID)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
@@ -319,7 +319,7 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments [][]byte) ([]byte,
 		t.AppendBytes("ring_pedersen_params", ringPedersenSnapshot.Params)
 		t.AppendBytes("ring_pedersen_proof", ringPedersenSnapshot.Proof)
 	}
-	t.AppendBytesList("new_commitments", newCommitments)
+	t.AppendBytesList("new_commitments", newCommitmentBytes)
 	return t.Sum(), nil
 }
 

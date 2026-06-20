@@ -18,6 +18,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/zk/schnorr"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
@@ -60,6 +61,27 @@ func mustKeyShareChainCode(t testing.TB, share *KeyShare) []byte {
 	return mustKeyShareMetadata(t, share).ChainCode
 }
 
+func testCurvePoint(scalar int64) *secp.Point {
+	return secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(scalar)))
+}
+
+func testCurvePointBytes(t testing.TB, scalar int64) []byte {
+	t.Helper()
+	raw, err := secp.PointBytes(testCurvePoint(scalar))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return raw
+}
+
+func testSchnorrProof(t testing.TB) *schnorr.Proof {
+	t.Helper()
+	return &schnorr.Proof{
+		Commitment: testCurvePointBytes(t, 1),
+		Response:   secp.ScalarFromBigInt(big.NewInt(2)).Bytes(),
+	}
+}
+
 func mustPresignMetadata(t testing.TB, presign *Presign) PresignPublicMetadata {
 	t.Helper()
 	meta, ok := presign.PublicMetadata()
@@ -85,7 +107,7 @@ func mustPresignVerifyShare(t testing.TB, presign *Presign, party tss.PartyID) s
 	if !ok {
 		t.Fatalf("missing presign verify share for party %d", party)
 	}
-	return share.clone()
+	return share.Clone()
 }
 
 func mustSignVerifyShareKPointBytes(t testing.TB, share signVerifyShare) []byte {
@@ -162,19 +184,11 @@ func clonePresignForTest(p *Presign) *Presign {
 		publicKey:            secp.Clone(p.state.publicKey),
 		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
 		partiesHash:          slices.Clone(p.state.partiesHash),
-		verifyShares:         cloneSignVerifySharesForTest(p.state.verifyShares),
+		verifyShares:         tss.CloneSlice(p.state.verifyShares),
 		kShare:               p.state.kShare.Clone(),
 		chiShare:             p.state.chiShare.Clone(),
 		delta:                p.state.delta.Clone(),
 	}}
-}
-
-func cloneSignVerifySharesForTest(in []signVerifyShare) []signVerifyShare {
-	out := make([]signVerifyShare, 0, len(in))
-	for _, share := range in {
-		out = append(out, share.clone())
-	}
-	return out
 }
 
 func startCGGMP21Keygen(config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
@@ -607,10 +621,10 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		keygenTranscriptHash: transcript[:],
 		partiesHash:          wireutil.PartySetHash(tss.NewPartySet(1), partySetHashLabel),
 		verifyShares: []signVerifyShare{{
-			party:    1,
-			kPoint:   secp.Clone(RPoint),
-			chiPoint: secp.Clone(RPoint),
-			proof:    minimalProof,
+			Party:    1,
+			KPoint:   secp.Clone(RPoint),
+			ChiPoint: secp.Clone(RPoint),
+			Proof:    minimalProof,
 		}},
 		kShare:   kShare,
 		chiShare: chiShare,
@@ -628,7 +642,7 @@ func testSecurityParamsPtr() *SecurityParams {
 	return &params
 }
 
-func mustMinimalSignPrepProofForTest(tb testing.TB) signprep.Proof {
+func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
 	one := big.NewInt(1)
 	two := big.NewInt(2)
 	kScalar := secp.ScalarFromBigInt(one)
@@ -662,5 +676,5 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) signprep.Proof {
 	if err != nil {
 		tb.Fatal("signprep.Prove: " + err.Error())
 	}
-	return *proof
+	return proof
 }

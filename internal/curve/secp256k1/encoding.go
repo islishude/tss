@@ -18,48 +18,44 @@ func PointBytes(p *Point) ([]byte, error) {
 	return out, nil
 }
 
-// WirePoint wraps a *Point for use with internal/wire's custom field kind.
-// It implements MarshalWireValue / UnmarshalWireValue via Go structural typing
-// (no import of internal/wire required). The zero value has a nil Point and
-// will be rejected on marshal.
-type WirePoint struct {
-	P *Point
+// MarshalWireValue encodes the point in canonical compressed SEC 1 form for
+// internal/wire's custom field kind.
+func (p *Point) MarshalWireValue() ([]byte, error) {
+	return PointBytes(p)
 }
 
-// MarshalWireValue encodes the point in canonical compressed SEC 1 form.
-func (p WirePoint) MarshalWireValue() ([]byte, error) {
-	return PointBytes(p.P)
-}
-
-// UnmarshalWireValue decodes canonical compressed SEC 1 point bytes.
-func (p *WirePoint) UnmarshalWireValue(in []byte) error {
+// UnmarshalWireValue decodes canonical compressed SEC 1 point bytes for
+// internal/wire's custom field kind.
+func (p *Point) UnmarshalWireValue(in []byte) error {
+	if p == nil {
+		return errors.New("nil secp256k1 point")
+	}
 	q, err := PointFromBytes(in)
 	if err != nil {
 		return err
 	}
-	p.P = q
+	*p = *q
 	return nil
 }
 
-// WireScalar wraps a Scalar for use with internal/wire's custom field kind.
-// It accepts the zero scalar on decode; callers enforce context-specific
-// non-zero requirements after unmarshaling.
-type WireScalar struct {
-	S Scalar
+// MarshalWireValue encodes the scalar as a fixed-width canonical value for
+// internal/wire's custom field kind.
+func (s Scalar) MarshalWireValue() ([]byte, error) {
+	return s.Bytes(), nil
 }
 
-// MarshalWireValue encodes the scalar as a fixed-width canonical value.
-func (s WireScalar) MarshalWireValue() ([]byte, error) {
-	return s.S.Bytes(), nil
-}
-
-// UnmarshalWireValue decodes a fixed-width canonical scalar.
-func (s *WireScalar) UnmarshalWireValue(in []byte) error {
+// UnmarshalWireValue decodes a fixed-width canonical scalar for
+// internal/wire's custom field kind. Zero is accepted here; callers enforce
+// context-specific non-zero requirements after unmarshaling.
+func (s *Scalar) UnmarshalWireValue(in []byte) error {
+	if s == nil {
+		return errors.New("nil secp256k1 scalar")
+	}
 	v, err := ScalarFromBytesAllowZero(in)
 	if err != nil {
 		return err
 	}
-	s.S = v
+	*s = v
 	return nil
 }
 

@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -484,7 +485,11 @@ func validateOldKeyMatchesResharePlan(oldKey *KeyShare, plan *ResharePlan) error
 	if !sameParties(oldKey.state.parties, plan.state.oldParties) {
 		return errors.New("old key party set does not match reshare plan")
 	}
-	if !sameByteSlices(oldKey.state.groupCommitments, plan.state.oldGroupCommitments) {
+	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.groupCommitments)
+	if err != nil {
+		return fmt.Errorf("old key commitments are invalid: %w", err)
+	}
+	if !sameByteSlices(oldGroupCommitments, plan.state.oldGroupCommitments) {
 		return errors.New("old key commitments do not match reshare plan")
 	}
 	for _, id := range oldKey.state.parties {

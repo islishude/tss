@@ -832,8 +832,8 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 		return nil, err
 	}
 	lhs := secp.ScalarBaseMult(sVal)
-	term1 := secp.ScalarMult(vs.kPoint, zScalar)
-	term2 := secp.ScalarMult(vs.chiPoint, littleR)
+	term1 := secp.ScalarMult(vs.KPoint, zScalar)
+	term2 := secp.ScalarMult(vs.ChiPoint, littleR)
 	rhs := secp.Add(term1, term2)
 	if !secp.Equal(lhs, rhs) {
 		return nil, errors.New("sign partial equation verification failed")
@@ -870,7 +870,7 @@ func presignVerifyShare(presign *Presign, party tss.PartyID) (signVerifyShare, b
 		return signVerifyShare{}, false
 	}
 	for _, vs := range presign.state.verifyShares {
-		if vs.party == party {
+		if vs.Party == party {
 			return vs, true
 		}
 	}

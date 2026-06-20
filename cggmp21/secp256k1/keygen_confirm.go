@@ -9,6 +9,7 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -77,6 +78,10 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 	if k == nil {
 		return nil, errors.New("nil key share")
 	}
+	commitmentsHash, err := keygenCommitmentsHash(k.state.groupCommitments)
+	if err != nil {
+		return nil, err
+	}
 	return &KeygenConfirmation{
 		SessionID:       k.state.paillierProofSessionID,
 		Sender:          k.state.party,
@@ -84,16 +89,20 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 		Parties:         slices.Clone(k.state.parties),
 		PublicKey:       slices.Clone(k.state.publicKey),
 		TranscriptHash:  slices.Clone(k.state.keygenTranscriptHash),
-		CommitmentsHash: keygenCommitmentsHash(k.state.groupCommitments),
+		CommitmentsHash: commitmentsHash,
 		ChainCode:       slices.Clone(k.state.chainCode),
 		PlanHash:        slices.Clone(k.state.planHash),
 	}, nil
 }
 
-func keygenCommitmentsHash(commitments [][]byte) []byte {
+func keygenCommitmentsHash(commitments []*secp.Point) ([]byte, error) {
+	commitmentBytes, err := secp.CommitmentPointsBytes(commitments)
+	if err != nil {
+		return nil, err
+	}
 	t := transcript.New(keygenCommitmentsHashLabel)
-	t.AppendBytesList("group_commitments", commitments)
-	return t.Sum()
+	t.AppendBytesList("group_commitments", commitmentBytes)
+	return t.Sum(), nil
 }
 
 // Validate performs structural checks on the confirmation.

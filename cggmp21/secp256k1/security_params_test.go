@@ -168,7 +168,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, keyShareWire{}, shares[1].state.securityParams)
+	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, 18, shares[1].state.securityParams)
 	if _, err := tss.DecodeBinaryWithLimits[KeyShare](keyRaw, limits); err == nil {
 		t.Fatal("key share accepted retired flattened security params")
 	}
@@ -178,7 +178,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presignRaw = flattenSecurityParamsRecordForTest(t, presignRaw, presignWireType, presignWire{}, presigns[1].state.securityParams)
+	presignRaw = flattenSecurityParamsRecordForTest(t, presignRaw, presignWireType, mustWireFieldTag(t, presignWire{}, "SecurityParams"), presigns[1].state.securityParams)
 	if _, err := tss.DecodeBinaryWithLimits[Presign](presignRaw, limits); err == nil {
 		t.Fatal("presign accepted retired flattened security params")
 	}
@@ -188,20 +188,16 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareRaw = flattenSecurityParamsRecordForTest(t, reshareRaw, resharePlanWireType, resharePlanWire{}, resharePlan.state.securityParams)
+	reshareRaw = flattenSecurityParamsRecordForTest(t, reshareRaw, resharePlanWireType, mustWireFieldTag(t, resharePlanWire{}, "SecurityParams"), resharePlan.state.securityParams)
 	if _, err := tss.DecodeBinaryWithLimits[ResharePlan](reshareRaw, resharePlan.limits); err == nil {
 		t.Fatal("reshare plan accepted retired flattened security params")
 	}
 }
 
-func flattenSecurityParamsRecordForTest(t *testing.T, raw []byte, wireType string, model any, params SecurityParams) []byte {
+func flattenSecurityParamsRecordForTest(t *testing.T, raw []byte, wireType string, recordTag uint16, params SecurityParams) []byte {
 	t.Helper()
 
 	version, fields, err := wire.UnmarshalFields(raw, wireType)
-	if err != nil {
-		t.Fatal(err)
-	}
-	recordTag, err := wire.FieldTag(model, "SecurityParams")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -224,4 +220,13 @@ func flattenSecurityParamsRecordForTest(t *testing.T, raw []byte, wireType strin
 		t.Fatal(err)
 	}
 	return raw
+}
+
+func mustWireFieldTag(t *testing.T, model any, field string) uint16 {
+	t.Helper()
+	tag, err := wire.FieldTag(model, field)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return tag
 }

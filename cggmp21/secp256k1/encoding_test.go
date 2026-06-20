@@ -53,15 +53,8 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	if !slices.Equal(decodedMeta.Parties, shareMeta.Parties) {
 		t.Fatal("party order changed after canonical round trip")
 	}
-	wireValue, err := encodeKeyShareWire(shares[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	if wireValue.PaillierPrivateKey != shares[1].state.paillierPrivateKey {
-		t.Fatal("key share wire DTO did not retain the typed Paillier private key")
-	}
-	if wireValue.PaillierProofSessionID != shares[1].state.paillierProofSessionID {
-		t.Fatal("key share wire DTO did not retain the typed Paillier proof session ID")
+	if decoded.state.paillierPrivateKey == nil {
+		t.Fatal("decoded key share lost typed Paillier private key")
 	}
 	if decoded.state.paillierProofSessionID != shares[1].state.paillierProofSessionID {
 		t.Fatal("Paillier proof session ID mismatch after canonical round trip")
@@ -116,14 +109,11 @@ func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 func TestCGGMP21KeyShareRejectsMalformedKeygenConfirmations(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
-	w, err := encodeKeyShareWire(shares[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	data := w.PartyData[1]
-	data.KeygenConfirmation.Sender = 2
-	w.PartyData[1] = data
-	if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
+	malformed := cloneKeyShareValue(shares[1])
+	data := malformed.state.partyData[1]
+	data.keygenConfirmation.Sender = 2
+	malformed.state.partyData[1] = data
+	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("key share accepted confirmation sender that did not match the party-data key")
 	}
 }
@@ -146,44 +136,45 @@ func TestCGGMP21KeyShareRejectsIncompleteProductionMaterial(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
-		mutate func(*keyShareWire)
+		mutate func(*KeyShare)
 	}{
-		{name: "verification share", mutate: func(w *keyShareWire) {
-			data := w.PartyData[1]
-			data.VerificationShare = nil
-			w.PartyData[1] = data
+		{name: "verification share", mutate: func(k *KeyShare) {
+			data := k.state.partyData[1]
+			data.verificationShare = nil
+			k.state.partyData[1] = data
 		}},
-		{name: "paillier public key", mutate: func(w *keyShareWire) {
-			data := w.PartyData[1]
-			data.PaillierPublicKey = nil
-			w.PartyData[1] = data
+		{name: "paillier public key", mutate: func(k *KeyShare) {
+			data := k.state.partyData[1]
+			data.paillierPublicKey = nil
+			k.state.partyData[1] = data
 		}},
-		{name: "paillier proof", mutate: func(w *keyShareWire) {
-			data := w.PartyData[1]
-			data.PaillierProof = nil
-			w.PartyData[1] = data
+		{name: "paillier proof", mutate: func(k *KeyShare) {
+			data := k.state.partyData[1]
+			data.paillierProof = nil
+			k.state.partyData[1] = data
 		}},
-		{name: "Ring-Pedersen parameters", mutate: func(w *keyShareWire) {
-			data := w.PartyData[1]
-			data.RingPedersenParams = nil
-			w.PartyData[1] = data
+		{name: "Ring-Pedersen parameters", mutate: func(k *KeyShare) {
+			data := k.state.partyData[1]
+			data.ringPedersenParams = nil
+			k.state.partyData[1] = data
 		}},
-		{name: "Ring-Pedersen proof", mutate: func(w *keyShareWire) {
-			data := w.PartyData[1]
-			data.RingPedersenProof = nil
-			w.PartyData[1] = data
+		{name: "Ring-Pedersen proof", mutate: func(k *KeyShare) {
+			data := k.state.partyData[1]
+			data.ringPedersenProof = nil
+			k.state.partyData[1] = data
 		}},
-		{name: "share proof", mutate: func(w *keyShareWire) { w.ShareProof = nil }},
-		{name: "keygen transcript hash", mutate: func(w *keyShareWire) { w.KeygenTranscriptHash = nil }},
+		{name: "share proof", mutate: func(k *KeyShare) { k.state.shareProof = nil }},
+		{name: "keygen transcript hash", mutate: func(k *KeyShare) { k.state.keygenTranscriptHash = nil }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			w, err := encodeKeyShareWire(shares[1])
-			if err != nil {
-				t.Fatal(err)
+			mutated := cloneKeyShareValue(shares[1])
+			tc.mutate(mutated)
+			raw, err := mutated.MarshalWireMessage(wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+			if err == nil {
+				_, err = tss.DecodeBinary[KeyShare](raw)
 			}
-			tc.mutate(w)
-			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
+			if err == nil {
 				t.Fatalf("key share missing %s decoded", tc.name)
 			}
 		})
@@ -194,13 +185,10 @@ func TestCGGMP21KeyShareRejectsInvalidTypedWireFields(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 3)
-	w, err := encodeKeyShareWire(shares[1])
-	if err != nil {
-		t.Fatal(err)
-	}
-	w.PaillierPrivateKey = nil
-	if _, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits())); err == nil {
-		t.Fatal("key share wire DTO accepted nil Paillier private key")
+	missingPrivate := cloneKeyShareValue(shares[1])
+	missingPrivate.state.paillierPrivateKey = nil
+	if _, err := missingPrivate.MarshalWireMessage(wire.WithFieldLimitsForMarshal(testLimits().fieldLimits())); err == nil {
+		t.Fatal("key share state codec accepted nil Paillier private key")
 	}
 
 	raw, err := shares[1].MarshalBinaryWithLimits(testLimits())
@@ -209,17 +197,17 @@ func TestCGGMP21KeyShareRejectsInvalidTypedWireFields(t *testing.T) {
 	}
 	for _, tc := range []struct {
 		name  string
-		field string
+		tag   uint16
 		value []byte
 	}{
-		{name: "empty Paillier private key", field: "PaillierPrivateKey", value: []byte{}},
-		{name: "malformed Paillier private key", field: "PaillierPrivateKey", value: []byte{1}},
-		{name: "short Paillier proof session ID", field: "PaillierProofSessionID", value: make([]byte, 31)},
-		{name: "long Paillier proof session ID", field: "PaillierProofSessionID", value: make([]byte, 33)},
+		{name: "empty Paillier private key", tag: 9, value: []byte{}},
+		{name: "malformed Paillier private key", tag: 9, value: []byte{1}},
+		{name: "short Paillier proof session ID", tag: 12, value: make([]byte, 31)},
+		{name: "long Paillier proof session ID", tag: 12, value: make([]byte, 33)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, tc.field, tc.value)
+			mutated, err := testutil.RewriteWireField(raw, keyShareWireType, tc.tag, tc.value)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -235,20 +223,17 @@ func TestCGGMP21KeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 	shares := CachedKeygenShares(t, 2, 3)
 	for _, tc := range []struct {
 		name   string
-		mutate func(*keyShareWire)
+		mutate func(*keyShareState)
 	}{
-		{name: "missing", mutate: func(w *keyShareWire) { delete(w.PartyData, 3) }},
-		{name: "extra", mutate: func(w *keyShareWire) { w.PartyData[4] = w.PartyData[3] }},
-		{name: "broadcast", mutate: func(w *keyShareWire) { w.PartyData[tss.BroadcastPartyId] = w.PartyData[3] }},
+		{name: "missing", mutate: func(s *keyShareState) { delete(s.partyData, 3) }},
+		{name: "extra", mutate: func(s *keyShareState) { s.partyData[4] = s.partyData[3] }},
+		{name: "broadcast", mutate: func(s *keyShareState) { s.partyData[tss.BroadcastPartyId] = s.partyData[3] }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			w, err := encodeKeyShareWire(shares[1])
-			if err != nil {
-				t.Fatal(err)
-			}
-			tc.mutate(w)
-			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareWireForTest(t, w)); err == nil {
+			mutated := cloneKeyShareValue(shares[1])
+			tc.mutate(mutated.state)
+			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareStateForTest(t, mutated.state)); err == nil {
 				t.Fatalf("key share accepted %s party data", tc.name)
 			}
 		})
@@ -265,9 +250,9 @@ func TestCGGMP21KeyShareRejectsLocalPaillierKeyMismatch(t *testing.T) {
 	}
 }
 
-func marshalKeyShareWireForTest(t testing.TB, w *keyShareWire) []byte {
+func marshalKeyShareStateForTest(t testing.TB, state *keyShareState) []byte {
 	t.Helper()
-	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	raw, err := state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -345,7 +330,7 @@ func TestCGGMP21KeyShareRejectsOverflowThreshold(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "Threshold", wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 2, wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}

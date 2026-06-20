@@ -44,6 +44,22 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 	if k == nil || k.state == nil {
 		return KeySharePublicMetadata{}, false
 	}
+	groupCommitments, err := secp.CommitmentPointsBytes(k.state.groupCommitments)
+	if err != nil {
+		return KeySharePublicMetadata{}, false
+	}
+	shareProof, err := proofWireBytes(k.state.shareProof)
+	if err != nil {
+		return KeySharePublicMetadata{}, false
+	}
+	logCiphertext, err := bigIntWireBytes(k.state.logCiphertext)
+	if err != nil {
+		return KeySharePublicMetadata{}, false
+	}
+	logProof, err := proofWireBytes(k.state.logProof)
+	if err != nil {
+		return KeySharePublicMetadata{}, false
+	}
 	return KeySharePublicMetadata{
 		SecurityParams:       k.state.securityParams,
 		Party:                k.state.party,
@@ -51,15 +67,15 @@ func (k *KeyShare) PublicMetadata() (KeySharePublicMetadata, bool) {
 		Parties:              k.state.parties.Clone(),
 		PublicKey:            bytes.Clone(k.state.publicKey),
 		ChainCode:            bytes.Clone(k.state.chainCode),
-		GroupCommitments:     tss.CloneByteSlices(k.state.groupCommitments),
+		GroupCommitments:     groupCommitments,
 		PaillierProofSession: k.state.paillierProofSessionID,
 		PaillierProofDomain:  k.state.paillierProofDomain,
 		ResharePlanHash:      bytes.Clone(k.state.resharePlanHash),
 		PlanHash:             bytes.Clone(k.state.planHash),
-		ShareProof:           bytes.Clone(k.state.shareProof),
+		ShareProof:           shareProof,
 		KeygenTranscriptHash: bytes.Clone(k.state.keygenTranscriptHash),
-		LogCiphertext:        bytes.Clone(k.state.logCiphertext),
-		LogProof:             bytes.Clone(k.state.logProof),
+		LogCiphertext:        logCiphertext,
+		LogProof:             logProof,
 	}, true
 }
 
@@ -214,10 +230,10 @@ func (k KeyShare) redactedString() string {
 		k.state.paillierProofDomain,
 		len(k.state.resharePlanHash),
 		len(k.state.planHash),
-		len(k.state.shareProof),
+		proofWireSize(k.state.shareProof),
 		k.state.keygenTranscriptHash,
-		len(k.state.logCiphertext),
-		len(k.state.logProof),
+		bigIntWireSize(k.state.logCiphertext),
+		proofWireSize(k.state.logProof),
 		confirmationCount,
 	)
 }
@@ -231,6 +247,71 @@ func wireMessageSize(msg wire.Message) int {
 		return 0
 	}
 	return len(raw)
+}
+
+func proofWireBytes(proof interface {
+	MarshalWireValue() ([]byte, error)
+}) ([]byte, error) {
+	if proof == nil {
+		return nil, nil
+	}
+	switch p := any(proof).(type) {
+	case *schnorr.Proof:
+		if p == nil {
+			return nil, nil
+		}
+	case *zkpai.LogStarProof:
+		if p == nil {
+			return nil, nil
+		}
+	}
+	return proof.MarshalWireValue()
+}
+
+func proofWireSize(proof interface {
+	MarshalWireValue() ([]byte, error)
+}) int {
+	raw, err := proofWireBytes(proof)
+	if err != nil {
+		return 0
+	}
+	return len(raw)
+}
+
+func bigIntWireSize(x *big.Int) int {
+	raw, err := bigIntWireBytes(x)
+	if err != nil {
+		return 0
+	}
+	return len(raw)
+}
+
+func bigIntWireBytes(x *big.Int) ([]byte, error) {
+	if x == nil {
+		return nil, nil
+	}
+	return wire.EncodeBigPos(x)
+}
+
+func cloneBigInt(x *big.Int) *big.Int {
+	if x == nil {
+		return nil
+	}
+	return new(big.Int).Set(x)
+}
+
+func cloneCommitmentPoints(in []*secp.Point) []*secp.Point {
+	if in == nil {
+		return nil
+	}
+	out := make([]*secp.Point, len(in))
+	for i, commitment := range in {
+		if commitment == nil {
+			continue
+		}
+		out[i] = secp.Clone(commitment)
+	}
+	return out
 }
 
 // UnmarshalBinary decodes a canonical CGGMP21 key-share record with size caps.
@@ -312,7 +393,13 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		return errors.New("group commitments length must equal threshold")
 	}
 	for i, commitment := range k.state.groupCommitments {
-		if _, err := secp.PointFromBytes(commitment); err != nil {
+		if commitment == nil {
+			if i == 0 {
+				return errors.New("missing group commitment 0")
+			}
+			continue
+		}
+		if _, err := secp.PointBytes(commitment); err != nil {
 			return fmt.Errorf("invalid group commitment %d: %w", i, err)
 		}
 	}
@@ -335,16 +422,16 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	} else if len(k.state.resharePlanHash) != 0 {
 		return errors.New("reshare plan hash is only valid for reshare key shares")
 	}
-	if len(k.state.shareProof) == 0 {
+	if k.state.shareProof == nil {
 		return errors.New("missing share proof")
 	}
 	if len(k.state.keygenTranscriptHash) == 0 {
 		return errors.New("missing keygen transcript hash")
 	}
-	if len(k.state.logCiphertext) == 0 {
+	if k.state.logCiphertext == nil {
 		return errors.New("missing log ciphertext")
 	}
-	if len(k.state.logProof) == 0 {
+	if k.state.logProof == nil {
 		return errors.New("missing log proof")
 	}
 	for _, id := range k.state.parties {
@@ -413,23 +500,14 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
 		return errors.New("paillier public/private key mismatch")
 	}
-	shareProof, err := tss.DecodeBinary[schnorr.Proof](k.state.shareProof)
-	if err != nil {
-		return fmt.Errorf("invalid share proof: %w", err)
-	}
 	verificationShare, ok := k.verificationShare(k.state.party)
 	if !ok {
 		return errors.New("missing local verification share")
 	}
-	if !schnorr.Verify(k.state.keygenTranscriptHash, verificationShare, shareProof) {
+	if !schnorr.Verify(k.state.keygenTranscriptHash, verificationShare, k.state.shareProof) {
 		return errors.New("invalid local share proof")
 	}
-	logProof, err := tss.DecodeBinary[zkpai.LogStarProof](k.state.logProof)
-	if err != nil {
-		return fmt.Errorf("invalid log proof: %w", err)
-	}
-	ciphertext := new(big.Int).SetBytes(k.state.logCiphertext)
-	if err := pk.ValidateCiphertext(ciphertext); err != nil {
+	if err := pk.ValidateCiphertext(k.state.logCiphertext); err != nil {
 		return fmt.Errorf("invalid log ciphertext: %w", err)
 	}
 	rp, err := k.ringPedersenPublicFor(k.state.party, limits)
@@ -446,12 +524,12 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   pk,
-		C:           ciphertext,
+		C:           new(big.Int).Set(k.state.logCiphertext),
 		X:           verificationPoint,
 		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
 		VerifierAux: rp,
 	}
-	if err := zkpai.VerifyLogStar(k.state.securityParams, logDomain, logStmt, logProof); err != nil {
+	if err := zkpai.VerifyLogStar(k.state.securityParams, logDomain, logStmt, k.state.logProof); err != nil {
 		return fmt.Errorf("invalid log proof: %w", err)
 	}
 	return nil
@@ -517,8 +595,15 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 		return fmt.Errorf("group commitments too large: %d > %d", len(k.state.groupCommitments), limits.Threshold.MaxThreshold)
 	}
 	for i, commitment := range k.state.groupCommitments {
-		if len(commitment) > limits.Curve.MaxPointBytes {
-			return fmt.Errorf("group commitment %d too large: %d > %d", i, len(commitment), limits.Curve.MaxPointBytes)
+		if commitment == nil {
+			continue
+		}
+		commitmentBytes, err := secp.PointBytes(commitment)
+		if err != nil {
+			return fmt.Errorf("group commitment %d: %w", i, err)
+		}
+		if len(commitmentBytes) > limits.Curve.MaxPointBytes {
+			return fmt.Errorf("group commitment %d too large: %d > %d", i, len(commitmentBytes), limits.Curve.MaxPointBytes)
 		}
 	}
 	if len(k.state.partyData) > limits.Threshold.MaxParties {
@@ -571,14 +656,32 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 			return fmt.Errorf("Ring-Pedersen proof for party %d too large: %d > %d", id, len(ringPedersenProofBytes), limits.Paillier.MaxProofBytes)
 		}
 	}
-	if len(k.state.shareProof) > limits.ZK.MaxProofBytes {
-		return fmt.Errorf("share proof too large: %d > %d", len(k.state.shareProof), limits.ZK.MaxProofBytes)
+	if k.state.shareProof != nil {
+		shareProofBytes, err := proofWireBytes(k.state.shareProof)
+		if err != nil {
+			return fmt.Errorf("share proof: %w", err)
+		}
+		if len(shareProofBytes) > limits.ZK.MaxProofBytes {
+			return fmt.Errorf("share proof too large: %d > %d", len(shareProofBytes), limits.ZK.MaxProofBytes)
+		}
 	}
-	if len(k.state.logCiphertext) > limits.Paillier.MaxCiphertextBytes {
-		return fmt.Errorf("log ciphertext too large: %d > %d", len(k.state.logCiphertext), limits.Paillier.MaxCiphertextBytes)
+	if k.state.logCiphertext != nil {
+		logCiphertextBytes, err := wire.EncodeBigPos(k.state.logCiphertext)
+		if err != nil {
+			return fmt.Errorf("log ciphertext: %w", err)
+		}
+		if len(logCiphertextBytes) > limits.Paillier.MaxCiphertextBytes {
+			return fmt.Errorf("log ciphertext too large: %d > %d", len(logCiphertextBytes), limits.Paillier.MaxCiphertextBytes)
+		}
 	}
-	if len(k.state.logProof) > limits.ZK.MaxProofBytes {
-		return fmt.Errorf("log proof too large: %d > %d", len(k.state.logProof), limits.ZK.MaxProofBytes)
+	if k.state.logProof != nil {
+		logProofBytes, err := proofWireBytes(k.state.logProof)
+		if err != nil {
+			return fmt.Errorf("log proof: %w", err)
+		}
+		if len(logProofBytes) > limits.ZK.MaxProofBytes {
+			return fmt.Errorf("log proof too large: %d > %d", len(logProofBytes), limits.ZK.MaxProofBytes)
+		}
 	}
 	confirmationCount := 0
 	for _, data := range k.state.partyData {
@@ -785,16 +888,16 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		publicKey:              slices.Clone(k.state.publicKey),
 		chainCode:              slices.Clone(k.state.chainCode),
 		secret:                 k.state.secret.Clone(),
-		groupCommitments:       tss.CloneByteSlices(k.state.groupCommitments),
+		groupCommitments:       cloneCommitmentPoints(k.state.groupCommitments),
 		partyData:              tss.CloneMap(k.state.partyData),
 		paillierPrivateKey:     k.state.paillierPrivateKey.Clone(),
 		paillierProofSessionID: k.state.paillierProofSessionID,
 		paillierProofDomain:    k.state.paillierProofDomain,
 		resharePlanHash:        slices.Clone(k.state.resharePlanHash),
 		planHash:               slices.Clone(k.state.planHash),
-		shareProof:             slices.Clone(k.state.shareProof),
+		shareProof:             k.state.shareProof.Clone(),
 		keygenTranscriptHash:   slices.Clone(k.state.keygenTranscriptHash),
-		logCiphertext:          slices.Clone(k.state.logCiphertext),
-		logProof:               slices.Clone(k.state.logProof),
+		logCiphertext:          cloneBigInt(k.state.logCiphertext),
+		logProof:               k.state.logProof.Clone(),
 	}}
 }

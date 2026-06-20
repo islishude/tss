@@ -25,6 +25,9 @@ type Proof struct {
 
 // Clone returns a copy of Proof
 func (in *Proof) Clone() *Proof {
+	if in == nil {
+		return nil
+	}
 	return &Proof{
 		Commitment: slices.Clone(in.Commitment),
 		Response:   slices.Clone(in.Response),
@@ -97,6 +100,15 @@ func (p *Proof) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(p)
 }
 
+// MarshalWireValue encodes the proof as a canonical TLV value for custom wire
+// fields.
+func (p *Proof) MarshalWireValue() ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil Schnorr proof")
+	}
+	return p.MarshalBinary()
+}
+
 // UnmarshalBinary decodes a TLV Schnorr proof record.
 func (p *Proof) UnmarshalBinary(in []byte) error {
 	var decoded Proof
@@ -105,6 +117,15 @@ func (p *Proof) UnmarshalBinary(in []byte) error {
 	}
 	*p = decoded
 	return nil
+}
+
+// UnmarshalWireValue decodes the proof from a canonical custom wire field
+// value.
+func (p *Proof) UnmarshalWireValue(in []byte) error {
+	if p == nil {
+		return errors.New("nil Schnorr proof")
+	}
+	return p.UnmarshalBinary(in)
 }
 
 // Validate checks the canonical curve point and scalar encodings in the proof.

@@ -67,3 +67,15 @@ func (p *Proof) UnmarshalBinary(in []byte) error {
 	*p = decoded
 	return nil
 }
+
+// MarshalWireValue encodes the proof as a canonical TLV proof record for
+// internal/wire's custom field kind.
+func (p *Proof) MarshalWireValue() ([]byte, error) {
+	return p.MarshalBinary()
+}
+
+// UnmarshalWireValue decodes a canonical TLV proof record for internal/wire's
+// custom field kind.
+func (p *Proof) UnmarshalWireValue(in []byte) error {
+	return p.UnmarshalBinary(in)
+}

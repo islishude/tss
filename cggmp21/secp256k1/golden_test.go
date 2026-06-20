@@ -85,8 +85,8 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 	chiPoint := secp.ScalarBaseMult(twoScalar)
 	payload := presignRound3Payload{
 		Delta:    big.NewInt(42),
-		KPoint:   secp.WirePoint{P: kPoint},
-		ChiPoint: secp.WirePoint{P: chiPoint},
+		KPoint:   kPoint,
+		ChiPoint: chiPoint,
 		Proof:    proof,
 		PlanHash: bytes.Repeat([]byte{0x91}, 32),
 	}

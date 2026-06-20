@@ -12,104 +12,49 @@ import (
 const signVerifyShareRecordFixedBytes = 2 + 4*(2+4) + 4
 
 type signVerifyShare struct {
-	party    tss.PartyID
-	kPoint   *secp.Point
-	chiPoint *secp.Point
-	proof    signprep.Proof
+	Party    tss.PartyID     `wire:"1,u32"`
+	KPoint   *secp.Point     `wire:"2,custom,len=33"`
+	ChiPoint *secp.Point     `wire:"3,custom,len=33"`
+	Proof    *signprep.Proof `wire:"4,custom,max_bytes=signprep_proof"`
 }
 
-func (s signVerifyShare) clone() signVerifyShare {
+// Clone returns a deep copy of signVerifyShare
+func (s signVerifyShare) Clone() signVerifyShare {
 	return signVerifyShare{
-		party:    s.party,
-		kPoint:   secp.Clone(s.kPoint),
-		chiPoint: secp.Clone(s.chiPoint),
-		proof:    cloneSignPrepProof(s.proof),
+		Party:    s.Party,
+		KPoint:   secp.Clone(s.KPoint),
+		ChiPoint: secp.Clone(s.ChiPoint),
+		Proof:    s.Proof.Clone(),
 	}
 }
 
 func (s signVerifyShare) kPointBytes() ([]byte, error) {
-	return secp.PointBytes(s.kPoint)
+	return secp.PointBytes(s.KPoint)
 }
 
 func (s signVerifyShare) chiPointBytes() ([]byte, error) {
-	return secp.PointBytes(s.chiPoint)
+	return secp.PointBytes(s.ChiPoint)
 }
 
 func (s signVerifyShare) proofBytes() ([]byte, error) {
-	return s.proof.MarshalBinary()
+	return s.Proof.MarshalBinary()
 }
 
-type signVerifyShareWire struct {
-	Party    tss.PartyID    `wire:"1,u32"`
-	KPoint   secp.WirePoint `wire:"2,custom,len=33"`
-	ChiPoint secp.WirePoint `wire:"3,custom,len=33"`
-	Proof    signprep.Proof `wire:"4,nested,max_bytes=signprep_proof"`
-}
-
-// Validate checks the private wire record's structural invariants.
-func (w signVerifyShareWire) Validate() error {
-	if w.Party == tss.BroadcastPartyId {
+// Validate checks the private sign verification record's structural invariants.
+func (s signVerifyShare) Validate() error {
+	if s.Party == tss.BroadcastPartyId {
 		return errors.New("sign verify share: zero party")
 	}
-	if _, err := secp.PointBytes(w.KPoint.P); err != nil {
+	if _, err := secp.PointBytes(s.KPoint); err != nil {
 		return fmt.Errorf("sign verify share: invalid KPoint: %w", err)
 	}
-	if _, err := secp.PointBytes(w.ChiPoint.P); err != nil {
+	if _, err := secp.PointBytes(s.ChiPoint); err != nil {
 		return fmt.Errorf("sign verify share: invalid ChiPoint: %w", err)
 	}
-	if err := w.Proof.Validate(); err != nil {
+	if err := s.Proof.Validate(); err != nil {
 		return fmt.Errorf("sign verify share: invalid proof: %w", err)
 	}
 	return nil
-}
-
-func cloneSignPrepProof(p signprep.Proof) signprep.Proof {
-	q := (&p).Clone()
-	if q == nil {
-		return signprep.Proof{}
-	}
-	return *q
-}
-
-func encodeSignVerifyShareWire(s signVerifyShare) signVerifyShareWire {
-	return signVerifyShareWire{
-		Party:    s.party,
-		KPoint:   secp.WirePoint{P: s.kPoint},
-		ChiPoint: secp.WirePoint{P: s.chiPoint},
-		Proof:    cloneSignPrepProof(s.proof),
-	}
-}
-
-func decodeSignVerifyShareWire(w signVerifyShareWire) (signVerifyShare, error) {
-	if err := w.Validate(); err != nil {
-		return signVerifyShare{}, err
-	}
-	return signVerifyShare{
-		party:    w.Party,
-		kPoint:   secp.Clone(w.KPoint.P),
-		chiPoint: secp.Clone(w.ChiPoint.P),
-		proof:    cloneSignPrepProof(w.Proof),
-	}, nil
-}
-
-func encodeSignVerifyShareWires(shares []signVerifyShare) []signVerifyShareWire {
-	out := make([]signVerifyShareWire, 0, len(shares))
-	for _, share := range shares {
-		out = append(out, encodeSignVerifyShareWire(share))
-	}
-	return out
-}
-
-func decodeSignVerifyShareWires(wires []signVerifyShareWire) ([]signVerifyShare, error) {
-	out := make([]signVerifyShare, 0, len(wires))
-	for i, w := range wires {
-		share, err := decodeSignVerifyShareWire(w)
-		if err != nil {
-			return nil, fmt.Errorf("verify share %d: %w", i, err)
-		}
-		out = append(out, share)
-	}
-	return out, nil
 }
 
 // validateSignVerifyShares checks that the verify shares set matches the signer
@@ -122,19 +67,19 @@ func validateSignVerifyShares(signers tss.PartySet, shares []signVerifyShare, li
 	totalBytes := 4 // recordlist item count
 	seen := make(map[tss.PartyID]bool, len(shares))
 	for i, share := range shares {
-		if !tss.ContainsParty(signers, share.party) {
-			return fmt.Errorf("verify share for non-signer party %d", share.party)
+		if !tss.ContainsParty(signers, share.Party) {
+			return fmt.Errorf("verify share for non-signer party %d", share.Party)
 		}
-		if seen[share.party] {
-			return fmt.Errorf("duplicate verify share for party %d", share.party)
+		if seen[share.Party] {
+			return fmt.Errorf("duplicate verify share for party %d", share.Party)
 		}
-		seen[share.party] = true
-		if share.party != signers[i] {
-			return fmt.Errorf("verify share party %d out of canonical signer order at index %d", share.party, i)
+		seen[share.Party] = true
+		if share.Party != signers[i] {
+			return fmt.Errorf("verify share party %d out of canonical signer order at index %d", share.Party, i)
 		}
 		kPoint, chiPoint, proof, err := signVerifyShareBytes(share)
 		if err != nil {
-			return fmt.Errorf("verify share party %d: %w", share.party, err)
+			return fmt.Errorf("verify share party %d: %w", share.Party, err)
 		}
 		if len(kPoint) > limits.Curve.MaxPointBytes {
 			return fmt.Errorf("sign verify share KPoint too large: %d > %d", len(kPoint), limits.Curve.MaxPointBytes)
@@ -166,7 +111,7 @@ func signVerifyShareBytes(s signVerifyShare) ([]byte, []byte, []byte, error) {
 	if err != nil {
 		return nil, nil, nil, fmt.Errorf("invalid ChiPoint: %w", err)
 	}
-	if err := s.proof.Validate(); err != nil {
+	if err := s.Proof.Validate(); err != nil {
 		return nil, nil, nil, fmt.Errorf("invalid proof: %w", err)
 	}
 	proof, err := s.proofBytes()

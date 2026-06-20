@@ -97,7 +97,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
 	k.state.parties = tss.NewPartySet(1)
-	k.state.groupCommitments = [][]byte{{1}, {2}}
+	k.state.groupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
 	paillierMaterial, err := paillierPublicMaterialFromSnapshot(testPaillierPublicShare(t), testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -127,6 +127,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	}
 
 	meta := mustKeyShareMetadata(t, k)
+	originalCommitment := append([]byte(nil), meta.GroupCommitments[0]...)
 	meta.Parties[0] = 99
 	meta.GroupCommitments[0][0] = 99
 	verificationShare, ok := k.VerificationShare(1)
@@ -153,6 +154,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	confirmation.Sender = 99
 
 	dataAfter := k.state.partyData[1]
+	metaAfter := mustKeyShareMetadata(t, k)
 	paillierAfter, err := (paillierPublicMaterial{Party: 1, PublicKey: dataAfter.paillierPublicKey, Proof: dataAfter.paillierProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -162,7 +164,7 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 		t.Fatal(err)
 	}
 	if k.state.parties[0] != 1 ||
-		k.state.groupCommitments[0][0] != 1 ||
+		metaAfter.GroupCommitments[0][0] != originalCommitment[0] ||
 		dataAfter.verificationShare[0] != 3 ||
 		!reflect.DeepEqual(paillierBefore, paillierAfter) ||
 		!reflect.DeepEqual(ringPedersenBefore, ringPedersenAfter) ||

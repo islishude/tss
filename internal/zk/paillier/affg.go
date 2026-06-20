@@ -569,21 +569,21 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 
 // affGProofWire is the wire DTO for AffGProof.
 type affGProofWire struct {
-	A              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
-	Bx             secp.WirePoint `wire:"3,custom,max_bytes=point"`
-	By             *big.Int       `wire:"4,bigpos,max_bytes=paillier_modulus"`
-	E              *big.Int       `wire:"5,bigpos,max_bytes=paillier_modulus"`
-	S              *big.Int       `wire:"6,bigpos,max_bytes=paillier_modulus"`
-	F              *big.Int       `wire:"7,bigpos,max_bytes=paillier_modulus"`
-	T              *big.Int       `wire:"8,bigpos,max_bytes=paillier_modulus"`
-	Y              *big.Int       `wire:"9,bigpos,max_bytes=paillier_modulus"`
-	Z1             *big.Int       `wire:"10,bigint,max_bytes=signed_response"`
-	Z2             *big.Int       `wire:"11,bigint,max_bytes=signed_response"`
-	Z3             *big.Int       `wire:"12,bigint,max_bytes=signed_response"`
-	Z4             *big.Int       `wire:"13,bigint,max_bytes=signed_response"`
-	W              *big.Int       `wire:"14,bigpos,max_bytes=paillier_modulus"`
-	WY             *big.Int       `wire:"15,bigpos,max_bytes=paillier_modulus"`
-	TranscriptHash []byte         `wire:"16,bytes"`
+	A              *big.Int    `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	Bx             *secp.Point `wire:"3,custom,max_bytes=point"`
+	By             *big.Int    `wire:"4,bigpos,max_bytes=paillier_modulus"`
+	E              *big.Int    `wire:"5,bigpos,max_bytes=paillier_modulus"`
+	S              *big.Int    `wire:"6,bigpos,max_bytes=paillier_modulus"`
+	F              *big.Int    `wire:"7,bigpos,max_bytes=paillier_modulus"`
+	T              *big.Int    `wire:"8,bigpos,max_bytes=paillier_modulus"`
+	Y              *big.Int    `wire:"9,bigpos,max_bytes=paillier_modulus"`
+	Z1             *big.Int    `wire:"10,bigint,max_bytes=signed_response"`
+	Z2             *big.Int    `wire:"11,bigint,max_bytes=signed_response"`
+	Z3             *big.Int    `wire:"12,bigint,max_bytes=signed_response"`
+	Z4             *big.Int    `wire:"13,bigint,max_bytes=signed_response"`
+	W              *big.Int    `wire:"14,bigpos,max_bytes=paillier_modulus"`
+	WY             *big.Int    `wire:"15,bigpos,max_bytes=paillier_modulus"`
+	TranscriptHash []byte      `wire:"16,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for affGProofWire.
@@ -605,7 +605,7 @@ func (p *AffGProof) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, erro
 	}
 	return wire.Marshal(affGProofWire{
 		A:              p.A,
-		Bx:             secp.WirePoint{P: p.Bx},
+		Bx:             p.Bx,
 		By:             p.By,
 		E:              p.E,
 		S:              p.S,
@@ -639,23 +639,7 @@ func (p *AffGProof) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption
 	if err := wire.Unmarshal(in, &w, opts...); err != nil {
 		return err
 	}
-	decoded := AffGProof{
-		A:              w.A,
-		Bx:             w.Bx.P,
-		By:             w.By,
-		E:              w.E,
-		S:              w.S,
-		F:              w.F,
-		T:              w.T,
-		Y:              w.Y,
-		Z1:             w.Z1,
-		Z2:             w.Z2,
-		Z3:             w.Z3,
-		Z4:             w.Z4,
-		W:              w.W,
-		WY:             w.WY,
-		TranscriptHash: w.TranscriptHash,
-	}
+	decoded := AffGProof(w)
 	if err := decoded.Validate(); err != nil {
 		return err
 	}

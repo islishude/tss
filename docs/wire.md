@@ -169,53 +169,56 @@ Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) 
 
 ## DTO Pattern
 
-Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use unexported wire
-DTOs. This includes opaque FROST/CGGMP21 key shares, CGGMP21 presigns, and the
-CGGMP21 reshare plan. The public domain object is never made mutable merely for
-serialization. The `custom` kind eliminates `*secret.Scalar ↔ []byte`
-mechanical conversions; the `bigint` / `biguint` / `bigpos` kinds eliminate
-`*big.Int ↔ []byte` conversions.
+Types with unexported fields (`secret.Scalar`, `sync.Mutex`) either use
+unexported wire DTOs or an object-level codec owned by the state type. This
+includes opaque FROST key shares, CGGMP21 presigns, and the CGGMP21 reshare
+plan. The public domain object is never made mutable merely for serialization.
+The `custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions;
+the `bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte`
+conversions.
 
-FROST and CGGMP21 KeyShare DTOs encode participant-owned public material as
-canonical `PartyID` maps. The map key is the sole owner identity; nested values
-do not duplicate it. Decoders require the map key set to match `Parties`
-exactly, reject the broadcast ID and unknown/missing parties, and validate any
-confirmation sender against its map key. FROST per-party keygen confirmations
-use `wire:"...,record,optional"` so missing confirmations are represented by an
-absent tag rather than a zero-length or one-element record list. Protocol
-ordering is still derived from `Parties`, not map iteration.
+FROST KeyShare DTOs and CGGMP21 secp256k1 `keyShareState` encode
+participant-owned public material as canonical `PartyID` maps. The map key is
+the sole owner identity; nested values do not duplicate it. Decoders require the
+map key set to match `Parties` exactly, reject the broadcast ID and
+unknown/missing parties, and validate any confirmation sender against its map
+key. FROST per-party keygen confirmations use `wire:"...,record,optional"` so
+missing confirmations are represented by an absent tag rather than a zero-length
+or one-element record list. Protocol ordering is still derived from `Parties`,
+not map iteration.
 
 When a type must completely control its TLV envelope (type ID, version, field
 order) without exposing wire-tagged exported fields, implement `MessageMarshaler`
-and `MessageUnmarshaler`. These object-level hooks delegate to an internal DTO
-while keeping the DTO and its wire tags private:
+and `MessageUnmarshaler`. These object-level hooks may delegate to an internal
+DTO, or may encode the state directly when runtime fields intentionally stay as
+domain objects:
 
 ```go
 type KeyShare struct {
-    state *keyShareState // unexported, no wire tags
+    state *keyShareState // unexported; state owns the wire tags and codec
 }
 
 func (KeyShare) WireType() string    { return "cggmp21.secp256k1.keyshare" }
 func (KeyShare) WireVersion() uint16 { return 1 }
 
 func (k KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-    w := keyShareDTOFromState(k.state)
-    return wire.Marshal(w, opts...)
+    return k.state.MarshalWireMessage(opts...)
 }
 
 func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-    var w keyShareDTO
-    if err := wire.Unmarshal(in, &w, opts...); err != nil {
+    var state keyShareState
+    if err := state.UnmarshalWireMessage(in, opts...); err != nil {
         return err
     }
-    k.state = stateFromKeyShareDTO(&w)
+    k.state = &state
     return nil
 }
 ```
 
-This approach keeps the DTO pattern but moves the object-to-DTO ceremony inside
-the type, making the public API cleaner. The wire codec still enforces all
-canonical rules through the inner `Marshal`/`Unmarshal` call on the DTO.
+This approach keeps wire ownership inside the type while allowing long-lived
+runtime state to store typed values such as `*secp.Point`, `*schnorr.Proof`,
+`*big.Int`, and `*zkpai.LogStarProof`. Bytes are produced only at wire,
+transcript, hash, and public snapshot boundaries.
 
 ```go
 type myMessageWire struct {
@@ -395,7 +398,7 @@ Current presign wire shapes are:
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
 - `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
-- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (nested signprep proof).
+- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (canonical signprep proof TLV bytes).
 - `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
 Retired `EncryptionProof`, `MTAResponseProof`, `LogProof`, and standalone
@@ -411,7 +414,7 @@ secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
 hashes, additive HD shift, consumed flag, key binding fields for the group
 public key, keygen transcript hash, and participant-set hash, and per-party
 `VerifyShares` (tag 16, a private canonical record list with one entry per
-signer: party ID, `KPoint`, `ChiPoint`, and nested signprep proof). Decoders
+signer: party ID, `KPoint`, `ChiPoint`, and canonical signprep proof TLV bytes). Decoders
 require the complete 19-field presign set. The former opaque party-triple byte
 field and standalone sign-verify-share object are intentionally not accepted.
 

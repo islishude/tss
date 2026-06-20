@@ -7,6 +7,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
 func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
@@ -51,7 +52,7 @@ func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Enve
 	return s.tryComplete()
 }
 
-func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenConfirmation, newCommitments [][]byte) error {
+func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenConfirmation, newCommitments []*secp.Point) error {
 	if c == nil {
 		return errors.New("nil reshare confirmation")
 	}
@@ -80,7 +81,11 @@ func (s *ReshareSession) verifyReshareConfirmationForPublicTranscript(c *KeygenC
 	if !bytes.Equal(c.PlanHash, s.planHash) {
 		return fmt.Errorf("reshare confirmation from party %d: %w", c.Sender, errPlanHashMismatch)
 	}
-	if !bytes.Equal(c.CommitmentsHash, keygenCommitmentsHash(newCommitments)) {
+	commitmentsHash, err := keygenCommitmentsHash(newCommitments)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(c.CommitmentsHash, commitmentsHash) {
 		return fmt.Errorf("reshare confirmation commitments mismatch from party %d", c.Sender)
 	}
 	if !bytes.Equal(c.ChainCode, s.oldChainCode) {

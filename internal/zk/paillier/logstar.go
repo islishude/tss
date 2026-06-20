@@ -318,14 +318,14 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 
 // logStarProofWire is the wire DTO for LogStarProof.
 type logStarProofWire struct {
-	S              *big.Int       `wire:"2,bigpos,max_bytes=paillier_modulus"`
-	A              *big.Int       `wire:"3,bigpos,max_bytes=paillier_modulus"`
-	Y              secp.WirePoint `wire:"4,custom,max_bytes=point"`
-	D              *big.Int       `wire:"5,bigpos,max_bytes=paillier_modulus"`
-	Z1             *big.Int       `wire:"6,bigint,max_bytes=signed_response"`
-	Z2             *big.Int       `wire:"7,bigpos,max_bytes=paillier_signed"`
-	Z3             *big.Int       `wire:"8,bigint,max_bytes=signed_response"`
-	TranscriptHash []byte         `wire:"9,bytes"`
+	S              *big.Int    `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	A              *big.Int    `wire:"3,bigpos,max_bytes=paillier_modulus"`
+	Y              *secp.Point `wire:"4,custom,max_bytes=point"`
+	D              *big.Int    `wire:"5,bigpos,max_bytes=paillier_modulus"`
+	Z1             *big.Int    `wire:"6,bigint,max_bytes=signed_response"`
+	Z2             *big.Int    `wire:"7,bigpos,max_bytes=paillier_signed"`
+	Z3             *big.Int    `wire:"8,bigint,max_bytes=signed_response"`
+	TranscriptHash []byte      `wire:"9,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for logStarProofWire.
@@ -342,7 +342,7 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	return wire.Marshal(logStarProofWire{
 		S:              p.S,
 		A:              p.A,
-		Y:              secp.WirePoint{P: p.Y},
+		Y:              p.Y,
 		D:              p.D,
 		Z1:             p.Z1,
 		Z2:             p.Z2,
@@ -351,24 +351,33 @@ func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
+// MarshalWireValue encodes the LogStarProof as a canonical TLV value for
+// custom wire fields.
+func (p *LogStarProof) MarshalWireValue() ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil LogStarProof")
+	}
+	return p.MarshalBinary()
+}
+
 // UnmarshalBinary decodes a canonical TLV LogStarProof.
 func (p *LogStarProof) UnmarshalBinary(in []byte) error {
 	var w logStarProofWire
 	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
-	decoded := LogStarProof{
-		S:              w.S,
-		A:              w.A,
-		Y:              w.Y.P,
-		D:              w.D,
-		Z1:             w.Z1,
-		Z2:             w.Z2,
-		Z3:             w.Z3,
-		TranscriptHash: w.TranscriptHash,
-	}
+	decoded := LogStarProof(w)
 	*p = decoded
 	return nil
+}
+
+// UnmarshalWireValue decodes the LogStarProof from a canonical custom wire
+// field value.
+func (p *LogStarProof) UnmarshalWireValue(in []byte) error {
+	if p == nil {
+		return errors.New("nil LogStarProof")
+	}
+	return p.UnmarshalBinary(in)
 }
 
 func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w LogStarWitness) error {
