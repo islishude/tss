@@ -89,6 +89,45 @@ func TestCGGMP21KeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
+func TestCGGMP21KeyShareStateCodecAppliesCallerLimits(t *testing.T) {
+	t.Parallel()
+
+	share := CachedKeygenShares(t, 2, 3)[1]
+	limits := testLimits()
+	raw, err := share.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	smallFields := limits.fieldLimits()
+	smallFields["point"] = len(share.state.publicKey) - 1
+	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+		t.Fatal("key share state marshal ignored caller field limits")
+	}
+
+	var decoded keyShareState
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err == nil {
+		t.Fatal("key share state unmarshal ignored caller frame limits")
+	}
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw))),
+		wire.WithFieldLimits(smallFields),
+	); err == nil {
+		t.Fatal("key share state unmarshal ignored caller field limits")
+	}
+
+	missingFields := limits.fieldLimits()
+	delete(missingFields, "point")
+	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missingFields)); err == nil {
+		t.Fatal("key share state marshal accepted missing field limit")
+	}
+}
+
 func TestCGGMP21KeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
@@ -233,7 +272,11 @@ func TestCGGMP21KeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 			t.Parallel()
 			mutated := cloneKeyShareValue(shares[1])
 			tc.mutate(mutated.state)
-			if _, err := tss.DecodeBinary[KeyShare](marshalKeyShareStateForTest(t, mutated.state)); err == nil {
+			raw, err := mutated.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+			if err != nil {
+				return
+			}
+			if _, err := tss.DecodeBinary[KeyShare](raw); err == nil {
 				t.Fatalf("key share accepted %s party data", tc.name)
 			}
 		})
@@ -248,15 +291,6 @@ func TestCGGMP21KeyShareRejectsLocalPaillierKeyMismatch(t *testing.T) {
 	if err := mismatched.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("key share accepted local Paillier private key from another party")
 	}
-}
-
-func marshalKeyShareStateForTest(t testing.TB, state *keyShareState) []byte {
-	t.Helper()
-	raw, err := state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
 }
 
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {

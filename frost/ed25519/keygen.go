@@ -11,7 +11,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/transcript"
 )
 
@@ -25,7 +25,7 @@ const (
 // confirmation is set during round 2 after the chain code is revealed.
 type keygenPartyData struct {
 	commitments     *keygenCommitments
-	share           *fed.Scalar
+	share           *secret.Scalar
 	chainCode       []byte
 	chainCodeCommit []byte
 	confirmation    *KeygenConfirmation
@@ -74,8 +74,8 @@ func (keygenCommitmentsPayload) WireVersion() uint16 {
 }
 
 type keygenSharePayload struct {
-	Share    []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
-	PlanHash []byte `json:"plan_hash" wire:"2,bytes,len=32"`
+	Share    *secret.Scalar `json:"share" wire:"1,custom,len=32"`
+	PlanHash []byte         `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
 const keygenSharePayloadWireVersion uint16 = 1
@@ -138,9 +138,15 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		partyData[id] = &keygenPartyData{}
 	}
 	ownCommitments := commitments.Clone()
+	ownShare := evalScalarPolynomial(poly, config.Self)
+	ownSecretShare, err := newEdSecretScalarFromFed(ownShare)
+	ownShare.Set(fed.NewScalar())
+	if err != nil {
+		return nil, nil, err
+	}
 	partyData[config.Self] = &keygenPartyData{
 		commitments:     &ownCommitments,
-		share:           evalScalarPolynomial(poly, config.Self),
+		share:           ownSecretShare,
 		chainCode:       bytes.Clone(chainCode),
 		chainCodeCommit: bytes.Clone(chainCodeCommit),
 	}
@@ -168,8 +174,16 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			continue
 		}
 		share := evalScalarPolynomial(poly, id)
-		shareBytes := share.Bytes()
-		payload, err := marshalKeygenSharePayloadWithLimits(keygenSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
+		secretShare, err := newEdSecretScalarFromFed(share)
+		share.Set(fed.NewScalar())
+		if err != nil {
+			return nil, nil, err
+		}
+		payload, err := marshalKeygenSharePayloadWithLimits(
+			keygenSharePayload{Share: secretShare, PlanHash: planHash},
+			limits,
+		)
+		secretShare.Destroy()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -259,24 +273,21 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
+		defer p.Share.Destroy()
 		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		scalar, err := edcurve.ScalarFromCanonical(p.Share)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		pd, err := s.partyEntry(base.From)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
 		if pd.share != nil {
-			if pd.share.Equal(scalar) == 1 {
+			if pd.share.Equal(p.Share) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting share"))
 		}
-		pd.share = scalar
+		pd.share = p.Share.Clone()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}

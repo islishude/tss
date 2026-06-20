@@ -35,7 +35,14 @@ func (state *keyShareState) MarshalWireMessage(opts ...wire.MarshalOption) ([]by
 	if state == nil {
 		return nil, errors.New("nil key share state")
 	}
-	limits := DefaultLimits()
+	resolved := wire.ResolveMarshalOptions(opts...)
+	limits, err := keyShareCodecLimits(resolved.FieldLimits)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	}
 	threshold, err := uint32WireField(state.threshold, "threshold")
 	if err != nil {
 		return nil, err
@@ -56,7 +63,7 @@ func (state *keyShareState) MarshalWireMessage(opts ...wire.MarshalOption) ([]by
 	if err != nil {
 		return nil, err
 	}
-	partyData, err := marshalKeySharePartyDataMap(state.partyData, limits)
+	partyData, err := marshalKeySharePartyDataMap(state.partyData, limits, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -78,7 +85,7 @@ func (state *keyShareState) MarshalWireMessage(opts ...wire.MarshalOption) ([]by
 	}
 	securityParams, err := wire.MarshalRecordValue(
 		state.securityParams,
-		wire.WithFieldLimitsForMarshal(limits.fieldLimits()),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("encode security params: %w", err)
@@ -111,12 +118,18 @@ func (state *keyShareState) UnmarshalWireMessage(in []byte, opts ...wire.Unmarsh
 	if state == nil {
 		return errors.New("nil key share state")
 	}
-	limits := DefaultLimits()
-	fields, err := wire.UnmarshalMessageBody(
-		in,
-		state,
-		limits.frameLimits(limits.State.MaxSerializedKeyShareBytes),
-	)
+	resolved := wire.ResolveUnmarshalOptions(opts...)
+	limits, err := keyShareCodecLimits(resolved.FieldLimits)
+	if err != nil {
+		return err
+	}
+	limits.State.MaxSerializedKeyShareBytes = resolved.FrameLimits.MaxTotalBytes
+	limits.TLV.MaxFields = resolved.FrameLimits.MaxFields
+	limits.TLV.MaxFieldBytes = resolved.FrameLimits.MaxFieldBytes
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
+	}
+	fields, err := wire.UnmarshalMessageBody(in, state, opts...)
 	if err != nil {
 		return err
 	}
@@ -153,7 +166,7 @@ func (state *keyShareState) UnmarshalWireMessage(in []byte, opts ...wire.Unmarsh
 	if err != nil {
 		return fmt.Errorf("invalid group commitments: %w", err)
 	}
-	partyData, err := unmarshalKeySharePartyDataMap(fields[7].Value, limits)
+	partyData, err := unmarshalKeySharePartyDataMap(fields[7].Value, limits, resolved.FrameLimits, opts...)
 	if err != nil {
 		return err
 	}
@@ -188,8 +201,7 @@ func (state *keyShareState) UnmarshalWireMessage(in []byte, opts ...wire.Unmarsh
 	if err := wire.UnmarshalRecordValue(
 		fields[17].Value,
 		&securityParams,
-		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
+		opts...,
 	); err != nil {
 		return fmt.Errorf("invalid security params: %w", err)
 	}
@@ -221,6 +233,40 @@ func (state *keyShareState) UnmarshalWireMessage(in []byte, opts ...wire.Unmarsh
 	}
 	*state = decoded
 	return nil
+}
+
+func keyShareCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
+	limits := DefaultLimits()
+	if fieldLimits == nil {
+		return limits, nil
+	}
+	required := []struct {
+		name string
+		dst  *int
+	}{
+		{name: "scalar", dst: &limits.Curve.MaxScalarBytes},
+		{name: "point", dst: &limits.Curve.MaxPointBytes},
+		{name: "parties", dst: &limits.Threshold.MaxParties},
+		{name: "threshold", dst: &limits.Threshold.MaxThreshold},
+		{name: "paillier_modulus_bits", dst: &limits.Paillier.MaxModulusBits},
+		{name: "paillier_public_key", dst: &limits.Paillier.MaxPublicKeyBytes},
+		{name: "paillier_private_key", dst: &limits.Paillier.MaxPrivateKeyBytes},
+		{name: "paillier_ciphertext", dst: &limits.Paillier.MaxCiphertextBytes},
+		{name: "paillier_proof", dst: &limits.Paillier.MaxProofBytes},
+		{name: "ring_pedersen_params", dst: &limits.Paillier.MaxRingPedersenBytes},
+		{name: "zk_proof", dst: &limits.ZK.MaxProofBytes},
+	}
+	for _, item := range required {
+		value, ok := fieldLimits[item.name]
+		if !ok {
+			return Limits{}, fmt.Errorf("wire: missing field limit %q for key share state", item.name)
+		}
+		if value <= 0 {
+			return Limits{}, fmt.Errorf("wire: field limit %q for key share state must be positive", item.name)
+		}
+		*item.dst = value
+	}
+	return limits, nil
 }
 
 func requireKeyShareStateTags(fields []wire.Field) error {
@@ -341,7 +387,7 @@ func unmarshalBytesListValue(raw []byte, maxBytes, maxItems int, name string) ([
 	return out, nil
 }
 
-func marshalKeySharePartyDataMap(data map[tss.PartyID]keySharePartyData, limits Limits) ([]byte, error) {
+func marshalKeySharePartyDataMap(data map[tss.PartyID]keySharePartyData, limits Limits, opts ...wire.MarshalOption) ([]byte, error) {
 	if len(data) > limits.Threshold.MaxParties {
 		return nil, fmt.Errorf("party data count %d exceeds max_items=%d", len(data), limits.Threshold.MaxParties)
 	}
@@ -364,7 +410,7 @@ func marshalKeySharePartyDataMap(data map[tss.PartyID]keySharePartyData, limits 
 	})
 	out := wire.Uint32(uint32(len(ids)))
 	for _, id := range ids {
-		value, err := data[id].MarshalWireValue()
+		value, err := marshalKeySharePartyData(data[id], limits, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("party data %d: %w", id, err)
 		}
@@ -374,7 +420,12 @@ func marshalKeySharePartyDataMap(data map[tss.PartyID]keySharePartyData, limits 
 	return out, nil
 }
 
-func unmarshalKeySharePartyDataMap(raw []byte, limits Limits) (map[tss.PartyID]keySharePartyData, error) {
+func unmarshalKeySharePartyDataMap(
+	raw []byte,
+	limits Limits,
+	frameLimits wire.FrameLimits,
+	opts ...wire.UnmarshalOption,
+) (map[tss.PartyID]keySharePartyData, error) {
 	count, offset, err := wire.ReadUint32(raw, 0)
 	if err != nil {
 		return nil, err
@@ -397,7 +448,7 @@ func unmarshalKeySharePartyDataMap(raw []byte, limits Limits) (map[tss.PartyID]k
 			return nil, fmt.Errorf("party data entries not strictly sorted at index %d", i)
 		}
 		prevKey = keyBytes
-		valueBytes, next, err := wire.ReadBytesWithLimit(raw, offset, limits.State.MaxSerializedKeyShareBytes)
+		valueBytes, next, err := wire.ReadBytesWithLimit(raw, offset, frameLimits.MaxFieldBytes)
 		if err != nil {
 			return nil, fmt.Errorf("party data value %d: %w", i, err)
 		}
@@ -408,7 +459,7 @@ func unmarshalKeySharePartyDataMap(raw []byte, limits Limits) (map[tss.PartyID]k
 		}
 		id := key
 		var value keySharePartyData
-		if err := value.UnmarshalWireValue(valueBytes); err != nil {
+		if err := unmarshalKeySharePartyData(valueBytes, &value, limits, frameLimits, opts...); err != nil {
 			return nil, fmt.Errorf("party data %d: %w", id, err)
 		}
 		if _, ok := out[id]; ok {
@@ -425,6 +476,14 @@ func unmarshalKeySharePartyDataMap(raw []byte, limits Limits) (map[tss.PartyID]k
 // MarshalWireValue implements the wire.ValueMarshaler interface
 func (data keySharePartyData) MarshalWireValue() ([]byte, error) {
 	limits := DefaultLimits()
+	return marshalKeySharePartyData(
+		data,
+		limits,
+		wire.WithFieldLimitsForMarshal(limits.fieldLimits()),
+	)
+}
+
+func marshalKeySharePartyData(data keySharePartyData, limits Limits, opts ...wire.MarshalOption) ([]byte, error) {
 	paillierPublicKey, err := canonicalWireMessageBytes(data.paillierPublicKey, limits)
 	if err != nil {
 		return nil, fmt.Errorf("encode Paillier public key: %w", err)
@@ -443,7 +502,7 @@ func (data keySharePartyData) MarshalWireValue() ([]byte, error) {
 	}
 	keygenConfirmation, err := wire.MarshalRecordValue(
 		data.keygenConfirmation,
-		wire.WithFieldLimitsForMarshal(limits.fieldLimits()),
+		opts...,
 	)
 	if err != nil {
 		return nil, fmt.Errorf("encode keygen confirmation: %w", err)
@@ -467,9 +526,30 @@ func (data *keySharePartyData) UnmarshalWireValue(in []byte) error {
 		return errors.New("nil key share party data")
 	}
 	limits := DefaultLimits()
+	frameLimits := limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)
+	return unmarshalKeySharePartyData(
+		in,
+		data,
+		limits,
+		frameLimits,
+		wire.WithFrameLimits(frameLimits),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	)
+}
+
+func unmarshalKeySharePartyData(
+	in []byte,
+	data *keySharePartyData,
+	limits Limits,
+	frameLimits wire.FrameLimits,
+	opts ...wire.UnmarshalOption,
+) error {
+	if data == nil {
+		return errors.New("nil key share party data")
+	}
 	fields, err := wire.UnmarshalRecordFieldsWithLimits(
 		in,
-		limits.frameLimits(limits.State.MaxSerializedKeyShareBytes),
+		frameLimits,
 		"keySharePartyData",
 	)
 	if err != nil {
@@ -501,8 +581,7 @@ func (data *keySharePartyData) UnmarshalWireValue(in []byte) error {
 	if err := wire.UnmarshalRecordValue(
 		fields[5].Value,
 		&keygenConfirmation,
-		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
+		opts...,
 	); err != nil {
 		return fmt.Errorf("invalid keygen confirmation: %w", err)
 	}
@@ -582,85 +661,353 @@ func (k *KeyShare) Clone() *KeyShare {
 	return cloneKeyShareValue(k)
 }
 
-// presignWire is the wire DTO for Presign.
-type presignWire struct {
-	Party                tss.PartyID           `wire:"1,u32"`
-	Threshold            int                   `wire:"2,u32"`
-	Signers              tss.PartySet          `wire:"3,u32list"`
-	R                    *secp.Point           `wire:"4,custom,len=33"`
-	LittleR              secp.Scalar           `wire:"5,custom,len=32"`
-	KShare               *secret.Scalar        `wire:"6,custom,len=32"`
-	ChiShare             *secret.Scalar        `wire:"7,custom,len=32"`
-	Delta                *secret.Scalar        `wire:"8,custom,len=32"`
-	TranscriptHash       []byte                `wire:"9,bytes"`
-	Context              PresignContext        `wire:"10,nested"`
-	ContextHash          []byte                `wire:"11,bytes"`
-	Consumed             bool                  `wire:"12,bool"`
-	PublicKey            *secp.Point           `wire:"13,custom,len=33"`
-	KeygenTranscriptHash []byte                `wire:"14,bytes"`
-	PartiesHash          []byte                `wire:"15,bytes"`
-	VerifyShares         []signVerifyShare     `wire:"16,recordlist,max_items=signers"`
-	PlanHash             []byte                `wire:"17,bytes,len=32"`
-	SecurityParams       SecurityParams        `wire:"18,record"`
-	Derivation           *tss.DerivationResult `wire:"19,record"`
+// WireType returns the canonical wire type identifier for presignState.
+func (*presignState) WireType() string { return presignWireType }
+
+// WireVersion returns the wire format version for presignState.
+func (*presignState) WireVersion() uint16 { return presignWireVersion }
+
+// MarshalWireMessage encodes presignState directly without an intermediate DTO.
+func (state *presignState) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+	if state == nil {
+		return nil, errors.New("nil presign state")
+	}
+	resolved := wire.ResolveMarshalOptions(opts...)
+	limits, err := presignCodecLimits(resolved.FieldLimits)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	}
+	threshold, err := uint32WireField(state.threshold, "threshold")
+	if err != nil {
+		return nil, err
+	}
+	signers, err := marshalPartySetValue(state.signers, limits.Threshold.MaxSigners)
+	if err != nil {
+		return nil, fmt.Errorf("encode signers: %w", err)
+	}
+	r, err := state.r.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode presign R: %w", err)
+	}
+	if len(r) > limits.Curve.MaxPointBytes {
+		return nil, fmt.Errorf("presign R too large: %d > %d", len(r), limits.Curve.MaxPointBytes)
+	}
+	littleR, err := state.littleR.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode little r: %w", err)
+	}
+	kShare, err := state.kShare.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode k share: %w", err)
+	}
+	chiShare, err := state.chiShare.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode chi share: %w", err)
+	}
+	delta, err := state.delta.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode delta: %w", err)
+	}
+	for name, raw := range map[string][]byte{
+		"little r":  littleR,
+		"k share":   kShare,
+		"chi share": chiShare,
+		"delta":     delta,
+	} {
+		if len(raw) != secp.ScalarSize {
+			return nil, fmt.Errorf("%s length %d != %d", name, len(raw), secp.ScalarSize)
+		}
+		if len(raw) > limits.Curve.MaxScalarBytes {
+			return nil, fmt.Errorf("%s too large: %d > %d", name, len(raw), limits.Curve.MaxScalarBytes)
+		}
+	}
+	context, err := wire.Marshal(state.context, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("encode presign context: %w", err)
+	}
+	publicKey, err := state.publicKey.MarshalWireValue()
+	if err != nil {
+		return nil, fmt.Errorf("encode presign public key: %w", err)
+	}
+	if len(publicKey) > limits.Curve.MaxPointBytes {
+		return nil, fmt.Errorf("presign public key too large: %d > %d", len(publicKey), limits.Curve.MaxPointBytes)
+	}
+	verifyShares, err := marshalPresignVerifyShares(state.verifyShares, limits, opts...)
+	if err != nil {
+		return nil, err
+	}
+	securityParams, err := wire.MarshalRecordValue(state.securityParams, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("encode presign security params: %w", err)
+	}
+	derivation, err := wire.MarshalRecordValue(state.derivation, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("encode presign derivation: %w", err)
+	}
+	fields := []wire.Field{
+		{Tag: 1, Value: wire.Uint32(state.party)},
+		{Tag: 2, Value: threshold},
+		{Tag: 3, Value: signers},
+		{Tag: 4, Value: r},
+		{Tag: 5, Value: littleR},
+		{Tag: 6, Value: kShare},
+		{Tag: 7, Value: chiShare},
+		{Tag: 8, Value: delta},
+		{Tag: 9, Value: wire.NonNilBytes(bytes.Clone(state.transcriptHash))},
+		{Tag: 10, Value: context},
+		{Tag: 11, Value: wire.NonNilBytes(bytes.Clone(state.contextHash))},
+		{Tag: 12, Value: wire.Bool(state.consumed == nil || state.consumed.Load())},
+		{Tag: 13, Value: publicKey},
+		{Tag: 14, Value: wire.NonNilBytes(bytes.Clone(state.keygenTranscriptHash))},
+		{Tag: 15, Value: wire.NonNilBytes(bytes.Clone(state.partiesHash))},
+		{Tag: 16, Value: verifyShares},
+		{Tag: 17, Value: wire.NonNilBytes(bytes.Clone(state.planHash))},
+		{Tag: 18, Value: securityParams},
+		{Tag: 19, Value: derivation},
+	}
+	return wire.MarshalMessageBody(state, fields)
 }
 
-// WireType returns the canonical wire type identifier for presignWire.
-func (presignWire) WireType() string { return presignWireType }
+// UnmarshalWireMessage decodes presignState directly without an intermediate DTO.
+func (state *presignState) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	if state == nil {
+		return errors.New("nil presign state")
+	}
+	resolved := wire.ResolveUnmarshalOptions(opts...)
+	limits, err := presignCodecLimits(resolved.FieldLimits)
+	if err != nil {
+		return err
+	}
+	limits.State.MaxSerializedPresignBytes = resolved.FrameLimits.MaxTotalBytes
+	limits.TLV.MaxFields = resolved.FrameLimits.MaxFields
+	limits.TLV.MaxFieldBytes = resolved.FrameLimits.MaxFieldBytes
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
+	}
+	fields, err := wire.UnmarshalMessageBody(in, state, opts...)
+	if err != nil {
+		return err
+	}
+	if err := requirePresignStateTags(fields); err != nil {
+		return err
+	}
+	party, err := wire.DecodeUint32(fields[0].Value)
+	if err != nil {
+		return fmt.Errorf("invalid presign party: %w", err)
+	}
+	threshold, err := wire.DecodeUint32(fields[1].Value)
+	if err != nil {
+		return fmt.Errorf("invalid presign threshold: %w", err)
+	}
+	if uint64(threshold) > uint64(^uint(0)>>1) {
+		return fmt.Errorf("presign threshold %d overflows int", threshold)
+	}
+	signers, err := unmarshalPartySetValue(fields[2].Value, limits.Threshold.MaxSigners)
+	if err != nil {
+		return fmt.Errorf("invalid presign signers: %w", err)
+	}
+	if len(fields[3].Value) > limits.Curve.MaxPointBytes {
+		return fmt.Errorf("presign R too large: %d > %d", len(fields[3].Value), limits.Curve.MaxPointBytes)
+	}
+	var r secp.Point
+	if err := r.UnmarshalWireValue(fields[3].Value); err != nil {
+		return fmt.Errorf("invalid presign R: %w", err)
+	}
+	var littleR secp.Scalar
+	if err := littleR.UnmarshalWireValue(fields[4].Value); err != nil {
+		return fmt.Errorf("invalid presign little r: %w", err)
+	}
+	if littleR.IsZero() {
+		return errors.New("zero presign little r")
+	}
+	var kShare, chiShare, delta secret.Scalar
+	secrets := []*secret.Scalar{&kShare, &chiShare, &delta}
+	keepSecrets := false
+	defer func() {
+		if keepSecrets {
+			return
+		}
+		for _, scalar := range secrets {
+			scalar.Destroy()
+		}
+	}()
+	for _, item := range []struct {
+		name string
+		raw  []byte
+		dst  *secret.Scalar
+	}{
+		{name: "k share", raw: fields[5].Value, dst: &kShare},
+		{name: "chi share", raw: fields[6].Value, dst: &chiShare},
+		{name: "delta", raw: fields[7].Value, dst: &delta},
+	} {
+		if len(item.raw) > limits.Curve.MaxScalarBytes {
+			return fmt.Errorf("%s too large: %d > %d", item.name, len(item.raw), limits.Curve.MaxScalarBytes)
+		}
+		if err := item.dst.UnmarshalWireValue(item.raw); err != nil {
+			return fmt.Errorf("invalid %s: %w", item.name, err)
+		}
+		if _, err := secpScalarFromSecret(item.dst); err != nil {
+			return fmt.Errorf("invalid %s: %w", item.name, err)
+		}
+	}
+	var context PresignContext
+	if err := wire.Unmarshal(fields[9].Value, &context, opts...); err != nil {
+		return fmt.Errorf("invalid presign context: %w", err)
+	}
+	consumed, err := wire.DecodeBool(fields[11].Value)
+	if err != nil {
+		return fmt.Errorf("invalid presign consumed flag: %w", err)
+	}
+	if len(fields[12].Value) > limits.Curve.MaxPointBytes {
+		return fmt.Errorf("presign public key too large: %d > %d", len(fields[12].Value), limits.Curve.MaxPointBytes)
+	}
+	var publicKey secp.Point
+	if err := publicKey.UnmarshalWireValue(fields[12].Value); err != nil {
+		return fmt.Errorf("invalid presign public key: %w", err)
+	}
+	verifyShares, err := unmarshalPresignVerifyShares(
+		fields[15].Value,
+		limits,
+		resolved.FrameLimits,
+		opts...,
+	)
+	if err != nil {
+		return err
+	}
+	if len(fields[16].Value) != 32 {
+		return fmt.Errorf("presign plan hash length %d != 32", len(fields[16].Value))
+	}
+	var securityParams SecurityParams
+	if err := wire.UnmarshalRecordValue(fields[17].Value, &securityParams, opts...); err != nil {
+		return fmt.Errorf("invalid presign security params: %w", err)
+	}
+	var derivation tss.DerivationResult
+	if err := wire.UnmarshalRecordValue(fields[18].Value, &derivation, opts...); err != nil {
+		return fmt.Errorf("invalid presign derivation: %w", err)
+	}
+	if err := validateDerivationResult(&derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
+		return fmt.Errorf("presign derivation result: %w", err)
+	}
+	consumedState := new(atomic.Bool)
+	consumedState.Store(consumed)
+	decoded := presignState{
+		securityParams:       securityParams,
+		party:                party,
+		threshold:            int(threshold),
+		signers:              signers,
+		r:                    secp.Clone(&r),
+		littleR:              littleR,
+		transcriptHash:       bytes.Clone(fields[8].Value),
+		context:              context.Clone(),
+		contextHash:          bytes.Clone(fields[10].Value),
+		derivation:           derivation.Clone(),
+		planHash:             bytes.Clone(fields[16].Value),
+		publicKey:            secp.Clone(&publicKey),
+		keygenTranscriptHash: bytes.Clone(fields[13].Value),
+		partiesHash:          bytes.Clone(fields[14].Value),
+		verifyShares:         tss.CloneSlice(verifyShares),
+		kShare:               &kShare,
+		chiShare:             &chiShare,
+		delta:                &delta,
+		consumed:             consumedState,
+		attempt:              newPresignAttemptBinding(consumed),
+	}
+	keepSecrets = true
+	*state = decoded
+	return nil
+}
 
-// WireVersion returns the wire format version for presignWire.
-func (presignWire) WireVersion() uint16 { return presignWireVersion }
+func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
+	limits := DefaultLimits()
+	if fieldLimits == nil {
+		return limits, nil
+	}
+	required := []struct {
+		name string
+		dst  *int
+	}{
+		{name: "scalar", dst: &limits.Curve.MaxScalarBytes},
+		{name: "point", dst: &limits.Curve.MaxPointBytes},
+		{name: "signers", dst: &limits.Threshold.MaxSigners},
+		{name: "threshold", dst: &limits.Threshold.MaxThreshold},
+		{name: "signprep_proof", dst: &limits.SignPrep.MaxProofBytes},
+	}
+	for _, item := range required {
+		value, ok := fieldLimits[item.name]
+		if !ok {
+			return Limits{}, fmt.Errorf("wire: missing field limit %q for presign state", item.name)
+		}
+		if value <= 0 {
+			return Limits{}, fmt.Errorf("wire: field limit %q for presign state must be positive", item.name)
+		}
+		*item.dst = value
+	}
+	return limits, nil
+}
 
-func decodePresignWire(w *presignWire) (*presignState, error) {
-	if w.R == nil {
-		return nil, errors.New("missing presign R")
+func requirePresignStateTags(fields []wire.Field) error {
+	if len(fields) != 19 {
+		return fmt.Errorf("presign state field count %d != 19", len(fields))
 	}
-	if w.LittleR.IsZero() {
-		return nil, errors.New("zero presign little r")
+	for i, field := range fields {
+		want := uint16(i + 1)
+		if field.Tag != want {
+			return fmt.Errorf("presign state tag %d at index %d, want %d", field.Tag, i, want)
+		}
 	}
-	if w.PublicKey == nil {
-		return nil, errors.New("missing presign public key")
+	return nil
+}
+
+func marshalPresignVerifyShares(
+	shares []signVerifyShare,
+	limits Limits,
+	opts ...wire.MarshalOption,
+) ([]byte, error) {
+	if len(shares) > limits.Threshold.MaxSigners {
+		return nil, fmt.Errorf("verify shares count %d exceeds max_items=%d", len(shares), limits.Threshold.MaxSigners)
 	}
-	if _, err := secpScalarFromSecret(w.KShare); err != nil {
-		return nil, fmt.Errorf("invalid k share: %w", err)
+	out := wire.Uint32(uint32(len(shares)))
+	for i, share := range shares {
+		record, err := wire.MarshalRecordValue(share, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("verify shares item %d: %w", i, err)
+		}
+		out = wire.AppendBytes(out, record)
 	}
-	if _, err := secpScalarFromSecret(w.ChiShare); err != nil {
-		return nil, fmt.Errorf("invalid chi share: %w", err)
+	return out, nil
+}
+
+func unmarshalPresignVerifyShares(
+	raw []byte,
+	limits Limits,
+	frameLimits wire.FrameLimits,
+	opts ...wire.UnmarshalOption,
+) ([]signVerifyShare, error) {
+	count, offset, err := wire.ReadUint32(raw, 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid verify shares count: %w", err)
 	}
-	if _, err := secpScalarFromSecret(w.Delta); err != nil {
-		return nil, fmt.Errorf("invalid delta: %w", err)
+	if int(count) > limits.Threshold.MaxSigners {
+		return nil, fmt.Errorf("verify shares count %d exceeds max_items=%d", count, limits.Threshold.MaxSigners)
 	}
-	consumed := new(atomic.Bool)
-	consumed.Store(w.Consumed)
-	derivation := w.Derivation
-	if derivation == nil {
-		return nil, errors.New("missing presign derivation")
+	out := make([]signVerifyShare, int(count))
+	for i := range int(count) {
+		record, next, err := wire.ReadBytesWithLimit(raw, offset, frameLimits.MaxFieldBytes)
+		if err != nil {
+			return nil, fmt.Errorf("verify shares item %d: %w", i, err)
+		}
+		offset = next
+		if err := wire.UnmarshalRecordValue(record, &out[i], opts...); err != nil {
+			return nil, fmt.Errorf("verify shares item %d: %w", i, err)
+		}
 	}
-	if err := validateDerivationResult(derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {
-		return nil, fmt.Errorf("presign derivation result: %w", err)
+	if offset != len(raw) {
+		return nil, errors.New("trailing verify shares data")
 	}
-	return &presignState{
-		securityParams:       w.SecurityParams,
-		party:                w.Party,
-		threshold:            w.Threshold,
-		signers:              w.Signers,
-		r:                    secp.Clone(w.R),
-		littleR:              w.LittleR,
-		transcriptHash:       slices.Clone(w.TranscriptHash),
-		context:              w.Context,
-		contextHash:          slices.Clone(w.ContextHash),
-		derivation:           derivation,
-		planHash:             slices.Clone(w.PlanHash),
-		publicKey:            secp.Clone(w.PublicKey),
-		keygenTranscriptHash: slices.Clone(w.KeygenTranscriptHash),
-		partiesHash:          slices.Clone(w.PartiesHash),
-		verifyShares:         tss.CloneSlice(w.VerifyShares),
-		kShare:               w.KShare,
-		chiShare:             w.ChiShare,
-		delta:                w.Delta,
-		consumed:             consumed,
-		attempt:              newPresignAttemptBinding(w.Consumed),
-	}, nil
+	return out, nil
 }
 
 // WireType returns the canonical wire type identifier for Presign.
@@ -669,45 +1016,20 @@ func (*Presign) WireType() string { return presignWireType }
 // WireVersion returns the wire format version for Presign.
 func (*Presign) WireVersion() uint16 { return presignWireVersion }
 
-// MarshalWireMessage encodes Presign through its private wire DTO.
+// MarshalWireMessage encodes Presign through its private state codec.
 func (p *Presign) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-	return wire.Marshal(encodePresignWire(p), opts...)
+	if p == nil || p.state == nil {
+		return nil, errors.New("nil presign")
+	}
+	return p.state.MarshalWireMessage(opts...)
 }
 
-// UnmarshalWireMessage decodes Presign through its private wire DTO.
+// UnmarshalWireMessage decodes Presign through its private state codec.
 func (p *Presign) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-	var w presignWire
-	if err := wire.Unmarshal(in, &w, opts...); err != nil {
+	var state presignState
+	if err := state.UnmarshalWireMessage(in, opts...); err != nil {
 		return err
 	}
-	state, err := decodePresignWire(&w)
-	if err != nil {
-		return err
-	}
-	p.state = state
+	p.state = &state
 	return nil
-}
-
-func encodePresignWire(p *Presign) presignWire {
-	return presignWire{
-		Party:                p.state.party,
-		Threshold:            p.state.threshold,
-		Signers:              p.state.signers,
-		R:                    p.state.r,
-		LittleR:              p.state.littleR,
-		KShare:               p.state.kShare,
-		ChiShare:             p.state.chiShare,
-		Delta:                p.state.delta,
-		TranscriptHash:       p.state.transcriptHash,
-		Context:              p.state.context,
-		ContextHash:          p.state.contextHash,
-		PlanHash:             p.state.planHash,
-		Consumed:             IsPresignConsumed(p),
-		PublicKey:            p.state.publicKey,
-		KeygenTranscriptHash: p.state.keygenTranscriptHash,
-		PartiesHash:          p.state.partiesHash,
-		VerifyShares:         p.state.verifyShares,
-		SecurityParams:       p.state.securityParams,
-		Derivation:           p.state.derivation,
-	}
 }

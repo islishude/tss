@@ -6,6 +6,48 @@ import (
 	"reflect"
 )
 
+// MarshalOptionsView exposes the effective options passed to a
+// MessageMarshaler implementation.
+type MarshalOptionsView struct {
+	FieldLimits FieldLimits
+}
+
+// UnmarshalOptionsView exposes the effective options passed to a
+// MessageUnmarshaler implementation.
+type UnmarshalOptionsView struct {
+	FrameLimits FrameLimits
+	FieldLimits FieldLimits
+}
+
+// ResolveMarshalOptions returns the field limits supplied to a direct message
+// codec. A nil FieldLimits value means the caller supplied no semantic limits.
+func ResolveMarshalOptions(opts ...MarshalOption) MarshalOptionsView {
+	cfg := marshalConfig{}
+	for _, opt := range opts {
+		opt.applyMarshal(&cfg)
+	}
+	return MarshalOptionsView{FieldLimits: cfg.fieldLimits}
+}
+
+// ResolveUnmarshalOptions returns the effective frame and field limits supplied
+// to a direct message codec. DefaultFrameLimits is used only when the caller did
+// not provide any frame limit.
+func ResolveUnmarshalOptions(opts ...UnmarshalOption) UnmarshalOptionsView {
+	cfg := unmarshalConfig{}
+	for _, opt := range opts {
+		opt.applyUnmarshal(&cfg)
+	}
+	if cfg.frameLimits.MaxTotalBytes == 0 &&
+		cfg.frameLimits.MaxFields == 0 &&
+		cfg.frameLimits.MaxFieldBytes == 0 {
+		cfg.frameLimits = DefaultFrameLimits()
+	}
+	return UnmarshalOptionsView{
+		FrameLimits: cfg.frameLimits,
+		FieldLimits: cfg.fieldLimits,
+	}
+}
+
 // MarshalRecordValue encodes a struct or pointer-to-struct as a canonical
 // record field value. It is intended for custom field implementations that need
 // to preserve the same record-body bytes as the "record" kind.
@@ -13,11 +55,8 @@ func MarshalRecordValue(v any, opts ...MarshalOption) ([]byte, error) {
 	if v == nil {
 		return nil, errors.New("nil record value")
 	}
-	cfg := marshalConfig{}
-	for _, opt := range opts {
-		opt.applyMarshal(&cfg)
-	}
-	return marshalRecordValue(reflect.ValueOf(v), cfg.fieldLimits)
+	resolved := ResolveMarshalOptions(opts...)
+	return marshalRecordValue(reflect.ValueOf(v), resolved.FieldLimits)
 }
 
 // UnmarshalRecordValue decodes a canonical record field value into dst. dst
@@ -26,18 +65,15 @@ func UnmarshalRecordValue(raw []byte, dst any, opts ...UnmarshalOption) error {
 	if dst == nil {
 		return errors.New("nil record destination")
 	}
-	cfg := unmarshalConfig{frameLimits: DefaultFrameLimits()}
-	for _, opt := range opts {
-		opt.applyUnmarshal(&cfg)
-	}
+	resolved := ResolveUnmarshalOptions(opts...)
 	rv := reflect.ValueOf(dst)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.New("record destination must be a non-nil pointer")
 	}
-	if cfg.frameLimits.MaxTotalBytes > 0 && len(raw) > cfg.frameLimits.MaxTotalBytes {
-		return fmt.Errorf("record input too large: %d > %d", len(raw), cfg.frameLimits.MaxTotalBytes)
+	if resolved.FrameLimits.MaxTotalBytes > 0 && len(raw) > resolved.FrameLimits.MaxTotalBytes {
+		return fmt.Errorf("record input too large: %d > %d", len(raw), resolved.FrameLimits.MaxTotalBytes)
 	}
-	return unmarshalRecordValue(raw, rv, cfg.fieldLimits, cfg.frameLimits)
+	return unmarshalRecordValue(raw, rv, resolved.FieldLimits, resolved.FrameLimits)
 }
 
 // MarshalRecordFields encodes precomputed fields as a canonical record field
@@ -73,12 +109,14 @@ func MarshalMessageBody(msg Message, fields []Field) ([]byte, error) {
 
 // UnmarshalMessageBody decodes a complete canonical TLV message for a
 // type-level MessageUnmarshaler implementation and validates the message type
-// and version before returning copied fields.
-func UnmarshalMessageBody(raw []byte, msg Message, limits FrameLimits) ([]Field, error) {
+// and version before returning copied fields. It applies the caller's frame
+// options exactly as wire.Unmarshal would.
+func UnmarshalMessageBody(raw []byte, msg Message, opts ...UnmarshalOption) ([]Field, error) {
 	if msg == nil {
 		return nil, errors.New("nil wire message")
 	}
-	version, fields, err := UnmarshalFieldsWithLimits(raw, msg.WireType(), limits)
+	resolved := ResolveUnmarshalOptions(opts...)
+	version, fields, err := UnmarshalFieldsWithLimits(raw, msg.WireType(), resolved.FrameLimits)
 	if err != nil {
 		return nil, err
 	}

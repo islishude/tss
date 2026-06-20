@@ -25,8 +25,14 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	for _, id := range s.cfg.Parties {
 		d := s.partyData[id]
+		share, err := edScalarFromSecret(d.share)
+		if err != nil {
+			return nil, err
+		}
 		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		if err := d.commitments.VerifyShare(s.cfg.Self, d.share); err != nil {
+		verifyErr := d.commitments.VerifyShare(s.cfg.Self, share)
+		share.Set(fed.NewScalar())
+		if verifyErr != nil {
 			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
 				"party_id", s.cfg.Self,
 				"dealer", id,
@@ -36,15 +42,21 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 				Round: 1,
 				Party: id,
 				Blame: frostKeygenBlame(s.cfg, id, d.commitments.BytesList()),
-				Err:   err,
+				Err:   verifyErr,
 			}
 		}
 	}
 	secret := fed.NewScalar()
 	for _, id := range s.cfg.Parties {
-		secret.Add(secret, s.partyData[id].share)
+		share, err := edScalarFromSecret(s.partyData[id].share)
+		if err != nil {
+			return nil, err
+		}
+		secret.Add(secret, share)
+		share.Set(fed.NewScalar())
 	}
 	secretScalar, err := newEdSecretScalar(secret.Bytes())
+	secret.Set(fed.NewScalar())
 	if err != nil {
 		return nil, err
 	}

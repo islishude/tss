@@ -59,7 +59,11 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 	if env, ok := s.partialEnvelopes[id]; ok {
 		return env.Clone()
 	}
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: edcurve.WireScalar{S: partial}, PlanHash: s.planHash}, s.limits)
+	zWire, err := newCanonicalScalar(partial)
+	if err != nil {
+		return tss.Envelope{}
+	}
+	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zWire, PlanHash: s.planHash}, s.limits)
 	if err != nil {
 		return tss.Envelope{}
 	}
@@ -79,8 +83,8 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 
 func (s *SignSession) verifyPartial(id tss.PartyID, z *fed.Scalar, rho *fed.Scalar, challenge *fed.Scalar) error {
 	commitment := s.commitments[id]
-	D := clonePoint(commitment.D.P)
-	E := clonePoint(commitment.E.P)
+	D := commitment.D.Point()
+	E := commitment.E.Point()
 	if D == nil || E == nil {
 		return errors.New("missing nonce commitment point")
 	}
@@ -124,8 +128,8 @@ func (s *SignSession) groupCommitment() (*fed.Point, map[tss.PartyID]*fed.Scalar
 		if !ok {
 			return nil, nil, fmt.Errorf("missing commitment for %d", id)
 		}
-		D := clonePoint(commitment.D.P)
-		E := clonePoint(commitment.E.P)
+		D := commitment.D.Point()
+		E := commitment.E.Point()
 		if D == nil || E == nil {
 			return nil, nil, fmt.Errorf("missing commitment point for %d", id)
 		}

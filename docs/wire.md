@@ -167,23 +167,24 @@ Frame and semantic limits are **fail-closed**: any struct tag that declares `max
 
 Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) provide `frameLimits(maxTotal int) wire.FrameLimits` and `fieldLimits() wire.FieldLimits` adapter methods to convert their structured limits into wire-layer options.
 
-## DTO Pattern
+## Opaque State Codecs
 
-Types with unexported fields (`secret.Scalar`, `sync.Mutex`) either use
-unexported wire DTOs or an object-level codec owned by the state type. This
-includes opaque FROST key shares, CGGMP21 presigns, and the CGGMP21 reshare
-plan. The public domain object is never made mutable merely for serialization.
-The `custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions;
-the `bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte`
+Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use an object-level
+codec owned by the domain state or, where structural conversion remains useful,
+an unexported wire DTO. Opaque FROST and CGGMP21 key shares, CGGMP21
+presigns, and CGGMP21 reshare plans are state-owned codecs.
+The public domain object is never made mutable merely for serialization. The
+`custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions; the
+`bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte`
 conversions.
 
-FROST KeyShare DTOs and CGGMP21 secp256k1 `keyShareState` encode
+FROST Ed25519 and CGGMP21 secp256k1 `keyShareState` codecs encode
 participant-owned public material as canonical `PartyID` maps. The map key is
-the sole owner identity; nested values do not duplicate it. Decoders require the
-map key set to match `Parties` exactly, reject the broadcast ID and
+the sole owner identity; nested values do not duplicate it. Decoders require
+the map key set to match `Parties` exactly, reject the broadcast ID and
 unknown/missing parties, and validate any confirmation sender against its map
-key. FROST per-party keygen confirmations use `wire:"...,record,optional"` so
-missing confirmations are represented by an absent tag rather than a zero-length
+key. FROST per-party keygen confirmations use optional record tag 2, so a
+missing confirmation is represented by an absent tag rather than a zero-length
 or one-element record list. Protocol ordering is still derived from `Parties`,
 not map iteration.
 
@@ -214,6 +215,12 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
     return nil
 }
 ```
+
+Direct state codecs call `wire.ResolveMarshalOptions` or
+`wire.ResolveUnmarshalOptions` before constructing fields. This ensures the
+same caller-provided semantic and frame limits are applied to top-level fields,
+canonical map values, and nested records. Defaults are used only when the
+caller supplied no corresponding options.
 
 This approach keeps wire ownership inside the type while allowing long-lived
 runtime state to store typed values such as `*secp.Point`, `*schnorr.Proof`,

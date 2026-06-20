@@ -42,31 +42,25 @@ type SignSession struct {
 }
 
 type nonceCommitment struct {
-	D        edcurve.WirePoint `wire:"1,custom,len=32"` // hiding nonce commitment
-	E        edcurve.WirePoint `wire:"2,custom,len=32"` // binding nonce commitment
-	PlanHash []byte            `wire:"3,bytes,len=32"`
+	D        nonceCommitmentPoint `wire:"1,custom,len=32"` // hiding nonce commitment
+	E        nonceCommitmentPoint `wire:"2,custom,len=32"` // binding nonce commitment
+	PlanHash []byte               `wire:"3,bytes,len=32"`
 }
 
 // DBytes returns a caller-owned canonical hiding commitment encoding.
 func (c nonceCommitment) DBytes() []byte {
-	if c.D.P == nil {
-		return nil
-	}
-	return c.D.P.Bytes()
+	return c.D.Bytes()
 }
 
 // EBytes returns a caller-owned canonical binding commitment encoding.
 func (c nonceCommitment) EBytes() []byte {
-	if c.E.P == nil {
-		return nil
-	}
-	return c.E.P.Bytes()
+	return c.E.Bytes()
 }
 
 // Equal reports whether two nonce commitments bind the same points and plan.
 func (c nonceCommitment) Equal(other nonceCommitment) bool {
-	return pointEqual(c.D.P, other.D.P) &&
-		pointEqual(c.E.P, other.E.P) &&
+	return c.D.Equal(other.D) &&
+		c.E.Equal(other.E) &&
 		bytes.Equal(c.PlanHash, other.PlanHash)
 }
 
@@ -84,8 +78,8 @@ func (nonceCommitment) MarshalJSON() ([]byte, error) {
 }
 
 type signPartialPayload struct {
-	Z        edcurve.WireScalar `wire:"1,custom,len=32"`
-	PlanHash []byte             `wire:"2,bytes,len=32"`
+	Z        canonicalScalar `wire:"1,custom,len=32"`
+	PlanHash []byte          `wire:"2,bytes,len=32"`
 }
 
 const signPartialPayloadWireVersion uint16 = 1
@@ -192,9 +186,21 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	ePoint := fed.NewIdentityPoint().ScalarBaseMult(e)
 	d.Set(fed.NewScalar())
 	e.Set(fed.NewScalar())
+	dCommitment, err := newNonceCommitmentPointFromPoint(dPoint)
+	if err != nil {
+		dNonce.Destroy()
+		eNonce.Destroy()
+		return nil, nil, err
+	}
+	eCommitment, err := newNonceCommitmentPointFromPoint(ePoint)
+	if err != nil {
+		dNonce.Destroy()
+		eNonce.Destroy()
+		return nil, nil, err
+	}
 	commitment := nonceCommitment{
-		D:        edcurve.WirePoint{P: clonePoint(dPoint)},
-		E:        edcurve.WirePoint{P: clonePoint(ePoint)},
+		D:        dCommitment,
+		E:        eCommitment,
 		PlanHash: slices.Clone(planHash),
 	}
 	payload, err := marshalNonceCommitmentPayloadWithLimits(commitment, limits)
@@ -319,7 +325,7 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		partial := fed.NewScalar().Set(p.Z.S)
+		partial := p.Z.Scalar()
 		if existing, ok := s.partials[base.From]; ok {
 			if existing.Equal(partial) == 1 {
 				if _, ok := s.partialEnvelopes[base.From]; !ok {

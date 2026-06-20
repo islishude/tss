@@ -15,9 +15,11 @@ the bytes remain Ed25519 canonical scalar encoding.
 */
 
 func newEdSecretScalar(data []byte) (*secret.Scalar, error) {
-	if _, err := edcurve.ScalarFromCanonical(data); err != nil {
+	scalar, err := edcurve.ScalarFromCanonical(data)
+	if err != nil {
 		return nil, err
 	}
+	scalar.Set(fed.NewScalar())
 	return secret.NewScalar(data, edcurve.ScalarSize)
 }
 
@@ -33,4 +35,12 @@ func edScalarFromSecret(s *secret.Scalar) (*fed.Scalar, error) {
 		return nil, errors.New("nil secret scalar")
 	}
 	return edcurve.ScalarFromCanonical(s.FixedBytes())
+}
+
+func validateEdSecretScalar(s *secret.Scalar) error {
+	scalar, err := edScalarFromSecret(s)
+	if scalar != nil {
+		scalar.Set(fed.NewScalar())
+	}
+	return err
 }

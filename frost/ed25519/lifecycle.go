@@ -3,6 +3,7 @@ package ed25519
 import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -77,7 +78,7 @@ func (s *KeygenSession) clearIntermediateSecrets() {
 	}
 	for _, pd := range s.partyData {
 		if pd.share != nil {
-			pd.share.Set(fed.NewScalar())
+			pd.share.Destroy()
 			pd.share = nil
 		}
 		clear(pd.chainCode)
@@ -105,6 +106,15 @@ func clearScalarMap(xs map[tss.PartyID]*fed.Scalar) {
 	for id := range xs {
 		if xs[id] != nil {
 			xs[id].Set(fed.NewScalar())
+		}
+		delete(xs, id)
+	}
+}
+
+func clearSecretScalarMap(xs map[tss.PartyID]*secret.Scalar) {
+	for id := range xs {
+		if xs[id] != nil {
+			xs[id].Destroy()
 		}
 		delete(xs, id)
 	}

@@ -284,13 +284,19 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scalar, err := edcurve.ScalarFromCanonical(payload.Share)
+	scalar, err := edScalarFromSecret(payload.Share)
 	if err != nil {
 		t.Fatal(err)
 	}
 	badShare := edcurve.ScalarOne().Add(edcurve.ScalarOne(), scalar)
-	badShareBytes := badShare.Bytes()
-	badPayload, err := marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes, PlanHash: payload.PlanHash})
+	badSecretShare, err := newEdSecretScalarFromFed(badShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPayload, err := marshalReshareSharePayload(
+		reshareSharePayload{Share: badSecretShare, PlanHash: payload.PlanHash},
+	)
+	badSecretShare.Destroy()
 	if err != nil {
 		t.Fatal(err)
 	}

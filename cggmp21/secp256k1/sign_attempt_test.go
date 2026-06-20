@@ -42,6 +42,71 @@ func TestFast_SignAttemptRecordCanonicalRoundTrip(t *testing.T) {
 	}
 }
 
+func TestFast_SignAttemptRecordCodecAppliesCallerLimits(t *testing.T) {
+	t.Parallel()
+
+	record := testSignAttemptRecord(t, 1)
+	limits := testLimits()
+	raw, err := record.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smallFields := limits.fieldLimits()
+	smallFields["envelope"] = len(record.CanonicalBaseEnvelopeBytes) - 1
+	if _, err := record.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+		t.Fatal("sign attempt marshal ignored caller field limits")
+	}
+	var decoded SignAttemptRecord
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err == nil {
+		t.Fatal("sign attempt unmarshal ignored caller frame limits")
+	}
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw))),
+		wire.WithFieldLimits(smallFields),
+	); err == nil {
+		t.Fatal("sign attempt unmarshal ignored caller field limits")
+	}
+	missing := limits.fieldLimits()
+	delete(missing, "envelope")
+	if _, err := record.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+		t.Fatal("sign attempt marshal accepted missing field limit")
+	}
+}
+
+func TestFast_SignAttemptRecordRejectsNonCanonicalFieldSet(t *testing.T) {
+	t.Parallel()
+
+	record := testSignAttemptRecord(t, 1)
+	raw, err := record.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, signAttemptWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := wire.MarshalFields(version, signAttemptWireType, fields[:len(fields)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinaryValueWithLimits[SignAttemptRecord](missing, testLimits()); err == nil {
+		t.Fatal("sign attempt accepted missing field")
+	}
+	fields[len(fields)-1].Tag = 29
+	unknown, err := wire.MarshalFields(version, signAttemptWireType, fields)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinaryValueWithLimits[SignAttemptRecord](unknown, testLimits()); err == nil {
+		t.Fatal("sign attempt accepted unknown field")
+	}
+}
+
 func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -100,12 +165,16 @@ func TestFast_SignAttemptRecordRejectsRetiredEnvelopeLayoutOnRestore(t *testing.
 	if err != nil {
 		t.Fatal(err)
 	}
-	w, err := signAttemptWireFromRecord(record)
+	raw, err := record.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.CanonicalBaseEnvelopeBytes = retiredEnvelope
-	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	attemptVersion, attemptFields, err := wire.UnmarshalFields(raw, signAttemptWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	attemptFields[13].Value = retiredEnvelope
+	raw, err = wire.MarshalFields(attemptVersion, signAttemptWireType, attemptFields)
 	if err != nil {
 		t.Fatal(err)
 	}

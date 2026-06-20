@@ -9,7 +9,7 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 )
 
 const (
@@ -36,7 +36,7 @@ type ReshareSession struct {
 	log     tss.Logger                         // Optional protocol logger.
 	limits  Limits                             // Local fail-closed resource policy.
 	commits map[tss.PartyID]reshareCommitments // Public dealer polynomial commitments by dealer.
-	shares  map[tss.PartyID]*fed.Scalar        // Secret dealer contributions received by this receiver.
+	shares  map[tss.PartyID]*secret.Scalar     // Secret dealer contributions received by this receiver.
 
 	completed bool               // Terminal success flag after newShare is available.
 	aborted   bool               // Terminal failure/destruction flag.
@@ -60,8 +60,8 @@ func (reshareCommitmentsPayload) WireVersion() uint16 {
 }
 
 type reshareSharePayload struct {
-	Share    []byte `json:"share" wire:"1,bytes,max_bytes=scalar"`
-	PlanHash []byte `json:"plan_hash" wire:"2,bytes,len=32"`
+	Share    *secret.Scalar `json:"share" wire:"1,custom,len=32"`
+	PlanHash []byte         `json:"plan_hash" wire:"2,bytes,len=32"`
 }
 
 const reshareSharePayloadWireVersion uint16 = 1
@@ -202,6 +202,12 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	ownShare := evalScalarPolynomial(poly, oldKey.state.party)
+	ownSecretShare, err := newEdSecretScalarFromFed(ownShare)
+	ownShare.Set(fed.NewScalar())
+	if err != nil {
+		return nil, nil, err
+	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.state.publicKey.Clone(),
@@ -216,7 +222,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
 		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
-		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
+		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
 		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
@@ -233,8 +239,16 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 			continue
 		}
 		share := evalScalarPolynomial(poly, id)
-		shareBytes := share.Bytes()
-		payload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
+		secretShare, err := newEdSecretScalarFromFed(share)
+		share.Set(fed.NewScalar())
+		if err != nil {
+			return nil, nil, err
+		}
+		payload, err := marshalReshareSharePayloadWithLimits(
+			reshareSharePayload{Share: secretShare, PlanHash: planHash},
+			limits,
+		)
+		secretShare.Destroy()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -298,7 +312,7 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
 		commits:      make(map[tss.PartyID]reshareCommitments),
-		shares:       make(map[tss.PartyID]*fed.Scalar),
+		shares:       make(map[tss.PartyID]*secret.Scalar),
 		guard:        guard,
 	}, nil
 }
@@ -359,6 +373,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	ownShare := evalScalarPolynomial(poly, oldKey.state.party)
+	ownSecretShare, err := newEdSecretScalarFromFed(ownShare)
+	ownShare.Set(fed.NewScalar())
+	if err != nil {
+		return nil, nil, err
+	}
 	s := &ReshareSession{
 		oldKey:       oldKey,
 		oldPublicKey: oldKey.state.publicKey.Clone(),
@@ -374,7 +394,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		limits:       limits,
 		planHash:     append([]byte(nil), planHash...),
 		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
-		shares:       map[tss.PartyID]*fed.Scalar{oldKey.state.party: evalScalarPolynomial(poly, oldKey.state.party)},
+		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
 		guard:        guard,
 	}
 	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
@@ -391,8 +411,16 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 			continue
 		}
 		share := evalScalarPolynomial(poly, id)
-		shareBytes := share.Bytes()
-		payload, err := marshalReshareSharePayloadWithLimits(reshareSharePayload{Share: shareBytes, PlanHash: planHash}, limits)
+		secretShare, err := newEdSecretScalarFromFed(share)
+		share.Set(fed.NewScalar())
+		if err != nil {
+			return nil, nil, err
+		}
+		payload, err := marshalReshareSharePayloadWithLimits(
+			reshareSharePayload{Share: secretShare, PlanHash: planHash},
+			limits,
+		)
+		secretShare.Destroy()
 		if err != nil {
 			return nil, nil, err
 		}
@@ -462,20 +490,17 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 		}
+		defer p.Share.Destroy()
 		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}
-		scalar, err := edcurve.ScalarFromCanonical(p.Share)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
 		if existing, ok := s.shares[base.From]; ok {
-			if existing.Equal(scalar) == 1 {
+			if existing.Equal(p.Share) {
 				return nil, nil
 			}
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare share"))
 		}
-		s.shares[base.From] = scalar
+		s.shares[base.From] = p.Share.Clone()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
@@ -486,7 +511,7 @@ func (s *ReshareSession) clearSensitive() {
 	if s == nil {
 		return
 	}
-	clearScalarMap(s.shares)
+	clearSecretScalarMap(s.shares)
 }
 
 // KeyShare returns the reshared key share when resharing completes.

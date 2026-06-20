@@ -418,13 +418,16 @@ func TestFROSTBlamesBadPartial(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	zBytes := payload.Z.S.Bytes()
+	zBytes := payload.Z.Bytes()
 	zBytes[0] ^= 1
 	z, err := edcurve.ScalarFromCanonical(zBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.Z = edcurve.WireScalar{S: z}
+	payload.Z, err = newCanonicalScalar(z)
+	if err != nil {
+		t.Fatal(err)
+	}
 	mutated, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -500,13 +503,19 @@ func TestFROSTReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	scalar, err := edcurve.ScalarFromCanonical(payload.Share)
+	scalar, err := edScalarFromSecret(payload.Share)
 	if err != nil {
 		t.Fatal(err)
 	}
 	badShare := fed.NewScalar().Add(scalar, edcurve.ScalarOne())
-	badShareBytes := badShare.Bytes()
-	out2[1].Payload, err = marshalReshareSharePayload(reshareSharePayload{Share: badShareBytes, PlanHash: payload.PlanHash})
+	badSecretShare, err := newEdSecretScalarFromFed(badShare)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2[1].Payload, err = marshalReshareSharePayload(
+		reshareSharePayload{Share: badSecretShare, PlanHash: payload.PlanHash},
+	)
+	badSecretShare.Destroy()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -596,13 +605,16 @@ func TestFROSTSessionStateIsMonotonic(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		zBytes := payload.Z.S.Bytes()
+		zBytes := payload.Z.Bytes()
 		zBytes[0] ^= 1
 		z, err := edcurve.ScalarFromCanonical(zBytes)
 		if err != nil {
 			t.Fatal(err)
 		}
-		payload.Z = edcurve.WireScalar{S: z}
+		payload.Z, err = newCanonicalScalar(z)
+		if err != nil {
+			t.Fatal(err)
+		}
 		mutated, err := marshalSignPartialPayload(payload)
 		if err != nil {
 			t.Fatal(err)

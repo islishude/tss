@@ -359,24 +359,24 @@ func assertPartialEnvelope(t *testing.T, env tss.Envelope, want []byte) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(partial.Z.S.Bytes(), want) {
-		t.Fatalf("partial mismatch: got %x want %x", partial.Z.S.Bytes(), want)
+	if !bytes.Equal(partial.Z.Bytes(), want) {
+		t.Fatalf("partial mismatch: got %x want %x", partial.Z.Bytes(), want)
 	}
 }
 
 func mustNonceCommitment(t testing.TB, d, e []byte) nonceCommitment {
 	t.Helper()
-	dPoint, err := edcurve.PointFromBytes(d)
+	dPoint, err := newNonceCommitmentPointFromBytes(d)
 	if err != nil {
 		t.Fatal(err)
 	}
-	ePoint, err := edcurve.PointFromBytes(e)
+	ePoint, err := newNonceCommitmentPointFromBytes(e)
 	if err != nil {
 		t.Fatal(err)
 	}
 	return nonceCommitment{
-		D: edcurve.WirePoint{P: dPoint},
-		E: edcurve.WirePoint{P: ePoint},
+		D: dPoint,
+		E: ePoint,
 	}
 }
 

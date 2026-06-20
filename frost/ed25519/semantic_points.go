@@ -88,8 +88,10 @@ func (p PublicKeyPoint) Validate() error {
 
 // MarshalWireValue returns the canonical wire encoding of the public key point.
 func (p PublicKeyPoint) MarshalWireValue() ([]byte, error) {
-	wirePoint := edcurve.WirePoint{P: p.Point()}
-	return wirePoint.MarshalWireValue()
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	return p.Bytes(), nil
 }
 
 // UnmarshalWireValue decodes a canonical non-identity public key point.
@@ -97,11 +99,7 @@ func (p *PublicKeyPoint) UnmarshalWireValue(in []byte) error {
 	if p == nil {
 		return errors.New("nil public key point")
 	}
-	var wirePoint edcurve.WirePoint
-	if err := wirePoint.UnmarshalWireValue(in); err != nil {
-		return err
-	}
-	point, err := newPublicKeyPointFromPoint(wirePoint.P)
+	point, err := newPublicKeyPointFromBytes(in)
 	if err != nil {
 		return err
 	}
@@ -200,8 +198,10 @@ func (p VerificationSharePoint) Validate() error {
 
 // MarshalWireValue returns the canonical wire encoding of the verification share.
 func (p VerificationSharePoint) MarshalWireValue() ([]byte, error) {
-	wirePoint := edcurve.WirePointAllowIdentity{P: p.Point()}
-	return wirePoint.MarshalWireValue()
+	if err := p.Validate(); err != nil {
+		return nil, err
+	}
+	return p.Bytes(), nil
 }
 
 // UnmarshalWireValue decodes a canonical verification-share point.
@@ -209,11 +209,7 @@ func (p *VerificationSharePoint) UnmarshalWireValue(in []byte) error {
 	if p == nil {
 		return errors.New("nil verification share point")
 	}
-	var wirePoint edcurve.WirePointAllowIdentity
-	if err := wirePoint.UnmarshalWireValue(in); err != nil {
-		return err
-	}
-	point, err := newVerificationSharePointFromPoint(wirePoint.P)
+	point, err := newVerificationSharePointFromBytes(in)
 	if err != nil {
 		return err
 	}

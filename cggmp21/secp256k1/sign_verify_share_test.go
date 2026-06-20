@@ -126,7 +126,7 @@ func TestFast_PresignRejectsLegacyVerifyShareBytes(t *testing.T) {
 		Second: chiPoint,
 		Third:  proof,
 	}})
-	mutated, err := testutil.RewriteWireFieldByName(raw, presignWireType, presignWire{}, "VerifyShares", legacy)
+	mutated, err := testutil.RewriteWireField(raw, presignWireType, 16, legacy)
 	if err != nil {
 		t.Fatal(err)
 	}

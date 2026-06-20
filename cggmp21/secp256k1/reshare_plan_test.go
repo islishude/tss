@@ -198,12 +198,48 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 		{Party: 2, Bytes: plan.state.oldVerificationShares[2]},
 		{Party: 1, Bytes: plan.state.oldVerificationShares[1]},
 	})
-	wrongShareOrder, err := testutil.RewriteWireFieldByName(raw, resharePlanWireType, resharePlanWire{}, "OldVerificationShares", reversedShares)
+	wrongShareOrder, err := testutil.RewriteWireField(raw, resharePlanWireType, 5, reversedShares)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tss.DecodeBinary[ResharePlan](wrongShareOrder); err == nil {
 		t.Fatal("reshare plan accepted verification shares outside old-party order")
+	}
+}
+
+func TestResharePlanCodecAppliesCallerLimits(t *testing.T) {
+	t.Parallel()
+
+	plan := minimalValidResharePlan(t)
+	limits := testLimits()
+	raw, err := plan.MarshalBinaryWithLimits(limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smallFields := limits.fieldLimits()
+	smallFields["point"] = len(plan.state.oldGroupPublicKey) - 1
+	if _, err := plan.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+		t.Fatal("reshare plan marshal ignored caller field limits")
+	}
+	var decoded ResharePlan
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err == nil {
+		t.Fatal("reshare plan unmarshal ignored caller frame limits")
+	}
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw))),
+		wire.WithFieldLimits(smallFields),
+	); err == nil {
+		t.Fatal("reshare plan unmarshal ignored caller field limits")
+	}
+	missing := limits.fieldLimits()
+	delete(missing, "point")
+	if _, err := plan.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+		t.Fatal("reshare plan marshal accepted missing field limit")
 	}
 }
 

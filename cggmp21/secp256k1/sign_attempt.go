@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -236,14 +237,7 @@ func (r SignAttemptRecord) MarshalBinary() ([]byte, error) {
 // MarshalBinaryWithLimits encodes the sign-attempt record using explicit local
 // resource limits.
 func (r SignAttemptRecord) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	if err := validateSignAttemptRecordWithLimits(r, limits); err != nil {
-		return nil, err
-	}
-	w, err := signAttemptWireFromRecord(r)
-	if err != nil {
-		return nil, err
-	}
-	return wire.Marshal(w, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return r.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // UnmarshalBinary decodes and validates a canonical sign-attempt record.
@@ -263,59 +257,223 @@ func (r *SignAttemptRecord) UnmarshalBinaryWithLimits(in []byte, limits Limits) 
 	if len(in) > limits.State.MaxSerializedSignAttemptBytes {
 		return fmt.Errorf("sign attempt too large: %d > %d", len(in), limits.State.MaxSerializedSignAttemptBytes)
 	}
-	var w signAttemptWire
-	if err := wire.Unmarshal(in, &w,
+	var decoded SignAttemptRecord
+	if err := decoded.UnmarshalWireMessage(in,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedSignAttemptBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
 		return err
 	}
-	sessionID, err := tss.SessionIDFromBytes(w.SessionID)
+	*r = decoded
+	return nil
+}
+
+// WireType returns the canonical sign-attempt wire type.
+func (SignAttemptRecord) WireType() string { return signAttemptWireType }
+
+// WireVersion returns the sign-attempt wire version.
+func (SignAttemptRecord) WireVersion() uint16 { return signAttemptWireVersion }
+
+// MarshalWireMessage encodes SignAttemptRecord directly without an intermediate
+// DTO. The field tags and values are the durable sign-attempt wire contract.
+func (r SignAttemptRecord) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+	resolved := wire.ResolveMarshalOptions(opts...)
+	config, err := signAttemptCodecConfig(resolved.FieldLimits)
+	if err != nil {
+		return nil, err
+	}
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimitsForMarshal(config.limits.fieldLimits()))
+	}
+	if err := validateSignAttemptRecordWithLimits(r, config.limits); err != nil {
+		return nil, err
+	}
+	if err := checkSignAttemptWireBytes(r.CanonicalBaseEnvelopeBytes, config.envelopeBytes, "canonical base envelope"); err != nil {
+		return nil, err
+	}
+	if err := checkSignAttemptWireBytes(r.SignatureR, config.scalarBytes, "signature r"); err != nil {
+		return nil, err
+	}
+	if err := checkSignAttemptWireBytes(r.SignatureS, config.scalarBytes, "signature s"); err != nil {
+		return nil, err
+	}
+	acks, err := marshalSignAttemptAcks(r.DeliveryState.Acks, opts...)
+	if err != nil {
+		return nil, err
+	}
+	var certificate []byte
+	if r.DeliveryState.Certificate != nil {
+		certificate, err = r.DeliveryState.Certificate.MarshalBinary()
+		if err != nil {
+			return nil, fmt.Errorf("encode delivery certificate: %w", err)
+		}
+	}
+	if err := checkSignAttemptWireBytes(certificate, config.envelopeBytes, "delivery certificate"); err != nil {
+		return nil, err
+	}
+	fields := []wire.Field{
+		{Tag: 1, Value: wire.Uint16(r.RecordVersion)},
+		{Tag: 2, Value: []byte(r.Protocol)},
+		{Tag: 3, Value: wire.Uint16(r.ProtocolVersion)},
+		{Tag: 4, Value: wire.NonNilBytes(bytes.Clone(r.PresignID))},
+		{Tag: 5, Value: wire.NonNilBytes(bytes.Clone(r.AttemptHash))},
+		{Tag: 6, Value: wire.NonNilBytes(bytes.Clone(r.IntentHash))},
+		{Tag: 7, Value: r.SessionID[:]},
+		{Tag: 8, Value: wire.Uint32(r.Party)},
+		{Tag: 9, Value: wire.NonNilBytes(bytes.Clone(r.SignerSetHash))},
+		{Tag: 10, Value: wire.NonNilBytes(bytes.Clone(r.SignPlanHash))},
+		{Tag: 11, Value: wire.NonNilBytes(bytes.Clone(r.ContextHash))},
+		{Tag: 12, Value: wire.NonNilBytes(bytes.Clone(r.Digest))},
+		{Tag: 13, Value: wire.NonNilBytes(bytes.Clone(r.DigestBindingHash))},
+		{Tag: 14, Value: wire.NonNilBytes(bytes.Clone(r.CanonicalBaseEnvelopeBytes))},
+		{Tag: 15, Value: wire.NonNilBytes(bytes.Clone(r.CanonicalBaseEnvelopeHash))},
+		{Tag: 16, Value: wire.NonNilBytes(bytes.Clone(r.EnvelopeDigest))},
+		{Tag: 17, Value: wire.NonNilBytes(bytes.Clone(r.PayloadHash))},
+		{Tag: 18, Value: signAttemptUint8(uint8(r.DeliveryPolicy.Mode))},
+		{Tag: 19, Value: signAttemptUint8(uint8(r.DeliveryPolicy.Confidentiality))},
+		{Tag: 20, Value: signAttemptUint8(uint8(r.DeliveryPolicy.BroadcastConsistency))},
+		{Tag: 21, Value: wire.EncodeUint32List(r.DeliveryPolicy.Recipients)},
+		{Tag: 22, Value: acks},
+		{Tag: 23, Value: wire.NonNilBytes(certificate)},
+		{Tag: 24, Value: wire.Bool(r.DeliveryState.DeliveryComplete)},
+		{Tag: 25, Value: wire.Bool(r.Completed)},
+		{Tag: 26, Value: wire.NonNilBytes(bytes.Clone(r.SignatureR))},
+		{Tag: 27, Value: wire.NonNilBytes(bytes.Clone(r.SignatureS))},
+		{Tag: 28, Value: signAttemptUint8(r.SignatureRecoveryID)},
+	}
+	return wire.MarshalMessageBody(r, fields)
+}
+
+// UnmarshalWireMessage decodes SignAttemptRecord directly without an
+// intermediate DTO and rejects any non-canonical field set.
+func (r *SignAttemptRecord) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	if r == nil {
+		return errors.New("nil sign attempt")
+	}
+	resolved := wire.ResolveUnmarshalOptions(opts...)
+	config, err := signAttemptCodecConfig(resolved.FieldLimits)
 	if err != nil {
 		return err
 	}
+	config.limits.State.MaxSerializedSignAttemptBytes = resolved.FrameLimits.MaxTotalBytes
+	config.limits.TLV.MaxFields = resolved.FrameLimits.MaxFields
+	config.limits.TLV.MaxFieldBytes = resolved.FrameLimits.MaxFieldBytes
+	if resolved.FieldLimits == nil {
+		opts = append(opts, wire.WithFieldLimits(config.limits.fieldLimits()))
+	}
+	fields, err := wire.UnmarshalMessageBody(in, r, opts...)
+	if err != nil {
+		return err
+	}
+	if err := requireSignAttemptRecordTags(fields); err != nil {
+		return err
+	}
+	recordVersion, err := wire.DecodeUint16(fields[0].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt record version: %w", err)
+	}
+	protocol, err := decodeSignAttemptString(fields[1].Value, "protocol")
+	if err != nil {
+		return err
+	}
+	protocolVersion, err := wire.DecodeUint16(fields[2].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt protocol version: %w", err)
+	}
+	sessionID, err := tss.SessionIDFromBytes(fields[6].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt session id: %w", err)
+	}
+	party, err := wire.DecodeUint32(fields[7].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt party: %w", err)
+	}
+	deliveryMode, err := decodeSignAttemptUint8(fields[17].Value, "delivery mode")
+	if err != nil {
+		return err
+	}
+	confidentiality, err := decodeSignAttemptUint8(fields[18].Value, "confidentiality")
+	if err != nil {
+		return err
+	}
+	broadcastConsistency, err := decodeSignAttemptUint8(fields[19].Value, "broadcast consistency")
+	if err != nil {
+		return err
+	}
+	recipients, err := wire.DecodeUint32List[tss.PartyID](fields[20].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt recipients: %w", err)
+	}
+	acks, err := unmarshalSignAttemptAcks(fields[21].Value, resolved.FrameLimits, opts...)
+	if err != nil {
+		return err
+	}
+	if err := checkSignAttemptWireBytes(fields[13].Value, config.envelopeBytes, "canonical base envelope"); err != nil {
+		return err
+	}
+	if err := checkSignAttemptWireBytes(fields[22].Value, config.envelopeBytes, "delivery certificate"); err != nil {
+		return err
+	}
+	if err := checkSignAttemptWireBytes(fields[25].Value, config.scalarBytes, "signature r"); err != nil {
+		return err
+	}
+	if err := checkSignAttemptWireBytes(fields[26].Value, config.scalarBytes, "signature s"); err != nil {
+		return err
+	}
 	var certificate *tss.BroadcastCertificate
-	if len(w.Certificate) > 0 {
-		certificate, err = tss.DecodeBinary[tss.BroadcastCertificate](w.Certificate)
+	if len(fields[22].Value) > 0 {
+		certificate, err = tss.DecodeBinary[tss.BroadcastCertificate](fields[22].Value)
 		if err != nil {
 			return fmt.Errorf("invalid delivery certificate: %w", err)
 		}
 	}
+	deliveryComplete, err := wire.DecodeBool(fields[23].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt delivery complete: %w", err)
+	}
+	completed, err := wire.DecodeBool(fields[24].Value)
+	if err != nil {
+		return fmt.Errorf("invalid sign attempt completed: %w", err)
+	}
+	recoveryID, err := decodeSignAttemptUint8(fields[27].Value, "signature recovery id")
+	if err != nil {
+		return err
+	}
 	record := SignAttemptRecord{
-		RecordVersion:              w.RecordVersion,
-		Protocol:                   tss.ProtocolID(w.Protocol),
-		ProtocolVersion:            w.ProtocolVersion,
-		PresignID:                  w.PresignID,
-		AttemptHash:                w.AttemptHash,
-		IntentHash:                 w.IntentHash,
+		RecordVersion:              recordVersion,
+		Protocol:                   tss.ProtocolID(protocol),
+		ProtocolVersion:            protocolVersion,
+		PresignID:                  bytes.Clone(fields[3].Value),
+		AttemptHash:                bytes.Clone(fields[4].Value),
+		IntentHash:                 bytes.Clone(fields[5].Value),
 		SessionID:                  sessionID,
-		Party:                      w.Party,
-		SignerSetHash:              w.SignerSetHash,
-		SignPlanHash:               w.SignPlanHash,
-		ContextHash:                w.ContextHash,
-		Digest:                     w.Digest,
-		DigestBindingHash:          w.DigestBindingHash,
-		CanonicalBaseEnvelopeBytes: w.CanonicalBaseEnvelopeBytes,
-		CanonicalBaseEnvelopeHash:  w.CanonicalBaseEnvelopeHash,
-		EnvelopeDigest:             w.EnvelopeDigest,
-		PayloadHash:                w.PayloadHash,
+		Party:                      party,
+		SignerSetHash:              bytes.Clone(fields[8].Value),
+		SignPlanHash:               bytes.Clone(fields[9].Value),
+		ContextHash:                bytes.Clone(fields[10].Value),
+		Digest:                     bytes.Clone(fields[11].Value),
+		DigestBindingHash:          bytes.Clone(fields[12].Value),
+		CanonicalBaseEnvelopeBytes: bytes.Clone(fields[13].Value),
+		CanonicalBaseEnvelopeHash:  bytes.Clone(fields[14].Value),
+		EnvelopeDigest:             bytes.Clone(fields[15].Value),
+		PayloadHash:                bytes.Clone(fields[16].Value),
 		DeliveryPolicy: SignAttemptDeliveryPolicy{
-			Mode:                 tss.DeliveryMode(w.DeliveryMode),
-			Confidentiality:      tss.ConfidentialityPolicy(w.Confidentiality),
-			BroadcastConsistency: tss.BroadcastConsistencyPolicy(w.BroadcastConsistency),
-			Recipients:           w.Recipients,
+			Mode:                 tss.DeliveryMode(deliveryMode),
+			Confidentiality:      tss.ConfidentialityPolicy(confidentiality),
+			BroadcastConsistency: tss.BroadcastConsistencyPolicy(broadcastConsistency),
+			Recipients:           recipients,
 		},
 		DeliveryState: SignAttemptDeliveryState{
-			Acks:             tss.CloneSlice(w.Acks),
+			Acks:             acks,
 			Certificate:      certificate,
-			DeliveryComplete: w.DeliveryComplete,
+			DeliveryComplete: deliveryComplete,
 		},
-		Completed:           w.Completed,
-		SignatureR:          w.SignatureR,
-		SignatureS:          w.SignatureS,
-		SignatureRecoveryID: w.SignatureRecoveryID,
+		Completed:           completed,
+		SignatureR:          bytes.Clone(fields[25].Value),
+		SignatureS:          bytes.Clone(fields[26].Value),
+		SignatureRecoveryID: recoveryID,
 	}
-	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
+	if err := validateSignAttemptRecordWithLimits(record, config.limits); err != nil {
 		return err
 	}
 	*r = record
@@ -363,82 +521,126 @@ func (r SignAttemptResult) validate() error {
 	return nil
 }
 
-type signAttemptWire struct {
-	RecordVersion              uint16             `wire:"1,u16"`
-	Protocol                   string             `wire:"2,string"`
-	ProtocolVersion            uint16             `wire:"3,u16"`
-	PresignID                  []byte             `wire:"4,bytes,len=32"`
-	AttemptHash                []byte             `wire:"5,bytes,len=32"`
-	IntentHash                 []byte             `wire:"6,bytes,len=32"`
-	SessionID                  []byte             `wire:"7,bytes,len=32"`
-	Party                      tss.PartyID        `wire:"8,u32"`
-	SignerSetHash              []byte             `wire:"9,bytes,len=32"`
-	SignPlanHash               []byte             `wire:"10,bytes,len=32"`
-	ContextHash                []byte             `wire:"11,bytes,len=32"`
-	Digest                     []byte             `wire:"12,bytes,len=32"`
-	DigestBindingHash          []byte             `wire:"13,bytes,len=32"`
-	CanonicalBaseEnvelopeBytes []byte             `wire:"14,bytes,max_bytes=envelope"`
-	CanonicalBaseEnvelopeHash  []byte             `wire:"15,bytes,len=32"`
-	EnvelopeDigest             []byte             `wire:"16,bytes,len=32"`
-	PayloadHash                []byte             `wire:"17,bytes,len=32"`
-	DeliveryMode               uint8              `wire:"18,u8"`
-	Confidentiality            uint8              `wire:"19,u8"`
-	BroadcastConsistency       uint8              `wire:"20,u8"`
-	Recipients                 []uint32           `wire:"21,u32list"`
-	Acks                       []tss.BroadcastAck `wire:"22,recordlist"`
-	Certificate                []byte             `wire:"23,bytes,max_bytes=envelope"`
-	DeliveryComplete           bool               `wire:"24,bool"`
-	Completed                  bool               `wire:"25,bool"`
-	SignatureR                 []byte             `wire:"26,bytes,max_bytes=scalar"`
-	SignatureS                 []byte             `wire:"27,bytes,max_bytes=scalar"`
-	SignatureRecoveryID        uint8              `wire:"28,u8"`
+type signAttemptCodecOptions struct {
+	limits        Limits
+	envelopeBytes int
+	scalarBytes   int
 }
 
-// WireType returns the canonical sign-attempt wire type.
-func (signAttemptWire) WireType() string { return signAttemptWireType }
+func signAttemptCodecConfig(fieldLimits wire.FieldLimits) (signAttemptCodecOptions, error) {
+	limits := DefaultLimits()
+	effective := fieldLimits
+	if effective == nil {
+		effective = limits.fieldLimits()
+	}
+	envelopeBytes, err := signAttemptRequiredFieldLimit(effective, "envelope")
+	if err != nil {
+		return signAttemptCodecOptions{}, err
+	}
+	scalarBytes, err := signAttemptRequiredFieldLimit(effective, "scalar")
+	if err != nil {
+		return signAttemptCodecOptions{}, err
+	}
+	limits.Curve.MaxScalarBytes = scalarBytes
+	if value, ok := effective["signprep_partial_signature"]; ok {
+		if value <= 0 {
+			return signAttemptCodecOptions{}, fmt.Errorf("wire: field limit %q for sign attempt record must be positive", "signprep_partial_signature")
+		}
+		limits.SignPrep.MaxSignPartialPayloadBytes = value
+	}
+	if value, ok := effective["broadcast_signature"]; ok && value <= 0 {
+		return signAttemptCodecOptions{}, fmt.Errorf("wire: field limit %q for sign attempt record must be positive", "broadcast_signature")
+	}
+	return signAttemptCodecOptions{
+		limits:        limits,
+		envelopeBytes: envelopeBytes,
+		scalarBytes:   scalarBytes,
+	}, nil
+}
 
-// WireVersion returns the sign-attempt wire version.
-func (signAttemptWire) WireVersion() uint16 { return signAttemptWireVersion }
+func signAttemptRequiredFieldLimit(fieldLimits wire.FieldLimits, name string) (int, error) {
+	value, ok := fieldLimits[name]
+	if !ok {
+		return 0, fmt.Errorf("wire: missing field limit %q for sign attempt record", name)
+	}
+	if value <= 0 {
+		return 0, fmt.Errorf("wire: field limit %q for sign attempt record must be positive", name)
+	}
+	return value, nil
+}
 
-func signAttemptWireFromRecord(r SignAttemptRecord) (signAttemptWire, error) {
-	var certificate []byte
-	var err error
-	if r.DeliveryState.Certificate != nil {
-		certificate, err = r.DeliveryState.Certificate.MarshalBinary()
-		if err != nil {
-			return signAttemptWire{}, fmt.Errorf("encode delivery certificate: %w", err)
+func requireSignAttemptRecordTags(fields []wire.Field) error {
+	if len(fields) != 28 {
+		return fmt.Errorf("sign attempt record field count %d != 28", len(fields))
+	}
+	for i, field := range fields {
+		want := uint16(i + 1)
+		if field.Tag != want {
+			return fmt.Errorf("sign attempt record tag %d at index %d, want %d", field.Tag, i, want)
 		}
 	}
-	return signAttemptWire{
-		RecordVersion:              r.RecordVersion,
-		Protocol:                   string(r.Protocol),
-		ProtocolVersion:            r.ProtocolVersion,
-		PresignID:                  r.PresignID,
-		AttemptHash:                r.AttemptHash,
-		IntentHash:                 r.IntentHash,
-		SessionID:                  r.SessionID[:],
-		Party:                      r.Party,
-		SignerSetHash:              r.SignerSetHash,
-		SignPlanHash:               r.SignPlanHash,
-		ContextHash:                r.ContextHash,
-		Digest:                     r.Digest,
-		DigestBindingHash:          r.DigestBindingHash,
-		CanonicalBaseEnvelopeBytes: r.CanonicalBaseEnvelopeBytes,
-		CanonicalBaseEnvelopeHash:  r.CanonicalBaseEnvelopeHash,
-		EnvelopeDigest:             r.EnvelopeDigest,
-		PayloadHash:                r.PayloadHash,
-		DeliveryMode:               uint8(r.DeliveryPolicy.Mode),
-		Confidentiality:            uint8(r.DeliveryPolicy.Confidentiality),
-		BroadcastConsistency:       uint8(r.DeliveryPolicy.BroadcastConsistency),
-		Recipients:                 r.DeliveryPolicy.Recipients,
-		Acks:                       tss.CloneSlice(r.DeliveryState.Acks),
-		Certificate:                certificate,
-		DeliveryComplete:           r.DeliveryState.DeliveryComplete,
-		Completed:                  r.Completed,
-		SignatureR:                 r.SignatureR,
-		SignatureS:                 r.SignatureS,
-		SignatureRecoveryID:        r.SignatureRecoveryID,
-	}, nil
+	return nil
+}
+
+func signAttemptUint8(v uint8) []byte {
+	return []byte{v}
+}
+
+func decodeSignAttemptUint8(raw []byte, name string) (uint8, error) {
+	if len(raw) != 1 {
+		return 0, fmt.Errorf("invalid sign attempt %s: u8: got %d bytes, want 1", name, len(raw))
+	}
+	return raw[0], nil
+}
+
+func decodeSignAttemptString(raw []byte, name string) (string, error) {
+	if !utf8.Valid(raw) {
+		return "", fmt.Errorf("invalid sign attempt %s: string is not valid UTF-8", name)
+	}
+	return string(raw), nil
+}
+
+func checkSignAttemptWireBytes(raw []byte, maxBytes int, name string) error {
+	if maxBytes > 0 && len(raw) > maxBytes {
+		return fmt.Errorf("sign attempt %s too large: %d > %d", name, len(raw), maxBytes)
+	}
+	return nil
+}
+
+func marshalSignAttemptAcks(acks []tss.BroadcastAck, opts ...wire.MarshalOption) ([]byte, error) {
+	out := wire.Uint32(uint32(len(acks)))
+	for i, ack := range acks {
+		record, err := wire.MarshalRecordValue(ack, opts...)
+		if err != nil {
+			return nil, fmt.Errorf("delivery ack %d: %w", i, err)
+		}
+		out = wire.AppendBytes(out, record)
+	}
+	return out, nil
+}
+
+func unmarshalSignAttemptAcks(raw []byte, frameLimits wire.FrameLimits, opts ...wire.UnmarshalOption) ([]tss.BroadcastAck, error) {
+	count, offset, err := wire.ReadUint32(raw, 0)
+	if err != nil {
+		return nil, fmt.Errorf("invalid delivery ack count: %w", err)
+	}
+	out := make([]tss.BroadcastAck, 0, int(count))
+	for i := range int(count) {
+		record, next, err := wire.ReadBytesWithLimit(raw, offset, frameLimits.MaxFieldBytes)
+		if err != nil {
+			return nil, fmt.Errorf("delivery ack %d: %w", i, err)
+		}
+		offset = next
+		var ack tss.BroadcastAck
+		if err := wire.UnmarshalRecordValue(record, &ack, opts...); err != nil {
+			return nil, fmt.Errorf("delivery ack %d: %w", i, err)
+		}
+		out = append(out, ack.Clone())
+	}
+	if offset != len(raw) {
+		return nil, errors.New("trailing delivery ack data")
+	}
+	return out, nil
 }
 
 func validateSignAttemptRecord(r SignAttemptRecord) error {

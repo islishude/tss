@@ -116,26 +116,26 @@ type Presign struct {
 }
 
 type presignState struct {
-	securityParams       SecurityParams         // Cryptographic profile inherited from the key share.
-	party                tss.PartyID            // Local owner of this presign share.
-	threshold            int                    // Number of signer partials required to complete ECDSA signing.
-	signers              tss.PartySet           // Canonical signer set authorized for this presign.
-	r                    *secp.Point            // Aggregate nonce point R.
-	littleR              secp.Scalar            // ECDSA r scalar derived from R.
-	transcriptHash       []byte                 // Cross-party presign transcript hash.
-	context              PresignContext         // Normalized context bound before online signing.
-	contextHash          []byte                 // Hash of context, used to reject cross-context reuse.
-	derivation           *tss.DerivationResult  // Resolved child key/path; ChildPublicKey is the verification key.
-	planHash             []byte                 // Digest of the presign lifecycle plan accepted by all signers.
-	publicKey            *secp.Point            // Parent group public key before request-time HD derivation.
-	keygenTranscriptHash []byte                 // Transcript hash of the keygen that produced publicKey.
-	partiesHash          []byte                 // Hash of the full key-share participant set.
-	verifyShares         []signVerifyShare      // Per-signer public verification material for online partials.
-	kShare               *secret.Scalar         // Local nonce-share secret used once during online signing.
-	chiShare             *secret.Scalar         // Local chi-share secret used once during online signing.
-	delta                *secret.Scalar         // Local aggregate-delta share from presign completion.
-	consumed             *atomic.Bool           // Shared in-process one-use marker across shallow copies.
-	attempt              *presignAttemptBinding // Durable attempt binding/outbox state for one-use signing.
+	securityParams       SecurityParams         `wire:"18,record"`                       // Cryptographic profile inherited from the key share.
+	party                tss.PartyID            `wire:"1,u32"`                           // Local owner of this presign share.
+	threshold            int                    `wire:"2,u32"`                           // Number of signer partials required to complete ECDSA signing.
+	signers              tss.PartySet           `wire:"3,u32list"`                       // Canonical signer set authorized for this presign.
+	r                    *secp.Point            `wire:"4,custom,len=33"`                 // Aggregate nonce point R.
+	littleR              secp.Scalar            `wire:"5,custom,len=32"`                 // ECDSA r scalar derived from R.
+	transcriptHash       []byte                 `wire:"9,bytes"`                         // Cross-party presign transcript hash.
+	context              PresignContext         `wire:"10,nested"`                       // Normalized context bound before online signing.
+	contextHash          []byte                 `wire:"11,bytes"`                        // Hash of context, used to reject cross-context reuse.
+	derivation           *tss.DerivationResult  `wire:"19,record"`                       // Resolved child key/path; ChildPublicKey is the verification key.
+	planHash             []byte                 `wire:"17,bytes,len=32"`                 // Digest of the presign lifecycle plan accepted by all signers.
+	publicKey            *secp.Point            `wire:"13,custom,len=33"`                // Parent group public key before request-time HD derivation.
+	keygenTranscriptHash []byte                 `wire:"14,bytes"`                        // Transcript hash of the keygen that produced publicKey.
+	partiesHash          []byte                 `wire:"15,bytes"`                        // Hash of the full key-share participant set.
+	verifyShares         []signVerifyShare      `wire:"16,recordlist,max_items=signers"` // Per-signer public verification material for online partials.
+	kShare               *secret.Scalar         `wire:"6,custom,len=32"`                 // Local nonce-share secret used once during online signing.
+	chiShare             *secret.Scalar         `wire:"7,custom,len=32"`                 // Local chi-share secret used once during online signing.
+	delta                *secret.Scalar         `wire:"8,custom,len=32"`                 // Local aggregate-delta share from presign completion.
+	consumed             *atomic.Bool           `wire:"-"`                               // Shared in-process one-use marker across shallow copies.
+	attempt              *presignAttemptBinding `wire:"-"`                               // Durable attempt binding/outbox state for one-use signing.
 }
 
 // PartyID returns the owner of the local presign share.
@@ -227,18 +227,13 @@ func (p *Presign) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	if len(in) > limits.State.MaxSerializedPresignBytes {
 		return fmt.Errorf("presign too large: %d > %d", len(in), limits.State.MaxSerializedPresignBytes)
 	}
-	var w presignWire
-	if err := wire.Unmarshal(in, &w,
+	var decoded Presign
+	if err := decoded.UnmarshalWireMessage(in,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedPresignBytes)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
 		return err
 	}
-	state, err := decodePresignWire(&w)
-	if err != nil {
-		return err
-	}
-	decoded := Presign{state: state}
 	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
@@ -349,13 +344,13 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if _, err := secpScalarFromSecret(p.state.delta); err != nil {
 		return fmt.Errorf("invalid delta: %w", err)
 	}
-	if len(p.state.transcriptHash) != 32 {
+	if len(p.state.transcriptHash) != sha256.Size {
 		return errors.New("invalid presign transcript hash")
 	}
 	if err := validatePresignContext(p.state.context); err != nil {
 		return err
 	}
-	if len(p.state.contextHash) != 32 {
+	if len(p.state.contextHash) != sha256.Size {
 		return errors.New("invalid presign context hash")
 	}
 	if err := validateDerivationResult(p.state.derivation, tss.DerivationSchemeBIP32Secp256k1); err != nil {

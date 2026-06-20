@@ -57,7 +57,12 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		z.Add(z, shiftTerm)
 	}
 	s.partials[s.key.state.party] = z
-	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: edcurve.WireScalar{S: z}, PlanHash: s.planHash}, s.limits)
+	zWire, err := newCanonicalScalar(z)
+	if err != nil {
+		s.clearNonceScalars()
+		return nil, err
+	}
+	payload, err := marshalSignPartialPayloadWithLimits(signPartialPayload{Z: zWire, PlanHash: s.planHash}, s.limits)
 	if err != nil {
 		s.clearNonceScalars()
 		return nil, err

@@ -37,13 +37,19 @@ func (s *ReshareSession) tryComplete() error {
 	}
 	// Verify each dealer's share against their commitments at the local party's ID.
 	for dealer, share := range s.shares {
-		if err := s.commits[dealer].VerifyShare(s.selfID, share); err != nil {
+		edShare, err := edScalarFromSecret(share)
+		if err != nil {
+			return err
+		}
+		verifyErr := s.commits[dealer].VerifyShare(s.selfID, edShare)
+		edShare.Set(fed.NewScalar())
+		if verifyErr != nil {
 			return &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 1,
 				Party: dealer,
 				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer].BytesList()),
-				Err:   err,
+				Err:   verifyErr,
 			}
 		}
 	}
@@ -58,16 +64,28 @@ func (s *ReshareSession) tryComplete() error {
 			return err
 		}
 		newSecret.Add(newSecret, oldSecret)
+		oldSecret.Set(fed.NewScalar())
 		for _, dealer := range s.oldParties {
-			newSecret.Add(newSecret, s.shares[dealer])
+			share, err := edScalarFromSecret(s.shares[dealer])
+			if err != nil {
+				return err
+			}
+			newSecret.Add(newSecret, share)
+			share.Set(fed.NewScalar())
 		}
 	} else {
 		// True reshare: new_secret = Σ g_i(self) mod L.
 		for _, dealer := range s.oldParties {
-			newSecret.Add(newSecret, s.shares[dealer])
+			share, err := edScalarFromSecret(s.shares[dealer])
+			if err != nil {
+				return err
+			}
+			newSecret.Add(newSecret, share)
+			share.Set(fed.NewScalar())
 		}
 	}
 	newSecretScalar, err := newEdSecretScalar(newSecret.Bytes())
+	newSecret.Set(fed.NewScalar())
 	if err != nil {
 		return err
 	}

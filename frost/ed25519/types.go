@@ -78,8 +78,8 @@ type KeyShare struct {
 }
 
 type keySharePartyData struct {
-	verificationShare  verificationSharePoint
-	keygenConfirmation *KeygenConfirmation
+	verificationShare  verificationSharePoint `wire:"1,custom,len=32"`
+	keygenConfirmation *KeygenConfirmation    `wire:"2,record,optional"`
 }
 
 // Clone returns a deep copy of keySharePartyData.
@@ -91,17 +91,17 @@ func (in keySharePartyData) Clone() keySharePartyData {
 }
 
 type keyShareState struct {
-	party                tss.PartyID                       // Local owner of the secret signing share.
-	threshold            int                               // Number of signers required for FROST signing.
-	parties              tss.PartySet                      // Canonical full participant set for the group key.
-	publicKey            publicKeyPoint                    // Parent group public key before request-time derivation.
-	chainCode            []byte                            // HD chain code paired with publicKey for non-hardened derivation.
-	secret               *secret.Scalar                    // Local Ed25519 signing share; never exposed through accessors.
-	groupCommitments     groupCommitments                  // Public polynomial commitments from keygen/reshare.
-	partyData            map[tss.PartyID]keySharePartyData // Per-party public material keyed by participant identity.
-	keygenSessionID      tss.SessionID                     // Session that produced this key share.
-	keygenTranscriptHash []byte                            // Transcript hash of completed keygen/reshare confirmation.
-	planHash             []byte                            // Lifecycle plan digest that authorized this key share.
+	party                tss.PartyID                       `wire:"1,u32"`                        // Local owner of the secret signing share.
+	threshold            int                               `wire:"2,u32"`                        // Number of signers required for FROST signing.
+	parties              tss.PartySet                      `wire:"3,u32list"`                    // Canonical full participant set for the group key.
+	publicKey            publicKeyPoint                    `wire:"4,custom,len=32"`              // Parent group public key before request-time derivation.
+	chainCode            []byte                            `wire:"5,bytes"`                      // HD chain code paired with publicKey for non-hardened derivation.
+	secret               *secret.Scalar                    `wire:"6,custom,len=32"`              // Local Ed25519 signing share; never exposed through accessors.
+	groupCommitments     groupCommitments                  `wire:"7,custom,max_items=threshold"` // Public polynomial commitments from keygen/reshare.
+	partyData            map[tss.PartyID]keySharePartyData `wire:"8,map,max_items=parties"`      // Per-party public material keyed by participant identity.
+	keygenSessionID      tss.SessionID                     `wire:"9,bytes,len=32"`               // Session that produced this key share.
+	keygenTranscriptHash []byte                            `wire:"10,bytes"`                     // Transcript hash of completed keygen/reshare confirmation.
+	planHash             []byte                            `wire:"11,bytes,len=32"`              // Lifecycle plan digest that authorized this key share.
 }
 
 func scalarBytes(x *big.Int) ([]byte, error) {

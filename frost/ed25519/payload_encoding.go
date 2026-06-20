@@ -4,7 +4,6 @@ import (
 	"crypto/sha256"
 	"fmt"
 
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -91,7 +90,7 @@ func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 
 // Validate checks the keygen share payload structure.
 func (p keygenSharePayload) Validate() error {
-	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
+	if err := validateEdSecretScalar(p.Share); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -254,7 +253,7 @@ func (p *reshareSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits
 
 // Validate checks the reshare share payload structure.
 func (p reshareSharePayload) Validate() error {
-	if _, err := edcurve.ScalarFromCanonical(p.Share); err != nil {
+	if err := validateEdSecretScalar(p.Share); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {

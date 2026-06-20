@@ -114,7 +114,11 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := keygenSharePayload{Share: scalar, PlanHash: bytes.Repeat([]byte{0x91}, 32)}
+	secretScalar, err := newEdSecretScalar(scalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := keygenSharePayload{Share: secretScalar, PlanHash: bytes.Repeat([]byte{0x91}, 32)}
 	raw, err := marshalKeygenSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -148,7 +152,15 @@ func TestGoldenNonceCommitmentPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := nonceCommitment{D: edcurve.WirePoint{P: dPoint}, E: edcurve.WirePoint{P: ePoint}, PlanHash: bytes.Repeat([]byte{0x92}, 32)}
+	dCommitment, err := newNonceCommitmentPointFromPoint(dPoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	eCommitment, err := newNonceCommitmentPointFromPoint(ePoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := nonceCommitment{D: dCommitment, E: eCommitment, PlanHash: bytes.Repeat([]byte{0x92}, 32)}
 	raw, err := marshalNonceCommitmentPayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -182,7 +194,11 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload := signPartialPayload{Z: edcurve.WireScalar{S: scalarValue}, PlanHash: bytes.Repeat([]byte{0x93}, 32)}
+	z, err := newCanonicalScalar(scalarValue)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload := signPartialPayload{Z: z, PlanHash: bytes.Repeat([]byte{0x93}, 32)}
 	raw, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)

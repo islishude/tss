@@ -209,9 +209,13 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialScalar := partialPayload.Z.S
+	partialScalar := partialPayload.Z.Scalar()
 	badScalar := fed.NewScalar().Add(partialScalar, edcurve.ScalarOne())
-	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: edcurve.WireScalar{S: badScalar}, PlanHash: partialPayload.PlanHash})
+	badZ, err := newCanonicalScalar(badScalar)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPayload, err := marshalSignPartialPayload(signPartialPayload{Z: badZ, PlanHash: partialPayload.PlanHash})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -307,10 +311,10 @@ func TestSignPartialPayloadMarshalJSONRejects(t *testing.T) {
 
 func TestSecretSharePayloadMarshalJSONRejects(t *testing.T) {
 	t.Parallel()
-	if _, err := (keygenSharePayload{Share: []byte{0x01}}).MarshalJSON(); err == nil {
+	if _, err := (keygenSharePayload{}).MarshalJSON(); err == nil {
 		t.Fatal("keygenSharePayload.MarshalJSON should reject JSON encoding")
 	}
-	if _, err := (reshareSharePayload{Share: []byte{0x02}}).MarshalJSON(); err == nil {
+	if _, err := (reshareSharePayload{}).MarshalJSON(); err == nil {
 		t.Fatal("reshareSharePayload.MarshalJSON should reject JSON encoding")
 	}
 }

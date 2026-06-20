@@ -2,6 +2,7 @@ package ed25519
 
 import (
 	"bytes"
+	"encoding/binary"
 	"fmt"
 	"math"
 	"strings"
@@ -9,7 +10,6 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
@@ -92,13 +92,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 	}
 	commitments := share.state.groupCommitments.BytesList()
 	commitments = append(commitments, append([]byte(nil), commitments[0]...))
-	mutated, err := testutil.RewriteWireFieldByName(
-		raw,
-		keyShareWireType,
-		keyShareWire{},
-		"GroupCommitments",
-		wire.EncodeBytesList(commitments),
-	)
+	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 7, wire.EncodeBytesList(commitments))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,8 +102,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 	if err == nil {
 		t.Fatal("key share accepted group commitments over resource limit")
 	}
-	if !strings.Contains(err.Error(), "custom item count") ||
-		!strings.Contains(err.Error(), "exceeds max_items") {
+	if !strings.Contains(err.Error(), "count too large") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -123,13 +116,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsRequiresExactThreshold(t *testing.T)
 		t.Fatal(err)
 	}
 	commitments := share.state.groupCommitments.BytesList()
-	mutated, err := testutil.RewriteWireFieldByName(
-		raw,
-		keyShareWireType,
-		keyShareWire{},
-		"GroupCommitments",
-		wire.EncodeBytesList(commitments[:1]),
-	)
+	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 7, wire.EncodeBytesList(commitments[:1]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,21 +149,24 @@ func TestFROSTKeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 	shares := frostKeygen(t, 2, 3)
 	for _, tc := range []struct {
 		name   string
-		mutate func(*keyShareWire)
+		mutate func(*keyShareState)
 	}{
-		{name: "missing", mutate: func(w *keyShareWire) { delete(w.PartyData, 3) }},
-		{name: "extra", mutate: func(w *keyShareWire) { w.PartyData[4] = w.PartyData[3] }},
-		{name: "broadcast", mutate: func(w *keyShareWire) {
-			w.PartyData[tss.BroadcastPartyId] = w.PartyData[3]
+		{name: "missing", mutate: func(state *keyShareState) { delete(state.partyData, 3) }},
+		{name: "extra", mutate: func(state *keyShareState) { state.partyData[4] = state.partyData[3] }},
+		{name: "broadcast", mutate: func(state *keyShareState) {
+			state.partyData[tss.BroadcastPartyId] = state.partyData[3]
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			w, err := encodeKeyShareWire(shares[1])
-			if err != nil {
-				t.Fatal(err)
+			mutated := cloneKeyShareValue(shares[1])
+			tc.mutate(mutated.state)
+			raw, err := mutated.state.MarshalWireMessage(
+				wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
+			)
+			if err == nil {
+				_, err = tss.DecodeBinary[KeyShare](raw)
 			}
-			tc.mutate(w)
-			if _, err := tss.DecodeBinary[KeyShare](marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+			if err == nil {
 				t.Fatalf("key share accepted %s party data", tc.name)
 			}
 		})
@@ -188,17 +178,20 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 	shares := frostKeygen(t, 2, 3)
 
 	t.Run("confirmation sender mismatch", func(t *testing.T) {
-		w, err := encodeKeyShareWire(shares[1])
-		if err != nil {
-			t.Fatal(err)
-		}
-		data := w.PartyData[1]
-		if data.KeygenConfirmation == nil {
+		mutated := cloneKeyShareValue(shares[1])
+		data := mutated.state.partyData[1]
+		if data.keygenConfirmation == nil {
 			t.Fatal("missing keygen confirmation for party data")
 		}
-		data.KeygenConfirmation.Sender = 2
-		w.PartyData[1] = data
-		if _, err := tss.DecodeBinary[KeyShare](marshalFROSTKeyShareWireForTest(t, w)); err == nil {
+		data.keygenConfirmation.Sender = 2
+		mutated.state.partyData[1] = data
+		raw, err := mutated.state.MarshalWireMessage(
+			wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
+		)
+		if err == nil {
+			_, err = tss.DecodeBinary[KeyShare](raw)
+		}
+		if err == nil {
 			t.Fatal("key share accepted confirmation sender that did not match party-data key")
 		}
 	})
@@ -212,6 +205,76 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 			t.Fatal("key share accepted partial confirmation set")
 		}
 	})
+}
+
+func TestFROSTKeyShareStateRejectsMalformedRawPointAndPartyData(t *testing.T) {
+	t.Parallel()
+
+	raw, err := frostKeygen(t, 2, 3)[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformedPoint, err := testutil.RewriteWireField(raw, keyShareWireType, 4, make([]byte, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinary[KeyShare](malformedPoint); err == nil {
+		t.Fatal("key share accepted malformed public key")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(testing.TB, []byte) []byte
+	}{
+		{
+			name: "missing verification share",
+			mutate: func(t testing.TB, record []byte) []byte {
+				fields, err := wire.UnmarshalRecordFieldsWithLimits(record, wire.DefaultFrameLimits(), "partyData")
+				if err != nil {
+					t.Fatal(err)
+				}
+				out, err := wire.MarshalRecordFields(fields[1:])
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+		{
+			name: "unknown field",
+			mutate: func(t testing.TB, record []byte) []byte {
+				fields, err := wire.UnmarshalRecordFieldsWithLimits(record, wire.DefaultFrameLimits(), "partyData")
+				if err != nil {
+					t.Fatal(err)
+				}
+				fields = append(fields, wire.Field{Tag: 3, Value: []byte{1}})
+				out, err := wire.MarshalRecordFields(fields)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return out
+			},
+		},
+		{
+			name: "duplicate field",
+			mutate: func(t testing.TB, record []byte) []byte {
+				return mutateFROSTRecordFieldTag(t, record, 1, 1)
+			},
+		},
+		{
+			name: "trailing data",
+			mutate: func(_ testing.TB, record []byte) []byte {
+				return append(bytes.Clone(record), 0)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := mutateFirstFROSTPartyDataRecord(t, raw, tc.mutate)
+			if _, err := tss.DecodeBinary[KeyShare](mutated); err == nil {
+				t.Fatalf("key share accepted party data with %s", tc.name)
+			}
+		})
+	}
 }
 
 func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
@@ -255,15 +318,6 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 	}
 }
 
-func marshalFROSTKeyShareWireForTest(t testing.TB, w *keyShareWire) []byte {
-	t.Helper()
-	raw, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
-	if err != nil {
-		t.Fatal(err)
-	}
-	return raw
-}
-
 func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
@@ -273,7 +327,7 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 	}
 	// Rewrite the threshold field to uint32 values that overflow int on 32-bit platforms.
 	for _, overflow := range []uint32{math.MaxInt32 + 1, math.MaxUint32} {
-		mutated, err := testutil.RewriteWireFieldByName(raw, keyShareWireType, keyShareWire{}, "Threshold", wire.Uint32(overflow))
+		mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 2, wire.Uint32(overflow))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -355,17 +409,174 @@ func TestFROSTKeyShareInternalCloneIsDeepCopy(t *testing.T) {
 	}
 }
 
-func TestFROSTKeyShareWirePointRejectsMalformedPublicKey(t *testing.T) {
+func TestFROSTKeyShareStateRejectsMalformedPublicKey(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
-	w, err := encodeKeyShareWire(shares[1])
+	mutated := cloneKeyShareValue(shares[1])
+	mutated.state.publicKey = publicKeyPoint{}
+	if _, err := mutated.state.MarshalWireMessage(
+		wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
+	); err == nil {
+		t.Fatal("key share state accepted nil public key")
+	}
+}
+
+func TestFROSTKeyShareStateCodecAppliesCallerLimits(t *testing.T) {
+	t.Parallel()
+
+	share := frostKeygen(t, 2, 3)[1]
+	limits := testLimits()
+	raw, err := share.MarshalBinaryWithLimits(limits)
 	if err != nil {
 		t.Fatal(err)
 	}
-	w.PublicKey = edcurve.WirePoint{}
-	if _, err := wire.Marshal(w, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits())); err == nil {
-		t.Fatal("key share wire accepted nil public key")
+	smallFields := limits.fieldLimits()
+	smallFields["point"] = len(share.state.publicKey.Bytes()) - 1
+	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+		t.Fatal("key share state marshal ignored caller field limits")
 	}
+	var decoded keyShareState
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err == nil {
+		t.Fatal("key share state unmarshal ignored caller frame limits")
+	}
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFrameLimits(limits.frameLimits(len(raw))),
+		wire.WithFieldLimits(smallFields),
+	); err == nil {
+		t.Fatal("key share state unmarshal ignored caller field limits")
+	}
+	missing := limits.fieldLimits()
+	delete(missing, "point")
+	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+		t.Fatal("key share state marshal accepted missing field limit")
+	}
+}
+
+func TestFROSTKeyShareStateRejectsNonCanonicalTopLevelTags(t *testing.T) {
+	t.Parallel()
+
+	raw, err := frostKeygen(t, 2, 3)[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, keyShareWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	missing, err := wire.MarshalFields(version, keyShareWireType, fields[:len(fields)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinary[KeyShare](missing); err == nil {
+		t.Fatal("key share accepted missing field")
+	}
+
+	unknown := mutateFROSTWireFieldTag(t, raw, len(fields)-1, 12)
+	if _, err := tss.DecodeBinary[KeyShare](unknown); err == nil {
+		t.Fatal("key share accepted unknown field")
+	}
+	duplicate := mutateFROSTWireFieldTag(t, raw, 1, 1)
+	if _, err := tss.DecodeBinary[KeyShare](duplicate); err == nil {
+		t.Fatal("key share accepted duplicate/out-of-order field")
+	}
+}
+
+func mutateFROSTWireFieldTag(t testing.TB, raw []byte, fieldIndex int, tag uint16) []byte {
+	t.Helper()
+	out := bytes.Clone(raw)
+	offset := 4
+	typeLen := int(binary.BigEndian.Uint16(out[offset : offset+2]))
+	offset += 2 + typeLen + 2
+	fieldCount := int(binary.BigEndian.Uint16(out[offset : offset+2]))
+	offset += 2
+	if fieldIndex < 0 || fieldIndex >= fieldCount {
+		t.Fatalf("field index %d out of range %d", fieldIndex, fieldCount)
+	}
+	for i := range fieldCount {
+		if i == fieldIndex {
+			binary.BigEndian.PutUint16(out[offset:offset+2], tag)
+			return out
+		}
+		valueLen := int(binary.BigEndian.Uint32(out[offset+2 : offset+6]))
+		offset += 6 + valueLen
+	}
+	t.Fatal("field tag not found")
+	return nil
+}
+
+func mutateFirstFROSTPartyDataRecord(
+	t testing.TB,
+	raw []byte,
+	mutate func(testing.TB, []byte) []byte,
+) []byte {
+	t.Helper()
+	version, fields, err := wire.UnmarshalFields(raw, keyShareWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range fields {
+		if fields[i].Tag != 8 {
+			continue
+		}
+		count, offset, err := wire.ReadUint32(fields[i].Value, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := wire.Uint32(count)
+		for entry := 0; entry < int(count); entry++ {
+			key, next, err := wire.ReadBytes(fields[i].Value, offset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			offset = next
+			value, next, err := wire.ReadBytes(fields[i].Value, offset)
+			if err != nil {
+				t.Fatal(err)
+			}
+			offset = next
+			if entry == 0 {
+				value = mutate(t, value)
+			}
+			out = wire.AppendBytes(out, key)
+			out = wire.AppendBytes(out, value)
+		}
+		fields[i].Value = out
+		mutated, err := wire.MarshalFields(version, keyShareWireType, fields)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return mutated
+	}
+	t.Fatal("missing party data field")
+	return nil
+}
+
+func mutateFROSTRecordFieldTag(t testing.TB, raw []byte, fieldIndex int, tag uint16) []byte {
+	t.Helper()
+	out := bytes.Clone(raw)
+	if len(out) < 2 {
+		t.Fatal("record too short")
+	}
+	fieldCount := int(binary.BigEndian.Uint16(out[:2]))
+	offset := 2
+	if fieldIndex < 0 || fieldIndex >= fieldCount {
+		t.Fatalf("field index %d out of range %d", fieldIndex, fieldCount)
+	}
+	for i := range fieldCount {
+		if i == fieldIndex {
+			binary.BigEndian.PutUint16(out[offset:offset+2], tag)
+			return out
+		}
+		valueLen := int(binary.BigEndian.Uint32(out[offset+2 : offset+6]))
+		offset += 6 + valueLen
+	}
+	t.Fatal("record field tag not found")
+	return nil
 }
 
 func TestFROSTKeyShareStringAndGoStringDoNotLeak(t *testing.T) {
