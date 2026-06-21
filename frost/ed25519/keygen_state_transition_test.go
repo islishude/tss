@@ -105,7 +105,7 @@ func TestFROSTKeygenPendingPrepareDoesNotMutateAndDestroysStagedShare(t *testing
 		t.Fatal("complete round-1 state did not prepare a pending key share")
 	}
 	assertFROSTSnapshotUnchanged(t, before, after)
-	stagedSecret := prepared.share.state.secret
+	stagedSecret := prepared.share.state.Secret
 	if stagedSecret == nil || testutil.IsZeroBytes(stagedSecret.FixedBytes()) {
 		t.Fatal("prepared pending key share has no staged secret")
 	}

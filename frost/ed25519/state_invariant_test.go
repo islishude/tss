@@ -54,7 +54,7 @@ func TestFROSTSignRejectNoMutationInvariant(t *testing.T) {
 	t.Parallel()
 
 	shares := frostKeygen(t, 2, 3)
-	parties := tss.SortParties(shares[1].state.parties)
+	parties := tss.SortParties(shares[1].state.Parties)
 	signers := tss.NewPartySet(1, 2)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

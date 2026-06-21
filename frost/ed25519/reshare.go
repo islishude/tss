@@ -116,13 +116,13 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 	if oldKey == nil || oldKey.state == nil {
 		return errors.New("nil old key share")
 	}
-	if !plan.state.oldPublicKey.Equal(oldKey.state.publicKey) {
+	if !plan.state.oldPublicKey.Equal(oldKey.state.PublicKey) {
 		return errors.New("old key public key does not match reshare plan")
 	}
-	if !bytes.Equal(plan.state.oldChainCode, oldKey.state.chainCode) {
+	if !bytes.Equal(plan.state.oldChainCode, oldKey.state.ChainCode) {
 		return errors.New("old key chain code does not match reshare plan")
 	}
-	if !slices.Equal(plan.state.oldParties, oldKey.state.parties) {
+	if !slices.Equal(plan.state.oldParties, oldKey.state.Parties) {
 		return errors.New("old key party set does not match reshare plan")
 	}
 	return nil
@@ -151,7 +151,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	}
 	limits := plan.limits
 	if local.Self == 0 {
-		local.Self = oldKey.state.party
+		local.Self = oldKey.state.Party
 	}
 	config, err := plan.dealerConfig(local)
 	if err != nil {
@@ -160,7 +160,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if config.Self != oldKey.state.party {
+	if config.Self != oldKey.state.Party {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
 	if err := validateResharePlanMatchesOldKey(plan, oldKey); err != nil {
@@ -173,19 +173,19 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	oldParties := oldKey.state.parties.Clone()
+	oldParties := oldKey.state.Parties.Clone()
 	// Fix config.Parties to the old party set so blame evidence is deterministic.
 	config.Parties = oldParties
 	newParties := plan.state.newParties.Clone()
 	newThreshold := plan.state.newThreshold
-	isRecipient := tss.ContainsParty(newParties, oldKey.state.party)
+	isRecipient := tss.ContainsParty(newParties, oldKey.state.Party)
 	role := frostReshareRoleDealerOnly
 	if isRecipient {
 		role = frostReshareRoleDealerAndRecipient
 	}
 
 	// Compute w_i = λ_i(old, 0) * s_i (mod L).
-	lambda, err := lagrangeCoefficientScalar(oldKey.state.party, oldParties)
+	lambda, err := lagrangeCoefficientScalar(oldKey.state.Party, oldParties)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -295,7 +295,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	limits := plan.limits
 	if local.Self == 0 {
-		local.Self = oldKey.state.party
+		local.Self = oldKey.state.Party
 	}
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
@@ -304,10 +304,10 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	if config.Self != oldKey.state.party {
+	if config.Self != oldKey.state.Party {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
-	if plan.state.threshold != oldKey.state.threshold || !plan.state.publicKey.Equal(oldKey.state.publicKey) || !bytes.Equal(plan.state.chainCode, oldKey.state.chainCode) || !slices.Equal(plan.state.parties, oldKey.state.parties) {
+	if plan.state.threshold != oldKey.state.Threshold || !plan.state.publicKey.Equal(oldKey.state.PublicKey) || !bytes.Equal(plan.state.chainCode, oldKey.state.ChainCode) || !slices.Equal(plan.state.parties, oldKey.state.Parties) {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("refresh plan does not match old key share"))
 	}
 	planHash, err := plan.Digest()
@@ -317,9 +317,9 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
 	}
-	parties := oldKey.state.parties.Clone()
+	parties := oldKey.state.Parties.Clone()
 	config.Parties = parties
-	config.Threshold = oldKey.state.threshold
+	config.Threshold = oldKey.state.Threshold
 	// Zero-coefficient polynomial preserves the group secret.
 	zero := fed.NewScalar()
 	defer zero.Set(fed.NewScalar())
@@ -330,7 +330,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		planHash,
 		parties,
 		parties,
-		oldKey.state.threshold,
+		oldKey.state.Threshold,
 		frostReshareModeRefresh,
 		frostReshareRoleDealerAndRecipient,
 		zero,

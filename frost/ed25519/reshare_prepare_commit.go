@@ -64,19 +64,19 @@ func prepareReshareDealerStart(
 
 	session := &ReshareSession{
 		oldKey:       oldKey,
-		oldPublicKey: oldKey.state.publicKey.Clone(),
-		chainCode:    bytes.Clone(oldKey.state.chainCode),
+		oldPublicKey: oldKey.state.PublicKey.Clone(),
+		chainCode:    bytes.Clone(oldKey.state.ChainCode),
 		oldParties:   oldParties.Clone(),
 		newParties:   newParties.Clone(),
 		newThreshold: newThreshold,
-		selfID:       oldKey.state.party,
+		selfID:       oldKey.state.Party,
 		mode:         mode,
 		role:         role,
 		cfg:          config,
 		log:          config.Logger(),
 		limits:       limits,
 		planHash:     bytes.Clone(planHash),
-		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
+		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.Party: commitments.Clone()},
 		shares:       make(map[tss.PartyID]*secret.Scalar),
 		guard:        guard,
 	}
@@ -88,14 +88,14 @@ func prepareReshareDealerStart(
 	}()
 
 	if session.requiresInboundShares() {
-		ownShare := evalScalarPolynomial(poly, oldKey.state.party)
+		ownShare := evalScalarPolynomial(poly, oldKey.state.Party)
 		ownSecretShare, shareErr := newEdSecretScalarFromFed(ownShare)
 		ownShare.Set(fed.NewScalar())
 		if shareErr != nil {
 			err = shareErr
 			return nil, err
 		}
-		session.shares[oldKey.state.party] = ownSecretShare
+		session.shares[oldKey.state.Party] = ownSecretShare
 	}
 
 	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{
@@ -105,7 +105,7 @@ func prepareReshareDealerStart(
 	if err != nil {
 		return nil, err
 	}
-	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, oldKey.state.Party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
 	clear(commitPayload)
 	if err != nil {
 		return nil, err
@@ -114,7 +114,7 @@ func prepareReshareDealerStart(
 
 	if session.requiresOutboundShares() {
 		for _, id := range newParties {
-			if id == oldKey.state.party {
+			if id == oldKey.state.Party {
 				continue
 			}
 			share := evalScalarPolynomial(poly, id)
@@ -133,7 +133,7 @@ func prepareReshareDealerStart(
 				err = marshalErr
 				return nil, err
 			}
-			shareEnv, envelopeErr := newEnvelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
+			shareEnv, envelopeErr := newEnvelope(config, 1, oldKey.state.Party, id, payloadReshareShare, payload)
 			clear(payload)
 			if envelopeErr != nil {
 				err = envelopeErr

@@ -168,14 +168,13 @@ Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) 
 
 ## Opaque State Codecs
 
-Types with unexported fields (`secret.Scalar`, `sync.Mutex`) use an object-level
-codec owned by the domain state or, where structural conversion remains useful,
-an unexported wire DTO. Opaque FROST and CGGMP21 key shares, CGGMP21
-presigns, and CGGMP21 reshare plans are state-owned codecs.
-The public domain object is never made mutable merely for serialization. The
-`custom` kind eliminates `*secret.Scalar ↔ []byte` mechanical conversions; the
-`bigint` / `biguint` / `bigpos` kinds eliminate `*big.Int ↔ []byte`
-conversions.
+Opaque public objects may keep their mutable and secret-bearing state behind an
+unexported pointer while the unexported state type exposes wire-tagged fields to
+the reflection codec. FROST and CGGMP21 key shares, CGGMP21 presigns, and
+CGGMP21 reshare plans use this pattern. The public domain object is never made
+mutable merely for serialization. The `custom` kind eliminates
+`*secret.Scalar ↔ []byte` mechanical conversions; the `bigint` / `biguint` /
+`bigpos` kinds eliminate `*big.Int ↔ []byte` conversions.
 
 FROST Ed25519 and CGGMP21 secp256k1 `keyShareState` codecs encode
 participant-owned public material as canonical `PartyID` maps. The map key is
@@ -187,39 +186,46 @@ missing confirmation is represented by an absent tag rather than a zero-length
 or one-element record list. Protocol ordering is still derived from `Parties`,
 not map iteration.
 
-When a type must completely control its TLV envelope (type ID, version, field
-order) without exposing wire-tagged exported fields, implement `MessageMarshaler`
-and `MessageUnmarshaler`. These object-level hooks may delegate to an internal
-DTO, or may encode the state directly when runtime fields intentionally stay as
-domain objects:
+The public wrapper implements `MessageMarshaler` and `MessageUnmarshaler` to
+apply domain validation, caller-provided semantic limits, fail-atomic receiver
+assignment, and secret cleanup. The internal state implements only `Message`;
+`wire.Marshal` and `wire.Unmarshal` encode its tagged fields directly:
 
 ```go
 type KeyShare struct {
-    state *keyShareState // unexported; state owns the wire tags and codec
+    state *keyShareState
 }
 
-func (KeyShare) WireType() string    { return "cggmp21.secp256k1.keyshare" }
-func (KeyShare) WireVersion() uint16 { return 1 }
+type keyShareState struct {
+    Party   tss.PartyID    `wire:"1,u32"`
+    Parties tss.PartySet   `wire:"2,u32list,max_items=parties"`
+    Secret  *secret.Scalar `wire:"3,custom,len=32,max_bytes=scalar"`
+}
 
-func (k KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-    return k.state.MarshalWireMessage(opts...)
+func (*keyShareState) WireType() string    { return "example.keyshare" }
+func (*keyShareState) WireVersion() uint16 { return 1 }
+
+func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
+    // Resolve limits, apply defaults, and validate first.
+    return wire.Marshal(k.state, opts...)
 }
 
 func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
     var state keyShareState
-    if err := state.UnmarshalWireMessage(in, opts...); err != nil {
+    if err := wire.Unmarshal(in, &state, opts...); err != nil {
         return err
     }
+    // Validate the temporary state and destroy it on failure.
     k.state = &state
     return nil
 }
 ```
 
-Direct state codecs call `wire.ResolveMarshalOptions` or
-`wire.ResolveUnmarshalOptions` before constructing fields. This ensures the
-same caller-provided semantic and frame limits are applied to top-level fields,
-canonical map values, and nested records. Defaults are used only when the
-caller supplied no corresponding options.
+Wrapper codecs call `wire.ResolveMarshalOptions` or
+`wire.ResolveUnmarshalOptions` before invoking the reflection codec. This
+ensures the same caller-provided semantic and frame limits are applied to
+top-level fields, canonical map values, and nested records. Defaults are used
+only when the caller supplied no corresponding options.
 
 This approach keeps wire ownership inside the type while allowing long-lived
 runtime state to store typed values such as `*secp.Point`, `*schnorr.Proof`,

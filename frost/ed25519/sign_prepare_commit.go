@@ -53,7 +53,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	verifyKey := s.derivation.VerificationKeyBytes()
 	c, _ := edcurve.Ed25519Challenge(R.Bytes(), verifyKey, s.message)
 
-	lambda, err := lagrangeCoefficientScalar(s.key.state.party, s.signers)
+	lambda, err := lagrangeCoefficientScalar(s.key.state.Party, s.signers)
 	if err != nil {
 		return nil, false, err
 	}
@@ -67,7 +67,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	// With HD additive shift delta: z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
 	lambdaC := fed.NewScalar().Multiply(lambda, c)
 	defer lambdaC.Set(fed.NewScalar())
-	rho := rhos[s.key.state.party]
+	rho := rhos[s.key.state.Party]
 	z := fed.NewScalar().Multiply(rho, e)
 	cleanup.add(func() { z.Set(fed.NewScalar()) })
 	z.Add(z, d)
@@ -92,7 +92,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   s.sessionID,
 		Round:       signRound2,
-		From:        s.key.state.party,
+		From:        s.key.state.Party,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,
 	})
@@ -118,7 +118,7 @@ func (s *SignSession) commitLocalPartial(p *preparedSignPartial) sessionEffects 
 	if s.partialEnvelopes == nil {
 		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope)
 	}
-	self := s.key.state.party
+	self := s.key.state.Party
 	s.partials[self] = p.z
 	s.partialEnvelopes[self] = p.env.Clone()
 	s.partialSent = true

@@ -132,7 +132,7 @@ func (s *KeygenSession) maybePreparePendingKeyShare() (*preparedPendingKeyShare,
 			return nil, false, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
-		partyData[id] = keySharePartyData{verificationShare: pub}
+		partyData[id] = keySharePartyData{VerificationShare: pub}
 	}
 	// Chain code commitment binds the aggregate of all round-1 chain code
 	// commitments into the transcript. Individual chain codes are revealed
@@ -152,17 +152,17 @@ func (s *KeygenSession) maybePreparePendingKeyShare() (*preparedPendingKeyShare,
 	}
 	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, dealerCommits, groupCommitments.BytesList(), verificationShares)
 	share := &KeyShare{state: &keyShareState{
-		party:                s.cfg.Self,
-		threshold:            s.cfg.Threshold,
-		parties:              s.cfg.Parties.Clone(),
-		publicKey:            groupCommitments.PublicKey(),
-		chainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
-		secret:               secretScalar,
-		groupCommitments:     groupCommitments.Clone(),
-		partyData:            partyData,
-		keygenSessionID:      s.cfg.SessionID,
-		keygenTranscriptHash: keygenTranscriptHash,
-		planHash:             bytes.Clone(s.planHash),
+		Party:                s.cfg.Self,
+		Threshold:            s.cfg.Threshold,
+		Parties:              s.cfg.Parties.Clone(),
+		PublicKey:            groupCommitments.PublicKey(),
+		ChainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
+		Secret:               secretScalar,
+		GroupCommitments:     groupCommitments.Clone(),
+		PartyData:            partyData,
+		KeygenSessionID:      s.cfg.SessionID,
+		KeygenTranscriptHash: keygenTranscriptHash,
+		PlanHash:             bytes.Clone(s.planHash),
 	}}
 	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
 		share.Destroy()

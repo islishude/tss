@@ -50,8 +50,8 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	}
 
 	recipientOnly, err := startFROSTReshareRecipient(
-		oldShares[1].state.publicKey.Bytes(),
-		oldShares[1].state.chainCode,
+		oldShares[1].state.PublicKey.Bytes(),
+		oldShares[1].state.ChainCode,
 		oldParties,
 		newParties,
 		2,
@@ -191,8 +191,8 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	recipient, err := startFROSTReshareRecipient(
-		oldShares[1].state.publicKey.Bytes(),
-		oldShares[1].state.chainCode,
+		oldShares[1].state.PublicKey.Bytes(),
+		oldShares[1].state.ChainCode,
 		oldParties,
 		newParties,
 		2,
@@ -291,7 +291,7 @@ func TestFROSTReshareCompletionPrepareDoesNotMutateAndDestroysStagedShare(t *tes
 		t.Fatal("complete refresh state did not prepare a new share")
 	}
 	assertFROSTSnapshotUnchanged(t, before, after)
-	stagedSecret := prepared.newShare.state.secret
+	stagedSecret := prepared.newShare.state.Secret
 	if stagedSecret == nil || testutil.IsZeroBytes(stagedSecret.FixedBytes()) {
 		t.Fatal("prepared reshare completion has no staged secret")
 	}

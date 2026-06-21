@@ -105,7 +105,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil key share"))
 	}
 	if local.Self == 0 {
-		local.Self = key.state.party
+		local.Self = key.state.Party
 	}
 	if err := key.ValidateConsistency(); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
@@ -122,7 +122,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if err := plan.validateKey(key, local); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	if len(signers) < key.state.threshold {
+	if len(signers) < key.state.Threshold {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("not enough signers"))
 	}
 	if !tss.ContainsParty(signers, local.Self) {
@@ -218,7 +218,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   plan.state.sessionID,
 		Round:       signStartRound,
-		From:        key.state.party,
+		From:        key.state.Party,
 		PayloadType: payloadSignCommitment,
 		Payload:     payload,
 	})
@@ -238,7 +238,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		contextHash:      slices.Clone(plan.state.contextHash),
 		derivation:       plan.state.derivation.Clone(),
 		planHash:         slices.Clone(planHash),
-		commitments:      map[tss.PartyID]nonceCommitment{key.state.party: commitment},
+		commitments:      map[tss.PartyID]nonceCommitment{key.state.Party: commitment},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
 		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
 		dNonce:           dNonce,
@@ -267,7 +267,7 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.key.state.parties, s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.key.state.Parties, s.key.state.Party)
 }
 
 // HandleSignMessage validates and applies one FROST signing envelope.
@@ -370,12 +370,12 @@ func (s *SignSession) clearNonceScalars() {
 }
 
 func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error {
-	if key.state.threshold < limits.Threshold.MinProductionThreshold {
-		if !limits.Threshold.AllowOneOfOne || key.state.threshold != 1 || len(key.state.parties) != 1 {
-			return fmt.Errorf("key threshold %d is below production minimum %d", key.state.threshold, limits.Threshold.MinProductionThreshold)
+	if key.state.Threshold < limits.Threshold.MinProductionThreshold {
+		if !limits.Threshold.AllowOneOfOne || key.state.Threshold != 1 || len(key.state.Parties) != 1 {
+			return fmt.Errorf("key threshold %d is below production minimum %d", key.state.Threshold, limits.Threshold.MinProductionThreshold)
 		}
 	}
-	return tss.ValidateSignerSet(key.state.parties, key.state.threshold, signers, limits.ThresholdLimits())
+	return tss.ValidateSignerSet(key.state.Parties, key.state.Threshold, signers, limits.ThresholdLimits())
 }
 
 // Sign runs an in-memory FROST signing exchange for tests and simple integrations.
@@ -426,8 +426,8 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		if err := share.ValidateConsistency(); err != nil {
 			return nil, nil, err
 		}
-		ids[i] = share.state.party
-		shares[share.state.party] = share
+		ids[i] = share.state.Party
+		shares[share.state.Party] = share
 	}
 	ids = tss.SortParties(ids)
 	sessionID, err := tss.NewSessionID(nil)
@@ -443,7 +443,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 	round1 := make([]tss.Envelope, 0, len(signers))
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
-		guard, err := newInProcessGuard(id, shares[id].state.parties, sessionID)
+		guard, err := newInProcessGuard(id, shares[id].state.Parties, sessionID)
 		if err != nil {
 			return nil, nil, err
 		}

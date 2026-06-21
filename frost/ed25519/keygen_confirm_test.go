@@ -67,7 +67,7 @@ func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
-	tampered.state.chainCode[0] ^= 1
+	tampered.state.ChainCode[0] ^= 1
 	if err := tampered.ValidateConsistency(); err == nil {
 		t.Fatal("expected tampered aggregate chain code to be rejected")
 	}
@@ -80,7 +80,7 @@ func TestFROSTUnmarshalKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	tamperedChainCode := bytes.Clone(share.state.chainCode)
+	tamperedChainCode := bytes.Clone(share.state.ChainCode)
 	tamperedChainCode[0] ^= 1
 	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 5, tamperedChainCode)
 	if err != nil {
@@ -95,11 +95,11 @@ func TestFROSTKeyShareRejectsTamperedConfirmationChainCode(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
-	data := tampered.state.partyData[2]
-	data.keygenConfirmation = data.keygenConfirmation.Clone()
-	data.keygenConfirmation.ChainCode = bytes.Clone(data.keygenConfirmation.ChainCode)
-	data.keygenConfirmation.ChainCode[0] ^= 1
-	tampered.state.partyData[2] = data
+	data := tampered.state.PartyData[2]
+	data.KeygenConfirmation = data.KeygenConfirmation.Clone()
+	data.KeygenConfirmation.ChainCode = bytes.Clone(data.KeygenConfirmation.ChainCode)
+	data.KeygenConfirmation.ChainCode[0] ^= 1
+	tampered.state.PartyData[2] = data
 	confirmations, err := tampered.orderedKeygenConfirmations()
 	if err != nil {
 		t.Fatal(err)

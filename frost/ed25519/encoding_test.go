@@ -3,6 +3,7 @@ package ed25519
 import (
 	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"slices"
@@ -30,9 +31,9 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 		t.Fatal("key share encoding is not deterministic")
 	}
 	reordered := cloneKeyShareValue(shares[1])
-	reordered.state.partyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.parties))
-	for _, id := range slices.Backward(reordered.state.parties) {
-		reordered.state.partyData[id] = shares[1].state.partyData[id].Clone()
+	reordered.state.PartyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.Parties))
+	for _, id := range slices.Backward(reordered.state.Parties) {
+		reordered.state.PartyData[id] = shares[1].state.PartyData[id].Clone()
 	}
 	raw3, err := reordered.MarshalBinary()
 	if err != nil {
@@ -57,6 +58,82 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	}
 }
 
+func TestFROSTKeyShareStateRejectsJSON(t *testing.T) {
+	t.Parallel()
+
+	state := frostKeygen(t, 2, 3)[1].state
+	if _, err := json.Marshal(state); err == nil {
+		t.Fatal("secret-bearing key share state accepted JSON encoding")
+	}
+}
+
+func TestFROSTKeySharePartyDataOptionalConfirmationRoundTrip(t *testing.T) {
+	t.Parallel()
+
+	share := cloneKeyShareValue(frostKeygen(t, 2, 3)[1])
+	data := share.state.PartyData[1]
+	data.KeygenConfirmation = nil
+	share.state.PartyData[1] = data
+
+	limits := testLimits()
+	raw, err := wire.Marshal(
+		share.state,
+		wire.WithFieldLimitsForMarshal(limits.fieldLimits()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded keyShareState
+	if err := wire.Unmarshal(
+		raw,
+		&decoded,
+		wire.WithFrameLimits(limits.frameLimits(len(raw))),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { (&KeyShare{state: &decoded}).Destroy() })
+	if decoded.PartyData[1].KeygenConfirmation != nil {
+		t.Fatal("absent keygen confirmation decoded as present")
+	}
+	if decoded.PartyData[2].KeygenConfirmation == nil {
+		t.Fatal("present keygen confirmation decoded as absent")
+	}
+}
+
+func TestFROSTKeyShareFailedDecodeDoesNotMutateReceiver(t *testing.T) {
+	t.Parallel()
+
+	shares := frostKeygen(t, 2, 3)
+	receiver := cloneKeyShareValue(shares[2])
+	before, err := receiver.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, fields, err := wire.UnmarshalFields(raw, keyShareWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	malformed, err := wire.MarshalFields(keyShareWireVersion, keyShareWireType, fields[:len(fields)-1])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := receiver.UnmarshalBinary(malformed); err == nil {
+		t.Fatal("key share accepted a missing required field")
+	}
+	after, err := receiver.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(before, after) {
+		t.Fatal("failed decode mutated the receiver")
+	}
+}
+
 func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) {
 	t.Parallel()
 
@@ -65,7 +142,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitments := share.state.groupCommitments.BytesList()
+	commitments := share.state.GroupCommitments.BytesList()
 	commitments = append(commitments, append([]byte(nil), commitments[0]...))
 	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 7, wire.EncodeBytesList(commitments))
 	if err != nil {
@@ -77,7 +154,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsEnforcesResourceLimit(t *testing.T) 
 	if err == nil {
 		t.Fatal("key share accepted group commitments over resource limit")
 	}
-	if !strings.Contains(err.Error(), "count too large") {
+	if !strings.Contains(err.Error(), "exceeds max_items") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -90,7 +167,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsRequiresExactThreshold(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	commitments := share.state.groupCommitments.BytesList()
+	commitments := share.state.GroupCommitments.BytesList()
 	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 7, wire.EncodeBytesList(commitments[:1]))
 	if err != nil {
 		t.Fatal(err)
@@ -99,7 +176,7 @@ func TestFROSTKeyShareCustomGroupCommitmentsRequiresExactThreshold(t *testing.T)
 	if err == nil {
 		t.Fatal("key share accepted group commitment count below threshold")
 	}
-	if !strings.Contains(err.Error(), "got 1 commitments, want 2") {
+	if !strings.Contains(err.Error(), "group commitments length must equal threshold") {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
@@ -108,12 +185,12 @@ func TestFROSTKeyShareRejectsNonCanonicalFields(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	unsorted := cloneKeyShareValue(shares[1])
-	unsorted.state.parties[0], unsorted.state.parties[1] = unsorted.state.parties[1], unsorted.state.parties[0]
+	unsorted.state.Parties[0], unsorted.state.Parties[1] = unsorted.state.Parties[1], unsorted.state.Parties[0]
 	if _, err := unsorted.MarshalBinary(); err == nil {
 		t.Fatal("unsorted party set encoded")
 	}
 	malformed := cloneKeyShareValue(shares[1])
-	malformed.state.publicKey = publicKeyPoint{p: fed.NewIdentityPoint()}
+	malformed.state.PublicKey = publicKeyPoint{p: fed.NewIdentityPoint()}
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed public key encoded")
 	}
@@ -126,16 +203,17 @@ func TestFROSTKeyShareRejectsPartyDataKeySetMismatch(t *testing.T) {
 		name   string
 		mutate func(*keyShareState)
 	}{
-		{name: "missing", mutate: func(state *keyShareState) { delete(state.partyData, 3) }},
-		{name: "extra", mutate: func(state *keyShareState) { state.partyData[4] = state.partyData[3] }},
+		{name: "missing", mutate: func(state *keyShareState) { delete(state.PartyData, 3) }},
+		{name: "extra", mutate: func(state *keyShareState) { state.PartyData[4] = state.PartyData[3] }},
 		{name: "broadcast", mutate: func(state *keyShareState) {
-			state.partyData[tss.BroadcastPartyId] = state.partyData[3]
+			state.PartyData[tss.BroadcastPartyId] = state.PartyData[3]
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mutated := cloneKeyShareValue(shares[1])
 			tc.mutate(mutated.state)
-			raw, err := mutated.state.MarshalWireMessage(
+			raw, err := wire.Marshal(
+				mutated.state,
 				wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
 			)
 			if err == nil {
@@ -154,13 +232,14 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 
 	t.Run("confirmation sender mismatch", func(t *testing.T) {
 		mutated := cloneKeyShareValue(shares[1])
-		data := mutated.state.partyData[1]
-		if data.keygenConfirmation == nil {
+		data := mutated.state.PartyData[1]
+		if data.KeygenConfirmation == nil {
 			t.Fatal("missing keygen confirmation for party data")
 		}
-		data.keygenConfirmation.Sender = 2
-		mutated.state.partyData[1] = data
-		raw, err := mutated.state.MarshalWireMessage(
+		data.KeygenConfirmation.Sender = 2
+		mutated.state.PartyData[1] = data
+		raw, err := wire.Marshal(
+			mutated.state,
 			wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
 		)
 		if err == nil {
@@ -173,9 +252,9 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 
 	t.Run("partial confirmation set", func(t *testing.T) {
 		missing := cloneKeyShareValue(shares[1])
-		data := missing.state.partyData[1]
-		data.keygenConfirmation = nil
-		missing.state.partyData[1] = data
+		data := missing.state.PartyData[1]
+		data.KeygenConfirmation = nil
+		missing.state.PartyData[1] = data
 		if _, err := missing.MarshalBinary(); err == nil {
 			t.Fatal("key share accepted partial confirmation set")
 		}
@@ -285,23 +364,23 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 		}
 		confirmationRecords = append(confirmationRecords, record)
 	}
-	secretBytes, err := share.state.secret.MarshalWireValue()
+	secretBytes, err := share.state.Secret.MarshalWireValue()
 	if err != nil {
 		t.Fatal(err)
 	}
 	raw, err := wire.MarshalFields(keyShareWireVersion, keyShareWireType, []wire.Field{
-		{Tag: 1, Value: wire.Uint32(share.state.party)},
-		{Tag: 2, Value: wire.Uint32(uint32(share.state.threshold))},
-		{Tag: 3, Value: wire.EncodeUint32List(share.state.parties)},
-		{Tag: 4, Value: share.state.publicKey.Bytes()},
+		{Tag: 1, Value: wire.Uint32(share.state.Party)},
+		{Tag: 2, Value: wire.Uint32(uint32(share.state.Threshold))},
+		{Tag: 3, Value: wire.EncodeUint32List(share.state.Parties)},
+		{Tag: 4, Value: share.state.PublicKey.Bytes()},
 		{Tag: 5, Value: secretBytes},
-		{Tag: 6, Value: wire.EncodeBytesList(share.state.groupCommitments.BytesList())},
+		{Tag: 6, Value: wire.EncodeBytesList(share.state.GroupCommitments.BytesList())},
 		{Tag: 7, Value: encodeFROSTRecordList(retiredVerificationShareRecords)},
-		{Tag: 8, Value: wire.NonNilBytes(bytes.Clone(share.state.keygenTranscriptHash))},
-		{Tag: 9, Value: wire.NonNilBytes(bytes.Clone(share.state.chainCode))},
-		{Tag: 10, Value: share.state.keygenSessionID[:]},
+		{Tag: 8, Value: wire.NonNilBytes(bytes.Clone(share.state.KeygenTranscriptHash))},
+		{Tag: 9, Value: wire.NonNilBytes(bytes.Clone(share.state.ChainCode))},
+		{Tag: 10, Value: share.state.KeygenSessionID[:]},
 		{Tag: 11, Value: encodeFROSTRecordList(confirmationRecords)},
-		{Tag: 12, Value: wire.NonNilBytes(bytes.Clone(share.state.planHash))},
+		{Tag: 12, Value: wire.NonNilBytes(bytes.Clone(share.state.PlanHash))},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -333,28 +412,28 @@ func TestFROSTKeyShareRejectsOverflowThreshold(t *testing.T) {
 // minimalFROSTKeyShare returns a FROST KeyShare with only public metadata populated.
 func minimalFROSTKeyShare() *KeyShare {
 	return &KeyShare{state: &keyShareState{
-		party:                1,
-		threshold:            2,
-		parties:              tss.NewPartySet(1, 2, 3),
-		publicKey:            publicKeyPoint{p: fed.NewGeneratorPoint()},
-		chainCode:            make([]byte, 32),
-		keygenSessionID:      tss.SessionID{},
-		keygenTranscriptHash: []byte{0x01, 0x02},
+		Party:                1,
+		Threshold:            2,
+		Parties:              tss.NewPartySet(1, 2, 3),
+		PublicKey:            publicKeyPoint{p: fed.NewGeneratorPoint()},
+		ChainCode:            make([]byte, 32),
+		KeygenSessionID:      tss.SessionID{},
+		KeygenTranscriptHash: []byte{0x01, 0x02},
 	}}
 }
 
 func TestFROSTKeySharePublicMetadataReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.chainCode[0] = 0xaa
-	publicKey := k.state.publicKey.Bytes()
+	k.state.ChainCode[0] = 0xaa
+	publicKey := k.state.PublicKey.Bytes()
 	metadata := mustKeyShareMetadata(t, k)
 	metadata.ChainCode[0] = 0xbb
 	metadata.PublicKey.p.Set(fed.NewIdentityPoint())
-	if k.state.chainCode[0] != 0xaa {
+	if k.state.ChainCode[0] != 0xaa {
 		t.Fatal("PublicMetadata() did not copy chain code")
 	}
-	if !bytes.Equal(k.state.publicKey.Bytes(), publicKey) {
+	if !bytes.Equal(k.state.PublicKey.Bytes(), publicKey) {
 		t.Fatal("PublicMetadata() did not copy public key")
 	}
 }
@@ -393,11 +472,11 @@ func TestFROSTKeySharePartyID(t *testing.T) {
 func TestFROSTKeyShareInternalCloneIsDeepCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.publicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
-	original := k.state.publicKey.Bytes()
+	k.state.PublicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
+	original := k.state.PublicKey.Bytes()
 	clone := cloneKeyShareValue(k)
-	clone.state.publicKey.p.Set(fed.NewIdentityPoint())
-	if !bytes.Equal(k.state.publicKey.Bytes(), original) {
+	clone.state.PublicKey.p.Set(fed.NewIdentityPoint())
+	if !bytes.Equal(k.state.PublicKey.Bytes(), original) {
 		t.Fatal("internal clone shares public-key backing array")
 	}
 }
@@ -406,8 +485,9 @@ func TestFROSTKeyShareStateRejectsMalformedPublicKey(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 3)
 	mutated := cloneKeyShareValue(shares[1])
-	mutated.state.publicKey = publicKeyPoint{}
-	if _, err := mutated.state.MarshalWireMessage(
+	mutated.state.PublicKey = publicKeyPoint{}
+	if _, err := wire.Marshal(
+		mutated.state,
 		wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
 	); err == nil {
 		t.Fatal("key share state accepted nil public key")
@@ -424,20 +504,22 @@ func TestFROSTKeyShareStateCodecAppliesCallerLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	smallFields := limits.fieldLimits()
-	smallFields["point"] = len(share.state.publicKey.Bytes()) - 1
-	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+	smallFields["point"] = len(share.state.PublicKey.Bytes()) - 1
+	if _, err := wire.Marshal(share.state, wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
 		t.Fatal("key share state marshal ignored caller field limits")
 	}
 	var decoded keyShareState
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err == nil {
 		t.Fatal("key share state unmarshal ignored caller frame limits")
 	}
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw))),
 		wire.WithFieldLimits(smallFields),
 	); err == nil {
@@ -445,7 +527,7 @@ func TestFROSTKeyShareStateCodecAppliesCallerLimits(t *testing.T) {
 	}
 	missing := limits.fieldLimits()
 	delete(missing, "point")
-	if _, err := share.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+	if _, err := wire.Marshal(share.state, wire.WithFieldLimitsForMarshal(missing)); err == nil {
 		t.Fatal("key share state marshal accepted missing field limit")
 	}
 }

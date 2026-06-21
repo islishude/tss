@@ -149,7 +149,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 			return nil, false, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
-		partyData[id] = keySharePartyData{verificationShare: pub}
+		partyData[id] = keySharePartyData{VerificationShare: pub}
 	}
 	chainCode := append([]byte(nil), s.chainCode...)
 	dealerCommitments := make(map[tss.PartyID][][]byte, len(s.commits))
@@ -158,17 +158,17 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 	}
 	reshareTranscriptHash := frostReshareTranscriptHash(s.cfg.SessionID, s.oldParties, s.newParties, s.newThreshold, s.oldPublicKey.Bytes(), chainCode, s.planHash, s.isRefresh(), dealerCommitments, newCommitments.BytesList(), verificationShares)
 	newShare := &KeyShare{state: &keyShareState{
-		party:                s.selfID,
-		threshold:            s.newThreshold,
-		parties:              s.newParties.Clone(),
-		publicKey:            publicKey.Clone(),
-		chainCode:            chainCode,
-		secret:               newSecretScalar,
-		groupCommitments:     newCommitments.Clone(),
-		partyData:            partyData,
-		keygenSessionID:      s.cfg.SessionID,
-		keygenTranscriptHash: reshareTranscriptHash,
-		planHash:             append([]byte(nil), s.planHash...),
+		Party:                s.selfID,
+		Threshold:            s.newThreshold,
+		Parties:              s.newParties.Clone(),
+		PublicKey:            publicKey.Clone(),
+		ChainCode:            chainCode,
+		Secret:               newSecretScalar,
+		GroupCommitments:     newCommitments.Clone(),
+		PartyData:            partyData,
+		KeygenSessionID:      s.cfg.SessionID,
+		KeygenTranscriptHash: reshareTranscriptHash,
+		PlanHash:             append([]byte(nil), s.planHash...),
 	}}
 	if err := newShare.ValidateConsistency(); err != nil {
 		newShare.Destroy()
@@ -204,8 +204,8 @@ func (s *ReshareSession) aggregateCommitments() (groupCommitments, error) {
 			}
 			points = append(points, p)
 		}
-		if s.isRefresh() && degree < s.oldKey.state.groupCommitments.Len() {
-			oldCommitment, err := s.oldKey.state.groupCommitments.PointAtAllowIdentity(degree)
+		if s.isRefresh() && degree < s.oldKey.state.GroupCommitments.Len() {
+			oldCommitment, err := s.oldKey.state.GroupCommitments.PointAtAllowIdentity(degree)
 			if err != nil {
 				return groupCommitments{}, err
 			}
