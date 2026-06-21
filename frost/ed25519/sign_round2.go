@@ -11,26 +11,52 @@ import (
 )
 
 func (s *SignSession) tryAggregate() error {
-	if s.completed || len(s.partials) != len(s.signers) {
+	prepared, ok, err := s.prepareAggregate()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return nil
 	}
+	defer prepared.Destroy()
+	s.commitAggregate(prepared)
+	return nil
+}
+
+type preparedAggregateSignature struct {
+	signature []byte
+	committed bool
+}
+
+func (p *preparedAggregateSignature) Destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	clear(p.signature)
+}
+
+func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, error) {
+	if s.completed || len(s.partials) != len(s.signers) {
+		return nil, false, nil
+	}
 	if len(s.commitments) != len(s.signers) {
-		return nil
+		return nil, false, nil
 	}
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
-		return err
+		return nil, false, err
 	}
 	RBytes := R.Bytes()
 	verifyKey := s.derivation.VerificationKeyBytes()
 	c, _ := edcurve.Ed25519Challenge(RBytes, verifyKey, s.message)
 	z := fed.NewScalar()
+	defer z.Set(fed.NewScalar())
 	for _, id := range s.signers {
 		partial := s.partials[id]
 		// Verify each partial before aggregation so failures can be blamed on a signer.
 		if err := s.verifyPartial(id, partial, rhos[id], c); err != nil {
 			blameEnv := s.partialBlameEnvelope(id, partial)
-			return &tss.ProtocolError{
+			return nil, false, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
 				Round: 2,
 				Party: id,
@@ -43,17 +69,24 @@ func (s *SignSession) tryAggregate() error {
 	zBytes := z.Bytes()
 	sig := append(append([]byte(nil), RBytes...), zBytes...)
 	if !stded25519.Verify(stded25519.PublicKey(verifyKey), s.message, sig) {
-		return &tss.ProtocolError{
+		return nil, false, &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: 2,
 			Blame: frostAggregateBlame(s.sessionID, s.signers, verifyKey, s.message, sig),
 			Err:   errors.New("aggregated Ed25519 signature failed verification"),
 		}
 	}
-	s.signature = sig
+	return &preparedAggregateSignature{signature: sig}, true, nil
+}
+
+func (s *SignSession) commitAggregate(p *preparedAggregateSignature) {
+	if p == nil {
+		return
+	}
+	s.signature = p.signature
 	s.completed = true
 	s.clearCompletedSigningState()
-	return nil
+	p.committed = true
 }
 
 func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) tss.Envelope {
