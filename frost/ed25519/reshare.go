@@ -141,6 +141,9 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 // reshare-run metadata, not a shared Go object. Old parties start the dealer
 // role with StartReshare, while new-only recipients use StartReshareRecipient.
 func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	if plan == nil || plan.state == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil reshare plan"))
+	}
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
 	}
@@ -187,13 +190,16 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	defer oldSecret.Set(fed.NewScalar())
 	weighted := fed.NewScalar().Multiply(lambda, oldSecret)
+	defer weighted.Set(fed.NewScalar())
 
 	// Generate polynomial g_i of degree newThreshold-1 with constant term w_i.
 	poly, err := randomScalarPolynomial(config.Reader(), newThreshold, weighted)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer clearScalars(poly)
 	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
 		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
@@ -225,6 +231,12 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
 		guard:        guard,
 	}
+	success := false
+	defer func() {
+		if !success {
+			s.abort()
+		}
+	}()
 	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
@@ -261,6 +273,7 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	if err := s.tryComplete(); err != nil {
 		return nil, nil, err
 	}
+	success = true
 	return s, out, nil
 }
 
@@ -272,6 +285,9 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 // reshare-run metadata, not a shared Go object. New-only recipients use this
 // entry point while old parties start the dealer role with StartReshare.
 func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, error) {
+	if plan == nil || plan.state == nil {
+		return nil, invalidPlanConfig(local.Self, errors.New("nil reshare plan"))
+	}
 	limits := plan.limits
 	config, err := plan.receiverConfig(local)
 	if err != nil {
@@ -326,6 +342,9 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 // staged output and should be installed with compare-and-swap against the
 // expected current key generation.
 func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {
+	if plan == nil || plan.state == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil refresh plan"))
+	}
 	if oldKey == nil || oldKey.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil old key share"))
 	}
@@ -365,6 +384,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	defer clearScalars(poly)
 	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
 		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
@@ -397,6 +417,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
 		guard:        guard,
 	}
+	success := false
+	defer func() {
+		if !success {
+			s.abort()
+		}
+	}()
 	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
 	if err != nil {
 		return nil, nil, err
@@ -433,6 +459,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err := s.tryComplete(); err != nil {
 		return nil, nil, err
 	}
+	success = true
 	return s, out, nil
 }
 
@@ -445,10 +472,10 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.completed {
-		return nil, errors.New("reshare session is already completed")
+		return nil, completedSessionError(base.Round, base.From)
 	}
 	if s.aborted {
-		return nil, errors.New("reshare session is aborted")
+		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
 		if shouldAbortSession(err) {

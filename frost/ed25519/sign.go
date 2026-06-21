@@ -157,13 +157,18 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if err != nil {
 		return nil, nil, err
 	}
+	defer x.Set(fed.NewScalar())
 	// FROST uses two nonces per signer so the binding factor can commit to the
 	// complete participant set and prevent later nonce-substitution attacks.
-	d, err := signingNonceGenerate(x, local.Rand)
+	d, err := signingNonceGenerate(
+		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "hiding",
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	e, err := signingNonceGenerate(x, local.Rand)
+	e, err := signingNonceGenerate(
+		x, local.Rand, plan.state.sessionID, message, plan.state.contextHash, planHash, "binding",
+	)
 	if err != nil {
 		d.Set(fed.NewScalar())
 		return nil, nil, err
@@ -420,39 +425,30 @@ func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error
 // newInProcessGuard creates an EnvelopeGuard for in-process signing where all
 // signer keys are available locally (e.g., Sign, SignWithOptions, SignDigest).
 // It uses relaxed broadcast consistency since there is no actual transport layer.
-// A noop ack verifier is safe here because inProcessPolicies relaxes all broadcast
-// consistency requirements — VerifyFull is never invoked.
-func newInProcessGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) *tss.EnvelopeGuard {
-	g, err := tss.NewEnvelopeGuard(self, parties, tss.ProtocolFROSTEd25519, sessionID, inProcessPolicies(), tss.NewInMemoryReplayCache())
+func newInProcessGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) (*tss.EnvelopeGuard, error) {
+	policies, err := inProcessPolicies()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
-	g.AckVerifier = &noopSignVerifier{}
-	return g
-}
-
-// noopSignVerifier accepts any signature — used only by newInProcessGuard with
-// relaxed policies where broadcast consistency is never required.
-type noopSignVerifier struct{}
-
-// VerifyAck implements [tss.BroadcastAckVerifier] by accepting any signature.
-func (noopSignVerifier) VerifyAck(party tss.PartyID, digest [32]byte, signature []byte) error {
-	return nil
+	return tss.NewEnvelopeGuard(
+		self,
+		parties,
+		tss.ProtocolFROSTEd25519,
+		sessionID,
+		policies,
+		tss.NewInMemoryReplayCache(),
+	)
 }
 
 // inProcessPolicies returns FROSTPolicies() with broadcast consistency relaxed.
-func inProcessPolicies() tss.PolicySet {
+func inProcessPolicies() (tss.PolicySet, error) {
 	entries := FROSTPolicies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))
 	for i, p := range entries {
 		relaxed[i] = p
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
 	}
-	ps, err := tss.NewPolicySet(relaxed...)
-	if err != nil {
-		panic(err)
-	}
-	return ps
+	return tss.NewPolicySet(relaxed...)
 }
 
 // Sign runs an in-memory FROST signing exchange and returns the child public key and signature.
@@ -460,7 +456,9 @@ func Sign(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, 
 	return SignWithOptions(message, signers, SignOptions{Context: ctx})
 }
 
-// SignWithOptions runs an in-memory FROST signing exchange with context-bound HD derivation.
+// SignWithOptions runs an in-memory FROST signing exchange with context-bound
+// HD derivation. It is an in-process orchestration helper and does not replace
+// authenticated transport or broadcast-consistency enforcement.
 func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]byte, []byte, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
@@ -480,10 +478,18 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		return nil, nil, err
 	}
 	sessions := make(map[tss.PartyID]*SignSession, len(signers))
+	defer func() {
+		for _, session := range sessions {
+			session.Destroy()
+		}
+	}()
 	round1 := make([]tss.Envelope, 0, len(signers))
 	round2 := make([]tss.Envelope, 0, len(signers))
 	for _, id := range ids {
-		guard := newInProcessGuard(id, shares[id].state.parties, sessionID)
+		guard, err := newInProcessGuard(id, shares[id].state.parties, sessionID)
+		if err != nil {
+			return nil, nil, err
+		}
 		plan, err := NewSignPlan(SignPlanOption{
 			Key:       shares[id],
 			SessionID: sessionID,

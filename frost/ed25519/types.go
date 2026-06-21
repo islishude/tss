@@ -119,7 +119,9 @@ type SignOptions struct {
 	Context tss.SigningContext
 
 	// NonceReader supplies fresh randomness for FROST signing nonces. If nil,
-	// crypto/rand.Reader is used.
+	// crypto/rand.Reader is used. A custom reader must be a CSPRNG and must not
+	// intentionally repeat output. The implementation additionally binds nonce
+	// derivation to the signing session, message, context, plan, and nonce role.
 	NonceReader io.Reader
 
 	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.

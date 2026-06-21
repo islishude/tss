@@ -68,12 +68,26 @@ func TestFROSTKeyShareRejectsTamperedHDChainCode(t *testing.T) {
 	shares := frostKeygenHD(t, 2, 3)
 	tampered := cloneKeyShareValue(shares[1])
 	tampered.state.chainCode[0] ^= 1
-	confirmations, err := tampered.orderedKeygenConfirmations()
+	if err := tampered.ValidateConsistency(); err == nil {
+		t.Fatal("expected tampered aggregate chain code to be rejected")
+	}
+}
+
+func TestFROSTUnmarshalKeyShareRejectsTamperedHDChainCode(t *testing.T) {
+	t.Parallel()
+	share := frostKeygenHD(t, 2, 3)[1]
+	raw, err := share.MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyFinalizedKeygenConfirmationSet(tampered, confirmations, true); err == nil {
-		t.Fatal("expected tampered aggregate chain code to be rejected")
+	tamperedChainCode := bytes.Clone(share.state.chainCode)
+	tamperedChainCode[0] ^= 1
+	mutated, err := testutil.RewriteWireField(raw, keyShareWireType, 5, tamperedChainCode)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := UnmarshalKeyShareWithLimits(mutated, testLimits()); err == nil {
+		t.Fatal("expected tampered aggregate chain code to be rejected during decode")
 	}
 }
 

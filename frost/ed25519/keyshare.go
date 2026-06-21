@@ -278,7 +278,7 @@ func (k *KeyShare) Validate() error {
 	if err != nil {
 		return err
 	}
-	if err := verifyFinalizedKeygenConfirmationSet(k, confirmations, false); err != nil {
+	if err := verifyFinalizedKeygenConfirmationSet(k, confirmations, true); err != nil {
 		return fmt.Errorf("invalid keygen confirmations: %w", err)
 	}
 	return nil

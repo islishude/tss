@@ -164,9 +164,9 @@ Keygen commitment hashing uses the label `frost-ed25519-keygen-commitments-v1`. 
 Repository-defined FROST transcript fields use the canonical labeled-entry
 encoding documented in [`wire.md`](wire.md). Party sets are sorted and encoded
 as canonical uint32 lists; dealer and verification-share records repeat their
-party ID before the associated public fields. RFC 9591 `H1`/`H4`/`H5` and nonce
-derivation retain the RFC-defined SHA-512 concatenation and are not rewritten
-through this helper.
+party ID before the associated public fields. The keygen transcript binds the
+aggregate of the round-1 chain-code commitments, not the final aggregate chain
+code. RFC 9591 `H1`/`H4`/`H5` retain their RFC-defined SHA-512 concatenation.
 
 ## Signing
 
@@ -174,14 +174,19 @@ Signing operates in two rounds. Only `threshold` or more signers from the origin
 
 ### Round 1: Nonce Commitments
 
-Each signer `i` derives two hedged nonces with RFC 9591 `H3`:
+Each signer `i` derives two hedged nonces from the RFC 9591 `H3` inputs plus a
+repository-defined context binding:
 
 ```
-d_i = H3(random32 || SerializeScalar(x_i))
-e_i = H3(random32 || SerializeScalar(x_i))
+d_i = H3(random32 || SerializeScalar(x_i) || nonce_context("hiding"))
+e_i = H3(random32 || SerializeScalar(x_i) || nonce_context("binding"))
 ```
 
-`random32` comes from `SignOptions.NonceReader` or `crypto/rand.Reader`.
+`nonce_context` binds the signing session ID, message, signing-context hash,
+sign-plan hash, and nonce role. This prevents repeated `NonceReader` output from
+reusing the same nonce across different signing intents. `random32` comes from
+`SignOptions.NonceReader` or `crypto/rand.Reader`; custom readers must still be
+CSPRNGs and must not intentionally repeat output.
 The session stores the canonical nonce bytes only until the round-2 partial is
 constructed. After that point the nonce bytes are cleared and set to `nil`.
 
@@ -247,8 +252,9 @@ z_i = d_i + ρ_i·e_i + λ_i·c·(x_i + δ)   mod q
 ```
 
 The signing session clears `d_i` and `e_i` immediately after the partial
-payload is constructed. Call `SignSession.Destroy()` when the session is no
-longer needed to clear message copies, partials, additive-shift scalars, and
+payload is constructed. After successful aggregation it also clears its message
+copy, partial scalars, and retained partial envelopes. Call
+`SignSession.Destroy()` when the session is no longer needed to clear the
 remaining session-owned material on a best-effort basis.
 
 ### Aggregation and Verification

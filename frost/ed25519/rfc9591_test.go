@@ -5,6 +5,7 @@ import (
 	stded25519 "crypto/ed25519"
 	"crypto/sha512"
 	"encoding/hex"
+	"io"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -12,6 +13,12 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/testutil"
 )
+
+type rfc9591VectorNonceReader struct {
+	io.Reader
+}
+
+func (rfc9591VectorNonceReader) rfc9591NonceDerivation() {}
 
 // TestRFC9591ContextString verifies the RFC 9591 Section 5.4.1 ciphersuite
 // context string used for domain separation.
@@ -156,13 +163,13 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 		t.Fatal(err)
 	}
 	s1, out1, err := startFROSTSignWithOptions(key1, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...)),
+		NonceReader: rfc9591VectorNonceReader{Reader: bytes.NewReader(append(append([]byte(nil), v.p1HidingRandomness...), v.p1BindingRandomness...))},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	s3, out3, err := startFROSTSignWithOptions(key3, sessionID, v.signers, v.message, SignOptions{
-		NonceReader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...)),
+		NonceReader: rfc9591VectorNonceReader{Reader: bytes.NewReader(append(append([]byte(nil), v.p3HidingRandomness...), v.p3BindingRandomness...))},
 	})
 	if err != nil {
 		t.Fatal(err)

@@ -72,7 +72,6 @@ var frostPolicies = tss.MustNewPolicySet(
 		Confidentiality:      tss.ConfidentialityRequired,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
-	// FROST reshare confirmations use payloadKeygenConfirmation (already registered)
 )
 
 // FROSTPolicies returns the read-only delivery policy set for the FROST Ed25519

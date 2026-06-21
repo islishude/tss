@@ -19,7 +19,8 @@ type StateLimits struct {
 
 // PayloadLimits caps FROST payload sizes.
 type PayloadLimits struct {
-	MaxMessageBytes int
+	MaxMessageBytes           int
+	MaxSerializedPayloadBytes int
 }
 
 // CurveLimits caps Ed25519 curve point and scalar encoding sizes.
@@ -54,7 +55,8 @@ func DefaultLimits() Limits {
 			MaxSerializedKeyShareBytes: tss.DefaultMaxSerializedKeyShareBytes,
 		},
 		Payload: PayloadLimits{
-			MaxMessageBytes: 65536,
+			MaxMessageBytes:           65536,
+			MaxSerializedPayloadBytes: tss.DefaultMaxWireFieldBytes,
 		},
 		Curve: CurveLimits{
 			MaxPointBytes:  32,
@@ -87,6 +89,10 @@ func (l Limits) frameLimits(maxTotal int) wire.FrameLimits {
 		MaxFields:     l.TLV.MaxFields,
 		MaxFieldBytes: l.TLV.MaxFieldBytes,
 	}
+}
+
+func (l Limits) payloadFrameLimits() wire.FrameLimits {
+	return l.frameLimits(l.Payload.MaxSerializedPayloadBytes)
 }
 
 // fieldLimits returns semantic field limits for FROST wire encoding tags.

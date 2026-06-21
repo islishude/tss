@@ -38,7 +38,10 @@ func (p *keygenCommitmentsPayload) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the keygen commitments payload with limits.
 func (p *keygenCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded keygenCommitmentsPayload
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
@@ -81,7 +84,10 @@ func (p *keygenSharePayload) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the keygen share payload with limits.
 func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded keygenSharePayload
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
@@ -121,7 +127,10 @@ func (p *nonceCommitment) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the nonce commitment payload with limits.
 func (p *nonceCommitment) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded nonceCommitment
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
@@ -164,7 +173,10 @@ func (p *signPartialPayload) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the partial signature payload with limits.
 func (p *signPartialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded signPartialPayload
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
@@ -204,7 +216,10 @@ func (p *reshareCommitmentsPayload) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the reshare commitments payload with limits.
 func (p *reshareCommitmentsPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded reshareCommitmentsPayload
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
@@ -244,7 +259,10 @@ func (p *reshareSharePayload) UnmarshalBinary(in []byte) error {
 // UnmarshalBinaryWithLimits decodes the reshare share payload with limits.
 func (p *reshareSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded reshareSharePayload
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded

@@ -313,9 +313,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	}
 
 	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
-	if err == nil || !strings.Contains(err.Error(), "reshare session is aborted") {
-		t.Fatalf("expected terminal aborted error, got %v", err)
-	}
+	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 }
 
 func TestReshareCompletionClearsIntermediateShares(t *testing.T) {

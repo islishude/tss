@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"cmp"
 	"slices"
 
 	"github.com/islishude/tss"
@@ -15,7 +16,7 @@ const (
 	frostReshareTranscriptLabel = "frost-ed25519-reshare-transcript-v1"
 )
 
-func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties tss.PartySet, chainCode, planHash []byte, dealerCommitments map[tss.PartyID][][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
+func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties tss.PartySet, chainCodeCommitAggregate, planHash []byte, dealerCommitments map[tss.PartyID][][]byte, groupCommitments [][]byte, verificationShares []VerificationShare) []byte {
 	t := transcript.New(frostKeygenTranscriptLabel)
 	t.AppendString("ciphersuite_context", rfc9591ContextString)
 	t.AppendString("protocol", string(tss.ProtocolFROSTEd25519))
@@ -24,7 +25,10 @@ func frostKeygenTranscriptHash(sessionID tss.SessionID, threshold int, parties t
 	t.AppendUint32("threshold", uint32(threshold))
 	sortedParties := tss.SortParties(parties)
 	t.AppendUint32List("parties", sortedParties)
-	t.AppendBytes("chain_code", chainCode)
+	// Keep the established transcript field label for vector stability. The
+	// value is the aggregate of round-1 chain-code commitments, not the final
+	// aggregate chain code.
+	t.AppendBytes("chain_code", chainCodeCommitAggregate)
 	t.AppendBytes("plan_hash", planHash)
 	for _, id := range sortedParties {
 		t.AppendUint32("dealer", id)
@@ -62,7 +66,7 @@ func frostReshareTranscriptHash(sessionID tss.SessionID, oldParties, newParties 
 func appendVerificationShares(t *transcript.Builder, verificationShares []VerificationShare) {
 	sorted := slices.Clone(verificationShares)
 	slices.SortFunc(sorted, func(a, b VerificationShare) int {
-		return int(a.Party) - int(b.Party)
+		return cmp.Compare(a.Party, b.Party)
 	})
 	for _, share := range sorted {
 		t.AppendUint32("verification_share_party", share.Party)

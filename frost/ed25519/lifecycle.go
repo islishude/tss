@@ -50,6 +50,18 @@ func (s *SignSession) abort() {
 	s.signature = nil
 }
 
+func (s *SignSession) clearCompletedSigningState() {
+	if s == nil {
+		return
+	}
+	s.clearNonceScalars()
+	clearScalarMap(s.partials)
+	s.partials = nil
+	s.partialEnvelopes = nil
+	clear(s.message)
+	s.message = nil
+}
+
 // Destroy clears local reshare material retained by the reshare session.
 func (s *ReshareSession) Destroy() {
 	if s == nil {

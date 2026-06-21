@@ -52,6 +52,7 @@ func (s *SignSession) tryAggregate() error {
 	}
 	s.signature = sig
 	s.completed = true
+	s.clearCompletedSigningState()
 	return nil
 }
 

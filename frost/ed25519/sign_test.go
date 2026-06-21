@@ -43,6 +43,34 @@ func TestSignNonceGenerationDependsOnSecretAndRandomness(t *testing.T) {
 	}
 }
 
+func TestSignNonceGenerationBindsSigningIntent(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 2)
+	signers := tss.NewPartySet(1, 2)
+	randomness := bytes.Repeat([]byte{0x42}, 64)
+
+	sessionA, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessionB, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitA := startSignCommitment(t, shares[1], sessionA, signers, []byte("message-a"), randomness)
+	commitB := startSignCommitment(t, shares[1], sessionB, signers, []byte("message-a"), randomness)
+	if bytes.Equal(commitA.DBytes(), commitB.DBytes()) || bytes.Equal(commitA.EBytes(), commitB.EBytes()) {
+		t.Fatal("repeated reader output reused a nonce across sessions")
+	}
+	commitC := startSignCommitment(t, shares[1], sessionA, signers, []byte("message-b"), randomness)
+	if bytes.Equal(commitA.DBytes(), commitC.DBytes()) || bytes.Equal(commitA.EBytes(), commitC.EBytes()) {
+		t.Fatal("repeated reader output reused a nonce across messages")
+	}
+	if bytes.Equal(commitA.DBytes(), commitA.EBytes()) {
+		t.Fatal("hiding and binding nonce commitments were identical")
+	}
+}
+
 func TestSignClearsNonceAfterPartial(t *testing.T) {
 	t.Parallel()
 	shares := frostKeygen(t, 2, 2)
@@ -168,6 +196,15 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	}
 	if !stded25519.Verify(stded25519.PublicKey(sessions[1].VerifyKey()), message, sig) {
 		t.Fatal("signature from out-of-order flow failed verification")
+	}
+	if sessions[1].message != nil {
+		t.Fatal("completed signing session retained message")
+	}
+	if sessions[1].partials != nil {
+		t.Fatal("completed signing session retained partial scalars")
+	}
+	if sessions[1].partialEnvelopes != nil {
+		t.Fatal("completed signing session retained partial envelopes")
 	}
 }
 
@@ -319,17 +356,17 @@ func TestSecretSharePayloadMarshalJSONRejects(t *testing.T) {
 	}
 }
 
-func TestNoopSignVerifierVerifyAckAcceptsAny(t *testing.T) {
+func TestInProcessGuardUsesNoAckVerifier(t *testing.T) {
 	t.Parallel()
-	var v noopSignVerifier
-	// VerifyAck should accept any signature without error.
-	if err := v.VerifyAck(1, [32]byte{}, []byte("anything")); err != nil {
-		t.Fatalf("noopSignVerifier should accept any signature: %v", err)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := v.VerifyAck(99, [32]byte{0xff}, nil); err != nil {
-		t.Fatalf("noopSignVerifier should accept nil signature: %v", err)
+	guard, err := newInProcessGuard(1, tss.NewPartySet(1, 2), sessionID)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if err := v.VerifyAck(0, [32]byte{}, []byte{}); err != nil {
-		t.Fatalf("noopSignVerifier should accept empty signature: %v", err)
+	if guard.AckVerifier != nil {
+		t.Fatal("in-process guard installed an ack verifier despite relaxed policies")
 	}
 }

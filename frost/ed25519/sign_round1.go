@@ -25,11 +25,13 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		s.clearNonceScalars()
 		return nil, err
 	}
+	defer d.Set(fed.NewScalar())
 	e, err := edScalarFromSecret(s.eNonce)
 	if err != nil {
 		s.clearNonceScalars()
 		return nil, err
 	}
+	defer e.Set(fed.NewScalar())
 	verifyKey := s.derivation.VerificationKeyBytes()
 	c, _ := edcurve.Ed25519Challenge(R.Bytes(), verifyKey, s.message)
 
@@ -43,17 +45,21 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 		s.clearNonceScalars()
 		return nil, err
 	}
+	defer x.Set(fed.NewScalar())
 
 	// z_i = d_i + rho_i*e_i + lambda_i*c*(x_i + delta).
 	// With HD additive shift delta: z_i = d_i + rho_i*e_i + lambda_i*c*x_i + lambda_i*c*delta.
 	lambdaC := fed.NewScalar().Multiply(lambda, c)
+	defer lambdaC.Set(fed.NewScalar())
 	rho := rhos[s.key.state.party]
 	z := fed.NewScalar().Multiply(rho, e)
 	z.Add(z, d)
 	lcs := fed.NewScalar().Multiply(lambdaC, x)
+	defer lcs.Set(fed.NewScalar())
 	z.Add(z, lcs)
 	if s.deltaScalar != nil && s.deltaScalar.Equal(edcurve.ScalarZero()) != 1 {
 		shiftTerm := fed.NewScalar().Multiply(lambdaC, s.deltaScalar)
+		defer shiftTerm.Set(fed.NewScalar())
 		z.Add(z, shiftTerm)
 	}
 	s.partials[s.key.state.party] = z
