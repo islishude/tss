@@ -425,7 +425,7 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeCompleted))
 	})
 
-	t.Run("attributable presign abort is terminal", func(t *testing.T) {
+	t.Run("malformed presign reject is non-mutating and equivocation is terminal", func(t *testing.T) {
 		h := newHarness(t, 2, 3)
 		sessionID, err := tss.NewSessionID(nil)
 		if err != nil {
@@ -447,8 +447,14 @@ func TestCGGMP21SessionStateIsMonotonic(t *testing.T) {
 		}
 		bad := out2[0]
 		bad.Payload = mutated
+		before := snapshotCGGMPPresignSession(s1)
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
+		after := snapshotCGGMPPresignSession(s1)
 		_ = assertBlameEvidence(t, err, h.evidenceContext(sessionID, 1, tss.NewPartySet(1, 2), nil))
+		assertCGGMPSnapshotUnchanged(t, before, after)
+
+		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0]))
+		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeVerification))
 		_, err = s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0]))
 		assertNoBlame(t, testutil.AssertProtocolError(t, err, tss.ErrCodeAborted))
 	})

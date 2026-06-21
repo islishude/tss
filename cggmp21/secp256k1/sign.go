@@ -57,6 +57,8 @@ var ErrSignAttemptBurned = errors.New("sign attempt burned")
 // ErrSignAttemptCorrupt reports an invalid or inconsistent durable attempt.
 var ErrSignAttemptCorrupt = errors.New("sign attempt record corrupt")
 
+var errPresignSignerMissing = errors.New("sender is not in signer set")
+
 // SignAttemptStore is the durable one-use and outbox boundary for online
 // signing. CommitSignAttempt must atomically bind one presign ID to one immutable
 // intent and its exact canonical outbound envelope.
@@ -459,12 +461,6 @@ type PresignSession struct {
 	partyIndex map[tss.PartyID]int // Index into parties; initialized once at StartPresign.
 	parties    []presignPartyState // Ordered by canonical signer set.
 
-	round1Count         int // Count of signers with accepted round-1 public payload.
-	round1ProofCount    int // Count of signers with accepted round-1 proof payload.
-	round1VerifiedCount int // Count of signers whose round-1 proof is verified.
-	round2Count         int // Count of accepted round-2 direct responses.
-	round3Count         int // Count of accepted round-3 delta/verify-share records.
-
 	startOpening *mta.StartOpening // Local MtA opening material; secret-bearing until round 2 completes.
 
 	round2Sent      bool     // Whether this party already emitted round-2 MtA responses.
@@ -640,23 +636,22 @@ func (m *presignMTAState) destroy() {
 type SignSession struct {
 	mu sync.Mutex
 
-	key       *KeyShare                   // Caller-owned key share used to validate local ownership.
-	presign   *Presign                    // One-use presign handle bound by the durable attempt store.
-	sessionID tss.SessionID               // Online signing session ID for partial-signature envelopes.
-	guard     *tss.EnvelopeGuard          // Transport replay, identity, and policy guard.
-	log       tss.Logger                  // Optional protocol logger.
-	limits    Limits                      // Local fail-closed resource policy.
-	digest    []byte                      // Context-bound message digest signed by ECDSA.
-	planHash  []byte                      // Digest every sign partial must echo.
-	publicKey []byte                      // Verification key used for final ECDSA self-checking.
-	partials  map[tss.PartyID]secp.Scalar // Validated ECDSA partial scalars keyed by signer.
-	completed bool                        // Terminal success flag; signature is available once true.
-	aborted   bool                        // Terminal failure/destruction flag.
-	signature *Signature                  // Final aggregated signature, cleared by Destroy.
-	attempt   SignAttemptRecord           // Durable one-use attempt/outbox record.
-	store     SignAttemptStore            // Durable boundary for presign consumption and completion.
-	storeCtx  context.Context             // Context used for durable store operations.
-	storeTTL  time.Duration               // Timeout applied to durable store calls.
+	key            *KeyShare                   // Caller-owned key share used to validate local ownership.
+	presign        *Presign                    // One-use presign handle bound by the durable attempt store.
+	sessionID      tss.SessionID               // Online signing session ID for partial-signature envelopes.
+	guard          *tss.EnvelopeGuard          // Transport replay, identity, and policy guard.
+	log            tss.Logger                  // Optional protocol logger.
+	limits         Limits                      // Local fail-closed resource policy.
+	digest         []byte                      // Context-bound message digest signed by ECDSA.
+	planHash       []byte                      // Digest every sign partial must echo.
+	publicKey      []byte                      // Verification key used for final ECDSA self-checking.
+	partials       map[tss.PartyID]secp.Scalar // Validated ECDSA partial scalars keyed by signer.
+	completed      bool                        // Terminal success flag; signature is available once true.
+	aborted        bool                        // Terminal failure/destruction flag.
+	signature      *Signature                  // Final aggregated signature, cleared by Destroy.
+	attempt        SignAttemptRecord           // Durable one-use attempt/outbox record.
+	coordinator    *signAttemptCoordinator     // Durable one-use attempt and outbox coordinator.
+	coordinatorCtx context.Context             // Detached context used for handler-triggered durable effects.
 }
 
 // abort marks the signing session aborted and clears secret-bearing
@@ -754,8 +749,8 @@ func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
 }
 
 // HandlePresignMessage validates and applies one presign envelope.
-// It dispatches to per-round handlers that each follow the template:
-// parse → policy validate → cryptographic verify → mutate state → emit.
+// It dispatches to per-round transitions that decode, validate, verify,
+// prepare, commit, and only then return effects.
 func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
@@ -796,7 +791,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if st.round1.havePayload {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1"))
 		}
-		return s.handlePresignRound1(base)
+		tx, err := s.buildAcceptPresignRound1PayloadTx(base)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.cleanupOnReject()
+		effects, err := tx.apply(s)
+		if err != nil {
+			return nil, err
+		}
+		tx.markCommitted()
+		return effects.envelopes, nil
 
 	case payloadPresignRound1Proof:
 		if base.Round != 1 {
@@ -808,7 +813,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if st.round1.haveProof {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round1 proof"))
 		}
-		return s.handlePresignRound1Proof(base)
+		tx, err := s.buildAcceptPresignRound1ProofTx(base)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.cleanupOnReject()
+		effects, err := tx.apply(s)
+		if err != nil {
+			return nil, err
+		}
+		tx.markCommitted()
+		return effects.envelopes, nil
 
 	case payloadPresignRound2:
 		if base.Round != 2 {
@@ -817,7 +832,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if st.round2.havePayload {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate presign round2"))
 		}
-		return s.handlePresignRound2(base)
+		tx, err := s.buildAcceptPresignRound2Tx(base)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.cleanupOnReject()
+		effects, err := tx.apply(s)
+		if err != nil {
+			return nil, err
+		}
+		tx.markCommitted()
+		return effects.envelopes, nil
 
 	case payloadPresignRound3:
 		if base.Round != 3 {
@@ -826,7 +851,17 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		if st.round3.haveDelta {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate delta share"))
 		}
-		return s.handlePresignRound3(base)
+		tx, err := s.buildAcceptPresignRound3Tx(base)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.cleanupOnReject()
+		effects, err := tx.apply(s)
+		if err != nil {
+			return nil, err
+		}
+		tx.markCommitted()
+		return effects.envelopes, nil
 
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))

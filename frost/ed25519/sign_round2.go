@@ -18,7 +18,7 @@ func (s *SignSession) tryAggregate() error {
 	if !ok {
 		return nil
 	}
-	defer prepared.Destroy()
+	defer prepared.destroy()
 	s.commitAggregate(prepared)
 	return nil
 }
@@ -28,7 +28,7 @@ type preparedAggregateSignature struct {
 	committed bool
 }
 
-func (p *preparedAggregateSignature) Destroy() {
+func (p *preparedAggregateSignature) destroy() {
 	if p == nil || p.committed {
 		return
 	}

@@ -51,10 +51,22 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	ctx := plan.state.context.Clone()
 	contextHash := slices.Clone(plan.state.contextHash)
 	derivation := plan.state.derivation.Clone()
+	derivationOwned := false
+	defer func() {
+		if !derivationOwned && derivation != nil {
+			derivation.Destroy()
+		}
+	}()
 	paillierKey, err := key.paillierPrivate()
 	if err != nil {
 		return nil, nil, err
 	}
+	paillierOwned := false
+	defer func() {
+		if !paillierOwned && paillierKey != nil {
+			paillierKey.Destroy()
+		}
+	}()
 	config := tss.ThresholdConfig{
 		Threshold:    key.state.threshold,
 		Parties:      signers,
@@ -147,7 +159,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	}()
 	presignPayload := presignRound1Payload{
 		Gamma:             gammaComm,
-		EncK:              startOpening.Message.Ciphertext,
+		EncK:              slices.Clone(startOpening.Message.Ciphertext),
 		PaillierPublicKey: *paillierPub,
 		PlanHash:          slices.Clone(planHash),
 	}
@@ -169,30 +181,33 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	selfState.round1.havePayload = true
 	selfState.round1.verified = true
 	s = &PresignSession{
-		key:                 key,
-		sessionID:           sessionID,
-		config:              config,
-		log:                 config.Logger(),
-		limits:              limits,
-		securityParams:      plan.securityParams,
-		signers:             signers,
-		context:             ctx,
-		contextHash:         contextHash,
-		derivation:          derivation,
-		planHash:            slices.Clone(planHash),
-		paillier:            paillierKey,
-		kShare:              kShareSecret,
-		gamma:               gammaSecret,
-		xBar:                xBarSecret,
-		gammaComm:           gammaComm,
-		xBarComm:            xBarComm,
-		partyIndex:          partyIndex,
-		parties:             parties,
-		round1Count:         1,
-		round1VerifiedCount: 1,
-		startOpening:        startOpening,
-		guard:               guard,
+		key:            key,
+		sessionID:      sessionID,
+		config:         config,
+		log:            config.Logger(),
+		limits:         limits,
+		securityParams: plan.securityParams,
+		signers:        signers,
+		context:        ctx,
+		contextHash:    contextHash,
+		derivation:     derivation,
+		planHash:       slices.Clone(planHash),
+		paillier:       paillierKey,
+		kShare:         kShareSecret,
+		gamma:          gammaSecret,
+		xBar:           xBarSecret,
+		gammaComm:      gammaComm,
+		xBarComm:       xBarComm,
+		partyIndex:     partyIndex,
+		parties:        parties,
+		startOpening:   startOpening,
+		guard:          guard,
 	}
+	derivationOwned = true
+	paillierOwned = true
+	openingReturned = true
+	prepared := &preparedPresignStart{session: s}
+	defer prepared.destroy()
 	// Defensive: clear local secret scalar references so only session fields
 	// own the secrets. The defer guards above will not fire since err is nil.
 	// startOpening is kept alive for the per-verifier proof loop below.
@@ -201,6 +216,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	xBarSecret = nil
 
 	out = []tss.Envelope{env}
+	prepared.out = out
 	for _, peer := range signers {
 		if peer == key.state.party {
 			continue
@@ -213,7 +229,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, startOpening, &paillierKey.PublicKey, peerRP)
+		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, &s.paillier.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -230,33 +246,34 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 			return nil, nil, err
 		}
 		out = append(out, proofEnv)
+		prepared.out = out
 	}
 	// Clear startOpening after all per-verifier proofs are generated.
 	// The MtA Finish path in round 2 only uses the Paillier private key and the
 	// StartMessage ciphertext — the StartOpening witness (k, rho) is never read
 	// after the proofs are generated. Clear it early to reduce the window of
 	// secret material exposure.
-	startOpening = nil
+	s.startOpening.Destroy()
 	s.startOpening = nil
+	startOpening = nil
 
 	round2, err := s.tryEmitRound2()
 	if err != nil {
 		return nil, nil, err
 	}
 	out = append(out, round2...)
+	prepared.out = out
 	round3, err := s.tryEmitRound3()
 	if err != nil {
 		return nil, nil, err
 	}
 	out = append(out, round3...)
-	openingReturned = true
+	prepared.out = out
+	prepared.markCommitted()
 	return s, out, nil
 }
 
-// handlePresignRound1 validates and applies a presign round 1 public payload.
-//
-// Follows the handler template (see doc.go).
-func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *PresignSession) buildAcceptPresignRound1PayloadTx(env tss.Envelope) (*acceptPresignRound1PayloadTx, error) {
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryValueWithLimits[presignRound1Payload](env.Payload, s.limits)
 	if err != nil {
@@ -290,34 +307,33 @@ func (s *PresignSession) handlePresignRound1(env tss.Envelope) ([]tss.Envelope, 
 		)
 	}
 
-	// ---- 4. MUTATE STATE ----
 	st, ok := s.partyState(env.From)
 	if !ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errPresignSignerMissing)
 	}
-	st.round1.payload = p
-	st.round1.havePayload = true
-	s.round1Count++
-
-	// ---- 5. EMIT ----
-	if err := s.maybeValidateRound1Proof(env.From); err != nil {
-		proofEnv := st.round1.proofEnvelope
-		return nil, verificationErrorWithEvidence(
-			proofEnv,
-			tss.EvidenceKindPresignRound1,
-			"invalid presign round1 proof",
-			tss.NewPartySet(env.From),
-			err,
-			s.presignRound1ProofEvidenceFields(env.From, p, st.round1.proof)...,
-		)
+	verified := false
+	if st.round1.haveProof {
+		if err := s.validateRound1Proof(env.From, p, st.round1.proof); err != nil {
+			proofEnv := st.round1.proofEnvelope
+			return nil, verificationErrorWithEvidence(
+				proofEnv,
+				tss.EvidenceKindPresignRound1,
+				"invalid presign round1 proof",
+				tss.NewPartySet(env.From),
+				err,
+				s.presignRound1ProofEvidenceFields(env.From, p, st.round1.proof)...,
+			)
+		}
+		verified = true
 	}
-	return s.tryEmitRound2()
+	return &acceptPresignRound1PayloadTx{
+		from:     env.From,
+		payload:  p,
+		verified: verified,
+	}, nil
 }
 
-// handlePresignRound1Proof validates and applies a presign round 1 proof payload.
-//
-// Follows the handler template (see doc.go).
-func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acceptPresignRound1ProofTx, error) {
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryValueWithLimits[presignRound1ProofPayload](env.Payload, s.limits)
 	if err != nil {
@@ -339,32 +355,31 @@ func (s *PresignSession) handlePresignRound1Proof(env tss.Envelope) ([]tss.Envel
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 
-	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	// (deferred until both public and proof are available — see maybeValidateRound1Proof)
-
-	// ---- 4. MUTATE STATE ----
 	st, ok := s.partyState(env.From)
 	if !ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errPresignSignerMissing)
 	}
-	st.round1.proof = p
-	st.round1.proofEnvelope = env
-	st.round1.haveProof = true
-	s.round1ProofCount++
-
-	// ---- 5. EMIT ----
-	if err := s.maybeValidateRound1Proof(env.From); err != nil {
-		public := st.round1.payload
-		return nil, verificationErrorWithEvidence(
-			env,
-			tss.EvidenceKindPresignRound1,
-			"invalid presign round1 proof",
-			tss.NewPartySet(env.From),
-			err,
-			s.presignRound1ProofEvidenceFields(env.From, public, p)...,
-		)
+	verified := false
+	if st.round1.havePayload {
+		if err := s.validateRound1Proof(env.From, st.round1.payload, p); err != nil {
+			public := st.round1.payload
+			return nil, verificationErrorWithEvidence(
+				env,
+				tss.EvidenceKindPresignRound1,
+				"invalid presign round1 proof",
+				tss.NewPartySet(env.From),
+				err,
+				s.presignRound1ProofEvidenceFields(env.From, public, p)...,
+			)
+		}
+		verified = true
 	}
-	return s.tryEmitRound2()
+	return &acceptPresignRound1ProofTx{
+		from:          env.From,
+		proof:         p,
+		proofEnvelope: env.Clone(),
+		verified:      verified,
+	}, nil
 }
 
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
@@ -420,34 +435,6 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 	if err := expectedPK.ValidateCiphertext(ciphertext); err != nil {
 		return fmt.Errorf("invalid encrypted nonce ciphertext: %w", err)
 	}
-	return nil
-}
-
-func (s *PresignSession) maybeValidateRound1Proof(from tss.PartyID) error {
-	st, ok := s.partyState(from)
-	if !ok {
-		return errors.New("sender is not in signer set")
-	}
-	if from == s.key.state.party {
-		if !st.round1.verified {
-			st.round1.verified = true
-			s.round1VerifiedCount++
-		}
-		return nil
-	}
-	if st.round1.verified {
-		return nil
-	}
-	if !st.round1.havePayload || !st.round1.haveProof {
-		return nil
-	}
-	public := st.round1.payload
-	proof := st.round1.proof
-	if err := s.validateRound1Proof(from, public, proof); err != nil {
-		return err
-	}
-	st.round1.verified = true
-	s.round1VerifiedCount++
 	return nil
 }
 

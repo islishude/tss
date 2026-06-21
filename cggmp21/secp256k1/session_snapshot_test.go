@@ -25,6 +25,10 @@ type cggmpPresignSnapshot struct {
 	Round1VerifiedSenders []tss.PartyID
 
 	Round2Senders           []tss.PartyID
+	AlphaDeltaSenders       []tss.PartyID
+	AlphaSigmaSenders       []tss.PartyID
+	BetaDeltaSenders        []tss.PartyID
+	BetaSigmaSenders        []tss.PartyID
 	Round3DeltaSenders      []tss.PartyID
 	Round3VerifyShareSender []tss.PartyID
 
@@ -46,7 +50,7 @@ type cggmpSignSnapshot struct {
 	HasSignature   bool
 	PartialSenders []tss.PartyID
 	HasAttempt     bool
-	HasStore       bool
+	HasCoordinator bool
 }
 
 func snapshotCGGMPKeygenSession(s *KeygenSession) cggmpKeygenSnapshot {
@@ -114,6 +118,18 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 		if state.round2.havePayload {
 			snap.Round2Senders = append(snap.Round2Senders, state.id)
 		}
+		if state.mta.alphaDelta != nil {
+			snap.AlphaDeltaSenders = append(snap.AlphaDeltaSenders, state.id)
+		}
+		if state.mta.alphaSigma != nil {
+			snap.AlphaSigmaSenders = append(snap.AlphaSigmaSenders, state.id)
+		}
+		if state.mta.betaDelta != nil {
+			snap.BetaDeltaSenders = append(snap.BetaDeltaSenders, state.id)
+		}
+		if state.mta.betaSigma != nil {
+			snap.BetaSigmaSenders = append(snap.BetaSigmaSenders, state.id)
+		}
 		if state.round3.haveDelta {
 			snap.Round3DeltaSenders = append(snap.Round3DeltaSenders, state.id)
 		}
@@ -125,6 +141,10 @@ func snapshotCGGMPPresignSession(s *PresignSession) cggmpPresignSnapshot {
 	snap.Round1ProofSenders = tss.PartySet(snap.Round1ProofSenders).Sorted()
 	snap.Round1VerifiedSenders = tss.PartySet(snap.Round1VerifiedSenders).Sorted()
 	snap.Round2Senders = tss.PartySet(snap.Round2Senders).Sorted()
+	snap.AlphaDeltaSenders = tss.PartySet(snap.AlphaDeltaSenders).Sorted()
+	snap.AlphaSigmaSenders = tss.PartySet(snap.AlphaSigmaSenders).Sorted()
+	snap.BetaDeltaSenders = tss.PartySet(snap.BetaDeltaSenders).Sorted()
+	snap.BetaSigmaSenders = tss.PartySet(snap.BetaSigmaSenders).Sorted()
 	snap.Round3DeltaSenders = tss.PartySet(snap.Round3DeltaSenders).Sorted()
 	snap.Round3VerifyShareSender = tss.PartySet(snap.Round3VerifyShareSender).Sorted()
 	return snap
@@ -142,7 +162,7 @@ func snapshotCGGMPSignSession(s *SignSession) cggmpSignSnapshot {
 		HasSignature:   s.signature != nil,
 		PartialSenders: cggmpSnapshotMapKeys(s.partials),
 		HasAttempt:     len(s.attempt.PresignID) != 0 || len(s.attempt.AttemptHash) != 0,
-		HasStore:       s.store != nil,
+		HasCoordinator: s.coordinator != nil,
 	}
 }
 

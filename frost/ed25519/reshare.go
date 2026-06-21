@@ -3,7 +3,6 @@ package ed25519
 import (
 	"bytes"
 	"errors"
-	"fmt"
 	"slices"
 	"sync"
 
@@ -27,10 +26,10 @@ type ReshareSession struct {
 	oldParties   tss.PartySet   // Canonical dealer set of old key holders.
 	newParties   tss.PartySet   // Canonical target key-holder set.
 	newThreshold int            // Target signing threshold.
-	isRecipient  bool           // Whether this party receives and assembles a new share.
 	selfID       tss.PartyID    // Local party ID for envelope recipient/sender checks.
-	refreshMode  bool           // True for same-party zero-constant-term refresh.
-	planHash     []byte         // Digest every reshare payload must echo.
+	mode         frostReshareMode
+	role         frostReshareRole
+	planHash     []byte // Digest every reshare payload must echo.
 
 	cfg     tss.ThresholdConfig                // Local threshold runtime view for this role.
 	log     tss.Logger                         // Optional protocol logger.
@@ -180,6 +179,10 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	newParties := plan.state.newParties.Clone()
 	newThreshold := plan.state.newThreshold
 	isRecipient := tss.ContainsParty(newParties, oldKey.state.party)
+	role := frostReshareRoleDealerOnly
+	if isRecipient {
+		role = frostReshareRoleDealerAndRecipient
+	}
 
 	// Compute w_i = λ_i(old, 0) * s_i (mod L).
 	lambda, err := lagrangeCoefficientScalar(oldKey.state.party, oldParties)
@@ -194,87 +197,25 @@ func StartReshare(oldKey *KeyShare, plan *ResharePlan, local tss.LocalConfig, gu
 	weighted := fed.NewScalar().Multiply(lambda, oldSecret)
 	defer weighted.Set(fed.NewScalar())
 
-	// Generate polynomial g_i of degree newThreshold-1 with constant term w_i.
-	poly, err := randomScalarPolynomial(config.Reader(), newThreshold, weighted)
+	prepared, err := prepareReshareDealerStart(
+		oldKey,
+		config,
+		limits,
+		planHash,
+		oldParties,
+		newParties,
+		newThreshold,
+		frostReshareModeReshare,
+		role,
+		weighted,
+		guard,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer clearScalars(poly)
-	commitmentPoints := make([]*fed.Point, len(poly))
-	for i, coeff := range poly {
-		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
-	}
-	commitments, err := newReshareCommitmentsFromPoints(commitmentPoints, newThreshold)
-	if err != nil {
-		return nil, nil, err
-	}
-	ownShare := evalScalarPolynomial(poly, oldKey.state.party)
-	ownSecretShare, err := newEdSecretScalarFromFed(ownShare)
-	ownShare.Set(fed.NewScalar())
-	if err != nil {
-		return nil, nil, err
-	}
-	s := &ReshareSession{
-		oldKey:       oldKey,
-		oldPublicKey: oldKey.state.publicKey.Clone(),
-		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
-		oldParties:   oldParties,
-		newParties:   newParties,
-		newThreshold: newThreshold,
-		isRecipient:  isRecipient,
-		selfID:       oldKey.state.party,
-		cfg:          config,
-		log:          config.Logger(),
-		limits:       limits,
-		planHash:     append([]byte(nil), planHash...),
-		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
-		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
-		guard:        guard,
-	}
-	success := false
-	defer func() {
-		if !success {
-			s.abort()
-		}
-	}()
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
-	if err != nil {
-		return nil, nil, err
-	}
-	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
-	if err != nil {
-		return nil, nil, err
-	}
-	out := []tss.Envelope{commitEnv}
-	for _, id := range newParties {
-		if id == oldKey.state.party {
-			continue
-		}
-		share := evalScalarPolynomial(poly, id)
-		secretShare, err := newEdSecretScalarFromFed(share)
-		share.Set(fed.NewScalar())
-		if err != nil {
-			return nil, nil, err
-		}
-		payload, err := marshalReshareSharePayloadWithLimits(
-			reshareSharePayload{Share: secretShare, PlanHash: planHash},
-			limits,
-		)
-		secretShare.Destroy()
-		if err != nil {
-			return nil, nil, err
-		}
-		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, shareEnv)
-	}
-	if err := s.tryComplete(); err != nil {
-		return nil, nil, err
-	}
-	success = true
-	return s, out, nil
+	defer prepared.destroy()
+	prepared.markCommitted()
+	return prepared.session, prepared.out, nil
 }
 
 // StartReshareRecipient starts a resharing session for a new participant.
@@ -321,8 +262,9 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 		oldParties:   plan.state.oldParties.Clone(),
 		newParties:   plan.state.newParties.Clone(),
 		newThreshold: plan.state.newThreshold,
-		isRecipient:  true,
 		selfID:       config.Self,
+		mode:         frostReshareModeReshare,
+		role:         frostReshareRoleRecipientOnly,
 		cfg:          config,
 		log:          config.Logger(),
 		limits:       limits,
@@ -380,87 +322,26 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	config.Threshold = oldKey.state.threshold
 	// Zero-coefficient polynomial preserves the group secret.
 	zero := fed.NewScalar()
-	poly, err := randomScalarPolynomial(config.Reader(), oldKey.state.threshold, zero)
+	defer zero.Set(fed.NewScalar())
+	prepared, err := prepareReshareDealerStart(
+		oldKey,
+		config,
+		limits,
+		planHash,
+		parties,
+		parties,
+		oldKey.state.threshold,
+		frostReshareModeRefresh,
+		frostReshareRoleDealerAndRecipient,
+		zero,
+		guard,
+	)
 	if err != nil {
 		return nil, nil, err
 	}
-	defer clearScalars(poly)
-	commitmentPoints := make([]*fed.Point, len(poly))
-	for i, coeff := range poly {
-		commitmentPoints[i] = fed.NewIdentityPoint().ScalarBaseMult(coeff)
-	}
-	commitments, err := newReshareCommitmentsFromPoints(commitmentPoints, oldKey.state.threshold)
-	if err != nil {
-		return nil, nil, err
-	}
-	ownShare := evalScalarPolynomial(poly, oldKey.state.party)
-	ownSecretShare, err := newEdSecretScalarFromFed(ownShare)
-	ownShare.Set(fed.NewScalar())
-	if err != nil {
-		return nil, nil, err
-	}
-	s := &ReshareSession{
-		oldKey:       oldKey,
-		oldPublicKey: oldKey.state.publicKey.Clone(),
-		chainCode:    append([]byte(nil), oldKey.state.chainCode...),
-		oldParties:   parties,
-		newParties:   parties,
-		newThreshold: oldKey.state.threshold,
-		isRecipient:  true,
-		selfID:       oldKey.state.party,
-		refreshMode:  true,
-		cfg:          config,
-		log:          config.Logger(),
-		limits:       limits,
-		planHash:     append([]byte(nil), planHash...),
-		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.party: commitments.Clone()},
-		shares:       map[tss.PartyID]*secret.Scalar{oldKey.state.party: ownSecretShare},
-		guard:        guard,
-	}
-	success := false
-	defer func() {
-		if !success {
-			s.abort()
-		}
-	}()
-	commitPayload, err := marshalReshareCommitmentsPayloadWithLimits(reshareCommitmentsPayload{Commitments: commitments.Clone(), PlanHash: planHash}, limits)
-	if err != nil {
-		return nil, nil, err
-	}
-	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadReshareCommitments, commitPayload)
-	if err != nil {
-		return nil, nil, err
-	}
-	out := []tss.Envelope{commitEnv}
-	for _, id := range parties {
-		if id == oldKey.state.party {
-			continue
-		}
-		share := evalScalarPolynomial(poly, id)
-		secretShare, err := newEdSecretScalarFromFed(share)
-		share.Set(fed.NewScalar())
-		if err != nil {
-			return nil, nil, err
-		}
-		payload, err := marshalReshareSharePayloadWithLimits(
-			reshareSharePayload{Share: secretShare, PlanHash: planHash},
-			limits,
-		)
-		secretShare.Destroy()
-		if err != nil {
-			return nil, nil, err
-		}
-		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadReshareShare, payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, shareEnv)
-	}
-	if err := s.tryComplete(); err != nil {
-		return nil, nil, err
-	}
-	success = true
-	return s, out, nil
+	defer prepared.destroy()
+	prepared.markCommitted()
+	return prepared.session, prepared.out, nil
 }
 
 // HandleReshareMessage validates and applies one reshare envelope.
@@ -482,56 +363,20 @@ func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []ts
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
+	tx, err := s.buildReshareTransition(env)
+	if err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
 		return nil, err
 	}
-	if base.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare only accepts round 1 messages"))
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
+	if err != nil {
+		return nil, err
 	}
-	payload := base.Payload
-	switch base.PayloadType {
-	case payloadReshareCommitments:
-		p, err := tss.DecodeBinaryValueWithLimits[reshareCommitmentsPayload](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		if err := p.Commitments.ValidateThreshold(s.newThreshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		commitments := p.Commitments.Clone()
-		if existing, ok := s.commits[base.From]; ok {
-			if existing.Equal(commitments) {
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare commitments"))
-		}
-		s.commits[base.From] = commitments
-	case payloadReshareShare:
-		p, err := tss.DecodeBinaryValueWithLimits[reshareSharePayload](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		defer p.Share.Destroy()
-		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		if existing, ok := s.shares[base.From]; ok {
-			if existing.Equal(p.Share) {
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare share"))
-		}
-		s.shares[base.From] = p.Share.Clone()
-	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
-	}
-	return nil, s.tryComplete()
+	tx.markCommitted()
+	return effects.envelopes, nil
 }
 
 func (s *ReshareSession) clearSensitive() {

@@ -7,17 +7,18 @@
 //
 // # Handler template
 //
-// Every inbound protocol message handler follows the same five-step pattern:
+// Every inbound protocol message handler follows the same transactional pattern:
 //
-//		parse → policy validate → cryptographic verify → mutate state → emit
+//	decode → policy validate → cryptographic verify → prepare transition → commit → effects
 //
-//	 1. PARSE: decode the wire payload, fail-closed on malformed input
+//	 1. DECODE: decode the wire payload, fail-closed on malformed input
 //	 2. POLICY VALIDATE: transport-layer checks are performed before this step
-//	    by the shared [tss.ValidateInbound]; handlers only check round / duplicate
+//	    by the shared [tss.ValidateInbound]; handlers also check round and duplicate state
 //	 3. CRYPTOGRAPHIC VERIFY: proof verification, ciphertext membership, curve checks
-//	 4. MUTATE STATE: record the verified data, update round-specific maps
-//	 5. EMIT: advance the protocol by calling tryEmitRound* or tryComplete*
+//	 4. PREPARE TRANSITION: own decoded secret material without mutating session state
+//	 5. COMMIT: atomically install verified state and transfer prepared ownership
+//	 6. EFFECTS: emit already-constructed envelopes or invoke durable coordination
 //
-// Steps 2 (duplicate/replay) and basic round checks are performed by the
-// Handle*Message dispatcher before delegating to the per-round handler.
+// Rejected transitions destroy uncommitted secret material. Readiness is
+// derived from accepted per-party state rather than manually maintained counts.
 package secp256k1

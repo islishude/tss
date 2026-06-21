@@ -172,7 +172,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		planHash:  wantPlanHash,
 		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
-	_, err = s.handleKeygenConfirmation(tss.Envelope{
+	_, err = s.buildAcceptCGGMPKeygenConfirmationTx(tss.Envelope{
 		Round:   keygenConfirmationRound,
 		From:    confirmation.Sender,
 		Payload: payload,

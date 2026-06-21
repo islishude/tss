@@ -297,15 +297,18 @@ func keygenConfirmationSetHash(confirmations []*KeygenConfirmation) []byte {
 	return t.Sum()
 }
 
-// handleKeygenConfirmation validates and applies a keygen confirmation message.
-//
-// Follows the handler template (see doc.go).
-func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *KeygenSession) buildAcceptCGGMPKeygenConfirmationTx(env tss.Envelope) (*acceptCGGMPKeygenConfirmationTx, error) {
 	// ---- 1. PARSE ----
 	confirmation, err := tss.DecodeBinary[KeygenConfirmation](env.Payload)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
+	owned := true
+	defer func() {
+		if owned {
+			clear(confirmation.ChainCode)
+		}
+	}()
 
 	// ---- 2. POLICY VALIDATE ----
 	if confirmation.Sender != env.From {
@@ -333,7 +336,7 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 	if pd.confirmation != nil {
 		existing, err := pd.confirmation.MarshalBinary()
 		if err == nil && bytes.Equal(existing, canonical) {
-			return nil, nil
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate keygen confirmation"))
 		}
 		return nil, tss.NewProtocolError(
 			tss.ErrCodeVerification,
@@ -354,16 +357,11 @@ func (s *KeygenSession) handleKeygenConfirmation(env tss.Envelope) ([]tss.Envelo
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", env.From))
 	}
 
-	// ---- 4. MUTATE STATE ----
-	// Store the revealed chain code for XOR aggregation.
-	pd.chainCode = bytes.Clone(confirmation.ChainCode)
-	pd.confirmation = confirmation
-
-	// ---- 5. EMIT ----
-	if s.pending != nil && allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-		return nil, s.finalizeConfirmedKeyShare()
-	}
-	return nil, nil
+	owned = false
+	return &acceptCGGMPKeygenConfirmationTx{
+		from:         env.From,
+		confirmation: confirmation,
+	}, nil
 }
 
 // allConfirmationsReceived returns true when every party has submitted a confirmation.
@@ -380,17 +378,48 @@ func allConfirmationsReceived(pd map[tss.PartyID]*keygenPartyData, parties tss.P
 // finalizeConfirmedKeyShare verifies the full confirmation set and produces the
 // final key share with the aggregate chain code.
 func (s *KeygenSession) finalizeConfirmedKeyShare() error {
+	prepared, ok, err := s.maybePrepareCGGMPFinalKeyShare()
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return nil
+	}
+	defer prepared.destroy()
+	s.commitCGGMPFinalKeyShare(prepared)
+	return nil
+}
+
+type preparedCGGMPFinalKeyShare struct {
+	share               *KeyShare
+	confirmationSetHash []byte
+	committed           bool
+}
+
+func (p *preparedCGGMPFinalKeyShare) destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	if p.share != nil {
+		p.share.Destroy()
+		p.share = nil
+	}
+	clear(p.confirmationSetHash)
+}
+
+func (s *KeygenSession) maybePrepareCGGMPFinalKeyShare() (*preparedCGGMPFinalKeyShare, bool, error) {
 	if s.pending == nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("missing pending key share"))
+		return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, errors.New("missing pending key share"))
+	}
+	if !allConfirmationsReceived(s.partyData, s.cfg.Parties) {
+		return nil, false, nil
 	}
 	// Collect parsed confirmations in party order (no re-unmarshal needed).
 	confirmations := make([]*KeygenConfirmation, len(s.cfg.Parties))
 	for i, id := range s.cfg.Parties {
 		c := s.partyData[id].confirmation
 		if c == nil {
-			s.abort()
-			return tss.NewProtocolError(
+			return nil, false, tss.NewProtocolError(
 				tss.ErrCodeVerification,
 				keygenConfirmationRound,
 				id,
@@ -400,8 +429,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 		confirmations[i] = c
 	}
 	if err := verifyFinalizedKeygenConfirmationSet(s.pending, confirmations); err != nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	// Aggregate chain codes from all revealed confirmations.
 	chainCodeMap := make(map[tss.PartyID][]byte, len(s.cfg.Parties))
@@ -410,8 +438,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	}
 	chainCode, err := bip32util.AggregateChainCode(s.cfg.Parties, chainCodeMap)
 	if err != nil {
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	finalShare := cloneKeyShareValue(s.pending)
 	finalShare.state.chainCode = chainCode
@@ -420,8 +447,7 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	finalTranscriptHash, err := s.keygenTranscriptHash(finalShare.state.groupCommitments)
 	if err != nil {
 		finalShare.Destroy()
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeInvariant, keygenConfirmationRound, s.cfg.Self, err)
+		return nil, false, tss.NewProtocolError(tss.ErrCodeInvariant, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	finalShare.state.keygenTranscriptHash = finalTranscriptHash
 	// Store parsed confirmation structs directly.
@@ -432,21 +458,29 @@ func (s *KeygenSession) finalizeConfirmedKeyShare() error {
 	}
 	if err := finalShare.ValidateWithLimits(s.limits); err != nil {
 		finalShare.Destroy()
-		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+		return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
+	}
+	return &preparedCGGMPFinalKeyShare{
+		share:               finalShare,
+		confirmationSetHash: keygenConfirmationSetHash(confirmations),
+	}, true, nil
+}
+
+func (s *KeygenSession) commitCGGMPFinalKeyShare(p *preparedCGGMPFinalKeyShare) {
+	if p == nil {
+		return
 	}
 	s.pending.Destroy()
 	s.pending = nil
-	s.keyShare = finalShare
+	s.keyShare = p.share
 	s.completed = true
 	s.state = keygenConfirmed
-	pubKeyHash := sha256.Sum256(finalShare.state.publicKey)
-	confirmationSetHash := keygenConfirmationSetHash(confirmations)
+	pubKeyHash := sha256.Sum256(p.share.state.publicKey)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
-		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
+		"confirmation_set_hash", fmt.Sprintf("%x", p.confirmationSetHash[:8]),
 	)
-	return nil
+	p.committed = true
 }

@@ -289,63 +289,20 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
+	tx, err := s.buildSignTransition(env)
+	if err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.signers, base.From) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
+	if err != nil {
+		return nil, err
 	}
-	payload := base.Payload
-	switch base.PayloadType {
-	case payloadSignCommitment:
-		if base.Round != 1 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("commitment must be round 1"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[nonceCommitment](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		if existing, ok := s.commitments[base.From]; ok {
-			if existing.Equal(p) {
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting nonce commitment"))
-		}
-		s.commitments[base.From] = p
-		return s.tryEmitPartial()
-	case payloadSignPartial:
-		if base.Round != 2 {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("partial signature must be round 2"))
-		}
-		p, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		partial := p.Z.Scalar()
-		if existing, ok := s.partials[base.From]; ok {
-			if existing.Equal(partial) == 1 {
-				if _, ok := s.partialEnvelopes[base.From]; !ok {
-					s.partialEnvelopes[base.From] = base.Clone()
-				}
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting partial signature"))
-		}
-		s.partials[base.From] = partial
-		s.partialEnvelopes[base.From] = base.Clone()
-		return nil, s.tryAggregate()
-	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
-	}
+	tx.markCommitted()
+	return effects.envelopes, nil
 }
 
 // Signature returns the completed RFC 8032 Ed25519 signature.

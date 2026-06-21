@@ -240,7 +240,7 @@ func TestFROSTEarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		planHash:  mustKeyShareMetadata(t, shares[1]).PlanHash,
 		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
-	_, err = s.handleKeygenConfirmation(tss.Envelope{
+	_, err = s.buildAcceptKeygenConfirmationTx(tss.Envelope{
 		Round:   keygenConfirmationRound,
 		From:    confirmation.Sender,
 		Payload: payload,

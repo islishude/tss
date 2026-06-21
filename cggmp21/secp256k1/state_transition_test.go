@@ -82,8 +82,8 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 }
 
 // TestShouldAbortSession verifies the session abort policy:
-// verification failures and blame-bearing errors cause abort,
-// but duplicate messages do not (they are protocol-level retries).
+// verification failures cause abort, while malformed or duplicate messages do
+// not mutate or terminate the session.
 func TestShouldAbortSession(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -109,12 +109,12 @@ func TestShouldAbortSession(t *testing.T) {
 			wantAbort: true,
 		},
 		{
-			name: "blame-bearing error aborts",
+			name: "blame-bearing invalid message does not abort",
 			err: &tss.ProtocolError{
 				Code:  tss.ErrCodeInvalidMessage,
 				Blame: &tss.Blame{Reason: "test"},
 			},
-			wantAbort: true,
+			wantAbort: false,
 		},
 		{
 			name: "duplicate does not abort",

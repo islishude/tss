@@ -126,10 +126,13 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	}
 	parties := config.SortedParties()
 	config.Parties = parties
+	cleanup := newCleanupStack()
+	defer cleanup.run()
 	poly, err := randomScalarPolynomial(config.Reader(), config.Threshold, nil)
 	if err != nil {
 		return nil, nil, err
 	}
+	cleanup.add(func() { clearScalars(poly) })
 	commitmentPoints := make([]*fed.Point, len(poly))
 	for i, coeff := range poly {
 		// Each coefficient commitment lets receivers validate their private share.
@@ -140,6 +143,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	chainCode := make([]byte, 32)
+	cleanup.add(func() { clear(chainCode) })
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 		return nil, nil, err
 	}
@@ -155,6 +159,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
+	cleanup.add(ownSecretShare.Destroy)
 	partyData[config.Self] = &keygenPartyData{
 		commitments:     &ownCommitments,
 		share:           ownSecretShare,
@@ -169,6 +174,10 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		ownPoly:   poly,
 		guard:     guard,
 	}
+	clear(chainCode)
+	cleanup.disarm()
+	prepared := &preparedKeygenStart{session: s}
+	defer prepared.destroy()
 
 	out := make([]tss.Envelope, 0, len(parties))
 	commitPayload, err := marshalKeygenCommitmentsPayloadWithLimits(keygenCommitmentsPayload{Commitments: commitments.Clone(), ChainCodeCommit: chainCodeCommit, PlanHash: planHash}, limits)
@@ -176,10 +185,12 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	commitEnv, err := newEnvelope(config, keygenStartRound, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
+	clear(commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
 	out = append(out, commitEnv)
+	prepared.out = out
 	for _, id := range parties {
 		if id == config.Self {
 			continue
@@ -200,10 +211,12 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		}
 		// Shamir shares are secret-bearing and must be delivered over a confidential transport.
 		shareEnv, err := newEnvelope(config, keygenStartRound, config.Self, id, payloadKeygenShare, payload)
+		clear(payload)
 		if err != nil {
 			return nil, nil, err
 		}
 		out = append(out, shareEnv)
+		prepared.out = out
 	}
 	s.ownMessages = tss.CloneSlice(out)
 	completionOut, err := s.tryComplete()
@@ -211,6 +224,8 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	out = append(out, completionOut...)
+	prepared.out = out
+	prepared.markCommitted()
 	return s, out, nil
 }
 
@@ -238,71 +253,20 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
+	tx, err := s.buildKeygenTransition(env)
+	if err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage
 		}
 		return nil, err
 	}
-	if base.PayloadType == payloadKeygenConfirmation {
-		return s.handleKeygenConfirmation(base)
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
+	if err != nil {
+		return nil, err
 	}
-	if base.Round != keygenStartRound {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages and round 2 confirmations"))
-	}
-	payload := base.Payload
-	switch base.PayloadType {
-	case payloadKeygenCommitments:
-		p, err := tss.DecodeBinaryWithLimits[keygenCommitmentsPayload](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		if err := p.Commitments.ValidateThreshold(s.cfg.Threshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		commitments := p.Commitments.Clone()
-		pd, err := s.partyEntry(base.From)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if pd.commitments != nil {
-			if pd.commitments.Equal(commitments) && bytes.Equal(pd.chainCodeCommit, p.ChainCodeCommit) {
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
-		}
-		pd.commitments = &commitments
-		if len(p.ChainCodeCommit) != sha256.Size {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("chain code commit must be 32 bytes, got %d", len(p.ChainCodeCommit)))
-		}
-		pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
-	case payloadKeygenShare:
-		p, err := tss.DecodeBinaryWithLimits[keygenSharePayload](payload, s.limits)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		defer p.Share.Destroy()
-		if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
-		}
-		pd, err := s.partyEntry(base.From)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if pd.share != nil {
-			if pd.share.Equal(p.Share) {
-				return nil, nil
-			}
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting share"))
-		}
-		pd.share = p.Share.Clone()
-	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
-	}
-	return s.tryComplete()
+	tx.markCommitted()
+	return effects.envelopes, nil
 }
 
 // KeyShare returns the completed local key share when DKG has finished.

@@ -7,7 +7,7 @@ type sessionEffects struct {
 }
 
 type sessionTransition[S any] interface {
-	Apply(*S) (sessionEffects, error)
-	CleanupOnReject()
-	MarkCommitted()
+	apply(*S) (sessionEffects, error)
+	cleanupOnReject()
+	markCommitted()
 }

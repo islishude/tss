@@ -26,6 +26,27 @@ name, session id, sender membership, transport authentication, identity binding,
 delivery mode, confidentiality policy, broadcast consistency, and replay before
 package-specific state machines decode payloads.
 
+## Protocol Handler Transactions
+
+FROST and CGGMP21 inbound handlers use the same internal transaction boundary:
+
+```text
+decode -> policy validate -> cryptographic verify -> prepare transition -> commit -> effects
+```
+
+Decode, policy, and cryptographic failures do not mutate protocol session state
+or emit envelopes. A prepared transition owns any decoded secret material until
+commit transfers that ownership to the session; rejected or abandoned prepared
+values are destroyed. Outbound envelopes are constructed before the state that
+authorizes them is committed, so marshal or envelope-construction failure cannot
+leave a partially advanced session.
+
+Identical duplicate delivery follows the documented handler lifecycle policy
+and never reapplies a transition. Conflicting duplicates are replay,
+equivocation, or verification errors and do not overwrite accepted state.
+Readiness is derived from accepted per-party state rather than independent
+message counters.
+
 ## Key-Share Lifecycle
 
 Keygen state machines produce algorithm-specific `KeyShare` records. `MarshalBinary` is deterministic and uses canonical TLV encoding for the share record. Secret material is not encrypted by this package; callers must encrypt persisted shares when needed and call `Destroy` when practical.
@@ -48,7 +69,7 @@ rejected and require rerunning keygen. Old GG20 wire identifiers are rejected.
 
 FROST Ed25519 signs in two online rounds: nonce commitments, then partial signatures. Aggregation verifies each partial before producing a 64-byte Ed25519 signature accepted by `crypto/ed25519.Verify`.
 
-CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `NewPresignPlan` binds key id, chain id, derivation path, policy domain, message domain, signer set, and key metadata before nonce generation. `NewSignPlan` binds the presign, message, and durable attempt policy; `StartSign` verifies the plan against the key and presign, constructs a candidate partial locally, then calls `CommitSignAttempt` as the only durable linearization point before returning the envelope. Aggregate signatures are always normalized to low-S, and public verification rejects high-S encodings. A committed, outcome-unknown, or possibly sent presign can only resume the same immutable attempt; delivery ACKs/certificates and final signature visibility are persisted as separate durable state on that attempt.
+CGGMP21 secp256k1 separates offline presign from online signing. Presign records contain local one-use `k_i` and `chi_i` values and must not be shared. `NewPresignPlan` binds key id, chain id, derivation path, policy domain, message domain, signer set, and key metadata before nonce generation. `NewSignPlan` binds the presign, message, and durable attempt policy; `StartSign` verifies the plan against the key and presign, constructs a candidate partial locally, then claims it through an internal sign-attempt coordinator whose store commit is the only durable linearization point before returning the envelope. Online partial verification and aggregate signature preparation are independent of the durable store. Aggregate signatures are always normalized to low-S, and public verification rejects high-S encodings. A committed, outcome-unknown, or possibly sent presign can only resume the same immutable attempt; delivery ACKs/certificates and final signature visibility are persisted as separate durable state on that attempt.
 
 ## Public vs Internal
 

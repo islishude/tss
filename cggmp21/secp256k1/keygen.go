@@ -115,8 +115,6 @@ func (s *KeygenSession) partyEntry(id tss.PartyID) (*keygenPartyData, error) {
 }
 
 // HandleKeygenMessage validates and applies one keygen envelope.
-// It dispatches to per-round/per-phase handlers that each follow the template:
-// parse → policy validate → cryptographic verify → mutate state → emit.
 func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
@@ -142,40 +140,33 @@ func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.
 		return nil, err
 	}
 
-	// Round 2 (confirmation) dispatch.
+	var tx sessionTransition[KeygenSession]
 	if base.PayloadType == payloadKeygenConfirmation {
 		if base.Round != keygenConfirmationRound {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen confirmation in wrong round"))
 		}
-		return s.handleKeygenConfirmation(base)
+		tx, err = s.buildAcceptCGGMPKeygenConfirmationTx(base)
+	} else {
+		if base.Round != keygenStartRound {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages"))
+		}
+		switch base.PayloadType {
+		case payloadKeygenCommitments:
+			tx, err = s.buildAcceptCGGMPKeygenCommitmentsTx(base)
+		case payloadKeygenShare:
+			tx, err = s.buildAcceptCGGMPKeygenShareTx(base)
+		default:
+			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
+		}
 	}
-
-	// Round 1 dispatch.
-	if base.Round != keygenStartRound {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages"))
+	if err != nil {
+		return nil, err
 	}
-	switch base.PayloadType {
-	case payloadKeygenCommitments:
-		pd, err := s.partyEntry(base.From)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if pd.commitments != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate commitments"))
-		}
-		return s.handleKeygenCommitments(base)
-
-	case payloadKeygenShare:
-		pd, err := s.partyEntry(base.From)
-		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
-		}
-		if pd.share != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate share"))
-		}
-		return s.handleKeygenShare(base)
-
-	default:
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
+	if err != nil {
+		return nil, err
 	}
+	tx.markCommitted()
+	return effects.envelopes, nil
 }

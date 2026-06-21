@@ -15,7 +15,7 @@ type preparedSignPartial struct {
 	committed bool
 }
 
-func (p *preparedSignPartial) Destroy() {
+func (p *preparedSignPartial) destroy() {
 	if p == nil || p.committed {
 		return
 	}
@@ -34,7 +34,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 		return nil, false, errors.New("signing nonce is unavailable")
 	}
 	cleanup := newCleanupStack()
-	defer cleanup.Run()
+	defer cleanup.run()
 
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
@@ -69,7 +69,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	defer lambdaC.Set(fed.NewScalar())
 	rho := rhos[s.key.state.party]
 	z := fed.NewScalar().Multiply(rho, e)
-	cleanup.Add(func() { z.Set(fed.NewScalar()) })
+	cleanup.add(func() { z.Set(fed.NewScalar()) })
 	z.Add(z, d)
 	lcs := fed.NewScalar().Multiply(lambdaC, x)
 	defer lcs.Set(fed.NewScalar())
@@ -87,7 +87,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	if err != nil {
 		return nil, false, err
 	}
-	cleanup.Add(func() { clear(payload) })
+	cleanup.add(func() { clear(payload) })
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   s.sessionID,
@@ -104,7 +104,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 		env:     env,
 		payload: payload,
 	}
-	cleanup.Disarm()
+	cleanup.disarm()
 	return prepared, true, nil
 }
 

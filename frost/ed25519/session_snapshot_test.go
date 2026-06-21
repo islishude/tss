@@ -106,8 +106,8 @@ func snapshotFROSTReshareSession(s *ReshareSession) frostReshareSnapshot {
 		Completed:     s.completed,
 		Aborted:       s.aborted,
 		HasNewShare:   s.newShare != nil,
-		IsRecipient:   s.isRecipient,
-		RefreshMode:   s.refreshMode,
+		IsRecipient:   s.isRecipient(),
+		RefreshMode:   s.isRefresh(),
 		CommitSenders: frostSnapshotMapKeys(s.commits),
 		ShareSenders:  frostSnapshotMapKeys(s.shares),
 	}

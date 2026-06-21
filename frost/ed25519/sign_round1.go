@@ -10,7 +10,7 @@ func (s *SignSession) tryEmitPartial() ([]tss.Envelope, error) {
 	if !ok {
 		return nil, nil
 	}
-	defer prepared.Destroy()
+	defer prepared.destroy()
 	effects := s.commitLocalPartial(prepared)
 	if err := s.tryAggregate(); err != nil {
 		return nil, err

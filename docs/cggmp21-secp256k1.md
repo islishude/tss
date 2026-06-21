@@ -14,6 +14,29 @@ The `cggmp21/secp256k1` package implements a ([CGGMP21-style](https://eprint.iac
 
 The signing path never transmits or reconstructs private key shares or nonce shares. Each presign record is strictly one-use; reuse is caught before any partial signature leaves the process.
 
+## Session Transition Contract
+
+CGGMP21 keygen, presign, and online-sign handlers follow:
+
+```text
+decode -> policy validate -> cryptographic verify -> prepare transition -> commit -> effects
+```
+
+Rejected messages do not mutate accepted protocol state or emit envelopes.
+Decoded secret scalars and prepared MtA, key-share, presign, or signature values
+remain owned by the transition until commit and are destroyed if abandoned.
+Outbound envelopes are constructed before their authorizing state is committed.
+Identical duplicates never reapply state; conflicting duplicates are rejected
+without replacing accepted values. Presign readiness is derived from per-party
+round state rather than message counters.
+
+Online partial verification and final ECDSA aggregation are independent of the
+durable store. A sign-attempt coordinator owns claim, load/resume, delivery,
+completion, and burn operations and validates that returned records preserve the
+same presign and attempt identity. The current store handle is derived from
+`Presign.id()` behind this coordinator boundary so a future persisted non-secret
+presign UID can replace that derivation without changing online-sign transitions.
+
 ## Production Run Recipes
 
 The recipes below describe production integration metadata. They do not add a

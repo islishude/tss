@@ -1,34 +1,36 @@
 package ed25519
 
 type cleanupStack struct {
-	fns   []func()
-	armed bool
+	callbacks []func()
+	armed     bool
 }
 
 func newCleanupStack() *cleanupStack {
 	return &cleanupStack{armed: true}
 }
 
-func (c *cleanupStack) Add(fn func()) {
-	if c == nil || fn == nil {
+func (c *cleanupStack) add(fn func()) {
+	if c == nil || !c.armed || fn == nil {
 		return
 	}
-	c.fns = append(c.fns, fn)
+	c.callbacks = append(c.callbacks, fn)
 }
 
-func (c *cleanupStack) Disarm() {
+func (c *cleanupStack) disarm() {
 	if c == nil {
 		return
 	}
 	c.armed = false
+	c.callbacks = nil
 }
 
-func (c *cleanupStack) Run() {
+func (c *cleanupStack) run() {
 	if c == nil || !c.armed {
 		return
 	}
 	c.armed = false
-	for i := len(c.fns) - 1; i >= 0; i-- {
-		c.fns[i]()
+	for i := len(c.callbacks) - 1; i >= 0; i-- {
+		c.callbacks[i]()
 	}
+	c.callbacks = nil
 }

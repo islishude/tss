@@ -180,6 +180,25 @@ Round transitions must be monotonic. Duplicates, replay, corruption, wrong
 recipients, non-signers, invalid thresholds, and invalid committee or reshare
 plans must not advance state or trigger outbound messages.
 
+Inbound handler tests must enforce this transaction order:
+
+```text
+decode -> policy validate -> cryptographic verify -> prepare transition -> commit -> effects
+```
+
+- Snapshot state before malformed, invalid, duplicate, and conflicting input;
+  rejected input must leave the snapshot unchanged.
+- A prepared secret-bearing value must be destroyed unless commit explicitly
+  transfers ownership to the session.
+- Marshal and envelope-construction failure must happen before committing the
+  state that authorizes an outbound message.
+- Identical duplicates are either replay/idempotence outcomes defined by the
+  handler lifecycle or explicit duplicate errors; they never reapply state.
+- Conflicting duplicates are replay, equivocation, or verification errors and
+  never overwrite accepted state.
+- Readiness must be derived from accepted per-party state or an equivalent
+  authoritative bitset, not from an independently maintained message counter.
+
 Early messages are either:
 
 - **not bufferable:** reject without mutation; or
