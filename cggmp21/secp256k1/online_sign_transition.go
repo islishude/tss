@@ -52,7 +52,7 @@ func (s *SignSession) buildAcceptSignPartialTx(env tss.InboundEnvelope) (*accept
 	if !tss.ContainsParty(s.presign.state.signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
-	if base.Round != 1 || base.PayloadType != payloadSignPartial {
+	if base.Round != signStartRound || base.PayloadType != payloadSignPartial {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("expected round 1 sign partial"))
 	}
 	if _, ok := s.partials[base.From]; ok {
@@ -142,7 +142,7 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	if !secp.VerifyECDSA(public, s.digest, r, normalizedS) {
 		return nil, false, &tss.ProtocolError{
 			Code:  tss.ErrCodeInvariant,
-			Round: 1,
+			Round: signStartRound,
 			Err:   errors.New("all partials individually verified but aggregate ECDSA signature verification failed"),
 		}
 	}

@@ -265,8 +265,8 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleRefreshConfirmation(env)
 	}
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts round 1 messages"))
+	if env.Round != refreshStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts refresh start round messages"))
 	}
 	switch env.PayloadType {
 	case payloadRefreshCommitments:

@@ -211,7 +211,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		if err != nil {
 			return nil, false, err
 		}
-		round2Env, err := newEnvelope(s.config, 2, s.key.state.party, peer, payloadPresignRound2, payload)
+		round2Env, err := newEnvelope(s.config, presignRound2, s.key.state.party, peer, payloadPresignRound2, payload)
 		clear(payload)
 		if err != nil {
 			return nil, false, err

@@ -18,6 +18,10 @@ import (
 const (
 	keygenStartRound        = 1
 	keygenConfirmationRound = 2
+
+	signStartRound    = 1
+	signRound2        = 2
+	reshareStartRound = 1
 )
 
 // keygenPartyData holds all per-party DKG state for a single participant.

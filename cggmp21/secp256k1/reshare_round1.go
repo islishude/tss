@@ -232,31 +232,31 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 
 func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePayload, rawPayload []byte) error {
 	if p.Dealer != from {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload sender mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload sender mismatch"))
 	}
 	if p.Receiver != s.selfID {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload receiver mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload receiver mismatch"))
 	}
 	dd, ok := s.dealerData[from]
 	if !ok || dd.commitments == nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share has no dealer commitments"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share has no dealer commitments"))
 	}
 	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share commitment hash mismatch"))
 	}
 	share, err := secpScalarFromSecret(p.Share)
 	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, err)
 	}
 	if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 		verifyErr := err
-		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
+		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, from, s.selfID, payloadReshareShare, rawPayload)
 		if evErr != nil {
-			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, evErr)
+			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, evErr)
 		}
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
-			Round: 1,
+			Round: reshareStartRound,
 			Party: from,
 			Blame: newBlame(
 				evidenceEnv,

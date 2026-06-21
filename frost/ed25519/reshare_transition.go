@@ -63,7 +63,7 @@ func (s *ReshareSession) buildReshareTransition(env tss.InboundEnvelope) (sessio
 		return nil, err
 	}
 	base := env.Envelope()
-	if base.Round != 1 {
+	if base.Round != reshareStartRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare only accepts round 1 messages"))
 	}
 	switch base.PayloadType {

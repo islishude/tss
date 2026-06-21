@@ -82,7 +82,7 @@ func (s *KeygenSession) maybePreparePendingKeyShare() (*preparedPendingKeyShare,
 			)
 			return nil, false, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: keygenStartRound,
 				Party: id,
 				Blame: frostKeygenBlame(s.cfg, id, d.commitments.BytesList()),
 				Err:   verifyErr,

@@ -34,13 +34,13 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		if err := secp.VerifyShare(pd.commitments, s.oldKey.state.party, share); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.oldKey.state.party, payloadRefreshShare, nil)
+			evidenceEnv, evErr := newEnvelope(s.cfg, refreshStartRound, dealer, s.oldKey.state.party, payloadRefreshShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: refreshStartRound,
 				Party: dealer,
 				Blame: newBlame(
 					evidenceEnv,

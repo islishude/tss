@@ -218,7 +218,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       1,
+		Round:       signStartRound,
 		From:        key.state.party,
 		PayloadType: payloadSignPartial,
 		Payload:     payloadBytes,

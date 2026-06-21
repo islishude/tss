@@ -171,7 +171,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := newEnvelope(config, 1, key.state.party, tss.BroadcastPartyId, payloadPresignRound1, payload)
+	env, err := newEnvelope(config, presignStartRound, key.state.party, tss.BroadcastPartyId, payloadPresignRound1, payload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -241,7 +241,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofEnv, err := newEnvelope(config, 1, key.state.party, peer, payloadPresignRound1Proof, proofPayload)
+		proofEnv, err := newEnvelope(config, presignStartRound, key.state.party, peer, payloadPresignRound1Proof, proofPayload)
 		if err != nil {
 			return nil, nil, err
 		}

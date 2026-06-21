@@ -354,8 +354,8 @@ func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss
 		return nil, err
 	}
 
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts round 1 messages"))
+	if env.Round != reshareStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare only accepts reshare start round messages"))
 	}
 	switch env.PayloadType {
 	case payloadReshareDealerCommitments:

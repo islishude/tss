@@ -87,7 +87,7 @@ func (s *SignSession) buildSignTransition(env tss.InboundEnvelope) (sessionTrans
 }
 
 func (s *SignSession) buildAcceptNonceCommitmentTx(base tss.Envelope) (*acceptNonceCommitmentTx, error) {
-	if base.Round != 1 {
+	if base.Round != signStartRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("commitment must be round 1"))
 	}
 	commitment, err := tss.DecodeBinaryValueWithLimits[nonceCommitment](base.Payload, s.limits)
@@ -110,7 +110,7 @@ func (s *SignSession) buildAcceptNonceCommitmentTx(base tss.Envelope) (*acceptNo
 }
 
 func (s *SignSession) buildAcceptPartialTx(base tss.Envelope) (*acceptPartialTx, error) {
-	if base.Round != 2 {
+	if base.Round != signRound2 {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("partial signature must be round 2"))
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](base.Payload, s.limits)

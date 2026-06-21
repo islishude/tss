@@ -681,7 +681,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		len(r.EnvelopeDigest) != sha256.Size || len(r.PayloadHash) != sha256.Size {
 		return fmt.Errorf("%w: invalid fixed-length field", ErrSignAttemptCorrupt)
 	}
-	if !r.SessionID.Valid() || r.Party == 0 {
+	if !r.SessionID.Valid() || r.Party == tss.BroadcastPartyId {
 		return fmt.Errorf("%w: invalid session or party", ErrSignAttemptCorrupt)
 	}
 	if len(r.CanonicalBaseEnvelopeBytes) == 0 || len(r.CanonicalBaseEnvelopeBytes) > tss.DefaultMaxEnvelopeBytes {
@@ -704,7 +704,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		return fmt.Errorf("%w: envelope digest mismatch", ErrSignAttemptCorrupt)
 	}
 	if env.Protocol != r.Protocol || env.SessionID != r.SessionID ||
-		env.Round != 1 || env.From != r.Party || env.To != 0 || env.PayloadType != payloadSignPartial {
+		env.Round != signStartRound || env.From != r.Party || env.To != tss.BroadcastPartyId || env.PayloadType != payloadSignPartial {
 		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
@@ -948,7 +948,7 @@ func scalarBytesStrict(in []byte) ([]byte, error) {
 }
 
 func scalarStrict(in []byte) (secp.Scalar, error) {
-	if len(in) != 32 {
+	if len(in) != secp.ScalarSize {
 		return secp.Scalar{}, errors.New("scalar must be 32 bytes")
 	}
 	return secp.ScalarFromBytes(in)

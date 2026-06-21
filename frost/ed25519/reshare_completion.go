@@ -76,7 +76,7 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		if verifyErr != nil {
 			return nil, false, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: reshareStartRound,
 				Party: dealer,
 				Blame: frostReshareBlame(s.cfg, dealer, s.commits[dealer].BytesList()),
 				Err:   verifyErr,

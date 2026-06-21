@@ -18,6 +18,15 @@ const (
 
 	keygenStartRound        = 1
 	keygenConfirmationRound = 2
+
+	presignStartRound = 1
+	presignRound2     = 2
+	presignRound3     = 3
+
+	refreshStartRound = 1
+	reshareStartRound = 1
+
+	signStartRound = 1
 )
 
 type keygenState uint8

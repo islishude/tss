@@ -217,7 +217,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   plan.state.sessionID,
-		Round:       1,
+		Round:       signStartRound,
 		From:        key.state.party,
 		PayloadType: payloadSignCommitment,
 		Payload:     payload,
@@ -464,7 +464,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		}
 		sessions[id] = session
 		for _, env := range out {
-			if env.Round == 1 {
+			if env.Round == signStartRound {
 				round1 = append(round1, env)
 			} else {
 				round2 = append(round2, env)

@@ -308,13 +308,13 @@ func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet
 // commitments. Callers are responsible for logging the failure with the
 // appropriate path-specific context (eager or deferred).
 func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
-	evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil)
+	evidenceEnv, evErr := newEnvelope(s.cfg, keygenStartRound, dealer, s.cfg.Self, payloadKeygenShare, nil)
 	if evErr != nil {
 		return nil, evErr
 	}
 	return &tss.ProtocolError{
 		Code:  tss.ErrCodeVerification,
-		Round: 1,
+		Round: keygenStartRound,
 		Party: dealer,
 		Blame: newBlame(
 			evidenceEnv,

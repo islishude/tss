@@ -58,7 +58,7 @@ func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, err
 			blameEnv := s.partialBlameEnvelope(id, partial)
 			return nil, false, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 2,
+				Round: signRound2,
 				Party: id,
 				Blame: frostSignBlame(blameEnv, s.signers, verifyKey),
 				Err:   err,
@@ -71,7 +71,7 @@ func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, err
 	if !stded25519.Verify(stded25519.PublicKey(verifyKey), s.message, sig) {
 		return nil, false, &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
-			Round: 2,
+			Round: signRound2,
 			Blame: frostAggregateBlame(s.sessionID, s.signers, verifyKey, s.message, sig),
 			Err:   errors.New("aggregated Ed25519 signature failed verification"),
 		}
@@ -104,7 +104,7 @@ func (s *SignSession) partialBlameEnvelope(id tss.PartyID, partial *fed.Scalar) 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   s.sessionID,
-		Round:       2,
+		Round:       signRound2,
 		From:        id,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,

@@ -61,13 +61,13 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil)
+			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, dealer, s.selfID, payloadReshareShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: reshareStartRound,
 				Party: dealer,
 				Blame: newBlame(
 					evidenceEnv,

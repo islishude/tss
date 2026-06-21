@@ -91,7 +91,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   s.sessionID,
-		Round:       2,
+		Round:       signRound2,
 		From:        s.key.state.party,
 		PayloadType: payloadSignPartial,
 		Payload:     payload,

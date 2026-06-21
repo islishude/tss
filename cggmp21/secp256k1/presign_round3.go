@@ -404,7 +404,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 	}}
 	stagedPresign.state.chiShare = chiSecret
 	chiOwned = true
-	env, err := newEnvelope(s.config, 3, s.key.state.party, tss.BroadcastPartyId, payloadPresignRound3, payload)
+	env, err := newEnvelope(s.config, presignRound3, s.key.state.party, tss.BroadcastPartyId, payloadPresignRound3, payload)
 	clear(payload)
 	if err != nil {
 		stagedPresign.Destroy()

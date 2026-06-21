@@ -785,7 +785,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 
 	switch base.PayloadType {
 	case payloadPresignRound1:
-		if base.Round != 1 {
+		if base.Round != presignStartRound {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 payload in wrong round"))
 		}
 		if st.round1.havePayload {
@@ -804,7 +804,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		return effects.envelopes, nil
 
 	case payloadPresignRound1Proof:
-		if base.Round != 1 {
+		if base.Round != presignStartRound {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round1 proof payload in wrong round"))
 		}
 		if base.From == s.key.state.party {
@@ -826,7 +826,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		return effects.envelopes, nil
 
 	case payloadPresignRound2:
-		if base.Round != 2 {
+		if base.Round != presignRound2 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round2 payload in wrong round"))
 		}
 		if st.round2.havePayload {
@@ -845,7 +845,7 @@ func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []ts
 		return effects.envelopes, nil
 
 	case payloadPresignRound3:
-		if base.Round != 3 {
+		if base.Round != presignRound3 {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("round3 payload in wrong round"))
 		}
 		if st.round3.haveDelta {
