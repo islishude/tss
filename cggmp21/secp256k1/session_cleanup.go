@@ -1,5 +1,7 @@
 package secp256k1
 
+import "slices"
+
 type cleanupStack struct {
 	callbacks []func()
 	armed     bool
@@ -29,8 +31,8 @@ func (c *cleanupStack) run() {
 		return
 	}
 	c.armed = false
-	for i := len(c.callbacks) - 1; i >= 0; i-- {
-		c.callbacks[i]()
+	for _, v := range slices.Backward(c.callbacks) {
+		v()
 	}
 	c.callbacks = nil
 }
