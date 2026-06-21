@@ -15,9 +15,9 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const logStarProofWireVersion = 1
+const logStarProofVersion = 1
 
-const logStarProofWireType = "zk.paillier.logstar-proof"
+const logStarProofType = "zk.paillier.logstar-proof"
 
 // LogStarStatement is the public input for a Πlog* proof: the Paillier
 // ciphertext, the curve points X = x*B and B, and the verifier's
@@ -40,17 +40,23 @@ type LogStarWitness struct {
 // and a curve point share the same discrete logarithm, with the scalar in the
 // configured range.
 type LogStarProof struct {
-	S *big.Int    // RP: s_j^x * t_j^m mod N_j
-	A *big.Int    // Enc_N(alpha; r)
-	Y *secp.Point // alpha * B
-	D *big.Int    // RP: s_j^alpha * t_j^gamma mod N_j
+	S *big.Int    `wire:"1,bigpos,max_bytes=paillier_modulus"` // RP: s_j^x * t_j^m mod N_j
+	A *big.Int    `wire:"2,bigpos,max_bytes=paillier_modulus"` // Enc_N(alpha; r)
+	Y *secp.Point `wire:"3,custom,max_bytes=point"`            // alpha * B
+	D *big.Int    `wire:"4,bigpos,max_bytes=paillier_modulus"` // RP: s_j^alpha * t_j^gamma mod N_j
 
-	Z1 *big.Int // alpha + e*x
-	Z2 *big.Int // r * rho^e mod N
-	Z3 *big.Int // gamma + e*m
+	Z1 *big.Int `wire:"5,bigint,max_bytes=signed_response"` // alpha + e*x
+	Z2 *big.Int `wire:"6,bigpos,max_bytes=paillier_signed"` // r * rho^e mod N
+	Z3 *big.Int `wire:"7,bigint,max_bytes=signed_response"` // gamma + e*m
 
-	TranscriptHash []byte
+	TranscriptHash []byte `wire:"8,bytes"`
 }
+
+// WireType returns the canonical wire type identifier for LogStarProof.
+func (LogStarProof) WireType() string { return logStarProofType }
+
+// WireVersion returns the wire format version for LogStarProof.
+func (LogStarProof) WireVersion() uint16 { return logStarProofVersion }
 
 // Clone returns a deep copy of the LogStarProof.
 func (p *LogStarProof) Clone() *LogStarProof {
@@ -316,39 +322,12 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	return nil
 }
 
-// logStarProofWire is the wire DTO for LogStarProof.
-type logStarProofWire struct {
-	S              *big.Int    `wire:"2,bigpos,max_bytes=paillier_modulus"`
-	A              *big.Int    `wire:"3,bigpos,max_bytes=paillier_modulus"`
-	Y              *secp.Point `wire:"4,custom,max_bytes=point"`
-	D              *big.Int    `wire:"5,bigpos,max_bytes=paillier_modulus"`
-	Z1             *big.Int    `wire:"6,bigint,max_bytes=signed_response"`
-	Z2             *big.Int    `wire:"7,bigpos,max_bytes=paillier_signed"`
-	Z3             *big.Int    `wire:"8,bigint,max_bytes=signed_response"`
-	TranscriptHash []byte      `wire:"9,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for logStarProofWire.
-func (logStarProofWire) WireType() string { return logStarProofWireType }
-
-// WireVersion returns the wire format version for logStarProofWire.
-func (logStarProofWire) WireVersion() uint16 { return logStarProofWireVersion }
-
 // MarshalBinary encodes the LogStarProof using the object-level wire codec.
 func (p *LogStarProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil LogStarProof")
 	}
-	return wire.Marshal(logStarProofWire{
-		S:              p.S,
-		A:              p.A,
-		Y:              p.Y,
-		D:              p.D,
-		Z1:             p.Z1,
-		Z2:             p.Z2,
-		Z3:             p.Z3,
-		TranscriptHash: p.TranscriptHash,
-	}, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // MarshalWireValue encodes the LogStarProof as a canonical TLV value for
@@ -362,11 +341,10 @@ func (p *LogStarProof) MarshalWireValue() ([]byte, error) {
 
 // UnmarshalBinary decodes a canonical TLV LogStarProof.
 func (p *LogStarProof) UnmarshalBinary(in []byte) error {
-	var w logStarProofWire
-	if err := wire.Unmarshal(in, &w, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	var decoded LogStarProof
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
-	decoded := LogStarProof(w)
 	*p = decoded
 	return nil
 }

@@ -15,9 +15,9 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-const affGProofWireVersion = 1
+const affGProofVersion = 1
 
-const affGProofWireType = "zk.paillier.aff-g-proof"
+const affGProofType = "zk.paillier.aff-g-proof"
 
 // AffGStatement is the public input for a Πaff-g proof: the MtA ciphertexts,
 // the curve commitment, the Paillier keys of both parties, and the verifier's
@@ -49,31 +49,31 @@ type AffGWitness struct {
 // Y is included in the proof so the verifier can check equation 3 without
 // separately receiving the responder's encryption of y.
 type AffGProof struct {
-	A  *big.Int    // (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
-	Bx *secp.Point // alpha * G
-	By *big.Int    // Enc_Ni(beta; rY)
-	E  *big.Int    // RP: s_j^alpha * t_j^gamma mod Nhat_j
-	S  *big.Int    // RP: s_j^x * t_j^m mod Nhat_j
-	F  *big.Int    // RP: s_j^beta * t_j^delta mod Nhat_j
-	T  *big.Int    // RP: s_j^y * t_j^mu mod Nhat_j
+	A  *big.Int    `wire:"1,bigpos,max_bytes=paillier_modulus"` // (alpha ⊙ C) ⊕ Enc_Nj(beta; r)
+	Bx *secp.Point `wire:"2,custom,max_bytes=point"`            // alpha * G
+	By *big.Int    `wire:"3,bigpos,max_bytes=paillier_modulus"` // Enc_Ni(beta; rY)
+	E  *big.Int    `wire:"4,bigpos,max_bytes=paillier_modulus"` // RP: s_j^alpha * t_j^gamma mod Nhat_j
+	S  *big.Int    `wire:"5,bigpos,max_bytes=paillier_modulus"` // RP: s_j^x * t_j^m mod Nhat_j
+	F  *big.Int    `wire:"6,bigpos,max_bytes=paillier_modulus"` // RP: s_j^beta * t_j^delta mod Nhat_j
+	T  *big.Int    `wire:"7,bigpos,max_bytes=paillier_modulus"` // RP: s_j^y * t_j^mu mod Nhat_j
 
-	Y *big.Int // Enc_Ni(y; rhoY) — public, carried in proof for verifier
+	Y *big.Int `wire:"8,bigpos,max_bytes=paillier_modulus"` // Enc_Ni(y; rhoY) — public, carried in proof for verifier
 
-	Z1 *big.Int // alpha + e*x
-	Z2 *big.Int // beta + e*y
-	Z3 *big.Int // gamma + e*m
-	Z4 *big.Int // delta + e*mu
-	W  *big.Int // r * rho^e mod Nj
-	WY *big.Int // rY * rhoY^e mod Ni
+	Z1 *big.Int `wire:"9,bigint,max_bytes=signed_response"`   // alpha + e*x
+	Z2 *big.Int `wire:"10,bigint,max_bytes=signed_response"`  // beta + e*y
+	Z3 *big.Int `wire:"11,bigint,max_bytes=signed_response"`  // gamma + e*m
+	Z4 *big.Int `wire:"12,bigint,max_bytes=signed_response"`  // delta + e*mu
+	W  *big.Int `wire:"13,bigpos,max_bytes=paillier_modulus"` // r * rho^e mod Nj
+	WY *big.Int `wire:"14,bigpos,max_bytes=paillier_modulus"` // rY * rhoY^e mod Ni
 
-	TranscriptHash []byte
+	TranscriptHash []byte `wire:"15,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for AffGProof.
-func (AffGProof) WireType() string { return affGProofWireType }
+func (AffGProof) WireType() string { return affGProofType }
 
 // WireVersion returns the wire format version for AffGProof.
-func (AffGProof) WireVersion() uint16 { return affGProofWireVersion }
+func (AffGProof) WireVersion() uint16 { return affGProofVersion }
 
 // Clone returns a deep copy of the AffGProof.
 func (p *AffGProof) Clone() *AffGProof {
@@ -95,7 +95,7 @@ func (p *AffGProof) Clone() *AffGProof {
 		Z4:             new(big.Int).Set(p.Z4),
 		W:              new(big.Int).Set(p.W),
 		WY:             new(big.Int).Set(p.WY),
-		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 	return cp
 }
@@ -567,89 +567,22 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	return nil
 }
 
-// affGProofWire is the wire DTO for AffGProof.
-type affGProofWire struct {
-	A              *big.Int    `wire:"2,bigpos,max_bytes=paillier_modulus"`
-	Bx             *secp.Point `wire:"3,custom,max_bytes=point"`
-	By             *big.Int    `wire:"4,bigpos,max_bytes=paillier_modulus"`
-	E              *big.Int    `wire:"5,bigpos,max_bytes=paillier_modulus"`
-	S              *big.Int    `wire:"6,bigpos,max_bytes=paillier_modulus"`
-	F              *big.Int    `wire:"7,bigpos,max_bytes=paillier_modulus"`
-	T              *big.Int    `wire:"8,bigpos,max_bytes=paillier_modulus"`
-	Y              *big.Int    `wire:"9,bigpos,max_bytes=paillier_modulus"`
-	Z1             *big.Int    `wire:"10,bigint,max_bytes=signed_response"`
-	Z2             *big.Int    `wire:"11,bigint,max_bytes=signed_response"`
-	Z3             *big.Int    `wire:"12,bigint,max_bytes=signed_response"`
-	Z4             *big.Int    `wire:"13,bigint,max_bytes=signed_response"`
-	W              *big.Int    `wire:"14,bigpos,max_bytes=paillier_modulus"`
-	WY             *big.Int    `wire:"15,bigpos,max_bytes=paillier_modulus"`
-	TranscriptHash []byte      `wire:"16,bytes"`
-}
-
-// WireType returns the canonical wire type identifier for affGProofWire.
-func (affGProofWire) WireType() string { return affGProofWireType }
-
-// WireVersion returns the wire format version for affGProofWire.
-func (affGProofWire) WireVersion() uint16 { return affGProofWireVersion }
-
-// MarshalWireMessage encodes AffGProof as a canonical TLV message.
-func (p *AffGProof) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-	if p == nil {
-		return nil, errors.New("nil AffGProof")
-	}
-	if err := p.Validate(); err != nil {
-		return nil, err
-	}
-	if len(opts) == 0 {
-		opts = []wire.MarshalOption{wire.WithFieldLimitsForMarshal(zkFieldLimits())}
-	}
-	return wire.Marshal(affGProofWire{
-		A:              p.A,
-		Bx:             p.Bx,
-		By:             p.By,
-		E:              p.E,
-		S:              p.S,
-		F:              p.F,
-		T:              p.T,
-		Y:              p.Y,
-		Z1:             p.Z1,
-		Z2:             p.Z2,
-		Z3:             p.Z3,
-		Z4:             p.Z4,
-		W:              p.W,
-		WY:             p.WY,
-		TranscriptHash: p.TranscriptHash,
-	}, opts...)
-}
-
 // MarshalBinary encodes the AffGProof using the object-level wire codec.
 func (p *AffGProof) MarshalBinary() ([]byte, error) {
 	if p == nil {
 		return nil, errors.New("nil AffGProof")
 	}
-	return wire.Marshal(p)
-}
-
-// UnmarshalWireMessage decodes AffGProof from a canonical TLV message.
-func (p *AffGProof) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-	if len(opts) == 0 {
-		opts = []wire.UnmarshalOption{wire.WithFieldLimits(zkFieldLimits())}
-	}
-	var w affGProofWire
-	if err := wire.Unmarshal(in, &w, opts...); err != nil {
-		return err
-	}
-	decoded := AffGProof(w)
-	if err := decoded.Validate(); err != nil {
-		return err
-	}
-	*p = decoded
-	return nil
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalBinary decodes a canonical TLV AffGProof.
 func (p *AffGProof) UnmarshalBinary(in []byte) error {
-	return wire.Unmarshal(in, p)
+	var decoded AffGProof
+	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+		return err
+	}
+	*p = decoded
+	return nil
 }
 
 func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitness) error {

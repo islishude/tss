@@ -101,24 +101,14 @@ func (sk *PrivateKey) Destroy() {
 }
 
 const (
-	publicKeyWireType     = "paillier.public-key"
-	privateKeyWireType    = "paillier.private-key"
-	publicKeyWireVersion  = 1
-	privateKeyWireVersion = 1
+	publicKeyWireType    = "paillier.public-key"
+	privateKeyType       = "paillier.private-key"
+	publicKeyWireVersion = 1
+	privateKeyVersion    = 1
 )
 
-// privateKeyWire is the wire DTO for PrivateKey.
-type privateKeyWire struct {
-	N      []byte `wire:"1,bytes"`
-	G      []byte `wire:"2,bytes"`
-	Lambda []byte `wire:"3,bytes"`
-	Mu     []byte `wire:"4,bytes"`
-	P      []byte `wire:"5,bytes"`
-	Q      []byte `wire:"6,bytes"`
-}
+// WireType returns the canonical wire type identifier for PrivateKey.
+func (PrivateKey) WireType() string { return privateKeyType }
 
-// WireType returns the canonical wire type identifier for privateKeyWire.
-func (privateKeyWire) WireType() string { return privateKeyWireType }
-
-// WireVersion returns the wire format version for privateKeyWire.
-func (privateKeyWire) WireVersion() uint16 { return privateKeyWireVersion }
+// WireVersion returns the wire format version for PrivateKey.
+func (PrivateKey) WireVersion() uint16 { return privateKeyVersion }

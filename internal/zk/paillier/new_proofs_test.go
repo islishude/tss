@@ -39,7 +39,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 		{
 			name:     "EncProof",
 			raw:      mustMarshalBinary(t, seedEncProof()),
-			wireType: encProofWireType,
+			wireType: encProofType,
 			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
 				_, err := tss.DecodeBinary[EncProof](raw)
@@ -49,7 +49,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 		{
 			name:     "AffGProof",
 			raw:      mustMarshalBinary(t, seedAffGProof(t)),
-			wireType: affGProofWireType,
+			wireType: affGProofType,
 			fields:   []string{"Z1", "Z2", "Z3", "Z4"},
 			unmarshal: func(raw []byte) error {
 				_, err := tss.DecodeBinary[AffGProof](raw)
@@ -59,7 +59,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalSignedIntegers(t *testing.T) {
 		{
 			name:     "LogStarProof",
 			raw:      mustMarshalBinary(t, seedLogStarProof()),
-			wireType: logStarProofWireType,
+			wireType: logStarProofType,
 			fields:   []string{"Z1", "Z3"},
 			unmarshal: func(raw []byte) error {
 				_, err := tss.DecodeBinary[LogStarProof](raw)
@@ -294,12 +294,12 @@ func wireFieldName(name string) string {
 
 func proofModelForWireType(wireType string) any {
 	switch wireType {
-	case encProofWireType:
+	case encProofType:
 		return EncProof{}
-	case affGProofWireType:
-		return affGProofWire{}
-	case logStarProofWireType:
-		return logStarProofWire{}
+	case affGProofType:
+		return AffGProof{}
+	case logStarProofType:
+		return LogStarProof{}
 	default:
 		panic(fmt.Sprintf("unknown proof wire type: %s", wireType))
 	}

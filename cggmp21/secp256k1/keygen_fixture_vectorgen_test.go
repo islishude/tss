@@ -56,16 +56,20 @@ func TestGenerateKeygenFixtures(t *testing.T) {
 	}
 
 	for _, key := range requiredKeygenFixtureOrder {
-		shares, ok, err := loadKeygenFixture(key.threshold, key.n)
+		fixture, ok, err := findKeygenFixture(fixtures, key.threshold, key.n)
 		if err != nil {
-			t.Fatalf("%d-of-%d reload: %v", key.threshold, key.n, err)
+			t.Fatalf("%d-of-%d generated fixture lookup: %v", key.threshold, key.n, err)
 		}
 		if !ok {
-			t.Fatalf("%d-of-%d reload missing", key.threshold, key.n)
+			t.Fatalf("%d-of-%d generated fixture missing", key.threshold, key.n)
+		}
+		shares, err := decodeKeygenFixture(*fixture)
+		if err != nil {
+			t.Fatalf("%d-of-%d generated fixture decode: %v", key.threshold, key.n, err)
 		}
 		for _, id := range keygenFixtureParties(key.n) {
 			if err := shares[id].ValidateWithLimits(testLimits()); err != nil {
-				t.Fatalf("%d-of-%d party %d reload validate: %v", key.threshold, key.n, id, err)
+				t.Fatalf("%d-of-%d party %d generated fixture validate: %v", key.threshold, key.n, id, err)
 			}
 		}
 	}

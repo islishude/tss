@@ -48,7 +48,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	}
 	for _, name := range []string{"S", "A", "C", "Z2"} {
 		t.Run(fmt.Sprintf("enc field %s", name), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(encRaw, encProofWireType, EncProof{}, name)
+			mutated, err := prependZeroToWireField(encRaw, encProofType, EncProof{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -115,7 +115,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		"F", "T", "Y", "W", "WY",
 	} {
 		t.Run(fmt.Sprintf("affg field %s", name), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(affGRaw, affGProofWireType, affGProofWire{}, name)
+			mutated, err := prependZeroToWireField(affGRaw, affGProofType, AffGProof{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -153,7 +153,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	}
 	for _, name := range []string{"S", "A", "D", "Z2"} {
 		t.Run(fmt.Sprintf("logstar field %s", name), func(t *testing.T) {
-			mutated, err := prependZeroToWireField(logRaw, logStarProofWireType, logStarProofWire{}, name)
+			mutated, err := prependZeroToWireField(logRaw, logStarProofType, LogStarProof{}, name)
 			if err != nil {
 				t.Fatal(err)
 			}

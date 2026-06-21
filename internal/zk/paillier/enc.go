@@ -16,9 +16,9 @@ import (
 )
 
 // Proof version for the new CGGMP-compatible proofs.
-const encProofWireVersion = 1
+const encProofVersion = 1
 
-const encProofWireType = "zk.paillier.enc-proof"
+const encProofType = "zk.paillier.enc-proof"
 
 // EncStatement is the public input for a Πenc proof: the prover's Paillier
 // modulus, the ciphertext, and the verifier's Ring-Pedersen auxiliary parameters.
@@ -38,21 +38,21 @@ type EncWitness struct {
 // encrypts a plaintext in the range ±2^Ell. It uses Ring-Pedersen commitments
 // and large integer masks for statistical zero-knowledge.
 type EncProof struct {
-	S  *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^k * t_j^mu mod N_j
-	A  *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"` // Paillier encryption: Enc_Ni(alpha; r)
-	C  *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^alpha * t_j^gamma mod N_j
-	Z1 *big.Int `wire:"5,bigint,max_bytes=signed_response"`  // alpha + e*k (signed integer)
-	Z2 *big.Int `wire:"6,bigpos,max_bytes=paillier_signed"`  // r * rho^e mod N_i
-	Z3 *big.Int `wire:"7,bigint,max_bytes=signed_response"`  // gamma + e*mu (signed integer)
+	S  *big.Int `wire:"1,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^k * t_j^mu mod N_j
+	A  *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"` // Paillier encryption: Enc_Ni(alpha; r)
+	C  *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"` // RP commitment: s_j^alpha * t_j^gamma mod N_j
+	Z1 *big.Int `wire:"4,bigint,max_bytes=signed_response"`  // alpha + e*k (signed integer)
+	Z2 *big.Int `wire:"5,bigpos,max_bytes=paillier_signed"`  // r * rho^e mod N_i
+	Z3 *big.Int `wire:"6,bigint,max_bytes=signed_response"`  // gamma + e*mu (signed integer)
 
-	TranscriptHash []byte `wire:"8,bytes"`
+	TranscriptHash []byte `wire:"7,bytes"`
 }
 
 // WireType returns the canonical wire type identifier for EncProof.
-func (EncProof) WireType() string { return encProofWireType }
+func (EncProof) WireType() string { return encProofType }
 
 // WireVersion returns the wire format version for EncProof.
-func (EncProof) WireVersion() uint16 { return encProofWireVersion }
+func (EncProof) WireVersion() uint16 { return encProofVersion }
 
 // Clone returns a deep copy of the EncProof.
 func (p *EncProof) Clone() *EncProof {

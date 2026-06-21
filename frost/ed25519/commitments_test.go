@@ -11,46 +11,7 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
-type oldGroupCommitmentsWire struct {
-	Threshold        int      `wire:"1,u32"`
-	GroupCommitments [][]byte `wire:"2,byteslist,max_bytes=point,max_items=threshold"`
-}
-
-func (oldGroupCommitmentsWire) WireType() string { return "test.frost.group-commitments" }
-
-func (oldGroupCommitmentsWire) WireVersion() uint16 { return 1 }
-
-type newGroupCommitmentsWire struct {
-	Threshold        int              `wire:"1,u32"`
-	GroupCommitments groupCommitments `wire:"2,custom,max_items=threshold"`
-}
-
-func (newGroupCommitmentsWire) WireType() string { return "test.frost.group-commitments" }
-
-func (newGroupCommitmentsWire) WireVersion() uint16 { return 1 }
-
-type oldKeygenCommitmentsPayloadWire struct {
-	Commitments     [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	ChainCodeCommit []byte   `wire:"2,bytes"`
-	PlanHash        []byte   `wire:"3,bytes,len=32"`
-}
-
-func (oldKeygenCommitmentsPayloadWire) WireType() string { return keygenCommitmentsPayloadWireType }
-
-func (oldKeygenCommitmentsPayloadWire) WireVersion() uint16 {
-	return keygenCommitmentsPayloadWireVersion
-}
-
-type oldReshareCommitmentsPayloadWire struct {
-	Commitments [][]byte `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PlanHash    []byte   `wire:"2,bytes,len=32"`
-}
-
-func (oldReshareCommitmentsPayloadWire) WireType() string { return reshareCommitmentsPayloadWireType }
-
-func (oldReshareCommitmentsPayloadWire) WireVersion() uint16 {
-	return reshareCommitmentsPayloadWireVersion
-}
+const testFROSTGroupCommitmentsType = "test.frost.group-commitments"
 
 func TestSemanticCommitmentIdentityPolicies(t *testing.T) {
 	t.Parallel()
@@ -224,24 +185,25 @@ func TestGroupCommitmentsCustomEncodingMatchesBytesList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	limits := wire.FieldLimits{"threshold": 2, "point": ed25519CommitmentBytes}
-	oldRaw, err := wire.Marshal(
-		oldGroupCommitmentsWire{
-			Threshold:        2,
-			GroupCommitments: group.BytesList(),
-		},
-		wire.WithFieldLimitsForMarshal(limits),
-	)
+	oldValue := wire.EncodeBytesList(group.BytesList())
+	newValue, err := group.Clone().MarshalWireValue()
 	if err != nil {
 		t.Fatal(err)
 	}
-	newRaw, err := wire.Marshal(
-		newGroupCommitmentsWire{
-			Threshold:        2,
-			GroupCommitments: group.Clone(),
-		},
-		wire.WithFieldLimitsForMarshal(limits),
-	)
+	if !bytes.Equal(oldValue, newValue) {
+		t.Fatalf("custom group commitments changed field bytes:\n old %x\n new %x", oldValue, newValue)
+	}
+	oldRaw, err := wire.MarshalFields(1, testFROSTGroupCommitmentsType, []wire.Field{
+		{Tag: 1, Value: wire.Uint32(2)},
+		{Tag: 2, Value: oldValue},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	newRaw, err := wire.MarshalFields(1, testFROSTGroupCommitmentsType, []wire.Field{
+		{Tag: 1, Value: wire.Uint32(2)},
+		{Tag: 2, Value: newValue},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -249,27 +211,29 @@ func TestGroupCommitmentsCustomEncodingMatchesBytesList(t *testing.T) {
 		t.Fatalf("custom field changed message bytes:\n old %x\n new %x", oldRaw, newRaw)
 	}
 
-	var newDecoded newGroupCommitmentsWire
-	if err := wire.Unmarshal(oldRaw, &newDecoded, wire.WithFieldLimits(limits)); err != nil {
+	_, fields, err := wire.UnmarshalFields(oldRaw, testFROSTGroupCommitmentsType)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if !group.Equal(newDecoded.GroupCommitments) {
+	var decoded groupCommitments
+	if err := decoded.UnmarshalWireValue(fields[1].Value); err != nil {
+		t.Fatal(err)
+	}
+	if !group.Equal(decoded) {
 		t.Fatal("new custom field did not decode old byteslist encoding")
 	}
-
-	var oldDecoded oldGroupCommitmentsWire
-	if err := wire.Unmarshal(newRaw, &oldDecoded, wire.WithFieldLimits(limits)); err != nil {
+	_, fields, err = wire.UnmarshalFields(newRaw, testFROSTGroupCommitmentsType)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := wire.EncodeBytesList(oldDecoded.GroupCommitments); !bytes.Equal(got, wire.EncodeBytesList(group.BytesList())) {
-		t.Fatal("old byteslist field did not decode new custom encoding")
+	if !bytes.Equal(fields[1].Value, wire.EncodeBytesList(group.BytesList())) {
+		t.Fatal("custom field no longer matches byteslist encoding")
 	}
 }
 
 func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	t.Parallel()
 
-	limits := testLimits().fieldLimits()
 	chainCodeCommit := bytes.Repeat([]byte{0x91}, 32)
 	planHash := bytes.Repeat([]byte{0x90}, 32)
 
@@ -280,13 +244,14 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldKeygenRaw, err := wire.Marshal(
-		oldKeygenCommitmentsPayloadWire{
-			Commitments:     keygenCommitments.BytesList(),
-			ChainCodeCommit: chainCodeCommit,
-			PlanHash:        planHash,
+	oldKeygenRaw, err := wire.MarshalFields(
+		keygenCommitmentsPayloadWireVersion,
+		keygenCommitmentsPayloadWireType,
+		[]wire.Field{
+			{Tag: 1, Value: wire.EncodeBytesList(keygenCommitments.BytesList())},
+			{Tag: 2, Value: chainCodeCommit},
+			{Tag: 3, Value: planHash},
 		},
-		wire.WithFieldLimitsForMarshal(limits),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -311,12 +276,12 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	if !keygenCommitments.Equal(keygenDecoded.Commitments) {
 		t.Fatal("keygen custom field did not decode old byteslist encoding")
 	}
-	var oldKeygenDecoded oldKeygenCommitmentsPayloadWire
-	if err := wire.Unmarshal(newKeygenRaw, &oldKeygenDecoded, wire.WithFieldLimits(limits)); err != nil {
+	_, keygenFields, err := wire.UnmarshalFields(newKeygenRaw, keygenCommitmentsPayloadWireType)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := wire.EncodeBytesList(oldKeygenDecoded.Commitments); !bytes.Equal(got, wire.EncodeBytesList(keygenCommitments.BytesList())) {
-		t.Fatal("old keygen byteslist field did not decode new custom encoding")
+	if !bytes.Equal(keygenFields[0].Value, wire.EncodeBytesList(keygenCommitments.BytesList())) {
+		t.Fatal("keygen custom field no longer matches byteslist encoding")
 	}
 
 	reshareCommitments, err := newReshareCommitmentsFromPoints(
@@ -326,12 +291,13 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	oldReshareRaw, err := wire.Marshal(
-		oldReshareCommitmentsPayloadWire{
-			Commitments: reshareCommitments.BytesList(),
-			PlanHash:    planHash,
+	oldReshareRaw, err := wire.MarshalFields(
+		reshareCommitmentsPayloadWireVersion,
+		reshareCommitmentsPayloadWireType,
+		[]wire.Field{
+			{Tag: 1, Value: wire.EncodeBytesList(reshareCommitments.BytesList())},
+			{Tag: 2, Value: planHash},
 		},
-		wire.WithFieldLimitsForMarshal(limits),
 	)
 	if err != nil {
 		t.Fatal(err)
@@ -355,12 +321,12 @@ func TestCommitmentsPayloadCustomEncodingMatchesBytesList(t *testing.T) {
 	if !reshareCommitments.Equal(reshareDecoded.Commitments) {
 		t.Fatal("reshare custom field did not decode old byteslist encoding")
 	}
-	var oldReshareDecoded oldReshareCommitmentsPayloadWire
-	if err := wire.Unmarshal(newReshareRaw, &oldReshareDecoded, wire.WithFieldLimits(limits)); err != nil {
+	_, reshareFields, err := wire.UnmarshalFields(newReshareRaw, reshareCommitmentsPayloadWireType)
+	if err != nil {
 		t.Fatal(err)
 	}
-	if got := wire.EncodeBytesList(oldReshareDecoded.Commitments); !bytes.Equal(got, wire.EncodeBytesList(reshareCommitments.BytesList())) {
-		t.Fatal("old reshare byteslist field did not decode new custom encoding")
+	if !bytes.Equal(reshareFields[0].Value, wire.EncodeBytesList(reshareCommitments.BytesList())) {
+		t.Fatal("reshare custom field no longer matches byteslist encoding")
 	}
 }
 
@@ -382,25 +348,26 @@ func TestCommitmentsPayloadCustomCommitmentsEnforceResourceLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	marshalLimits := testLimits().fieldLimits()
 	planHash := bytes.Repeat([]byte{0x90}, 32)
-	keygenRaw, err := wire.Marshal(
-		oldKeygenCommitmentsPayloadWire{
-			Commitments:     keygenCommitments.BytesList(),
-			ChainCodeCommit: bytes.Repeat([]byte{0x91}, 32),
-			PlanHash:        planHash,
+	keygenRaw, err := wire.MarshalFields(
+		keygenCommitmentsPayloadWireVersion,
+		keygenCommitmentsPayloadWireType,
+		[]wire.Field{
+			{Tag: 1, Value: wire.EncodeBytesList(keygenCommitments.BytesList())},
+			{Tag: 2, Value: bytes.Repeat([]byte{0x91}, 32)},
+			{Tag: 3, Value: planHash},
 		},
-		wire.WithFieldLimitsForMarshal(marshalLimits),
 	)
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareRaw, err := wire.Marshal(
-		oldReshareCommitmentsPayloadWire{
-			Commitments: reshareCommitments.BytesList(),
-			PlanHash:    planHash,
+	reshareRaw, err := wire.MarshalFields(
+		reshareCommitmentsPayloadWireVersion,
+		reshareCommitmentsPayloadWireType,
+		[]wire.Field{
+			{Tag: 1, Value: wire.EncodeBytesList(reshareCommitments.BytesList())},
+			{Tag: 2, Value: planHash},
 		},
-		wire.WithFieldLimitsForMarshal(marshalLimits),
 	)
 	if err != nil {
 		t.Fatal(err)

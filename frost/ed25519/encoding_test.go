@@ -10,34 +10,9 @@ import (
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
-
-type retiredFROSTKeyShareWire struct {
-	Party                tss.PartyID                         `wire:"1,u32"`
-	Threshold            int                                 `wire:"2,u32"`
-	Parties              tss.PartySet                        `wire:"3,u32list"`
-	PublicKey            []byte                              `wire:"4,bytes,max_bytes=point"`
-	Secret               *secret.Scalar                      `wire:"5,custom,len=32"`
-	GroupCommitments     [][]byte                            `wire:"6,byteslist,max_bytes=point,max_items=threshold"`
-	VerificationShares   []retiredFROSTVerificationShareWire `wire:"7,recordlist,max_items=parties"`
-	KeygenTranscriptHash []byte                              `wire:"8,bytes"`
-	ChainCode            []byte                              `wire:"9,bytes"`
-	KeygenSessionID      []byte                              `wire:"10,bytes,len=32"`
-	KeygenConfirmations  []*KeygenConfirmation               `wire:"11,recordlist,max_items=parties"`
-	PlanHash             []byte                              `wire:"12,bytes,len=32"`
-}
-
-type retiredFROSTVerificationShareWire struct {
-	Party     tss.PartyID `wire:"1,u32"`
-	PublicKey []byte      `wire:"2,bytes,max_bytes=point"`
-}
-
-func (retiredFROSTKeyShareWire) WireType() string { return keyShareWireType }
-
-func (retiredFROSTKeyShareWire) WireVersion() uint16 { return keyShareWireVersion }
 
 func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	t.Parallel()
@@ -284,32 +259,50 @@ func TestFROSTKeyShareRejectsRetiredRecordListLayout(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	retiredVerificationShares := make([]retiredFROSTVerificationShareWire, 0, len(verificationShares))
-	for _, share := range verificationShares {
-		retiredVerificationShares = append(retiredVerificationShares, retiredFROSTVerificationShareWire{
-			Party:     share.Party,
-			PublicKey: share.PublicKey.Bytes(),
+	retiredVerificationShareRecords := make([][]byte, 0, len(verificationShares))
+	for _, verificationShare := range verificationShares {
+		record, err := wire.MarshalRecordFields([]wire.Field{
+			{Tag: 1, Value: wire.Uint32(verificationShare.Party)},
+			{Tag: 2, Value: verificationShare.PublicKey.Bytes()},
 		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		retiredVerificationShareRecords = append(retiredVerificationShareRecords, record)
 	}
 	confirmations, err := share.orderedKeygenConfirmations()
 	if err != nil {
 		t.Fatal(err)
 	}
-	retired := retiredFROSTKeyShareWire{
-		Party:                share.state.party,
-		Threshold:            share.state.threshold,
-		Parties:              share.state.parties,
-		PublicKey:            share.state.publicKey.Bytes(),
-		Secret:               share.state.secret,
-		GroupCommitments:     share.state.groupCommitments.BytesList(),
-		VerificationShares:   retiredVerificationShares,
-		KeygenTranscriptHash: share.state.keygenTranscriptHash,
-		ChainCode:            share.state.chainCode,
-		KeygenSessionID:      share.state.keygenSessionID[:],
-		KeygenConfirmations:  confirmations,
-		PlanHash:             share.state.planHash,
+	confirmationRecords := make([][]byte, 0, len(confirmations))
+	for _, confirmation := range confirmations {
+		record, err := wire.MarshalRecordValue(
+			confirmation,
+			wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmationRecords = append(confirmationRecords, record)
 	}
-	raw, err := wire.Marshal(retired, wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()))
+	secretBytes, err := share.state.secret.MarshalWireValue()
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := wire.MarshalFields(keyShareWireVersion, keyShareWireType, []wire.Field{
+		{Tag: 1, Value: wire.Uint32(share.state.party)},
+		{Tag: 2, Value: wire.Uint32(uint32(share.state.threshold))},
+		{Tag: 3, Value: wire.EncodeUint32List(share.state.parties)},
+		{Tag: 4, Value: share.state.publicKey.Bytes()},
+		{Tag: 5, Value: secretBytes},
+		{Tag: 6, Value: wire.EncodeBytesList(share.state.groupCommitments.BytesList())},
+		{Tag: 7, Value: encodeFROSTRecordList(retiredVerificationShareRecords)},
+		{Tag: 8, Value: wire.NonNilBytes(bytes.Clone(share.state.keygenTranscriptHash))},
+		{Tag: 9, Value: wire.NonNilBytes(bytes.Clone(share.state.chainCode))},
+		{Tag: 10, Value: share.state.keygenSessionID[:]},
+		{Tag: 11, Value: encodeFROSTRecordList(confirmationRecords)},
+		{Tag: 12, Value: wire.NonNilBytes(bytes.Clone(share.state.planHash))},
+	})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -554,6 +547,15 @@ func mutateFirstFROSTPartyDataRecord(
 	}
 	t.Fatal("missing party data field")
 	return nil
+}
+
+func encodeFROSTRecordList(records [][]byte) []byte {
+	out := wire.Uint32(uint32(len(records)))
+	for _, record := range records {
+		out = append(out, wire.Uint32(uint32(len(record)))...)
+		out = append(out, record...)
+	}
+	return out
 }
 
 func mutateFROSTRecordFieldTag(t testing.TB, raw []byte, fieldIndex int, tag uint16) []byte {

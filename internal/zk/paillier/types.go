@@ -10,12 +10,12 @@ import (
 const proofTranscriptVersion = 1
 
 const (
-	modulusProofWireType          = "zk.paillier.modulus-proof"
-	ringPedersenParamsWireType    = "zk.paillier.ring-pedersen-params"
-	ringPedersenProofWireType     = "zk.paillier.ring-pedersen-proof"
-	modulusProofWireVersion       = 1
-	ringPedersenParamsWireVersion = 1
-	ringPedersenProofWireVersion  = 1
+	modulusProofWireType         = "zk.paillier.modulus-proof"
+	ringPedersenParamsType       = "zk.paillier.ring-pedersen-params"
+	ringPedersenProofWireType    = "zk.paillier.ring-pedersen-proof"
+	modulusProofWireVersion      = 1
+	ringPedersenParamsVersion    = 1
+	ringPedersenProofWireVersion = 1
 )
 
 const (
@@ -57,14 +57,10 @@ func (p *ModulusProof) Clone() *ModulusProof {
 	cp := &ModulusProof{
 		W:              bytes.Clone(p.W),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
+		X:              tss.CloneByteSlices(p.X),
 		A:              bytes.Clone(p.A),
 		B:              bytes.Clone(p.B),
-	}
-	for _, x := range p.X {
-		cp.X = append(cp.X, bytes.Clone(x))
-	}
-	for _, z := range p.Z {
-		cp.Z = append(cp.Z, bytes.Clone(z))
+		Z:              tss.CloneByteSlices(p.Z),
 	}
 	return cp
 }
@@ -78,32 +74,20 @@ type RingPedersenParams struct {
 }
 
 // WireType returns the canonical wire type identifier for RingPedersenParams.
-func (RingPedersenParams) WireType() string { return ringPedersenParamsWireType }
+func (RingPedersenParams) WireType() string { return ringPedersenParamsType }
 
 // WireVersion returns the wire format version for RingPedersenParams.
-func (RingPedersenParams) WireVersion() uint16 { return ringPedersenParamsWireVersion }
+func (RingPedersenParams) WireVersion() uint16 { return ringPedersenParamsVersion }
 
 // Clone returns a deep copy of RingPedersenParams
 func (params *RingPedersenParams) Clone() *RingPedersenParams {
 	if params == nil {
 		return nil
 	}
-	var n *big.Int
-	if params.N != nil {
-		n = new(big.Int).Set(params.N)
-	}
-	var s *big.Int
-	if params.S != nil {
-		s = new(big.Int).Set(params.S)
-	}
-	var t *big.Int
-	if params.T != nil {
-		t = new(big.Int).Set(params.T)
-	}
 	return &RingPedersenParams{
-		N: n,
-		S: s,
-		T: t,
+		N: new(big.Int).Set(params.N),
+		S: new(big.Int).Set(params.S),
+		T: new(big.Int).Set(params.T),
 	}
 }
 

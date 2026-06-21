@@ -61,6 +61,11 @@ func (pk *PublicKey) UnmarshalBinaryWithMaxModulusBits(in []byte, maxBits int) e
 
 // MarshalBinary returns a deterministic TLV private-key record.
 func (sk PrivateKey) MarshalBinary() ([]byte, error) {
+	return wire.Marshal(sk)
+}
+
+// MarshalWireMessage encodes PrivateKey as a canonical TLV message.
+func (sk PrivateKey) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
 	if err := sk.Validate(); err != nil {
 		return nil, err
 	}
@@ -92,7 +97,14 @@ func (sk PrivateKey) MarshalBinary() ([]byte, error) {
 		return nil, err
 	}
 	defer clear(q)
-	return wire.Marshal(privateKeyWire{N: n, G: g, Lambda: lambda, Mu: mu, P: p, Q: q})
+	return wire.MarshalMessageBody(sk, []wire.Field{
+		{Tag: 1, Value: n},
+		{Tag: 2, Value: g},
+		{Tag: 3, Value: lambda},
+		{Tag: 4, Value: mu},
+		{Tag: 5, Value: p},
+		{Tag: 6, Value: q},
+	})
 }
 
 // MarshalWireValue returns the canonical private-key message encoding for use
@@ -106,34 +118,45 @@ func (sk *PrivateKey) MarshalWireValue() ([]byte, error) {
 
 // UnmarshalBinary decodes and rejects non-canonical private-key encodings.
 func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
-	var w privateKeyWire
-	if err := wire.Unmarshal(in, &w); err != nil {
+	return sk.UnmarshalWireMessage(in)
+}
+
+// UnmarshalWireMessage decodes PrivateKey from a canonical TLV message.
+func (sk *PrivateKey) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
+	if sk == nil {
+		return errors.New("nil Paillier private key")
+	}
+	fields, err := wire.UnmarshalMessageBody(in, sk, opts...)
+	if err != nil {
 		return err
 	}
-	n, err := decodePositiveIntBytes(w.N)
+	if err := requirePrivateKeyTags(fields); err != nil {
+		return err
+	}
+	n, err := decodePositiveIntBytes(fields[0].Value)
 	if err != nil {
 		return fmt.Errorf("invalid public modulus: %w", err)
 	}
-	g, err := decodePositiveIntBytes(w.G)
+	g, err := decodePositiveIntBytes(fields[1].Value)
 	if err != nil {
 		return fmt.Errorf("invalid public generator: %w", err)
 	}
-	lambdaBig, err := decodePositiveIntBytes(w.Lambda)
+	lambdaBig, err := decodePositiveIntBytes(fields[2].Value)
 	if err != nil {
 		return fmt.Errorf("invalid lambda: %w", err)
 	}
 	defer secret.ClearBigInt(lambdaBig)
-	muBig, err := decodePositiveIntBytes(w.Mu)
+	muBig, err := decodePositiveIntBytes(fields[3].Value)
 	if err != nil {
 		return fmt.Errorf("invalid mu: %w", err)
 	}
 	defer secret.ClearBigInt(muBig)
-	p, err := decodePositiveIntBytes(w.P)
+	p, err := decodePositiveIntBytes(fields[4].Value)
 	if err != nil {
 		return fmt.Errorf("invalid p: %w", err)
 	}
 	defer secret.ClearBigInt(p)
-	q, err := decodePositiveIntBytes(w.Q)
+	q, err := decodePositiveIntBytes(fields[5].Value)
 	if err != nil {
 		return fmt.Errorf("invalid q: %w", err)
 	}
@@ -178,6 +201,18 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 		return err
 	}
 	*sk = decoded
+	return nil
+}
+
+func requirePrivateKeyTags(fields []wire.Field) error {
+	if len(fields) != 6 {
+		return fmt.Errorf("paillier private key field count %d != 6", len(fields))
+	}
+	for i, tag := range []uint16{1, 2, 3, 4, 5, 6} {
+		if fields[i].Tag != tag {
+			return fmt.Errorf("paillier private key field tag %d at index %d, want %d", fields[i].Tag, i, tag)
+		}
+	}
 	return nil
 }
 

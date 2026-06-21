@@ -164,7 +164,7 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	badPrivate, err := testutil.RewriteWireFieldByName(privRaw, privateKeyWireType, privateKeyWire{}, "P", append([]byte{0}, pBytes...))
+	badPrivate, err := testutil.RewriteWireField(privRaw, privateKeyType, 5, append([]byte{0}, pBytes...))
 	if err != nil {
 		t.Fatal(err)
 	}

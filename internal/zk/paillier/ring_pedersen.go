@@ -389,56 +389,107 @@ func ValidateRingPedersenParams(params *RingPedersenParams) error {
 	return nil
 }
 
-// ringPedersenParamsWire is the wire DTO for RingPedersenParams.
-type ringPedersenParamsWire struct {
-	N []byte `wire:"1,bytes,max_bits=paillier_modulus_bits"`
-	S []byte `wire:"2,bytes,max_bits=paillier_modulus_bits"`
-	T []byte `wire:"3,bytes,max_bits=paillier_modulus_bits"`
-}
-
-// WireType returns the canonical wire type identifier for ringPedersenParamsWire.
-func (ringPedersenParamsWire) WireType() string { return ringPedersenParamsWireType }
-
-// WireVersion returns the wire format version for ringPedersenParamsWire.
-func (ringPedersenParamsWire) WireVersion() uint16 { return ringPedersenParamsWireVersion }
-
 // MarshalWireMessage encodes RingPedersenParams as a canonical TLV message.
 func (params *RingPedersenParams) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
 	if err := ValidateRingPedersenParams(params); err != nil {
 		return nil, err
 	}
+	resolved := wire.ResolveMarshalOptions(opts...)
 	nLen := modulusBytes(params.N)
-	return wire.Marshal(ringPedersenParamsWire{
-		N: fixedModNBytes(params.N, nLen),
-		S: fixedModNBytes(params.S, nLen),
-		T: fixedModNBytes(params.T, nLen),
-	}, opts...)
+	n := fixedModNBytes(params.N, nLen)
+	s := fixedModNBytes(params.S, nLen)
+	tv := fixedModNBytes(params.T, nLen)
+	if err := checkRingPedersenParamBits("N", n, resolved.FieldLimits); err != nil {
+		return nil, err
+	}
+	if err := checkRingPedersenParamBits("S", s, resolved.FieldLimits); err != nil {
+		return nil, err
+	}
+	if err := checkRingPedersenParamBits("T", tv, resolved.FieldLimits); err != nil {
+		return nil, err
+	}
+	return wire.MarshalMessageBody(params, []wire.Field{
+		{Tag: 1, Value: n},
+		{Tag: 2, Value: s},
+		{Tag: 3, Value: tv},
+	})
 }
 
 // UnmarshalWireMessage decodes RingPedersenParams from a canonical TLV message.
 func (params *RingPedersenParams) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-	var w ringPedersenParamsWire
-	if err := wire.Unmarshal(in, &w, opts...); err != nil {
+	resolved := wire.ResolveUnmarshalOptions(opts...)
+	fields, err := wire.UnmarshalMessageBody(in, params, opts...)
+	if err != nil {
 		return err
 	}
-	n := new(big.Int).SetBytes(w.N)
+	if err := requireRingPedersenParamTags(fields); err != nil {
+		return err
+	}
+	if err := checkRingPedersenParamBits("N", fields[0].Value, resolved.FieldLimits); err != nil {
+		return err
+	}
+	if err := checkRingPedersenParamBits("S", fields[1].Value, resolved.FieldLimits); err != nil {
+		return err
+	}
+	if err := checkRingPedersenParamBits("T", fields[2].Value, resolved.FieldLimits); err != nil {
+		return err
+	}
+	n := new(big.Int).SetBytes(fields[0].Value)
 	nLen := modulusBytes(n)
-	if nLen == 0 || len(w.N) != nLen {
+	if nLen == 0 || len(fields[0].Value) != nLen {
 		return errors.New("invalid Ring-Pedersen modulus encoding")
 	}
-	if len(w.S) != nLen || len(w.T) != nLen {
+	if len(fields[1].Value) != nLen || len(fields[2].Value) != nLen {
 		return errors.New("invalid Ring-Pedersen parameter width")
 	}
 	decoded := RingPedersenParams{
 		N: n,
-		S: new(big.Int).SetBytes(w.S),
-		T: new(big.Int).SetBytes(w.T),
+		S: new(big.Int).SetBytes(fields[1].Value),
+		T: new(big.Int).SetBytes(fields[2].Value),
 	}
 	if err := ValidateRingPedersenParams(&decoded); err != nil {
 		return err
 	}
 	*params = decoded
 	return nil
+}
+
+func requireRingPedersenParamTags(fields []wire.Field) error {
+	if len(fields) != 3 {
+		return fmt.Errorf("Ring-Pedersen parameters field count %d != 3", len(fields))
+	}
+	for i, tag := range []uint16{1, 2, 3} {
+		if fields[i].Tag != tag {
+			return fmt.Errorf("Ring-Pedersen parameters field tag %d at index %d, want %d", fields[i].Tag, i, tag)
+		}
+	}
+	return nil
+}
+
+func checkRingPedersenParamBits(name string, raw []byte, limits wire.FieldLimits) error {
+	maxBits, err := ringPedersenModulusBitsLimit(limits)
+	if err != nil {
+		return err
+	}
+	bits := len(raw) * 8
+	if bits > maxBits {
+		return fmt.Errorf("Ring-Pedersen parameter %s: bit length %d exceeds max_bits=%d", name, bits, maxBits)
+	}
+	return nil
+}
+
+func ringPedersenModulusBitsLimit(limits wire.FieldLimits) (int, error) {
+	if limits == nil {
+		return 0, errors.New(`wire: missing field limit "paillier_modulus_bits" for Ring-Pedersen parameters`)
+	}
+	maxBits, ok := limits["paillier_modulus_bits"]
+	if !ok {
+		return 0, errors.New(`wire: missing field limit "paillier_modulus_bits" for Ring-Pedersen parameters`)
+	}
+	if maxBits <= 0 {
+		return 0, errors.New(`wire: field limit "paillier_modulus_bits" for Ring-Pedersen parameters must be positive`)
+	}
+	return maxBits, nil
 }
 
 // MarshalRingPedersenParams encodes Ring-Pedersen parameters canonically.
@@ -450,8 +501,8 @@ func MarshalRingPedersenParams(params *RingPedersenParams) ([]byte, error) {
 
 // UnmarshalRingPedersenParamsWithMaxModulusBits decodes Ring-Pedersen
 // parameters and rejects an oversized modulus before primality checks.
-// The modulus size check is enforced by wire.Unmarshal via the
-// max_bits=paillier_modulus_bits wire tag on ringPedersenParamsWire.
+// The modulus size check is enforced by RingPedersenParams' direct wire codec
+// before constructing and validating the decoded parameters.
 func UnmarshalRingPedersenParamsWithMaxModulusBits(in []byte, maxBits int) (*RingPedersenParams, error) {
 	params := new(RingPedersenParams)
 	if err := params.UnmarshalBinaryWithMaxModulusBits(in, maxBits); err != nil {
