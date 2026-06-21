@@ -15,15 +15,6 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
-const (
-	keygenStartRound        = 1
-	keygenConfirmationRound = 2
-
-	signStartRound    = 1
-	signRound2        = 2
-	reshareStartRound = 1
-)
-
 // keygenPartyData holds all per-party DKG state for a single participant.
 // All fields other than confirmation are populated during round 1;
 // confirmation is set during round 2 after the chain code is revealed.

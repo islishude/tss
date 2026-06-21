@@ -293,13 +293,6 @@ func bigIntWireBytes(x *big.Int) ([]byte, error) {
 	return wire.EncodeBigPos(x)
 }
 
-func cloneBigInt(x *big.Int) *big.Int {
-	if x == nil {
-		return nil
-	}
-	return new(big.Int).Set(x)
-}
-
 func cloneCommitmentPoints(in []*secp.Point) []*secp.Point {
 	if in == nil {
 		return nil
@@ -897,7 +890,7 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		planHash:               slices.Clone(k.state.planHash),
 		shareProof:             k.state.shareProof.Clone(),
 		keygenTranscriptHash:   slices.Clone(k.state.keygenTranscriptHash),
-		logCiphertext:          cloneBigInt(k.state.logCiphertext),
+		logCiphertext:          tss.CloneBigInt(k.state.logCiphertext),
 		logProof:               k.state.logProof.Clone(),
 	}}
 }

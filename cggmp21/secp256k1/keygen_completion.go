@@ -239,7 +239,7 @@ func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendin
 	if err != nil {
 		return nil, false, err
 	}
-	share.state.logCiphertext = cloneBigInt(logCiphertext)
+	share.state.logCiphertext = tss.CloneBigInt(logCiphertext)
 	share.state.logProof = logProof.Clone()
 	// Carry the local chain code into the confirmation for commit-reveal.
 	share.state.chainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)

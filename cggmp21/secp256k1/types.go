@@ -14,6 +14,23 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
+// The round numbers with named constants
+const (
+	invalidRound = 0
+
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
+
+	presignStartRound = 1
+	presignRound2     = 2
+	presignRound3     = 3
+
+	refreshStartRound = 1
+	reshareStartRound = 1
+
+	signStartRound = 1
+)
+
 const (
 	payloadKeygenCommitments  tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
 	payloadKeygenShare        tss.PayloadType = "cggmp21.secp256k1.keygen.share"

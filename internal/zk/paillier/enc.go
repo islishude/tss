@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
@@ -60,12 +61,12 @@ func (p *EncProof) Clone() *EncProof {
 		return nil
 	}
 	return &EncProof{
-		S:              cloneBigInt(p.S),
-		A:              cloneBigInt(p.A),
-		C:              cloneBigInt(p.C),
-		Z1:             cloneBigInt(p.Z1),
-		Z2:             cloneBigInt(p.Z2),
-		Z3:             cloneBigInt(p.Z3),
+		S:              tss.CloneBigInt(p.S),
+		A:              tss.CloneBigInt(p.A),
+		C:              tss.CloneBigInt(p.C),
+		Z1:             tss.CloneBigInt(p.Z1),
+		Z2:             tss.CloneBigInt(p.Z2),
+		Z3:             tss.CloneBigInt(p.Z3),
 		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
 	}
 }

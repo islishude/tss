@@ -223,7 +223,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.newShare.state.logCiphertext = cloneBigInt(logCiphertext)
+	s.newShare.state.logCiphertext = tss.CloneBigInt(logCiphertext)
 	s.newShare.state.logProof = logProof.Clone()
 	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err

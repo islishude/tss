@@ -13,6 +13,16 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
+// The round numbers with named constants
+const (
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
+
+	signStartRound    = 1
+	signRound2        = 2
+	reshareStartRound = 1
+)
+
 const (
 	payloadKeygenCommitments  tss.PayloadType = "frost.ed25519.keygen.commitments"
 	payloadKeygenShare        tss.PayloadType = "frost.ed25519.keygen.share"

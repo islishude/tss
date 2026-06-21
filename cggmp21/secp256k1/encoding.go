@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
@@ -889,8 +890,8 @@ func (state *presignState) UnmarshalWireMessage(in []byte, opts ...wire.Unmarsha
 	if err != nil {
 		return err
 	}
-	if len(fields[16].Value) != 32 {
-		return fmt.Errorf("presign plan hash length %d != 32", len(fields[16].Value))
+	if len(fields[16].Value) != sha256.Size {
+		return fmt.Errorf("presign plan hash length %d != %d", len(fields[16].Value), sha256.Size)
 	}
 	var securityParams SecurityParams
 	if err := wire.UnmarshalRecordValue(fields[17].Value, &securityParams, opts...); err != nil {
@@ -1012,7 +1013,7 @@ func unmarshalPresignVerifyShares(
 		return nil, fmt.Errorf("verify shares count %d exceeds max_items=%d", count, limits.Threshold.MaxSigners)
 	}
 	out := make([]signVerifyShare, int(count))
-	for i := range int(count) {
+	for i := range count {
 		record, next, err := wire.ReadBytesWithLimit(raw, offset, frameLimits.MaxFieldBytes)
 		if err != nil {
 			return nil, fmt.Errorf("verify shares item %d: %w", i, err)

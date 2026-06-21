@@ -15,18 +15,6 @@ import (
 const (
 	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
-
-	keygenStartRound        = 1
-	keygenConfirmationRound = 2
-
-	presignStartRound = 1
-	presignRound2     = 2
-	presignRound3     = 3
-
-	refreshStartRound = 1
-	reshareStartRound = 1
-
-	signStartRound = 1
 )
 
 type keygenState uint8

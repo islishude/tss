@@ -92,7 +92,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if err := presign.VerifySignMaterialWithLimits(limits); err != nil {
 		return nil, nil, err
 	}
-	if len(digest32) != 32 {
+	if len(digest32) != sha256.Size {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
 	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.state.contextHash) {
