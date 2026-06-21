@@ -166,6 +166,9 @@ func DecodeBigPos(in []byte) (*big.Int, error) { return decodeBigPos(in) }
 // encodeBigIntDispatch encodes a field value as a canonical signed integer.
 func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
+	if fv.Kind() == reflect.Pointer && x == nil {
+		return nil, fmt.Errorf("wire: required bigint field %s tag %d is nil", fs.name, fs.tag)
+	}
 	bits := 0
 	if x != nil {
 		bits = x.BitLen()
@@ -186,6 +189,9 @@ func (fs fieldSchema) encodeBigIntDispatch(fv reflect.Value, limitSet FieldLimit
 // encodeBigUintDispatch encodes a field value as a canonical unsigned integer.
 func (fs fieldSchema) encodeBigUintDispatch(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	x := bigIntFromValue(fv)
+	if fv.Kind() == reflect.Pointer && x == nil {
+		return nil, fmt.Errorf("wire: required biguint field %s tag %d is nil", fs.name, fs.tag)
+	}
 	bits := 0
 	if x != nil {
 		bits = x.BitLen()

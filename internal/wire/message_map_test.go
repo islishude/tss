@@ -632,6 +632,26 @@ func TestMapFixedLenValueRoundtrip(t *testing.T) {
 	}
 }
 
+func TestMapFixedLenValueRejectsWrongLength(t *testing.T) {
+	t.Parallel()
+
+	limits := FieldLimits{"parties": 10}
+	for _, value := range [][]byte{
+		{0x01, 0x02, 0x03},
+		{0x01, 0x02, 0x03, 0x04, 0x05},
+	} {
+		mapRaw := mapEncodeRawEntries(mapRawEntry{key: 1, value: value})
+		raw, err := MarshalFields(1, "wire.test.map.fixedlen", []Field{{Tag: 1, Value: mapRaw}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded mapFixedLenMessage
+		if err := Unmarshal(raw, &decoded, WithFieldLimits(limits)); err == nil {
+			t.Fatalf("accepted map array value length %d", len(value))
+		}
+	}
+}
+
 func TestMapTrailingDataRejected(t *testing.T) {
 	t.Parallel()
 

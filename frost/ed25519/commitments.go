@@ -181,7 +181,7 @@ func (c keygenCommitments) MarshalWireValue() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid keygen commitments: %w", err)
 	}
-	return wire.EncodeBytesList(c.BytesList()), nil
+	return wire.EncodeBytesListChecked(c.BytesList())
 }
 
 // UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
@@ -280,7 +280,7 @@ func (c reshareCommitments) MarshalWireValue() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid reshare commitments: %w", err)
 	}
-	return wire.EncodeBytesList(c.BytesList()), nil
+	return wire.EncodeBytesListChecked(c.BytesList())
 }
 
 // UnmarshalWireValue decodes the canonical byteslist-compatible encoding and
@@ -374,7 +374,7 @@ func (c groupCommitments) MarshalWireValue() ([]byte, error) {
 	if err := c.Validate(); err != nil {
 		return nil, fmt.Errorf("invalid group commitments: %w", err)
 	}
-	return wire.EncodeBytesList(c.BytesList()), nil
+	return wire.EncodeBytesListChecked(c.BytesList())
 }
 
 // UnmarshalWireValue decodes the canonical byteslist-compatible encoding and

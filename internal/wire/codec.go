@@ -235,7 +235,7 @@ func (fs fieldSchema) checkBitsLimit(bits int, limitSet FieldLimits) error {
 // ---- fixed length checker ----------------------------------------------------
 
 func (fs fieldSchema) checkFixedLen(raw []byte) error {
-	if fs.fixedLen > 0 && len(raw) != fs.fixedLen {
+	if fs.fixedLenSet && len(raw) != fs.fixedLen {
 		return fmt.Errorf("got %d bytes, want %d", len(raw), fs.fixedLen)
 	}
 	return nil

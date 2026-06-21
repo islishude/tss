@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 )
 
 // NonNilBytes returns an empty byte slice when in is nil.
@@ -49,15 +50,16 @@ func ReadBytesWithLimit(in []byte, offset int, maxItemBytes int) ([]byte, int, e
 	if err != nil {
 		return nil, offset, err
 	}
-	if maxItemBytes > 0 && int(length) > maxItemBytes {
+	if maxItemBytes > 0 && uint64(length) > uint64(maxItemBytes) {
 		return nil, offset, fmt.Errorf("byte field too large: %d > %d", length, maxItemBytes)
 	}
 	if uint64(len(in)-offset) < uint64(length) {
 		return nil, offset, errors.New("truncated byte field")
 	}
-	out := make([]byte, length)
-	copy(out, in[offset:offset+int(length)])
-	return out, offset + int(length), nil
+	lengthInt := int(length)
+	out := make([]byte, lengthInt)
+	copy(out, in[offset:offset+lengthInt])
+	return out, offset + lengthInt, nil
 }
 
 // AppendUint16 appends a big-endian uint16 to out.
@@ -74,8 +76,22 @@ func AppendUint32(out []byte, v uint32) []byte {
 	return append(out, buf[:]...)
 }
 
-// AppendBytes appends a uint32 length-prefixed byte string to out.
-func AppendBytes(out, value []byte) []byte {
+// AppendBytesChecked appends a uint32 length-prefixed byte string to out.
+func AppendBytesChecked(out, value []byte) ([]byte, error) {
+	if uint64(len(value)) > math.MaxUint32 {
+		return nil, fmt.Errorf("byte field length %d exceeds uint32", len(value))
+	}
 	out = append(out, Uint32(uint32(len(value)))...)
-	return append(out, value...)
+	return append(out, value...), nil
+}
+
+// AppendBytes appends a uint32 length-prefixed byte string to out.
+// It panics when value exceeds the wire uint32 length domain. Production wire
+// codecs should use AppendBytesChecked so oversized input returns an error.
+func AppendBytes(out, value []byte) []byte {
+	out, err := AppendBytesChecked(out, value)
+	if err != nil {
+		panic(err)
+	}
+	return out
 }

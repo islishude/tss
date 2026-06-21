@@ -129,10 +129,9 @@ the wire format of existing fields if their Go type were refactored to a map.
 - `max_bytes=name` — semantic byte limit (from `wire.WithFieldLimits`)
 - `max_bits=name` — semantic bit-length limit for bigint/biguint/bigpos (validates `BitLen()`) or conservative `len*8` upper bound for bytes (from `wire.WithFieldLimits`)
 - `max_items=name` — semantic item count limit
-- `optional` — only valid on pointer fields; nil is omitted on marshal and an
-  absent tag decodes as nil. Without `optional`, pointer fields remain
-  required, and nil record/nested pointers are rejected.
-- `allow_empty` — documents that empty is permitted (no-op)
+- `optional` — valid only on pointer `record`, `nested`, `custom`, `bigint`,
+  `biguint`, and `bigpos` fields; nil is omitted on marshal and an absent tag
+  decodes as nil. Without `optional`, pointer fields remain required.
 
 For custom fields, `max_items` is supported only for count-prefixed custom
 values. A field tagged `wire:"N,custom,max_items=name"` must encode its raw
@@ -151,8 +150,8 @@ protocol invariant.
 - **`AfterUnmarshaler`** — optional: `AfterUnmarshalWire() error`
 - **`ValueMarshaler`** — used by `custom` kind: `MarshalWireValue() ([]byte, error)`
 - **`ValueUnmarshaler`** — used by `custom` kind: `UnmarshalWireValue([]byte) error`
-- **`MessageMarshaler`** — optional: `MarshalWireMessage(opts ...MarshalOption) ([]byte, error)`. Types implementing this interface provide their own complete canonical TLV message encoding, bypassing struct-tag reflection. The returned bytes must be a full TLV envelope (`magic || type_id || version || field_body`). BeforeMarshalWire and Validate hooks still run before the custom marshaler.
-- **`MessageUnmarshaler`** — optional: `UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error`. Types implementing this interface provide their own complete canonical TLV message decoding, bypassing struct-tag reflection. AfterUnmarshalWire and Validate hooks still run after the custom unmarshaler. Decoding is fail-atomic: the original destination is never modified on error.
+- **`MessageMarshaler`** — optional: `MarshalWireMessage(opts ...MarshalOption) ([]byte, error)`. Types implementing this interface provide their own complete TLV message encoding, bypassing struct-tag reflection. `wire.Marshal` reparses the returned full envelope to enforce type, version, tag ordering, duplicate/tag-zero rejection, canonical framing, and no trailing bytes. BeforeMarshalWire and Validate hooks still run before the custom marshaler.
+- **`MessageUnmarshaler`** — optional: `UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error`. Types implementing this interface provide their own field-schema decoding, bypassing struct-tag reflection. `wire.Unmarshal` performs canonical frame/type/version and configured frame-limit preflight before invoking the hook. AfterUnmarshalWire and Validate hooks still run afterward. Decoding is fail-atomic: the original destination is never modified on error.
 
 ### Field-Level API (Tests Only)
 
@@ -162,7 +161,7 @@ The low-level `MarshalFields` / `UnmarshalFields` / `UnmarshalFieldsWithLimits` 
 
 Frame and semantic limits are **fail-closed**: any struct tag that declares `max_bytes=name`, `max_bits=name`, or `max_items=name` requires the caller to provide a `wire.FieldLimits` containing that name. Missing limits or missing keys produce an error — there is no silent fallback to unlimited.
 
-- **Frame-level** (`wire.FrameLimits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during decode via `wire.WithFrameLimits`
+- **Frame-level** (`wire.FrameLimits`): `MaxTotalBytes`, `MaxFields`, `MaxFieldBytes` — applied during decode via `wire.WithFrameLimits`. Zero-valued members inherit their individual defaults, so partial overrides are safe.
 - **Semantic-level** (`wire.FieldLimits`): per-field max bytes, bits, or items checked against named limits via `wire.WithFieldLimits` (decode) or `wire.WithFieldLimitsForMarshal` (encode)
 
 Package-level limits (e.g., `frost/ed25519.Limits`, `cggmp21/secp256k1.Limits`) provide `frameLimits(maxTotal int) wire.FrameLimits` and `fieldLimits() wire.FieldLimits` adapter methods to convert their structured limits into wire-layer options.
@@ -245,13 +244,18 @@ and domain validation; field-level byte encoding is handled by the wire codec.
 
 - `type_id` must be non-empty and match the expected decoder type.
 - Fields must be sorted by strictly increasing tag.
+- Tag zero is invalid in object, message-body, and record-body encodings.
 - Duplicate tags are rejected.
 - Nil field values are rejected by the encoder (nil bytes/list → empty).
 - Decoders reject trailing bytes.
 - All tagged fields are required. Missing and extra fields are rejected.
+- `[N]byte` fields and map values always decode from exactly `N` bytes, even
+  when the tag omits an explicit `len=N`.
 - Fields tagged `bigint`, `biguint`, or `bigpos` use canonical integer encodings:
-  `bigint` — signed-magnitude (zero = `0x00`, nil = zero); `biguint` — minimal
+  `bigint` — signed-magnitude (zero = `0x00`); `biguint` — minimal
   big-endian (zero = empty); `bigpos` — minimal big-endian (zero rejected).
+  Required `*big.Int` fields reject nil; only explicitly optional fields may
+  omit a nil pointer.
   Non-canonical encodings (negative zero, leading zeroes, empty signed) are rejected.
   When `max_bits=name` is declared, `BitLen()` is validated against the limit
   after decoding; for `bytes` fields, `len(raw)*8` is used as a conservative

@@ -37,11 +37,7 @@ func ResolveUnmarshalOptions(opts ...UnmarshalOption) UnmarshalOptionsView {
 	for _, opt := range opts {
 		opt.applyUnmarshal(&cfg)
 	}
-	if cfg.frameLimits.MaxTotalBytes == 0 &&
-		cfg.frameLimits.MaxFields == 0 &&
-		cfg.frameLimits.MaxFieldBytes == 0 {
-		cfg.frameLimits = DefaultFrameLimits()
-	}
+	cfg.frameLimits = cfg.frameLimits.withDefaults()
 	return UnmarshalOptionsView{
 		FrameLimits: cfg.frameLimits,
 		FieldLimits: cfg.fieldLimits,
@@ -66,6 +62,9 @@ func UnmarshalRecordValue(raw []byte, dst any, opts ...UnmarshalOption) error {
 		return errors.New("nil record destination")
 	}
 	resolved := ResolveUnmarshalOptions(opts...)
+	if err := resolved.FrameLimits.validate(); err != nil {
+		return err
+	}
 	rv := reflect.ValueOf(dst)
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		return errors.New("record destination must be a non-nil pointer")
@@ -85,6 +84,10 @@ func MarshalRecordFields(fields []Field) ([]byte, error) {
 // UnmarshalRecordFieldsWithLimits decodes a canonical record field value. It
 // rejects trailing bytes and returns copied field values.
 func UnmarshalRecordFieldsWithLimits(raw []byte, limits FrameLimits, name string) ([]Field, error) {
+	limits = limits.withDefaults()
+	if err := limits.validate(); err != nil {
+		return nil, err
+	}
 	if limits.MaxTotalBytes > 0 && len(raw) > limits.MaxTotalBytes {
 		return nil, fmt.Errorf("record input too large: %d > %d", len(raw), limits.MaxTotalBytes)
 	}

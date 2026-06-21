@@ -23,11 +23,11 @@
 // from the Go field type. Named primitive types (e.g. type SessionID [32]byte)
 // are handled correctly. big.Int must always be declared explicitly.
 //
-// Pointer fields may be marked with the "optional" option, for example
+// Pointer record, nested, custom, bigint, biguint, and bigpos fields may be
+// marked with the "optional" option, for example
 // `wire:"2,record,optional"`. An optional nil pointer is omitted during
-// marshaling. When decoding, an absent optional field is left nil. Fields
-// without "optional" remain required and nil pointer records/nested messages
-// are rejected.
+// marshaling. When decoding, an absent optional field is left nil. Other
+// pointer primitive shapes are rejected at schema-parse time.
 //
 // The "custom" kind delegates field value encoding to the field type via
 // the ValueMarshaler and ValueUnmarshaler interfaces. This lets domain types
@@ -41,6 +41,7 @@
 package wire
 
 import (
+	"bytes"
 	"fmt"
 	"reflect"
 )
@@ -106,11 +107,9 @@ type ValueUnmarshaler interface {
 // value for `wire:",custom"` fields. The returned bytes must be a complete
 // canonical TLV message: magic || type_id || version || field_body.
 //
-// Implementations must guarantee:
-//   - correct wire type and version
-//   - canonical sorted field tags
-//   - no duplicate fields
-//   - no trailing bytes
+// Marshal reparses the returned frame and enforces its type, version,
+// canonical field order, duplicate/tag-zero rejection, and trailing-data
+// invariant before returning it to the caller.
 type MessageMarshaler interface {
 	MarshalWireMessage(opts ...MarshalOption) ([]byte, error)
 }
@@ -122,12 +121,38 @@ type MessageMarshaler interface {
 // value for `wire:",custom"` fields. The implementation receives the
 // complete TLV message bytes and must decode into the receiver.
 //
-// Implementations must:
-//   - validate wire type and version
-//   - reject non-canonical encodings
-//   - not retain a reference to the input buffer
+// Unmarshal performs frame-level type, version, canonical-order, duplicate-tag,
+// trailing-data, and configured size checks before invoking the implementation.
+// Implementations must still validate their exact field schema and must not
+// retain a reference to the input buffer.
 type MessageUnmarshaler interface {
 	UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error
+}
+
+func validateMarshaledMessage(raw []byte, msg Message, limits FrameLimits) error {
+	version, fields, err := UnmarshalFieldsWithLimits(raw, msg.WireType(), limits)
+	if err != nil {
+		return err
+	}
+	if version != msg.WireVersion() {
+		return fmt.Errorf("got version %d, want %d", version, msg.WireVersion())
+	}
+	canonical, err := MarshalFields(version, msg.WireType(), fields)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(raw, canonical) {
+		return fmt.Errorf("message encoding is not canonical")
+	}
+	return nil
+}
+
+func marshalSelfCheckLimits(raw []byte) FrameLimits {
+	return FrameLimits{
+		MaxTotalBytes: len(raw),
+		MaxFields:     maxRecordCount,
+		MaxFieldBytes: len(raw),
+	}
 }
 
 // runBeforeMarshalHook calls BeforeMarshalWire on msg if it implements
@@ -226,6 +251,9 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 		if raw == nil {
 			return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
 		}
+		if err := validateMarshaledMessage(raw, m, marshalSelfCheckLimits(raw)); err != nil {
+			return nil, fmt.Errorf("wire.Marshal %s: invalid MarshalWireMessage output: %w", v.Type().Name(), err)
+		}
 		return raw, nil
 	}
 	if v.CanAddr() {
@@ -236,6 +264,9 @@ func Marshal(msg any, opts ...MarshalOption) ([]byte, error) {
 			}
 			if raw == nil {
 				return nil, fmt.Errorf("wire.Marshal %s: MarshalWireMessage returned nil", v.Type().Name())
+			}
+			if err := validateMarshaledMessage(raw, m, marshalSelfCheckLimits(raw)); err != nil {
+				return nil, fmt.Errorf("wire.Marshal %s: invalid MarshalWireMessage output: %w", v.Type().Name(), err)
 			}
 			return raw, nil
 		}
@@ -301,6 +332,10 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 	// Type-level codec hook: if the message provides its own complete TLV
 	// decoding, delegate to it and bypass reflection-based field decoding.
 	if um, ok := hookTarget.(MessageUnmarshaler); ok {
+		limits := cfg.frameLimits.withDefaults()
+		if err := validateMarshaledMessage(in, m, limits); err != nil {
+			return fmt.Errorf("wire.Unmarshal %s: invalid message frame: %w", v.Type().Name(), err)
+		}
 		if err := um.UnmarshalWireMessage(in, opts...); err != nil {
 			return fmt.Errorf("wire.Unmarshal %s: %w", v.Type().Name(), err)
 		}
@@ -315,10 +350,7 @@ func Unmarshal(in []byte, dst any, opts ...UnmarshalOption) error {
 	}
 
 	// Proceed with reflection path.
-	limits := cfg.frameLimits
-	if limits.MaxTotalBytes == 0 && limits.MaxFields == 0 && limits.MaxFieldBytes == 0 {
-		limits = DefaultFrameLimits()
-	}
+	limits := cfg.frameLimits.withDefaults()
 
 	version, fields, err := UnmarshalFieldsWithLimits(in, m.WireType(), limits)
 	if err != nil {

@@ -39,6 +39,13 @@ type fixedLenMessage struct {
 func (m fixedLenMessage) WireType() string    { return "test.fixedlen" }
 func (m fixedLenMessage) WireVersion() uint16 { return 1 }
 
+type implicitArrayMessage struct {
+	Hash [4]byte `wire:"1,bytes"`
+}
+
+func (m implicitArrayMessage) WireType() string    { return "test.implicitarray" }
+func (m implicitArrayMessage) WireVersion() uint16 { return 1 }
+
 type boolMessage struct {
 	Flag bool `wire:"1,bool"`
 }
@@ -196,7 +203,7 @@ func (m *hookMessage) AfterUnmarshalWire() error {
 }
 
 type emptyBytesMessage struct {
-	Data []byte `wire:"1,bytes,allow_empty"`
+	Data []byte `wire:"1,bytes"`
 }
 
 func (m emptyBytesMessage) WireType() string    { return "test.emptybytes" }
@@ -471,6 +478,13 @@ type bigUintMessage struct {
 
 func (m bigUintMessage) WireType() string    { return "test.bigint.unsigned" }
 func (m bigUintMessage) WireVersion() uint16 { return 1 }
+
+type optionalBigIntMessage struct {
+	Val *big.Int `wire:"1,bigint,optional"`
+}
+
+func (m optionalBigIntMessage) WireType() string    { return "test.bigint.optional" }
+func (m optionalBigIntMessage) WireVersion() uint16 { return 1 }
 
 type bigPosMessage struct {
 	Val *big.Int `wire:"1,bigpos"`

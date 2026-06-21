@@ -73,6 +73,22 @@ func TestUnmarshalRejectsOversizedField(t *testing.T) {
 	}
 }
 
+func TestUnmarshalWithPartialFrameLimitsUsesDefaults(t *testing.T) {
+	t.Parallel()
+
+	msg, err := wire.MarshalFields(1, "test.partial", []wire.Field{
+		{Tag: 1, Value: []byte("hello")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := wire.UnmarshalFieldsWithLimits(msg, "test.partial", wire.FrameLimits{
+		MaxFields: 1,
+	}); err != nil {
+		t.Fatalf("partial frame limits rejected valid input: %v", err)
+	}
+}
+
 func TestUnmarshalWithLimitsRejectsWrongType(t *testing.T) {
 	t.Parallel()
 	fields := []wire.Field{

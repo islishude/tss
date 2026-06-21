@@ -2,6 +2,7 @@ package wire
 
 import (
 	"fmt"
+	"math"
 	"reflect"
 )
 
@@ -29,6 +30,9 @@ func (fs fieldSchema) decodeRecord(fv reflect.Value, raw []byte, limitSet FieldL
 //	    record bytes
 func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("recordlist count %d exceeds uint32", n)
+	}
 
 	if fs.maxItems != "" {
 		max, err := fs.getLimit(fs.maxItems, limitSet)
@@ -48,6 +52,9 @@ func (fs fieldSchema) encodeRecordList(fv reflect.Value, limitSet FieldLimits) (
 		if err != nil {
 			return nil, fmt.Errorf("recordlist item %d: %w", i, err)
 		}
+		if uint64(len(rec)) > math.MaxUint32 {
+			return nil, fmt.Errorf("recordlist item %d length %d exceeds uint32", i, len(rec))
+		}
 		out = append(out, Uint32(uint32(len(rec)))...)
 		out = append(out, rec...)
 	}
@@ -64,7 +71,7 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Fi
 	if err != nil {
 		return err
 	}
-	if int(count) > maxRecordCount {
+	if uint64(count) > uint64(maxRecordCount) {
 		return fmt.Errorf("recordlist count too large: %d > %d", count, maxRecordCount)
 	}
 	if fs.maxItems != "" {
@@ -72,7 +79,7 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Fi
 		if err != nil {
 			return err
 		}
-		if int(count) > max {
+		if uint64(count) > uint64(max) {
 			return fmt.Errorf("recordlist count %d exceeds max_items=%d", count, max)
 		}
 	}
@@ -89,8 +96,9 @@ func (fs fieldSchema) decodeRecordList(fv reflect.Value, raw []byte, limitSet Fi
 		if uint64(len(raw)-offset) < uint64(recLen) {
 			return fmt.Errorf("truncated recordlist item %d", i)
 		}
-		recBytes := raw[offset : offset+int(recLen)]
-		offset += int(recLen)
+		recLenInt := int(recLen)
+		recBytes := raw[offset : offset+recLenInt]
+		offset += recLenInt
 
 		var elem reflect.Value
 		if elemType.Kind() == reflect.Pointer {

@@ -36,20 +36,25 @@ const (
 
 // fieldSchema holds the parsed information for a single wire-tagged struct field.
 type fieldSchema struct {
-	tag      uint16
-	name     string
-	index    []int
-	kind     wireKind
-	typ      reflect.Type
-	fixedLen int    // for len=N option
-	maxBytes string // limit name for max_bytes= option
-	maxItems string // limit name for max_items= option
-	maxBits  string // limit name for max_bits= option
-	optional bool   // optional pointer field; nil/missing is encoded as absent
+	tag         uint16
+	name        string
+	index       []int
+	kind        wireKind
+	typ         reflect.Type
+	fixedLen    int    // for len=N option or the natural width of [N]byte
+	fixedLenSet bool   // distinguishes an exact zero-length array from no fixed length
+	maxBytes    string // limit name for max_bytes= option
+	maxItems    string // limit name for max_items= option
+	maxBits     string // limit name for max_bits= option
+	optional    bool   // optional pointer field; nil/missing is encoded as absent
 
 	mapKeyType   reflect.Type
 	mapValueType reflect.Type
 	mapValueKind wireKind
+
+	partyIndex  int
+	firstIndex  int
+	secondIndex int
 }
 
 // schema is the cached parsed struct-tag information for a wire-encodable type.
@@ -76,9 +81,16 @@ func getSchema(t reflect.Type) (*schema, error) {
 }
 
 // FieldTag returns the wire tag number for the named field of model.
-// model must be a non-nil struct with a `wire:"N,…"` tag on every encoded field.
+// model must be a struct or pointer-to-struct with a `wire:"N,…"` tag on every
+// encoded field.
 func FieldTag(model any, fieldName string) (uint16, error) {
 	t := reflect.TypeOf(model)
+	if t == nil {
+		return 0, fmt.Errorf("wire.FieldTag: nil model")
+	}
+	for t.Kind() == reflect.Pointer {
+		t = t.Elem()
+	}
 	s, err := getSchema(t)
 	if err != nil {
 		return 0, err
@@ -100,11 +112,14 @@ func parseSchema(t reflect.Type) (*schema, error) {
 	seenTags := make(map[uint16]bool)
 
 	for f := range t.Fields() {
+		tagStr, tagged := f.Tag.Lookup("wire")
 		if !f.IsExported() {
+			if tagged && tagStr != "-" {
+				return nil, fmt.Errorf("unexported field %s has wire tag %q", f.Name, tagStr)
+			}
 			continue
 		}
-		tagStr, ok := f.Tag.Lookup("wire")
-		if !ok {
+		if !tagged {
 			continue
 		}
 		if tagStr == "-" {
@@ -200,10 +215,6 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		if opt == "" {
 			continue
 		}
-		if opt == "allow_empty" {
-			// Documented but no-op; empty is allowed by default.
-			continue
-		}
 		if opt == "optional" {
 			fs.optional = true
 			continue
@@ -225,6 +236,7 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 				return fieldSchema{}, fmt.Errorf("len must be positive")
 			}
 			fs.fixedLen = n
+			fs.fixedLenSet = true
 		case "max_bytes":
 			fs.maxBytes = val
 		case "max_items":
@@ -236,19 +248,47 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		}
 	}
 
-	// Validate len=N against array length for bytes fields.
-	if fs.kind == kindBytes && fs.fixedLen > 0 && f.Type.Kind() == reflect.Array {
-		if f.Type.Len() != fs.fixedLen {
+	// Arrays have an intrinsic exact width even when len=N is omitted.
+	if fs.kind == kindBytes && f.Type.Kind() == reflect.Array {
+		if fs.fixedLenSet && f.Type.Len() != fs.fixedLen {
 			return fieldSchema{}, fmt.Errorf("field %s: len=%d does not match array length %d", f.Name, fs.fixedLen, f.Type.Len())
 		}
+		fs.fixedLen = f.Type.Len()
+		fs.fixedLenSet = true
 	}
 	if fs.optional && f.Type.Kind() != reflect.Pointer {
 		return fieldSchema{}, fmt.Errorf("optional requires pointer field, got %s", f.Type)
+	}
+	if fs.optional && !kindSupportsOptional(fs.kind) {
+		return fieldSchema{}, fmt.Errorf("optional is not supported for %s fields", kindName(fs.kind))
 	}
 
 	// Map kind requires additional schema initialization for key/value types.
 	if fs.kind == kindMap {
 		if err := fs.initMapSchema(); err != nil {
+			return fieldSchema{}, err
+		}
+		valueType := indirectType(fs.mapValueType)
+		if fs.mapValueKind == kindBytes && valueType.Kind() == reflect.Array {
+			if fs.fixedLenSet && valueType.Len() != fs.fixedLen {
+				return fieldSchema{}, fmt.Errorf(
+					"field %s: len=%d does not match map array value length %d",
+					f.Name,
+					fs.fixedLen,
+					valueType.Len(),
+				)
+			}
+			fs.fixedLen = valueType.Len()
+			fs.fixedLenSet = true
+		}
+	}
+	if fs.kind == kindPartyBytes {
+		if err := fs.initPartyBytesSchema(false); err != nil {
+			return fieldSchema{}, err
+		}
+	}
+	if fs.kind == kindPartyBytePairs {
+		if err := fs.initPartyBytesSchema(true); err != nil {
 			return fieldSchema{}, err
 		}
 	}
@@ -425,6 +465,58 @@ func isKnownKind(s string) bool {
 	return knownKindNames[s]
 }
 
+func kindSupportsOptional(kind wireKind) bool {
+	switch kind {
+	case kindNested, kindCustom, kindBigInt, kindBigUint, kindBigPos, kindRecord:
+		return true
+	default:
+		return false
+	}
+}
+
+func kindName(kind wireKind) string {
+	switch kind {
+	case kindU8:
+		return "u8"
+	case kindU16:
+		return "u16"
+	case kindU32:
+		return "u32"
+	case kindBool:
+		return "bool"
+	case kindBytes:
+		return "bytes"
+	case kindString:
+		return "string"
+	case kindU32List:
+		return "u32list"
+	case kindBytesList:
+		return "byteslist"
+	case kindPartyBytes:
+		return "partybytes"
+	case kindPartyBytePairs:
+		return "partybytepairs"
+	case kindNested:
+		return "nested"
+	case kindCustom:
+		return "custom"
+	case kindBigInt:
+		return "bigint"
+	case kindBigUint:
+		return "biguint"
+	case kindBigPos:
+		return "bigpos"
+	case kindRecord:
+		return "record"
+	case kindRecordList:
+		return "recordlist"
+	case kindMap:
+		return "map"
+	default:
+		return fmt.Sprintf("kind(%d)", kind)
+	}
+}
+
 // inferKind returns the wire kind for a Go type when the tag omits an explicit kind.
 //
 // Mapping:
@@ -535,10 +627,49 @@ func (fs *fieldSchema) initMapSchema() error {
 	if err != nil {
 		return fmt.Errorf("field %s: unsupported map value %s: %w", fs.name, valueType, err)
 	}
+	if valueType.Kind() == reflect.Pointer && valueKind != kindCustom && valueKind != kindRecord {
+		return fmt.Errorf("field %s: pointer map values require custom or record kind, got %s", fs.name, valueType)
+	}
 
 	fs.mapKeyType = keyType
 	fs.mapValueType = valueType
 	fs.mapValueKind = valueKind
+	return nil
+}
+
+func (fs *fieldSchema) initPartyBytesSchema(pair bool) error {
+	elem := fs.typ.Elem()
+	if elem.Kind() != reflect.Struct {
+		return fmt.Errorf("field %s: %s requires a slice of structs, got %s", fs.name, kindName(fs.kind), fs.typ)
+	}
+	wantFields := 2
+	if pair {
+		wantFields = 3
+	}
+	if elem.NumField() != wantFields {
+		return fmt.Errorf(
+			"field %s: %s element must have %d fields, got %d",
+			fs.name,
+			kindName(fs.kind),
+			wantFields,
+			elem.NumField(),
+		)
+	}
+	party := elem.Field(0)
+	if !party.IsExported() || party.Type.Kind() != reflect.Uint32 {
+		return fmt.Errorf("field %s: %s party field must be exported uint32-compatible, got %s", fs.name, kindName(fs.kind), party.Type)
+	}
+	for i := 1; i < wantFields; i++ {
+		field := elem.Field(i)
+		if !field.IsExported() || field.Type.Kind() != reflect.Slice || field.Type.Elem().Kind() != reflect.Uint8 {
+			return fmt.Errorf("field %s: %s byte field %d must be exported []byte, got %s", fs.name, kindName(fs.kind), i, field.Type)
+		}
+	}
+	fs.partyIndex = 0
+	fs.firstIndex = 1
+	if pair {
+		fs.secondIndex = 2
+	}
 	return nil
 }
 

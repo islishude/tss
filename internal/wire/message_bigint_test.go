@@ -59,19 +59,11 @@ func TestBigIntRoundTripScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("signed nil pointer is zero", func(t *testing.T) {
+	t.Run("signed required nil pointer rejects", func(t *testing.T) {
 		t.Parallel()
 
-		raw, err := Marshal(bigIntSignedMessage{Val: nil})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded bigIntSignedMessage
-		if err := Unmarshal(raw, &decoded); err != nil {
-			t.Fatal(err)
-		}
-		if decoded.Val == nil || decoded.Val.Sign() != 0 {
-			t.Fatalf("nil pointer round-trip: got %v", decoded.Val)
+		if _, err := Marshal(bigIntSignedMessage{Val: nil}); err == nil {
+			t.Fatal("expected required nil bigint to be rejected")
 		}
 	})
 
@@ -138,6 +130,22 @@ func TestBigIntCanonicalEncoding(t *testing.T) {
 				t.Fatalf("encoding: got %x, want %x", got, tc.want)
 			}
 		})
+	}
+}
+
+func TestOptionalBigIntAllowsNil(t *testing.T) {
+	t.Parallel()
+
+	raw, err := Marshal(optionalBigIntMessage{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded optionalBigIntMessage
+	if err := Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Val != nil {
+		t.Fatalf("optional nil bigint decoded as %v", decoded.Val)
 	}
 }
 
@@ -222,19 +230,11 @@ func TestBigUintScenarios(t *testing.T) {
 		}
 	})
 
-	t.Run("nil pointer is zero", func(t *testing.T) {
+	t.Run("required nil pointer rejects", func(t *testing.T) {
 		t.Parallel()
 
-		raw, err := Marshal(bigUintMessage{Val: nil})
-		if err != nil {
-			t.Fatal(err)
-		}
-		var decoded bigUintMessage
-		if err := Unmarshal(raw, &decoded); err != nil {
-			t.Fatal(err)
-		}
-		if decoded.Val == nil || decoded.Val.Sign() != 0 {
-			t.Fatalf("nil round-trip for unsigned: got %v", decoded.Val)
+		if _, err := Marshal(bigUintMessage{Val: nil}); err == nil {
+			t.Fatal("expected required nil biguint to be rejected")
 		}
 	})
 

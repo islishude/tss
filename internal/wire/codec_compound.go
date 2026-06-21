@@ -56,10 +56,10 @@ func (fs fieldSchema) decodeU32List(fv reflect.Value, raw []byte, limitSet Field
 	if err != nil {
 		return err
 	}
-	if int(count) > maxRecordCount {
+	if uint64(count) > uint64(maxRecordCount) {
 		return fmt.Errorf("u32list count too large: %d", count)
 	}
-	if maxItems > 0 && int(count) > maxItems {
+	if maxItems > 0 && uint64(count) > uint64(maxItems) {
 		return fmt.Errorf("u32list count %d exceeds max_items=%d", count, maxItems)
 	}
 	if uint64(len(raw)-offset) != uint64(count)*4 {
@@ -90,20 +90,16 @@ func (fs fieldSchema) decodeU32List(fv reflect.Value, raw []byte, limitSet Field
 
 func (fs fieldSchema) encodeBytesList(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
-	out := Uint32(uint32(n))
-	for i := range n {
-		out = AppendBytes(out, NonNilBytes(fv.Index(i).Bytes()))
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("byteslist count %d exceeds max", n)
 	}
+	var maxBytes int
 	if fs.maxBytes != "" {
 		max, err := fs.getLimit(fs.maxBytes, limitSet)
 		if err != nil {
 			return nil, err
 		}
-		for i := range n {
-			if fv.Index(i).Len() > max {
-				return nil, fmt.Errorf("byteslist item %d length %d exceeds max_bytes=%d", i, fv.Index(i).Len(), max)
-			}
-		}
+		maxBytes = max
 	}
 	if fs.maxItems != "" {
 		max, err := fs.getLimit(fs.maxItems, limitSet)
@@ -112,6 +108,18 @@ func (fs fieldSchema) encodeBytesList(fv reflect.Value, limitSet FieldLimits) ([
 		}
 		if n > max {
 			return nil, fmt.Errorf("byteslist count %d exceeds max_items=%d", n, max)
+		}
+	}
+	out := Uint32(uint32(n))
+	for i := range n {
+		item := NonNilBytes(fv.Index(i).Bytes())
+		if maxBytes > 0 && len(item) > maxBytes {
+			return nil, fmt.Errorf("byteslist item %d length %d exceeds max_bytes=%d", i, len(item), maxBytes)
+		}
+		var err error
+		out, err = AppendBytesChecked(out, item)
+		if err != nil {
+			return nil, fmt.Errorf("byteslist item %d: %w", i, err)
 		}
 	}
 	return out, nil
@@ -165,25 +173,16 @@ func (fs fieldSchema) decodeBytesList(fv reflect.Value, raw []byte, limitSet Fie
 
 func (fs fieldSchema) encodePartyBytes(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
-	out := Uint32(uint32(n))
-	for i := range n {
-		rec := fv.Index(i)
-		party := rec.Field(0)
-		bytes := rec.Field(1)
-		out = append(out, Uint32(uint32(party.Uint()))...)
-		out = AppendBytes(out, NonNilBytes(bytes.Bytes()))
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("partybytes count %d exceeds max", n)
 	}
+	var maxBytes int
 	if fs.maxBytes != "" {
 		max, err := fs.getLimit(fs.maxBytes, limitSet)
 		if err != nil {
 			return nil, err
 		}
-		for i := range n {
-			b := fv.Index(i).Field(1)
-			if b.Len() > max {
-				return nil, fmt.Errorf("partybytes item %d bytes length %d exceeds max_bytes=%d", i, b.Len(), max)
-			}
-		}
+		maxBytes = max
 	}
 	if fs.maxItems != "" {
 		max, err := fs.getLimit(fs.maxItems, limitSet)
@@ -192,6 +191,21 @@ func (fs fieldSchema) encodePartyBytes(fv reflect.Value, limitSet FieldLimits) (
 		}
 		if n > max {
 			return nil, fmt.Errorf("partybytes count %d exceeds max_items=%d", n, max)
+		}
+	}
+	out := Uint32(uint32(n))
+	for i := range n {
+		rec := fv.Index(i)
+		party := rec.Field(fs.partyIndex)
+		bytes := rec.Field(fs.firstIndex)
+		if maxBytes > 0 && bytes.Len() > maxBytes {
+			return nil, fmt.Errorf("partybytes item %d bytes length %d exceeds max_bytes=%d", i, bytes.Len(), maxBytes)
+		}
+		out = append(out, Uint32(uint32(party.Uint()))...)
+		var err error
+		out, err = AppendBytesChecked(out, NonNilBytes(bytes.Bytes()))
+		if err != nil {
+			return nil, fmt.Errorf("partybytes item %d: %w", i, err)
 		}
 	}
 	return out, nil
@@ -237,8 +251,8 @@ func (fs fieldSchema) decodePartyBytes(fv reflect.Value, raw []byte, limitSet Fi
 		offset = next
 
 		rec := reflect.New(elemType).Elem()
-		rec.Field(0).SetUint(uint64(party))
-		rec.Field(1).SetBytes(value)
+		rec.Field(fs.partyIndex).SetUint(uint64(party))
+		rec.Field(fs.firstIndex).SetBytes(value)
 		out.Index(i).Set(rec)
 	}
 	if offset != len(raw) {
@@ -252,31 +266,16 @@ func (fs fieldSchema) decodePartyBytes(fv reflect.Value, raw []byte, limitSet Fi
 
 func (fs fieldSchema) encodePartyBytePairs(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	n := fv.Len()
-	out := Uint32(uint32(n))
-	for i := range n {
-		rec := fv.Index(i)
-		party := rec.Field(0)
-		first := rec.Field(1)
-		second := rec.Field(2)
-		out = append(out, Uint32(uint32(party.Uint()))...)
-		out = AppendBytes(out, NonNilBytes(first.Bytes()))
-		out = AppendBytes(out, NonNilBytes(second.Bytes()))
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("partybytepairs count %d exceeds max", n)
 	}
+	var maxBytes int
 	if fs.maxBytes != "" {
 		max, err := fs.getLimit(fs.maxBytes, limitSet)
 		if err != nil {
 			return nil, err
 		}
-		for i := range n {
-			f := fv.Index(i).Field(1)
-			s := fv.Index(i).Field(2)
-			if f.Len() > max {
-				return nil, fmt.Errorf("partybytepairs item %d First length %d exceeds max_bytes=%d", i, f.Len(), max)
-			}
-			if s.Len() > max {
-				return nil, fmt.Errorf("partybytepairs item %d Second length %d exceeds max_bytes=%d", i, s.Len(), max)
-			}
-		}
+		maxBytes = max
 	}
 	if fs.maxItems != "" {
 		max, err := fs.getLimit(fs.maxItems, limitSet)
@@ -285,6 +284,29 @@ func (fs fieldSchema) encodePartyBytePairs(fv reflect.Value, limitSet FieldLimit
 		}
 		if n > max {
 			return nil, fmt.Errorf("partybytepairs count %d exceeds max_items=%d", n, max)
+		}
+	}
+	out := Uint32(uint32(n))
+	for i := range n {
+		rec := fv.Index(i)
+		party := rec.Field(fs.partyIndex)
+		first := rec.Field(fs.firstIndex)
+		second := rec.Field(fs.secondIndex)
+		if maxBytes > 0 && first.Len() > maxBytes {
+			return nil, fmt.Errorf("partybytepairs item %d First length %d exceeds max_bytes=%d", i, first.Len(), maxBytes)
+		}
+		if maxBytes > 0 && second.Len() > maxBytes {
+			return nil, fmt.Errorf("partybytepairs item %d Second length %d exceeds max_bytes=%d", i, second.Len(), maxBytes)
+		}
+		out = append(out, Uint32(uint32(party.Uint()))...)
+		var err error
+		out, err = AppendBytesChecked(out, NonNilBytes(first.Bytes()))
+		if err != nil {
+			return nil, fmt.Errorf("partybytepairs item %d First: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, NonNilBytes(second.Bytes()))
+		if err != nil {
+			return nil, fmt.Errorf("partybytepairs item %d Second: %w", i, err)
 		}
 	}
 	return out, nil
@@ -335,9 +357,9 @@ func (fs fieldSchema) decodePartyBytePairs(fv reflect.Value, raw []byte, limitSe
 		offset = next
 
 		rec := reflect.New(elemType).Elem()
-		rec.Field(0).SetUint(uint64(party))
-		rec.Field(1).SetBytes(first)
-		rec.Field(2).SetBytes(second)
+		rec.Field(fs.partyIndex).SetUint(uint64(party))
+		rec.Field(fs.firstIndex).SetBytes(first)
+		rec.Field(fs.secondIndex).SetBytes(second)
 		out.Index(i).Set(rec)
 	}
 	if offset != len(raw) {

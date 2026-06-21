@@ -66,7 +66,7 @@ type msgHookErrorUnmarshal struct {
 	Value uint16
 }
 
-func (msgHookErrorUnmarshal) WireType() string    { return "wire.test.msghook.err.unmarshal" }
+func (msgHookErrorUnmarshal) WireType() string    { return "wire.test.msghook" }
 func (msgHookErrorUnmarshal) WireVersion() uint16 { return 1 }
 
 var errUnmarshalHook = errors.New("unmarshal hook error")
@@ -88,7 +88,7 @@ type msgHookWithBeforeAfter struct {
 	AfterCalled  bool
 }
 
-func (m msgHookWithBeforeAfter) WireType() string    { return "wire.test.msghook.lifecycle" }
+func (m msgHookWithBeforeAfter) WireType() string    { return "wire.test.msghook" }
 func (m msgHookWithBeforeAfter) WireVersion() uint16 { return 1 }
 
 func (m *msgHookWithBeforeAfter) BeforeMarshalWire() error {
@@ -120,7 +120,7 @@ type msgHookWithValidate struct {
 	Value uint16
 }
 
-func (m msgHookWithValidate) WireType() string    { return "wire.test.msghook.validate" }
+func (m msgHookWithValidate) WireType() string    { return "wire.test.msghook" }
 func (m msgHookWithValidate) WireVersion() uint16 { return 1 }
 
 func (m msgHookWithValidate) Validate() error {
@@ -188,7 +188,7 @@ type msgHookPtrOnly struct {
 	Value uint16
 }
 
-func (msgHookPtrOnly) WireType() string    { return "wire.test.msghook.ptronly" }
+func (msgHookPtrOnly) WireType() string    { return "wire.test.msghook" }
 func (msgHookPtrOnly) WireVersion() uint16 { return 1 }
 
 func (m *msgHookPtrOnly) MarshalWireMessage(opts ...MarshalOption) ([]byte, error) {
@@ -203,6 +203,43 @@ func (m *msgHookPtrOnly) UnmarshalWireMessage(in []byte, opts ...UnmarshalOption
 	}
 	m.Value = dto.Value
 	return nil
+}
+
+type rawMessageHook struct {
+	raw []byte
+}
+
+func (rawMessageHook) WireType() string    { return "wire.test.rawhook" }
+func (rawMessageHook) WireVersion() uint16 { return 1 }
+
+func (m rawMessageHook) MarshalWireMessage(opts ...MarshalOption) ([]byte, error) {
+	return bytes.Clone(m.raw), nil
+}
+
+type acceptingMessageHook struct {
+	Value uint16
+}
+
+func (acceptingMessageHook) WireType() string    { return "wire.test.rawhook" }
+func (acceptingMessageHook) WireVersion() uint16 { return 1 }
+
+func (m *acceptingMessageHook) UnmarshalWireMessage(in []byte, opts ...UnmarshalOption) error {
+	m.Value = 42
+	return nil
+}
+
+func rawHookFrame(version uint16, fields []Field) []byte {
+	out := append([]byte{}, magic...)
+	out = AppendUint16(out, uint16(len("wire.test.rawhook")))
+	out = append(out, "wire.test.rawhook"...)
+	out = AppendUint16(out, version)
+	out = AppendUint16(out, uint16(len(fields)))
+	for _, field := range fields {
+		out = AppendUint16(out, field.Tag)
+		out = AppendUint32(out, uint32(len(field.Value)))
+		out = append(out, field.Value...)
+	}
+	return out
 }
 
 // ---- Marshal tests ----
@@ -377,6 +414,43 @@ func TestMarshalRejectsNonMessageEvenWithHook(t *testing.T) {
 	}
 }
 
+func TestMessageMarshalerOutputReceivesCanonicalSelfCheck(t *testing.T) {
+	t.Parallel()
+
+	wrongType, err := MarshalFields(1, "wire.test.other", []Field{{Tag: 1, Value: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	wrongVersion, err := MarshalFields(2, "wire.test.rawhook", []Field{{Tag: 1, Value: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	valid, err := MarshalFields(1, "wire.test.rawhook", []Field{{Tag: 1, Value: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	tests := []struct {
+		name string
+		raw  []byte
+	}{
+		{name: "wrong type", raw: wrongType},
+		{name: "wrong version", raw: wrongVersion},
+		{name: "tag zero", raw: rawHookFrame(1, []Field{{Tag: 0, Value: []byte{1}}})},
+		{name: "duplicate tag", raw: rawHookFrame(1, []Field{{Tag: 1, Value: []byte{1}}, {Tag: 1, Value: []byte{2}}})},
+		{name: "unsorted tag", raw: rawHookFrame(1, []Field{{Tag: 2, Value: []byte{1}}, {Tag: 1, Value: []byte{2}}})},
+		{name: "trailing bytes", raw: append(bytes.Clone(valid), 0xff)},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := Marshal(rawMessageHook{raw: tc.raw}); err == nil {
+				t.Fatal("expected invalid hook output to be rejected")
+			}
+		})
+	}
+}
+
 // ---- Unmarshal tests ----
 
 func TestMessageUnmarshalerCalled(t *testing.T) {
@@ -433,6 +507,29 @@ func TestMessageUnmarshalerFailAtomic(t *testing.T) {
 	// Original dst must be unchanged.
 	if decoded.Value != 99 {
 		t.Fatalf("dst was modified on failure: got %d, want 99", decoded.Value)
+	}
+}
+
+func TestMessageUnmarshalerInputReceivesFramePreflight(t *testing.T) {
+	t.Parallel()
+
+	malformed := rawHookFrame(1, []Field{{Tag: 0, Value: []byte{1}}})
+	decoded := acceptingMessageHook{Value: 99}
+	if err := Unmarshal(malformed, &decoded); err == nil {
+		t.Fatal("expected malformed frame to be rejected before hook")
+	}
+	if decoded.Value != 99 {
+		t.Fatalf("destination changed on frame rejection: %d", decoded.Value)
+	}
+
+	valid, err := MarshalFields(1, "wire.test.rawhook", []Field{{Tag: 1, Value: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := Unmarshal(valid, &decoded, WithFrameLimits(FrameLimits{
+		MaxTotalBytes: len(valid) - 1,
+	})); err == nil {
+		t.Fatal("expected partial frame limit to reject oversized hook input")
 	}
 }
 

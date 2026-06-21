@@ -311,6 +311,10 @@ func (r SignAttemptRecord) MarshalWireMessage(opts ...wire.MarshalOption) ([]byt
 	if err := checkSignAttemptWireBytes(certificate, config.envelopeBytes, "delivery certificate"); err != nil {
 		return nil, err
 	}
+	recipients, err := wire.EncodeUint32ListChecked(r.DeliveryPolicy.Recipients)
+	if err != nil {
+		return nil, fmt.Errorf("encode delivery recipients: %w", err)
+	}
 	fields := []wire.Field{
 		{Tag: 1, Value: wire.Uint16(r.RecordVersion)},
 		{Tag: 2, Value: []byte(r.Protocol)},
@@ -332,7 +336,7 @@ func (r SignAttemptRecord) MarshalWireMessage(opts ...wire.MarshalOption) ([]byt
 		{Tag: 18, Value: signAttemptUint8(uint8(r.DeliveryPolicy.Mode))},
 		{Tag: 19, Value: signAttemptUint8(uint8(r.DeliveryPolicy.Confidentiality))},
 		{Tag: 20, Value: signAttemptUint8(uint8(r.DeliveryPolicy.BroadcastConsistency))},
-		{Tag: 21, Value: wire.EncodeUint32List(r.DeliveryPolicy.Recipients)},
+		{Tag: 21, Value: recipients},
 		{Tag: 22, Value: acks},
 		{Tag: 23, Value: wire.NonNilBytes(certificate)},
 		{Tag: 24, Value: wire.Bool(r.DeliveryState.DeliveryComplete)},
@@ -608,13 +612,19 @@ func checkSignAttemptWireBytes(raw []byte, maxBytes int, name string) error {
 }
 
 func marshalSignAttemptAcks(acks []tss.BroadcastAck, opts ...wire.MarshalOption) ([]byte, error) {
+	if uint64(len(acks)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("delivery ack count %d exceeds uint32", len(acks))
+	}
 	out := wire.Uint32(uint32(len(acks)))
 	for i, ack := range acks {
 		record, err := wire.MarshalRecordValue(ack, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("delivery ack %d: %w", i, err)
 		}
-		out = wire.AppendBytes(out, record)
+		out, err = wire.AppendBytesChecked(out, record)
+		if err != nil {
+			return nil, fmt.Errorf("delivery ack %d: %w", i, err)
+		}
 	}
 	return out, nil
 }
@@ -623,6 +633,12 @@ func unmarshalSignAttemptAcks(raw []byte, frameLimits wire.FrameLimits, opts ...
 	count, offset, err := wire.ReadUint32(raw, 0)
 	if err != nil {
 		return nil, fmt.Errorf("invalid delivery ack count: %w", err)
+	}
+	if uint64(count) > 65535 {
+		return nil, fmt.Errorf("delivery ack count %d exceeds global limit", count)
+	}
+	if uint64(count)*4 > uint64(len(raw)-offset) {
+		return nil, errors.New("invalid delivery ack list length")
 	}
 	out := make([]tss.BroadcastAck, 0, int(count))
 	for i := range int(count) {

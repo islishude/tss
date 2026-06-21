@@ -58,10 +58,13 @@ func marshalFieldBody(fields []Field) ([]byte, error) {
 	}
 	var last uint16
 	for i, field := range fields {
+		if field.Tag == 0 {
+			return nil, errors.New("wire field tag 0 is invalid")
+		}
 		if field.Value == nil {
 			return nil, fmt.Errorf("nil wire field %d", field.Tag)
 		}
-		if len(field.Value) > math.MaxUint32 {
+		if uint64(len(field.Value)) > math.MaxUint32 {
 			return nil, fmt.Errorf("wire field %d too large", field.Tag)
 		}
 		if i > 0 && field.Tag <= last {
@@ -99,6 +102,33 @@ func DefaultFrameLimits() FrameLimits {
 	}
 }
 
+func (l FrameLimits) withDefaults() FrameLimits {
+	defaults := DefaultFrameLimits()
+	if l.MaxTotalBytes == 0 {
+		l.MaxTotalBytes = defaults.MaxTotalBytes
+	}
+	if l.MaxFields == 0 {
+		l.MaxFields = defaults.MaxFields
+	}
+	if l.MaxFieldBytes == 0 {
+		l.MaxFieldBytes = defaults.MaxFieldBytes
+	}
+	return l
+}
+
+func (l FrameLimits) validate() error {
+	if l.MaxTotalBytes <= 0 {
+		return errors.New("wire MaxTotalBytes must be positive")
+	}
+	if l.MaxFields <= 0 {
+		return errors.New("wire MaxFields must be positive")
+	}
+	if l.MaxFieldBytes <= 0 {
+		return errors.New("wire MaxFieldBytes must be positive")
+	}
+	return nil
+}
+
 // UnmarshalFields decodes a typed message and rejects trailing or non-canonical data.
 // It uses DefaultFrameLimits to guard against oversized inputs.
 func UnmarshalFields(in []byte, expectedTypeID string) (uint16, []Field, error) {
@@ -109,6 +139,10 @@ func UnmarshalFields(in []byte, expectedTypeID string) (uint16, []Field, error) 
 // It checks the total input size, field count, and per-field value size before
 // allocating memory, preventing oversized messages from causing OOM.
 func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLimits) (uint16, []Field, error) {
+	limits = limits.withDefaults()
+	if err := limits.validate(); err != nil {
+		return 0, nil, err
+	}
 	if expectedTypeID == "" {
 		return 0, nil, errors.New("empty expected wire type id")
 	}
@@ -129,17 +163,18 @@ func UnmarshalFieldsWithLimits(in []byte, expectedTypeID string, limits FrameLim
 	if typeLen == 0 {
 		return 0, nil, errors.New("empty wire type id")
 	}
-	if len(in)-offset < int(typeLen) {
+	if uint64(len(in)-offset) < uint64(typeLen) {
 		return 0, nil, errors.New("truncated wire type id")
 	}
-	typeID := string(in[offset : offset+int(typeLen)])
+	typeLenInt := int(typeLen)
+	typeID := string(in[offset : offset+typeLenInt])
 	if !utf8.ValidString(typeID) {
 		return 0, nil, errors.New("wire type id must be valid UTF-8")
 	}
 	if typeID != expectedTypeID {
 		return 0, nil, fmt.Errorf("unexpected wire type id %q", typeID)
 	}
-	offset += int(typeLen)
+	offset += typeLenInt
 	version, offset, err := ReadUint16(in, offset)
 	if err != nil {
 		return 0, nil, err
@@ -179,6 +214,9 @@ func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string)
 		if err != nil {
 			return nil, 0, err
 		}
+		if tag == 0 {
+			return nil, 0, errors.New("wire field tag 0 is invalid")
+		}
 		if i > 0 && tag <= last {
 			return nil, 0, errors.New("wire fields must be strictly increasing")
 		}
@@ -191,13 +229,14 @@ func unmarshalFieldBody(raw []byte, offset int, limits FrameLimits, name string)
 		if uint64(len(raw)-offset) < uint64(length) {
 			return nil, 0, fmt.Errorf("truncated wire field %d", tag)
 		}
-		if int(length) > limits.MaxFieldBytes {
+		if uint64(length) > uint64(limits.MaxFieldBytes) {
 			return nil, 0, fmt.Errorf("wire field %d too large: %d > %d", tag, length, limits.MaxFieldBytes)
 		}
-		value := make([]byte, length)
-		copy(value, raw[offset:offset+int(length)])
+		lengthInt := int(length)
+		value := make([]byte, lengthInt)
+		copy(value, raw[offset:offset+lengthInt])
 		fields = append(fields, Field{Tag: tag, Value: value})
-		offset += int(length)
+		offset += lengthInt
 		last = tag
 	}
 	return fields, offset, nil

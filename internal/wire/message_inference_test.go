@@ -6,6 +6,10 @@ import (
 	"testing"
 )
 
+type taggedUnexportedField struct {
+	secret []byte `wire:"1,bytes"`
+}
+
 // TestLenMismatchWithArrayLength verifies that len=N is validated against
 // the array length at schema parse time for bytes fields.
 func TestLenMismatchWithArrayLength(t *testing.T) {
@@ -43,6 +47,105 @@ func TestLenMismatchWithArrayLength(t *testing.T) {
 			t.Fatal("expected schema error for len=0")
 		}
 	})
+}
+
+func TestImplicitArrayLengthIsExact(t *testing.T) {
+	t.Parallel()
+
+	for _, value := range [][]byte{
+		{1, 2, 3},
+		{1, 2, 3, 4, 5},
+	} {
+		raw, err := MarshalFields(1, "test.implicitarray", []Field{{Tag: 1, Value: value}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		var decoded implicitArrayMessage
+		if err := Unmarshal(raw, &decoded); err == nil {
+			t.Fatalf("accepted array value length %d", len(value))
+		}
+	}
+}
+
+func TestSchemaRejectsTaggedUnexportedField(t *testing.T) {
+	t.Parallel()
+
+	_ = taggedUnexportedField{}.secret
+	if _, err := getSchema(reflect.TypeFor[taggedUnexportedField]()); err == nil {
+		t.Fatal("expected tagged unexported field to be rejected")
+	}
+}
+
+func TestFieldTagAcceptsPointerToStruct(t *testing.T) {
+	t.Parallel()
+
+	tag, err := FieldTag(&simpleMessage{}, "Name")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if tag != 1 {
+		t.Fatalf("tag = %d, want 1", tag)
+	}
+}
+
+func TestSchemaRejectsOptionalPrimitivePointers(t *testing.T) {
+	t.Parallel()
+
+	tests := []reflect.Type{
+		reflect.TypeFor[struct {
+			Value *uint32 `wire:"1,optional"`
+		}](),
+		reflect.TypeFor[struct {
+			Value *string `wire:"1,optional"`
+		}](),
+		reflect.TypeFor[struct {
+			Value *[]byte `wire:"1,optional"`
+		}](),
+		reflect.TypeFor[struct {
+			Value *bool `wire:"1,optional"`
+		}](),
+	}
+	for _, typ := range tests {
+		if _, err := getSchema(typ); err == nil {
+			t.Fatalf("accepted optional primitive field in %s", typ)
+		}
+	}
+}
+
+func TestSchemaRejectsMalformedPartyCompoundTypes(t *testing.T) {
+	t.Parallel()
+
+	tests := []reflect.Type{
+		reflect.TypeFor[struct {
+			Items []struct {
+				Party uint32
+				Bytes string
+			} `wire:"1,partybytes"`
+		}](),
+		reflect.TypeFor[struct {
+			Items []struct {
+				Party  uint32
+				First  []byte
+				Second uint32
+			} `wire:"1,partybytepairs"`
+		}](),
+	}
+	for _, typ := range tests {
+		if _, err := getSchema(typ); err == nil {
+			t.Fatalf("accepted malformed compound type %s", typ)
+		}
+	}
+}
+
+func TestSchemaRejectsRetiredAllowEmptyOption(t *testing.T) {
+	t.Parallel()
+
+	type bad struct {
+		Data []byte `wire:"1,bytes,allow_empty"`
+	}
+	if _, err := getSchema(reflect.TypeFor[bad]()); err == nil {
+		t.Fatal("expected allow_empty to be rejected")
+	}
 }
 
 func TestInferredKindRoundTripScenarios(t *testing.T) {

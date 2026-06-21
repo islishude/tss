@@ -320,11 +320,7 @@ func marshalPartySetValue(parties tss.PartySet, maxItems int) ([]byte, error) {
 	if maxItems > 0 && len(parties) > maxItems {
 		return nil, fmt.Errorf("party count %d exceeds max_items=%d", len(parties), maxItems)
 	}
-	out := wire.Uint32(uint32(len(parties)))
-	for _, id := range parties {
-		out = append(out, wire.Uint32(id)...)
-	}
-	return out, nil
+	return wire.EncodeUint32ListChecked(parties)
 }
 
 func unmarshalPartySetValue(raw []byte, maxItems int) (tss.PartySet, error) {
@@ -332,7 +328,7 @@ func unmarshalPartySetValue(raw []byte, maxItems int) (tss.PartySet, error) {
 	if err != nil {
 		return nil, err
 	}
-	if maxItems > 0 && int(count) > maxItems {
+	if maxItems > 0 && uint64(count) > uint64(maxItems) {
 		return nil, fmt.Errorf("party count %d exceeds max_items=%d", count, maxItems)
 	}
 	if uint64(len(raw)-offset) != uint64(count)*4 {
@@ -354,12 +350,19 @@ func marshalBytesListValue(values [][]byte, maxBytes, maxItems int, name string)
 	if maxItems > 0 && len(values) > maxItems {
 		return nil, fmt.Errorf("%s count %d exceeds max_items=%d", name, len(values), maxItems)
 	}
+	if uint64(len(values)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("%s count %d exceeds uint32", name, len(values))
+	}
 	out := wire.Uint32(uint32(len(values)))
 	for i, value := range values {
 		if maxBytes > 0 && len(value) > maxBytes {
 			return nil, fmt.Errorf("%s item %d length %d exceeds max_bytes=%d", name, i, len(value), maxBytes)
 		}
-		out = wire.AppendBytes(out, wire.NonNilBytes(value))
+		var err error
+		out, err = wire.AppendBytesChecked(out, wire.NonNilBytes(value))
+		if err != nil {
+			return nil, fmt.Errorf("%s item %d: %w", name, i, err)
+		}
 	}
 	return out, nil
 }
@@ -369,7 +372,7 @@ func unmarshalBytesListValue(raw []byte, maxBytes, maxItems int, name string) ([
 	if err != nil {
 		return nil, err
 	}
-	if maxItems > 0 && int(count) > maxItems {
+	if maxItems > 0 && uint64(count) > uint64(maxItems) {
 		return nil, fmt.Errorf("%s count %d exceeds max_items=%d", name, count, maxItems)
 	}
 	out := make([][]byte, int(count))
@@ -408,14 +411,23 @@ func marshalKeySharePartyDataMap(data map[tss.PartyID]keySharePartyData, limits 
 			return 0
 		}
 	})
+	if uint64(len(ids)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("party data count %d exceeds uint32", len(ids))
+	}
 	out := wire.Uint32(uint32(len(ids)))
 	for _, id := range ids {
 		value, err := marshalKeySharePartyData(data[id], limits, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("party data %d: %w", id, err)
 		}
-		out = wire.AppendBytes(out, wire.Uint32(id))
-		out = wire.AppendBytes(out, value)
+		out, err = wire.AppendBytesChecked(out, wire.Uint32(id))
+		if err != nil {
+			return nil, fmt.Errorf("party data key %d: %w", id, err)
+		}
+		out, err = wire.AppendBytesChecked(out, value)
+		if err != nil {
+			return nil, fmt.Errorf("party data value %d: %w", id, err)
+		}
 	}
 	return out, nil
 }
@@ -430,7 +442,7 @@ func unmarshalKeySharePartyDataMap(
 	if err != nil {
 		return nil, err
 	}
-	if int(count) > limits.Threshold.MaxParties {
+	if uint64(count) > uint64(limits.Threshold.MaxParties) {
 		return nil, fmt.Errorf("party data count %d exceeds max_items=%d", count, limits.Threshold.MaxParties)
 	}
 	out := make(map[tss.PartyID]keySharePartyData, int(count))
@@ -969,13 +981,19 @@ func marshalPresignVerifyShares(
 	if len(shares) > limits.Threshold.MaxSigners {
 		return nil, fmt.Errorf("verify shares count %d exceeds max_items=%d", len(shares), limits.Threshold.MaxSigners)
 	}
+	if uint64(len(shares)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("verify shares count %d exceeds uint32", len(shares))
+	}
 	out := wire.Uint32(uint32(len(shares)))
 	for i, share := range shares {
 		record, err := wire.MarshalRecordValue(share, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("verify shares item %d: %w", i, err)
 		}
-		out = wire.AppendBytes(out, record)
+		out, err = wire.AppendBytesChecked(out, record)
+		if err != nil {
+			return nil, fmt.Errorf("verify shares item %d: %w", i, err)
+		}
 	}
 	return out, nil
 }
@@ -990,7 +1008,7 @@ func unmarshalPresignVerifyShares(
 	if err != nil {
 		return nil, fmt.Errorf("invalid verify shares count: %w", err)
 	}
-	if int(count) > limits.Threshold.MaxSigners {
+	if uint64(count) > uint64(limits.Threshold.MaxSigners) {
 		return nil, fmt.Errorf("verify shares count %d exceeds max_items=%d", count, limits.Threshold.MaxSigners)
 	}
 	out := make([]signVerifyShare, int(count))

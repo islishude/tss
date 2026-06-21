@@ -65,15 +65,18 @@ func (fs fieldSchema) encodeBytes(fv reflect.Value) []byte {
 }
 
 // setBytesValue sets a []byte or [N]byte field from raw bytes.
-func (fs fieldSchema) setBytesValue(fv reflect.Value, out []byte) {
+func (fs fieldSchema) setBytesValue(fv reflect.Value, out []byte) error {
 	if fv.Kind() == reflect.Array {
-		n := fv.Len()
-		for i := range min(n, len(out)) {
+		if len(out) != fv.Len() {
+			return fmt.Errorf("array bytes length %d, want %d", len(out), fv.Len())
+		}
+		for i := range fv.Len() {
 			fv.Index(i).SetUint(uint64(out[i]))
 		}
 	} else {
 		fv.SetBytes(out)
 	}
+	return nil
 }
 
 func (fs fieldSchema) decodeBool(fv reflect.Value, raw []byte) error {
@@ -95,8 +98,7 @@ func (fs fieldSchema) decodeBytes(fv reflect.Value, raw []byte, limitSet FieldLi
 	// Copy to prevent aliasing with the decode buffer.
 	out := make([]byte, len(raw))
 	copy(out, raw)
-	fs.setBytesValue(fv, out)
-	return nil
+	return fs.setBytesValue(fv, out)
 }
 
 func (fs fieldSchema) decodeString(fv reflect.Value, raw []byte, limitSet FieldLimits) error {

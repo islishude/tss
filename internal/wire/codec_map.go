@@ -3,6 +3,7 @@ package wire
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"reflect"
 	"sort"
 )
@@ -28,6 +29,9 @@ func (fs fieldSchema) encodeMap(fv reflect.Value, limitSet FieldLimits) ([]byte,
 	}
 
 	n := fv.Len()
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("map count %d exceeds uint32", n)
+	}
 
 	if fs.maxItems != "" {
 		max, err := fs.getLimit(fs.maxItems, limitSet)
@@ -73,8 +77,15 @@ func (fs fieldSchema) encodeMap(fv reflect.Value, limitSet FieldLimits) ([]byte,
 		if i > 0 && bytes.Compare(entries[i-1].key, entry.key) >= 0 {
 			return nil, fmt.Errorf("map entries contain duplicate canonical key")
 		}
-		out = AppendBytes(out, entry.key)
-		out = AppendBytes(out, entry.value)
+		var err error
+		out, err = AppendBytesChecked(out, entry.key)
+		if err != nil {
+			return nil, fmt.Errorf("map key %d: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, entry.value)
+		if err != nil {
+			return nil, fmt.Errorf("map value %d: %w", i, err)
+		}
 	}
 
 	return out, nil
@@ -134,7 +145,29 @@ func (fs fieldSchema) decodeMap(
 		}
 		prevKey = keyBytes
 
-		valueBytes, next, err := ReadBytes(raw, offset)
+		if fs.fixedLenSet {
+			valueLen, _, err := ReadUint32(raw, offset)
+			if err != nil {
+				return err
+			}
+			if uint64(valueLen) != uint64(fs.fixedLen) {
+				return fmt.Errorf("map value %d length %d, want %d", i, valueLen, fs.fixedLen)
+			}
+		}
+		maxValueBytes := frameLimits.MaxFieldBytes
+		if fs.maxBytes != "" {
+			semanticMax, err := fs.getLimit(fs.maxBytes, limitSet)
+			if err != nil {
+				return err
+			}
+			if maxValueBytes <= 0 || semanticMax < maxValueBytes {
+				maxValueBytes = semanticMax
+			}
+		}
+		if fs.fixedLenSet && (maxValueBytes <= 0 || fs.fixedLen < maxValueBytes) {
+			maxValueBytes = fs.fixedLen
+		}
+		valueBytes, next, err := ReadBytesWithLimit(raw, offset, maxValueBytes)
 		if err != nil {
 			return err
 		}
@@ -191,13 +224,14 @@ func (fs fieldSchema) decodeMapKey(raw []byte) (reflect.Value, error) {
 // encodeMapValue encodes a map value using its inferred wire kind.
 func (fs fieldSchema) encodeMapValue(v reflect.Value, limitSet FieldLimits) ([]byte, error) {
 	valueFS := fieldSchema{
-		tag:      fs.tag,
-		name:     fs.name + " value",
-		kind:     fs.mapValueKind,
-		typ:      fs.mapValueType,
-		fixedLen: fs.fixedLen,
-		maxBytes: fs.maxBytes,
-		maxBits:  fs.maxBits,
+		tag:         fs.tag,
+		name:        fs.name + " value",
+		kind:        fs.mapValueKind,
+		typ:         fs.mapValueType,
+		fixedLen:    fs.fixedLen,
+		fixedLenSet: fs.fixedLenSet,
+		maxBytes:    fs.maxBytes,
+		maxBits:     fs.maxBits,
 	}
 	return valueFS.encode(v, limitSet)
 }
@@ -211,13 +245,14 @@ func (fs fieldSchema) decodeMapValue(
 	value := reflect.New(fs.mapValueType).Elem()
 
 	valueFS := fieldSchema{
-		tag:      fs.tag,
-		name:     fs.name + " value",
-		kind:     fs.mapValueKind,
-		typ:      fs.mapValueType,
-		fixedLen: fs.fixedLen,
-		maxBytes: fs.maxBytes,
-		maxBits:  fs.maxBits,
+		tag:         fs.tag,
+		name:        fs.name + " value",
+		kind:        fs.mapValueKind,
+		typ:         fs.mapValueType,
+		fixedLen:    fs.fixedLen,
+		fixedLenSet: fs.fixedLenSet,
+		maxBytes:    fs.maxBytes,
+		maxBits:     fs.maxBits,
 	}
 
 	if err := valueFS.decode(value, raw, limitSet, frameLimits); err != nil {

@@ -45,8 +45,8 @@ type withFieldLimitsForMarshal struct{ fl FieldLimits }
 
 func (o withFieldLimitsForMarshal) applyMarshal(cfg *marshalConfig) { cfg.fieldLimits = o.fl }
 
-// WithFrameLimits overrides the TLV-level decode limits.  When omitted,
-// DefaultFrameLimits is used.
+// WithFrameLimits overrides non-zero TLV-level decode limits. Zero-valued
+// members inherit the corresponding value from DefaultFrameLimits.
 func WithFrameLimits(l FrameLimits) UnmarshalOption {
 	return withFrameLimitsOpt{l}
 }

@@ -3,6 +3,7 @@ package wire
 import (
 	"errors"
 	"fmt"
+	"math"
 )
 
 // PartyBytes is a party-scoped byte string record.
@@ -26,11 +27,24 @@ type PartyTriple[T uint32Value] struct {
 	Third  []byte
 }
 
-// EncodeUint32List encodes a list of uint32-compatible values.
-func EncodeUint32List[T uint32Value](items []T) []byte {
+// EncodeUint32ListChecked encodes a list of uint32-compatible values.
+func EncodeUint32ListChecked[T uint32Value](items []T) ([]byte, error) {
+	if uint64(len(items)) > math.MaxUint32 {
+		return nil, fmt.Errorf("uint32 list count %d exceeds uint32", len(items))
+	}
 	out := Uint32(uint32(len(items)))
 	for _, item := range items {
 		out = append(out, Uint32(uint32(item))...)
+	}
+	return out, nil
+}
+
+// EncodeUint32List encodes a list of uint32-compatible values.
+// It panics when the item count exceeds the wire uint32 count domain.
+func EncodeUint32List[T uint32Value](items []T) []byte {
+	out, err := EncodeUint32ListChecked(items)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
@@ -47,10 +61,10 @@ func DecodeUint32ListWithLimit[T uint32Value](raw []byte, maxItems int) ([]T, er
 	if err != nil {
 		return nil, err
 	}
-	if int(count) > maxRecordCount {
+	if uint64(count) > uint64(maxRecordCount) {
 		return nil, fmt.Errorf("uint32 list count too large: %d > %d", count, maxRecordCount)
 	}
-	if maxItems > 0 && int(count) > maxItems {
+	if maxItems > 0 && uint64(count) > uint64(maxItems) {
 		return nil, fmt.Errorf("uint32 list count too large: %d > %d", count, maxItems)
 	}
 	if uint64(len(raw)-offset) != uint64(count)*4 {
@@ -68,11 +82,28 @@ func DecodeUint32ListWithLimit[T uint32Value](raw []byte, maxItems int) ([]T, er
 	return out, nil
 }
 
-// EncodeBytesList encodes a list of byte strings with uint32 lengths.
-func EncodeBytesList(items [][]byte) []byte {
+// EncodeBytesListChecked encodes a list of byte strings with uint32 lengths.
+func EncodeBytesListChecked(items [][]byte) ([]byte, error) {
+	if uint64(len(items)) > math.MaxUint32 {
+		return nil, fmt.Errorf("bytes list count %d exceeds uint32", len(items))
+	}
 	out := Uint32(uint32(len(items)))
-	for _, item := range items {
-		out = AppendBytes(out, item)
+	for i, item := range items {
+		var err error
+		out, err = AppendBytesChecked(out, item)
+		if err != nil {
+			return nil, fmt.Errorf("bytes list item %d: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+// EncodeBytesList encodes a list of byte strings with uint32 lengths.
+// It panics when a count or item length exceeds the wire uint32 domain.
+func EncodeBytesList(items [][]byte) []byte {
+	out, err := EncodeBytesListChecked(items)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
@@ -107,12 +138,29 @@ func DecodeBytesListWithLimit(raw []byte, maxItems int, maxItemBytes int) ([][]b
 	return out, nil
 }
 
-// EncodePartyBytes encodes party-scoped byte string records.
-func EncodePartyBytes[T uint32Value](records []PartyBytes[T]) []byte {
+// EncodePartyBytesChecked encodes party-scoped byte string records.
+func EncodePartyBytesChecked[T uint32Value](records []PartyBytes[T]) ([]byte, error) {
+	if uint64(len(records)) > math.MaxUint32 {
+		return nil, fmt.Errorf("party bytes count %d exceeds uint32", len(records))
+	}
 	out := Uint32(uint32(len(records)))
-	for _, record := range records {
+	for i, record := range records {
 		out = append(out, Uint32(uint32(record.Party))...)
-		out = AppendBytes(out, record.Bytes)
+		var err error
+		out, err = AppendBytesChecked(out, record.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("party bytes item %d: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+// EncodePartyBytes encodes party-scoped byte string records.
+// It panics when a count or item length exceeds the wire uint32 domain.
+func EncodePartyBytes[T uint32Value](records []PartyBytes[T]) []byte {
+	out, err := EncodePartyBytesChecked(records)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
@@ -151,13 +199,33 @@ func DecodePartyBytesWithLimit[T uint32Value](raw []byte, maxItems int, maxItemB
 	return out, nil
 }
 
-// EncodePartyBytePairs encodes party-scoped pairs of byte string records.
-func EncodePartyBytePairs[T uint32Value](records []PartyBytePair[T]) []byte {
+// EncodePartyBytePairsChecked encodes party-scoped pairs of byte string records.
+func EncodePartyBytePairsChecked[T uint32Value](records []PartyBytePair[T]) ([]byte, error) {
+	if uint64(len(records)) > math.MaxUint32 {
+		return nil, fmt.Errorf("party byte pair count %d exceeds uint32", len(records))
+	}
 	out := Uint32(uint32(len(records)))
-	for _, record := range records {
+	for i, record := range records {
 		out = append(out, Uint32(uint32(record.Party))...)
-		out = AppendBytes(out, record.First)
-		out = AppendBytes(out, record.Second)
+		var err error
+		out, err = AppendBytesChecked(out, record.First)
+		if err != nil {
+			return nil, fmt.Errorf("party byte pair item %d first: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, record.Second)
+		if err != nil {
+			return nil, fmt.Errorf("party byte pair item %d second: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+// EncodePartyBytePairs encodes party-scoped pairs of byte string records.
+// It panics when a count or item length exceeds the wire uint32 domain.
+func EncodePartyBytePairs[T uint32Value](records []PartyBytePair[T]) []byte {
+	out, err := EncodePartyBytePairsChecked(records)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
@@ -201,14 +269,37 @@ func DecodePartyBytePairsWithLimit[T uint32Value](raw []byte, maxItems int, maxI
 	return out, nil
 }
 
-// EncodePartyTriples encodes party-scoped triples of byte string records.
-func EncodePartyTriples[T uint32Value](records []PartyTriple[T]) []byte {
+// EncodePartyTriplesChecked encodes party-scoped triples of byte string records.
+func EncodePartyTriplesChecked[T uint32Value](records []PartyTriple[T]) ([]byte, error) {
+	if uint64(len(records)) > math.MaxUint32 {
+		return nil, fmt.Errorf("party triple count %d exceeds uint32", len(records))
+	}
 	out := Uint32(uint32(len(records)))
-	for _, record := range records {
+	for i, record := range records {
 		out = append(out, Uint32(uint32(record.Party))...)
-		out = AppendBytes(out, record.First)
-		out = AppendBytes(out, record.Second)
-		out = AppendBytes(out, record.Third)
+		var err error
+		out, err = AppendBytesChecked(out, record.First)
+		if err != nil {
+			return nil, fmt.Errorf("party triple item %d first: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, record.Second)
+		if err != nil {
+			return nil, fmt.Errorf("party triple item %d second: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, record.Third)
+		if err != nil {
+			return nil, fmt.Errorf("party triple item %d third: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+// EncodePartyTriples encodes party-scoped triples of byte string records.
+// It panics when a count or item length exceeds the wire uint32 domain.
+func EncodePartyTriples[T uint32Value](records []PartyTriple[T]) []byte {
+	out, err := EncodePartyTriplesChecked(records)
+	if err != nil {
+		panic(err)
 	}
 	return out
 }
@@ -260,10 +351,10 @@ func validateRecordCountWithLimit(raw []byte, offset int, count uint32, minRecor
 	if offset > len(raw) {
 		return fmt.Errorf("invalid %s offset", name)
 	}
-	if maxItems > 0 && int(count) > maxItems {
+	if maxItems > 0 && uint64(count) > uint64(maxItems) {
 		return fmt.Errorf("%s count too large: %d > %d", name, count, maxItems)
 	}
-	if int(count) > maxRecordCount {
+	if uint64(count) > uint64(maxRecordCount) {
 		return fmt.Errorf("%s count too large: %d > %d", name, count, maxRecordCount)
 	}
 	remaining := uint64(len(raw) - offset)

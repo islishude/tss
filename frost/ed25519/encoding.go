@@ -44,6 +44,10 @@ func (state *keyShareState) MarshalWireMessage(opts ...wire.MarshalOption) ([]by
 	if len(state.parties) > limits.Threshold.MaxParties {
 		return nil, fmt.Errorf("party count %d exceeds max_items=%d", len(state.parties), limits.Threshold.MaxParties)
 	}
+	parties, err := wire.EncodeUint32ListChecked(state.parties)
+	if err != nil {
+		return nil, fmt.Errorf("encode parties: %w", err)
+	}
 	publicKey, err := state.publicKey.MarshalWireValue()
 	if err != nil {
 		return nil, fmt.Errorf("encode public key: %w", err)
@@ -72,7 +76,7 @@ func (state *keyShareState) MarshalWireMessage(opts ...wire.MarshalOption) ([]by
 	fields := []wire.Field{
 		{Tag: 1, Value: wire.Uint32(state.party)},
 		{Tag: 2, Value: wire.Uint32(uint32(state.threshold))},
-		{Tag: 3, Value: wire.EncodeUint32List(state.parties)},
+		{Tag: 3, Value: parties},
 		{Tag: 4, Value: publicKey},
 		{Tag: 5, Value: wire.NonNilBytes(bytes.Clone(state.chainCode))},
 		{Tag: 6, Value: secretBytes},
@@ -271,14 +275,23 @@ func marshalFROSTKeySharePartyDataMap(
 		ids = append(ids, id)
 	}
 	slices.Sort(ids)
+	if uint64(len(ids)) > uint64(^uint32(0)) {
+		return nil, fmt.Errorf("party data count %d exceeds uint32", len(ids))
+	}
 	out := wire.Uint32(uint32(len(ids)))
 	for _, id := range ids {
 		value, err := marshalFROSTKeySharePartyData(data[id], limits, opts...)
 		if err != nil {
 			return nil, fmt.Errorf("party data %d: %w", id, err)
 		}
-		out = wire.AppendBytes(out, wire.Uint32(id))
-		out = wire.AppendBytes(out, value)
+		out, err = wire.AppendBytesChecked(out, wire.Uint32(id))
+		if err != nil {
+			return nil, fmt.Errorf("party data key %d: %w", id, err)
+		}
+		out, err = wire.AppendBytesChecked(out, value)
+		if err != nil {
+			return nil, fmt.Errorf("party data value %d: %w", id, err)
+		}
 	}
 	return out, nil
 }
@@ -293,7 +306,7 @@ func unmarshalFROSTKeySharePartyDataMap(
 	if err != nil {
 		return nil, err
 	}
-	if int(count) > limits.Threshold.MaxParties {
+	if uint64(count) > uint64(limits.Threshold.MaxParties) {
 		return nil, fmt.Errorf("party data count %d exceeds max_items=%d", count, limits.Threshold.MaxParties)
 	}
 	out := make(map[tss.PartyID]keySharePartyData, int(count))

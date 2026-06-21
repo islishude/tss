@@ -41,6 +41,24 @@ func TestMarshalRejectsDuplicateOrUnsortedTags(t *testing.T) {
 	if _, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte{1}}, {Tag: 1, Value: []byte{2}}}); err == nil {
 		t.Fatal("duplicate tags accepted")
 	}
+	if _, err := MarshalFields(1, "test.type", []Field{{Tag: 0, Value: []byte{1}}}); err == nil {
+		t.Fatal("tag 0 accepted")
+	}
+}
+
+func TestUnmarshalRejectsTagZero(t *testing.T) {
+	t.Parallel()
+
+	raw, err := MarshalFields(1, "test.type", []Field{{Tag: 1, Value: []byte{1}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tagOffset := len(magic) + 2 + len("test.type") + 2 + 2
+	raw[tagOffset] = 0
+	raw[tagOffset+1] = 0
+	if _, _, err := UnmarshalFields(raw, "test.type"); err == nil {
+		t.Fatal("tag 0 accepted")
+	}
 }
 
 func TestUnmarshalRejectsTrailingBytes(t *testing.T) {

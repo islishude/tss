@@ -64,6 +64,31 @@ func TestRecordFieldHelpersRejectTrailingData(t *testing.T) {
 	}
 }
 
+func TestMessageAndRecordBodyHelpersRejectTagZero(t *testing.T) {
+	t.Parallel()
+
+	msg := msgHookDTO{Value: 7}
+	if _, err := MarshalMessageBody(msg, []Field{{Tag: 0, Value: []byte{1}}}); err == nil {
+		t.Fatal("MarshalMessageBody accepted tag 0")
+	}
+	if _, err := MarshalRecordFields([]Field{{Tag: 0, Value: []byte{1}}}); err == nil {
+		t.Fatal("MarshalRecordFields accepted tag 0")
+	}
+
+	recordRaw := AppendUint16(nil, 1)
+	recordRaw = AppendUint16(recordRaw, 0)
+	recordRaw = AppendUint32(recordRaw, 1)
+	recordRaw = append(recordRaw, 1)
+	if _, err := UnmarshalRecordFieldsWithLimits(recordRaw, DefaultFrameLimits(), "test.record"); err == nil {
+		t.Fatal("UnmarshalRecordFieldsWithLimits accepted tag 0")
+	}
+
+	messageRaw := rawHookFrame(1, []Field{{Tag: 0, Value: []byte{1}}})
+	if _, err := UnmarshalMessageBody(messageRaw, rawMessageHook{}); err == nil {
+		t.Fatal("UnmarshalMessageBody accepted tag 0")
+	}
+}
+
 func TestResolveDirectCodecOptions(t *testing.T) {
 	t.Parallel()
 
@@ -89,6 +114,13 @@ func TestResolveDirectCodecOptions(t *testing.T) {
 	defaults := ResolveUnmarshalOptions()
 	if defaults.FrameLimits != DefaultFrameLimits() {
 		t.Fatalf("default frame limits = %+v, want %+v", defaults.FrameLimits, DefaultFrameLimits())
+	}
+
+	partial := ResolveUnmarshalOptions(WithFrameLimits(FrameLimits{MaxFields: 7}))
+	wantPartial := DefaultFrameLimits()
+	wantPartial.MaxFields = 7
+	if partial.FrameLimits != wantPartial {
+		t.Fatalf("partial frame limits = %+v, want %+v", partial.FrameLimits, wantPartial)
 	}
 }
 

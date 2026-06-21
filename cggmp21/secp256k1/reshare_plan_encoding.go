@@ -271,7 +271,7 @@ func marshalResharePlanVerificationShares(state *resharePlanState, limits Limits
 			Bytes: bytes.Clone(share),
 		})
 	}
-	return wire.EncodePartyBytes(shares), nil
+	return wire.EncodePartyBytesChecked(shares)
 }
 
 func decodeResharePlanFields(fields []wire.Field, config resharePlanCodecOptions, opts ...wire.UnmarshalOption) (*resharePlanState, error) {
