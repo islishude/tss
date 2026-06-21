@@ -16,7 +16,7 @@
 //	wire.Unmarshal(raw, &decoded)
 //
 // Supported kinds: u8, u16, u32, bool, bytes, string, u32list, byteslist,
-// partybytes, partybytepairs, nested, custom, bigint, biguint, bigpos,
+// partybytes, partybytepairs, nested, custom, customlist, bigint, biguint, bigpos,
 // record, recordlist, map.
 //
 // The kind may be omitted from the struct tag, in which case it is inferred
@@ -32,6 +32,8 @@
 // The "custom" kind delegates field value encoding to the field type via
 // the ValueMarshaler and ValueUnmarshaler interfaces. This lets domain types
 // define their own canonical bytes without internal/wire importing them.
+// The "customlist" kind encodes a slice of custom values using the same
+// count-and-length-prefixed item format as byteslist.
 //
 // # Field-Level API (Tests Only)
 //

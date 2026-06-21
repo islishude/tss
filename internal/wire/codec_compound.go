@@ -369,6 +369,116 @@ func (fs fieldSchema) decodePartyBytePairs(fv reflect.Value, raw []byte, limitSe
 	return nil
 }
 
+// ---- custom list ------------------------------------------------------------
+
+func (fs fieldSchema) encodeCustomList(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {
+	n := fv.Len()
+	if uint64(n) > math.MaxUint32 {
+		return nil, fmt.Errorf("customlist count %d exceeds max", n)
+	}
+	if fs.maxItems != "" {
+		max, err := fs.getLimit(fs.maxItems, limitSet)
+		if err != nil {
+			return nil, err
+		}
+		if n > max {
+			return nil, fmt.Errorf("customlist count %d exceeds max_items=%d", n, max)
+		}
+	}
+
+	out := Uint32(uint32(n))
+	for i := range n {
+		elem := fv.Index(i)
+		if elem.Kind() == reflect.Pointer && elem.IsNil() {
+			return nil, fmt.Errorf("customlist item %d is nil", i)
+		}
+		m := valueMarshaler(elem)
+		if m == nil {
+			return nil, fmt.Errorf("customlist item %d does not implement MarshalWireValue", i)
+		}
+		item, err := m.MarshalWireValue()
+		if err != nil {
+			return nil, fmt.Errorf("customlist item %d marshal: %w", i, err)
+		}
+		if item == nil {
+			return nil, fmt.Errorf("customlist item %d returned nil", i)
+		}
+		if err := fs.checkByteLimits(item, limitSet); err != nil {
+			return nil, fmt.Errorf("customlist item %d: %w", i, err)
+		}
+		out, err = AppendBytesChecked(out, item)
+		if err != nil {
+			return nil, fmt.Errorf("customlist item %d: %w", i, err)
+		}
+	}
+	return out, nil
+}
+
+func (fs fieldSchema) decodeCustomList(fv reflect.Value, raw []byte, limitSet FieldLimits) error {
+	var maxItems, maxItemBytes int
+	if fs.maxItems != "" {
+		v, err := fs.getLimit(fs.maxItems, limitSet)
+		if err != nil {
+			return err
+		}
+		maxItems = v
+	}
+	if fs.maxBytes != "" {
+		v, err := fs.getLimit(fs.maxBytes, limitSet)
+		if err != nil {
+			return err
+		}
+		maxItemBytes = v
+	}
+
+	count, offset, err := ReadUint32(raw, 0)
+	if err != nil {
+		return err
+	}
+	if err := validateRecordCountWithLimit(raw, offset, count, 4, maxItems, "customlist"); err != nil {
+		return err
+	}
+
+	elemType := fv.Type().Elem()
+	out := reflect.MakeSlice(fv.Type(), int(count), int(count))
+	for i := range int(count) {
+		item, next, err := ReadBytesWithLimit(raw, offset, maxItemBytes)
+		if err != nil {
+			return fmt.Errorf("customlist item %d: %w", i, err)
+		}
+		offset = next
+		if err := fs.checkFixedLen(item); err != nil {
+			return fmt.Errorf("customlist item %d: %w", i, err)
+		}
+
+		elem := reflect.New(elemType).Elem()
+		target := elem
+		if elemType.Kind() == reflect.Pointer {
+			target = reflect.New(elemType.Elem())
+		}
+		u := valueUnmarshaler(target)
+		if u == nil {
+			return fmt.Errorf("customlist item %d does not implement UnmarshalWireValue", i)
+		}
+		if err := u.UnmarshalWireValue(item); err != nil {
+			return fmt.Errorf("customlist item %d unmarshal: %w", i, err)
+		}
+		if elemType.Kind() == reflect.Pointer {
+			elem.Set(target)
+		} else if target.Kind() == reflect.Pointer {
+			elem.Set(target.Elem())
+		} else {
+			elem.Set(target)
+		}
+		out.Index(i).Set(elem)
+	}
+	if offset != len(raw) {
+		return fmt.Errorf("trailing customlist data")
+	}
+	fv.Set(out)
+	return nil
+}
+
 // ---- nested -----------------------------------------------------------------
 
 func (fs fieldSchema) encodeNested(fv reflect.Value, limitSet FieldLimits) ([]byte, error) {

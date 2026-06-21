@@ -123,12 +123,12 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 	if err != nil {
 		return nil, false, err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.Party, s.limits)
 	if err != nil {
 		return nil, false, err
 	}
 	for _, peer := range s.signers {
-		if peer == s.key.state.party {
+		if peer == s.key.state.Party {
 			continue
 		}
 		peerPK, err := s.key.paillierPublicFor(peer, s.limits)
@@ -145,15 +145,15 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		}
 		peerRound1 := peerState.round1.payload
 		start := mta.StartMessage{Ciphertext: peerRound1.EncK}
-		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}
-		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}
-		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}
@@ -211,7 +211,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		if err != nil {
 			return nil, false, err
 		}
-		round2Env, err := newEnvelope(s.config, presignRound2, s.key.state.party, peer, payloadPresignRound2, payload)
+		round2Env, err := newEnvelope(s.config, presignRound2, s.key.state.Party, peer, payloadPresignRound2, payload)
 		clear(payload)
 		if err != nil {
 			return nil, false, err
@@ -243,7 +243,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 	if !bytes.Equal(p.Round1Echo, s.round1Echo()) {
 		return nil, errors.New("presign round1 echo mismatch")
 	}
-	selfState, ok := s.partyState(s.key.state.party)
+	selfState, ok := s.partyState(s.key.state.Party)
 	if !ok || !selfState.round1.havePayload {
 		return nil, errors.New("missing local presign round1 state")
 	}
@@ -260,12 +260,12 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		return nil, err
 	}
 	// Initiator's own Ring-Pedersen params (the verifier's auxiliary input).
-	selfRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
+	selfRP, err := s.key.ringPedersenPublicFor(s.key.state.Party, s.limits)
 	if err != nil {
 		return nil, err
 	}
 
-	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		alphaDelta.Destroy()
 		return nil, err
 	}
-	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		alphaDelta.Destroy()
 		return nil, err

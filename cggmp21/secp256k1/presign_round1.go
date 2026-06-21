@@ -25,7 +25,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
 	}
 	if local.Self == 0 {
-		local.Self = key.state.party
+		local.Self = key.state.Party
 	}
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign plan"))
@@ -68,7 +68,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		}
 	}()
 	config := tss.ThresholdConfig{
-		Threshold:    key.state.threshold,
+		Threshold:    key.state.Threshold,
 		Parties:      signers,
 		Self:         local.Self,
 		SessionID:    sessionID,
@@ -91,11 +91,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	lambda, err := shamirsecp.LagrangeCoefficient(key.state.party, signers)
+	lambda, err := shamirsecp.LagrangeCoefficient(key.state.Party, signers)
 	if err != nil {
 		return nil, nil, err
 	}
-	sec, err := secpScalarFromSecret(key.state.secret)
+	sec, err := secpScalarFromSecret(key.state.Secret)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -129,7 +129,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 			xBarSecret.Destroy()
 		}
 	}()
-	localVerificationShare, ok := key.verificationShare(key.state.party)
+	localVerificationShare, ok := key.verificationShare(key.state.Party)
 	if !ok {
 		return nil, nil, errors.New("missing local verification share")
 	}
@@ -147,7 +147,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	paillierPub, err := key.paillierPublicFor(key.state.party, limits)
+	paillierPub, err := key.paillierPublicFor(key.state.Party, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -171,12 +171,12 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	env, err := newEnvelope(config, presignStartRound, key.state.party, tss.BroadcastPartyId, payloadPresignRound1, payload)
+	env, err := newEnvelope(config, presignStartRound, key.state.Party, tss.BroadcastPartyId, payloadPresignRound1, payload)
 	if err != nil {
 		return nil, nil, err
 	}
 	parties, partyIndex := newPresignPartyStates(signers)
-	selfState := &parties[partyIndex[key.state.party]]
+	selfState := &parties[partyIndex[key.state.Party]]
 	selfState.round1.payload = presignPayload
 	selfState.round1.havePayload = true
 	selfState.round1.verified = true
@@ -218,14 +218,14 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	out = []tss.Envelope{env}
 	prepared.out = out
 	for _, peer := range signers {
-		if peer == key.state.party {
+		if peer == key.state.Party {
 			continue
 		}
 		peerRP, err := key.ringPedersenPublicFor(peer, limits)
 		if err != nil {
 			return nil, nil, err
 		}
-		proofDomain, err := mtaStartProofDomain(key, sessionID, signers, key.state.party, peer, &paillierKey.PublicKey, contextHash, planHash, limits)
+		proofDomain, err := mtaStartProofDomain(key, sessionID, signers, key.state.Party, peer, &paillierKey.PublicKey, contextHash, planHash, limits)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -241,7 +241,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofEnv, err := newEnvelope(config, presignStartRound, key.state.party, peer, payloadPresignRound1Proof, proofPayload)
+		proofEnv, err := newEnvelope(config, presignStartRound, key.state.Party, peer, payloadPresignRound1Proof, proofPayload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -450,12 +450,12 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if err != nil {
 		return err
 	}
-	localRP, err := s.key.ringPedersenPublicFor(s.key.state.party, s.limits)
+	localRP, err := s.key.ringPedersenPublicFor(s.key.state.Party, s.limits)
 	if err != nil {
 		return err
 	}
 	start := mta.StartMessage{Ciphertext: public.EncK}
-	domain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.party, &public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+	domain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, &public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		return err
 	}

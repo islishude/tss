@@ -59,19 +59,19 @@ func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
 }
 
 type resharePlanState struct {
-	sessionID             tss.SessionID          // Reshare protocol session; all dealer and receiver messages are scoped to it.
-	curveID               string                 // Canonical curve identifier bound into the plan digest.
-	oldGroupPublicKey     []byte                 // Existing parent group public key that resharing must preserve.
-	oldGroupCommitments   [][]byte               // Existing public polynomial commitments for old shares.
-	oldVerificationShares map[tss.PartyID][]byte // Existing per-party public verification shares keyed by old party.
-	oldParties            tss.PartySet           // Canonical old key-holder set.
-	oldThreshold          int                    // Signing threshold of the old key.
-	dealerParties         tss.PartySet           // Old parties selected to contribute weighted dealer polynomials.
-	newParties            tss.PartySet           // Canonical target key-holder set.
-	newThreshold          int                    // Signing threshold for the reshared key.
-	chainCode             []byte                 // HD chain code preserved across reshare.
-	paillierBits          int                    // Shared modulus size for new receiver auxiliary material.
-	securityParams        SecurityParams         // Cryptographic profile required for new auxiliary material.
+	SessionID             tss.SessionID          `wire:"1,bytes,len=32"`                                  // Reshare protocol session; all dealer and receiver messages are scoped to it.
+	CurveID               string                 `wire:"2,string,max_bytes=curve_id"`                     // Canonical curve identifier bound into the plan digest.
+	OldGroupPublicKey     []byte                 `wire:"3,bytes,max_bytes=point"`                         // Existing parent group public key that resharing must preserve.
+	OldGroupCommitments   [][]byte               `wire:"4,byteslist,max_bytes=point,max_items=threshold"` // Existing public polynomial commitments for old shares.
+	OldVerificationShares map[tss.PartyID][]byte `wire:"5,map,max_items=parties,max_bytes=point"`         // Existing per-party public verification shares keyed by old party.
+	OldParties            tss.PartySet           `wire:"6,u32list,max_items=parties"`                     // Canonical old key-holder set.
+	OldThreshold          int                    `wire:"7,u32"`                                           // Signing threshold of the old key.
+	DealerParties         tss.PartySet           `wire:"8,u32list,max_items=parties"`                     // Old parties selected to contribute weighted dealer polynomials.
+	NewParties            tss.PartySet           `wire:"9,u32list,max_items=parties"`                     // Canonical target key-holder set.
+	NewThreshold          int                    `wire:"10,u32"`                                          // Signing threshold for the reshared key.
+	ChainCode             []byte                 `wire:"11,bytes,len=32"`                                 // HD chain code preserved across reshare.
+	PaillierBits          int                    `wire:"12,u32"`                                          // Shared modulus size for new receiver auxiliary material.
+	SecurityParams        SecurityParams         `wire:"13,record"`                                       // Cryptographic profile required for new auxiliary material.
 }
 
 // SessionID returns the reshare session identifier.
@@ -79,7 +79,7 @@ func (p *ResharePlan) SessionID() tss.SessionID {
 	if p == nil || p.state == nil {
 		return tss.SessionID{}
 	}
-	return p.state.sessionID
+	return p.state.SessionID
 }
 
 // CurveID returns the canonical curve identifier.
@@ -87,7 +87,7 @@ func (p *ResharePlan) CurveID() string {
 	if p == nil || p.state == nil {
 		return ""
 	}
-	return p.state.curveID
+	return p.state.CurveID
 }
 
 // OldThreshold returns the old signing threshold.
@@ -95,7 +95,7 @@ func (p *ResharePlan) OldThreshold() int {
 	if p == nil || p.state == nil {
 		return 0
 	}
-	return p.state.oldThreshold
+	return p.state.OldThreshold
 }
 
 // NewThreshold returns the new signing threshold.
@@ -103,7 +103,7 @@ func (p *ResharePlan) NewThreshold() int {
 	if p == nil || p.state == nil {
 		return 0
 	}
-	return p.state.newThreshold
+	return p.state.NewThreshold
 }
 
 // Snapshot returns a caller-owned reshare plan snapshot.
@@ -112,18 +112,18 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 		return ResharePlanSnapshot{}, false
 	}
 	return ResharePlanSnapshot{
-		SessionID:           p.state.sessionID,
-		CurveID:             p.state.curveID,
-		OldGroupPublicKey:   bytes.Clone(p.state.oldGroupPublicKey),
-		OldGroupCommitments: tss.CloneByteSlices(p.state.oldGroupCommitments),
-		OldParties:          p.state.oldParties.Clone(),
-		OldThreshold:        p.state.oldThreshold,
-		DealerParties:       p.state.dealerParties.Clone(),
-		NewParties:          p.state.newParties.Clone(),
-		NewThreshold:        p.state.newThreshold,
-		ChainCode:           bytes.Clone(p.state.chainCode),
-		PaillierBits:        p.state.paillierBits,
-		SecurityParams:      p.state.securityParams,
+		SessionID:           p.state.SessionID,
+		CurveID:             p.state.CurveID,
+		OldGroupPublicKey:   bytes.Clone(p.state.OldGroupPublicKey),
+		OldGroupCommitments: tss.CloneByteSlices(p.state.OldGroupCommitments),
+		OldParties:          p.state.OldParties.Clone(),
+		OldThreshold:        p.state.OldThreshold,
+		DealerParties:       p.state.DealerParties.Clone(),
+		NewParties:          p.state.NewParties.Clone(),
+		NewThreshold:        p.state.NewThreshold,
+		ChainCode:           bytes.Clone(p.state.ChainCode),
+		PaillierBits:        p.state.PaillierBits,
+		SecurityParams:      p.state.SecurityParams,
 	}, true
 }
 
@@ -132,7 +132,7 @@ func (p *ResharePlan) OldVerificationShare(party tss.PartyID) (VerificationShare
 	if p == nil || p.state == nil {
 		return VerificationShare{}, false
 	}
-	share, ok := p.state.oldVerificationShares[party]
+	share, ok := p.state.OldVerificationShares[party]
 	if !ok || len(share) == 0 {
 		return VerificationShare{}, false
 	}
@@ -145,7 +145,7 @@ func (p *ResharePlan) PaillierBits() int {
 	if p == nil || p.state == nil {
 		return 0
 	}
-	return p.state.paillierBits
+	return p.state.PaillierBits
 }
 
 // ReshareMessageHeader identifies one logical resharing message.
@@ -231,13 +231,13 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	}
 	var party tss.PartyID
 	if oldKey.state != nil {
-		party = oldKey.state.party
+		party = oldKey.state.Party
 	}
 	if err := oldKey.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old key share: %w", err))
 	}
-	securityParams := securityParamsForArtifact(oldKey.state.securityParams, option.SecurityParams)
-	if option.SecurityParams != nil && validSecurityParams(oldKey.state.securityParams) && oldKey.state.securityParams != *option.SecurityParams {
+	securityParams := securityParamsForArtifact(oldKey.state.SecurityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(oldKey.state.SecurityParams) && oldKey.state.SecurityParams != *option.SecurityParams {
 		return nil, invalidPlanConfig(party, errors.New("security params mismatch with old key share"))
 	}
 	if err := securityParams.Validate(); err != nil {
@@ -250,35 +250,35 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 	if paillierBits < int(securityParams.MinPaillierBits) {
 		return nil, invalidPlanConfig(party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
 	}
-	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.parties))
-	for _, id := range oldKey.state.parties {
+	verificationShares := make(map[tss.PartyID][]byte, len(oldKey.state.Parties))
+	for _, id := range oldKey.state.Parties {
 		verificationShare, ok := oldKey.verificationShare(id)
 		if !ok {
 			return nil, invalidPlanConfig(party, fmt.Errorf("missing verification share for party %d", id))
 		}
 		verificationShares[id] = append([]byte(nil), verificationShare...)
 	}
-	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.groupCommitments)
+	oldGroupCommitments, err := secp.CommitmentPointsBytes(oldKey.state.GroupCommitments)
 	if err != nil {
 		return nil, invalidPlanConfig(party, fmt.Errorf("invalid old group commitments: %w", err))
 	}
 	plan := &ResharePlan{state: &resharePlanState{
-		sessionID:             option.SessionID,
-		curveID:               reshareCurveID,
-		oldGroupPublicKey:     append([]byte(nil), oldKey.state.publicKey...),
-		oldGroupCommitments:   oldGroupCommitments,
-		oldVerificationShares: verificationShares,
-		oldParties:            tss.SortParties(oldKey.state.parties),
-		oldThreshold:          oldKey.state.threshold,
-		dealerParties:         tss.SortParties(option.DealerParties),
-		newParties:            tss.SortParties(option.NewParties),
-		newThreshold:          option.NewThreshold,
-		chainCode:             append([]byte(nil), oldKey.state.chainCode...),
-		paillierBits:          paillierBits,
-		securityParams:        securityParams,
+		SessionID:             option.SessionID,
+		CurveID:               reshareCurveID,
+		OldGroupPublicKey:     append([]byte(nil), oldKey.state.PublicKey...),
+		OldGroupCommitments:   oldGroupCommitments,
+		OldVerificationShares: verificationShares,
+		OldParties:            tss.SortParties(oldKey.state.Parties),
+		OldThreshold:          oldKey.state.Threshold,
+		DealerParties:         tss.SortParties(option.DealerParties),
+		NewParties:            tss.SortParties(option.NewParties),
+		NewThreshold:          option.NewThreshold,
+		ChainCode:             append([]byte(nil), oldKey.state.ChainCode...),
+		PaillierBits:          paillierBits,
+		SecurityParams:        securityParams,
 	}, limits: limits}
-	if len(plan.state.dealerParties) == 0 {
-		plan.state.dealerParties = plan.state.oldParties.Clone()
+	if len(plan.state.DealerParties) == 0 {
+		plan.state.DealerParties = plan.state.OldParties.Clone()
 	}
 	if err := plan.ValidateWithLimits(limits); err != nil {
 		return nil, invalidPlanConfig(party, err)
@@ -292,7 +292,7 @@ func (p *ResharePlan) Validate() error {
 	if p == nil || p.state == nil {
 		return errors.New("nil reshare plan")
 	}
-	if !isProductionSecurityParams(p.state.securityParams) {
+	if !isProductionSecurityParams(p.state.SecurityParams) {
 		return errors.New("reshare plan uses non-production security params")
 	}
 	return p.ValidateWithLimits(DefaultLimits())
@@ -306,85 +306,85 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil reshare plan")
 	}
-	if err := p.state.securityParams.Validate(); err != nil {
+	if err := p.state.SecurityParams.Validate(); err != nil {
 		return fmt.Errorf("invalid security params: %w", err)
 	}
-	if !p.state.sessionID.Valid() {
+	if !p.state.SessionID.Valid() {
 		return errors.New("reshare plan session id must not be zero")
 	}
-	if p.state.curveID != reshareCurveID {
+	if p.state.CurveID != reshareCurveID {
 		return fmt.Errorf("reshare plan curve id must be %q", reshareCurveID)
 	}
-	if _, err := secp.PointFromBytes(p.state.oldGroupPublicKey); err != nil {
+	if _, err := secp.PointFromBytes(p.state.OldGroupPublicKey); err != nil {
 		return fmt.Errorf("invalid old group public key: %w", err)
 	}
-	if p.state.oldThreshold <= 0 || p.state.oldThreshold > len(p.state.oldParties) {
+	if p.state.OldThreshold <= 0 || p.state.OldThreshold > len(p.state.OldParties) {
 		return errors.New("invalid old threshold")
 	}
-	if len(p.state.oldParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many old parties: %d > %d", len(p.state.oldParties), limits.Threshold.MaxParties)
+	if len(p.state.OldParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many old parties: %d > %d", len(p.state.OldParties), limits.Threshold.MaxParties)
 	}
-	if p.state.oldThreshold > limits.Threshold.MaxThreshold {
-		return fmt.Errorf("old threshold too large: %d > %d", p.state.oldThreshold, limits.Threshold.MaxThreshold)
+	if p.state.OldThreshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("old threshold too large: %d > %d", p.state.OldThreshold, limits.Threshold.MaxThreshold)
 	}
-	if err := limits.Threshold.ValidateThreshold(p.state.oldThreshold, len(p.state.oldParties)); err != nil {
+	if err := limits.Threshold.ValidateThreshold(p.state.OldThreshold, len(p.state.OldParties)); err != nil {
 		return fmt.Errorf("old %w", err)
 	}
-	if p.state.newThreshold <= 0 || p.state.newThreshold > len(p.state.newParties) {
+	if p.state.NewThreshold <= 0 || p.state.NewThreshold > len(p.state.NewParties) {
 		return errors.New("invalid new threshold")
 	}
-	if len(p.state.newParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many new parties: %d > %d", len(p.state.newParties), limits.Threshold.MaxParties)
+	if len(p.state.NewParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many new parties: %d > %d", len(p.state.NewParties), limits.Threshold.MaxParties)
 	}
-	if p.state.newThreshold > limits.Threshold.MaxThreshold {
-		return fmt.Errorf("new threshold too large: %d > %d", p.state.newThreshold, limits.Threshold.MaxThreshold)
+	if p.state.NewThreshold > limits.Threshold.MaxThreshold {
+		return fmt.Errorf("new threshold too large: %d > %d", p.state.NewThreshold, limits.Threshold.MaxThreshold)
 	}
-	if err := limits.Threshold.ValidateThreshold(p.state.newThreshold, len(p.state.newParties)); err != nil {
+	if err := limits.Threshold.ValidateThreshold(p.state.NewThreshold, len(p.state.NewParties)); err != nil {
 		return fmt.Errorf("new %w", err)
 	}
-	if len(p.state.oldGroupCommitments) != p.state.oldThreshold {
+	if len(p.state.OldGroupCommitments) != p.state.OldThreshold {
 		return errors.New("old group commitments length must equal old threshold")
 	}
-	for i, commitment := range p.state.oldGroupCommitments {
+	for i, commitment := range p.state.OldGroupCommitments {
 		if _, err := secp.PointFromBytes(commitment); err != nil {
 			return fmt.Errorf("invalid old group commitment %d: %w", i, err)
 		}
 	}
-	if !bytes.Equal(p.state.oldGroupCommitments[0], p.state.oldGroupPublicKey) {
+	if !bytes.Equal(p.state.OldGroupCommitments[0], p.state.OldGroupPublicKey) {
 		return errors.New("old group commitment constant must equal old public key")
 	}
-	if err := wire.ValidateStrictSortedIDs(p.state.oldParties); err != nil {
+	if err := wire.ValidateStrictSortedIDs(p.state.OldParties); err != nil {
 		return fmt.Errorf("invalid old participant set: %w", err)
 	}
-	if err := wire.ValidateStrictSortedIDs(p.state.dealerParties); err != nil {
+	if err := wire.ValidateStrictSortedIDs(p.state.DealerParties); err != nil {
 		return fmt.Errorf("invalid dealer set: %w", err)
 	}
-	if len(p.state.dealerParties) > limits.Threshold.MaxParties {
-		return fmt.Errorf("too many dealer parties: %d > %d", len(p.state.dealerParties), limits.Threshold.MaxParties)
+	if len(p.state.DealerParties) > limits.Threshold.MaxParties {
+		return fmt.Errorf("too many dealer parties: %d > %d", len(p.state.DealerParties), limits.Threshold.MaxParties)
 	}
-	if err := wire.ValidateStrictSortedIDs(p.state.newParties); err != nil {
+	if err := wire.ValidateStrictSortedIDs(p.state.NewParties); err != nil {
 		return fmt.Errorf("invalid new participant set: %w", err)
 	}
-	if len(p.state.dealerParties) < p.state.oldThreshold {
+	if len(p.state.DealerParties) < p.state.OldThreshold {
 		return errors.New("dealer set is smaller than old threshold")
 	}
-	for _, dealer := range p.state.dealerParties {
-		if !tss.ContainsParty(p.state.oldParties, dealer) {
+	for _, dealer := range p.state.DealerParties {
+		if !tss.ContainsParty(p.state.OldParties, dealer) {
 			return fmt.Errorf("dealer %d is not an old participant", dealer)
 		}
 	}
-	if len(p.state.oldVerificationShares) != len(p.state.oldParties) {
+	if len(p.state.OldVerificationShares) != len(p.state.OldParties) {
 		return errors.New("old verification share count must equal old party count")
 	}
-	for _, id := range p.state.oldParties {
-		verificationShare, ok := p.state.oldVerificationShares[id]
+	for _, id := range p.state.OldParties {
+		verificationShare, ok := p.state.OldVerificationShares[id]
 		if !ok {
 			return fmt.Errorf("missing old verification share for party %d", id)
 		}
 		if _, err := secp.PointFromBytes(verificationShare); err != nil {
 			return fmt.Errorf("invalid old verification share for party %d: %w", id, err)
 		}
-		expected, err := secp.EvalCommitments(p.state.oldGroupCommitments, id)
+		expected, err := secp.EvalCommitments(p.state.OldGroupCommitments, id)
 		if err != nil {
 			return fmt.Errorf("evaluate old verification share for party %d: %w", id, err)
 		}
@@ -396,14 +396,14 @@ func (p *ResharePlan) ValidateWithLimits(limits Limits) error {
 			return fmt.Errorf("old verification share mismatch for party %d", id)
 		}
 	}
-	if len(p.state.chainCode) != 32 {
+	if len(p.state.ChainCode) != 32 {
 		return errors.New("chain code must be 32 bytes")
 	}
-	if p.state.paillierBits < int(p.state.securityParams.MinPaillierBits) {
-		return fmt.Errorf("paillier key size %d is below security parameter minimum %d", p.state.paillierBits, p.state.securityParams.MinPaillierBits)
+	if p.state.PaillierBits < int(p.state.SecurityParams.MinPaillierBits) {
+		return fmt.Errorf("paillier key size %d is below security parameter minimum %d", p.state.PaillierBits, p.state.SecurityParams.MinPaillierBits)
 	}
-	if limits.Paillier.MaxModulusBits > 0 && p.state.paillierBits > limits.Paillier.MaxModulusBits {
-		return fmt.Errorf("paillier key size %d exceeds max %d", p.state.paillierBits, limits.Paillier.MaxModulusBits)
+	if limits.Paillier.MaxModulusBits > 0 && p.state.PaillierBits > limits.Paillier.MaxModulusBits {
+		return fmt.Errorf("paillier key size %d exceeds max %d", p.state.PaillierBits, limits.Paillier.MaxModulusBits)
 	}
 	return nil
 }
@@ -419,33 +419,33 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t := transcript.New(resharePlanDigestLabel)
 	t.AppendString("protocol", string(tss.ProtocolCGGMP21Secp256k1))
 	t.AppendUint32("version", uint32(tss.ProtocolVersion))
-	t.AppendBytes("session_id", p.state.sessionID[:])
-	t.AppendString("curve", p.state.curveID)
-	t.AppendBytes("old_group_public_key", p.state.oldGroupPublicKey)
-	t.AppendBytesList("old_group_commitments", p.state.oldGroupCommitments)
-	t.AppendUint32List("old_parties", tss.SortParties(p.state.oldParties))
-	t.AppendUint32List("dealer_parties", tss.SortParties(p.state.dealerParties))
-	t.AppendUint32List("new_parties", tss.SortParties(p.state.newParties))
-	t.AppendUint32("old_threshold", uint32(p.state.oldThreshold))
-	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
-	t.AppendBytes("chain_code", p.state.chainCode)
-	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
-	appendSecurityParamsTranscript(t, p.state.securityParams)
-	for _, id := range p.state.oldParties {
+	t.AppendBytes("session_id", p.state.SessionID[:])
+	t.AppendString("curve", p.state.CurveID)
+	t.AppendBytes("old_group_public_key", p.state.OldGroupPublicKey)
+	t.AppendBytesList("old_group_commitments", p.state.OldGroupCommitments)
+	t.AppendUint32List("old_parties", tss.SortParties(p.state.OldParties))
+	t.AppendUint32List("dealer_parties", tss.SortParties(p.state.DealerParties))
+	t.AppendUint32List("new_parties", tss.SortParties(p.state.NewParties))
+	t.AppendUint32("old_threshold", uint32(p.state.OldThreshold))
+	t.AppendUint32("new_threshold", uint32(p.state.NewThreshold))
+	t.AppendBytes("chain_code", p.state.ChainCode)
+	t.AppendUint32("paillier_bits", uint32(p.state.PaillierBits))
+	appendSecurityParamsTranscript(t, p.state.SecurityParams)
+	for _, id := range p.state.OldParties {
 		t.AppendUint32("old_party", id)
-		t.AppendBytes("old_verification_share", p.state.oldVerificationShares[id])
+		t.AppendBytes("old_verification_share", p.state.OldVerificationShares[id])
 	}
 	return t.Sum(), nil
 }
 
 // IsDealer reports whether party is in the plan's old dealer set.
 func (p *ResharePlan) IsDealer(party tss.PartyID) bool {
-	return p != nil && p.state != nil && tss.ContainsParty(p.state.dealerParties, party)
+	return p != nil && p.state != nil && tss.ContainsParty(p.state.DealerParties, party)
 }
 
 // IsReceiver reports whether party is in the plan's new receiver set.
 func (p *ResharePlan) IsReceiver(party tss.PartyID) bool {
-	return p != nil && p.state != nil && tss.ContainsParty(p.state.newParties, party)
+	return p != nil && p.state != nil && tss.ContainsParty(p.state.NewParties, party)
 }
 
 // IsOverlap reports whether party is both an old dealer and a new receiver.

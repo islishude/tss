@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"reflect"
 	"strings"
-	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -60,8 +59,8 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 		{
 			typ: reflect.TypeFor[keyShareState](),
 			fields: []string{
-				"partyData",
-				"paillierPrivateKey",
+				"PartyData",
+				"PaillierPrivateKey",
 			},
 		},
 		{
@@ -96,8 +95,8 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.state.parties = tss.NewPartySet(1)
-	k.state.groupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
+	k.state.Parties = tss.NewPartySet(1)
+	k.state.GroupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
 	paillierMaterial, err := paillierPublicMaterialFromSnapshot(testPaillierPublicShare(t), testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -106,22 +105,22 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	k.state.partyData = map[tss.PartyID]keySharePartyData{
+	k.state.PartyData = map[tss.PartyID]keySharePartyData{
 		1: {
-			verificationShare:  []byte{3},
-			paillierPublicKey:  paillierMaterial.PublicKey,
-			paillierProof:      paillierMaterial.Proof,
-			ringPedersenParams: ringPedersenMaterial.Params,
-			ringPedersenProof:  ringPedersenMaterial.Proof,
-			keygenConfirmation: &KeygenConfirmation{Sender: 1},
+			VerificationShare:  []byte{3},
+			PaillierPublicKey:  paillierMaterial.PublicKey,
+			PaillierProof:      paillierMaterial.Proof,
+			RingPedersenParams: ringPedersenMaterial.Params,
+			RingPedersenProof:  ringPedersenMaterial.Proof,
+			KeygenConfirmation: &KeygenConfirmation{Sender: 1},
 		},
 	}
-	dataBefore := k.state.partyData[1]
-	paillierBefore, err := (paillierPublicMaterial{Party: 1, PublicKey: dataBefore.paillierPublicKey, Proof: dataBefore.paillierProof}).snapshot(testLimits())
+	dataBefore := k.state.PartyData[1]
+	paillierBefore, err := (paillierPublicMaterial{Party: 1, PublicKey: dataBefore.PaillierPublicKey, Proof: dataBefore.PaillierProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ringPedersenBefore, err := (ringPedersenPublicMaterial{Party: 1, Params: dataBefore.ringPedersenParams, Proof: dataBefore.ringPedersenProof}).snapshot(testLimits())
+	ringPedersenBefore, err := (ringPedersenPublicMaterial{Party: 1, Params: dataBefore.RingPedersenParams, Proof: dataBefore.RingPedersenProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -153,22 +152,22 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	}
 	confirmation.Sender = 99
 
-	dataAfter := k.state.partyData[1]
+	dataAfter := k.state.PartyData[1]
 	metaAfter := mustKeyShareMetadata(t, k)
-	paillierAfter, err := (paillierPublicMaterial{Party: 1, PublicKey: dataAfter.paillierPublicKey, Proof: dataAfter.paillierProof}).snapshot(testLimits())
+	paillierAfter, err := (paillierPublicMaterial{Party: 1, PublicKey: dataAfter.PaillierPublicKey, Proof: dataAfter.PaillierProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	ringPedersenAfter, err := (ringPedersenPublicMaterial{Party: 1, Params: dataAfter.ringPedersenParams, Proof: dataAfter.ringPedersenProof}).snapshot(testLimits())
+	ringPedersenAfter, err := (ringPedersenPublicMaterial{Party: 1, Params: dataAfter.RingPedersenParams, Proof: dataAfter.RingPedersenProof}).snapshot(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if k.state.parties[0] != 1 ||
+	if k.state.Parties[0] != 1 ||
 		metaAfter.GroupCommitments[0][0] != originalCommitment[0] ||
-		dataAfter.verificationShare[0] != 3 ||
+		dataAfter.VerificationShare[0] != 3 ||
 		!reflect.DeepEqual(paillierBefore, paillierAfter) ||
 		!reflect.DeepEqual(ringPedersenBefore, ringPedersenAfter) ||
-		dataAfter.keygenConfirmation.Sender != 1 {
+		dataAfter.KeygenConfirmation.Sender != 1 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }
@@ -176,10 +175,10 @@ func TestFast_KeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	p := minimalCGGMP21Presign(t)
-	p.state.context.Derivation.Path = tss.DerivationPath([]uint32{1, 2}).Clone()
-	p.state.derivation.RequestedPath = tss.DerivationPath{1, 2}
-	p.state.derivation.ResolvedPath = tss.DerivationPath{1, 2}
-	p.state.derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
+	p.state.Context.Derivation.Path = tss.DerivationPath([]uint32{1, 2}).Clone()
+	p.state.Derivation.RequestedPath = tss.DerivationPath{1, 2}
+	p.state.Derivation.ResolvedPath = tss.DerivationPath{1, 2}
+	p.state.Derivation.AdditiveShift = bytes.Repeat([]byte{9}, 32)
 
 	meta := mustPresignMetadata(t, p)
 	meta.Signers[0] = 99
@@ -190,21 +189,21 @@ func TestFast_PresignGettersReturnOwnedSnapshots(t *testing.T) {
 	meta.Derivation.AdditiveShift[0] = 99
 	meta.VerificationKey[0] ^= 1
 
-	rBytes, err := secp.PointBytes(p.state.r)
+	rBytes, err := secp.PointBytes(p.state.R)
 	if err != nil {
 		t.Fatal(err)
 	}
-	publicKeyBytes, err := secp.PointBytes(p.state.publicKey)
+	publicKeyBytes, err := secp.PointBytes(p.state.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if p.state.signers[0] != 1 ||
-		p.state.context.Derivation.Path[0] != 1 ||
+	if p.state.Signers[0] != 1 ||
+		p.state.Context.Derivation.Path[0] != 1 ||
 		rBytes[0] == meta.R[0] ||
-		p.state.littleR.Bytes()[0] == meta.LittleR[0] ||
+		p.state.LittleR.Bytes()[0] == meta.LittleR[0] ||
 		publicKeyBytes[0] == meta.PublicKey[0] ||
-		p.state.derivation.AdditiveShift[0] != 9 ||
-		p.state.derivation.ChildPublicKey[0] == meta.VerificationKey[0] {
+		p.state.Derivation.AdditiveShift[0] != 9 ||
+		p.state.Derivation.ChildPublicKey[0] == meta.VerificationKey[0] {
 		t.Fatal("Presign getter snapshot aliases internal state")
 	}
 }
@@ -213,17 +212,17 @@ func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 	t.Parallel()
 	privateKey := testPaillierPrivateKey(t)
 	key := &KeyShare{state: &keyShareState{
-		chainCode:          []byte{1, 2},
-		secret:             fillSecretScalar(t, 1),
-		paillierPrivateKey: privateKey,
+		ChainCode:          []byte{1, 2},
+		Secret:             fillSecretScalar(t, 1),
+		PaillierPrivateKey: privateKey,
 	}}
 	keyHandle := *key
 	keyHandle.Destroy()
-	if key.state.secret.FixedLen() != 0 || key.state.chainCode[0] != 0 || privateKey.Lambda.FixedLen() != 0 {
+	if key.state.Secret.FixedLen() != 0 || key.state.ChainCode[0] != 0 || privateKey.Lambda.FixedLen() != 0 {
 		t.Fatal("shallow KeyShare copy did not share Destroy lifecycle")
 	}
 
-	presign := &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
+	presign := &Presign{state: &presignState{Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false)}}
 	presignHandle := *presign
 	if err := MarkPresignConsumed(&presignHandle); err != nil {
 		t.Fatal(err)
@@ -237,9 +236,9 @@ func TestFast_KeygenAccessorReturnsIndependentKeyShareState(t *testing.T) {
 	t.Parallel()
 	privateKey := testPaillierPrivateKey(t)
 	internal := &KeyShare{state: &keyShareState{
-		secret:             fillSecretScalar(t, 7),
-		chainCode:          []byte{1, 2},
-		paillierPrivateKey: privateKey,
+		Secret:             fillSecretScalar(t, 7),
+		ChainCode:          []byte{1, 2},
+		PaillierPrivateKey: privateKey,
 	}}
 	session := &KeygenSession{
 		state:     keygenConfirmed,
@@ -251,8 +250,8 @@ func TestFast_KeygenAccessorReturnsIndependentKeyShareState(t *testing.T) {
 		t.Fatal("KeyShare accessor did not return completed share")
 	}
 	share.Destroy()
-	if internal.state.secret.FixedLen() == 0 ||
-		internal.state.chainCode[0] == 0 ||
+	if internal.state.Secret.FixedLen() == 0 ||
+		internal.state.ChainCode[0] == 0 ||
 		privateKey.Lambda.FixedLen() == 0 {
 		t.Fatal("destroying accessor result changed session-owned key share")
 	}

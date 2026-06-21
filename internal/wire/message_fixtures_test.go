@@ -457,6 +457,34 @@ type customNilReturnMessage struct {
 func (m customNilReturnMessage) WireType() string    { return "test.custom.nilreturn" }
 func (m customNilReturnMessage) WireVersion() uint16 { return 1 }
 
+type customListMessage struct {
+	Items []customBytes `wire:"1,customlist,max_items=items,max_bytes=field"`
+}
+
+func (m customListMessage) WireType() string    { return "test.customlist" }
+func (m customListMessage) WireVersion() uint16 { return 1 }
+
+type customPointerListMessage struct {
+	Items []*customBytes `wire:"1,customlist,max_items=items,max_bytes=field"`
+}
+
+func (m customPointerListMessage) WireType() string    { return "test.customlist.ptr" }
+func (m customPointerListMessage) WireVersion() uint16 { return 1 }
+
+type customListFixedLenMessage struct {
+	Items []customBytes `wire:"1,customlist,len=2,max_items=items"`
+}
+
+func (m customListFixedLenMessage) WireType() string    { return "test.customlist.fixedlen" }
+func (m customListFixedLenMessage) WireVersion() uint16 { return 1 }
+
+type customListNilReturnMessage struct {
+	Items []customNilReturn `wire:"1,customlist"`
+}
+
+func (m customListNilReturnMessage) WireType() string    { return "test.customlist.nilreturn" }
+func (m customListNilReturnMessage) WireVersion() uint16 { return 1 }
+
 type customMultiFieldMessage struct {
 	First  customBytes `wire:"1,custom"`
 	Second uint32      `wire:"2,u32"`

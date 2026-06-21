@@ -201,14 +201,14 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 			presigns := secpPresign(t, shares, signers)
 
 			for _, r := range presigns {
-				if len(r.state.verifyShares) == 0 {
+				if len(r.state.VerifyShares) == 0 {
 					continue
 				}
 				switch tc.field {
 				case "KPoint":
-					r.state.verifyShares[0].KPoint = nil
+					r.state.VerifyShares[0].KPoint = nil
 				case "ChiPoint":
-					r.state.verifyShares[0].ChiPoint = nil
+					r.state.VerifyShares[0].ChiPoint = nil
 				}
 
 				err := r.VerifySignMaterial()

@@ -87,8 +87,8 @@ func TestCGGMP21SignRejectNoMutationInvariant(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &SignSession{
-		key:       &KeyShare{state: &keyShareState{party: 1}},
-		presign:   &Presign{state: &presignState{signers: signers}},
+		key:       &KeyShare{state: &keyShareState{Party: 1}},
+		presign:   &Presign{state: &presignState{Signers: signers}},
 		sessionID: sessionID,
 		guard:     testCGGMP21Guard(1, signers, sessionID),
 		partials:  make(map[tss.PartyID]secp.Scalar),

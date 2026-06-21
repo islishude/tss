@@ -111,8 +111,8 @@ func TestCGGMP21KeygenPendingPrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 	}
 	assertCGGMPSnapshotUnchanged(t, before, after)
 
-	stagedSecret := prepared.share.state.secret
-	stagedPaillierP := prepared.share.state.paillierPrivateKey.P
+	stagedSecret := prepared.share.state.Secret
+	stagedPaillierP := prepared.share.state.PaillierPrivateKey.P
 	if stagedSecret == nil || testutil.IsZeroBytes(stagedSecret.FixedBytes()) {
 		t.Fatal("prepared key share has no staged secret scalar")
 	}

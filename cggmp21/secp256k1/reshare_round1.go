@@ -37,7 +37,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	oldSecret, err := secpScalarFromSecret(s.oldKey.state.secret)
+	oldSecret, err := secpScalarFromSecret(s.oldKey.state.Secret)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) initReceiverMaterial() error {
-	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.state.paillierBits)
+	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.state.PaillierBits)
 	if err != nil {
 		return err
 	}
@@ -296,7 +296,7 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if !tss.ContainsParty(s.dealerParties, dealer) {
 		return fmt.Errorf("sender %d is not a dealer", dealer)
 	}
-	verificationShare, ok := s.plan.state.oldVerificationShares[dealer]
+	verificationShare, ok := s.plan.state.OldVerificationShares[dealer]
 	if !ok {
 		return fmt.Errorf("missing old verification share for dealer %d", dealer)
 	}

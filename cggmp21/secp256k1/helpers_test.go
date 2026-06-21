@@ -10,7 +10,6 @@ import (
 	"math/big"
 	"slices"
 	"sync"
-	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -168,26 +167,26 @@ func clonePresignForTest(p *Presign) *Presign {
 		return nil
 	}
 	return &Presign{state: &presignState{
-		consumed:             p.state.consumed,
+		Consumed:             p.state.Consumed,
 		attempt:              p.state.attempt,
-		securityParams:       p.state.securityParams,
-		party:                p.state.party,
-		threshold:            p.state.threshold,
-		signers:              slices.Clone(p.state.signers),
-		r:                    secp.Clone(p.state.r),
-		littleR:              p.state.littleR,
-		transcriptHash:       slices.Clone(p.state.transcriptHash),
-		context:              p.state.context.Clone(),
-		contextHash:          slices.Clone(p.state.contextHash),
-		derivation:           p.state.derivation.Clone(),
-		planHash:             slices.Clone(p.state.planHash),
-		publicKey:            secp.Clone(p.state.publicKey),
-		keygenTranscriptHash: slices.Clone(p.state.keygenTranscriptHash),
-		partiesHash:          slices.Clone(p.state.partiesHash),
-		verifyShares:         tss.CloneSlice(p.state.verifyShares),
-		kShare:               p.state.kShare.Clone(),
-		chiShare:             p.state.chiShare.Clone(),
-		delta:                p.state.delta.Clone(),
+		SecurityParams:       p.state.SecurityParams,
+		Party:                p.state.Party,
+		Threshold:            p.state.Threshold,
+		Signers:              slices.Clone(p.state.Signers),
+		R:                    secp.Clone(p.state.R),
+		LittleR:              p.state.LittleR,
+		TranscriptHash:       slices.Clone(p.state.TranscriptHash),
+		Context:              p.state.Context.Clone(),
+		ContextHash:          slices.Clone(p.state.ContextHash),
+		Derivation:           p.state.Derivation.Clone(),
+		PlanHash:             slices.Clone(p.state.PlanHash),
+		PublicKey:            secp.Clone(p.state.PublicKey),
+		KeygenTranscriptHash: slices.Clone(p.state.KeygenTranscriptHash),
+		PartiesHash:          slices.Clone(p.state.PartiesHash),
+		VerifyShares:         tss.CloneSlice(p.state.VerifyShares),
+		KShare:               p.state.KShare.Clone(),
+		ChiShare:             p.state.ChiShare.Clone(),
+		Delta:                p.state.Delta.Clone(),
 	}}
 }
 
@@ -230,7 +229,7 @@ func startCGGMP21KeygenWithPlanOption(config tss.ThresholdConfig, option KeygenP
 
 func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, ctx PresignContext, guards ...*tss.EnvelopeGuard) (*PresignSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(key.state.party, testCGGMP21GuardParties(key.state.parties, key.state.party), sessionID)
+		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
 	plan, err := NewPresignPlan(PresignPlanOption{
 		Key:            key,
@@ -243,12 +242,12 @@ func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, sign
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartPresign(key, plan, tss.LocalConfig{Self: key.state.party}, guard)
+	return StartPresign(key, plan, tss.LocalConfig{Self: key.state.Party}, guard)
 }
 
 func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, request SignRequest, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(key.state.party, testCGGMP21GuardParties(key.state.parties, key.state.party), sessionID)
+		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
 	if request.AttemptStore == nil {
 		request.AttemptStore = newTestSignAttemptStore()
@@ -263,12 +262,12 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartSign(key, presign, plan, tss.LocalConfig{Self: key.state.party, Context: context.Background()}, guard)
+	return StartSign(key, presign, plan, tss.LocalConfig{Self: key.state.Party, Context: context.Background()}, guard)
 }
 
 func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(oldKey.state.parties, config.Self), config.SessionID)
+		return testCGGMP21Guard(config.Self, testCGGMP21GuardParties(oldKey.state.Parties, config.Self), config.SessionID)
 	})
 	plan, err := NewRefreshPlan(RefreshPlanOption{
 		OldKey:         oldKey,
@@ -284,23 +283,23 @@ func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ..
 
 func startCGGMP21ReshareDealer(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareDealerSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(oldKey.state.party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.dealerParties, plan.state.newParties), oldKey.state.party), plan.state.sessionID)
+		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
-	return StartReshareDealer(oldKey, plan, tss.LocalConfig{Self: oldKey.state.party, Rand: rng}, guard)
+	return StartReshareDealer(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
 }
 
 func startCGGMP21ReshareReceiver(plan *ResharePlan, localParty tss.PartyID, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareReceiverSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(localParty, testCGGMP21GuardParties(tss.MergePartySet(plan.state.dealerParties, plan.state.newParties), localParty), plan.state.sessionID)
+		return testCGGMP21Guard(localParty, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), localParty), plan.state.SessionID)
 	})
 	return StartReshareReceiver(plan, tss.LocalConfig{Self: localParty, Rand: rng}, guard)
 }
 
 func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Reader, guards ...*tss.EnvelopeGuard) (*ReshareOverlapSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
-		return testCGGMP21Guard(oldKey.state.party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.dealerParties, plan.state.newParties), oldKey.state.party), plan.state.sessionID)
+		return testCGGMP21Guard(oldKey.state.Party, testCGGMP21GuardParties(tss.MergePartySet(plan.state.DealerParties, plan.state.NewParties), oldKey.state.Party), plan.state.SessionID)
 	})
-	return StartReshareOverlap(oldKey, plan, tss.LocalConfig{Self: oldKey.state.party, Rand: rng}, guard)
+	return StartReshareOverlap(oldKey, plan, tss.LocalConfig{Self: oldKey.state.Party, Rand: rng}, guard)
 }
 
 func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
@@ -336,7 +335,7 @@ func startTestPresign(key *KeyShare, sessionID tss.SessionID, signers tss.PartyS
 		if !sessionID.Valid() {
 			return nil
 		}
-		return testCGGMP21Guard(key.state.party, key.state.parties, sessionID)
+		return testCGGMP21Guard(key.state.Party, key.state.Parties, sessionID)
 	})
 	return startCGGMP21PresignWithContext(key, sessionID, signers, testPresignContext(), guard)
 }
@@ -353,9 +352,9 @@ func StartSignDigest(key *KeyShare, presign *Presign, sessionID tss.SessionID, d
 		if !sessionID.Valid() {
 			return nil
 		}
-		return testCGGMP21Guard(key.state.party, key.state.parties, sessionID)
+		return testCGGMP21Guard(key.state.Party, key.state.Parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, newTestSignAttemptStore(), guard, testLimits())
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.ContextHash, newTestSignAttemptStore(), guard, testLimits())
 }
 
 func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32 []byte, store SignAttemptStore, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
@@ -369,9 +368,9 @@ func StartSignDigestWithStore(key *KeyShare, presign *Presign, sessionID tss.Ses
 		if !sessionID.Valid() {
 			return nil
 		}
-		return testCGGMP21Guard(key.state.party, key.state.parties, sessionID)
+		return testCGGMP21Guard(key.state.Party, key.state.Parties, sessionID)
 	})
-	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.contextHash, store, guard, testLimits())
+	return startSignDigestBound(context.Background(), key, presign, sessionID, digest32, presign.state.ContextHash, store, guard, testLimits())
 }
 
 type testSignAttemptStore struct {
@@ -599,36 +598,41 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		tb.Fatal("delta: " + err.Error())
 	}
 	return &Presign{state: &presignState{
-		consumed:       new(atomic.Bool),
+		Consumed:       NewAtomicBoolWire(false),
 		attempt:        newPresignAttemptBinding(false),
-		securityParams: testSecurityParams(),
-		party:          1,
-		threshold:      1,
-		signers:        tss.NewPartySet(1),
-		r:              secp.Clone(RPoint),
-		littleR:        littleR,
-		transcriptHash: transcript[:],
-		context:        ctx,
-		contextHash:    contextHash,
-		derivation: &tss.DerivationResult{
+		SecurityParams: testSecurityParams(),
+		Party:          1,
+		Threshold:      2,
+		Signers:        tss.NewPartySet(1, 2),
+		R:              secp.Clone(RPoint),
+		LittleR:        littleR,
+		TranscriptHash: transcript[:],
+		Context:        ctx,
+		ContextHash:    contextHash,
+		Derivation: &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: slices.Clone(R),
 			ChildChainCode: slices.Clone(childChainCode),
 			AdditiveShift:  slices.Clone(zeroShift),
 		},
-		planHash:             planHash[:],
-		publicKey:            secp.Clone(RPoint),
-		keygenTranscriptHash: transcript[:],
-		partiesHash:          wireutil.PartySetHash(tss.NewPartySet(1), partySetHashLabel),
-		verifyShares: []signVerifyShare{{
+		PlanHash:             planHash[:],
+		PublicKey:            secp.Clone(RPoint),
+		KeygenTranscriptHash: transcript[:],
+		PartiesHash:          wireutil.PartySetHash(tss.NewPartySet(1, 2), partySetHashLabel),
+		VerifyShares: []signVerifyShare{{
 			Party:    1,
 			KPoint:   secp.Clone(RPoint),
 			ChiPoint: secp.Clone(RPoint),
 			Proof:    minimalProof,
+		}, {
+			Party:    2,
+			KPoint:   secp.Clone(RPoint),
+			ChiPoint: secp.Clone(RPoint),
+			Proof:    minimalProof.Clone(),
 		}},
-		kShare:   kShare,
-		chiShare: chiShare,
-		delta:    delta,
+		KShare:   kShare,
+		ChiShare: chiShare,
+		Delta:    delta,
 	}}
 }
 

@@ -54,7 +54,7 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 	}
 	guard, err := (tss.GuardConfig{
 		Self:        current.PartyID(),
-		Parties:     current.state.parties.Clone(),
+		Parties:     current.state.Parties.Clone(),
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   config.SessionID,
 		Policies:    CGGMP21Policies(),

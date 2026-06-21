@@ -40,7 +40,7 @@ func TestCGGMP21PresignRound1DeferredVerificationFailureDoesNotAcceptPayload(t *
 	s1, _, s2, out2 := cggmpTwoPartyPresignSessions(t)
 	defer s1.Destroy()
 	defer s2.Destroy()
-	proofEnv := mustPresignEnvelope(t, out2, payloadPresignRound1Proof, s1.key.state.party)
+	proofEnv := mustPresignEnvelope(t, out2, payloadPresignRound1Proof, s1.key.state.Party)
 	proof, err := unmarshalPresignRound1ProofPayload(proofEnv.Payload)
 	if err != nil {
 		t.Fatal(err)
@@ -104,7 +104,7 @@ func TestCGGMP21PresignRound2VerificationFailureDoesNotWriteAlphaShares(t *testi
 	}
 	defer prepared2.destroy()
 	effects := s2.commitPresignRound2Outputs(prepared2)
-	round2 := mustPresignEnvelope(t, effects.envelopes, payloadPresignRound2, s1.key.state.party)
+	round2 := mustPresignEnvelope(t, effects.envelopes, payloadPresignRound2, s1.key.state.Party)
 	payload, err := unmarshalPresignRound2Payload(round2.Payload)
 	if err != nil {
 		t.Fatal(err)
@@ -220,7 +220,7 @@ func TestCGGMP21PresignRound3PrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 	}
 	defer prepared2.destroy()
 	effects2 := s2.commitPresignRound2Outputs(prepared2)
-	round2From2 := mustPresignEnvelope(t, effects2.envelopes, payloadPresignRound2, s1.key.state.party)
+	round2From2 := mustPresignEnvelope(t, effects2.envelopes, payloadPresignRound2, s1.key.state.Party)
 	round2Tx, err := s1.buildAcceptPresignRound2Tx(round2From2)
 	if err != nil {
 		t.Fatal(err)
@@ -235,8 +235,8 @@ func TestCGGMP21PresignRound3PrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 	}
 	assertCGGMPSnapshotUnchanged(t, before, after)
 	stagedDelta := prepared3.delta
-	stagedK := prepared3.presign.state.kShare
-	stagedChi := prepared3.presign.state.chiShare
+	stagedK := prepared3.presign.state.KShare
+	stagedChi := prepared3.presign.state.ChiShare
 	prepared3.destroy()
 	if !testutil.IsZeroBytes(stagedDelta.FixedBytes()) ||
 		!testutil.IsZeroBytes(stagedK.FixedBytes()) ||
@@ -289,9 +289,9 @@ func TestCGGMP21PresignCompletionPrepareDoesNotMutateAndDestroysFinalPresign(t *
 		t.Fatalf("prepare final presign: ok=%v err=%v", ok, err)
 	}
 	assertCGGMPSnapshotUnchanged(t, before, after)
-	stagedK := prepared.presign.state.kShare
-	stagedChi := prepared.presign.state.chiShare
-	stagedDelta := prepared.presign.state.delta
+	stagedK := prepared.presign.state.KShare
+	stagedChi := prepared.presign.state.ChiShare
+	stagedDelta := prepared.presign.state.Delta
 	prepared.destroy()
 	if !testutil.IsZeroBytes(stagedK.FixedBytes()) ||
 		!testutil.IsZeroBytes(stagedChi.FixedBytes()) ||
@@ -332,7 +332,7 @@ func TestCGGMP21PreparedPresignStartDestroyClearsOwnedState(t *testing.T) {
 
 func TestCGGMP21PresignReadinessDerivesFromPartyState(t *testing.T) {
 	s := &PresignSession{
-		key: &KeyShare{state: &keyShareState{party: 1}},
+		key: &KeyShare{state: &keyShareState{Party: 1}},
 		parties: []presignPartyState{
 			{id: 1},
 			{id: 2},
@@ -387,7 +387,7 @@ func installPresignRound1Peer(t *testing.T, session *PresignSession, remoteOut [
 	if err != nil {
 		t.Fatal(err)
 	}
-	proofEnv := mustPresignEnvelope(t, remoteOut, payloadPresignRound1Proof, session.key.state.party)
+	proofEnv := mustPresignEnvelope(t, remoteOut, payloadPresignRound1Proof, session.key.state.Party)
 	proof, err := unmarshalPresignRound1ProofPayload(proofEnv.Payload)
 	if err != nil {
 		t.Fatal(err)
@@ -457,7 +457,7 @@ func presignSessionsWithRound3Outputs(t *testing.T) (*PresignSession, *PresignSe
 	}
 	effects2 := s2.commitPresignRound2Outputs(prepared2)
 
-	round2From1 := mustPresignEnvelope(t, effects1.envelopes, payloadPresignRound2, s2.key.state.party)
+	round2From1 := mustPresignEnvelope(t, effects1.envelopes, payloadPresignRound2, s2.key.state.Party)
 	tx1, err := s2.buildAcceptPresignRound2Tx(round2From1)
 	if err != nil {
 		s1.Destroy()
@@ -465,7 +465,7 @@ func presignSessionsWithRound3Outputs(t *testing.T) (*PresignSession, *PresignSe
 		t.Fatal(err)
 	}
 	installPresignRound2Tx(t, s2, tx1)
-	round2From2 := mustPresignEnvelope(t, effects2.envelopes, payloadPresignRound2, s1.key.state.party)
+	round2From2 := mustPresignEnvelope(t, effects2.envelopes, payloadPresignRound2, s1.key.state.Party)
 	tx2, err := s1.buildAcceptPresignRound2Tx(round2From2)
 	if err != nil {
 		s1.Destroy()

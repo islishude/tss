@@ -180,16 +180,16 @@ func newSyntheticOnlineSignCase(t *testing.T) (*SignSession, tss.Envelope) {
 		{Party: 2, KPoint: secp.ScalarBaseMult(k2), ChiPoint: secp.ScalarBaseMult(chi2)},
 	}
 	presign := &Presign{state: &presignState{
-		party:          1,
-		signers:        signers,
-		r:              rPoint,
-		littleR:        littleR,
-		transcriptHash: transcriptHash,
-		contextHash:    contextHash,
-		verifyShares:   verifyShares,
+		Party:          1,
+		Signers:        signers,
+		R:              rPoint,
+		LittleR:        littleR,
+		TranscriptHash: transcriptHash,
+		ContextHash:    contextHash,
+		VerifyShares:   verifyShares,
 	}}
 	s := &SignSession{
-		key:       &KeyShare{state: &keyShareState{party: 1}},
+		key:       &KeyShare{state: &keyShareState{Party: 1}},
 		presign:   presign,
 		sessionID: sessionID,
 		guard:     testCGGMP21Guard(1, signers, sessionID),

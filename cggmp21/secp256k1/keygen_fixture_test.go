@@ -263,9 +263,9 @@ func TestCachedKeygenSharesReturnsIndependentClones(t *testing.T) {
 		t.Fatal("expected independent KeyShare pointers")
 	}
 
-	a[1].state.publicKey[0] ^= 1
-	a[1].state.chainCode[0] ^= 1
-	a[1].state.parties[0] = 99
+	a[1].state.PublicKey[0] ^= 1
+	a[1].state.ChainCode[0] ^= 1
+	a[1].state.Parties[0] = 99
 
 	if err := b[1].ValidateWithLimits(testLimits()); err != nil {
 		t.Fatalf("second clone was affected by first clone mutation: %v", err)

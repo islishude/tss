@@ -55,11 +55,11 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 func (s *RefreshSession) finalizeConfirmedShare() error {
 	if s.newShare == nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, errors.New("missing pending refresh share"))
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.Party, errors.New("missing pending refresh share"))
 	}
 	// Collect parsed confirmations in party order (no re-unmarshal needed).
-	confirmations := make([]*KeygenConfirmation, len(s.oldKey.state.parties))
-	for i, id := range s.oldKey.state.parties {
+	confirmations := make([]*KeygenConfirmation, len(s.oldKey.state.Parties))
+	for i, id := range s.oldKey.state.Parties {
 		c := s.partyData[id].confirmation
 		if c == nil {
 			s.abort()
@@ -69,23 +69,23 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 	}
 	if err := verifyFinalizedKeygenConfirmationSet(s.newShare, confirmations); err != nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.Party, err)
 	}
 	// Verify preserved chain code on each confirmation.
 	for _, c := range confirmations {
-		if !bytes.Equal(c.ChainCode, s.newShare.state.chainCode) {
+		if !bytes.Equal(c.ChainCode, s.newShare.state.ChainCode) {
 			s.abort()
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
 		}
 	}
 	for _, confirmation := range confirmations {
-		data := s.newShare.state.partyData[confirmation.Sender]
-		data.keygenConfirmation = confirmation.Clone()
-		s.newShare.state.partyData[confirmation.Sender] = data
+		data := s.newShare.state.PartyData[confirmation.Sender]
+		data.KeygenConfirmation = confirmation.Clone()
+		s.newShare.state.PartyData[confirmation.Sender] = data
 	}
 	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()
-		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.party, err)
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.Party, err)
 	}
 	s.completed = true
 	if s.newPaillier != nil {
@@ -94,7 +94,7 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 	}
 	confirmationSetHash := keygenConfirmationSetHash(confirmations)
 	s.log.Info(s.cfg.Ctx(), "refresh complete",
-		"party_id", s.oldKey.state.party,
+		"party_id", s.oldKey.state.Party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"confirmation_set_hash", fmt.Sprintf("%x", confirmationSetHash[:8]),
 	)

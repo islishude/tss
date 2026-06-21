@@ -235,12 +235,12 @@ func TestMarkPresignConsumedDoesNotReleaseBoundAttempt(t *testing.T) {
 
 func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
-	p.state.consumed = nil
+	p.state.Consumed.Bool = nil
 
 	if !IsPresignConsumed(p) {
 		t.Fatal("presign without claim state was treated as unconsumed")
 	}
-	if p.state.consumed != nil {
+	if p.state.Consumed.Bool != nil {
 		t.Fatal("IsPresignConsumed lazily initialized missing claim state")
 	}
 	if err := p.Validate(); err == nil {
@@ -249,14 +249,14 @@ func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	if bindPresignToAttempt(p, bytes.Repeat([]byte{1}, 32), false) {
 		t.Fatal("presign without claim state was bound")
 	}
-	if p.state.consumed != nil {
+	if p.state.Consumed.Bool != nil {
 		t.Fatal("attempt binding lazily initialized missing claim state")
 	}
 	if err := MarkPresignConsumed(p); err == nil {
 		t.Fatal("MarkPresignConsumed accepted missing claim state")
 	}
 	cp := clonePresignForTest(p)
-	if cp.state.consumed != nil || !IsPresignConsumed(cp) {
+	if cp.state.Consumed.Bool != nil || !IsPresignConsumed(cp) {
 		t.Fatal("test copy revived presign with missing claim state")
 	}
 }
@@ -310,7 +310,7 @@ func TestBindPresignToAttemptRejectsNil(t *testing.T) {
 
 func TestValidateSignerSetRejectsEmptyKey(t *testing.T) {
 	t.Parallel()
-	key := &KeyShare{state: &keyShareState{party: 1, threshold: 1, parties: tss.NewPartySet(1)}}
+	key := &KeyShare{state: &keyShareState{Party: 1, Threshold: 1, Parties: tss.NewPartySet(1)}}
 	err := validateSignerSet(key, tss.NewPartySet(), DefaultLimits())
 	if err == nil {
 		t.Fatal("expected empty signer set rejection")

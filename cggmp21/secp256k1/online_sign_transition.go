@@ -49,7 +49,7 @@ func (s *SignSession) buildAcceptSignPartialTx(env tss.InboundEnvelope) (*accept
 		}
 		return nil, err
 	}
-	if !tss.ContainsParty(s.presign.state.signers, base.From) {
+	if !tss.ContainsParty(s.presign.state.Signers, base.From) {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
 	}
 	if base.Round != signStartRound || base.PayloadType != payloadSignPartial {
@@ -111,11 +111,11 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	if s == nil {
 		return nil, false, errors.New("nil sign session")
 	}
-	if s.completed || len(s.partials) != len(s.presign.state.signers) {
+	if s.completed || len(s.partials) != len(s.presign.state.Signers) {
 		return nil, false, nil
 	}
 	sigS := secp.ScalarZero()
-	for _, id := range s.presign.state.signers {
+	for _, id := range s.presign.state.Signers {
 		partial, ok := s.partials[id]
 		if !ok {
 			return nil, false, nil
@@ -126,7 +126,7 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 		return nil, false, errors.New("zero ECDSA s")
 	}
 	normalizedS, sWasNegated := secp.NormalizeLowS(sigS)
-	rPointBytes, err := secp.PointBytes(s.presign.state.r)
+	rPointBytes, err := secp.PointBytes(s.presign.state.R)
 	if err != nil {
 		return nil, false, err
 	}
@@ -134,7 +134,7 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 	if err != nil {
 		return nil, false, err
 	}
-	r := s.presign.state.littleR
+	r := s.presign.state.LittleR
 	public, err := secp.PointFromBytes(s.publicKey)
 	if err != nil {
 		return nil, false, err
@@ -165,7 +165,7 @@ func (s *SignSession) commitFinalSignature(ctx context.Context, prepared *prepar
 	s.completed = true
 	prepared.committed = true
 	s.log.Info(ctx, "signing complete",
-		"party_id", s.key.state.party,
+		"party_id", s.key.state.Party,
 		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
 	)
 }

@@ -52,19 +52,21 @@ func TestFast_SignAttemptRecordCodecAppliesCallerLimits(t *testing.T) {
 	}
 	smallFields := limits.fieldLimits()
 	smallFields["envelope"] = len(record.CanonicalBaseEnvelopeBytes) - 1
-	if _, err := record.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+	if _, err := wire.Marshal(record, wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
 		t.Fatal("sign attempt marshal ignored caller field limits")
 	}
 	var decoded SignAttemptRecord
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err == nil {
 		t.Fatal("sign attempt unmarshal ignored caller frame limits")
 	}
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw))),
 		wire.WithFieldLimits(smallFields),
 	); err == nil {
@@ -72,7 +74,7 @@ func TestFast_SignAttemptRecordCodecAppliesCallerLimits(t *testing.T) {
 	}
 	missing := limits.fieldLimits()
 	delete(missing, "envelope")
-	if _, err := record.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+	if _, err := wire.Marshal(record, wire.WithFieldLimitsForMarshal(missing)); err == nil {
 		t.Fatal("sign attempt marshal accepted missing field limit")
 	}
 }

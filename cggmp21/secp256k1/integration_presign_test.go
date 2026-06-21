@@ -1092,8 +1092,8 @@ func TestThresholdECDSA_PresignRejectsKeyBindingMismatchBeforeConsume(t *testing
 	signers := tss.NewPartySet(1, 2)
 	presigns := secpPresign(t, shares, signers)
 	presign := clonePresignForTest(presigns[1])
-	presign.state.keygenTranscriptHash = append([]byte(nil), presign.state.keygenTranscriptHash...)
-	presign.state.keygenTranscriptHash[0] ^= 1
+	presign.state.KeygenTranscriptHash = append([]byte(nil), presign.state.KeygenTranscriptHash...)
+	presign.state.KeygenTranscriptHash[0] ^= 1
 	signID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

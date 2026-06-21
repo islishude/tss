@@ -78,20 +78,20 @@ func (k *KeyShare) keygenConfirmationReferenceUnchecked() (*KeygenConfirmation, 
 	if k == nil {
 		return nil, errors.New("nil key share")
 	}
-	commitmentsHash, err := keygenCommitmentsHash(k.state.groupCommitments)
+	commitmentsHash, err := keygenCommitmentsHash(k.state.GroupCommitments)
 	if err != nil {
 		return nil, err
 	}
 	return &KeygenConfirmation{
-		SessionID:       k.state.paillierProofSessionID,
-		Sender:          k.state.party,
-		Threshold:       k.state.threshold,
-		Parties:         slices.Clone(k.state.parties),
-		PublicKey:       slices.Clone(k.state.publicKey),
-		TranscriptHash:  slices.Clone(k.state.keygenTranscriptHash),
+		SessionID:       k.state.PaillierProofSessionID,
+		Sender:          k.state.Party,
+		Threshold:       k.state.Threshold,
+		Parties:         slices.Clone(k.state.Parties),
+		PublicKey:       slices.Clone(k.state.PublicKey),
+		TranscriptHash:  slices.Clone(k.state.KeygenTranscriptHash),
 		CommitmentsHash: commitmentsHash,
-		ChainCode:       slices.Clone(k.state.chainCode),
-		PlanHash:        slices.Clone(k.state.planHash),
+		ChainCode:       slices.Clone(k.state.ChainCode),
+		PlanHash:        slices.Clone(k.state.PlanHash),
 	}, nil
 }
 
@@ -191,7 +191,7 @@ func verifyFinalizedKeygenConfirmationSet(local *KeyShare, confirmations []*Keyg
 	if local == nil {
 		return errors.New("nil local key share")
 	}
-	n := len(local.state.parties)
+	n := len(local.state.Parties)
 	if len(confirmations) != n {
 		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), n)
 	}
@@ -201,7 +201,7 @@ func verifyFinalizedKeygenConfirmationSet(local *KeyShare, confirmations []*Keyg
 	}
 	seen := make(map[tss.PartyID]struct{}, n)
 	for i, c := range confirmations {
-		expectedSender := local.state.parties[i]
+		expectedSender := local.state.Parties[i]
 		if c == nil {
 			return fmt.Errorf("nil keygen confirmation at index %d for party %d", i, expectedSender)
 		}
@@ -240,7 +240,7 @@ func verifyKeygenConfirmationSetPreservedChainCodeStruct(local *KeyShare, confir
 		return err
 	}
 	for _, c := range confirmations {
-		if !bytes.Equal(c.ChainCode, local.state.chainCode) {
+		if !bytes.Equal(c.ChainCode, local.state.ChainCode) {
 			return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
 		}
 	}
@@ -251,7 +251,7 @@ func verifyKeygenConfirmationForPreservedChainCode(local *KeyShare, c *KeygenCon
 	if err := verifyKeygenConfirmationForShare(local, c); err != nil {
 		return err
 	}
-	if !bytes.Equal(c.ChainCode, local.state.chainCode) {
+	if !bytes.Equal(c.ChainCode, local.state.ChainCode) {
 		return fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender)
 	}
 	return nil
@@ -264,24 +264,24 @@ func applyKeygenConfirmationSet(local *KeyShare, confirmations []*KeygenConfirma
 	if err := local.validateWithoutConfirmations(limits); err != nil {
 		return fmt.Errorf("invalid local key share: %w", err)
 	}
-	if len(confirmations) != len(local.state.parties) {
-		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), len(local.state.parties))
+	if len(confirmations) != len(local.state.Parties) {
+		return fmt.Errorf("got %d keygen confirmations, want %d", len(confirmations), len(local.state.Parties))
 	}
 	for i, confirmation := range confirmations {
 		if confirmation == nil {
 			return fmt.Errorf("nil keygen confirmation at index %d", i)
 		}
-		if confirmation.Sender != local.state.parties[i] {
-			return fmt.Errorf("keygen confirmation order mismatch at index %d: got party %d, want %d", i, confirmation.Sender, local.state.parties[i])
+		if confirmation.Sender != local.state.Parties[i] {
+			return fmt.Errorf("keygen confirmation order mismatch at index %d: got party %d, want %d", i, confirmation.Sender, local.state.Parties[i])
 		}
 	}
 	if err := verifyFinalizedKeygenConfirmationSet(local, confirmations); err != nil {
 		return err
 	}
 	for _, confirmation := range confirmations {
-		data := local.state.partyData[confirmation.Sender]
-		data.keygenConfirmation = confirmation.Clone()
-		local.state.partyData[confirmation.Sender] = data
+		data := local.state.PartyData[confirmation.Sender]
+		data.KeygenConfirmation = confirmation.Clone()
+		local.state.PartyData[confirmation.Sender] = data
 	}
 	return nil
 }
@@ -441,20 +441,20 @@ func (s *KeygenSession) maybePrepareCGGMPFinalKeyShare() (*preparedCGGMPFinalKey
 		return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.cfg.Self, err)
 	}
 	finalShare := cloneKeyShareValue(s.pending)
-	finalShare.state.chainCode = chainCode
+	finalShare.state.ChainCode = chainCode
 	// Recomputation: now that we have the real chain codes, produce the final
 	// transcript hash that binds them.
-	finalTranscriptHash, err := s.keygenTranscriptHash(finalShare.state.groupCommitments)
+	finalTranscriptHash, err := s.keygenTranscriptHash(finalShare.state.GroupCommitments)
 	if err != nil {
 		finalShare.Destroy()
 		return nil, false, tss.NewProtocolError(tss.ErrCodeInvariant, keygenConfirmationRound, s.cfg.Self, err)
 	}
-	finalShare.state.keygenTranscriptHash = finalTranscriptHash
+	finalShare.state.KeygenTranscriptHash = finalTranscriptHash
 	// Store parsed confirmation structs directly.
 	for _, confirmation := range confirmations {
-		data := finalShare.state.partyData[confirmation.Sender]
-		data.keygenConfirmation = confirmation.Clone()
-		finalShare.state.partyData[confirmation.Sender] = data
+		data := finalShare.state.PartyData[confirmation.Sender]
+		data.KeygenConfirmation = confirmation.Clone()
+		finalShare.state.PartyData[confirmation.Sender] = data
 	}
 	if err := finalShare.ValidateWithLimits(s.limits); err != nil {
 		finalShare.Destroy()
@@ -475,7 +475,7 @@ func (s *KeygenSession) commitCGGMPFinalKeyShare(p *preparedCGGMPFinalKeyShare) 
 	s.keyShare = p.share
 	s.completed = true
 	s.state = keygenConfirmed
-	pubKeyHash := sha256.Sum256(p.share.state.publicKey)
+	pubKeyHash := sha256.Sum256(p.share.state.PublicKey)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),

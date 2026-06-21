@@ -41,16 +41,16 @@ func TestCGGMP21KeyShareProofDomainBindsContext(t *testing.T) {
 		name   string
 		mutate func(*KeyShare)
 	}{
-		{name: "party", mutate: func(k *KeyShare) { k.state.party = 2 }},
-		{name: "threshold", mutate: func(k *KeyShare) { k.state.threshold++ }},
-		{name: "parties", mutate: func(k *KeyShare) { k.state.parties = tss.NewPartySet(1, 2, 3) }},
-		{name: "public key", mutate: func(k *KeyShare) { k.state.publicKey[0] ^= 1 }},
-		{name: "keygen transcript", mutate: func(k *KeyShare) { k.state.keygenTranscriptHash[0] ^= 1 }},
-		{name: "lifecycle plan", mutate: func(k *KeyShare) { k.state.planHash[0] ^= 1 }},
+		{name: "party", mutate: func(k *KeyShare) { k.state.Party = 2 }},
+		{name: "threshold", mutate: func(k *KeyShare) { k.state.Threshold++ }},
+		{name: "parties", mutate: func(k *KeyShare) { k.state.Parties = tss.NewPartySet(1, 2, 3) }},
+		{name: "public key", mutate: func(k *KeyShare) { k.state.PublicKey[0] ^= 1 }},
+		{name: "keygen transcript", mutate: func(k *KeyShare) { k.state.KeygenTranscriptHash[0] ^= 1 }},
+		{name: "lifecycle plan", mutate: func(k *KeyShare) { k.state.PlanHash[0] ^= 1 }},
 		{name: "paillier public key", mutate: func(k *KeyShare) {
-			data := k.state.partyData[k.state.party]
-			data.paillierPublicKey = shares[2].state.partyData[shares[2].state.party].paillierPublicKey.Clone()
-			k.state.partyData[k.state.party] = data
+			data := k.state.PartyData[k.state.Party]
+			data.PaillierPublicKey = shares[2].state.PartyData[shares[2].state.Party].PaillierPublicKey.Clone()
+			k.state.PartyData[k.state.Party] = data
 		}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -112,7 +112,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal("MtA start proof did not verify")
 	}
 	mutatedKey := cloneKeyShareValue(shares[1])
-	mutatedKey.state.keygenTranscriptHash[0] ^= 1
+	mutatedKey.state.KeygenTranscriptHash[0] ^= 1
 	mutatedDomain, err := mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, &round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
 	if err != nil {
 		t.Fatal(err)

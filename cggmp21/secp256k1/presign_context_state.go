@@ -17,7 +17,7 @@ func (s *PresignSession) allRound1ProofsAccepted() bool {
 		return false
 	}
 	for i := range s.parties {
-		if s.parties[i].id == s.key.state.party {
+		if s.parties[i].id == s.key.state.Party {
 			continue
 		}
 		if !s.parties[i].round1.haveProof {
@@ -44,7 +44,7 @@ func (s *PresignSession) allRound2Accepted() bool {
 		return false
 	}
 	for i := range s.parties {
-		if s.parties[i].id == s.key.state.party {
+		if s.parties[i].id == s.key.state.Party {
 			continue
 		}
 		if !s.parties[i].round2.havePayload {

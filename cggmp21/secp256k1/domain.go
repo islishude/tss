@@ -20,7 +20,7 @@ const (
 	domainLabelKeygenRingPedersen   = "keygen.ring-pedersen"
 	domainLabelKeySharePaillier     = "keyshare.paillier-modulus"
 	domainLabelPresignMTAStartProof = "presign.mta-start.enc-proof"
-	domainLabelPresignMTADelta      = "presign.mta-response.delta"
+	domainLabelPresignMTADelta      = "presign.mta-response.Delta"
 	domainLabelPresignMTASigma      = "presign.mta-response.sigma"
 	domainLabelResharePaillier      = "reshare.paillier-modulus"
 	domainLabelReshareRingPedersen  = "reshare.ring-pedersen"
@@ -303,12 +303,12 @@ func keyShareDomainBinding(key *KeyShare, sessionID tss.SessionID, sender tss.Pa
 	}
 	return keyShareBinding{
 		SessionID:            sessionID,
-		Threshold:            key.state.threshold,
-		Parties:              key.state.parties,
+		Threshold:            key.state.Threshold,
+		Parties:              key.state.Parties,
 		Sender:               sender,
 		PublicKey:            statementPublicKey,
 		KeygenTranscriptHash: transcriptHash,
-		PlanHash:             key.state.planHash,
+		PlanHash:             key.state.PlanHash,
 	}, nil
 }
 
@@ -318,13 +318,13 @@ func presignDomainBinding(key *KeyShare, sessionID tss.SessionID, signers tss.Pa
 	}
 	return presignBinding{
 		SessionID:            sessionID,
-		Threshold:            key.state.threshold,
-		Parties:              key.state.parties,
+		Threshold:            key.state.Threshold,
+		Parties:              key.state.Parties,
 		Signers:              signers,
 		Sender:               sender,
 		Receiver:             receiver,
-		PublicKey:            key.state.publicKey,
-		KeygenTranscriptHash: key.state.keygenTranscriptHash,
+		PublicKey:            key.state.PublicKey,
+		KeygenTranscriptHash: key.state.KeygenTranscriptHash,
 		PresignContextHash:   presignContextHash,
 		PlanHash:             planHash,
 	}, nil
@@ -416,14 +416,14 @@ func keySharePaillierProofDomain(key *KeyShare, limits Limits) ([]byte, error) {
 	if key == nil || key.state == nil {
 		return nil, errors.New("nil key share")
 	}
-	data, err := key.partyDataFor(key.state.party)
+	data, err := key.partyDataFor(key.state.Party)
 	if err != nil {
 		return nil, err
 	}
-	if data.paillierPublicKey == nil {
+	if data.PaillierPublicKey == nil {
 		return nil, errors.New("key share paillier proof domain: missing public key")
 	}
-	binding, err := keyShareDomainBinding(key, tss.SessionID{}, key.state.party, key.state.publicKey, key.state.keygenTranscriptHash)
+	binding, err := keyShareDomainBinding(key, tss.SessionID{}, key.state.Party, key.state.PublicKey, key.state.KeygenTranscriptHash)
 	if err != nil {
 		return nil, err
 	}
@@ -434,7 +434,7 @@ func keySharePaillierProofDomain(key *KeyShare, limits Limits) ([]byte, error) {
 	if err := b.appendKeyShareBinding(binding); err != nil {
 		return nil, err
 	}
-	if err := b.appendPaillierStatement(data.paillierPublicKey, limits); err != nil {
+	if err := b.appendPaillierStatement(data.PaillierPublicKey, limits); err != nil {
 		return nil, err
 	}
 	b.appendNoPresignContext()
@@ -452,13 +452,13 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params *z
 		return nil, errors.New("key share Ring-Pedersen proof domain: missing parameters")
 	}
 	binding := lifecycleBinding{
-		SessionID: key.state.paillierProofSessionID,
-		Threshold: key.state.threshold,
-		Parties:   key.state.parties,
+		SessionID: key.state.PaillierProofSessionID,
+		Threshold: key.state.Threshold,
+		Parties:   key.state.Parties,
 		Sender:    party,
-		PlanHash:  key.state.planHash,
+		PlanHash:  key.state.PlanHash,
 	}
-	switch key.state.paillierProofDomain {
+	switch key.state.PaillierProofDomain {
 	case domainLabelKeygenModulus:
 		return ringPedersenDomain(domainLabelKeygenRingPedersen, binding, params, limits)
 	case domainLabelRefreshPaillier:
@@ -466,7 +466,7 @@ func keyShareRingPedersenProofDomain(key *KeyShare, party tss.PartyID, params *z
 	case domainLabelResharePaillier:
 		return ringPedersenDomain(domainLabelReshareRingPedersen, binding, params, limits)
 	default:
-		return nil, fmt.Errorf("unsupported Ring-Pedersen proof domain %q", key.state.paillierProofDomain)
+		return nil, fmt.Errorf("unsupported Ring-Pedersen proof domain %q", key.state.PaillierProofDomain)
 	}
 }
 
@@ -523,20 +523,20 @@ func logProofDomain(key *KeyShare, pk *pai.PublicKey, verificationShare, transcr
 		return nil, errors.New("nil paillier public key")
 	}
 	label := domainLabelKeyShareLogProof
-	switch key.state.paillierProofDomain {
+	switch key.state.PaillierProofDomain {
 	case domainLabelResharePaillier:
 		label = domainLabelReshareLogProof
 	case domainLabelRefreshPaillier:
 		label = domainLabelRefreshLogProof
 	}
 	binding := logProofBinding{
-		SessionID:         key.state.paillierProofSessionID,
-		Threshold:         key.state.threshold,
-		Parties:           key.state.parties,
-		Sender:            key.state.party,
+		SessionID:         key.state.PaillierProofSessionID,
+		Threshold:         key.state.Threshold,
+		Parties:           key.state.Parties,
+		Sender:            key.state.Party,
 		VerificationShare: verificationShare,
 		TranscriptHash:    transcriptHash,
-		PlanHash:          key.state.planHash,
+		PlanHash:          key.state.PlanHash,
 	}
 	return logProofDomainWithBinding(label, binding, pk, limits)
 }

@@ -151,18 +151,18 @@ func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendin
 		return nil, false, errors.New("local share proof public key mismatch")
 	}
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams: s.securityParams,
-		party:          s.cfg.Self,
-		threshold:      s.cfg.Threshold,
-		parties:        s.cfg.Parties,
-		publicKey:      publicKey,
-		partyData: map[tss.PartyID]keySharePartyData{
-			s.cfg.Self: {paillierPublicKey: s.paillier.PublicKey.Clone()},
+		SecurityParams: s.securityParams,
+		Party:          s.cfg.Self,
+		Threshold:      s.cfg.Threshold,
+		Parties:        s.cfg.Parties,
+		PublicKey:      publicKey,
+		PartyData: map[tss.PartyID]keySharePartyData{
+			s.cfg.Self: {PaillierPublicKey: s.paillier.PublicKey.Clone()},
 		},
-		planHash:               bytes.Clone(s.planHash),
-		keygenTranscriptHash:   transcriptHash,
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelKeygenModulus,
+		PlanHash:               bytes.Clone(s.planHash),
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelKeygenModulus,
 	}}
 	localPaillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
@@ -185,29 +185,29 @@ func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendin
 			paillierProof = localPaillierProof
 		}
 		partyData[id] = keySharePartyData{
-			verificationShare:  bytes.Clone(verificationShare),
-			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			paillierProof:      paillierProof.Clone(),
-			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:  bytes.Clone(verificationShare),
+			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:      paillierProof.Clone(),
+			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
 		}
 	}
 	share := &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.cfg.Self,
-		threshold:              s.cfg.Threshold,
-		parties:                s.cfg.Parties.Clone(),
-		publicKey:              bytes.Clone(publicKey),
-		chainCode:              nil, // filled in after confirmation round
-		secret:                 secretScalar,
-		groupCommitments:       groupCommitments,
-		partyData:              partyData,
-		paillierPrivateKey:     s.paillier.Clone(),
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelKeygenModulus,
-		shareProof:             shareProof.Clone(),
-		planHash:               bytes.Clone(s.planHash),
-		keygenTranscriptHash:   transcriptHash,
+		SecurityParams:         s.securityParams,
+		Party:                  s.cfg.Self,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.cfg.Parties.Clone(),
+		PublicKey:              bytes.Clone(publicKey),
+		ChainCode:              nil, // filled in after confirmation round
+		Secret:                 secretScalar,
+		GroupCommitments:       groupCommitments,
+		PartyData:              partyData,
+		PaillierPrivateKey:     s.paillier.Clone(),
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelKeygenModulus,
+		ShareProof:             shareProof.Clone(),
+		PlanHash:               bytes.Clone(s.planHash),
+		KeygenTranscriptHash:   transcriptHash,
 	}}
 	shareOwnsSecret = true
 	cleanup.add(share.Destroy)
@@ -239,10 +239,10 @@ func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendin
 	if err != nil {
 		return nil, false, err
 	}
-	share.state.logCiphertext = tss.CloneBigInt(logCiphertext)
-	share.state.logProof = logProof.Clone()
+	share.state.LogCiphertext = tss.CloneBigInt(logCiphertext)
+	share.state.LogProof = logProof.Clone()
 	// Carry the local chain code into the confirmation for commit-reveal.
-	share.state.chainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)
+	share.state.ChainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)
 	if err := share.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, false, err
 	}
@@ -252,7 +252,7 @@ func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendin
 	}
 	encodedConfirmation, err := confirmation.MarshalBinary()
 	// Don't leak the per-party chain code into the KeyShare — overwritten with aggregate after confirmations.
-	share.state.chainCode = nil
+	share.state.ChainCode = nil
 	if err != nil {
 		clear(confirmation.ChainCode)
 		return nil, false, err
@@ -279,7 +279,7 @@ func (s *KeygenSession) commitCGGMPPendingKeyShare(p *preparedCGGMPPendingKeySha
 	s.pending = p.share
 	s.state = keygenConfirming
 	p.committed = true
-	publicKey := p.share.state.publicKey
+	publicKey := p.share.state.PublicKey
 	pubKeyHash := sha256.Sum256(publicKey)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
