@@ -572,29 +572,29 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 // minimalCGGMP21Presign creates a Presign with minimal valid fields for
 // wire-format testing. No keygen or Paillier crypto is performed.
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
-	one := big.NewInt(1)
-	RPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
+	one := secp.ScalarOne()
+	RPoint := secp.ScalarBaseMult(one)
 	R, err := secp.PointBytes(RPoint)
 	if err != nil {
 		tb.Fatal("PointBytes: " + err.Error())
 	}
 	minimalProof := mustMinimalSignPrepProofForTest(tb)
-	littleR := new(big.Int).Mod(RPoint.X.BigInt(), secp.Order())
+	littleR := secp.ScalarFromFieldElement(RPoint.X)
 	transcript := sha256.Sum256([]byte("minimal presign"))
 	planHash := sha256.Sum256([]byte("minimal presign plan"))
 	ctx := testPresignContext()
 	contextHash := presignContextHash(ctx)
 	zeroShift := secp.ScalarZero().Bytes()
 	childChainCode := bytes.Repeat([]byte{0x42}, 32)
-	kShare, err := secpSecretScalarFromBig(one)
+	kShare, err := secpSecretScalarFromScalar(one)
 	if err != nil {
 		tb.Fatal("k share: " + err.Error())
 	}
-	chiShare, err := secpSecretScalarFromBig(one)
+	chiShare, err := secpSecretScalarFromScalar(one)
 	if err != nil {
 		tb.Fatal("chi share: " + err.Error())
 	}
-	delta, err := secpSecretScalarFromBig(one)
+	delta, err := secpSecretScalarFromScalar(one)
 	if err != nil {
 		tb.Fatal("delta: " + err.Error())
 	}
@@ -606,7 +606,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		threshold:      1,
 		signers:        tss.NewPartySet(1),
 		r:              secp.Clone(RPoint),
-		littleR:        secp.ScalarFromBigInt(littleR),
+		littleR:        littleR,
 		transcriptHash: transcript[:],
 		context:        ctx,
 		contextHash:    contextHash,
@@ -665,12 +665,12 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
 		EncK:                 make([]byte, 256),
 		PaillierPublicKey:    make([]byte, 256),
 		Gamma:                kPoint,
-		Delta:                scalarBytes(one),
+		Delta:                kScalar.Bytes(),
 	}
 	wit := signprep.Witness{
-		KShare:   one,
-		MTASum:   one,
-		ChiShare: two,
+		KShare:   testSecretScalar(tb, 1),
+		MTASum:   testSecretScalar(tb, 1),
+		ChiShare: testSecretScalar(tb, 2),
 	}
 	proof, err := signprep.Prove(testutil.DeterministicReader(42), stmt, wit)
 	if err != nil {

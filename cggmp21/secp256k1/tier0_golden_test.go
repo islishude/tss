@@ -164,7 +164,7 @@ func TestFast_GoldenReshareSharePayload(t *testing.T) {
 func TestFast_GoldenSignPartialPayload(t *testing.T) {
 	t.Parallel()
 	payload := signPartialPayload{
-		S:                   big.NewInt(1),
+		S:                   testSecretScalar(t, 1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -230,7 +230,7 @@ func TestFast_GoldenPresignRound3Payload(t *testing.T) {
 	chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(2)))
 	proof := mustMinimalSignPrepProofForTest(t)
 	payload := presignRound3Payload{
-		Delta:    big.NewInt(42),
+		Delta:    testSecretScalar(t, 42),
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,

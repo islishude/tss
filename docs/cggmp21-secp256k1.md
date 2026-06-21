@@ -363,6 +363,8 @@ The proof transcript binds labeled entries for `(protocol, session ID, party, si
 
 Receivers verify the signprep proof during presign round 3 **before** accepting the delta share or writing any session state. An invalid proof produces `EvidenceKindPresignRound3` blame with the sender.
 
+The signprep witness remains fixed-width secret material throughout proof generation. `KShare`, `MTASum`, and `ChiShare` use `secret.Scalar` at the API boundary and fiat-backed `secp256k1.Scalar` arithmetic internally; they are not converted to `*big.Int`.
+
 ### Presign Transcript
 
 The transcript hash binds the session ID, presign context hash, additive HD shift, group public key, keygen transcript hash, participant-set hash, all signers' public round-1 material (Gamma and EncK), all delta shares, **all KPoint_i, ChiPoint_i, and SHA-256(Proof_i)**, R, r, and δ. Binding the verification material into the transcript prevents replay or substitution of verify shares after presign completion.
@@ -387,6 +389,8 @@ Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the internal
 
 - `DigestHash`: binds the signing request to prevent the same presign context from being confused across different digest requests.
 - `PartialEquationHash`: a stable evidence hash binding `(session ID, party, presign transcript hash, context hash, digest hash, r, S, KPoint, ChiPoint)`.
+
+`PresignRound3.Delta` and online `SignPartial.S` use canonical fixed-width 32-byte scalar fields. The earlier minimal-length integer encodings are retired and are not decoded. Online partial computation, verification, retention, and aggregation remain in fiat-backed scalar form; `SignSession` does not retain partials as `*big.Int`.
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 

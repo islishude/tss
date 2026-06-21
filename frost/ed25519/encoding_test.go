@@ -32,7 +32,6 @@ func TestFROSTKeyShareCanonicalEncoding(t *testing.T) {
 	reordered := cloneKeyShareValue(shares[1])
 	reordered.state.partyData = make(map[tss.PartyID]keySharePartyData, len(reordered.state.parties))
 	for _, id := range slices.Backward(reordered.state.parties) {
-
 		reordered.state.partyData[id] = shares[1].state.partyData[id].Clone()
 	}
 	raw3, err := reordered.MarshalBinary()

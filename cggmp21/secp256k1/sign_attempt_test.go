@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
-	"math/big"
 	"os"
 	"sync"
 	"testing"
@@ -535,7 +534,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	digestBindingHash := digestHash(digest, contextHash)
 	signPlanHash := bytes.Repeat([]byte{0x33}, sha256.Size)
 	payload := signPartialPayload{
-		S:                   big.NewInt(1),
+		S:                   testSecretScalar(t, 1),
 		PresignTranscript:   bytes.Repeat([]byte{0x11}, sha256.Size),
 		PresignContext:      contextHash,
 		DigestHash:          digestBindingHash,

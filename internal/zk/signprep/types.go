@@ -2,7 +2,6 @@ package signprep
 
 import (
 	"bytes"
-	"math/big"
 	"slices"
 
 	"github.com/islishude/tss"
@@ -57,17 +56,17 @@ func (stmt Statement) Clone() Statement {
 
 // Witness is the secret input for a signprep proof.
 type Witness struct {
-	KShare   *big.Int
-	MTASum   *big.Int
-	ChiShare *big.Int
+	KShare   *secret.Scalar
+	MTASum   *secret.Scalar
+	ChiShare *secret.Scalar
 }
 
 // Clone returns a deep copy of Witness
 func (w Witness) Clone() Witness {
 	return Witness{
-		KShare:   new(big.Int).Set(w.KShare),
-		MTASum:   new(big.Int).Set(w.MTASum),
-		ChiShare: new(big.Int).Set(w.ChiShare),
+		KShare:   w.KShare.Clone(),
+		MTASum:   w.MTASum.Clone(),
+		ChiShare: w.ChiShare.Clone(),
 	}
 }
 

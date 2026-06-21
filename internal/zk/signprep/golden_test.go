@@ -46,7 +46,11 @@ func TestGoldenProof(t *testing.T) {
 		ChiPoint:             chiPoint,
 		XBarPoint:            xBarPoint,
 	}
-	wit := Witness{KShare: one, MTASum: one, ChiShare: two}
+	wit := Witness{
+		KShare:   witnessScalarForTest(one),
+		MTASum:   witnessScalarForTest(one),
+		ChiShare: witnessScalarForTest(two),
+	}
 
 	proof, err := Prove(testutil.DeterministicReader(42), stmt, wit)
 	if err != nil {

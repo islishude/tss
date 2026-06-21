@@ -110,17 +110,17 @@ func TestFiatScalarArithmeticMatchesBigInt(t *testing.T) {
 
 	a := ScalarFromBigInt(big.NewInt(7))
 	b := ScalarFromBigInt(big.NewInt(11))
-	got := ScalarMul(ScalarAdd(a, b), b).BigInt()
+	got := ScalarMul(ScalarAdd(a, b), b)
 	want := new(big.Int).Mul(big.NewInt(18), big.NewInt(11))
 	want.Mod(want, Order())
-	if got.Cmp(want) != 0 {
-		t.Fatalf("fiat scalar arithmetic mismatch: got %s want %s", got, want)
+	if !got.Equal(ScalarFromBigInt(want)) {
+		t.Fatalf("fiat scalar arithmetic mismatch: got %x want %x", got.Bytes(), ScalarFromBigInt(want).Bytes())
 	}
 	inv, err := ScalarInvert(b)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if ScalarMul(b, inv).BigInt().Cmp(big.NewInt(1)) != 0 {
+	if !ScalarMul(b, inv).Equal(ScalarOne()) {
 		t.Fatal("fiat scalar inversion failed")
 	}
 }

@@ -5,11 +5,13 @@ import (
 	"errors"
 	"math/big"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
@@ -27,6 +29,56 @@ func TestFast_StaticNoSecretShareRegression(t *testing.T) {
 		if strings.Contains(text, forbidden) {
 			t.Fatalf("sign.go still contains forbidden regression marker %q", forbidden)
 		}
+	}
+}
+
+func TestFast_NoSecretScalarBigIntRegression(t *testing.T) {
+	t.Parallel()
+
+	sources := make(map[string][]byte, 3)
+	for name, read := range map[string]func() ([]byte, error){
+		"online_sign.go":    func() ([]byte, error) { return os.ReadFile("online_sign.go") },
+		"presign_round3.go": func() ([]byte, error) { return os.ReadFile("presign_round3.go") },
+		"sign.go":           func() ([]byte, error) { return os.ReadFile("sign.go") },
+	} {
+		body, err := read()
+		if err != nil {
+			t.Fatal(err)
+		}
+		sources[name] = body
+	}
+	for name, body := range sources {
+		if strings.Contains(string(body), ".BigInt()") {
+			t.Fatalf("%s converts a scalar to *big.Int", name)
+		}
+	}
+
+	secretScalarType := reflect.TypeFor[*secret.Scalar]()
+	secpScalarType := reflect.TypeFor[secp.Scalar]()
+	for _, tc := range []struct {
+		name  string
+		owner reflect.Type
+		field string
+		want  reflect.Type
+	}{
+		{name: "sign partial wire scalar", owner: reflect.TypeFor[signPartialPayload](), field: "S", want: secretScalarType},
+		{name: "presign delta wire scalar", owner: reflect.TypeFor[presignRound3Payload](), field: "Delta", want: secretScalarType},
+	} {
+		field, ok := tc.owner.FieldByName(tc.field)
+		if !ok {
+			t.Fatalf("%s field missing", tc.name)
+		}
+		if field.Type != tc.want {
+			t.Fatalf("%s type = %v, want %v", tc.name, field.Type, tc.want)
+		}
+	}
+
+	partials, ok := reflect.TypeFor[SignSession]().FieldByName("partials")
+	if !ok {
+		t.Fatal("SignSession.partials field missing")
+	}
+	if partials.Type.Kind() != reflect.Map || partials.Type.Elem() != secpScalarType {
+		t.Fatalf("SignSession.partials type = %v, want map with secp.Scalar values", partials.Type)
 	}
 }
 
@@ -173,7 +225,7 @@ func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
 		{
 			name: "missing DigestHash",
 			payload: signPartialPayload{
-				S:                   big.NewInt(1),
+				S:                   testSecretScalar(t, 1),
 				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 				DigestHash:          nil,
@@ -185,7 +237,7 @@ func TestFast_SignPartialPayloadEncodingRejectsMissingFields(t *testing.T) {
 		{
 			name: "missing PartialEquationHash",
 			payload: signPartialPayload{
-				S:                   big.NewInt(1),
+				S:                   testSecretScalar(t, 1),
 				PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 				PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 				DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -291,7 +343,7 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 				one := big.NewInt(1)
 				kPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 				return presignRound3Payload{
-					Delta:    one,
+					Delta:    testSecretScalar(t, 1),
 					KPoint:   kPoint,
 					ChiPoint: kPoint,
 					Proof:    &signprep.Proof{},
@@ -307,7 +359,7 @@ func TestFast_PresignRound3PayloadRejectsInvalidFields(t *testing.T) {
 				chiPoint := secp.ScalarBaseMult(secp.ScalarFromBigInt(one))
 				proof := mustMinimalSignPrepProofForTest(t)
 				return presignRound3Payload{
-					Delta:    one,
+					Delta:    testSecretScalar(t, 1),
 					KPoint:   nil,
 					ChiPoint: chiPoint,
 					Proof:    proof,

@@ -47,9 +47,9 @@ func TestEvalMatchesGenericShamir(t *testing.T) {
 		secp.ScalarFromBigInt(coeffs[2]),
 	}
 	for _, id := range []tss.PartyID{0, 1, 2, 5, 99} {
-		got := Eval(poly, id).BigInt()
+		got := Eval(poly, id)
 		want := shamir.Eval(coeffs, id, secp.Order())
-		if got.Cmp(want) != 0 {
+		if !got.Equal(secp.ScalarFromBigInt(want)) {
 			t.Fatalf("Eval(id=%d) mismatch", id)
 		}
 	}
@@ -60,12 +60,12 @@ func TestLagrangeCoefficientMatchesGenericShamir(t *testing.T) {
 
 	ids := tss.NewPartySet(1, 2, 5)
 	for _, id := range ids {
-		got := mustLagrangeCoefficient(t, id, ids).BigInt()
+		got := mustLagrangeCoefficient(t, id, ids)
 		want, err := shamir.LagrangeCoefficient(id, ids, secp.Order())
 		if err != nil {
 			t.Fatal(err)
 		}
-		if got.Cmp(want) != 0 {
+		if !got.Equal(secp.ScalarFromBigInt(want)) {
 			t.Fatalf("LagrangeCoefficient(id=%d) mismatch", id)
 		}
 	}

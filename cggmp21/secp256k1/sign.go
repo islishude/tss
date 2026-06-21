@@ -6,7 +6,6 @@ import (
 	"crypto/sha256"
 	"errors"
 	"fmt"
-	"math/big"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -641,23 +640,23 @@ func (m *presignMTAState) destroy() {
 type SignSession struct {
 	mu sync.Mutex
 
-	key       *KeyShare                // Caller-owned key share used to validate local ownership.
-	presign   *Presign                 // One-use presign handle bound by the durable attempt store.
-	sessionID tss.SessionID            // Online signing session ID for partial-signature envelopes.
-	guard     *tss.EnvelopeGuard       // Transport replay, identity, and policy guard.
-	log       tss.Logger               // Optional protocol logger.
-	limits    Limits                   // Local fail-closed resource policy.
-	digest    []byte                   // Context-bound message digest signed by ECDSA.
-	planHash  []byte                   // Digest every sign partial must echo.
-	publicKey []byte                   // Verification key used for final ECDSA self-checking.
-	partials  map[tss.PartyID]*big.Int // Validated ECDSA partial scalars keyed by signer.
-	completed bool                     // Terminal success flag; signature is available once true.
-	aborted   bool                     // Terminal failure/destruction flag.
-	signature *Signature               // Final aggregated signature, cleared by Destroy.
-	attempt   SignAttemptRecord        // Durable one-use attempt/outbox record.
-	store     SignAttemptStore         // Durable boundary for presign consumption and completion.
-	storeCtx  context.Context          // Context used for durable store operations.
-	storeTTL  time.Duration            // Timeout applied to durable store calls.
+	key       *KeyShare                   // Caller-owned key share used to validate local ownership.
+	presign   *Presign                    // One-use presign handle bound by the durable attempt store.
+	sessionID tss.SessionID               // Online signing session ID for partial-signature envelopes.
+	guard     *tss.EnvelopeGuard          // Transport replay, identity, and policy guard.
+	log       tss.Logger                  // Optional protocol logger.
+	limits    Limits                      // Local fail-closed resource policy.
+	digest    []byte                      // Context-bound message digest signed by ECDSA.
+	planHash  []byte                      // Digest every sign partial must echo.
+	publicKey []byte                      // Verification key used for final ECDSA self-checking.
+	partials  map[tss.PartyID]secp.Scalar // Validated ECDSA partial scalars keyed by signer.
+	completed bool                        // Terminal success flag; signature is available once true.
+	aborted   bool                        // Terminal failure/destruction flag.
+	signature *Signature                  // Final aggregated signature, cleared by Destroy.
+	attempt   SignAttemptRecord           // Durable one-use attempt/outbox record.
+	store     SignAttemptStore            // Durable boundary for presign consumption and completion.
+	storeCtx  context.Context             // Context used for durable store operations.
+	storeTTL  time.Duration               // Timeout applied to durable store calls.
 }
 
 // abort marks the signing session aborted and clears secret-bearing
@@ -667,7 +666,7 @@ func (s *SignSession) abort() {
 		return
 	}
 	s.aborted = true
-	clearBigIntMap(s.partials)
+	clearScalarMap(s.partials)
 	clear(s.digest)
 	s.digest = nil
 }
@@ -713,7 +712,7 @@ func (presignRound2Payload) WireType() string { return presignRound2PayloadWireT
 func (presignRound2Payload) WireVersion() uint16 { return presignRound2PayloadWireVersion }
 
 type presignRound3Payload struct {
-	Delta    *big.Int        `json:"-" wire:"1,bigpos,max_bytes=scalar"`
+	Delta    *secret.Scalar  `json:"-" wire:"1,custom,len=32"`
 	KPoint   *secp.Point     `json:"k_point" wire:"2,custom,len=33"`
 	ChiPoint *secp.Point     `json:"chi_point" wire:"3,custom,len=33"`
 	Proof    *signprep.Proof `json:"proof" wire:"4,custom,max_bytes=signprep_proof"`
@@ -727,12 +726,12 @@ func (presignRound3Payload) WireType() string { return presignRound3PayloadWireT
 func (presignRound3Payload) WireVersion() uint16 { return presignRound3PayloadWireVersion }
 
 type signPartialPayload struct {
-	S                   *big.Int `wire:"1,biguint,max_bytes=scalar"`
-	PresignTranscript   []byte   `json:"presign_transcript" wire:"2,bytes,len=32"`
-	PresignContext      []byte   `json:"presign_context" wire:"3,bytes,len=32"`
-	DigestHash          []byte   `json:"digest_hash" wire:"4,bytes,len=32"`
-	PartialEquationHash []byte   `json:"partial_equation_hash" wire:"5,bytes,len=32"`
-	PlanHash            []byte   `json:"plan_hash" wire:"6,bytes,len=32"`
+	S                   *secret.Scalar `json:"-" wire:"1,custom,len=32"`
+	PresignTranscript   []byte         `json:"presign_transcript" wire:"2,bytes,len=32"`
+	PresignContext      []byte         `json:"presign_context" wire:"3,bytes,len=32"`
+	DigestHash          []byte         `json:"digest_hash" wire:"4,bytes,len=32"`
+	PartialEquationHash []byte         `json:"partial_equation_hash" wire:"5,bytes,len=32"`
+	PlanHash            []byte         `json:"plan_hash" wire:"6,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for signPartialPayload.

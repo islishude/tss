@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"slices"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -44,9 +45,9 @@ func RandomPolynomial(reader io.Reader, threshold int, constant *secp.Scalar) (P
 func Eval(poly Polynomial, id tss.PartyID) secp.Scalar {
 	x := secp.ScalarFromUint64(uint64(id))
 	acc := secp.ScalarZero()
-	for i := len(poly) - 1; i >= 0; i-- {
+	for _, p := range slices.Backward(poly) {
 		acc = secp.ScalarMul(acc, x)
-		acc = secp.ScalarAdd(acc, poly[i])
+		acc = secp.ScalarAdd(acc, p)
 	}
 	return acc
 }

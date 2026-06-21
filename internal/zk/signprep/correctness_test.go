@@ -7,6 +7,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -275,9 +276,9 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 		XBarPoint:            kPoint,
 	}
 	wit := Witness{
-		KShare:   new(big.Int).Set(one),
-		MTASum:   new(big.Int).Set(one),
-		ChiShare: new(big.Int).Set(two),
+		KShare:   witnessScalarForTest(one),
+		MTASum:   witnessScalarForTest(one),
+		ChiShare: witnessScalarForTest(two),
 	}
 
 	for _, opt := range opts {
@@ -309,9 +310,21 @@ func withSignPrepAdditiveShift() signPrepFixtureOption {
 
 		stmt.AdditiveShift = scalarFixedBytes(one)
 		stmt.ChiPoint = signPrepPointBytes(five)
-		wit.MTASum = new(big.Int).Set(three)
-		wit.ChiShare = new(big.Int).Set(five)
+		wit.MTASum = witnessScalarForTest(three)
+		wit.ChiShare = witnessScalarForTest(five)
 	}
+}
+
+func scalarFixedBytes(x *big.Int) []byte {
+	return secp.ScalarFromBigInt(x).Bytes()
+}
+
+func witnessScalarForTest(x *big.Int) *secret.Scalar {
+	s, err := secret.NewScalar(scalarFixedBytes(x), secp.ScalarSize)
+	if err != nil {
+		panic("signprep test witness scalar: " + err.Error())
+	}
+	return s
 }
 
 func signPrepPointBytes(x *big.Int) []byte {

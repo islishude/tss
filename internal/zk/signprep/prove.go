@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
@@ -20,26 +19,17 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 	if err := validateStatement(stmt); err != nil {
 		return nil, err
 	}
-	if err := validateWitness(wit); err != nil {
+	kScalar, mScalar, _, err := witnessScalars(wit)
+	if err != nil {
 		return nil, err
 	}
-	kShare := new(big.Int).Set(wit.KShare)
-	defer secret.ClearBigInt(kShare)
-	mtaSum := new(big.Int).Set(wit.MTASum)
-	defer secret.ClearBigInt(mtaSum)
-	mtaIsZero := mtaSum.Sign() == 0
+	mtaIsZero := mScalar.IsZero()
 
 	// Compute MPoint = M_i * G. When M_i = 0, MPoint is the identity (point at
 	// infinity) which has no compressed encoding — we represent it as nil.
 	// This is common for 1-of-1 signing where there are no MTA contributions.
 	var mPoint []byte
-	var mScalar secp.Scalar
 	if !mtaIsZero {
-		var err error
-		mScalar, err = secp.ScalarFromBytes(scalarFixedBytes(mtaSum))
-		if err != nil {
-			return nil, err
-		}
 		mPoint, err = secp.PointBytes(secp.ScalarBaseMult(mScalar))
 		if err != nil {
 			return nil, err
@@ -65,10 +55,6 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 	}
 
 	// Commitments.
-	kScalar, err := secp.ScalarFromBytes(scalarFixedBytes(kShare))
-	if err != nil {
-		return nil, err
-	}
 	kCommit, err := secp.PointBytes(secp.ScalarBaseMult(kNonce))
 	if err != nil {
 		return nil, err
@@ -107,11 +93,7 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 
 	// Derive challenge. nil mCommit/mPoint are identity elements and contribute
 	// the same length-prefixed zero bytes to the transcript.
-	challenge, err := transcript(stmt, kCommit, mCommit, dleqA1, dleqA2, mPoint)
-	if err != nil {
-		return nil, err
-	}
-	challengeScalar, err := secp.ScalarFromBytes(scalarFixedBytes(challenge))
+	challengeScalar, err := transcript(stmt, kCommit, mCommit, dleqA1, dleqA2, mPoint)
 	if err != nil {
 		return nil, err
 	}
@@ -195,21 +177,40 @@ func validateStatement(stmt Statement) error {
 	return nil
 }
 
-func validateWitness(wit Witness) error {
-	if wit.KShare == nil || wit.KShare.Sign() == 0 {
-		return errors.New("signprep: k share must be non-zero")
+func witnessScalars(wit Witness) (kShare, mtaSum, chiShare secp.Scalar, err error) {
+	kShare, err = witnessScalar(wit.KShare, false, "k share")
+	if err != nil {
+		return secp.Scalar{}, secp.Scalar{}, secp.Scalar{}, err
 	}
-	if wit.ChiShare == nil || wit.ChiShare.Sign() == 0 {
-		return errors.New("signprep: chi share must be non-zero")
+	mtaSum, err = witnessScalar(wit.MTASum, true, "MTA sum")
+	if err != nil {
+		return secp.Scalar{}, secp.Scalar{}, secp.Scalar{}, err
 	}
-	if wit.MTASum == nil {
-		return errors.New("signprep: MTA sum must not be nil")
+	chiShare, err = witnessScalar(wit.ChiShare, false, "chi share")
+	if err != nil {
+		return secp.Scalar{}, secp.Scalar{}, secp.Scalar{}, err
 	}
-	return nil
+	return kShare, mtaSum, chiShare, nil
 }
 
-func scalarFixedBytes(x *big.Int) []byte {
-	return secp.ScalarFromBigInt(x).Bytes()
+func witnessScalar(value *secret.Scalar, allowZero bool, name string) (secp.Scalar, error) {
+	if value == nil {
+		return secp.Scalar{}, fmt.Errorf("signprep: %s must not be nil", name)
+	}
+	raw := value.FixedBytes()
+	defer clear(raw)
+	if allowZero {
+		scalar, err := secp.ScalarFromBytesAllowZero(raw)
+		if err != nil {
+			return secp.Scalar{}, fmt.Errorf("signprep: invalid %s: %w", name, err)
+		}
+		return scalar, nil
+	}
+	scalar, err := secp.ScalarFromBytes(raw)
+	if err != nil {
+		return secp.Scalar{}, fmt.Errorf("signprep: invalid %s: %w", name, err)
+	}
+	return scalar, nil
 }
 
 func newProofScalar(data []byte) (*secret.Scalar, error) {

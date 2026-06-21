@@ -315,7 +315,7 @@ func (p *presignRound3Payload) UnmarshalBinaryWithLimits(in []byte, limits Limit
 
 // Validate checks the presign round-three payload structure.
 func (p presignRound3Payload) Validate() error {
-	if err := validateScalarRangeStrict(p.Delta); err != nil {
+	if err := validateSecretScalarStrict(p.Delta); err != nil {
 		return err
 	}
 	if _, err := secp.PointBytes(p.KPoint); err != nil {
@@ -373,7 +373,7 @@ func (p *signPartialPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 
 // Validate checks the sign partial payload structure.
 func (p signPartialPayload) Validate() error {
-	if err := validateScalarRangeAllowZero(p.S); err != nil {
+	if err := validateSecretScalarAllowZero(p.S); err != nil {
 		return err
 	}
 	if len(p.PresignTranscript) != sha256.Size {

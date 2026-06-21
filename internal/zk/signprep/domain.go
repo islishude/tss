@@ -2,7 +2,6 @@ package signprep
 
 import (
 	"errors"
-	"math/big"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	transcriptpkg "github.com/islishude/tss/internal/transcript"
@@ -12,7 +11,7 @@ const signPrepProofDomainLabel = "cggmp21-secp256k1-signprep-proof"
 
 var errZeroChallenge = errors.New("signprep: zero challenge — re-run with fresh nonces")
 
-func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte) (*big.Int, error) {
+func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte) (secp.Scalar, error) {
 	t := transcriptpkg.New(signPrepProofDomainLabel)
 	t.AppendString("protocol", string(stmt.Protocol))
 	t.AppendBytes("session_id", stmt.SessionID[:])
@@ -40,10 +39,12 @@ func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte)
 	t.AppendBytes("dleq_a1", dleqA1)
 	t.AppendBytes("dleq_a2", dleqA2)
 
-	challenge := new(big.Int).SetBytes(t.Sum())
-	challenge.Mod(challenge, secp.Order())
-	if challenge.Sign() == 0 {
-		return nil, errZeroChallenge
+	challenge, err := secp.ScalarFromBytesModOrder(t.Sum())
+	if err != nil {
+		return secp.Scalar{}, err
+	}
+	if challenge.IsZero() {
+		return secp.Scalar{}, errZeroChallenge
 	}
 	return challenge, nil
 }

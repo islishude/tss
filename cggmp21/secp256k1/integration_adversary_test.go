@@ -28,7 +28,8 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 		{
 			name: "tampered S with bad equation hash",
 			mutate: func(t *testing.T, p *signPartialPayload, _ *Presign, _ tss.SessionID, _ []byte) {
-				p.S = big.NewInt(123456789)
+				p.S.Destroy()
+				p.S = testSecretScalar(t, 123456789)
 				p.PartialEquationHash = bytes.Repeat([]byte{0x42}, 32)
 			},
 		},
@@ -53,15 +54,21 @@ func TestIntegration_SignPartialTamperingBlamesSender(t *testing.T) {
 		{
 			name: "tampered S with recomputed equation hash",
 			mutate: func(t *testing.T, p *signPartialPayload, presign *Presign, signID tss.SessionID, digest []byte) {
-				sVal := secp.ScalarFromBigInt(p.S)
-				wrongS := new(big.Int).Add(sVal.BigInt(), big.NewInt(1))
-				wrongS.Mod(wrongS, secp.Order())
-				p.S = wrongS
+				sVal, err := secpScalarFromSecretAllowZero(p.S)
+				if err != nil {
+					t.Fatal(err)
+				}
+				wrongS := secp.ScalarAdd(sVal, secp.ScalarOne())
+				p.S.Destroy()
+				p.S, err = secpSecretScalarFromScalarAllowZero(wrongS)
+				if err != nil {
+					t.Fatal(err)
+				}
 				vs, _ := presignVerifyShare(presign, presign.PartyID())
 				p.PartialEquationHash = partialEquationHash(
 					signID, presign.PartyID(), p.PresignTranscript,
 					p.PresignContext, p.PlanHash, digest[:],
-					mustPresignLittleR(t, presign), scalarBytes(p.S),
+					mustPresignLittleR(t, presign), wrongS.Bytes(),
 					mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
 				)
 			},
@@ -440,15 +447,16 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Replace S with a different valid scalar (not the correct s_i).
-	originalS := new(big.Int).Set(p.S)
-	p.S = big.NewInt(42)
+	originalS := p.S.Clone()
+	p.S.Destroy()
+	p.S = testSecretScalar(t, 42)
 	// Recompute equation hash so hash mismatch doesn't fire first — we want
 	// the equation verification to catch it.
 	vs, _ := presignVerifyShare(presigns[maliciousSigner], maliciousSigner)
 	p.PartialEquationHash = partialEquationHash(
 		signID, maliciousSigner, p.PresignTranscript,
 		p.PresignContext, p.PlanHash, digest[:],
-		mustPresignLittleR(t, presigns[maliciousSigner]), scalarBytes(p.S),
+		mustPresignLittleR(t, presigns[maliciousSigner]), p.S.FixedBytes(),
 		mustSignVerifyShareKPointBytes(t, vs), mustSignVerifyShareChiPointBytes(t, vs),
 	)
 	mutated, err := marshalSignPartialPayload(p)
@@ -458,9 +466,10 @@ func TestIntegration_OriginalDefectRegression(t *testing.T) {
 	maliciousPartial.Payload = mutated
 
 	// Verify S is actually different from original.
-	if p.S.Cmp(originalS) == 0 {
+	if p.S.Equal(originalS) {
 		t.Fatal("S was not changed — scalar collision")
 	}
+	originalS.Destroy()
 
 	// Step 4: Deliver tampered partial to honest signer.
 	_, err = honestSession.HandleSignMessage(testutil.DeliverEnvelope(maliciousPartial))

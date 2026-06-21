@@ -88,7 +88,8 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.S = bigOne()
+	payload.S.Destroy()
+	payload.S = testSecretScalar(t, 1)
 	mutated, err := marshalSignPartialPayload(payload)
 	if err != nil {
 		t.Fatal(err)

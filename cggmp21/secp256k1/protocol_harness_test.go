@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
-	"math/big"
 	"strings"
 	"sync"
 	"testing"
@@ -264,10 +263,6 @@ func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, sign
 		out[id] = presign
 	}
 	return out
-}
-
-func bigOne() *big.Int {
-	return big.NewInt(1)
 }
 
 func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign) EvidenceContext {

@@ -36,6 +36,11 @@ func ScalarFromBytesModOrder(in []byte) (Scalar, error) {
 	return mustScalarFromBytes(be), nil
 }
 
+// ScalarFromFieldElement reduces a base-field element modulo the subgroup order.
+func ScalarFromFieldElement(x FieldElement) Scalar {
+	return scalarFromFieldElement(x)
+}
+
 func scalarFromBig(x *big.Int) Scalar {
 	order := Order()
 	reduced := new(big.Int).Mod(x, order)

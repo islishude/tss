@@ -86,11 +86,7 @@ func Verify(stmt Statement, proof *Proof) error {
 		}
 	}
 
-	challenge, err := transcript(stmt, proof.KCommitment, proof.MCommitment, proof.DLEQA1, proof.DLEQA2, proof.MPoint)
-	if err != nil {
-		return err
-	}
-	challengeScalar, err := secp.ScalarFromBytes(scalarFixedBytes(challenge))
+	challengeScalar, err := transcript(stmt, proof.KCommitment, proof.MCommitment, proof.DLEQA1, proof.DLEQA2, proof.MPoint)
 	if err != nil {
 		return err
 	}

@@ -54,7 +54,11 @@ func TestSignPrepProofZeroKnowledge(t *testing.T) {
 		ChiPoint:             chiPoint,
 		XBarPoint:            xBarPoint,
 	}
-	wit := Witness{KShare: one, MTASum: one, ChiShare: two}
+	wit := Witness{
+		KShare:   witnessScalarForTest(one),
+		MTASum:   witnessScalarForTest(one),
+		ChiShare: witnessScalarForTest(two),
+	}
 
 	proof1, err := Prove(nil, stmt, wit)
 	if err != nil {
@@ -119,7 +123,11 @@ func TestSignPrepProofDoesNotContainWitness(t *testing.T) {
 		ChiPoint:             chiPoint,
 		XBarPoint:            xBarPoint,
 	}
-	wit := Witness{KShare: secretK, MTASum: secretM, ChiShare: secretChi}
+	wit := Witness{
+		KShare:   witnessScalarForTest(secretK),
+		MTASum:   witnessScalarForTest(secretM),
+		ChiShare: witnessScalarForTest(secretChi),
+	}
 
 	proof, err := Prove(nil, stmt, wit)
 	if err != nil {

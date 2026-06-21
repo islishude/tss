@@ -46,7 +46,7 @@ func TestGoldenSignPartialPayload(t *testing.T) {
 	t.Parallel()
 
 	payload := signPartialPayload{
-		S:                   big.NewInt(1),
+		S:                   testSecretScalar(t, 1),
 		PresignTranscript:   bytes.Repeat([]byte{0xaa}, 32),
 		PresignContext:      bytes.Repeat([]byte{0xbb}, 32),
 		DigestHash:          bytes.Repeat([]byte{0xcc}, 32),
@@ -84,7 +84,7 @@ func TestGoldenPresignRound3Payload(t *testing.T) {
 	twoScalar := secp.ScalarFromBigInt(big.NewInt(2))
 	chiPoint := secp.ScalarBaseMult(twoScalar)
 	payload := presignRound3Payload{
-		Delta:    big.NewInt(42),
+		Delta:    testSecretScalar(t, 42),
 		KPoint:   kPoint,
 		ChiPoint: chiPoint,
 		Proof:    proof,

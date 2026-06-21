@@ -1,10 +1,10 @@
 package secp256k1
 
 import (
-	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -44,7 +44,10 @@ func testSecurityParams() SecurityParams {
 
 func testSecretScalar(t testing.TB, v int64) *secret.Scalar {
 	t.Helper()
-	s, err := secpSecretScalarFromBig(big.NewInt(v))
+	if v <= 0 {
+		t.Fatalf("test secret scalar must be positive: %d", v)
+	}
+	s, err := secpSecretScalarFromScalar(secp.ScalarFromUint64(uint64(v)))
 	if err != nil {
 		t.Fatal(err)
 	}
