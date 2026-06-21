@@ -25,14 +25,54 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		return nil, nil
 	}
-	if !allRound1Received(s.partyData, s.cfg.Parties) {
+	prepared, ok, err := s.maybePrepareCGGMPPendingKeyShare()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
+	}
+	defer prepared.destroy()
+	effects := s.commitCGGMPPendingKeyShare(prepared)
+	if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
+		if err := s.finalizeConfirmedKeyShare(); err != nil {
+			return nil, err
+		}
+	}
+	return effects.envelopes, nil
+}
+
+type preparedCGGMPPendingKeyShare struct {
+	share        *KeyShare
+	confirmation *KeygenConfirmation
+	env          tss.Envelope
+	committed    bool
+}
+
+func (p *preparedCGGMPPendingKeyShare) destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	if p.share != nil {
+		p.share.Destroy()
+		p.share = nil
+	}
+	if p.confirmation != nil {
+		clear(p.confirmation.ChainCode)
+		p.confirmation = nil
+	}
+	clear(p.env.Payload)
+}
+
+func (s *KeygenSession) maybePrepareCGGMPPendingKeyShare() (*preparedCGGMPPendingKeyShare, bool, error) {
+	if !allRound1Received(s.partyData, s.cfg.Parties) {
+		return nil, false, nil
 	}
 	for _, id := range s.cfg.Parties {
 		d := s.partyData[id]
 		share, err := secpScalarFromSecret(d.share)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if err := secp.VerifyShare(d.commitments, s.cfg.Self, share); err != nil {
 			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
@@ -41,23 +81,31 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 			)
 			protoErr, evErr := s.buildShareVerificationBlame(id, d.commitments, err)
 			if evErr != nil {
-				return nil, evErr
+				return nil, false, evErr
 			}
-			return nil, protoErr
+			return nil, false, protoErr
 		}
 	}
 	localSecret := secp.ScalarZero()
 	for _, id := range s.cfg.Parties {
 		share, err := secpScalarFromSecret(s.partyData[id].share)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		localSecret = secp.ScalarAdd(localSecret, share)
 	}
 	secretScalar, err := secpSecretScalarFromScalar(localSecret)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
+	cleanup := newCleanupStack()
+	defer cleanup.run()
+	shareOwnsSecret := false
+	cleanup.add(func() {
+		if !shareOwnsSecret {
+			secretScalar.Destroy()
+		}
+	})
 	// Chain code is aggregated from round 2 confirmation reveals (commit-reveal).
 	groupCommitments := make([]*secp.Point, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
@@ -65,7 +113,7 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 		for _, id := range s.cfg.Parties {
 			p, err := secp.PointFromBytes(s.partyData[id].commitments[degree])
 			if err != nil {
-				return nil, err
+				return nil, false, err
 			}
 			points = append(points, p)
 		}
@@ -73,65 +121,63 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	publicKey, err := secp.PointBytes(groupCommitments[0])
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		pub, err := secp.EvalCommitmentPoints(groupCommitments, id)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		enc, err := secp.PointBytes(pub)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: enc})
 	}
 	transcriptHash, err := s.keygenTranscriptHash(groupCommitments)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	localVerificationShare, ok := verificationShareFor(verificationShares, s.cfg.Self)
 	if !ok {
-		return nil, errors.New("missing local verification share")
+		return nil, false, errors.New("missing local verification share")
 	}
 	shareProof, proofPublic, err := schnorr.Prove(transcriptHash, secretScalar)
 	if err != nil {
-		secretScalar.Destroy()
-		return nil, err
+		return nil, false, err
 	}
 	if !bytes.Equal(proofPublic, localVerificationShare) {
-		secretScalar.Destroy()
-		return nil, errors.New("local share proof public key mismatch")
+		return nil, false, errors.New("local share proof public key mismatch")
 	}
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams: s.securityParams,
-		party:          s.cfg.Self,
-		threshold:      s.cfg.Threshold,
-		parties:        s.cfg.Parties,
-		publicKey:      publicKey,
-		partyData: map[tss.PartyID]keySharePartyData{
-			s.cfg.Self: {paillierPublicKey: s.paillier.PublicKey.Clone()},
+		SecurityParams: s.securityParams,
+		Party:          s.cfg.Self,
+		Threshold:      s.cfg.Threshold,
+		Parties:        s.cfg.Parties,
+		PublicKey:      publicKey,
+		PartyData: map[tss.PartyID]keySharePartyData{
+			s.cfg.Self: {PaillierPublicKey: s.paillier.PublicKey.Clone()},
 		},
-		planHash:               bytes.Clone(s.planHash),
-		keygenTranscriptHash:   transcriptHash,
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelKeygenModulus,
+		PlanHash:               bytes.Clone(s.planHash),
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelKeygenModulus,
 	}}
 	localPaillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	localPaillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), localPaillierDomain, s.paillier, s.cfg.Self)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	localRingPedersen := s.partyData[s.cfg.Self].ringPedersen
 	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
 	for _, id := range s.cfg.Parties {
 		verificationShare, ok := verificationShareFor(verificationShares, id)
 		if !ok {
-			return nil, fmt.Errorf("missing verification share for party %d", id)
+			return nil, false, fmt.Errorf("missing verification share for party %d", id)
 		}
 		sessionData := s.partyData[id]
 		paillierProof := sessionData.paillierPub.Proof
@@ -139,45 +185,47 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 			paillierProof = localPaillierProof
 		}
 		partyData[id] = keySharePartyData{
-			verificationShare:  bytes.Clone(verificationShare),
-			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			paillierProof:      paillierProof.Clone(),
-			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:  bytes.Clone(verificationShare),
+			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:      paillierProof.Clone(),
+			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
 		}
 	}
 	share := &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.cfg.Self,
-		threshold:              s.cfg.Threshold,
-		parties:                s.cfg.Parties.Clone(),
-		publicKey:              bytes.Clone(publicKey),
-		chainCode:              nil, // filled in after confirmation round
-		secret:                 secretScalar,
-		groupCommitments:       groupCommitments,
-		partyData:              partyData,
-		paillierPrivateKey:     s.paillier.Clone(),
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelKeygenModulus,
-		shareProof:             shareProof.Clone(),
-		planHash:               bytes.Clone(s.planHash),
-		keygenTranscriptHash:   transcriptHash,
+		SecurityParams:         s.securityParams,
+		Party:                  s.cfg.Self,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.cfg.Parties.Clone(),
+		PublicKey:              bytes.Clone(publicKey),
+		ChainCode:              nil, // filled in after confirmation round
+		Secret:                 secretScalar,
+		GroupCommitments:       groupCommitments,
+		PartyData:              partyData,
+		PaillierPrivateKey:     s.paillier.Clone(),
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelKeygenModulus,
+		ShareProof:             shareProof.Clone(),
+		PlanHash:               bytes.Clone(s.planHash),
+		KeygenTranscriptHash:   transcriptHash,
 	}}
+	shareOwnsSecret = true
+	cleanup.add(share.Destroy)
 	// Π^log*: prove that Enc_i(x_i) and V_i = x_i·G share the same secret x_i,
 	// using the prover's own Ring-Pedersen parameters for the commitment.
 	logCiphertext, logRandomness, err := s.paillier.EncryptSecret(s.cfg.Reader(), secretScalar)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer logRandomness.Destroy()
 	localRP := localRingPedersen.Params.Clone()
 	logDomain, err := logProofDomain(localProofShare, &s.paillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	verificationPoint, err := secp.PointFromBytes(localVerificationShare)
 	if err != nil {
-		return nil, fmt.Errorf("invalid verification share: %w", err)
+		return nil, false, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
 		PaillierN:   &s.paillier.PublicKey,
@@ -189,45 +237,56 @@ func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
 	logWitness := zkpai.LogStarWitness{X: secretScalar, Rho: logRandomness}
 	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	share.state.logCiphertext = cloneBigInt(logCiphertext)
-	share.state.logProof = logProof.Clone()
+	share.state.LogCiphertext = tss.CloneBigInt(logCiphertext)
+	share.state.LogProof = logProof.Clone()
 	// Carry the local chain code into the confirmation for commit-reveal.
-	share.state.chainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)
+	share.state.ChainCode = bytes.Clone(s.partyData[s.cfg.Self].chainCode)
 	if err := share.validateWithoutConfirmations(s.limits); err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	confirmation, err := share.NewConfirmationWithLimits(s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	encodedConfirmation, err := confirmation.MarshalBinary()
 	// Don't leak the per-party chain code into the KeyShare — overwritten with aggregate after confirmations.
-	share.state.chainCode = nil
+	share.state.ChainCode = nil
 	if err != nil {
-		return nil, err
+		clear(confirmation.ChainCode)
+		return nil, false, err
 	}
-	s.partyData[s.cfg.Self].confirmation = confirmation
-	s.pending = share
-	s.state = keygenConfirming
 	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
-		return nil, err
+		clear(encodedConfirmation)
+		clear(confirmation.ChainCode)
+		return nil, false, err
 	}
-	out := []tss.Envelope{confirmationEnv}
+	cleanup.disarm()
+	return &preparedCGGMPPendingKeyShare{
+		share:        share,
+		confirmation: confirmation,
+		env:          confirmationEnv,
+	}, true, nil
+}
+
+func (s *KeygenSession) commitCGGMPPendingKeyShare(p *preparedCGGMPPendingKeyShare) sessionEffects {
+	if p == nil {
+		return sessionEffects{}
+	}
+	s.partyData[s.cfg.Self].confirmation = p.confirmation
+	s.pending = p.share
+	s.state = keygenConfirming
+	p.committed = true
+	publicKey := p.share.state.PublicKey
 	pubKeyHash := sha256.Sum256(publicKey)
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
 	)
-	if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-		if err := s.finalizeConfirmedKeyShare(); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return sessionEffects{envelopes: []tss.Envelope{p.env}}
 }
 
 // allRound1Received returns true when every party has submitted commitments,
@@ -249,13 +308,13 @@ func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet
 // commitments. Callers are responsible for logging the failure with the
 // appropriate path-specific context (eager or deferred).
 func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
-	evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.cfg.Self, payloadKeygenShare, nil)
+	evidenceEnv, evErr := newEnvelope(s.cfg, keygenStartRound, dealer, s.cfg.Self, payloadKeygenShare, nil)
 	if evErr != nil {
 		return nil, evErr
 	}
 	return &tss.ProtocolError{
 		Code:  tss.ErrCodeVerification,
-		Round: 1,
+		Round: keygenStartRound,
 		Party: dealer,
 		Blame: newBlame(
 			evidenceEnv,

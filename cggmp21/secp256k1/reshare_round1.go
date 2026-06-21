@@ -37,7 +37,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	oldSecret, err := secpScalarFromSecret(s.oldKey.state.secret)
+	oldSecret, err := secpScalarFromSecret(s.oldKey.state.Secret)
 	if err != nil {
 		return nil, err
 	}
@@ -113,7 +113,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) initReceiverMaterial() error {
-	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.state.paillierBits)
+	newPaillierKey, err := generatePaillierKey(s.cfg.Ctx(), s.cfg.Reader(), s.plan.state.PaillierBits)
 	if err != nil {
 		return err
 	}
@@ -232,31 +232,31 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 
 func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePayload, rawPayload []byte) error {
 	if p.Dealer != from {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload sender mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload sender mismatch"))
 	}
 	if p.Receiver != s.selfID {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share payload receiver mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload receiver mismatch"))
 	}
 	dd, ok := s.dealerData[from]
 	if !ok || dd.commitments == nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share has no dealer commitments"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share has no dealer commitments"))
 	}
 	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, errors.New("dealer share commitment hash mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share commitment hash mismatch"))
 	}
 	share, err := secpScalarFromSecret(p.Share)
 	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, err)
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, err)
 	}
 	if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 		verifyErr := err
-		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, from, s.selfID, payloadReshareShare, rawPayload)
+		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, from, s.selfID, payloadReshareShare, rawPayload)
 		if evErr != nil {
-			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, 1, from, evErr)
+			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, evErr)
 		}
 		return &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
-			Round: 1,
+			Round: reshareStartRound,
 			Party: from,
 			Blame: newBlame(
 				evidenceEnv,
@@ -296,7 +296,7 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if !tss.ContainsParty(s.dealerParties, dealer) {
 		return fmt.Errorf("sender %d is not a dealer", dealer)
 	}
-	verificationShare, ok := s.plan.state.oldVerificationShares[dealer]
+	verificationShare, ok := s.plan.state.OldVerificationShares[dealer]
 	if !ok {
 		return fmt.Errorf("missing old verification share for dealer %d", dealer)
 	}

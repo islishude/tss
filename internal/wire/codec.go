@@ -62,6 +62,8 @@ func (fs fieldSchema) encode(fv reflect.Value, limitSet FieldLimits) ([]byte, er
 		return raw, nil
 	case kindCustom:
 		return fs.encodeCustom(fv, limitSet)
+	case kindCustomList:
+		return fs.encodeCustomList(fv, limitSet)
 	case kindBigInt:
 		return fs.encodeBigIntDispatch(fv, limitSet)
 	case kindBigUint:
@@ -111,6 +113,8 @@ func (fs fieldSchema) decode(fv reflect.Value, raw []byte, limitSet FieldLimits,
 		return fs.decodeNested(fv, raw, limitSet, frameLimits)
 	case kindCustom:
 		return fs.decodeCustom(fv, raw, limitSet)
+	case kindCustomList:
+		return fs.decodeCustomList(fv, raw, limitSet)
 	case kindBigInt:
 		return fs.decodeBigIntDispatch(fv, raw, limitSet)
 	case kindBigUint:

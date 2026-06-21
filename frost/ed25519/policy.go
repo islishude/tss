@@ -14,7 +14,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                1,
+		Round:                keygenStartRound,
 		PayloadType:          payloadKeygenCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -22,7 +22,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                1,
+		Round:                keygenStartRound,
 		PayloadType:          payloadKeygenShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -30,7 +30,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                2,
+		Round:                keygenConfirmationRound,
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -40,7 +40,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	// --- Sign ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                1,
+		Round:                signStartRound,
 		PayloadType:          payloadSignCommitment,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -48,7 +48,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                2,
+		Round:                signRound2,
 		PayloadType:          payloadSignPartial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -58,7 +58,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	// --- Reshare ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                1,
+		Round:                reshareStartRound,
 		PayloadType:          payloadReshareCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -66,7 +66,7 @@ var frostPolicies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolFROSTEd25519,
-		Round:                1,
+		Round:                reshareStartRound,
 		PayloadType:          payloadReshareShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,

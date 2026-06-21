@@ -75,11 +75,11 @@ func TestCGGMP21MTAResponseProofDomainsBindLabelAndLifecyclePlan(t *testing.T) {
 	t.Parallel()
 
 	key := &KeyShare{state: &keyShareState{
-		threshold:            2,
-		parties:              tss.NewPartySet(1, 2),
-		publicKey:            []byte("public-key"),
-		keygenTranscriptHash: bytes.Repeat([]byte{0x24}, 32),
-		planHash:             bytes.Repeat([]byte{0x25}, 32),
+		Threshold:            2,
+		Parties:              tss.NewPartySet(1, 2),
+		PublicKey:            []byte("public-key"),
+		KeygenTranscriptHash: bytes.Repeat([]byte{0x24}, 32),
+		PlanHash:             bytes.Repeat([]byte{0x25}, 32),
 	}}
 	var sessionID tss.SessionID
 	sessionID[0] = 1

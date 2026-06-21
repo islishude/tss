@@ -1,12 +1,9 @@
 package secp256k1
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
-	"unicode/utf8"
 
-	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/wire"
 )
 
@@ -77,7 +74,13 @@ func (*ResharePlan) WireType() string { return resharePlanWireType }
 // WireVersion returns the wire format version for ResharePlan.
 func (*ResharePlan) WireVersion() uint16 { return resharePlanWireVersion }
 
-// MarshalWireMessage encodes ResharePlan directly without an intermediate DTO.
+// WireType returns the canonical wire type identifier for resharePlanState.
+func (*resharePlanState) WireType() string { return resharePlanWireType }
+
+// WireVersion returns the wire format version for resharePlanState.
+func (*resharePlanState) WireVersion() uint16 { return resharePlanWireVersion }
+
+// MarshalWireMessage encodes ResharePlan through its private state codec.
 func (p *ResharePlan) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
 	if p == nil || p.state == nil {
 		return nil, errors.New("nil reshare plan")
@@ -93,75 +96,10 @@ func (p *ResharePlan) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, er
 	if err := p.ValidateWithLimits(config.limits); err != nil {
 		return nil, err
 	}
-	if err := checkResharePlanWireBytes([]byte(p.state.curveID), config.maxCurveIDBytes, "curve id"); err != nil {
-		return nil, err
-	}
-	if err := checkResharePlanWireBytes(p.state.oldGroupPublicKey, config.limits.Curve.MaxPointBytes, "old group public key"); err != nil {
-		return nil, err
-	}
-	oldGroupCommitments, err := marshalBytesListValue(
-		p.state.oldGroupCommitments,
-		config.limits.Curve.MaxPointBytes,
-		config.limits.Threshold.MaxThreshold,
-		"old group commitments",
-	)
-	if err != nil {
-		return nil, err
-	}
-	oldVerificationShares, err := marshalResharePlanVerificationShares(p.state, config.limits)
-	if err != nil {
-		return nil, err
-	}
-	oldParties, err := marshalPartySetValue(p.state.oldParties, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("encode old parties: %w", err)
-	}
-	oldThreshold, err := uint32WireField(p.state.oldThreshold, "old threshold")
-	if err != nil {
-		return nil, err
-	}
-	dealerParties, err := marshalPartySetValue(p.state.dealerParties, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("encode dealer parties: %w", err)
-	}
-	newParties, err := marshalPartySetValue(p.state.newParties, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("encode new parties: %w", err)
-	}
-	newThreshold, err := uint32WireField(p.state.newThreshold, "new threshold")
-	if err != nil {
-		return nil, err
-	}
-	if err := checkResharePlanWireBytes(p.state.chainCode, config.limits.Curve.MaxScalarBytes, "chain code"); err != nil {
-		return nil, err
-	}
-	paillierBits, err := uint32WireField(p.state.paillierBits, "paillier bits")
-	if err != nil {
-		return nil, err
-	}
-	securityParams, err := wire.MarshalRecordValue(p.state.securityParams, opts...)
-	if err != nil {
-		return nil, fmt.Errorf("encode reshare security params: %w", err)
-	}
-	fields := []wire.Field{
-		{Tag: 1, Value: p.state.sessionID[:]},
-		{Tag: 2, Value: []byte(p.state.curveID)},
-		{Tag: 3, Value: wire.NonNilBytes(bytes.Clone(p.state.oldGroupPublicKey))},
-		{Tag: 4, Value: oldGroupCommitments},
-		{Tag: 5, Value: oldVerificationShares},
-		{Tag: 6, Value: oldParties},
-		{Tag: 7, Value: oldThreshold},
-		{Tag: 8, Value: dealerParties},
-		{Tag: 9, Value: newParties},
-		{Tag: 10, Value: newThreshold},
-		{Tag: 11, Value: wire.NonNilBytes(bytes.Clone(p.state.chainCode))},
-		{Tag: 12, Value: paillierBits},
-		{Tag: 13, Value: securityParams},
-	}
-	return wire.MarshalMessageBody(p, fields)
+	return wire.Marshal(p.state, opts...)
 }
 
-// UnmarshalWireMessage decodes ResharePlan directly without an intermediate DTO.
+// UnmarshalWireMessage decodes ResharePlan through its private state codec.
 func (p *ResharePlan) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
 	if p == nil {
 		return errors.New("nil reshare plan")
@@ -171,24 +109,14 @@ func (p *ResharePlan) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOpti
 	if err != nil {
 		return err
 	}
-	config.limits.State.MaxSerializedResharePlanBytes = resolved.FrameLimits.MaxTotalBytes
-	config.limits.TLV.MaxFields = resolved.FrameLimits.MaxFields
-	config.limits.TLV.MaxFieldBytes = resolved.FrameLimits.MaxFieldBytes
 	if resolved.FieldLimits == nil {
 		opts = append(opts, wire.WithFieldLimits(config.limits.fieldLimits()))
 	}
-	fields, err := wire.UnmarshalMessageBody(in, p, opts...)
-	if err != nil {
+	var state resharePlanState
+	if err := wire.Unmarshal(in, &state, opts...); err != nil {
 		return err
 	}
-	if err := requireResharePlanTags(fields); err != nil {
-		return err
-	}
-	state, err := decodeResharePlanFields(fields, config, opts...)
-	if err != nil {
-		return err
-	}
-	decoded := ResharePlan{state: state, limits: config.limits}
+	decoded := ResharePlan{state: &state, limits: config.limits}
 	if err := decoded.ValidateWithLimits(config.limits); err != nil {
 		return err
 	}
@@ -197,25 +125,19 @@ func (p *ResharePlan) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOpti
 }
 
 type resharePlanCodecOptions struct {
-	limits          Limits
-	maxCurveIDBytes int
+	limits Limits
 }
 
 func resharePlanCodecConfig(fieldLimits wire.FieldLimits) (resharePlanCodecOptions, error) {
 	limits := DefaultLimits()
-	defaults := limits.fieldLimits()
 	if fieldLimits == nil {
-		return resharePlanCodecOptions{
-			limits:          limits,
-			maxCurveIDBytes: defaults["curve_id"],
-		}, nil
+		return resharePlanCodecOptions{limits: limits}, nil
 	}
 	required := []struct {
 		name string
 		dst  *int
 	}{
 		{name: "point", dst: &limits.Curve.MaxPointBytes},
-		{name: "scalar", dst: &limits.Curve.MaxScalarBytes},
 		{name: "parties", dst: &limits.Threshold.MaxParties},
 		{name: "threshold", dst: &limits.Threshold.MaxThreshold},
 		{name: "paillier_modulus_bits", dst: &limits.Paillier.MaxModulusBits},
@@ -237,169 +159,5 @@ func resharePlanCodecConfig(fieldLimits wire.FieldLimits) (resharePlanCodecOptio
 	if curveIDBytes <= 0 {
 		return resharePlanCodecOptions{}, fmt.Errorf("wire: field limit %q for reshare plan must be positive", "curve_id")
 	}
-	return resharePlanCodecOptions{
-		limits:          limits,
-		maxCurveIDBytes: curveIDBytes,
-	}, nil
-}
-
-func requireResharePlanTags(fields []wire.Field) error {
-	if len(fields) != 13 {
-		return fmt.Errorf("reshare plan field count %d != 13", len(fields))
-	}
-	for i, field := range fields {
-		want := uint16(i + 1)
-		if field.Tag != want {
-			return fmt.Errorf("reshare plan tag %d at index %d, want %d", field.Tag, i, want)
-		}
-	}
-	return nil
-}
-
-func marshalResharePlanVerificationShares(state *resharePlanState, limits Limits) ([]byte, error) {
-	if len(state.oldParties) > limits.Threshold.MaxParties {
-		return nil, fmt.Errorf("old verification share count %d exceeds max_items=%d", len(state.oldParties), limits.Threshold.MaxParties)
-	}
-	shares := make([]wire.PartyBytes[tss.PartyID], 0, len(state.oldParties))
-	for _, party := range state.oldParties {
-		share := state.oldVerificationShares[party]
-		if len(share) > limits.Curve.MaxPointBytes {
-			return nil, fmt.Errorf("old verification share for party %d too large: %d > %d", party, len(share), limits.Curve.MaxPointBytes)
-		}
-		shares = append(shares, wire.PartyBytes[tss.PartyID]{
-			Party: party,
-			Bytes: bytes.Clone(share),
-		})
-	}
-	return wire.EncodePartyBytesChecked(shares)
-}
-
-func decodeResharePlanFields(fields []wire.Field, config resharePlanCodecOptions, opts ...wire.UnmarshalOption) (*resharePlanState, error) {
-	sessionID, err := tss.SessionIDFromBytes(fields[0].Value)
-	if err != nil {
-		return nil, fmt.Errorf("invalid reshare session id: %w", err)
-	}
-	curveID, err := decodeResharePlanString(fields[1].Value, config.maxCurveIDBytes, "curve id")
-	if err != nil {
-		return nil, err
-	}
-	if err := checkResharePlanWireBytes(fields[2].Value, config.limits.Curve.MaxPointBytes, "old group public key"); err != nil {
-		return nil, err
-	}
-	oldGroupCommitments, err := unmarshalBytesListValue(
-		fields[3].Value,
-		config.limits.Curve.MaxPointBytes,
-		config.limits.Threshold.MaxThreshold,
-		"old group commitments",
-	)
-	if err != nil {
-		return nil, err
-	}
-	oldVerificationShareRecords, err := wire.DecodePartyBytesWithLimit[tss.PartyID](
-		fields[4].Value,
-		config.limits.Threshold.MaxParties,
-		config.limits.Curve.MaxPointBytes,
-		"old verification shares",
-	)
-	if err != nil {
-		return nil, err
-	}
-	oldParties, err := unmarshalPartySetValue(fields[5].Value, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("invalid old parties: %w", err)
-	}
-	oldThreshold, err := decodeResharePlanUint32AsInt(fields[6].Value, "old threshold")
-	if err != nil {
-		return nil, err
-	}
-	dealerParties, err := unmarshalPartySetValue(fields[7].Value, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("invalid dealer parties: %w", err)
-	}
-	newParties, err := unmarshalPartySetValue(fields[8].Value, config.limits.Threshold.MaxParties)
-	if err != nil {
-		return nil, fmt.Errorf("invalid new parties: %w", err)
-	}
-	newThreshold, err := decodeResharePlanUint32AsInt(fields[9].Value, "new threshold")
-	if err != nil {
-		return nil, err
-	}
-	if err := checkResharePlanWireBytes(fields[10].Value, config.limits.Curve.MaxScalarBytes, "chain code"); err != nil {
-		return nil, err
-	}
-	paillierBits, err := decodeResharePlanUint32AsInt(fields[11].Value, "paillier bits")
-	if err != nil {
-		return nil, err
-	}
-	if paillierBits > config.limits.Paillier.MaxModulusBits {
-		return nil, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, config.limits.Paillier.MaxModulusBits)
-	}
-	var securityParams SecurityParams
-	if err := wire.UnmarshalRecordValue(fields[12].Value, &securityParams, opts...); err != nil {
-		return nil, fmt.Errorf("invalid reshare security params: %w", err)
-	}
-	verificationShares, err := decodeResharePlanVerificationShares(oldVerificationShareRecords, oldParties)
-	if err != nil {
-		return nil, err
-	}
-	return &resharePlanState{
-		sessionID:             sessionID,
-		curveID:               curveID,
-		oldGroupPublicKey:     bytes.Clone(fields[2].Value),
-		oldGroupCommitments:   tss.CloneByteSlices(oldGroupCommitments),
-		oldVerificationShares: verificationShares,
-		oldParties:            oldParties.Clone(),
-		oldThreshold:          oldThreshold,
-		dealerParties:         dealerParties.Clone(),
-		newParties:            newParties.Clone(),
-		newThreshold:          newThreshold,
-		chainCode:             bytes.Clone(fields[10].Value),
-		paillierBits:          paillierBits,
-		securityParams:        securityParams,
-	}, nil
-}
-
-func decodeResharePlanVerificationShares(records []wire.PartyBytes[tss.PartyID], oldParties tss.PartySet) (map[tss.PartyID][]byte, error) {
-	if len(records) != len(oldParties) {
-		return nil, fmt.Errorf("old verification share count must equal old party count")
-	}
-	verificationShares := make(map[tss.PartyID][]byte, len(records))
-	for i, share := range records {
-		if share.Party != oldParties[i] {
-			return nil, fmt.Errorf("old verification share %d is for party %d, want party %d", i, share.Party, oldParties[i])
-		}
-		if _, exists := verificationShares[share.Party]; exists {
-			return nil, fmt.Errorf("duplicate old verification share for party %d", share.Party)
-		}
-		verificationShares[share.Party] = bytes.Clone(share.Bytes)
-	}
-	return verificationShares, nil
-}
-
-func decodeResharePlanUint32AsInt(raw []byte, name string) (int, error) {
-	value, err := wire.DecodeUint32(raw)
-	if err != nil {
-		return 0, fmt.Errorf("invalid reshare plan %s: %w", name, err)
-	}
-	if uint64(value) > uint64(^uint(0)>>1) {
-		return 0, fmt.Errorf("reshare plan %s %d overflows int", name, value)
-	}
-	return int(value), nil
-}
-
-func decodeResharePlanString(raw []byte, maxBytes int, name string) (string, error) {
-	if err := checkResharePlanWireBytes(raw, maxBytes, name); err != nil {
-		return "", err
-	}
-	if !utf8.Valid(raw) {
-		return "", fmt.Errorf("invalid reshare plan %s: string is not valid UTF-8", name)
-	}
-	return string(raw), nil
-}
-
-func checkResharePlanWireBytes(raw []byte, maxBytes int, name string) error {
-	if maxBytes > 0 && len(raw) > maxBytes {
-		return fmt.Errorf("reshare plan %s too large: %d > %d", name, len(raw), maxBytes)
-	}
-	return nil
+	return resharePlanCodecOptions{limits: limits}, nil
 }

@@ -15,7 +15,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Keygen ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                keygenStartRound,
 		PayloadType:          payloadKeygenCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -23,7 +23,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                keygenStartRound,
 		PayloadType:          payloadKeygenShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -31,7 +31,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                2,
+		Round:                keygenConfirmationRound,
 		PayloadType:          payloadKeygenConfirmation,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -41,7 +41,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Presign ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                presignStartRound,
 		PayloadType:          payloadPresignRound1,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -49,7 +49,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                presignStartRound,
 		PayloadType:          payloadPresignRound1Proof,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -57,7 +57,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                2,
+		Round:                presignRound2,
 		PayloadType:          payloadPresignRound2,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -65,7 +65,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                3,
+		Round:                presignRound3,
 		PayloadType:          payloadPresignRound3,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -75,7 +75,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Sign ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                signStartRound,
 		PayloadType:          payloadSignPartial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -85,7 +85,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Refresh ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                refreshStartRound,
 		PayloadType:          payloadRefreshCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -93,7 +93,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                refreshStartRound,
 		PayloadType:          payloadRefreshShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -104,7 +104,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	// --- Reshare ---
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                reshareStartRound,
 		PayloadType:          payloadReshareDealerCommitments,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,
@@ -112,7 +112,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                reshareStartRound,
 		PayloadType:          payloadReshareShare,
 		Mode:                 tss.DeliveryDirect,
 		Confidentiality:      tss.ConfidentialityRequired,
@@ -120,7 +120,7 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	},
 	tss.DeliveryPolicy{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		Round:                1,
+		Round:                reshareStartRound,
 		PayloadType:          payloadReshareReceiverMaterial,
 		Mode:                 tss.DeliveryBroadcast,
 		Confidentiality:      tss.ConfidentialityOptional,

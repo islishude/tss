@@ -115,15 +115,15 @@ func (s *ReshareSession) finalizeConfirmedShare() error {
 	}
 	// Verify preserved chain code on each confirmation.
 	for _, c := range confirmations {
-		if !bytes.Equal(c.ChainCode, s.newShare.state.chainCode) {
+		if !bytes.Equal(c.ChainCode, s.newShare.state.ChainCode) {
 			s.abort()
 			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
 		}
 	}
 	for _, confirmation := range confirmations {
-		data := s.newShare.state.partyData[confirmation.Sender]
-		data.keygenConfirmation = confirmation.Clone()
-		s.newShare.state.partyData[confirmation.Sender] = data
+		data := s.newShare.state.PartyData[confirmation.Sender]
+		data.KeygenConfirmation = confirmation.Clone()
+		s.newShare.state.PartyData[confirmation.Sender] = data
 	}
 	if err := s.newShare.ValidateWithLimits(s.limits); err != nil {
 		s.abort()

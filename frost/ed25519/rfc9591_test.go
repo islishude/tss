@@ -324,24 +324,24 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		if err != nil {
 			t.Fatal(err)
 		}
-		partyData[id] = keySharePartyData{verificationShare: pub}
+		partyData[id] = keySharePartyData{VerificationShare: pub}
 	}
 	secretScalar, err := newEdSecretScalar(secret)
 	if err != nil {
 		t.Fatal(err)
 	}
 	key := &KeyShare{state: &keyShareState{
-		party:                party,
-		threshold:            2,
-		parties:              parties,
-		publicKey:            groupCommitments.PublicKey(),
-		chainCode:            bytes.Repeat([]byte{0x96}, 32),
-		secret:               secretScalar,
-		groupCommitments:     groupCommitments,
-		partyData:            partyData,
-		keygenTranscriptHash: []byte("rfc9591-appendix-e1"),
-		keygenSessionID:      tss.SessionID(bytes.Repeat([]byte{0x01}, 32)),
-		planHash:             bytes.Repeat([]byte{0x95}, 32),
+		Party:                party,
+		Threshold:            2,
+		Parties:              parties,
+		PublicKey:            groupCommitments.PublicKey(),
+		ChainCode:            bytes.Repeat([]byte{0x96}, 32),
+		Secret:               secretScalar,
+		GroupCommitments:     groupCommitments,
+		PartyData:            partyData,
+		KeygenTranscriptHash: []byte("rfc9591-appendix-e1"),
+		KeygenSessionID:      tss.SessionID(bytes.Repeat([]byte{0x01}, 32)),
+		PlanHash:             bytes.Repeat([]byte{0x95}, 32),
 	}}
 	if err := key.ValidateConsistency(); err != nil {
 		t.Fatal(err)

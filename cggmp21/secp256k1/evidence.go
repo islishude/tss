@@ -165,12 +165,12 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 		paillierPublicKeys = nil
 	}
 	fields := []tss.EvidenceField{
-		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)),
-		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.publicKey),
+		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.Parties, partySetHashLabel)),
+		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.PublicKey),
 		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(paillierPublicKeys)),
 	}
-	if len(key.state.keygenTranscriptHash) > 0 {
-		fields = append(fields, rawEvidenceField(evidenceFieldKeygenTranscriptHash, key.state.keygenTranscriptHash))
+	if len(key.state.KeygenTranscriptHash) > 0 {
+		fields = append(fields, rawEvidenceField(evidenceFieldKeygenTranscriptHash, key.state.KeygenTranscriptHash))
 	}
 	return fields
 }
@@ -247,29 +247,29 @@ func compareEvidenceField(evidence *tss.BlameEvidence, key string, expected []by
 func validateEvidenceShape(evidence *tss.BlameEvidence) error {
 	switch evidence.Kind {
 	case tss.EvidenceKindKeygenCommitment:
-		return expectEvidenceMessage(evidence, 1, payloadKeygenCommitments)
+		return expectEvidenceMessage(evidence, keygenStartRound, payloadKeygenCommitments)
 	case tss.EvidenceKindKeygenPaillier:
-		return expectEvidenceMessage(evidence, 1, payloadKeygenCommitments)
+		return expectEvidenceMessage(evidence, keygenStartRound, payloadKeygenCommitments)
 	case tss.EvidenceKindKeygenShare:
-		return expectEvidenceMessage(evidence, 1, payloadKeygenShare)
+		return expectEvidenceMessage(evidence, keygenStartRound, payloadKeygenShare)
 	case tss.EvidenceKindRefreshShare:
-		return expectEvidenceMessage(evidence, 1, payloadRefreshShare)
+		return expectEvidenceMessage(evidence, refreshStartRound, payloadRefreshShare)
 	case tss.EvidenceKindReshareShare:
-		return expectEvidenceMessage(evidence, 1, payloadReshareShare)
+		return expectEvidenceMessage(evidence, reshareStartRound, payloadReshareShare)
 	case tss.EvidenceKindPresignRound1:
-		if evidence.Round != 1 {
-			return fmt.Errorf("evidence round %d does not match %d", evidence.Round, 1)
+		if evidence.Round != presignStartRound {
+			return fmt.Errorf("evidence round %d does not match %d", evidence.Round, presignStartRound)
 		}
 		if evidence.PayloadType != payloadPresignRound1 && evidence.PayloadType != payloadPresignRound1Proof {
 			return fmt.Errorf("evidence payload type %q is not a presign round1 payload", evidence.PayloadType)
 		}
 		return nil
 	case tss.EvidenceKindPresignRound2:
-		return expectEvidenceMessage(evidence, 2, payloadPresignRound2)
+		return expectEvidenceMessage(evidence, presignRound2, payloadPresignRound2)
 	case tss.EvidenceKindPresignRound3:
-		return expectEvidenceMessage(evidence, 3, payloadPresignRound3)
+		return expectEvidenceMessage(evidence, presignRound3, payloadPresignRound3)
 	case tss.EvidenceKindSignPartial, tss.EvidenceKindAggregateSign:
-		return expectEvidenceMessage(evidence, 1, payloadSignPartial)
+		return expectEvidenceMessage(evidence, signStartRound, payloadSignPartial)
 	default:
 		return fmt.Errorf("unknown evidence kind %q", evidence.Kind)
 	}

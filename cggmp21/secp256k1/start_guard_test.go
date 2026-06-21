@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"errors"
-	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -16,12 +15,12 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	}
 
 	key := minimalKeyShare()
-	key.state.party = 1
-	key.state.threshold = 2
-	key.state.parties = tss.NewPartySet(1, 2)
-	key.state.securityParams = DefaultSecurityParams()
+	key.state.Party = 1
+	key.state.Threshold = 2
+	key.state.Parties = tss.NewPartySet(1, 2)
+	key.state.SecurityParams = DefaultSecurityParams()
 	minimalPresign := func() *Presign {
-		return &Presign{state: &presignState{consumed: new(atomic.Bool), attempt: newPresignAttemptBinding(false)}}
+		return &Presign{state: &presignState{Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false)}}
 	}
 	keygenPlan, err := NewKeygenPlan(KeygenPlanOption{
 		SessionID: sessionID,
@@ -37,24 +36,24 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 		sessionID:    sessionID,
 		threshold:    2,
 		parties:      tss.NewPartySet(1, 2),
-		publicKey:    key.state.publicKey,
-		chainCode:    key.state.chainCode,
+		publicKey:    key.state.PublicKey,
+		chainCode:    key.state.ChainCode,
 		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
 	}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
 	plan := &ResharePlan{state: &resharePlanState{
-		sessionID:             sessionID,
-		curveID:               reshareCurveID,
-		oldParties:            tss.NewPartySet(1, 2),
-		oldThreshold:          2,
-		dealerParties:         tss.NewPartySet(1, 2),
-		newParties:            tss.NewPartySet(1, 2, 3),
-		newThreshold:          2,
-		paillierBits:          int(DefaultSecurityParams().MinPaillierBits),
-		chainCode:             nil,
-		oldGroupPublicKey:     nil,
-		oldGroupCommitments:   nil,
-		oldVerificationShares: map[tss.PartyID][]byte{},
-		securityParams:        DefaultSecurityParams(),
+		SessionID:             sessionID,
+		CurveID:               reshareCurveID,
+		OldParties:            tss.NewPartySet(1, 2),
+		OldThreshold:          2,
+		DealerParties:         tss.NewPartySet(1, 2),
+		NewParties:            tss.NewPartySet(1, 2, 3),
+		NewThreshold:          2,
+		PaillierBits:          int(DefaultSecurityParams().MinPaillierBits),
+		ChainCode:             nil,
+		OldGroupPublicKey:     nil,
+		OldGroupCommitments:   nil,
+		OldVerificationShares: map[tss.PartyID][]byte{},
+		SecurityParams:        DefaultSecurityParams(),
 	}, limits: DefaultLimits()}
 
 	type startCase struct {

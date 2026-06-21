@@ -14,8 +14,8 @@ func TestHDKeygenScenarios(t *testing.T) {
 
 		shares := frostKeygenHD(t, 2, 3)
 		for id, share := range shares {
-			if len(share.state.chainCode) != 32 {
-				t.Fatalf("party %d: expected 32-byte chain code, got %d", id, len(share.state.chainCode))
+			if len(share.state.ChainCode) != 32 {
+				t.Fatalf("party %d: expected 32-byte chain code, got %d", id, len(share.state.ChainCode))
 			}
 		}
 	})
@@ -28,14 +28,14 @@ func TestHDKeygenScenarios(t *testing.T) {
 		var firstPub []byte
 		for _, share := range shares {
 			if first == nil {
-				first = share.state.chainCode
-				firstPub = share.state.publicKey.Bytes()
+				first = share.state.ChainCode
+				firstPub = share.state.PublicKey.Bytes()
 				continue
 			}
-			if !bytes.Equal(first, share.state.chainCode) {
+			if !bytes.Equal(first, share.state.ChainCode) {
 				t.Fatal("parties did not agree on chain code")
 			}
-			if !bytes.Equal(firstPub, share.state.publicKey.Bytes()) {
+			if !bytes.Equal(firstPub, share.state.PublicKey.Bytes()) {
 				t.Fatal("parties did not agree on public key")
 			}
 		}
@@ -46,8 +46,8 @@ func TestHDKeygenScenarios(t *testing.T) {
 
 		shares := frostKeygen(t, 1, 1)
 		for _, share := range shares {
-			if len(share.state.chainCode) != 32 {
-				t.Fatalf("default keygen should produce 32-byte chain code, got %d bytes", len(share.state.chainCode))
+			if len(share.state.ChainCode) != 32 {
+				t.Fatalf("default keygen should produce 32-byte chain code, got %d bytes", len(share.state.ChainCode))
 			}
 		}
 	})
@@ -63,7 +63,7 @@ func TestHDSignScenarios(t *testing.T) {
 		share := shares[1]
 		msg := []byte("hello HD world")
 
-		result, err := DeriveNonHardenedBIP32(share.state.publicKey.Bytes(), share.state.chainCode, []uint32{0})
+		result, err := DeriveNonHardenedBIP32(share.state.PublicKey.Bytes(), share.state.ChainCode, []uint32{0})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -78,7 +78,7 @@ func TestHDSignScenarios(t *testing.T) {
 		if !stded25519.Verify(stded25519.PublicKey(result.ChildPublicKey), msg, sig) {
 			t.Fatal("HD signature did not verify against derived public key")
 		}
-		if stded25519.Verify(stded25519.PublicKey(share.state.publicKey.Bytes()), msg, sig) {
+		if stded25519.Verify(stded25519.PublicKey(share.state.PublicKey.Bytes()), msg, sig) {
 			t.Fatal("HD signature should not verify against original key")
 		}
 	})
@@ -92,7 +92,7 @@ func TestHDSignScenarios(t *testing.T) {
 		key1 := shares[1]
 		key2 := shares[2]
 
-		result, err := DeriveNonHardenedBIP32(key1.state.publicKey.Bytes(), key1.state.chainCode, []uint32{5})
+		result, err := DeriveNonHardenedBIP32(key1.state.PublicKey.Bytes(), key1.state.ChainCode, []uint32{5})
 		if err != nil {
 			t.Fatal(err)
 		}

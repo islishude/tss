@@ -61,13 +61,13 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), 1, dealer, s.selfID, payloadReshareShare, nil)
+			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, dealer, s.selfID, payloadReshareShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: reshareStartRound,
 				Party: dealer,
 				Blame: newBlame(
 					evidenceEnv,
@@ -138,19 +138,19 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	selfNPD := s.newPartyData[s.selfID]
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams: s.securityParams,
-		party:          s.selfID,
-		threshold:      s.newThreshold,
-		parties:        s.newParties,
-		publicKey:      publicKey,
-		partyData: map[tss.PartyID]keySharePartyData{
-			s.selfID: {paillierPublicKey: selfNPD.paillierPub.PublicKey.Clone()},
+		SecurityParams: s.securityParams,
+		Party:          s.selfID,
+		Threshold:      s.newThreshold,
+		Parties:        s.newParties,
+		PublicKey:      publicKey,
+		PartyData: map[tss.PartyID]keySharePartyData{
+			s.selfID: {PaillierPublicKey: selfNPD.paillierPub.PublicKey.Clone()},
 		},
-		keygenTranscriptHash:   transcriptHash,
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelResharePaillier,
-		resharePlanHash:        s.planHash,
-		planHash:               bytes.Clone(s.planHash),
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelResharePaillier,
+		ResharePlanHash:        s.planHash,
+		PlanHash:               bytes.Clone(s.planHash),
 	}}
 	paillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
@@ -172,30 +172,30 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 			partyProof = paillierProof
 		}
 		partyData[id] = keySharePartyData{
-			verificationShare:  bytes.Clone(verificationShare),
-			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			paillierProof:      partyProof.Clone(),
-			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:  bytes.Clone(verificationShare),
+			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:      partyProof.Clone(),
+			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
 		}
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.selfID,
-		threshold:              s.newThreshold,
-		parties:                s.newParties.Clone(),
-		publicKey:              bytes.Clone(publicKey),
-		chainCode:              bytes.Clone(s.oldChainCode),
-		secret:                 newSecretScalar,
-		groupCommitments:       newCommitments,
-		partyData:              partyData,
-		paillierPrivateKey:     s.newPaillier.Clone(),
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelResharePaillier,
-		resharePlanHash:        bytes.Clone(s.planHash),
-		planHash:               bytes.Clone(s.planHash),
-		shareProof:             shareProof.Clone(),
-		keygenTranscriptHash:   transcriptHash,
+		SecurityParams:         s.securityParams,
+		Party:                  s.selfID,
+		Threshold:              s.newThreshold,
+		Parties:                s.newParties.Clone(),
+		PublicKey:              bytes.Clone(publicKey),
+		ChainCode:              bytes.Clone(s.oldChainCode),
+		Secret:                 newSecretScalar,
+		GroupCommitments:       newCommitments,
+		PartyData:              partyData,
+		PaillierPrivateKey:     s.newPaillier.Clone(),
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelResharePaillier,
+		ResharePlanHash:        bytes.Clone(s.planHash),
+		PlanHash:               bytes.Clone(s.planHash),
+		ShareProof:             shareProof.Clone(),
+		KeygenTranscriptHash:   transcriptHash,
 	}}
 	logCiphertext, logRandomness, err := s.newPaillier.EncryptSecret(s.cfg.Reader(), newSecretScalar)
 	if err != nil {
@@ -223,8 +223,8 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.newShare.state.logCiphertext = cloneBigInt(logCiphertext)
-	s.newShare.state.logProof = logProof.Clone()
+	s.newShare.state.LogCiphertext = tss.CloneBigInt(logCiphertext)
+	s.newShare.state.LogProof = logProof.Clone()
 	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
@@ -280,24 +280,24 @@ func (s *ReshareSession) reshareTranscriptHash(newCommitments []*secp.Point) ([]
 		return nil, err
 	}
 	t := transcript.New(reshareTranscriptHashLabel)
-	t.AppendString("curve", s.plan.state.curveID)
+	t.AppendString("curve", s.plan.state.CurveID)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
 	t.AppendBytes("old_public_key", s.oldPublicKey)
-	t.AppendBytesList("old_group_commitments", s.plan.state.oldGroupCommitments)
+	t.AppendBytesList("old_group_commitments", s.plan.state.OldGroupCommitments)
 	sortedOldParties := tss.SortParties(s.oldParties)
 	sortedDealerParties := tss.SortParties(s.dealerParties)
 	sortedNewParties := tss.SortParties(s.newParties)
 	t.AppendUint32List("old_parties", sortedOldParties)
 	t.AppendUint32List("dealer_parties", sortedDealerParties)
 	t.AppendUint32List("new_parties", sortedNewParties)
-	t.AppendUint32("old_threshold", uint32(s.plan.state.oldThreshold))
+	t.AppendUint32("old_threshold", uint32(s.plan.state.OldThreshold))
 	t.AppendUint32("new_threshold", uint32(s.newThreshold))
-	t.AppendBytes("chain_code", s.plan.state.chainCode)
-	t.AppendUint32("paillier_bits", uint32(s.plan.state.paillierBits))
+	t.AppendBytes("chain_code", s.plan.state.ChainCode)
+	t.AppendUint32("paillier_bits", uint32(s.plan.state.PaillierBits))
 	t.AppendBytes("plan_hash", s.planHash)
 	for _, dealer := range sortedOldParties {
 		t.AppendUint32("old_party", dealer)
-		t.AppendBytes("old_verification_share", s.plan.state.oldVerificationShares[dealer])
+		t.AppendBytes("old_verification_share", s.plan.state.OldVerificationShares[dealer])
 	}
 	for _, dealer := range sortedDealerParties {
 		t.AppendUint32("dealer", dealer)

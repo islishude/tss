@@ -1,24 +1,22 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"fmt"
 	"slices"
-	"sync/atomic"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire/wireutil"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
-// handlePresignRound3 validates and applies a presign round 3 delta share.
-//
-// Follows the handler template (see doc.go).
-func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *PresignSession) buildAcceptPresignRound3Tx(env tss.Envelope) (*acceptPresignRound3Tx, error) {
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryValueWithLimits[presignRound3Payload](env.Payload, s.limits)
 	if err != nil {
@@ -33,7 +31,15 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 			fields...,
 		)
 	}
-	defer p.Delta.Destroy()
+	if p.Delta == nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("missing presign delta"))
+	}
+	owned := true
+	defer func() {
+		if owned {
+			p.Delta.Destroy()
+		}
+	}()
 
 	// ---- 2. POLICY VALIDATE ----
 	// (round and duplicate checks done in dispatcher)
@@ -42,8 +48,7 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	delta, err := secpScalarFromSecret(p.Delta)
-	if err != nil {
+	if _, err := secpScalarFromSecret(p.Delta); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 
@@ -60,24 +65,15 @@ func (s *PresignSession) handlePresignRound3(env tss.Envelope) ([]tss.Envelope, 
 		)
 	}
 
-	// ---- 4. MUTATE STATE ----
-	deltaSecret, err := secpSecretScalarFromScalar(delta)
-	if err != nil {
-		return nil, err
+	if _, ok := s.partyState(env.From); !ok {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errPresignSignerMissing)
 	}
-	st, ok := s.partyState(env.From)
-	if !ok {
-		deltaSecret.Destroy()
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("sender is not in signer set"))
-	}
-	st.round3.delta = deltaSecret
-	st.round3.verifyShare = material
-	st.round3.haveDelta = true
-	st.round3.haveVerifyShare = true
-	s.round3Count++
-
-	// ---- 5. EMIT ----
-	return nil, s.tryComplete()
+	owned = false
+	return &acceptPresignRound3Tx{
+		from:        env.From,
+		delta:       p.Delta,
+		verifyShare: material,
+	}, nil
 }
 
 func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRound3Payload) (signVerifyShare, error) {
@@ -133,9 +129,9 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
 		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
-		PublicKey:            slices.Clone(s.key.state.publicKey),
-		KeygenTranscriptHash: slices.Clone(s.key.state.keygenTranscriptHash),
-		PartiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
+		PublicKey:            slices.Clone(s.key.state.PublicKey),
+		KeygenTranscriptHash: slices.Clone(s.key.state.KeygenTranscriptHash),
+		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
 		KPoint:               kPointBytes,
 		ChiPoint:             chiPointBytes,
 		XBarPoint:            xBarPoint,
@@ -172,46 +168,85 @@ func (s *PresignSession) presignRound3EvidenceFields(p presignRound3Payload) []t
 }
 
 func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
-	if s.round3Sent || s.round2Count != len(s.parties)-1 {
+	prepared, ok, err := s.preparePresignRound3Output()
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
+	}
+	defer prepared.destroy()
+	effects, err := s.commitPresignRound3Output(prepared)
+	if err != nil {
+		return nil, err
+	}
+	return effects.envelopes, nil
+}
+
+type preparedPresignRound3Output struct {
+	delta       *secret.Scalar
+	verifyShare signVerifyShare
+	presign     *Presign
+	env         tss.Envelope
+	committed   bool
+}
+
+func (p *preparedPresignRound3Output) destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	if p.delta != nil {
+		p.delta.Destroy()
+		p.delta = nil
+	}
+	if p.presign != nil {
+		p.presign.Destroy()
+		p.presign = nil
+	}
+	clear(p.env.Payload)
+}
+
+func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Output, bool, error) {
+	if s.round3Sent || !s.allRound2Accepted() {
+		return nil, false, nil
 	}
 	kShare, err := secpScalarFromSecret(s.kShare)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	gamma, err := secpScalarFromSecret(s.gamma)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	xBar, err := secpScalarFromSecret(s.xBar)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	deltaShare := secp.ScalarMul(kShare, gamma)
 	chiShare := secp.ScalarMul(kShare, xBar)
 	for _, peer := range s.signers {
-		if peer == s.key.state.party {
+		if peer == s.key.state.Party {
 			continue
 		}
 		peerState, ok := s.partyState(peer)
 		if !ok {
-			return nil, fmt.Errorf("missing presign state for party %d", peer)
+			return nil, false, fmt.Errorf("missing presign state for party %d", peer)
 		}
 		alphaDelta, err := secpScalarFromSecret(peerState.mta.alphaDelta)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		betaDelta, err := secpScalarFromSecret(peerState.mta.betaDelta)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		alphaSigma, err := secpScalarFromSecret(peerState.mta.alphaSigma)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		betaSigma, err := secpScalarFromSecret(peerState.mta.betaSigma)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		deltaShare = secp.ScalarAdd(deltaShare, alphaDelta)
 		deltaShare = secp.ScalarAdd(deltaShare, betaDelta)
@@ -223,7 +258,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	if len(s.derivation.AdditiveShift) > 0 {
 		shift, err := secp.ScalarFromBytesAllowZero(s.derivation.AdditiveShift)
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		if !shift.IsZero() {
 			chiShare = secp.ScalarAdd(chiShare, secp.ScalarMul(kShare, shift))
@@ -231,7 +266,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	deltaSecret, err := secpSecretScalarFromScalar(deltaShare)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	deltaOwned := false
 	defer func() {
@@ -239,61 +274,61 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 			deltaSecret.Destroy()
 		}
 	}()
-	selfState, ok := s.partyState(s.key.state.party)
+	selfState, ok := s.partyState(s.key.state.Party)
 	if !ok {
-		return nil, errors.New("missing local presign party state")
+		return nil, false, errors.New("missing local presign party state")
 	}
 
 	// Compute KPoint and ChiPoint.
 	kPoint := secp.ScalarBaseMult(kShare)
 	kPointBytes, err := secp.PointBytes(kPoint)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	chiPoint := secp.ScalarBaseMult(chiShare)
 	chiPointBytes, err := secp.PointBytes(chiPoint)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Compute XBarPoint.
-	lambda, err := shamirsecp.LagrangeCoefficient(s.key.state.party, s.signers)
+	lambda, err := shamirsecp.LagrangeCoefficient(s.key.state.Party, s.signers)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	verificationShare, ok := s.key.verificationShare(s.key.state.party)
+	verificationShare, ok := s.key.verificationShare(s.key.state.Party)
 	if !ok {
-		return nil, fmt.Errorf("missing local verification share for party %d", s.key.state.party)
+		return nil, false, fmt.Errorf("missing local verification share for party %d", s.key.state.Party)
 	}
 	verificationPoint, err := secp.PointFromBytes(verificationShare)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	xBarPoint, err := secp.PointBytes(secp.ScalarMult(verificationPoint, lambda))
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 
 	// Build signprep proof.
-	localPaillierPublicKey, err := s.key.paillierPublicFor(s.key.state.party, s.limits)
+	localPaillierPublicKey, err := s.key.paillierPublicFor(s.key.state.Party, s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	paillierPublicKey, err := canonicalWireMessageBytes(localPaillierPublicKey, s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	stmt := signprep.Statement{
 		Protocol:             tss.ProtocolCGGMP21Secp256k1,
 		SessionID:            s.sessionID,
-		Party:                s.key.state.party,
+		Party:                s.key.state.Party,
 		Signers:              slices.Clone(s.signers),
 		PlanHash:             slices.Clone(s.planHash),
 		ContextHash:          slices.Clone(s.contextHash),
 		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
-		PublicKey:            slices.Clone(s.key.state.publicKey),
-		KeygenTranscriptHash: slices.Clone(s.key.state.keygenTranscriptHash),
-		PartiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
+		PublicKey:            slices.Clone(s.key.state.PublicKey),
+		KeygenTranscriptHash: slices.Clone(s.key.state.KeygenTranscriptHash),
+		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
 		KPoint:               kPointBytes,
 		ChiPoint:             chiPointBytes,
 		XBarPoint:            xBarPoint,
@@ -305,12 +340,12 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	mtaSumSecret, err := secpSecretScalarFromScalarAllowZero(mtaSum)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	defer mtaSumSecret.Destroy()
 	chiSecret, err := secpSecretScalarFromScalar(chiShare)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
 	chiOwned := false
 	defer func() {
@@ -325,7 +360,7 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 	}
 	proof, err := signprep.Prove(s.config.Reader(), stmt, wit)
 	if err != nil {
-		return nil, fmt.Errorf("signprep proof generation: %w", err)
+		return nil, false, fmt.Errorf("signprep proof generation: %w", err)
 	}
 
 	payload, err := (presignRound3Payload{
@@ -336,114 +371,192 @@ func (s *PresignSession) tryEmitRound3() ([]tss.Envelope, error) {
 		PlanHash: s.planHash,
 	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	s.round3Sent = true
-	selfState.round3.delta = deltaSecret
-	deltaOwned = true
-	selfState.round3.verifyShare = signVerifyShare{
-		Party:    s.key.state.party,
+	verifyShare := signVerifyShare{
+		Party:    s.key.state.Party,
 		KPoint:   secp.Clone(kPoint),
 		ChiPoint: secp.Clone(chiPoint),
 		Proof:    proof.Clone(),
 	}
+	context := s.context.Clone()
+	publicKeyPoint, err := secp.PointFromBytes(s.key.state.PublicKey)
+	if err != nil {
+		clear(payload)
+		return nil, false, err
+	}
+	stagedPresign := &Presign{state: &presignState{
+		Consumed:             NewAtomicBoolWire(false),
+		attempt:              newPresignAttemptBinding(false),
+		SecurityParams:       s.securityParams,
+		Party:                s.key.state.Party,
+		Threshold:            s.key.state.Threshold,
+		Signers:              s.signers.Clone(),
+		Context:              context,
+		ContextHash:          append([]byte(nil), s.contextHash...),
+		Derivation:           s.derivation.Clone(),
+		PlanHash:             append([]byte(nil), s.planHash...),
+		PublicKey:            publicKeyPoint,
+		KeygenTranscriptHash: append([]byte(nil), s.key.state.KeygenTranscriptHash...),
+		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
+		KShare:               s.kShare.Clone(),
+	}}
+	stagedPresign.state.ChiShare = chiSecret
+	chiOwned = true
+	env, err := newEnvelope(s.config, presignRound3, s.key.state.Party, tss.BroadcastPartyId, payloadPresignRound3, payload)
+	clear(payload)
+	if err != nil {
+		stagedPresign.Destroy()
+		return nil, false, err
+	}
+	deltaOwned = true
+	return &preparedPresignRound3Output{
+		delta:       deltaSecret,
+		verifyShare: verifyShare,
+		presign:     stagedPresign,
+		env:         env,
+	}, true, nil
+}
+
+func (s *PresignSession) commitPresignRound3Output(p *preparedPresignRound3Output) (sessionEffects, error) {
+	if p == nil {
+		return sessionEffects{}, nil
+	}
+	selfState, ok := s.partyState(s.key.state.Party)
+	if !ok {
+		return sessionEffects{}, errors.New("missing local presign party state")
+	}
+	selfState.round3.delta = p.delta
+	selfState.round3.verifyShare = p.verifyShare
 	selfState.round3.haveDelta = true
 	selfState.round3.haveVerifyShare = true
-	s.round3Count++
-	context := s.context.Clone()
-	publicKeyPoint, err := secp.PointFromBytes(s.key.state.publicKey)
-	if err != nil {
-		return nil, err
-	}
-	s.presign = &Presign{state: &presignState{
-		consumed:             new(atomic.Bool),
-		attempt:              newPresignAttemptBinding(false),
-		securityParams:       s.securityParams,
-		party:                s.key.state.party,
-		threshold:            s.key.state.threshold,
-		signers:              s.signers.Clone(),
-		context:              context,
-		contextHash:          append([]byte(nil), s.contextHash...),
-		derivation:           s.derivation.Clone(),
-		planHash:             append([]byte(nil), s.planHash...),
-		publicKey:            publicKeyPoint,
-		keygenTranscriptHash: append([]byte(nil), s.key.state.keygenTranscriptHash...),
-		partiesHash:          wireutil.PartySetHash(s.key.state.parties, partySetHashLabel),
-		kShare:               s.kShare.Clone(),
-	}}
-	s.presign.state.chiShare = chiSecret
-	chiOwned = true
+	s.round3Sent = true
+	s.presign = p.presign
+	p.committed = true
 	if err := s.tryComplete(); err != nil {
-		return nil, err
+		return sessionEffects{}, err
 	}
-	env, err := newEnvelope(s.config, 3, s.key.state.party, tss.BroadcastPartyId, payloadPresignRound3, payload)
-	if err != nil {
-		return nil, err
-	}
-	return []tss.Envelope{env}, nil
+	return sessionEffects{envelopes: []tss.Envelope{p.env}}, nil
 }
 
 func (s *PresignSession) tryComplete() error {
-	if s.completed || s.round3Count != len(s.parties) {
+	prepared, ok, err := s.maybePreparePresignCompletion()
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return nil
+	}
+	defer prepared.destroy()
+	s.commitPresignCompletion(prepared)
+	return nil
+}
+
+type preparedPresignCompletion struct {
+	presign   *Presign
+	committed bool
+}
+
+func (p *preparedPresignCompletion) destroy() {
+	if p == nil || p.committed {
+		return
+	}
+	if p.presign != nil {
+		p.presign.Destroy()
+		p.presign = nil
+	}
+}
+
+func (s *PresignSession) maybePreparePresignCompletion() (*preparedPresignCompletion, bool, error) {
+	if s.completed || !s.allRound3Accepted() {
+		return nil, false, nil
 	}
 	delta := secp.ScalarZero()
 	gammaPoints := make([]*secp.Point, 0, len(s.parties))
 	for i := range s.parties {
 		st := &s.parties[i]
 		if !st.round3.haveDelta || !st.round3.haveVerifyShare {
-			return nil
+			return nil, false, nil
 		}
 		deltaShare, err := secpScalarFromSecret(st.round3.delta)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		delta = secp.ScalarAdd(delta, deltaShare)
 		gammaPoint, err := secp.PointFromBytes(st.round1.payload.Gamma)
 		if err != nil {
-			return err
+			return nil, false, err
 		}
 		gammaPoints = append(gammaPoints, gammaPoint)
 	}
 	if delta.IsZero() {
-		return errors.New("zero presign delta")
+		return nil, false, errors.New("zero presign delta")
 	}
 	deltaInv, err := secp.ScalarInvert(delta)
 	if err != nil {
-		return errors.New("non-invertible presign delta")
+		return nil, false, errors.New("non-invertible presign delta")
 	}
 	gamma := secp.AddPoints(gammaPoints...)
 	RPoint := secp.ScalarMult(gamma, deltaInv)
 	littleR := secp.ScalarFromFieldElement(RPoint.X)
 	if littleR.IsZero() {
-		return errors.New("zero ECDSA r")
+		return nil, false, errors.New("zero ECDSA r")
 	}
 	if s.presign == nil {
-		return errors.New("local presign shares not computed")
+		return nil, false, errors.New("local presign shares not computed")
 	}
-	// R = delta^{-1} * Gamma, with Gamma=sum_i Gamma_i. LittleR is the ECDSA r.
-	// Populate VerifyShares from the session's collected verification material.
-	s.presign.state.verifyShares = make([]signVerifyShare, 0, len(s.signers))
+	verifyShares := make([]signVerifyShare, 0, len(s.signers))
 	for _, id := range s.signers {
 		st, ok := s.partyState(id)
 		if !ok {
-			return fmt.Errorf("missing presign state for party %d", id)
+			return nil, false, fmt.Errorf("missing presign state for party %d", id)
 		}
-		s.presign.state.verifyShares = append(s.presign.state.verifyShares, st.round3.verifyShare.Clone())
+		verifyShares = append(verifyShares, st.round3.verifyShare.Clone())
 	}
-	s.presign.state.r = secp.Clone(RPoint)
-	s.presign.state.littleR = littleR
-	s.presign.state.delta, err = secpSecretScalarFromScalar(delta)
+	deltaSecret, err := secpSecretScalarFromScalar(delta)
 	if err != nil {
-		return err
+		return nil, false, err
 	}
-	s.presign.state.transcriptHash = s.presignTranscriptHash(RPoint, littleR, delta)
+	base := s.presign.state
+	completed := &Presign{state: &presignState{
+		SecurityParams:       base.SecurityParams,
+		Party:                base.Party,
+		Threshold:            base.Threshold,
+		Signers:              base.Signers.Clone(),
+		R:                    secp.Clone(RPoint),
+		LittleR:              littleR,
+		TranscriptHash:       s.presignTranscriptHash(RPoint, littleR, delta),
+		Context:              base.Context.Clone(),
+		ContextHash:          bytes.Clone(base.ContextHash),
+		Derivation:           base.Derivation.Clone(),
+		PlanHash:             bytes.Clone(base.PlanHash),
+		PublicKey:            secp.Clone(base.PublicKey),
+		KeygenTranscriptHash: bytes.Clone(base.KeygenTranscriptHash),
+		PartiesHash:          bytes.Clone(base.PartiesHash),
+		VerifyShares:         verifyShares,
+		KShare:               base.KShare.Clone(),
+		ChiShare:             base.ChiShare.Clone(),
+		Delta:                deltaSecret,
+		Consumed:             NewAtomicBoolWire(false),
+		attempt:              newPresignAttemptBinding(false),
+	}}
+	return &preparedPresignCompletion{presign: completed}, true, nil
+}
+
+func (s *PresignSession) commitPresignCompletion(p *preparedPresignCompletion) {
+	if p == nil {
+		return
+	}
+	if s.presign != nil {
+		s.presign.Destroy()
+	}
+	s.presign = p.presign
 	s.completed = true
 	s.log.Info(s.config.Ctx(), "presign complete",
-		"party_id", s.key.state.party,
+		"party_id", s.key.state.Party,
 		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
 	)
-	return nil
+	p.committed = true
 }
 
 func (s *PresignSession) presignTranscriptHash(R *secp.Point, littleR, delta secp.Scalar) []byte {
@@ -453,9 +566,9 @@ func (s *PresignSession) presignTranscriptHash(R *secp.Point, littleR, delta sec
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("context_hash", s.contextHash)
 	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
-	t.AppendBytes("public_key", s.key.state.publicKey)
-	t.AppendBytes("keygen_transcript_hash", s.key.state.keygenTranscriptHash)
-	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.parties, partySetHashLabel))
+	t.AppendBytes("public_key", s.key.state.PublicKey)
+	t.AppendBytes("keygen_transcript_hash", s.key.state.KeygenTranscriptHash)
+	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel))
 	for _, id := range s.signers {
 		st, ok := s.partyState(id)
 		if !ok {

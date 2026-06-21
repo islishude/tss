@@ -128,9 +128,9 @@ func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
 	s := &SignSession{
 		presign: &Presign{state: &presignState{
 
-			signers:        tss.NewPartySet(1, 2),
-			transcriptHash: bytes.Repeat([]byte{0x41}, 32),
-			contextHash:    bytes.Repeat([]byte{0x42}, 32),
+			Signers:        tss.NewPartySet(1, 2),
+			TranscriptHash: bytes.Repeat([]byte{0x41}, 32),
+			ContextHash:    bytes.Repeat([]byte{0x42}, 32),
 		}},
 		planHash: bytes.Repeat([]byte{0x43}, 32),
 	}
@@ -172,7 +172,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		planHash:  wantPlanHash,
 		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
 	}
-	_, err = s.handleKeygenConfirmation(tss.Envelope{
+	_, err = s.buildAcceptCGGMPKeygenConfirmationTx(tss.Envelope{
 		Round:   keygenConfirmationRound,
 		From:    confirmation.Sender,
 		Payload: payload,

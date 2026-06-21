@@ -226,34 +226,34 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(oldKey.state.party, tss.ErrInvalidSessionID)
+		return nil, invalidPlanConfig(oldKey.state.Party, tss.ErrInvalidSessionID)
 	}
 	if err := oldKey.requireMPCMaterial(limits); err != nil {
-		return nil, invalidPlanConfig(oldKey.state.party, err)
+		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
-	securityParams := securityParamsForArtifact(oldKey.state.securityParams, option.SecurityParams)
-	if option.SecurityParams != nil && validSecurityParams(oldKey.state.securityParams) && oldKey.state.securityParams != *option.SecurityParams {
-		return nil, invalidPlanConfig(oldKey.state.party, errors.New("security params mismatch with old key share"))
+	securityParams := securityParamsForArtifact(oldKey.state.SecurityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(oldKey.state.SecurityParams) && oldKey.state.SecurityParams != *option.SecurityParams {
+		return nil, invalidPlanConfig(oldKey.state.Party, errors.New("security params mismatch with old key share"))
 	}
 	if err := securityParams.Validate(); err != nil {
-		return nil, invalidPlanConfig(oldKey.state.party, err)
+		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
 	paillierBits := option.PaillierBits
 	if paillierBits == 0 {
 		paillierBits = int(securityParams.MinPaillierBits)
 	}
 	if paillierBits < int(securityParams.MinPaillierBits) {
-		return nil, invalidPlanConfig(oldKey.state.party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
+		return nil, invalidPlanConfig(oldKey.state.Party, fmt.Errorf("paillier key size %d is below security parameter minimum %d", paillierBits, securityParams.MinPaillierBits))
 	}
 	if limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits {
-		return nil, invalidPlanConfig(oldKey.state.party, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
+		return nil, invalidPlanConfig(oldKey.state.Party, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
 	}
 	return &RefreshPlan{state: &refreshPlanState{
 		sessionID:    option.SessionID,
-		threshold:    oldKey.state.threshold,
-		parties:      slices.Clone(oldKey.state.parties),
-		publicKey:    slices.Clone(oldKey.state.publicKey),
-		chainCode:    slices.Clone(oldKey.state.chainCode),
+		threshold:    oldKey.state.Threshold,
+		parties:      slices.Clone(oldKey.state.Parties),
+		publicKey:    slices.Clone(oldKey.state.PublicKey),
+		chainCode:    slices.Clone(oldKey.state.ChainCode),
 		paillierBits: paillierBits,
 	}, limits: limits, securityParams: securityParams}, nil
 }
@@ -402,32 +402,32 @@ func NewPresignPlan(option PresignPlanOption) (*PresignPlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
+		return nil, invalidPlanConfig(key.state.Party, tss.ErrInvalidSessionID)
 	}
 	if err := key.requireMPCMaterial(limits); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
-	securityParams := securityParamsForArtifact(key.state.securityParams, option.SecurityParams)
-	if option.SecurityParams != nil && validSecurityParams(key.state.securityParams) && key.state.securityParams != *option.SecurityParams {
-		return nil, invalidPlanConfig(key.state.party, errors.New("security params mismatch with key share"))
+	securityParams := securityParamsForArtifact(key.state.SecurityParams, option.SecurityParams)
+	if option.SecurityParams != nil && validSecurityParams(key.state.SecurityParams) && key.state.SecurityParams != *option.SecurityParams {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("security params mismatch with key share"))
 	}
 	if err := securityParams.Validate(); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	signers := tss.SortParties(option.Signers)
 	if err := validateSignerSet(key, signers, limits); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	ctx, contextHash, derivation, err := preparePresignContext(key, option.Context)
 	if err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	return &PresignPlan{state: &presignPlanState{
 		sessionID:   option.SessionID,
-		threshold:   key.state.threshold,
-		parties:     slices.Clone(key.state.parties),
-		publicKey:   slices.Clone(key.state.publicKey),
-		keygenHash:  slices.Clone(key.state.keygenTranscriptHash),
+		threshold:   key.state.Threshold,
+		parties:     slices.Clone(key.state.Parties),
+		publicKey:   slices.Clone(key.state.PublicKey),
+		keygenHash:  slices.Clone(key.state.KeygenTranscriptHash),
 		signers:     signers,
 		context:     ctx.Clone(),
 		contextHash: slices.Clone(contextHash),
@@ -500,19 +500,19 @@ func (p *PresignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	if key == nil || key.state == nil {
 		return errors.New("nil key share")
 	}
-	if local.Self != key.state.party {
+	if local.Self != key.state.Party {
 		return errors.New("local self must match key share party")
 	}
 	if !tss.ContainsParty(p.state.signers, local.Self) {
 		return errors.New("local party is not in signer set")
 	}
-	if p.state.threshold != key.state.threshold ||
-		!slices.Equal(p.state.parties, key.state.parties) ||
-		!bytes.Equal(p.state.publicKey, key.state.publicKey) ||
-		!bytes.Equal(p.state.keygenHash, key.state.keygenTranscriptHash) {
+	if p.state.threshold != key.state.Threshold ||
+		!slices.Equal(p.state.parties, key.state.Parties) ||
+		!bytes.Equal(p.state.publicKey, key.state.PublicKey) ||
+		!bytes.Equal(p.state.keygenHash, key.state.KeygenTranscriptHash) {
 		return errors.New("presign plan does not match key share")
 	}
-	if validSecurityParams(key.state.securityParams) && p.securityParams != key.state.securityParams {
+	if validSecurityParams(key.state.SecurityParams) && p.securityParams != key.state.SecurityParams {
 		return errors.New("presign plan security params do not match key share")
 	}
 	return nil
@@ -577,39 +577,39 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
 	if presign == nil || presign.state == nil {
-		return nil, invalidPlanConfig(key.state.party, errors.New("nil presign"))
+		return nil, invalidPlanConfig(key.state.Party, errors.New("nil presign"))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
+		return nil, invalidPlanConfig(key.state.Party, tss.ErrInvalidSessionID)
 	}
 	if request.AttemptStore == nil {
-		return nil, invalidPlanConfig(key.state.party, errors.New("sign request attempt store is required"))
+		return nil, invalidPlanConfig(key.state.Party, errors.New("sign request attempt store is required"))
 	}
 	if err := validatePresign(key, presign, limits); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
-	if validSecurityParams(key.state.securityParams) && validSecurityParams(presign.state.securityParams) &&
-		key.state.securityParams != presign.state.securityParams {
-		return nil, invalidPlanConfig(key.state.party, errors.New("security params mismatch between key share and presign"))
+	if validSecurityParams(key.state.SecurityParams) && validSecurityParams(presign.state.SecurityParams) &&
+		key.state.SecurityParams != presign.state.SecurityParams {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("security params mismatch between key share and presign"))
 	}
 	if limits.Payload.MaxMessageBytes <= 0 {
-		return nil, invalidPlanConfig(key.state.party, errors.New("max message bytes must be positive"))
+		return nil, invalidPlanConfig(key.state.Party, errors.New("max message bytes must be positive"))
 	}
 	if len(request.Message) > limits.Payload.MaxMessageBytes {
-		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(request.Message), limits.Payload.MaxMessageBytes))
+		return nil, invalidPlanConfig(key.state.Party, fmt.Errorf("message too large: %d > %d", len(request.Message), limits.Payload.MaxMessageBytes))
 	}
 	normalizedContext, contextHash, derivation, err := preparePresignContext(key, request.Context)
 	if err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
-	if !bytes.Equal(contextHash, presign.state.contextHash) {
-		return nil, invalidPlanConfig(key.state.party, errors.New("presign context mismatch"))
+	if !bytes.Equal(contextHash, presign.state.ContextHash) {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("presign context mismatch"))
 	}
-	if !derivation.Equal(presign.state.derivation) {
-		return nil, invalidPlanConfig(key.state.party, errors.New("presign derivation mismatch"))
+	if !derivation.Equal(presign.state.Derivation) {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("presign derivation mismatch"))
 	}
-	if !slices.Equal(derivation.ResolvedPath, presign.state.derivation.ResolvedPath) {
-		return nil, invalidPlanConfig(key.state.party, errors.New("presign resolved path mismatch"))
+	if !slices.Equal(derivation.ResolvedPath, presign.state.Derivation.ResolvedPath) {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("presign resolved path mismatch"))
 	}
 	req := SignRequest{
 		Context:             normalizedContext.Clone(),
@@ -621,7 +621,7 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	return &SignPlan{state: &signPlanState{
 		sessionID:         option.SessionID,
 		presignID:         presign.id(),
-		presignTranscript: slices.Clone(presign.state.transcriptHash),
+		presignTranscript: slices.Clone(presign.state.TranscriptHash),
 		contextHash:       slices.Clone(contextHash),
 		derivation:        derivation.Clone(),
 		digest:            slices.Clone(digest),
@@ -680,19 +680,19 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	if presign == nil || presign.state == nil {
 		return errors.New("nil presign")
 	}
-	if local.Self != key.state.party {
+	if local.Self != key.state.Party {
 		return errors.New("local self must match key share party")
 	}
 	if !bytes.Equal(p.state.presignID, presign.id()) {
 		return errors.New("sign plan presign mismatch")
 	}
-	if !bytes.Equal(p.state.presignTranscript, presign.state.transcriptHash) {
+	if !bytes.Equal(p.state.presignTranscript, presign.state.TranscriptHash) {
 		return errors.New("sign plan presign transcript mismatch")
 	}
-	if !bytes.Equal(p.state.contextHash, presign.state.contextHash) {
+	if !bytes.Equal(p.state.contextHash, presign.state.ContextHash) {
 		return errors.New("sign plan context mismatch")
 	}
-	if !p.state.derivation.Equal(presign.state.derivation) {
+	if !p.state.derivation.Equal(presign.state.Derivation) {
 		return errors.New("sign plan derivation mismatch")
 	}
 	return validatePresign(key, presign, p.limits)

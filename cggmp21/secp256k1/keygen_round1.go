@@ -33,24 +33,25 @@ import (
 func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
 	config, err := plan.thresholdConfig(local)
 	if err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, local.Self, err)
 	}
 	limits := plan.limits
 	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
 	planHash, err := plan.Digest()
 	if err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
 
 	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
 	config.Parties = config.SortedParties()
 
 	chainCode := make([]byte, bip32util.ChainCodeSize)
+	defer clear(chainCode)
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 		return nil, nil, err
 	}
@@ -59,6 +60,9 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
+	cleanup := newCleanupStack()
+	defer cleanup.run()
+	cleanup.add(paillierKey.Destroy)
 	modDomain, err := keygenModulusDomain(config, config.Self, &paillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, nil, err
@@ -84,6 +88,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
+	defer clearSecpPolynomial(poly)
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		point := secp.ScalarBaseMult(coeff)
@@ -97,6 +102,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if err != nil {
 		return nil, nil, err
 	}
+	cleanup.add(localShare.Destroy)
 	partyData := make(map[tss.PartyID]*keygenPartyData, len(config.Parties))
 	for _, id := range config.Parties {
 		if id == config.Self {
@@ -130,6 +136,9 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		state:          keygenCollecting,
 		guard:          guard,
 	}
+	cleanup.disarm()
+	prepared := &preparedCGGMPKeygenStart{session: s}
+	defer prepared.destroy()
 	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:        commitments,
@@ -144,10 +153,12 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	commitEnv, err := newEnvelope(config, keygenStartRound, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
+	clear(commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
 	out = append(out, commitEnv)
+	prepared.out = out
 	for _, id := range config.Parties {
 		if id == config.Self {
 			continue
@@ -162,23 +173,32 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 			return nil, nil, err
 		}
 		shareEnv, err := newEnvelope(config, keygenStartRound, config.Self, id, payloadKeygenShare, payload)
+		clear(payload)
 		if err != nil {
 			return nil, nil, err
 		}
 		out = append(out, shareEnv)
+		prepared.out = out
 	}
 	completionOut, err := s.tryComplete()
 	if err != nil {
 		return nil, nil, err
 	}
 	out = append(out, completionOut...)
+	prepared.out = out
+	prepared.markCommitted()
 	return s, out, nil
 }
 
-// handleKeygenCommitments validates and applies a keygen commitments payload.
-//
-// Follows the handler template (see doc.go).
-func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*acceptCGGMPKeygenCommitmentsTx, error) {
+	pd, err := s.partyEntry(env.From)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if pd.commitments != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
+	}
+
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryWithLimits[keygenCommitmentsPayload](env.Payload, s.limits)
 	if err != nil {
@@ -280,47 +300,55 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 		)
 	}
 
-	// ---- 4. MUTATE STATE ----
-	pd := s.partyData[env.From]
-	pd.commitments = p.Commitments
 	if len(p.ChainCodeCommit) != sha256.Size {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("chain code commit must be %d bytes, got %d", sha256.Size, len(p.ChainCodeCommit)))
 	}
-	pd.chainCodeCommit = bytes.Clone(p.ChainCodeCommit)
-	pd.paillierPub = paillierPublicMaterial{
-		Party:     env.From,
-		PublicKey: p.PaillierPublicKey.Clone(),
-		Proof:     p.PaillierProof.Clone(),
-	}
-	pd.ringPedersen = ringPedersenPublicMaterial{
-		Party:  env.From,
-		Params: p.RingPedersenParams.Clone(),
-		Proof:  p.RingPedersenProof.Clone(),
-	}
-
-	// ---- 5. EMIT ----
-	return s.tryComplete()
+	return &acceptCGGMPKeygenCommitmentsTx{
+		from:            env.From,
+		commitments:     p.Commitments,
+		chainCodeCommit: bytes.Clone(p.ChainCodeCommit),
+		paillierPub: paillierPublicMaterial{
+			Party:     env.From,
+			PublicKey: p.PaillierPublicKey.Clone(),
+			Proof:     p.PaillierProof.Clone(),
+		},
+		ringPedersen: ringPedersenPublicMaterial{
+			Party:  env.From,
+			Params: p.RingPedersenParams.Clone(),
+			Proof:  p.RingPedersenProof.Clone(),
+		},
+	}, nil
 }
 
-// handleKeygenShare validates and applies a keygen share payload.
-//
-// Follows the handler template (see doc.go).
-func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, error) {
+func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*acceptCGGMPKeygenShareTx, error) {
+	pd, err := s.partyEntry(env.From)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	}
+	if pd.share != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
+	}
+
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
+	if p.Share == nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("missing keygen share"))
+	}
 
 	// ---- 2. POLICY VALIDATE ----
 	// (direct-confidential, duplicate checks done in dispatcher)
 	if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
+		p.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
 	share, err := secpScalarFromSecret(p.Share)
 	if err != nil {
+		p.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 
@@ -336,17 +364,17 @@ func (s *KeygenSession) handleKeygenShare(env tss.Envelope) ([]tss.Envelope, err
 			)
 			protoErr, evErr := s.buildShareVerificationBlame(env.From, pd.commitments, err)
 			if evErr != nil {
+				p.Share.Destroy()
 				return nil, evErr
 			}
+			p.Share.Destroy()
 			return nil, protoErr
 		}
 	}
-
-	// ---- 4. MUTATE STATE ----
-	s.partyData[env.From].share = p.Share.Clone()
-
-	// ---- 5. EMIT ----
-	return s.tryComplete()
+	return &acceptCGGMPKeygenShareTx{
+		from:  env.From,
+		share: p.Share,
+	}, nil
 }
 
 // Complete returns the confirmed local key share when keygen has finished.

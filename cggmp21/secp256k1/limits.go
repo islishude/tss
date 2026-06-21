@@ -150,6 +150,8 @@ func (l Limits) frameLimits(maxTotal int) wire.FrameLimits {
 func (l Limits) fieldLimits() wire.FieldLimits {
 	return wire.FieldLimits{
 		"curve_id":                   32,
+		"protocol_name":              tss.DefaultMaxProtocolNameBytes,
+		"payload_type":               tss.DefaultMaxPayloadTypeBytes,
 		"scalar":                     l.Curve.MaxScalarBytes,
 		"point":                      l.Curve.MaxPointBytes,
 		"parties":                    l.Threshold.MaxParties,
@@ -170,5 +172,6 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"signprep_partial_signature": l.SignPrep.MaxSignPartialPayloadBytes,
 		"envelope":                   tss.DefaultMaxEnvelopeBytes,
 		"broadcast_signature":        tss.DefaultMaxWireFieldBytes,
+		"broadcast_recipients":       l.Threshold.MaxParties,
 	}
 }

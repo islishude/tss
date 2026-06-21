@@ -30,7 +30,7 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil presign"))
 	}
 	if local.Self == tss.BroadcastPartyId {
-		local.Self = key.state.party
+		local.Self = key.state.Party
 	}
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil sign plan"))
@@ -65,7 +65,7 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	var planHash []byte
 	if presign != nil && presign.state != nil {
-		planHash = presign.state.planHash
+		planHash = presign.state.PlanHash
 	}
 	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, store, guard, DefaultSignAttemptStoreTimeout, limits)
 }
@@ -80,7 +80,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if presign == nil || presign.state == nil {
 		return nil, nil, errors.New("nil presign")
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, sessionID, key.state.party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, sessionID, key.state.Party); err != nil {
 		return nil, nil, err
 	}
 	if err := key.requireMPCMaterial(limits); err != nil {
@@ -92,17 +92,25 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if err := presign.VerifySignMaterialWithLimits(limits); err != nil {
 		return nil, nil, err
 	}
-	if len(digest32) != 32 {
+	if len(digest32) != sha256.Size {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
-	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.state.contextHash) {
+	if len(contextHash) != sha256.Size || !bytes.Equal(contextHash, presign.state.ContextHash) {
 		return nil, nil, errors.New("presign context mismatch")
 	}
 	if len(planHash) != sha256.Size {
 		return nil, nil, errors.New("sign plan hash must be 32 bytes")
 	}
 	if store == nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.Party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
+	}
+	handle, err := newPresignHandle(presign)
+	if err != nil {
+		return nil, nil, err
+	}
+	coordinator, err := newSignAttemptCoordinator(store, handle, storeTTL, limits)
+	if err != nil {
+		return nil, nil, err
 	}
 
 	// Build and locally verify the exact outbound partial before touching the
@@ -118,23 +126,18 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	// The in-memory binding prevents concurrent goroutines in this process from
 	// racing multiple intents into the durable store for the same presign.
 	if !bindPresignToAttempt(presign, candidate.IntentHash, false) {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign already consumed or bound to another attempt"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, errors.New("presign already consumed or bound to another attempt"))
 	}
 	// CommitSignAttempt is the cross-process linearization point. After this
 	// call returns or its outcome is unknown, the presign is treated as consumed.
-	commitCtx, cancel := durableStoreContext(ctx, storeTTL)
-	defer cancel()
-	commit, err := store.CommitSignAttempt(commitCtx, candidate)
+	commit, err := coordinator.claim(ctx, candidate)
 	if err != nil {
 		if signAttemptConsumedError(err) {
-			return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, err)
+			return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, err)
 		}
-		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptOutcomeUnknown, err)
+		return nil, nil, err
 	}
-	if commit.Status != SignAttemptCreated && commit.Status != SignAttemptExistingSame {
-		return nil, nil, fmt.Errorf("%w: invalid commit status", ErrSignAttemptCorrupt)
-	}
-	return resumeMatchingSignAttempt(ctx, key, presign, candidate, commit.Record, store, guard, storeTTL, limits)
+	return resumeMatchingSignAttempt(ctx, key, presign, candidate, commit.Record, coordinator, guard, limits)
 }
 
 func durableStoreTimeout(timeout time.Duration) time.Duration {
@@ -158,15 +161,15 @@ func signAttemptConsumedError(err error) bool {
 }
 
 func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, guard *tss.EnvelopeGuard, limits Limits) (SignAttemptRecord, error) {
-	kShare, err := secpScalarFromSecret(presign.state.kShare)
+	kShare, err := secpScalarFromSecret(presign.state.KShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	chiShare, err := secpScalarFromSecret(presign.state.chiShare)
+	chiShare, err := secpScalarFromSecret(presign.state.ChiShare)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	littleR := presign.state.littleR
+	littleR := presign.state.LittleR
 	zScalar, err := secp.ScalarFromBytesModOrder(digest32)
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -181,9 +184,9 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 		return SignAttemptRecord{}, err
 	}
 	defer partialWire.Destroy()
-	localVS, ok := presignVerifyShare(presign, key.state.party)
+	localVS, ok := presignVerifyShare(presign, key.state.Party)
 	if !ok {
-		return SignAttemptRecord{}, fmt.Errorf("missing local verify share for party %d: presign may be corrupted", key.state.party)
+		return SignAttemptRecord{}, fmt.Errorf("missing local verify share for party %d: presign may be corrupted", key.state.Party)
 	}
 	kPointBytes, err := localVS.kPointBytes()
 	if err != nil {
@@ -197,12 +200,12 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	defer clear(partialBytes)
 	payload := signPartialPayload{
 		S:                 partialWire,
-		PresignTranscript: slices.Clone(presign.state.transcriptHash),
+		PresignTranscript: slices.Clone(presign.state.TranscriptHash),
 		PresignContext:    slices.Clone(contextHash),
 		DigestHash:        digestHash(digest32, contextHash),
 		PlanHash:          slices.Clone(planHash),
 		PartialEquationHash: partialEquationHash(
-			sessionID, key.state.party, presign.state.transcriptHash,
+			sessionID, key.state.Party, presign.state.TranscriptHash,
 			contextHash, planHash, digest32,
 			littleR.Bytes(), partialBytes,
 			kPointBytes, chiPointBytes,
@@ -215,8 +218,8 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       1,
-		From:        key.state.party,
+		Round:       signStartRound,
+		From:        key.state.Party,
 		PayloadType: payloadSignPartial,
 		Payload:     payloadBytes,
 	})
@@ -241,8 +244,8 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 		ProtocolVersion:            tss.ProtocolVersion,
 		PresignID:                  presign.id(),
 		SessionID:                  sessionID,
-		Party:                      key.state.party,
-		SignerSetHash:              signAttemptSignerSetHash(presign.state.signers),
+		Party:                      key.state.Party,
+		SignerSetHash:              signAttemptSignerSetHash(presign.state.Signers),
 		SignPlanHash:               slices.Clone(planHash),
 		ContextHash:                slices.Clone(contextHash),
 		Digest:                     slices.Clone(digest32),
@@ -255,7 +258,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 			Mode:                 policy.Mode,
 			Confidentiality:      policy.Confidentiality,
 			BroadcastConsistency: policy.BroadcastConsistency,
-			Recipients:           slices.Clone(presign.state.signers),
+			Recipients:           slices.Clone(presign.state.Signers),
 		},
 	}
 	record.IntentHash = signAttemptIntentHash(record)
@@ -263,7 +266,7 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	validationSession, _, err := signSessionFromAttempt(ctx, key, presign, record, nil, guard, DefaultSignAttemptStoreTimeout, limits)
+	validationSession, _, err := signSessionFromAttempt(ctx, key, presign, record, nil, guard, limits)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("local sign partial self-verification failed: %w", err)
 	}
@@ -303,7 +306,15 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, nil, err
 	}
-	record, err := store.LoadSignAttempt(ctx, presign.id())
+	handle, err := newPresignHandle(presign)
+	if err != nil {
+		return nil, nil, err
+	}
+	coordinator, err := newSignAttemptCoordinator(store, handle, DefaultSignAttemptStoreTimeout, limits)
+	if err != nil {
+		return nil, nil, err
+	}
+	record, err := coordinator.load(ctx)
 	if err != nil {
 		if errors.Is(err, ErrSignAttemptCorrupt) {
 			_ = MarkPresignConsumed(presign)
@@ -314,16 +325,16 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 		_ = MarkPresignConsumed(presign)
 		return nil, nil, err
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.SessionID, key.state.party); err != nil {
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.SessionID, key.state.Party); err != nil {
 		return nil, nil, err
 	}
 	if !bindPresignToAttempt(presign, record.IntentHash, true) {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign is bound to another attempt or was manually discarded"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, errors.New("presign is bound to another attempt or was manually discarded"))
 	}
-	return signSessionFromAttempt(ctx, key, presign, record, store, guard, DefaultSignAttemptStoreTimeout, limits)
+	return signSessionFromAttempt(ctx, key, presign, record, coordinator, guard, limits)
 }
 
-func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Presign, candidate, durable SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
+func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Presign, candidate, durable SignAttemptRecord, coordinator *signAttemptCoordinator, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if err := validateSignAttemptRecordWithLimits(durable, limits); err != nil {
 		_ = MarkPresignConsumed(presign)
 		return nil, nil, err
@@ -332,15 +343,15 @@ func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Pres
 		if !bindPresignToAttempt(presign, durable.IntentHash, true) {
 			_ = MarkPresignConsumed(presign)
 		}
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, ErrSignAttemptConflict)
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, ErrSignAttemptConflict)
 	}
 	if !bindPresignToAttempt(presign, durable.IntentHash, true) {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.party, errors.New("presign is bound to another attempt or was manually discarded"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, errors.New("presign is bound to another attempt or was manually discarded"))
 	}
-	return signSessionFromAttempt(ctx, key, presign, durable, store, guard, storeTTL, limits)
+	return signSessionFromAttempt(ctx, key, presign, durable, coordinator, guard, limits)
 }
 
-func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign, record SignAttemptRecord, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
+func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign, record SignAttemptRecord, coordinator *signAttemptCoordinator, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if err := validateSignAttemptBindings(key, presign, record, limits); err != nil {
 		return nil, nil, err
 	}
@@ -355,26 +366,25 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	defer payload.S.Destroy()
 	verifyKey := presign.verificationKey()
 	s := &SignSession{
-		key:       key,
-		presign:   presign,
-		sessionID: record.SessionID,
-		log:       tss.NopLogger(),
-		limits:    limits,
-		digest:    slices.Clone(record.Digest),
-		planHash:  slices.Clone(record.SignPlanHash),
-		publicKey: verifyKey,
-		partials:  make(map[tss.PartyID]secp.Scalar),
-		guard:     guard,
-		attempt:   record.Clone(),
-		store:     store,
-		storeCtx:  context.WithoutCancel(ctx),
-		storeTTL:  durableStoreTimeout(storeTTL),
+		key:            key,
+		presign:        presign,
+		sessionID:      record.SessionID,
+		log:            tss.NopLogger(),
+		limits:         limits,
+		digest:         slices.Clone(record.Digest),
+		planHash:       slices.Clone(record.SignPlanHash),
+		publicKey:      verifyKey,
+		partials:       make(map[tss.PartyID]secp.Scalar),
+		guard:          guard,
+		attempt:        record.Clone(),
+		coordinator:    coordinator,
+		coordinatorCtx: context.WithoutCancel(ctx),
 	}
-	partial, err := s.verifySignPartial(key.state.party, payload)
+	partial, err := s.verifySignPartial(key.state.Party, payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: local sign partial verification failed: %w", ErrSignAttemptCorrupt, err)
 	}
-	s.partials[key.state.party] = partial
+	s.partials[key.state.Party] = partial
 	if record.Completed {
 		sig := &Signature{R: slices.Clone(record.SignatureR), S: slices.Clone(record.SignatureS), RecoveryID: record.SignatureRecoveryID}
 		if !VerifyDigest(verifyKey, record.Digest, sig) {
@@ -387,8 +397,8 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		}
 		return s, []tss.Envelope{env}, nil
 	}
-	if store != nil {
-		if err := s.tryCompleteSign(s.storeCtx); err != nil {
+	if coordinator != nil {
+		if err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
 			return nil, nil, err
 		}
 		if s.completed {
@@ -409,9 +419,9 @@ func validateSignAttemptBindings(key *KeyShare, presign *Presign, record SignAtt
 		return err
 	}
 	if !bytes.Equal(record.PresignID, presign.id()) ||
-		record.Party != key.state.party ||
-		!bytes.Equal(record.SignerSetHash, signAttemptSignerSetHash(presign.state.signers)) ||
-		!bytes.Equal(record.ContextHash, presign.state.contextHash) {
+		record.Party != key.state.Party ||
+		!bytes.Equal(record.SignerSetHash, signAttemptSignerSetHash(presign.state.Signers)) ||
+		!bytes.Equal(record.ContextHash, presign.state.ContextHash) {
 		return fmt.Errorf("%w: key or presign binding mismatch", ErrSignAttemptCorrupt)
 	}
 	return nil
@@ -428,7 +438,15 @@ func BurnPresign(ctx context.Context, store SignAttemptStore, presign *Presign, 
 	if presign == nil || presign.state == nil {
 		return errors.New("nil presign")
 	}
-	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: presign.id(), Reason: reason}); err != nil {
+	handle, err := newPresignHandle(presign)
+	if err != nil {
+		return err
+	}
+	coordinator, err := newSignAttemptCoordinator(store, handle, DefaultSignAttemptStoreTimeout, DefaultLimits())
+	if err != nil {
+		return err
+	}
+	if err := coordinator.burn(ctx, reason); err != nil {
 		return err
 	}
 	return MarkPresignConsumed(presign)
@@ -452,17 +470,10 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.store == nil {
-		return errors.New("sign attempt store unavailable during delivery update")
+	if s.coordinator == nil {
+		return errors.New("sign attempt coordinator unavailable during delivery update")
 	}
-	storeCtx, cancel := durableStoreContext(ctx, s.storeTTL)
-	defer cancel()
-	updated, err := s.store.UpdateSignAttemptDelivery(storeCtx, SignAttemptDeliveryUpdate{
-		PresignID:   slices.Clone(s.attempt.PresignID),
-		AttemptHash: slices.Clone(s.attempt.AttemptHash),
-		Ack:         ack,
-		Certificate: certificate,
-	})
+	updated, err := s.coordinator.updateDelivery(ctx, ack, certificate)
 	if err != nil {
 		return err
 	}
@@ -475,7 +486,7 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.presign.state.signers, s.key.state.party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.presign.state.Signers, s.key.state.Party)
 }
 
 // HandleSignMessage validates and applies one online signing envelope.
@@ -499,57 +510,20 @@ func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Enve
 			s.abort()
 		}
 	}()
-	if err := s.validateInbound(env); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
+	tx, err := s.buildAcceptSignPartialTx(env)
+	if err != nil {
 		return nil, err
 	}
-	if !tss.ContainsParty(s.presign.state.signers, base.From) {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("sender is not in signer set"))
-	}
-
-	// ---- 1 & 2. PARSE + POLICY VALIDATE ----
-	if base.Round != 1 || base.PayloadType != payloadSignPartial {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("expected round 1 sign partial"))
-	}
-	if _, ok := s.partials[base.From]; ok {
-		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, base.Round, base.From, errors.New("duplicate sign partial"))
-	}
-	payload := base.Payload
-	p, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](payload, s.limits)
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
 	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeInvalidMessage,
-			base,
-			tss.EvidenceKindSignPartial,
-			"malformed sign partial payload",
-			tss.NewPartySet(base.From),
-			err,
-			s.signPartialContextEvidenceFields(payload)...,
-		)
+		return nil, err
 	}
-	defer p.S.Destroy()
-
-	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	partial, err := s.verifySignPartial(base.From, p)
-	if err != nil {
-		return nil, protocolErrorWithEvidence(
-			tss.ErrCodeVerification,
-			base,
-			tss.EvidenceKindSignPartial,
-			"sign partial verification failed",
-			tss.NewPartySet(base.From),
-			err,
-			s.signPartialEvidenceFields(base.From, p)...,
-		)
+	tx.markCommitted()
+	if err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
+		return nil, err
 	}
-
-	// ---- 4. MUTATE STATE ----
-	s.partials[base.From] = partial
-
-	// ---- 5. EMIT ----
-	return nil, s.tryCompleteSign(s.storeCtx)
+	return effects.envelopes, nil
 }
 
 // Signature returns the completed ECDSA signature.
@@ -583,9 +557,9 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 		)
 		// Compute the expected equation hash for independent auditability.
 		expectedEqHash := partialEquationHash(
-			s.sessionID, from, s.presign.state.transcriptHash,
-			s.presign.state.contextHash, s.planHash, s.digest,
-			s.presign.state.littleR.Bytes(), partialBytes,
+			s.sessionID, from, s.presign.state.TranscriptHash,
+			s.presign.state.ContextHash, s.planHash, s.digest,
+			s.presign.state.LittleR.Bytes(), partialBytes,
 			kPointBytes, chiPointBytes,
 		)
 		fields = append(fields,
@@ -597,10 +571,10 @@ func (s *SignSession) signPartialEvidenceFields(from tss.PartyID, p signPartialP
 }
 
 func (s *SignSession) signPartialContextEvidenceFields(rawPayload []byte) []tss.EvidenceField {
-	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.state.signers)...)
+	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.state.Signers)...)
 	fields = append(fields,
-		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.state.transcriptHash),
-		rawEvidenceField("presign_context_hash", s.presign.state.contextHash),
+		rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.state.TranscriptHash),
+		rawEvidenceField("presign_context_hash", s.presign.state.ContextHash),
 		hashEvidenceField(evidenceFieldDigestHash, s.digest),
 	)
 	if rawPayload != nil {
@@ -621,72 +595,6 @@ func (s *SignSession) RetryCompletion(ctx context.Context) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return s.tryCompleteSign(ctx)
-}
-
-func (s *SignSession) tryCompleteSign(ctx context.Context) error {
-	if s.completed || len(s.partials) != len(s.presign.state.signers) {
-		return nil
-	}
-	sigS := secp.ScalarZero()
-	for _, id := range s.presign.state.signers {
-		sigS = secp.ScalarAdd(sigS, s.partials[id])
-	}
-	if sigS.IsZero() {
-		return errors.New("zero ECDSA s")
-	}
-	normalizedS, sWasNegated := secp.NormalizeLowS(sigS)
-
-	rPointBytes, err := secp.PointBytes(s.presign.state.r)
-	if err != nil {
-		return err
-	}
-	recoveryID, err := recoveryIDFromPresignR(rPointBytes, sWasNegated)
-	if err != nil {
-		return err
-	}
-	r := s.presign.state.littleR
-	public, err := secp.PointFromBytes(s.publicKey)
-	if err != nil {
-		return err
-	}
-	if !secp.VerifyECDSA(public, s.digest, r, normalizedS) {
-		return &tss.ProtocolError{
-			Code:  tss.ErrCodeInvariant,
-			Round: 1,
-			Err:   errors.New("all partials individually verified but aggregate ECDSA signature verification failed"),
-		}
-	}
-	if s.store == nil {
-		return errors.New("sign attempt store unavailable during completion")
-	}
-	signature := Signature{R: r.Bytes(), S: normalizedS.Bytes(), RecoveryID: recoveryID}
-	storeCtx, cancel := durableStoreContext(ctx, s.storeTTL)
-	defer cancel()
-	completed, err := s.store.CompleteSignAttempt(storeCtx, SignAttemptResult{
-		PresignID:   slices.Clone(s.attempt.PresignID),
-		AttemptHash: slices.Clone(s.attempt.AttemptHash),
-		Signature:   signature,
-	})
-	if err != nil {
-		return fmt.Errorf("persist sign attempt completion: %w", err)
-	}
-	if !s.attempt.SameAttempt(completed) || !completed.Completed ||
-		!bytes.Equal(completed.SignatureR, signature.R) ||
-		!bytes.Equal(completed.SignatureS, signature.S) ||
-		completed.SignatureRecoveryID != signature.RecoveryID {
-		return fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
-	}
-	if err := validateSignAttemptRecordWithLimits(completed, s.limits); err != nil {
-		return err
-	}
-	s.attempt = completed.Clone()
-	s.signature = &Signature{R: slices.Clone(signature.R), S: slices.Clone(signature.S), RecoveryID: signature.RecoveryID}
-	s.completed = true
-	s.log.Info(ctx, "signing complete",
-		"party_id", s.key.state.party,
-		"session_id", fmt.Sprintf("%x", s.sessionID[:8]),
-	)
-	return nil
 }
 
 // VerifyDigest verifies a canonical low-S secp256k1 ECDSA signature over a
@@ -758,59 +666,59 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	if err := presign.ValidateWithLimits(limits); err != nil {
 		return err
 	}
-	if presign.state.party != key.state.party {
+	if presign.state.Party != key.state.Party {
 		return errors.New("presign party mismatch")
 	}
-	if presign.state.threshold != key.state.threshold {
+	if presign.state.Threshold != key.state.Threshold {
 		return errors.New("presign threshold mismatch")
 	}
-	presignPublicKey, err := secp.PointBytes(presign.state.publicKey)
+	presignPublicKey, err := secp.PointBytes(presign.state.PublicKey)
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(presignPublicKey, key.state.publicKey) {
+	if !bytes.Equal(presignPublicKey, key.state.PublicKey) {
 		return errors.New("presign public key binding mismatch")
 	}
-	if !bytes.Equal(presign.state.keygenTranscriptHash, key.state.keygenTranscriptHash) {
+	if !bytes.Equal(presign.state.KeygenTranscriptHash, key.state.KeygenTranscriptHash) {
 		return errors.New("presign keygen transcript binding mismatch")
 	}
-	if !bytes.Equal(presign.state.partiesHash, wireutil.PartySetHash(key.state.parties, partySetHashLabel)) {
+	if !bytes.Equal(presign.state.PartiesHash, wireutil.PartySetHash(key.state.Parties, partySetHashLabel)) {
 		return errors.New("presign participant set binding mismatch")
 	}
-	_, contextHash, derivation, err := preparePresignContext(key, presign.state.context)
+	_, contextHash, derivation, err := preparePresignContext(key, presign.state.Context)
 	if err != nil {
 		return err
 	}
-	if !bytes.Equal(contextHash, presign.state.contextHash) {
+	if !bytes.Equal(contextHash, presign.state.ContextHash) {
 		return errors.New("presign context hash mismatch")
 	}
-	if !derivation.Equal(presign.state.derivation) {
+	if !derivation.Equal(presign.state.Derivation) {
 		return errors.New("presign derivation binding mismatch")
 	}
-	if len(presign.state.signers) < key.state.threshold || !tss.ContainsParty(presign.state.signers, key.state.party) {
+	if len(presign.state.Signers) < key.state.Threshold || !tss.ContainsParty(presign.state.Signers, key.state.Party) {
 		return errors.New("invalid presign signer set")
 	}
 	return nil
 }
 
 func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error {
-	return tss.ValidateSignerSet(key.state.parties, key.state.threshold, signers, limits.ThresholdLimits())
+	return tss.ValidateSignerSet(key.state.Parties, key.state.Threshold, signers, limits.ThresholdLimits())
 }
 
 func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) (secp.Scalar, error) {
-	if !tss.ContainsParty(s.presign.state.signers, from) {
+	if !tss.ContainsParty(s.presign.state.Signers, from) {
 		return secp.Scalar{}, errors.New("sender is not in signer set")
 	}
-	if !bytes.Equal(p.PresignTranscript, s.presign.state.transcriptHash) {
+	if !bytes.Equal(p.PresignTranscript, s.presign.state.TranscriptHash) {
 		return secp.Scalar{}, errors.New("presign transcript mismatch")
 	}
-	if !bytes.Equal(p.PresignContext, s.presign.state.contextHash) {
+	if !bytes.Equal(p.PresignContext, s.presign.state.ContextHash) {
 		return secp.Scalar{}, errors.New("presign context mismatch")
 	}
 	if err := requirePlanHash("sign", p.PlanHash, s.planHash); err != nil {
 		return secp.Scalar{}, err
 	}
-	expectedDigestHash := digestHash(s.digest, s.presign.state.contextHash)
+	expectedDigestHash := digestHash(s.digest, s.presign.state.ContextHash)
 	if !bytes.Equal(p.DigestHash, expectedDigestHash) {
 		return secp.Scalar{}, errors.New("digest hash mismatch")
 	}
@@ -830,12 +738,12 @@ func (s *SignSession) verifySignPartial(from tss.PartyID, p signPartialPayload) 
 	if err != nil {
 		return secp.Scalar{}, fmt.Errorf("invalid ChiPoint for party %d: %w", from, err)
 	}
-	littleR := s.presign.state.littleR
+	littleR := s.presign.state.LittleR
 	partialBytes := p.S.FixedBytes()
 	defer clear(partialBytes)
 	expectedEqHash := partialEquationHash(
-		s.sessionID, from, s.presign.state.transcriptHash,
-		s.presign.state.contextHash, s.planHash, s.digest,
+		s.sessionID, from, s.presign.state.TranscriptHash,
+		s.presign.state.ContextHash, s.planHash, s.digest,
 		littleR.Bytes(), partialBytes,
 		kPointBytes, chiPointBytes,
 	)
@@ -884,7 +792,7 @@ func presignVerifyShare(presign *Presign, party tss.PartyID) (signVerifyShare, b
 	if presign == nil || presign.state == nil {
 		return signVerifyShare{}, false
 	}
-	for _, vs := range presign.state.verifyShares {
+	for _, vs := range presign.state.VerifyShares {
 		if vs.Party == party {
 			return vs, true
 		}

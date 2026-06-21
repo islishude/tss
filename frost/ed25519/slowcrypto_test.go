@@ -244,7 +244,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 	}
 
 	// Party 4 is a recipient-only.
-	recipient, err := startFROSTReshareRecipient(oldPublicKey.Bytes(), oldShares[1].state.chainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
+	recipient, err := startFROSTReshareRecipient(oldPublicKey.Bytes(), oldShares[1].state.ChainCode, oldParties, newParties, newThreshold, tss.ThresholdConfig{
 		Threshold: newThreshold,
 		Parties:   newParties,
 		Self:      4,

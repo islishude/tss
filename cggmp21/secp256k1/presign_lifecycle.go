@@ -82,29 +82,29 @@ func MarkPresignConsumed(p *Presign) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}
-	if p.state.consumed == nil {
+	if p.state.Consumed.Bool == nil {
 		return errors.New("presign claim state unavailable")
 	}
 	if p.state.attempt == nil {
 		return errors.New("presign attempt state unavailable")
 	}
-	p.state.consumed.Store(true)
+	p.state.Consumed.Store(true)
 	p.state.attempt.discard()
 	return nil
 }
 
 // IsPresignConsumed reports whether the presign has been consumed.
 func IsPresignConsumed(p *Presign) bool {
-	return p == nil || p.state == nil || p.state.consumed == nil || p.state.attempt == nil || p.state.consumed.Load()
+	return p == nil || p.state == nil || p.state.Consumed.Bool == nil || p.state.attempt == nil || p.state.Consumed.Load()
 }
 
 func bindPresignToAttempt(presign *Presign, intent []byte, recovered bool) bool {
-	if presign == nil || presign.state == nil || presign.state.consumed == nil || presign.state.attempt == nil {
+	if presign == nil || presign.state == nil || presign.state.Consumed.Bool == nil || presign.state.attempt == nil {
 		return false
 	}
 	if !presign.state.attempt.bind(intent, recovered) {
 		return false
 	}
-	presign.state.consumed.Store(true)
+	presign.state.Consumed.Store(true)
 	return true
 }

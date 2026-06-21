@@ -26,39 +26,39 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if !s.allRefreshRound1Complete() {
 		return nil, nil
 	}
-	for _, dealer := range s.oldKey.state.parties {
+	for _, dealer := range s.oldKey.state.Parties {
 		pd := s.partyData[dealer]
 		share, err := secpScalarFromSecretAllowZero(pd.share)
 		if err != nil {
 			return nil, err
 		}
-		if err := secp.VerifyShare(pd.commitments, s.oldKey.state.party, share); err != nil {
+		if err := secp.VerifyShare(pd.commitments, s.oldKey.state.Party, share); err != nil {
 			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.cfg, 1, dealer, s.oldKey.state.party, payloadRefreshShare, nil)
+			evidenceEnv, evErr := newEnvelope(s.cfg, refreshStartRound, dealer, s.oldKey.state.Party, payloadRefreshShare, nil)
 			if evErr != nil {
 				return nil, evErr
 			}
 			return nil, &tss.ProtocolError{
 				Code:  tss.ErrCodeVerification,
-				Round: 1,
+				Round: refreshStartRound,
 				Party: dealer,
 				Blame: newBlame(
 					evidenceEnv,
 					tss.EvidenceKindRefreshShare,
 					"invalid refresh share",
 					tss.NewPartySet(dealer),
-					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.parties, partySetHashLabel)),
+					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, pd.commitments)),
 				),
 				Err: verifyErr,
 			}
 		}
 	}
-	newSecret, err := secpScalarFromSecret(s.oldKey.state.secret)
+	newSecret, err := secpScalarFromSecret(s.oldKey.state.Secret)
 	if err != nil {
 		return nil, err
 	}
-	for _, dealer := range s.oldKey.state.parties {
+	for _, dealer := range s.oldKey.state.Parties {
 		share, err := secpScalarFromSecretAllowZero(s.partyData[dealer].share)
 		if err != nil {
 			return nil, err
@@ -71,8 +71,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	newCommitments := make([]*secp.Point, s.cfg.Threshold)
 	for degree := 0; degree < s.cfg.Threshold; degree++ {
-		points := make([]*secp.Point, 0, len(s.oldKey.state.parties))
-		for _, dealer := range s.oldKey.state.parties {
+		points := make([]*secp.Point, 0, len(s.oldKey.state.Parties))
+		for _, dealer := range s.oldKey.state.Parties {
 			if len(s.partyData[dealer].commitments[degree]) == 0 {
 				continue
 			}
@@ -82,8 +82,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 			}
 			points = append(points, p)
 		}
-		if degree < len(s.oldKey.state.groupCommitments) {
-			if oldCommitment := s.oldKey.state.groupCommitments[degree]; oldCommitment != nil {
+		if degree < len(s.oldKey.state.GroupCommitments) {
+			if oldCommitment := s.oldKey.state.GroupCommitments[degree]; oldCommitment != nil {
 				points = append(points, oldCommitment)
 			}
 		}
@@ -97,11 +97,11 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(publicKey, s.oldKey.state.publicKey) {
+	if !bytes.Equal(publicKey, s.oldKey.state.PublicKey) {
 		return nil, errors.New("refreshed group public key does not match original")
 	}
-	verificationShares := make([]VerificationShare, 0, len(s.oldKey.state.parties))
-	for _, id := range s.oldKey.state.parties {
+	verificationShares := make([]VerificationShare, 0, len(s.oldKey.state.Parties))
+	for _, id := range s.oldKey.state.Parties {
 		pub, err := secp.EvalCommitmentPoints(newCommitments, id)
 		if err != nil {
 			return nil, err
@@ -116,7 +116,7 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	localVerificationShare, ok := verificationShareFor(verificationShares, s.oldKey.state.party)
+	localVerificationShare, ok := verificationShareFor(verificationShares, s.oldKey.state.Party)
 	if !ok {
 		return nil, errors.New("missing local verification share")
 	}
@@ -129,65 +129,65 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		newSecretScalar.Destroy()
 		return nil, errors.New("local share proof public key mismatch")
 	}
-	selfPD := s.partyData[s.oldKey.state.party]
+	selfPD := s.partyData[s.oldKey.state.Party]
 	// Construct a temporary share for domain-separated Paillier proof binding.
 	localProofShare := &KeyShare{state: &keyShareState{
-		securityParams: s.securityParams,
-		party:          s.oldKey.state.party,
-		threshold:      s.cfg.Threshold,
-		parties:        s.oldKey.state.parties,
-		publicKey:      publicKey,
-		partyData: map[tss.PartyID]keySharePartyData{
-			s.oldKey.state.party: {paillierPublicKey: selfPD.paillierPub.PublicKey.Clone()},
+		SecurityParams: s.securityParams,
+		Party:          s.oldKey.state.Party,
+		Threshold:      s.cfg.Threshold,
+		Parties:        s.oldKey.state.Parties,
+		PublicKey:      publicKey,
+		PartyData: map[tss.PartyID]keySharePartyData{
+			s.oldKey.state.Party: {PaillierPublicKey: selfPD.paillierPub.PublicKey.Clone()},
 		},
-		planHash:               append([]byte(nil), s.planHash...),
-		keygenTranscriptHash:   transcriptHash,
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelRefreshPaillier,
+		PlanHash:               append([]byte(nil), s.planHash...),
+		KeygenTranscriptHash:   transcriptHash,
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelRefreshPaillier,
 	}}
 	paillierDomain, err := keySharePaillierProofDomain(localProofShare, s.limits)
 	if err != nil {
 		return nil, err
 	}
-	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), paillierDomain, s.newPaillier, s.oldKey.state.party)
+	paillierProof, err := zkpai.ProveModulus(s.cfg.Reader(), paillierDomain, s.newPaillier, s.oldKey.state.Party)
 	if err != nil {
 		return nil, err
 	}
-	partyData := make(map[tss.PartyID]keySharePartyData, len(s.oldKey.state.parties))
-	for _, id := range s.oldKey.state.parties {
+	partyData := make(map[tss.PartyID]keySharePartyData, len(s.oldKey.state.Parties))
+	for _, id := range s.oldKey.state.Parties {
 		verificationShare, ok := verificationShareFor(verificationShares, id)
 		if !ok {
 			return nil, fmt.Errorf("missing verification share for party %d", id)
 		}
 		sessionData := s.partyData[id]
 		partyProof := sessionData.paillierPub.Proof
-		if id == s.oldKey.state.party {
+		if id == s.oldKey.state.Party {
 			partyProof = paillierProof
 		}
 		partyData[id] = keySharePartyData{
-			verificationShare:  bytes.Clone(verificationShare),
-			paillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			paillierProof:      partyProof.Clone(),
-			ringPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			ringPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:  bytes.Clone(verificationShare),
+			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:      partyProof.Clone(),
+			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
 		}
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
-		securityParams:         s.securityParams,
-		party:                  s.oldKey.state.party,
-		threshold:              s.cfg.Threshold,
-		parties:                s.oldKey.state.parties.Clone(),
-		publicKey:              append([]byte(nil), publicKey...),
-		chainCode:              append([]byte(nil), s.oldKey.state.chainCode...),
-		secret:                 newSecretScalar,
-		groupCommitments:       newCommitments,
-		partyData:              partyData,
-		paillierPrivateKey:     s.newPaillier.Clone(),
-		paillierProofSessionID: s.cfg.SessionID,
-		paillierProofDomain:    domainLabelRefreshPaillier,
-		shareProof:             shareProof.Clone(),
-		planHash:               append([]byte(nil), s.planHash...),
-		keygenTranscriptHash:   transcriptHash,
+		SecurityParams:         s.securityParams,
+		Party:                  s.oldKey.state.Party,
+		Threshold:              s.cfg.Threshold,
+		Parties:                s.oldKey.state.Parties.Clone(),
+		PublicKey:              append([]byte(nil), publicKey...),
+		ChainCode:              append([]byte(nil), s.oldKey.state.ChainCode...),
+		Secret:                 newSecretScalar,
+		GroupCommitments:       newCommitments,
+		PartyData:              partyData,
+		PaillierPrivateKey:     s.newPaillier.Clone(),
+		PaillierProofSessionID: s.cfg.SessionID,
+		PaillierProofDomain:    domainLabelRefreshPaillier,
+		ShareProof:             shareProof.Clone(),
+		PlanHash:               append([]byte(nil), s.planHash...),
+		KeygenTranscriptHash:   transcriptHash,
 	}}
 	// Π^log*: prove that Enc_new(x'_i) and V'_i = x'_i·G share the same secret,
 	// using the prover's own Ring-Pedersen parameters for the commitment.
@@ -217,8 +217,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.newShare.state.logCiphertext = cloneBigInt(logCiphertext)
-	s.newShare.state.logProof = logProof.Clone()
+	s.newShare.state.LogCiphertext = tss.CloneBigInt(logCiphertext)
+	s.newShare.state.LogProof = logProof.Clone()
 	if err := s.newShare.validateWithoutConfirmations(s.limits); err != nil {
 		return nil, err
 	}
@@ -231,13 +231,13 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
-	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.oldKey.state.party, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
+	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.oldKey.state.Party, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
 	if err != nil {
 		return nil, err
 	}
 	out := []tss.Envelope{confirmationEnv}
 	s.log.Info(s.cfg.Ctx(), "refresh local material complete",
-		"party_id", s.oldKey.state.party,
+		"party_id", s.oldKey.state.Party,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
 	if s.allRefreshConfirmationsReceived() {
@@ -256,12 +256,12 @@ func (s *RefreshSession) refreshTranscriptHash(newCommitments []*secp.Point) ([]
 	t := transcript.New(refreshTranscriptHashLabel)
 	t.AppendBytes("session_id", s.cfg.SessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
-	t.AppendBytes("old_keygen_transcript_hash", s.oldKey.state.keygenTranscriptHash)
-	sortedParties := tss.SortParties(s.oldKey.state.parties)
+	t.AppendBytes("old_keygen_transcript_hash", s.oldKey.state.KeygenTranscriptHash)
+	sortedParties := tss.SortParties(s.oldKey.state.Parties)
 	t.AppendUint32List("parties", sortedParties)
 	t.AppendUint32("threshold", uint32(s.cfg.Threshold))
-	t.AppendBytes("public_key", s.oldKey.state.publicKey)
-	t.AppendBytes("chain_code", s.oldKey.state.chainCode)
+	t.AppendBytes("public_key", s.oldKey.state.PublicKey)
+	t.AppendBytes("chain_code", s.oldKey.state.ChainCode)
 	for _, id := range sortedParties {
 		t.AppendUint32("party", id)
 		pd := s.partyData[id]

@@ -217,7 +217,7 @@ func TestThresholdECDSARefreshValidationBindsPreservedChainCode(t *testing.T) {
 	if !ok {
 		t.Fatal("refresh did not produce party 1 key share")
 	}
-	share.state.chainCode[0] ^= 1
+	share.state.ChainCode[0] ^= 1
 	if err := share.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("Validate accepted refreshed share with tampered preserved chain code")
 	}

@@ -22,13 +22,13 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(decoded.state.chainCode) != 32 {
+		if len(decoded.state.ChainCode) != 32 {
 			t.Fatal("HD key share lost chain code in round-trip")
 		}
-		if !bytes.Equal(decoded.state.chainCode, shares[1].state.chainCode) {
+		if !bytes.Equal(decoded.state.ChainCode, shares[1].state.ChainCode) {
 			t.Fatal("chain code mismatch after round-trip")
 		}
-		if !decoded.state.publicKey.Equal(shares[1].state.publicKey) {
+		if !decoded.state.PublicKey.Equal(shares[1].state.PublicKey) {
 			t.Fatal("public key mismatch after round-trip")
 		}
 	})
@@ -45,7 +45,7 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if len(decoded.state.chainCode) != 32 {
+		if len(decoded.state.ChainCode) != 32 {
 			t.Fatal("default key share should have a 32-byte chain code")
 		}
 	})
@@ -72,11 +72,11 @@ func TestHDKeyShareWireAndLifecycleScenarios(t *testing.T) {
 
 		shares := frostKeygenHD(t, 1, 1)
 		share := shares[1]
-		if len(share.state.chainCode) != 32 {
+		if len(share.state.ChainCode) != 32 {
 			t.Fatal("expected 32-byte chain code")
 		}
 		share.Destroy()
-		for _, b := range share.state.chainCode {
+		for _, b := range share.state.ChainCode {
 			if b != 0 {
 				t.Fatal("chain code not zeroed after Destroy")
 			}

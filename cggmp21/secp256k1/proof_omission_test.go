@@ -256,7 +256,7 @@ func TestKeyShareValidateRejectsMissingLogStarProof(t *testing.T) {
 	}
 
 	// Remove the log proof.
-	decoded.state.logProof = nil
+	decoded.state.LogProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing LogProof marshaled successfully")
@@ -280,8 +280,8 @@ func TestKeyShareValidateRejectsInvalidLogStarProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if decoded.state.logProof != nil && decoded.state.logProof.Z1 != nil {
-		decoded.state.logProof.Z1 = new(big.Int).Add(decoded.state.logProof.Z1, big.NewInt(1))
+	if decoded.state.LogProof != nil && decoded.state.LogProof.Z1 != nil {
+		decoded.state.LogProof.Z1 = new(big.Int).Add(decoded.state.LogProof.Z1, big.NewInt(1))
 	}
 	_, err = decoded.MarshalBinary()
 	if err == nil {
@@ -307,7 +307,7 @@ func TestKeyShareValidateRejectsMissingSchnorrProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	decoded.state.shareProof = nil
+	decoded.state.ShareProof = nil
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing ShareProof marshaled successfully")
@@ -332,9 +332,9 @@ func TestKeyShareValidateRejectsMissingPaillierProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := decoded.state.partyData[decoded.state.party]
-	data.paillierProof = nil
-	decoded.state.partyData[decoded.state.party] = data
+	data := decoded.state.PartyData[decoded.state.Party]
+	data.PaillierProof = nil
+	decoded.state.PartyData[decoded.state.Party] = data
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing PaillierProof marshaled successfully")
@@ -358,9 +358,9 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	data := decoded.state.partyData[decoded.state.party]
-	data.ringPedersenProof = nil
-	decoded.state.partyData[decoded.state.party] = data
+	data := decoded.state.PartyData[decoded.state.Party]
+	data.RingPedersenProof = nil
+	decoded.state.PartyData[decoded.state.Party] = data
 	_, err = decoded.MarshalBinary()
 	if err == nil {
 		t.Fatal("KeyShare with missing RingPedersenProof marshaled successfully")

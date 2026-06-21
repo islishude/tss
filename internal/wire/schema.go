@@ -26,6 +26,7 @@ const (
 	kindPartyBytePairs
 	kindNested
 	kindCustom
+	kindCustomList
 	kindBigInt
 	kindBigUint
 	kindBigPos
@@ -409,6 +410,14 @@ func parseKind(kindStr string, t reflect.Type) (wireKind, error) {
 		// Any type is accepted at schema-parse time. Interface checks
 		// (ValueMarshaler / ValueUnmarshaler) happen at encode/decode.
 		return kindCustom, nil
+	case "customlist":
+		if t.Kind() != reflect.Slice {
+			return 0, fmt.Errorf("customlist requires slice, got %s", t)
+		}
+		if !supportsValueCodec(t.Elem()) {
+			return 0, fmt.Errorf("customlist item must implement ValueMarshaler and ValueUnmarshaler, got %s", t.Elem())
+		}
+		return kindCustomList, nil
 	case "bigint":
 		bigType := reflect.TypeFor[big.Int]()
 		ptrBigType := reflect.TypeFor[*big.Int]()
@@ -455,7 +464,8 @@ var knownKindNames = map[string]bool{
 	"u8": true, "u16": true, "u32": true, "bool": true,
 	"bytes": true, "string": true, "u32list": true, "byteslist": true,
 	"partybytes": true, "partybytepairs": true, "nested": true, "custom": true,
-	"bigint": true, "biguint": true, "bigpos": true,
+	"customlist": true,
+	"bigint":     true, "biguint": true, "bigpos": true,
 	"record": true, "recordlist": true,
 	"map": true,
 }
@@ -500,6 +510,8 @@ func kindName(kind wireKind) string {
 		return "nested"
 	case kindCustom:
 		return "custom"
+	case kindCustomList:
+		return "customlist"
 	case kindBigInt:
 		return "bigint"
 	case kindBigUint:
@@ -534,6 +546,7 @@ func kindName(kind wireKind) string {
 //	[]struct / []*struct -> recordlist
 //	ValueMarshaler       -> custom
 //
+// customlist is not inferred; declare it explicitly for slice-of-custom fields.
 // big.Int is NOT auto-inferred (three possible signedness variants).
 func inferKind(t reflect.Type) (wireKind, error) {
 	t = indirectType(t)
@@ -607,6 +620,28 @@ func indirectType(t reflect.Type) reflect.Type {
 		t = t.Elem()
 	}
 	return t
+}
+
+func supportsValueCodec(t reflect.Type) bool {
+	vmType := reflect.TypeFor[ValueMarshaler]()
+	vuType := reflect.TypeFor[ValueUnmarshaler]()
+
+	candidates := []reflect.Type{t}
+	if t.Kind() != reflect.Pointer {
+		candidates = append(candidates, reflect.PointerTo(t))
+	}
+
+	hasMarshaler := false
+	hasUnmarshaler := false
+	for _, candidate := range candidates {
+		if candidate.Implements(vmType) {
+			hasMarshaler = true
+		}
+		if candidate.Implements(vuType) {
+			hasUnmarshaler = true
+		}
+	}
+	return hasMarshaler && hasUnmarshaler
 }
 
 // initMapSchema validates and populates the map-specific schema fields.

@@ -67,20 +67,22 @@ func TestFast_PresignStateCodecAppliesCallerLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	smallFields := limits.fieldLimits()
-	smallFields["point"] = 32
-	if _, err := presign.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
+	smallFields["signers"] = 1
+	if _, err := wire.Marshal(presign.state, wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
 		t.Fatal("presign state marshal ignored caller field limits")
 	}
 	var decoded presignState
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw)-1)),
 		wire.WithFieldLimits(limits.fieldLimits()),
 	); err == nil {
 		t.Fatal("presign state unmarshal ignored caller frame limits")
 	}
-	if err := decoded.UnmarshalWireMessage(
+	if err := wire.Unmarshal(
 		raw,
+		&decoded,
 		wire.WithFrameLimits(limits.frameLimits(len(raw))),
 		wire.WithFieldLimits(smallFields),
 	); err == nil {
@@ -88,7 +90,7 @@ func TestFast_PresignStateCodecAppliesCallerLimits(t *testing.T) {
 	}
 	missing := limits.fieldLimits()
 	delete(missing, "signprep_proof")
-	if _, err := presign.state.MarshalWireMessage(wire.WithFieldLimitsForMarshal(missing)); err == nil {
+	if _, err := wire.Marshal(presign.state, wire.WithFieldLimitsForMarshal(missing)); err == nil {
 		t.Fatal("presign state marshal accepted missing field limit")
 	}
 }

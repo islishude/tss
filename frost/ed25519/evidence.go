@@ -97,7 +97,7 @@ func frostAggregateBlame(sessionID tss.SessionID, signers tss.PartySet, publicKe
 	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   sessionID,
-		Round:       2,
+		Round:       signRound2,
 		PayloadType: payloadSignPartial,
 	})
 	return &tss.Blame{

@@ -13,6 +13,16 @@ import (
 	"github.com/islishude/tss/internal/secret"
 )
 
+// The round numbers with named constants
+const (
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
+
+	signStartRound    = 1
+	signRound2        = 2
+	reshareStartRound = 1
+)
+
 const (
 	payloadKeygenCommitments  tss.PayloadType = "frost.ed25519.keygen.commitments"
 	payloadKeygenShare        tss.PayloadType = "frost.ed25519.keygen.share"
@@ -78,30 +88,30 @@ type KeyShare struct {
 }
 
 type keySharePartyData struct {
-	verificationShare  verificationSharePoint
-	keygenConfirmation *KeygenConfirmation
+	VerificationShare  verificationSharePoint `wire:"1,custom,len=32,max_bytes=point"`
+	KeygenConfirmation *KeygenConfirmation    `wire:"2,record,optional"`
 }
 
 // Clone returns a deep copy of keySharePartyData.
 func (in keySharePartyData) Clone() keySharePartyData {
 	return keySharePartyData{
-		verificationShare:  in.verificationShare.Clone(),
-		keygenConfirmation: in.keygenConfirmation.Clone(),
+		VerificationShare:  in.VerificationShare.Clone(),
+		KeygenConfirmation: in.KeygenConfirmation.Clone(),
 	}
 }
 
 type keyShareState struct {
-	party                tss.PartyID                       // Local owner of the secret signing share.
-	threshold            int                               // Number of signers required for FROST signing.
-	parties              tss.PartySet                      // Canonical full participant set for the group key.
-	publicKey            publicKeyPoint                    // Parent group public key before request-time derivation.
-	chainCode            []byte                            // HD chain code paired with publicKey for non-hardened derivation.
-	secret               *secret.Scalar                    // Local Ed25519 signing share; never exposed through accessors.
-	groupCommitments     groupCommitments                  // Public polynomial commitments from keygen/reshare.
-	partyData            map[tss.PartyID]keySharePartyData // Per-party public material keyed by participant identity.
-	keygenSessionID      tss.SessionID                     // Session that produced this key share.
-	keygenTranscriptHash []byte                            // Transcript hash of completed keygen/reshare confirmation.
-	planHash             []byte                            // Lifecycle plan digest that authorized this key share.
+	Party                tss.PartyID                       `wire:"1,u32"`                            // Local owner of the secret signing share.
+	Threshold            int                               `wire:"2,u32"`                            // Number of signers required for FROST signing.
+	Parties              tss.PartySet                      `wire:"3,u32list,max_items=parties"`      // Canonical full participant set for the group key.
+	PublicKey            publicKeyPoint                    `wire:"4,custom,len=32,max_bytes=point"`  // Parent group public key before request-time derivation.
+	ChainCode            []byte                            `wire:"5,bytes,len=32"`                   // HD chain code paired with PublicKey for non-hardened derivation.
+	Secret               *secret.Scalar                    `wire:"6,custom,len=32,max_bytes=scalar"` // Local Ed25519 signing share; never exposed through accessors.
+	GroupCommitments     groupCommitments                  `wire:"7,custom,max_items=threshold"`     // Public polynomial commitments from keygen/reshare.
+	PartyData            map[tss.PartyID]keySharePartyData `wire:"8,map,max_items=parties"`          // Per-party public material keyed by participant identity.
+	KeygenSessionID      tss.SessionID                     `wire:"9,bytes,len=32"`                   // Session that produced this key share.
+	KeygenTranscriptHash []byte                            `wire:"10,bytes"`                         // Transcript hash of completed keygen/reshare confirmation.
+	PlanHash             []byte                            `wire:"11,bytes,len=32"`                  // Lifecycle plan digest that authorized this key share.
 }
 
 func scalarBytes(x *big.Int) ([]byte, error) {

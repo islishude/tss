@@ -14,6 +14,23 @@ import (
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
 
+// The round numbers with named constants
+const (
+	invalidRound = 0
+
+	keygenStartRound        = 1
+	keygenConfirmationRound = 2
+
+	presignStartRound = 1
+	presignRound2     = 2
+	presignRound3     = 3
+
+	refreshStartRound = 1
+	reshareStartRound = 1
+
+	signStartRound = 1
+)
+
 const (
 	payloadKeygenCommitments  tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
 	payloadKeygenShare        tss.PayloadType = "cggmp21.secp256k1.keygen.share"
@@ -181,48 +198,48 @@ type KeyShare struct {
 }
 
 type keySharePartyData struct {
-	verificationShare []byte
+	VerificationShare []byte `wire:"1,bytes,max_bytes=point"`
 
-	paillierPublicKey *pai.PublicKey
-	paillierProof     *zkpai.ModulusProof
+	PaillierPublicKey *pai.PublicKey      `wire:"2,nested,max_bytes=paillier_public_key"`
+	PaillierProof     *zkpai.ModulusProof `wire:"3,nested,max_bytes=paillier_proof"`
 
-	ringPedersenParams *zkpai.RingPedersenParams
-	ringPedersenProof  *zkpai.RingPedersenProof
+	RingPedersenParams *zkpai.RingPedersenParams `wire:"4,nested,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  *zkpai.RingPedersenProof  `wire:"5,nested,max_bytes=paillier_proof"`
 
-	keygenConfirmation *KeygenConfirmation
+	KeygenConfirmation *KeygenConfirmation `wire:"6,record"`
 }
 
 // Clone returns a deep copy of the keySharePartyData.
 func (in keySharePartyData) Clone() keySharePartyData {
 	return keySharePartyData{
-		verificationShare:  bytes.Clone(in.verificationShare),
-		paillierPublicKey:  in.paillierPublicKey.Clone(),
-		paillierProof:      in.paillierProof.Clone(),
-		ringPedersenParams: in.ringPedersenParams.Clone(),
-		ringPedersenProof:  in.ringPedersenProof.Clone(),
-		keygenConfirmation: in.keygenConfirmation.Clone(),
+		VerificationShare:  bytes.Clone(in.VerificationShare),
+		PaillierPublicKey:  in.PaillierPublicKey.Clone(),
+		PaillierProof:      in.PaillierProof.Clone(),
+		RingPedersenParams: in.RingPedersenParams.Clone(),
+		RingPedersenProof:  in.RingPedersenProof.Clone(),
+		KeygenConfirmation: in.KeygenConfirmation.Clone(),
 	}
 }
 
 type keyShareState struct {
-	party                  tss.PartyID                       // Local owner of the secret signing share.
-	threshold              int                               // Number of signers required for CGGMP21 signing.
-	parties                tss.PartySet                      // Canonical full participant set for the group key.
-	publicKey              []byte                            // Parent group public key before request-time derivation.
-	chainCode              []byte                            // HD chain code paired with publicKey for non-hardened derivation.
-	secret                 *secret.Scalar                    // Local ECDSA signing share; never exposed through accessors.
-	groupCommitments       []*secp.Point                     // Public polynomial commitments from keygen/reshare.
-	partyData              map[tss.PartyID]keySharePartyData // Per-party public material keyed by participant identity.
-	paillierPrivateKey     *pai.PrivateKey                   // Local Paillier private key; secret-bearing.
-	shareProof             *schnorr.Proof                    // Public proof binding a reshare receiver's share to commitments.
-	keygenTranscriptHash   []byte                            // Transcript hash of the completed keygen or reshare confirmation.
-	paillierProofSessionID tss.SessionID                     // Session ID bound into local Paillier proof transcripts.
-	paillierProofDomain    string                            // Domain label bound into local Paillier proof transcripts.
-	logCiphertext          *big.Int                          // Public ciphertext used by auxiliary logarithm proofs.
-	logProof               *zkpai.LogStarProof               // Public proof for the auxiliary logarithm statement.
-	resharePlanHash        []byte                            // Reshare plan digest when this share came from reshare.
-	planHash               []byte                            // Lifecycle plan digest that authorized this key share.
-	securityParams         SecurityParams                    // Cryptographic profile used to create this share.
+	Party                  tss.PartyID                       `wire:"1,u32"`                                   // Local owner of the secret signing share.
+	Threshold              int                               `wire:"2,u32"`                                   // Number of signers required for CGGMP21 signing.
+	Parties                tss.PartySet                      `wire:"3,u32list,max_items=parties"`             // Canonical full participant set for the group key.
+	PublicKey              []byte                            `wire:"4,bytes,max_bytes=point"`                 // Parent group public key before request-time derivation.
+	ChainCode              []byte                            `wire:"5,bytes,len=32"`                          // HD chain code paired with PublicKey for non-hardened derivation.
+	Secret                 *secret.Scalar                    `wire:"6,custom,len=32"`                         // Local ECDSA signing share; never exposed through accessors.
+	GroupCommitments       []*secp.Point                     `wire:"7,customlist,len=33,max_items=threshold"` // Public polynomial commitments from keygen/reshare.
+	PartyData              map[tss.PartyID]keySharePartyData `wire:"8,map,max_items=parties"`                 // Per-party public material keyed by participant identity.
+	PaillierPrivateKey     *pai.PrivateKey                   `wire:"9,custom,max_bytes=paillier_private_key"` // Local Paillier private key; secret-bearing.
+	ShareProof             *schnorr.Proof                    `wire:"10,custom,max_bytes=zk_proof"`            // Public proof binding a reshare receiver's share to commitments.
+	KeygenTranscriptHash   []byte                            `wire:"11,bytes,len=32"`                         // Transcript hash of the completed keygen or reshare confirmation.
+	PaillierProofSessionID tss.SessionID                     `wire:"12,bytes,len=32"`                         // Session ID bound into local Paillier proof transcripts.
+	PaillierProofDomain    string                            `wire:"13,string"`                               // Domain label bound into local Paillier proof transcripts.
+	LogCiphertext          *big.Int                          `wire:"14,bigpos,max_bytes=paillier_ciphertext"` // Public ciphertext used by auxiliary logarithm proofs.
+	LogProof               *zkpai.LogStarProof               `wire:"15,custom,max_bytes=zk_proof"`            // Public proof for the auxiliary logarithm statement.
+	ResharePlanHash        []byte                            `wire:"16,bytes"`                                // Reshare plan digest when this share came from reshare.
+	PlanHash               []byte                            `wire:"17,bytes,len=32"`                         // Lifecycle plan digest that authorized this key share.
+	SecurityParams         SecurityParams                    `wire:"18,record"`                               // Cryptographic profile used to create this share.
 }
 
 // Signature is a canonical low-S secp256k1 ECDSA signature encoded as r and s

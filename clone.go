@@ -1,6 +1,9 @@
 package tss
 
-import "slices"
+import (
+	"math/big"
+	"slices"
+)
 
 // CloneByteSlices returns a deep copy of a [][]byte slice. A nil input returns nil.
 func CloneByteSlices(in [][]byte) [][]byte {
@@ -47,4 +50,15 @@ func CloneMap[K comparable, V Cloner[V]](in map[K]V) map[K]V {
 		out[key] = value.Clone()
 	}
 	return out
+}
+
+// CloneBigInt returns a copy of x.
+//
+// If x is nil, CloneBigInt returns nil. The returned *big.Int does not share
+// mutable state with x, so modifying the returned value will not modify x.
+func CloneBigInt(x *big.Int) *big.Int {
+	if x == nil {
+		return nil
+	}
+	return new(big.Int).Set(x)
 }

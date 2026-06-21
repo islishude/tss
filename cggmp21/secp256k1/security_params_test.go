@@ -142,7 +142,7 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 
 	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	mismatched := clonePresignForTest(presigns[1])
-	mismatched.state.securityParams = production
+	mismatched.state.SecurityParams = production
 	if _, err := NewSignPlan(SignPlanOption{
 		Key:       shares[1],
 		Presign:   mismatched,
@@ -168,7 +168,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, 18, shares[1].state.securityParams)
+	keyRaw = flattenSecurityParamsRecordForTest(t, keyRaw, keyShareWireType, 18, shares[1].state.SecurityParams)
 	if _, err := tss.DecodeBinaryWithLimits[KeyShare](keyRaw, limits); err == nil {
 		t.Fatal("key share accepted retired flattened security params")
 	}
@@ -178,7 +178,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	presignRaw = flattenSecurityParamsRecordForTest(t, presignRaw, presignWireType, 18, presigns[1].state.securityParams)
+	presignRaw = flattenSecurityParamsRecordForTest(t, presignRaw, presignWireType, 18, presigns[1].state.SecurityParams)
 	if _, err := tss.DecodeBinaryWithLimits[Presign](presignRaw, limits); err == nil {
 		t.Fatal("presign accepted retired flattened security params")
 	}
@@ -188,7 +188,7 @@ func TestCGGMP21ArtifactsRejectFlattenedSecurityParamsWire(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	reshareRaw = flattenSecurityParamsRecordForTest(t, reshareRaw, resharePlanWireType, 13, resharePlan.state.securityParams)
+	reshareRaw = flattenSecurityParamsRecordForTest(t, reshareRaw, resharePlanWireType, 13, resharePlan.state.SecurityParams)
 	if _, err := tss.DecodeBinaryWithLimits[ResharePlan](reshareRaw, resharePlan.limits); err == nil {
 		t.Fatal("reshare plan accepted retired flattened security params")
 	}

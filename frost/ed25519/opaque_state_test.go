@@ -21,17 +21,17 @@ func TestFROSTKeyShareHasNoExportedFields(t *testing.T) {
 func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	t.Parallel()
 	k := minimalFROSTKeyShare()
-	k.state.parties = tss.NewPartySet(1, 2)
-	k.state.groupCommitments = groupCommitments{points: []*fed.Point{
+	k.state.Parties = tss.NewPartySet(1, 2)
+	k.state.GroupCommitments = groupCommitments{points: []*fed.Point{
 		fed.NewGeneratorPoint(),
 		fed.NewIdentityPoint(),
 	}}
-	k.state.partyData = map[tss.PartyID]keySharePartyData{
-		1: {verificationShare: verificationSharePoint{p: fed.NewGeneratorPoint()}, keygenConfirmation: &KeygenConfirmation{Sender: 1}},
-		2: {verificationShare: verificationSharePoint{p: fed.NewIdentityPoint()}, keygenConfirmation: &KeygenConfirmation{Sender: 2}},
+	k.state.PartyData = map[tss.PartyID]keySharePartyData{
+		1: {VerificationShare: verificationSharePoint{p: fed.NewGeneratorPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 1}},
+		2: {VerificationShare: verificationSharePoint{p: fed.NewIdentityPoint()}, KeygenConfirmation: &KeygenConfirmation{Sender: 2}},
 	}
-	groupBefore := k.state.groupCommitments.BytesList()
-	shareBefore := k.state.partyData[1].verificationShare.Bytes()
+	groupBefore := k.state.GroupCommitments.BytesList()
+	shareBefore := k.state.PartyData[1].VerificationShare.Bytes()
 
 	metadata := mustKeyShareMetadata(t, k)
 	metadata.Parties[0] = 99
@@ -47,10 +47,10 @@ func TestFROSTKeyShareGettersReturnOwnedSnapshots(t *testing.T) {
 	}
 	confirmation.Sender = 99
 
-	if k.state.parties[0] != 1 ||
-		!reflect.DeepEqual(k.state.groupCommitments.BytesList(), groupBefore) ||
-		!reflect.DeepEqual(k.state.partyData[1].verificationShare.Bytes(), shareBefore) ||
-		k.state.partyData[1].keygenConfirmation.Sender != 1 {
+	if k.state.Parties[0] != 1 ||
+		!reflect.DeepEqual(k.state.GroupCommitments.BytesList(), groupBefore) ||
+		!reflect.DeepEqual(k.state.PartyData[1].VerificationShare.Bytes(), shareBefore) ||
+		k.state.PartyData[1].KeygenConfirmation.Sender != 1 {
 		t.Fatal("KeyShare getter snapshot aliases internal state")
 	}
 }
@@ -64,12 +64,12 @@ func TestFROSTShallowKeyShareCopiesShareDestroyLifecycle(t *testing.T) {
 		t.Fatal(err)
 	}
 	key := &KeyShare{state: &keyShareState{
-		secret:    secretScalar,
-		chainCode: []byte{1, 2},
+		Secret:    secretScalar,
+		ChainCode: []byte{1, 2},
 	}}
 	handle := *key
 	handle.Destroy()
-	if key.state.secret.FixedLen() != 0 || key.state.chainCode[0] != 0 {
+	if key.state.Secret.FixedLen() != 0 || key.state.ChainCode[0] != 0 {
 		t.Fatal("shallow KeyShare copy did not share Destroy lifecycle")
 	}
 }

@@ -176,8 +176,8 @@ func runSecpKeygen(threshold, n int) (map[tss.PartyID]*KeyShare, error) {
 			return nil, fmt.Errorf("keygen not complete for party %d", id)
 		}
 		if pub == nil {
-			pub = share.state.publicKey
-		} else if !bytes.Equal(pub, share.state.publicKey) {
+			pub = share.state.PublicKey
+		} else if !bytes.Equal(pub, share.state.PublicKey) {
 			return nil, fmt.Errorf("group public key mismatch for party %d", id)
 		}
 		if err := validateKeySharePartyDataSet(share, parties); err != nil {
@@ -271,14 +271,14 @@ func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign
 		panic(err)
 	}
 	ctx := EvidenceContext{
-		Parties:              share.state.parties.Clone(),
-		PublicKey:            append([]byte(nil), share.state.publicKey...),
+		Parties:              share.state.Parties.Clone(),
+		PublicKey:            append([]byte(nil), share.state.PublicKey...),
 		PaillierPublicKeys:   paillierPublicKeys,
 		Signers:              signers.Clone(),
-		KeygenTranscriptHash: append([]byte(nil), share.state.keygenTranscriptHash...),
+		KeygenTranscriptHash: append([]byte(nil), share.state.KeygenTranscriptHash...),
 	}
 	if presign != nil {
-		ctx.PresignTranscriptHash = append([]byte(nil), presign.state.transcriptHash...)
+		ctx.PresignTranscriptHash = append([]byte(nil), presign.state.TranscriptHash...)
 	}
 	return ctx
 }
@@ -334,7 +334,7 @@ func runCGGMP21Reshare(t testing.TB, oldShares map[tss.PartyID]*KeyShare, newPar
 		t.Fatal("missing old shares")
 		return nil, nil
 	}
-	return runCGGMP21ReshareWithDealers(t, oldShares, reference.state.parties, newParties, newThreshold)
+	return runCGGMP21ReshareWithDealers(t, oldShares, reference.state.Parties, newParties, newThreshold)
 }
 
 func runCGGMP21ReshareWithDealers(t testing.TB, oldShares map[tss.PartyID]*KeyShare, dealerParties, newParties tss.PartySet, newThreshold int) (map[tss.PartyID]*KeyShare, map[tss.PartyID]*ReshareSession) {
@@ -439,15 +439,15 @@ func validateKeySharePartyDataSet(share *KeyShare, parties tss.PartySet) error {
 	if share == nil || share.state == nil {
 		return errors.New("nil key share")
 	}
-	if len(share.state.partyData) != len(parties) {
-		return fmt.Errorf("party data count %d != party count %d", len(share.state.partyData), len(parties))
+	if len(share.state.PartyData) != len(parties) {
+		return fmt.Errorf("party data count %d != party count %d", len(share.state.PartyData), len(parties))
 	}
 	for _, id := range parties {
-		if _, ok := share.state.partyData[id]; !ok {
+		if _, ok := share.state.PartyData[id]; !ok {
 			return fmt.Errorf("missing party data for %d", id)
 		}
 	}
-	for id := range share.state.partyData {
+	for id := range share.state.PartyData {
 		if !tss.ContainsParty(parties, id) {
 			return fmt.Errorf("unexpected party data for %d", id)
 		}

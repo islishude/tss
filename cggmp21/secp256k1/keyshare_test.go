@@ -14,13 +14,13 @@ import (
 // exercising accessors, formatting, and serialization rejection.
 func minimalKeyShare() *KeyShare {
 	return &KeyShare{state: &keyShareState{
-		party:                  1,
-		threshold:              2,
-		parties:                tss.NewPartySet(1, 2, 3),
-		publicKey:              make([]byte, 33),
-		chainCode:              make([]byte, 32),
-		paillierProofDomain:    "keygen.modulus",
-		paillierProofSessionID: tss.SessionID{},
+		Party:                  1,
+		Threshold:              2,
+		Parties:                tss.NewPartySet(1, 2, 3),
+		PublicKey:              make([]byte, 33),
+		ChainCode:              make([]byte, 32),
+		PaillierProofDomain:    "keygen.modulus",
+		PaillierProofSessionID: tss.SessionID{},
 	}}
 }
 
@@ -69,11 +69,11 @@ func TestFast_KeyShareRedactedStringNoSecrets(t *testing.T) {
 func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	t.Parallel()
 	k := minimalKeyShare()
-	k.state.publicKey[0] = 0x02
-	k.state.chainCode[0] = 0xaa
-	k.state.shareProof = testSchnorrProof(t)
-	k.state.keygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
-	k.state.groupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
+	k.state.PublicKey[0] = 0x02
+	k.state.ChainCode[0] = 0xaa
+	k.state.ShareProof = testSchnorrProof(t)
+	k.state.KeygenTranscriptHash = []byte{0xde, 0xad, 0xbe, 0xef}
+	k.state.GroupCommitments = []*secp.Point{testCurvePoint(1), testCurvePoint(2)}
 
 	meta := mustKeyShareMetadata(t, k)
 	originalShareProof := append([]byte(nil), meta.ShareProof...)
@@ -85,17 +85,17 @@ func TestFast_KeySharePublicMetadataReturnsCopy(t *testing.T) {
 	meta.GroupCommitments[0][0] = 0xff
 	meta.GroupCommitments[0] = []byte{0x99}
 
-	if k.state.publicKey[0] != 0x02 {
+	if k.state.PublicKey[0] != 0x02 {
 		t.Fatal("PublicMetadata() did not deep-copy public key")
 	}
-	if k.state.chainCode[0] != 0xaa {
+	if k.state.ChainCode[0] != 0xaa {
 		t.Fatal("PublicMetadata() did not deep-copy chain code")
 	}
 	metaAgain := mustKeyShareMetadata(t, k)
 	if metaAgain.ShareProof[0] != originalShareProof[0] {
 		t.Fatal("PublicMetadata() did not deep-copy share proof")
 	}
-	if k.state.keygenTranscriptHash[0] != 0xde {
+	if k.state.KeygenTranscriptHash[0] != 0xde {
 		t.Fatal("PublicMetadata() did not deep-copy keygen transcript hash")
 	}
 	if metaAgain.GroupCommitments[0][0] != originalCommitment[0] {

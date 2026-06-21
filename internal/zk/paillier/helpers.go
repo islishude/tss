@@ -208,10 +208,3 @@ func randomCoprime(reader io.Reader, n *big.Int) (*big.Int, error) {
 func partyBytes(party uint32) []byte {
 	return []byte{byte(party >> 24), byte(party >> 16), byte(party >> 8), byte(party)}
 }
-
-func cloneBigInt(x *big.Int) *big.Int {
-	if x == nil {
-		return nil
-	}
-	return new(big.Int).Set(x)
-}

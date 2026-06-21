@@ -197,20 +197,20 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(oldKey.state.party, tss.ErrInvalidSessionID)
+		return nil, invalidPlanConfig(oldKey.state.Party, tss.ErrInvalidSessionID)
 	}
 	if err := oldKey.ValidateConsistency(); err != nil {
-		return nil, invalidPlanConfig(oldKey.state.party, err)
+		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
-	if _, err := validatePlanPartySetVerbose(oldKey.state.parties, oldKey.state.threshold, limits); err != nil {
-		return nil, invalidPlanConfig(oldKey.state.party, err)
+	if _, err := validatePlanPartySetVerbose(oldKey.state.Parties, oldKey.state.Threshold, limits); err != nil {
+		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
 	return &RefreshPlan{state: &refreshPlanState{
 		sessionID: option.SessionID,
-		threshold: oldKey.state.threshold,
-		parties:   slices.Clone(oldKey.state.parties),
-		publicKey: oldKey.state.publicKey.Clone(),
-		chainCode: slices.Clone(oldKey.state.chainCode),
+		threshold: oldKey.state.Threshold,
+		parties:   slices.Clone(oldKey.state.Parties),
+		publicKey: oldKey.state.PublicKey.Clone(),
+		chainCode: slices.Clone(oldKey.state.ChainCode),
 	}, limits: limits}, nil
 }
 
@@ -341,12 +341,12 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil old key share"))
 	}
 	if err := oldKey.ValidateConsistency(); err != nil {
-		return nil, invalidPlanConfig(oldKey.state.party, err)
+		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
 	return NewPublicResharePlan(PublicResharePlanOption{
-		OldPublicKey: oldKey.state.publicKey.Bytes(),
-		OldChainCode: oldKey.state.chainCode,
-		OldParties:   oldKey.state.parties,
+		OldPublicKey: oldKey.state.PublicKey.Bytes(),
+		OldChainCode: oldKey.state.ChainCode,
+		OldParties:   oldKey.state.Parties,
 		SessionID:    option.SessionID,
 		NewParties:   option.NewParties,
 		NewThreshold: option.NewThreshold,
@@ -552,32 +552,32 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
 	}
 	if !option.SessionID.Valid() {
-		return nil, invalidPlanConfig(key.state.party, tss.ErrInvalidSessionID)
+		return nil, invalidPlanConfig(key.state.Party, tss.ErrInvalidSessionID)
 	}
 	if err := key.ValidateConsistency(); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	signers := tss.SortParties(option.Signers)
 	if err := validateSignerSet(key, signers, limits); err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	context, contextHash, derivation, err := prepareSignContext(key, option.Context)
 	if err != nil {
-		return nil, invalidPlanConfig(key.state.party, err)
+		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	if limits.Payload.MaxMessageBytes <= 0 {
-		return nil, invalidPlanConfig(key.state.party, errors.New("max message bytes must be positive"))
+		return nil, invalidPlanConfig(key.state.Party, errors.New("max message bytes must be positive"))
 	}
 	if len(option.Message) > limits.Payload.MaxMessageBytes {
-		return nil, invalidPlanConfig(key.state.party, fmt.Errorf("message too large: %d > %d", len(option.Message), limits.Payload.MaxMessageBytes))
+		return nil, invalidPlanConfig(key.state.Party, fmt.Errorf("message too large: %d > %d", len(option.Message), limits.Payload.MaxMessageBytes))
 	}
 	return &SignPlan{state: &signPlanState{
 		sessionID:   option.SessionID,
-		threshold:   key.state.threshold,
-		parties:     slices.Clone(key.state.parties),
-		publicKey:   key.state.publicKey.Clone(),
-		chainCode:   slices.Clone(key.state.chainCode),
-		keygenHash:  slices.Clone(key.state.keygenTranscriptHash),
+		threshold:   key.state.Threshold,
+		parties:     slices.Clone(key.state.Parties),
+		publicKey:   key.state.PublicKey.Clone(),
+		chainCode:   slices.Clone(key.state.ChainCode),
+		keygenHash:  slices.Clone(key.state.KeygenTranscriptHash),
 		signers:     signers,
 		context:     context, // already cloned in prepareSignContext
 		contextHash: slices.Clone(contextHash),
@@ -645,17 +645,17 @@ func (p *SignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 	if key == nil || key.state == nil {
 		return errors.New("nil key share")
 	}
-	if local.Self != key.state.party {
+	if local.Self != key.state.Party {
 		return errors.New("local self must match key share party")
 	}
 	if !tss.ContainsParty(p.state.signers, local.Self) {
 		return errors.New("local party is not in signer set")
 	}
-	if p.state.threshold != key.state.threshold ||
-		!slices.Equal(p.state.parties, key.state.parties) ||
-		!p.state.publicKey.Equal(key.state.publicKey) ||
-		!bytes.Equal(p.state.chainCode, key.state.chainCode) ||
-		!bytes.Equal(p.state.keygenHash, key.state.keygenTranscriptHash) {
+	if p.state.threshold != key.state.Threshold ||
+		!slices.Equal(p.state.parties, key.state.Parties) ||
+		!p.state.publicKey.Equal(key.state.PublicKey) ||
+		!bytes.Equal(p.state.chainCode, key.state.ChainCode) ||
+		!bytes.Equal(p.state.keygenHash, key.state.KeygenTranscriptHash) {
 		return errors.New("sign plan does not match key share")
 	}
 	_, contextHash, derivation, err := prepareSignContext(key, p.state.context)

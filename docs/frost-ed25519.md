@@ -13,6 +13,22 @@ The `frost/ed25519` package implements a dealerless FROST-style threshold Ed2551
 
 The group public key is a standard Ed25519 verification key. Signatures are standard 64-byte `R || S` Ed25519 values verifiable with `crypto/ed25519.Verify`.
 
+## Session Transition Contract
+
+FROST keygen, signing, refresh, and reshare handlers follow:
+
+```text
+decode -> policy validate -> cryptographic verify -> prepare transition -> commit -> effects
+```
+
+Rejected messages do not mutate accepted commitments, shares, partials, or
+completion state. Decoded secret scalars and prepared nonce/share outputs remain
+owned by the transition until commit and are destroyed on rejection. Outbound
+envelopes are fully constructed before the corresponding state is committed.
+Identical duplicates never reapply state; conflicting duplicates are rejected
+without overwriting accepted values. Completion readiness is derived from the
+accepted per-party state.
+
 ## Production Run Recipes
 
 The recipes below describe production integration metadata. They do not add a

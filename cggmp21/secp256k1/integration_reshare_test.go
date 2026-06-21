@@ -143,7 +143,7 @@ func TestThresholdECDSAReshareKeyShareValidationBindsPlanHash(t *testing.T) {
 	if len(meta.ResharePlanHash) != sha256.Size {
 		t.Fatalf("got reshare plan hash length %d, want %d", len(meta.ResharePlanHash), sha256.Size)
 	}
-	share.state.resharePlanHash[0] ^= 1
+	share.state.ResharePlanHash[0] ^= 1
 	if err := share.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("Validate accepted reshare key share with tampered plan hash")
 	}

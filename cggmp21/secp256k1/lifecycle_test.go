@@ -2,7 +2,6 @@ package secp256k1
 
 import (
 	"math/big"
-	"sync/atomic"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -32,7 +31,7 @@ func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
 	}
 	s := &KeygenSession{
 		partyData: pd,
-		pending:   &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04, 0x05}}},
+		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04, 0x05}}},
 	}
 
 	s.Destroy()
@@ -348,7 +347,7 @@ func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	}
 	s := &KeygenSession{
 		partyData: pd,
-		pending:   &KeyShare{state: &keyShareState{secret: secretScalar, chainCode: []byte{0x04}}},
+		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04}}},
 	}
 
 	s.abort()
@@ -391,15 +390,15 @@ func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
 	secretScalar := fillSecretScalar(t, 0x42)
 	privateKey := testPaillierPrivateKey(t)
 	k := &KeyShare{state: &keyShareState{
-		chainCode:          []byte{0x01, 0x02, 0x03, 0x04},
-		secret:             secretScalar,
-		paillierPrivateKey: privateKey,
+		ChainCode:          []byte{0x01, 0x02, 0x03, 0x04},
+		Secret:             secretScalar,
+		PaillierPrivateKey: privateKey,
 	}}
 
 	k.Destroy()
 
 	// Chain code must be zeroed (clear zeros elements but preserves length).
-	testutil.AssertBytesCleared(t, k.state.chainCode)
+	testutil.AssertBytesCleared(t, k.state.ChainCode)
 	for name, scalar := range map[string]*secret.Scalar{
 		"lambda": privateKey.Lambda,
 		"mu":     privateKey.Mu,
@@ -411,7 +410,7 @@ func TestKeyShare_Destroy_ClearsSecrets(t *testing.T) {
 		}
 	}
 	// secret must report zero length (buf is set to nil by Destroy).
-	if k.state.secret.FixedLen() != 0 {
+	if k.state.Secret.FixedLen() != 0 {
 		t.Error("secret scalar not zeroed after Destroy")
 	}
 }
@@ -431,12 +430,12 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	additiveShift := []byte{0x08, 0x09, 0x0a}
 	p := &Presign{state: &presignState{
 
-		consumed: new(atomic.Bool),
+		Consumed: NewAtomicBoolWire(false),
 		attempt:  newPresignAttemptBinding(false),
-		kShare:   kShare,
-		chiShare: chiShare,
-		delta:    delta,
-		derivation: &tss.DerivationResult{
+		KShare:   kShare,
+		ChiShare: chiShare,
+		Delta:    delta,
+		Derivation: &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: childPublicKey,
 			ChildChainCode: childChainCode,
@@ -451,13 +450,13 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	if !IsPresignConsumed(p) {
 		t.Error("presign not consumed after Destroy")
 	}
-	if p.state.kShare.FixedLen() != 0 {
+	if p.state.KShare.FixedLen() != 0 {
 		t.Error("kShare not zeroed")
 	}
-	if p.state.chiShare.FixedLen() != 0 {
+	if p.state.ChiShare.FixedLen() != 0 {
 		t.Error("chiShare not zeroed")
 	}
-	if p.state.delta.FixedLen() != 0 {
+	if p.state.Delta.FixedLen() != 0 {
 		t.Error("delta not zeroed")
 	}
 	testutil.AssertBytesCleared(t, childPublicKey)
@@ -465,12 +464,12 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	testutil.AssertBytesCleared(t, additiveShift)
 	assertDerivationPathCleared(t, "requested path", requestedPath)
 	assertDerivationPathCleared(t, "resolved path", resolvedPath)
-	if p.state.derivation.Scheme != "" ||
-		p.state.derivation.ChildPublicKey != nil ||
-		p.state.derivation.ChildChainCode != nil ||
-		p.state.derivation.RequestedPath != nil ||
-		p.state.derivation.ResolvedPath != nil ||
-		p.state.derivation.AdditiveShift != nil {
+	if p.state.Derivation.Scheme != "" ||
+		p.state.Derivation.ChildPublicKey != nil ||
+		p.state.Derivation.ChildChainCode != nil ||
+		p.state.Derivation.RequestedPath != nil ||
+		p.state.Derivation.ResolvedPath != nil ||
+		p.state.Derivation.AdditiveShift != nil {
 		t.Fatal("derivation result metadata not reset after Destroy")
 	}
 }
@@ -482,7 +481,7 @@ func TestDestroy_Idempotent(t *testing.T) {
 	secretScalar := testSecretScalar(t, 42)
 	kg := &KeygenSession{
 		partyData: map[tss.PartyID]*keygenPartyData{2: {share: testSecretScalar(t, 1)}},
-		pending:   &KeyShare{state: &keyShareState{secret: secretScalar}},
+		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar}},
 	}
 	kg.Destroy()
 	kg.Destroy() // must not panic

@@ -18,7 +18,7 @@ const testResharePlanPaillierBits = 3072
 func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.dealerParties = tss.NewPartySet(1, 2)
+	plan.state.DealerParties = tss.NewPartySet(1, 2)
 	if err := plan.Validate(); err != nil {
 		t.Fatalf("Validate: %v", err)
 	}
@@ -36,7 +36,7 @@ func TestResharePlanValidateAcceptsDealerSubset(t *testing.T) {
 func TestResharePlanValidateRejectsWrongOldPublicKey(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.oldGroupPublicKey = mustResharePlanPoint(t, 2)
+	plan.state.OldGroupPublicKey = mustResharePlanPoint(t, 2)
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted old commitment/public key mismatch")
 	}
@@ -45,7 +45,7 @@ func TestResharePlanValidateRejectsWrongOldPublicKey(t *testing.T) {
 func TestResharePlanValidateRejectsDealerOutsideOldSet(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.dealerParties = tss.NewPartySet(4)
+	plan.state.DealerParties = tss.NewPartySet(4)
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted dealer outside old party set")
 	}
@@ -54,7 +54,7 @@ func TestResharePlanValidateRejectsDealerOutsideOldSet(t *testing.T) {
 func TestResharePlanValidateRejectsVerificationShareMismatch(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.oldVerificationShares[2] = mustResharePlanPoint(t, 2)
+	plan.state.OldVerificationShares[2] = mustResharePlanPoint(t, 2)
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted wrong old verification share")
 	}
@@ -75,7 +75,7 @@ func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
 		t.Fatal("reshare plan digest is not deterministic")
 	}
 	mutated := cloneResharePlan(plan)
-	mutated.state.chainCode = bytes.Repeat([]byte{0x42}, 32)
+	mutated.state.ChainCode = bytes.Repeat([]byte{0x42}, 32)
 	digest3, err := mutated.Digest()
 	if err != nil {
 		t.Fatal(err)
@@ -88,7 +88,7 @@ func TestResharePlanDigestBindsPublicInputs(t *testing.T) {
 func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.chainCode = bytes.Repeat([]byte{1}, 32)
+	plan.state.ChainCode = bytes.Repeat([]byte{1}, 32)
 
 	snapshot, ok := plan.Snapshot()
 	if !ok {
@@ -106,14 +106,14 @@ func TestResharePlanSnapshotReturnsOwnedValues(t *testing.T) {
 	snapshot.NewParties[0] = 99
 	snapshot.ChainCode[0] = 99
 
-	if bytes.Equal(snapshot.OldGroupPublicKey, plan.state.oldGroupPublicKey) ||
-		bytes.Equal(snapshot.OldGroupCommitments[0], plan.state.oldGroupCommitments[0]) ||
-		bytes.Equal(oldShare.PublicKey, plan.state.oldVerificationShares[1]) ||
-		len(plan.state.oldVerificationShares) != 3 ||
-		plan.state.oldParties[0] != 1 ||
-		plan.state.dealerParties[0] != 1 ||
-		plan.state.newParties[0] != 2 ||
-		plan.state.chainCode[0] != 1 {
+	if bytes.Equal(snapshot.OldGroupPublicKey, plan.state.OldGroupPublicKey) ||
+		bytes.Equal(snapshot.OldGroupCommitments[0], plan.state.OldGroupCommitments[0]) ||
+		bytes.Equal(oldShare.PublicKey, plan.state.OldVerificationShares[1]) ||
+		len(plan.state.OldVerificationShares) != 3 ||
+		plan.state.OldParties[0] != 1 ||
+		plan.state.DealerParties[0] != 1 ||
+		plan.state.NewParties[0] != 2 ||
+		plan.state.ChainCode[0] != 1 {
 		t.Fatal("ResharePlan snapshot aliases internal state")
 	}
 }
@@ -194,9 +194,9 @@ func TestResharePlanRejectsNonCanonicalEncoding(t *testing.T) {
 	}
 
 	reversedShares := wire.EncodePartyBytes([]wire.PartyBytes[tss.PartyID]{
-		{Party: 3, Bytes: plan.state.oldVerificationShares[3]},
-		{Party: 2, Bytes: plan.state.oldVerificationShares[2]},
-		{Party: 1, Bytes: plan.state.oldVerificationShares[1]},
+		{Party: 3, Bytes: plan.state.OldVerificationShares[3]},
+		{Party: 2, Bytes: plan.state.OldVerificationShares[2]},
+		{Party: 1, Bytes: plan.state.OldVerificationShares[1]},
 	})
 	wrongShareOrder, err := testutil.RewriteWireField(raw, resharePlanWireType, 5, reversedShares)
 	if err != nil {
@@ -217,7 +217,7 @@ func TestResharePlanCodecAppliesCallerLimits(t *testing.T) {
 		t.Fatal(err)
 	}
 	smallFields := limits.fieldLimits()
-	smallFields["point"] = len(plan.state.oldGroupPublicKey) - 1
+	smallFields["point"] = len(plan.state.OldGroupPublicKey) - 1
 	if _, err := plan.MarshalWireMessage(wire.WithFieldLimitsForMarshal(smallFields)); err == nil {
 		t.Fatal("reshare plan marshal ignored caller field limits")
 	}
@@ -306,23 +306,23 @@ func minimalValidResharePlan(t *testing.T) *ResharePlan {
 	publicKey := mustResharePlanPoint(t, 1)
 	linearCommitment := mustResharePlanPoint(t, 1)
 	return &ResharePlan{state: &resharePlanState{
-		sessionID:           sessionID,
-		curveID:             reshareCurveID,
-		oldGroupPublicKey:   publicKey,
-		oldGroupCommitments: [][]byte{publicKey, linearCommitment},
-		oldVerificationShares: map[tss.PartyID][]byte{
+		SessionID:           sessionID,
+		CurveID:             reshareCurveID,
+		OldGroupPublicKey:   publicKey,
+		OldGroupCommitments: [][]byte{publicKey, linearCommitment},
+		OldVerificationShares: map[tss.PartyID][]byte{
 			1: mustResharePlanPoint(t, 2),
 			2: mustResharePlanPoint(t, 3),
 			3: mustResharePlanPoint(t, 4),
 		},
-		oldParties:     tss.NewPartySet(1, 2, 3),
-		oldThreshold:   2,
-		dealerParties:  tss.NewPartySet(1, 2),
-		newParties:     tss.NewPartySet(2, 3),
-		newThreshold:   2,
-		chainCode:      bytes.Repeat([]byte{0x44}, 32),
-		paillierBits:   testResharePlanPaillierBits,
-		securityParams: DefaultSecurityParams(),
+		OldParties:     tss.NewPartySet(1, 2, 3),
+		OldThreshold:   2,
+		DealerParties:  tss.NewPartySet(1, 2),
+		NewParties:     tss.NewPartySet(2, 3),
+		NewThreshold:   2,
+		ChainCode:      bytes.Repeat([]byte{0x44}, 32),
+		PaillierBits:   testResharePlanPaillierBits,
+		SecurityParams: DefaultSecurityParams(),
 	}, limits: DefaultLimits()}
 }
 
@@ -385,10 +385,10 @@ func TestNewResharePlanRejectsInvalidNewThreshold(t *testing.T) {
 
 func testMetadataKeyShare(party tss.PartyID, threshold int, parties tss.PartySet) *KeyShare {
 	return &KeyShare{state: &keyShareState{
-		securityParams: testSecurityParams(),
-		party:          party,
-		threshold:      threshold,
-		parties:        parties,
+		SecurityParams: testSecurityParams(),
+		Party:          party,
+		Threshold:      threshold,
+		Parties:        parties,
 	}}
 }
 
@@ -409,7 +409,7 @@ func TestIsDealerReceiverOverlapFalseForNonMembers(t *testing.T) {
 func TestResharePlanValidateRejectsNilCurveID(t *testing.T) {
 	t.Parallel()
 	plan := minimalValidResharePlan(t)
-	plan.state.curveID = ""
+	plan.state.CurveID = ""
 	if err := plan.Validate(); err == nil {
 		t.Fatal("Validate accepted empty CurveID")
 	}

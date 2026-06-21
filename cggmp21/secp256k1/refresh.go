@@ -55,8 +55,8 @@ type RefreshSession struct {
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.
-// The participant set and threshold are fixed to oldKey.state.parties and
-// oldKey.state.threshold. The group public key and chain code are preserved from the
+// The participant set and threshold are fixed to oldKey.state.Parties and
+// oldKey.state.Threshold. The group public key and chain code are preserved from the
 // original key share.
 //
 // In production, StartRefresh starts this party's local proactive refresh state
@@ -71,13 +71,13 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
-	if local.Self != oldKey.state.party {
+	if local.Self != oldKey.state.Party {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self must match the old key's party ID"))
 	}
-	if plan.state.threshold != oldKey.state.threshold ||
-		!bytes.Equal(plan.state.publicKey, oldKey.state.publicKey) ||
-		!bytes.Equal(plan.state.chainCode, oldKey.state.chainCode) ||
-		!slices.Equal(plan.state.parties, oldKey.state.parties) {
+	if plan.state.threshold != oldKey.state.Threshold ||
+		!bytes.Equal(plan.state.publicKey, oldKey.state.PublicKey) ||
+		!bytes.Equal(plan.state.chainCode, oldKey.state.ChainCode) ||
+		!slices.Equal(plan.state.parties, oldKey.state.Parties) {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("refresh plan does not match old key share"))
 	}
 	limits := plan.limits
@@ -137,7 +137,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		}
 		commitments[i] = enc
 	}
-	localShare, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, oldKey.state.party))
+	localShare, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, oldKey.state.Party))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -149,20 +149,20 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		securityParams: plan.securityParams,
 		planHash:       append([]byte(nil), planHash...),
 		partyData: func() map[tss.PartyID]*refreshPartyData {
-			pd := make(map[tss.PartyID]*refreshPartyData, len(oldKey.state.parties))
-			for _, id := range oldKey.state.parties {
+			pd := make(map[tss.PartyID]*refreshPartyData, len(oldKey.state.Parties))
+			for _, id := range oldKey.state.Parties {
 				pd[id] = &refreshPartyData{}
 			}
-			pd[oldKey.state.party] = &refreshPartyData{
+			pd[oldKey.state.Party] = &refreshPartyData{
 				commitments: commitments,
 				share:       localShare,
 				paillierPub: paillierPublicMaterial{
-					Party:     oldKey.state.party,
+					Party:     oldKey.state.Party,
 					PublicKey: newPaillierKey.PublicKey.Clone(),
 					Proof:     modProof.Clone(),
 				},
 				ringPedersen: ringPedersenPublicMaterial{
-					Party:  oldKey.state.party,
+					Party:  oldKey.state.Party,
 					Params: ringPedersenParams.Clone(),
 					Proof:  ringPedersenProof.Clone(),
 				},
@@ -183,13 +183,13 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := newEnvelope(config, 1, oldKey.state.party, tss.BroadcastPartyId, payloadRefreshCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, 1, oldKey.state.Party, tss.BroadcastPartyId, payloadRefreshCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
 	out := []tss.Envelope{commitEnv}
-	for _, id := range oldKey.state.parties {
-		if id == oldKey.state.party {
+	for _, id := range oldKey.state.Parties {
+		if id == oldKey.state.Party {
 			continue
 		}
 		share, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, id))
@@ -201,7 +201,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := newEnvelope(config, 1, oldKey.state.party, id, payloadRefreshShare, payload)
+		shareEnv, err := newEnvelope(config, 1, oldKey.state.Party, id, payloadRefreshShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -265,8 +265,8 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleRefreshConfirmation(env)
 	}
-	if env.Round != 1 {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts round 1 messages"))
+	if env.Round != refreshStartRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts refresh start round messages"))
 	}
 	switch env.PayloadType {
 	case payloadRefreshCommitments:
@@ -300,7 +300,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"refresh Paillier modulus does not meet security requirements",
 				tss.NewPartySet(env.From),
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -315,7 +315,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"invalid refresh Paillier modulus proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Paillier modulus proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -327,7 +327,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"refresh Ring-Pedersen modulus mismatch",
 				tss.NewPartySet(env.From),
 				errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -343,7 +343,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"invalid refresh Ring-Pedersen proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Ring-Pedersen proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -431,7 +431,7 @@ func (s *RefreshSession) abort() {
 
 // allRefreshRound1Complete returns true when every party has submitted round 1 data.
 func (s *RefreshSession) allRefreshRound1Complete() bool {
-	for _, id := range s.oldKey.state.parties {
+	for _, id := range s.oldKey.state.Parties {
 		pd := s.partyData[id]
 		if pd == nil || pd.commitments == nil || pd.share == nil ||
 			pd.paillierPub.PublicKey == nil || pd.paillierPub.Proof == nil ||
@@ -444,7 +444,7 @@ func (s *RefreshSession) allRefreshRound1Complete() bool {
 
 // allRefreshConfirmationsReceived returns true when every party has submitted a confirmation.
 func (s *RefreshSession) allRefreshConfirmationsReceived() bool {
-	for _, id := range s.oldKey.state.parties {
+	for _, id := range s.oldKey.state.Parties {
 		pd := s.partyData[id]
 		if pd == nil || pd.confirmation == nil {
 			return false
