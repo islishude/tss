@@ -264,7 +264,7 @@ func (s *KeygenSession) handleKeygenCommitments(env tss.Envelope) ([]tss.Envelop
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	if !zkpai.VerifyRingPedersen(ringDomain, ringParams, env.From, ringProof) {
+	if !zkpai.VerifyRingPedersen(s.securityParams, ringDomain, ringParams, env.From, ringProof) {
 		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid Ring-Pedersen proof",
 			"party_id", s.cfg.Self,
 			"from", env.From,

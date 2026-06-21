@@ -109,8 +109,14 @@ func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, re
 	// verifies the exact relationship response = encA^b * encBeta mod N².
 	nLen := (pkA.N.BitLen() + 7) / 8
 	nSquaredLen := 2 * nLen
-	nSquaredBytes := paillierct.FixedEncode(pkA.NSquared, nSquaredLen)
-	encABytes := paillierct.FixedEncode(encA, nSquaredLen)
+	nSquaredBytes, err := paillierct.FixedEncodeStrict(pkA.NSquared, nSquaredLen)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode Paillier modulus: %w", err)
+	}
+	encABytes, err := paillierct.FixedEncodeStrict(encA, nSquaredLen)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode start ciphertext: %w", err)
+	}
 	bBytes := b.FixedBytes()
 	defer clear(bBytes)
 

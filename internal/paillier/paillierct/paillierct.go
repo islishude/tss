@@ -23,26 +23,42 @@ import (
 type PrivateModExp struct {
 	mod        *bigmod.Modulus // n²
 	modSize    int             // len(n²) in bytes
+	nBytes     []byte          // n as big-endian bytes
+	nSize      int             // len(n) in bytes
 	nSquaredBs []byte          // n² as big-endian bytes
 	expSize    int             // fixed byte length of the secret exponent
 }
 
-// NewPrivateModExp creates a PrivateModExp from the n² modulus bytes and the
-// expected secret exponent byte length. All ExpSecret calls must provide
-// ciphertext bytes of length modSize and exponent bytes of length expSize.
-func NewPrivateModExp(nSquared []byte, expSize int) (*PrivateModExp, error) {
-	if len(nSquared) == 0 || expSize <= 0 {
+// NewPrivateModExp creates a PrivateModExp from the Paillier modulus n, n²
+// modulus bytes, and expected secret exponent byte length. The constructor
+// binds n to n² so blinded exponentiation cannot mix randomness for one
+// modulus with exponentiation under another.
+func NewPrivateModExp(n, nSquared []byte, expSize int) (*PrivateModExp, error) {
+	if len(n) == 0 || len(nSquared) == 0 || expSize <= 0 {
 		return nil, errors.New("invalid parameter size")
+	}
+	nBig := new(big.Int).SetBytes(n)
+	if nBig.Cmp(big.NewInt(1)) <= 0 {
+		return nil, errors.New("invalid Paillier modulus")
+	}
+	nSquaredBig := new(big.Int).SetBytes(nSquared)
+	wantNSquared := new(big.Int).Mul(nBig, nBig)
+	if nSquaredBig.Cmp(wantNSquared) != 0 {
+		return nil, errors.New("n squared does not match modulus")
 	}
 	mod, err := bigmod.NewModulus(nSquared)
 	if err != nil {
 		return nil, err
 	}
+	nBytes := make([]byte, len(n))
+	copy(nBytes, n)
 	nSquaredBs := make([]byte, len(nSquared))
 	copy(nSquaredBs, nSquared)
 	return &PrivateModExp{
 		mod:        mod,
 		modSize:    len(nSquared),
+		nBytes:     nBytes,
+		nSize:      len(n),
 		nSquaredBs: nSquaredBs,
 		expSize:    expSize,
 	}, nil
@@ -51,6 +67,9 @@ func NewPrivateModExp(nSquared []byte, expSize int) (*PrivateModExp, error) {
 // ExpSecret computes ciphertext^lambda mod n² in constant time.
 // The ciphertext must be len(n²) bytes and lambda must be expSize bytes.
 func (p *PrivateModExp) ExpSecret(ciphertext []byte, lambda []byte) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil PrivateModExp")
+	}
 	if len(ciphertext) != p.modSize {
 		return nil, fmt.Errorf("invalid ciphertext length: got %d, want %d", len(ciphertext), p.modSize)
 	}
@@ -68,8 +87,10 @@ func (p *PrivateModExp) ExpSecret(ciphertext []byte, lambda []byte) ([]byte, err
 
 // ExpSecretBlinded computes ciphertext^lambda mod n² in constant time with
 // ciphertext blinding: c' = c * r^n mod n² where r is random ∈ Z*_n.
-// The n parameter is the Paillier modulus.
-func (p *PrivateModExp) ExpSecretBlinded(reader io.Reader, ciphertext, lambda, n []byte) ([]byte, error) {
+func (p *PrivateModExp) ExpSecretBlinded(reader io.Reader, ciphertext, lambda []byte) ([]byte, error) {
+	if p == nil {
+		return nil, errors.New("nil PrivateModExp")
+	}
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -82,13 +103,13 @@ func (p *PrivateModExp) ExpSecretBlinded(reader io.Reader, ciphertext, lambda, n
 
 	// Ciphertext blinding: c' = c * r^n mod n².
 	// r^n encrypts zero, so decrypting c' yields the same plaintext as c.
-	r, err := randomCoprimeFixed(reader, n)
+	r, err := randomCoprimeFixed(reader, p.nBytes)
 	if err != nil {
 		return nil, fmt.Errorf("blinding randomness: %w", err)
 	}
 
 	// r^n mod n² using math/big is acceptable: n is the public modulus.
-	nBig := new(big.Int).SetBytes(n)
+	nBig := new(big.Int).SetBytes(p.nBytes)
 	nSquaredBig := new(big.Int).SetBytes(p.nSquaredBs)
 	rBig := new(big.Int).SetBytes(r)
 	rn := new(big.Int).Exp(rBig, nBig, nSquaredBig)
@@ -97,7 +118,10 @@ func (p *PrivateModExp) ExpSecretBlinded(reader io.Reader, ciphertext, lambda, n
 	cPrime := new(big.Int).Mul(cBig, rn)
 	cPrime.Mod(cPrime, nSquaredBig)
 
-	cPrimeBytes := padFixed(cPrime.Bytes(), p.modSize)
+	cPrimeBytes, err := padFixedStrict(cPrime.Bytes(), p.modSize)
+	if err != nil {
+		return nil, fmt.Errorf("blinded ciphertext encoding: %w", err)
+	}
 
 	base, err := bigmod.NewNat().SetBytes(cPrimeBytes, p.mod)
 	if err != nil {
@@ -132,8 +156,32 @@ func ExpCT(modulus, base, exp []byte) ([]byte, error) {
 	return out.Bytes(mod), nil
 }
 
-// FixedEncode encodes x as fixedLen big-endian bytes (padded with leading zeros).
-func FixedEncode(x *big.Int, fixedLen int) []byte {
+// FixedEncodeStrict encodes x as exactly fixedLen big-endian bytes, padding
+// with leading zeroes. Oversized, negative, nil, or zero-length inputs are
+// rejected so distinct integers cannot silently collapse to the same encoding.
+func FixedEncodeStrict(x *big.Int, fixedLen int) ([]byte, error) {
+	if x == nil {
+		return nil, errors.New("nil integer")
+	}
+	if fixedLen <= 0 {
+		return nil, errors.New("invalid fixed length")
+	}
+	if x.Sign() < 0 {
+		return nil, errors.New("negative integer")
+	}
+	b := x.Bytes()
+	if len(b) > fixedLen {
+		return nil, fmt.Errorf("integer encoding too long: got %d, want at most %d", len(b), fixedLen)
+	}
+	out := make([]byte, fixedLen)
+	copy(out[fixedLen-len(b):], b)
+	return out, nil
+}
+
+// FixedEncodeReduced encodes the low fixedLen bytes of x. Callers must only use
+// this after an explicit modular reduction or in tests that intentionally cover
+// truncation semantics.
+func FixedEncodeReduced(x *big.Int, fixedLen int) []byte {
 	b := x.Bytes()
 	if len(b) >= fixedLen {
 		return b[len(b)-fixedLen:]
@@ -143,15 +191,27 @@ func FixedEncode(x *big.Int, fixedLen int) []byte {
 	return out
 }
 
-// padFixed pads b to fixedLen with leading zeros. If b is already longer, it
-// is truncated from the left.
-func padFixed(b []byte, fixedLen int) []byte {
-	if len(b) >= fixedLen {
-		return b[len(b)-fixedLen:]
+// FixedEncode encodes the low fixedLen bytes of x.
+//
+// Deprecated: use FixedEncodeStrict for security-sensitive fixed-width
+// encodings, or FixedEncodeReduced when the input was explicitly reduced and
+// low-byte extraction is intended.
+func FixedEncode(x *big.Int, fixedLen int) []byte {
+	return FixedEncodeReduced(x, fixedLen)
+}
+
+// padFixedStrict pads b to fixedLen with leading zeros. Oversized inputs are
+// rejected instead of truncated.
+func padFixedStrict(b []byte, fixedLen int) ([]byte, error) {
+	if fixedLen <= 0 {
+		return nil, errors.New("invalid fixed length")
+	}
+	if len(b) > fixedLen {
+		return nil, fmt.Errorf("input encoding too long: got %d, want at most %d", len(b), fixedLen)
 	}
 	out := make([]byte, fixedLen)
 	copy(out[fixedLen-len(b):], b)
-	return out
+	return out, nil
 }
 
 // randomCoprimeFixed generates a random value r < n that is coprime to n.
@@ -161,6 +221,9 @@ func randomCoprimeFixed(reader io.Reader, n []byte) ([]byte, error) {
 		reader = rand.Reader
 	}
 	nBig := new(big.Int).SetBytes(n)
+	if nBig.Cmp(big.NewInt(1)) <= 0 {
+		return nil, errors.New("invalid modulus")
+	}
 	one := big.NewInt(1)
 	nLen := len(n)
 	for {
@@ -172,7 +235,7 @@ func randomCoprimeFixed(reader io.Reader, n []byte) ([]byte, error) {
 			continue
 		}
 		if new(big.Int).GCD(nil, nil, r, nBig).Cmp(one) == 0 {
-			return padFixed(r.Bytes(), nLen), nil
+			return padFixedStrict(r.Bytes(), nLen)
 		}
 	}
 }

@@ -123,13 +123,13 @@ func TestBigIntExpCallSitesRemainPublicExponentOnly(t *testing.T) {
 			"fourthRootForModulusProof": true,
 		},
 		"internal/zk/paillier/enc.go": {
-			"ProveEnc": true,
+			"proveEncOnce": true,
 		},
 		"internal/zk/paillier/affg.go": {
-			"ProveAffG": true,
+			"proveAffGOnce": true,
 		},
 		"internal/zk/paillier/logstar.go": {
-			"ProveLogStar": true,
+			"proveLogStarOnce": true,
 		},
 	}
 	directories := []string{

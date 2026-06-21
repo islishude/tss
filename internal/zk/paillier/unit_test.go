@@ -217,15 +217,19 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 	t.Parallel()
 
 	build := func(domain, label string, payload []byte) []byte {
-		t := NewTranscript(domain)
-		t.AppendBytes(label, payload)
-		t.AppendBigInt("n", big.NewInt(42))
-		t.AppendSigned("z", big.NewInt(-7))
-		t.AppendUint16("u16", 16)
-		t.AppendUint32("u32", 32)
+		transcript := NewTranscript(domain)
+		transcript.AppendBytes(label, payload)
+		if err := transcript.AppendBigInt("n", big.NewInt(42)); err != nil {
+			t.Fatal(err)
+		}
+		if err := transcript.AppendSigned("z", big.NewInt(-7)); err != nil {
+			t.Fatal(err)
+		}
+		transcript.AppendUint16("u16", 16)
+		transcript.AppendUint32("u32", 32)
 		// AppendPoint with the generator is infallible.
-		_ = t.AppendPoint("G", secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
-		return t.Sum()
+		_ = transcript.AppendPoint("G", secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))))
+		return transcript.Sum()
 	}
 	base := build("domain", "field", []byte("payload"))
 	for _, changed := range [][]byte{
@@ -249,6 +253,12 @@ func TestTranscriptDomainSeparation(t *testing.T) {
 	}
 	if err := t1.AppendPointBytes("bad", []byte{0x02}); err == nil {
 		t.Fatal("AppendPointBytes accepted malformed point")
+	}
+	if err := t1.AppendBigInt("nil_bigint", nil); err == nil {
+		t.Fatal("AppendBigInt accepted nil integer")
+	}
+	if err := t1.AppendSigned("nil_signed", nil); err == nil {
+		t.Fatal("AppendSigned accepted nil integer")
 	}
 	challenge, err := t1.ChallengeSigned(128)
 	if err != nil {

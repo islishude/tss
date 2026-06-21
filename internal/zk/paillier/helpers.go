@@ -45,10 +45,21 @@ func expandHash(size int, domain, transcriptHash, round, attempt []byte) []byte 
 // --- Paillier helpers ---
 
 func expSecretMod(modulus, base, exponent *big.Int, modLen, expLen int) (*big.Int, error) {
-	modulusBytes := paillierct.FixedEncode(modulus, modLen)
+	modulusBytes, err := paillierct.FixedEncodeStrict(modulus, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode modulus: %w", err)
+	}
 	baseMod := new(big.Int).Mod(base, modulus)
-	baseBytes := paillierct.FixedEncode(baseMod, modLen)
-	exponentBytes := paillierct.FixedEncode(exponent, expLen)
+	baseBytes, err := paillierct.FixedEncodeStrict(baseMod, modLen)
+	if err != nil {
+		secret.ClearBigInt(baseMod)
+		return nil, fmt.Errorf("encode base: %w", err)
+	}
+	exponentBytes, err := paillierct.FixedEncodeStrict(exponent, expLen)
+	if err != nil {
+		secret.ClearBigInt(baseMod)
+		return nil, fmt.Errorf("encode exponent: %w", err)
+	}
 	defer secret.ClearBigInt(baseMod)
 	defer clear(exponentBytes)
 	out, err := paillierct.ExpCT(
@@ -68,9 +79,19 @@ func expSecretScalarMod(modulus, base *big.Int, exponent *secret.Scalar, modLen 
 	}
 	expBytes := exponent.FixedBytes()
 	defer clear(expBytes)
+	modulusBytes, err := paillierct.FixedEncodeStrict(modulus, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode modulus: %w", err)
+	}
+	baseMod := new(big.Int).Mod(base, modulus)
+	defer secret.ClearBigInt(baseMod)
+	baseBytes, err := paillierct.FixedEncodeStrict(baseMod, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode base: %w", err)
+	}
 	out, err := paillierct.ExpCT(
-		paillierct.FixedEncode(modulus, modLen),
-		paillierct.FixedEncode(new(big.Int).Mod(base, modulus), modLen),
+		modulusBytes,
+		baseBytes,
 		expBytes,
 	)
 	if err != nil {
@@ -131,8 +152,8 @@ func modulusBytes(n *big.Int) int {
 
 // --- Fixed-width encoding helpers ---
 
-func fixedModNBytes(x *big.Int, nLen int) []byte {
-	return paillierct.FixedEncode(x, nLen)
+func fixedModNBytes(x *big.Int, nLen int) ([]byte, error) {
+	return paillierct.FixedEncodeStrict(x, nLen)
 }
 
 // --- Validation helpers ---
@@ -186,4 +207,11 @@ func randomCoprime(reader io.Reader, n *big.Int) (*big.Int, error) {
 
 func partyBytes(party uint32) []byte {
 	return []byte{byte(party >> 24), byte(party >> 16), byte(party >> 8), byte(party)}
+}
+
+func cloneBigInt(x *big.Int) *big.Int {
+	if x == nil {
+		return nil
+	}
+	return new(big.Int).Set(x)
 }

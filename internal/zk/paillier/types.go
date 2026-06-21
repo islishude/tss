@@ -85,9 +85,9 @@ func (params *RingPedersenParams) Clone() *RingPedersenParams {
 		return nil
 	}
 	return &RingPedersenParams{
-		N: new(big.Int).Set(params.N),
-		S: new(big.Int).Set(params.S),
-		T: new(big.Int).Set(params.T),
+		N: cloneBigInt(params.N),
+		S: cloneBigInt(params.S),
+		T: cloneBigInt(params.T),
 	}
 }
 

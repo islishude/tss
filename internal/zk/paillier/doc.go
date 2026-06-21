@@ -17,7 +17,9 @@
 //     using Ring-Pedersen commitment to hide the integer witness.
 //
 // All proofs use SecurityParams to configure statistical and computational
-// security parameters, a typed Transcript API for Fiat-Shamir challenge
-// derivation, signed integer encoding for witness responses, and strict
-// ciphertext/point membership checks before algebraic equation verification.
+// security parameters, including the minimum bit length for both Paillier public
+// moduli and Ring-Pedersen auxiliary moduli. A typed Transcript API derives
+// Fiat-Shamir challenges from every SecurityParams field, signed integer
+// encoding keeps witness responses canonical, and structural/membership checks
+// run before algebraic equation verification.
 package paillier

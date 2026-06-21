@@ -33,7 +33,7 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 	nLen := modulusBytes(sk.N)
 	t.Run("jacobi w", func(t *testing.T) {
 		tampered := proof.Clone()
-		tampered.W = fixedModNBytes(big.NewInt(1), nLen)
+		tampered.W = mustFixedModNBytes(t, big.NewInt(1), nLen)
 		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
 			t.Fatal("modulus proof with Jacobi(w,N) != -1 verified")
 		}
@@ -68,8 +68,8 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 			mutate func(*ModulusProof)
 		}{
 			{name: "w zero", mutate: func(p *ModulusProof) { p.W = make([]byte, nLen) }},
-			{name: "x outside", mutate: func(p *ModulusProof) { p.X[0] = fixedModNBytes(sk.N, nLen) }},
-			{name: "z outside", mutate: func(p *ModulusProof) { p.Z[0] = fixedModNBytes(sk.N, nLen) }},
+			{name: "x outside", mutate: func(p *ModulusProof) { p.X[0] = mustFixedModNBytes(t, sk.N, nLen) }},
+			{name: "z outside", mutate: func(p *ModulusProof) { p.Z[0] = mustFixedModNBytes(t, sk.N, nLen) }},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				tampered := proof.Clone()

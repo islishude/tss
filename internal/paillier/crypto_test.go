@@ -199,6 +199,34 @@ func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
 	}
 }
 
+func TestUncheckedHelpersRejectInvalidPublicKeyWithoutPanic(t *testing.T) {
+	t.Parallel()
+
+	pk := PublicKey{}
+	tests := []struct {
+		name string
+		call func() (*big.Int, error)
+	}{
+		{name: "AddCiphertextsUnchecked", call: func() (*big.Int, error) { return pk.AddCiphertextsUnchecked(big.NewInt(1), big.NewInt(1)) }},
+		{name: "AddPlaintextUnchecked", call: func() (*big.Int, error) { return pk.AddPlaintextUnchecked(big.NewInt(1), big.NewInt(1)) }},
+		{name: "MulPlaintextUnchecked", call: func() (*big.Int, error) { return pk.MulPlaintextUnchecked(big.NewInt(1), big.NewInt(1)) }},
+	}
+	for i := range tests {
+		tc := tests[i]
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			defer func() {
+				if recovered := recover(); recovered != nil {
+					t.Fatalf("unchecked helper panicked: %v", recovered)
+				}
+			}()
+			if _, err := tc.call(); err == nil {
+				t.Fatal("unchecked helper accepted invalid public key")
+			}
+		})
+	}
+}
+
 func TestEncryptWithRandomnessDeterministic(t *testing.T) {
 	t.Parallel()
 	sk, err := GenerateKeyForTest(context.Background(), nil, 512)

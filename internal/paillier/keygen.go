@@ -112,25 +112,55 @@ func generateKeyInner(ctx context.Context, reader io.Reader, bits int) (*Private
 		}
 		nLen := (n.BitLen() + 7) / 8
 		factorLen := (nLen + 1) / 2
-		lambdaSec, err := secret.NewScalar(paillierct.FixedEncode(lambdaBig, nLen), nLen)
+		lambdaBytes, err := paillierct.FixedEncodeStrict(lambdaBig, nLen)
 		if err != nil {
 			clearSecrets()
 			continue
 		}
-		muSec, err := secret.NewScalar(paillierct.FixedEncode(muBig, nLen), nLen)
+		lambdaSec, err := secret.NewScalar(lambdaBytes, nLen)
+		clear(lambdaBytes)
+		if err != nil {
+			clearSecrets()
+			continue
+		}
+		muBytes, err := paillierct.FixedEncodeStrict(muBig, nLen)
 		if err != nil {
 			lambdaSec.Destroy()
 			clearSecrets()
 			continue
 		}
-		pSec, err := secret.NewScalar(paillierct.FixedEncode(p, factorLen), factorLen)
+		muSec, err := secret.NewScalar(muBytes, nLen)
+		clear(muBytes)
+		if err != nil {
+			lambdaSec.Destroy()
+			clearSecrets()
+			continue
+		}
+		pBytes, err := paillierct.FixedEncodeStrict(p, factorLen)
 		if err != nil {
 			lambdaSec.Destroy()
 			muSec.Destroy()
 			clearSecrets()
 			continue
 		}
-		qSec, err := secret.NewScalar(paillierct.FixedEncode(q, factorLen), factorLen)
+		pSec, err := secret.NewScalar(pBytes, factorLen)
+		clear(pBytes)
+		if err != nil {
+			lambdaSec.Destroy()
+			muSec.Destroy()
+			clearSecrets()
+			continue
+		}
+		qBytes, err := paillierct.FixedEncodeStrict(q, factorLen)
+		if err != nil {
+			lambdaSec.Destroy()
+			muSec.Destroy()
+			pSec.Destroy()
+			clearSecrets()
+			continue
+		}
+		qSec, err := secret.NewScalar(qBytes, factorLen)
+		clear(qBytes)
 		if err != nil {
 			lambdaSec.Destroy()
 			muSec.Destroy()

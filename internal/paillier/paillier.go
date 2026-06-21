@@ -76,16 +76,17 @@ func (sk *PrivateKey) Clone() *PrivateKey {
 	if sk == nil {
 		return nil
 	}
+	pk := sk.PublicKey.Clone()
+	var publicKey PublicKey
+	if pk != nil {
+		publicKey = *pk
+	}
 	return &PrivateKey{
-		PublicKey: PublicKey{
-			N:        new(big.Int).Set(sk.N),
-			G:        new(big.Int).Set(sk.G),
-			NSquared: new(big.Int).Set(sk.NSquared),
-		},
-		Lambda: sk.Lambda.Clone(),
-		Mu:     sk.Mu.Clone(),
-		P:      sk.P.Clone(),
-		Q:      sk.Q.Clone(),
+		PublicKey: publicKey,
+		Lambda:    sk.Lambda.Clone(),
+		Mu:        sk.Mu.Clone(),
+		P:         sk.P.Clone(),
+		Q:         sk.Q.Clone(),
 	}
 }
 

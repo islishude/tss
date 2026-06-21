@@ -10,6 +10,10 @@ import (
 	"github.com/islishude/tss/internal/wire"
 )
 
+var errZeroChallenge = errors.New("transcript: zero challenge — re-run with fresh nonces")
+
+const maxChallengeRetries = 32
+
 // Transcript is a Fiat-Shamir transcript that accumulates labeled protocol
 // messages and derives a signed challenge. Every field is length-prefixed
 // and labeled for domain separation.
@@ -28,18 +32,26 @@ func (t *Transcript) AppendBytes(label string, b []byte) {
 }
 
 // AppendBigInt writes a labeled positive big.Int in canonical big-endian form.
-func (t *Transcript) AppendBigInt(label string, x *big.Int) {
+func (t *Transcript) AppendBigInt(label string, x *big.Int) error {
+	if x == nil {
+		return fmt.Errorf("transcript AppendBigInt %s: nil integer", label)
+	}
 	b := x.Bytes() // canonical big-endian, no leading zero
 	t.AppendBytes(label, b)
+	return nil
 }
 
 // AppendSigned writes a labeled signed integer in canonical signed-magnitude form.
-func (t *Transcript) AppendSigned(label string, x *big.Int) {
+func (t *Transcript) AppendSigned(label string, x *big.Int) error {
+	if x == nil {
+		return fmt.Errorf("transcript AppendSigned %s: nil integer", label)
+	}
 	b, err := wire.EncodeBigInt(x)
 	if err != nil {
-		panic("transcript: " + err.Error())
+		return fmt.Errorf("transcript AppendSigned %s: %w", label, err)
 	}
 	t.AppendBytes(label, b)
+	return nil
 }
 
 // AppendPoint writes a labeled secp256k1 curve point in compressed form.
@@ -87,7 +99,7 @@ func (t *Transcript) ChallengeSigned(bits uint32) (*big.Int, error) {
 	mask.Sub(mask, big.NewInt(1))
 	challenge.And(challenge, mask)
 	if challenge.Sign() == 0 {
-		return nil, errors.New("transcript: zero challenge — re-run with fresh nonces")
+		return nil, errZeroChallenge
 	}
 	return challenge, nil
 }
@@ -95,4 +107,12 @@ func (t *Transcript) ChallengeSigned(bits uint32) (*big.Int, error) {
 // Sum returns the current transcript hash without modifying state.
 func (t *Transcript) Sum() []byte {
 	return t.builder.Sum()
+}
+
+func appendSecurityParams(t *Transcript, params SecurityParams) {
+	t.AppendUint32("ell", params.Ell)
+	t.AppendUint32("ell_prime", params.EllPrime)
+	t.AppendUint32("epsilon", params.Epsilon)
+	t.AppendUint32("challenge_bits", params.ChallengeBits)
+	t.AppendUint32("min_paillier_bits", params.MinPaillierBits)
 }

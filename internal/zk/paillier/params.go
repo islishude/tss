@@ -3,6 +3,7 @@ package paillier
 import (
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
@@ -39,8 +40,9 @@ type SecurityParams struct {
 	// 128 bits provides 128-bit soundness.
 	ChallengeBits uint32 `wire:"4,u32"`
 
-	// MinPaillierBits is the Paillier modulus security floor.
-	// 3072 bits provides ~128-bit classical security matching secp256k1.
+	// MinPaillierBits is the Paillier and Ring-Pedersen auxiliary modulus
+	// security floor. 3072 bits provides ~128-bit classical security matching
+	// secp256k1.
 	MinPaillierBits uint32 `wire:"5,u32"`
 }
 
@@ -126,6 +128,19 @@ func (sp SecurityParams) CheckPaillierModulus(n *pai.PublicKey) error {
 	bits := n.N.BitLen()
 	if bits < int(sp.MinPaillierBits) {
 		return fmt.Errorf("paillier modulus is %d bits, minimum is %d", bits, sp.MinPaillierBits)
+	}
+	return nil
+}
+
+// CheckRingPedersenModulus verifies that a Ring-Pedersen auxiliary modulus
+// satisfies the minimum bit-length requirement from the security parameters.
+func (sp SecurityParams) CheckRingPedersenModulus(n *big.Int) error {
+	if n == nil {
+		return errors.New("nil Ring-Pedersen modulus")
+	}
+	bits := n.BitLen()
+	if bits < int(sp.MinPaillierBits) {
+		return fmt.Errorf("Ring-Pedersen modulus is %d bits, minimum is %d", bits, sp.MinPaillierBits)
 	}
 	return nil
 }

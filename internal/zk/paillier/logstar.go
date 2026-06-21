@@ -64,19 +64,49 @@ func (p *LogStarProof) Clone() *LogStarProof {
 		return nil
 	}
 	return &LogStarProof{
-		S:              new(big.Int).Set(p.S),
-		A:              new(big.Int).Set(p.A),
+		S:              cloneBigInt(p.S),
+		A:              cloneBigInt(p.A),
 		Y:              secp.Clone(p.Y),
-		D:              new(big.Int).Set(p.D),
-		Z1:             new(big.Int).Set(p.Z1),
-		Z2:             new(big.Int).Set(p.Z2),
-		Z3:             new(big.Int).Set(p.Z3),
+		D:              cloneBigInt(p.D),
+		Z1:             cloneBigInt(p.Z1),
+		Z2:             cloneBigInt(p.Z2),
+		Z3:             cloneBigInt(p.Z3),
 		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
 	}
 }
 
+// Validate checks that the LogStarProof is structurally complete.
+func (p *LogStarProof) Validate() error {
+	if p == nil {
+		return errors.New("nil LogStarProof")
+	}
+	if p.S == nil || p.A == nil || p.Y == nil || p.D == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
+		return errors.New("incomplete LogStarProof")
+	}
+	if len(p.TranscriptHash) != sha256.Size {
+		return errors.New("invalid LogStarProof transcript hash")
+	}
+	return nil
+}
+
 // ProveLogStar creates a Πlog* proof.
 func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
+	var lastErr error
+	for range maxChallengeRetries {
+		proof, err := proveLogStarOnce(params, state, stmt, w, rng)
+		if errors.Is(err, errZeroChallenge) {
+			lastErr = err
+			continue
+		}
+		return proof, err
+	}
+	if lastErr == nil {
+		lastErr = errZeroChallenge
+	}
+	return nil, lastErr
+}
+
+func proveLogStarOnce(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
@@ -222,8 +252,8 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if err := params.Validate(); err != nil {
 		return err
 	}
-	if proof == nil {
-		return errors.New("nil LogStarProof")
+	if err := proof.Validate(); err != nil {
+		return err
 	}
 
 	N := stmt.PaillierN
@@ -239,7 +269,7 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if stmt.X == nil || stmt.B == nil {
 		return errors.New("LogStarProof: nil curve point")
 	}
-	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("LogStarProof: invalid verifier aux: %w", err)
 	}
 
@@ -248,9 +278,6 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	}
 	if _, err := RequireZN2Star(proof.A, N.N); err != nil {
 		return fmt.Errorf("LogStarProof: A not in Z*_N^2: %w", err)
-	}
-	if proof.Y == nil {
-		return errors.New("LogStarProof: nil Y")
 	}
 	if _, err := RequireZNStar(proof.D, Nj); err != nil {
 		return fmt.Errorf("LogStarProof: D not in Z*_Nj: %w", err)
@@ -272,7 +299,7 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if err != nil {
 		return err
 	}
-	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
+	if !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
 		return errors.New("LogStarProof: transcript hash mismatch")
 	}
 	e, err := transcript.ChallengeSigned(params.ChallengeBits)
@@ -345,6 +372,9 @@ func (p *LogStarProof) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
+	if err := decoded.Validate(); err != nil {
+		return err
+	}
 	*p = decoded
 	return nil
 }
@@ -374,7 +404,7 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	if err := stmt.PaillierN.ValidateCiphertext(stmt.C); err != nil {
 		return fmt.Errorf("invalid C: %w", err)
 	}
-	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 	if w.X == nil || w.Rho == nil {
@@ -434,22 +464,39 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 }
 
 func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarStatement, S, A *big.Int, Y *secp.Point, D *big.Int) (*Transcript, error) {
+	if stmt.PaillierN == nil {
+		return nil, errors.New("LogStarProof transcript: nil Paillier key")
+	}
 	t := NewTranscript("cggmp-paillier-zk")
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("logstar"))
 	t.AppendUint16("version", 1)
-	t.AppendUint32("ell", params.Ell)
-	t.AppendUint32("epsilon", params.Epsilon)
-	t.AppendUint32("challenge_bits", params.ChallengeBits)
+	appendSecurityParams(t, params)
 	t.AppendBytes("state", state)
 
 	// Statement.
-	t.AppendBigInt("paillier_N", stmt.PaillierN.N)
+	if err := t.AppendBigInt("paillier_N", stmt.PaillierN.N); err != nil {
+		return nil, err
+	}
 	njLen := modulusBytes(stmt.VerifierAux.N)
-	t.AppendBytes("verifier_N", fixedModNBytes(stmt.VerifierAux.N, njLen))
-	t.AppendBytes("verifier_S", fixedModNBytes(stmt.VerifierAux.S, njLen))
-	t.AppendBytes("verifier_T", fixedModNBytes(stmt.VerifierAux.T, njLen))
-	t.AppendBigInt("C", stmt.C)
+	verifierN, err := fixedModNBytes(stmt.VerifierAux.N, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("LogStarProof transcript verifier N: %w", err)
+	}
+	verifierS, err := fixedModNBytes(stmt.VerifierAux.S, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("LogStarProof transcript verifier S: %w", err)
+	}
+	verifierT, err := fixedModNBytes(stmt.VerifierAux.T, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("LogStarProof transcript verifier T: %w", err)
+	}
+	t.AppendBytes("verifier_N", verifierN)
+	t.AppendBytes("verifier_S", verifierS)
+	t.AppendBytes("verifier_T", verifierT)
+	if err := t.AppendBigInt("C", stmt.C); err != nil {
+		return nil, err
+	}
 	if err := t.AppendPoint("X", stmt.X); err != nil {
 		return nil, err
 	}
@@ -458,12 +505,18 @@ func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarSta
 	}
 
 	// Commitments.
-	t.AppendBigInt("S", S)
-	t.AppendBigInt("A", A)
+	if err := t.AppendBigInt("S", S); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("A", A); err != nil {
+		return nil, err
+	}
 	if err := t.AppendPoint("Y", Y); err != nil {
 		return nil, err
 	}
-	t.AppendBigInt("D", D)
+	if err := t.AppendBigInt("D", D); err != nil {
+		return nil, err
+	}
 
 	return t, nil
 }

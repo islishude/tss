@@ -487,7 +487,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 		if err != nil {
 			return err
 		}
-		if !zkpai.VerifyRingPedersen(rpDomain, peerRPParams, id, peerRPProof) {
+		if !zkpai.VerifyRingPedersen(k.state.securityParams, rpDomain, peerRPParams, id, peerRPProof) {
 			return fmt.Errorf("invalid Ring-Pedersen proof for party %d", id)
 		}
 	}

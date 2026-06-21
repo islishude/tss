@@ -54,7 +54,10 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 	if err != nil {
 		return nil, err
 	}
-	wBytes := fixedModNBytes(w, nLen)
+	wBytes, err := fixedModNBytes(w, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode modulus proof w: %w", err)
+	}
 	transcript := proofTranscript(modulusProofTag, domain, [][]byte{partyBytes(party), raw}, [][]byte{wBytes})
 
 	xs := make([][]byte, modulusProofRounds)
@@ -74,8 +77,16 @@ func ProveModulus(reader io.Reader, domain []byte, sk *pai.PrivateKey, party uin
 		if err != nil {
 			return nil, fmt.Errorf("modulus proof fourth root round %d: %w", i, err)
 		}
-		xs[i] = fixedModNBytes(x, nLen)
-		zs[i] = fixedModNBytes(z, nLen)
+		xBytes, err := fixedModNBytes(x, nLen)
+		if err != nil {
+			return nil, fmt.Errorf("encode modulus proof x round %d: %w", i, err)
+		}
+		zBytes, err := fixedModNBytes(z, nLen)
+		if err != nil {
+			return nil, fmt.Errorf("encode modulus proof z round %d: %w", i, err)
+		}
+		xs[i] = xBytes
+		zs[i] = zBytes
 		aBits[i] = byte(a)
 		bBits[i] = byte(b)
 	}

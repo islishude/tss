@@ -205,7 +205,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	if !zkpai.VerifyRingPedersen(ringDomain, ringParams, env.From, ringProof) {
+	if !zkpai.VerifyRingPedersen(s.securityParams, ringDomain, ringParams, env.From, ringProof) {
 		return verificationErrorWithEvidence(
 			env,
 			tss.EvidenceKindKeygenPaillier,

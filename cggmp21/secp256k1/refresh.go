@@ -336,7 +336,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 		}
-		if !zkpai.VerifyRingPedersen(ringDomain, ringParams, env.From, ringProof) {
+		if !zkpai.VerifyRingPedersen(s.securityParams, ringDomain, ringParams, env.From, ringProof) {
 			return nil, verificationErrorWithEvidence(
 				env,
 				tss.EvidenceKindKeygenPaillier,

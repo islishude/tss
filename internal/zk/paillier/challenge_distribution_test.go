@@ -112,6 +112,7 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 // coin flips. With 128 rounds, the expected number of 1s is 64.
 func TestRingPedersenChallengeDistribution(t *testing.T) {
 	t.Parallel()
+	securityParams := DefaultSecurityParams()
 	sk := testPaillierKey(t, 3072)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)
 	if err != nil {
@@ -130,7 +131,7 @@ func TestRingPedersenChallengeDistribution(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if !VerifyRingPedersen(domain, params, party, proof) {
+		if !VerifyRingPedersen(securityParams, domain, params, party, proof) {
 			t.Fatalf("proof %d did not verify", p)
 		}
 		for i, challenge := range proof.Challenges {

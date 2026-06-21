@@ -60,20 +60,26 @@ func (p *EncProof) Clone() *EncProof {
 		return nil
 	}
 	return &EncProof{
-		S:              new(big.Int).Set(p.S),
-		A:              new(big.Int).Set(p.A),
-		C:              new(big.Int).Set(p.C),
-		Z1:             new(big.Int).Set(p.Z1),
-		Z2:             new(big.Int).Set(p.Z2),
-		Z3:             new(big.Int).Set(p.Z3),
+		S:              cloneBigInt(p.S),
+		A:              cloneBigInt(p.A),
+		C:              cloneBigInt(p.C),
+		Z1:             cloneBigInt(p.Z1),
+		Z2:             cloneBigInt(p.Z2),
+		Z3:             cloneBigInt(p.Z3),
 		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
 	}
 }
 
 // Validate checks that the EncProof is structurally complete.
 func (p *EncProof) Validate() error {
+	if p == nil {
+		return errors.New("nil EncProof")
+	}
 	if p.S == nil || p.A == nil || p.C == nil || p.Z1 == nil || p.Z2 == nil || p.Z3 == nil {
 		return errors.New("incomplete EncProof")
+	}
+	if len(p.TranscriptHash) != sha256.Size {
+		return errors.New("invalid EncProof transcript hash")
 	}
 	return nil
 }
@@ -82,6 +88,22 @@ func (p *EncProof) Validate() error {
 // k in the range ±2^Ell under the prover's Paillier key, with a Ring-Pedersen
 // commitment under the verifier's auxiliary parameters.
 func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witness EncWitness, rng io.Reader) (*EncProof, error) {
+	var lastErr error
+	for range maxChallengeRetries {
+		proof, err := proveEncOnce(params, state, statement, witness, rng)
+		if errors.Is(err, errZeroChallenge) {
+			lastErr = err
+			continue
+		}
+		return proof, err
+	}
+	if lastErr == nil {
+		lastErr = errZeroChallenge
+	}
+	return nil, lastErr
+}
+
+func proveEncOnce(params SecurityParams, state []byte, statement EncStatement, witness EncWitness, rng io.Reader) (*EncProof, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
@@ -156,7 +178,10 @@ func ProveEnc(params SecurityParams, state []byte, statement EncStatement, witne
 	}
 
 	// Build transcript and challenge.
-	transcript := buildEncTranscript(params, state, statement, S, A, C)
+	transcript, err := buildEncTranscript(params, state, statement, S, A, C)
+	if err != nil {
+		return nil, err
+	}
 	e, err := transcript.ChallengeSigned(params.ChallengeBits)
 	if err != nil {
 		return nil, err
@@ -224,8 +249,8 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	if err := params.Validate(); err != nil {
 		return err
 	}
-	if proof == nil {
-		return errors.New("nil EncProof")
+	if err := proof.Validate(); err != nil {
+		return err
 	}
 
 	Ni := statement.ProverPaillierN
@@ -238,7 +263,7 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	if _, err := RequireZN2Star(statement.CiphertextK, Ni.N); err != nil {
 		return fmt.Errorf("EncProof: ciphertext K not in Z*_N^2: %w", err)
 	}
-	if err := validateRPParamsForCommit(statement.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, statement.VerifierAux); err != nil {
 		return fmt.Errorf("EncProof: invalid verifier aux: %w", err)
 	}
 	if _, err := RequireZNStar(proof.S, Nj); err != nil {
@@ -265,8 +290,11 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	}
 
 	// Recompute challenge.
-	transcript := buildEncTranscript(params, state, statement, proof.S, proof.A, proof.C)
-	if len(proof.TranscriptHash) != sha256.Size || !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
+	transcript, err := buildEncTranscript(params, state, statement, proof.S, proof.A, proof.C)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(transcript.Sum(), proof.TranscriptHash) {
 		return errors.New("EncProof: transcript hash mismatch")
 	}
 	e, err := transcript.ChallengeSigned(params.ChallengeBits)
@@ -323,6 +351,9 @@ func (p *EncProof) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
+	if err := decoded.Validate(); err != nil {
+		return err
+	}
 	*p = decoded
 	return nil
 }
@@ -343,7 +374,7 @@ func validateEncStatement(params SecurityParams, stmt EncStatement, w EncWitness
 	if err := stmt.ProverPaillierN.ValidateCiphertext(stmt.CiphertextK); err != nil {
 		return fmt.Errorf("invalid ciphertext K: %w", err)
 	}
-	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 	if w.K == nil || w.Rho == nil {
@@ -388,29 +419,51 @@ func validateEncStatement(params SecurityParams, stmt EncStatement, w EncWitness
 	return nil
 }
 
-func buildEncTranscript(params SecurityParams, state []byte, stmt EncStatement, S, A, C *big.Int) *Transcript {
+func buildEncTranscript(params SecurityParams, state []byte, stmt EncStatement, S, A, C *big.Int) (*Transcript, error) {
+	if stmt.ProverPaillierN == nil {
+		return nil, errors.New("EncProof transcript: nil prover Paillier key")
+	}
 	t := NewTranscript("cggmp-paillier-zk")
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("enc"))
 	t.AppendUint16("version", 1)
-	t.AppendUint32("ell", params.Ell)
-	t.AppendUint32("epsilon", params.Epsilon)
-	t.AppendUint32("challenge_bits", params.ChallengeBits)
+	appendSecurityParams(t, params)
 	t.AppendBytes("state", state)
 
 	// Statement.
-	niBytes := stmt.ProverPaillierN.N.Bytes()
-	t.AppendBytes("prover_N", niBytes)
+	if err := t.AppendBigInt("prover_N", stmt.ProverPaillierN.N); err != nil {
+		return nil, err
+	}
 	njLen := modulusBytes(stmt.VerifierAux.N)
-	t.AppendBytes("verifier_N", fixedModNBytes(stmt.VerifierAux.N, njLen))
-	t.AppendBytes("verifier_S", fixedModNBytes(stmt.VerifierAux.S, njLen))
-	t.AppendBytes("verifier_T", fixedModNBytes(stmt.VerifierAux.T, njLen))
-	t.AppendBigInt("K", stmt.CiphertextK)
+	verifierN, err := fixedModNBytes(stmt.VerifierAux.N, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("EncProof transcript verifier N: %w", err)
+	}
+	verifierS, err := fixedModNBytes(stmt.VerifierAux.S, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("EncProof transcript verifier S: %w", err)
+	}
+	verifierT, err := fixedModNBytes(stmt.VerifierAux.T, njLen)
+	if err != nil {
+		return nil, fmt.Errorf("EncProof transcript verifier T: %w", err)
+	}
+	t.AppendBytes("verifier_N", verifierN)
+	t.AppendBytes("verifier_S", verifierS)
+	t.AppendBytes("verifier_T", verifierT)
+	if err := t.AppendBigInt("K", stmt.CiphertextK); err != nil {
+		return nil, err
+	}
 
 	// Commitments.
-	t.AppendBigInt("S", S)
-	t.AppendBigInt("A", A)
-	t.AppendBigInt("C", C)
+	if err := t.AppendBigInt("S", S); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("A", A); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("C", C); err != nil {
+		return nil, err
+	}
 
-	return t
+	return t, nil
 }

@@ -3,6 +3,7 @@
 package paillier
 
 import (
+	"bytes"
 	"testing"
 )
 
@@ -51,6 +52,13 @@ func TestEncProofTranscriptBindsSecurityParams(t *testing.T) {
 	if err := VerifyEnc(p4, encState, stmt, proof); err == nil {
 		t.Fatal("EncProof verified with wrong ChallengeBits (transcript should bind it)")
 	}
+
+	p5 := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime + 1, Epsilon: p1.Epsilon, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
+	if err := VerifyEnc(p5, encState, stmt, proof); err == nil {
+		t.Fatal("EncProof verified with wrong EllPrime (transcript should bind it)")
+	}
+
+	assertEncTranscriptDiffersForMinPaillierBits(t, p1, encState, stmt, proof)
 }
 
 // TestAffGProofTranscriptBindsSecurityParams verifies that AffGProof
@@ -68,6 +76,7 @@ func TestAffGProofTranscriptBindsSecurityParams(t *testing.T) {
 	if err := VerifyAffG(pDiff, affgState, stmt, proof); err == nil {
 		t.Fatal("AffGProof verified with wrong Epsilon (transcript should bind it)")
 	}
+	assertAffGTranscriptDiffersForMinPaillierBits(t, p1, affgState, stmt, proof)
 }
 
 // TestLogStarProofTranscriptBindsSecurityParams verifies that LogStarProof
@@ -84,5 +93,61 @@ func TestLogStarProofTranscriptBindsSecurityParams(t *testing.T) {
 	pDiff := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime, Epsilon: p1.Epsilon + 1, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
 	if err := VerifyLogStar(pDiff, logState, stmt, proof); err == nil {
 		t.Fatal("LogStarProof verified with wrong Epsilon (transcript should bind it)")
+	}
+	pEllPrime := SecurityParams{Ell: p1.Ell, EllPrime: p1.EllPrime + 1, Epsilon: p1.Epsilon, ChallengeBits: p1.ChallengeBits, MinPaillierBits: p1.MinPaillierBits}
+	if err := VerifyLogStar(pEllPrime, logState, stmt, proof); err == nil {
+		t.Fatal("LogStarProof verified with wrong EllPrime (transcript should bind it)")
+	}
+	assertLogStarTranscriptDiffersForMinPaillierBits(t, p1, logState, stmt, proof)
+}
+
+func assertEncTranscriptDiffersForMinPaillierBits(t *testing.T, params SecurityParams, state []byte, stmt EncStatement, proof *EncProof) {
+	t.Helper()
+	changed := params
+	changed.MinPaillierBits++
+	base, err := buildEncTranscript(params, state, stmt, proof.S, proof.A, proof.C)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := buildEncTranscript(changed, state, stmt, proof.S, proof.A, proof.C)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(base.Sum(), other.Sum()) {
+		t.Fatal("EncProof transcript did not bind MinPaillierBits")
+	}
+}
+
+func assertAffGTranscriptDiffersForMinPaillierBits(t *testing.T, params SecurityParams, state []byte, stmt AffGStatement, proof *AffGProof) {
+	t.Helper()
+	changed := params
+	changed.MinPaillierBits++
+	base, err := buildAffGTranscript(params, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := buildAffGTranscript(changed, state, stmt, proof.Y, proof.A, proof.Bx, proof.By, proof.E, proof.S, proof.F, proof.T)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(base.Sum(), other.Sum()) {
+		t.Fatal("AffGProof transcript did not bind MinPaillierBits")
+	}
+}
+
+func assertLogStarTranscriptDiffersForMinPaillierBits(t *testing.T, params SecurityParams, state []byte, stmt LogStarStatement, proof *LogStarProof) {
+	t.Helper()
+	changed := params
+	changed.MinPaillierBits++
+	base, err := buildLogStarTranscript(params, state, stmt, proof.S, proof.A, proof.Y, proof.D)
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := buildLogStarTranscript(changed, state, stmt, proof.S, proof.A, proof.Y, proof.D)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Equal(base.Sum(), other.Sum()) {
+		t.Fatal("LogStarProof transcript did not bind MinPaillierBits")
 	}
 }

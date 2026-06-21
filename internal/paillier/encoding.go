@@ -163,22 +163,48 @@ func (sk *PrivateKey) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOpti
 	defer secret.ClearBigInt(q)
 	nLen := (n.BitLen() + 7) / 8
 	factorLen := (nLen + 1) / 2
-	lambdaSec, err := secret.NewScalar(paillierct.FixedEncode(lambdaBig, nLen), nLen)
+	lambdaBytes, err := paillierct.FixedEncodeStrict(lambdaBig, nLen)
 	if err != nil {
 		return fmt.Errorf("invalid lambda: %w", err)
 	}
-	muSec, err := secret.NewScalar(paillierct.FixedEncode(muBig, nLen), nLen)
+	defer clear(lambdaBytes)
+	lambdaSec, err := secret.NewScalar(lambdaBytes, nLen)
+	if err != nil {
+		return fmt.Errorf("invalid lambda: %w", err)
+	}
+	muBytes, err := paillierct.FixedEncodeStrict(muBig, nLen)
 	if err != nil {
 		lambdaSec.Destroy()
 		return fmt.Errorf("invalid mu: %w", err)
 	}
-	pSec, err := secret.NewScalar(paillierct.FixedEncode(p, factorLen), factorLen)
+	defer clear(muBytes)
+	muSec, err := secret.NewScalar(muBytes, nLen)
+	if err != nil {
+		lambdaSec.Destroy()
+		return fmt.Errorf("invalid mu: %w", err)
+	}
+	pBytes, err := paillierct.FixedEncodeStrict(p, factorLen)
 	if err != nil {
 		lambdaSec.Destroy()
 		muSec.Destroy()
 		return fmt.Errorf("invalid p: %w", err)
 	}
-	qSec, err := secret.NewScalar(paillierct.FixedEncode(q, factorLen), factorLen)
+	defer clear(pBytes)
+	pSec, err := secret.NewScalar(pBytes, factorLen)
+	if err != nil {
+		lambdaSec.Destroy()
+		muSec.Destroy()
+		return fmt.Errorf("invalid p: %w", err)
+	}
+	qBytes, err := paillierct.FixedEncodeStrict(q, factorLen)
+	if err != nil {
+		lambdaSec.Destroy()
+		muSec.Destroy()
+		pSec.Destroy()
+		return fmt.Errorf("invalid q: %w", err)
+	}
+	defer clear(qBytes)
+	qSec, err := secret.NewScalar(qBytes, factorLen)
 	if err != nil {
 		lambdaSec.Destroy()
 		muSec.Destroy()

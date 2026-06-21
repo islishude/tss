@@ -81,20 +81,20 @@ func (p *AffGProof) Clone() *AffGProof {
 		return nil
 	}
 	cp := &AffGProof{
-		A:              new(big.Int).Set(p.A),
+		A:              cloneBigInt(p.A),
 		Bx:             secp.Clone(p.Bx),
-		By:             new(big.Int).Set(p.By),
-		E:              new(big.Int).Set(p.E),
-		S:              new(big.Int).Set(p.S),
-		F:              new(big.Int).Set(p.F),
-		T:              new(big.Int).Set(p.T),
-		Y:              new(big.Int).Set(p.Y),
-		Z1:             new(big.Int).Set(p.Z1),
-		Z2:             new(big.Int).Set(p.Z2),
-		Z3:             new(big.Int).Set(p.Z3),
-		Z4:             new(big.Int).Set(p.Z4),
-		W:              new(big.Int).Set(p.W),
-		WY:             new(big.Int).Set(p.WY),
+		By:             cloneBigInt(p.By),
+		E:              cloneBigInt(p.E),
+		S:              cloneBigInt(p.S),
+		F:              cloneBigInt(p.F),
+		T:              cloneBigInt(p.T),
+		Y:              cloneBigInt(p.Y),
+		Z1:             cloneBigInt(p.Z1),
+		Z2:             cloneBigInt(p.Z2),
+		Z3:             cloneBigInt(p.Z3),
+		Z4:             cloneBigInt(p.Z4),
+		W:              cloneBigInt(p.W),
+		WY:             cloneBigInt(p.WY),
 		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 	return cp
@@ -117,6 +117,22 @@ func (p *AffGProof) Validate() error {
 
 // ProveAffG creates a Πaff-g proof for the MtA response.
 func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
+	var lastErr error
+	for range maxChallengeRetries {
+		proof, err := proveAffGOnce(params, state, stmt, w, rng)
+		if errors.Is(err, errZeroChallenge) {
+			lastErr = err
+			continue
+		}
+		return proof, err
+	}
+	if lastErr == nil {
+		lastErr = errZeroChallenge
+	}
+	return nil, lastErr
+}
+
+func proveAffGOnce(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
 	if rng == nil {
 		rng = rand.Reader
 	}
@@ -386,8 +402,8 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if err := params.Validate(); err != nil {
 		return err
 	}
-	if proof == nil {
-		return errors.New("nil AffGProof")
+	if err := proof.Validate(); err != nil {
+		return err
 	}
 	Ni := stmt.ProverPaillierN
 	Nj := stmt.ReceiverPaillierN
@@ -422,7 +438,7 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if stmt.X == nil {
 		return errors.New("AffGProof: nil X point")
 	}
-	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("AffGProof: invalid verifier aux: %w", err)
 	}
 
@@ -581,6 +597,9 @@ func (p *AffGProof) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
 		return err
 	}
+	if err := decoded.Validate(); err != nil {
+		return err
+	}
 	*p = decoded
 	return nil
 }
@@ -613,7 +632,7 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 	if err := stmt.ProverPaillierN.ValidateCiphertext(stmt.Y); err != nil {
 		return fmt.Errorf("invalid Y: %w", err)
 	}
-	if err := validateRPParamsForCommit(stmt.VerifierAux); err != nil {
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
 		return fmt.Errorf("invalid verifier aux: %w", err)
 	}
 
@@ -719,40 +738,74 @@ func validateAffGStatement(params SecurityParams, stmt AffGStatement, w AffGWitn
 }
 
 func buildAffGTranscript(params SecurityParams, state []byte, stmt AffGStatement, yVal *big.Int, A *big.Int, Bx *secp.Point, By *big.Int, E, S, F, T *big.Int) (*Transcript, error) {
+	if stmt.ReceiverPaillierN == nil || stmt.ProverPaillierN == nil {
+		return nil, errors.New("AffGProof transcript: nil Paillier key")
+	}
 	t := NewTranscript("cggmp-paillier-zk")
 	t.AppendBytes("curve", []byte("secp256k1"))
 	t.AppendBytes("proof", []byte("aff-g"))
 	t.AppendUint16("version", 1)
-	t.AppendUint32("ell", params.Ell)
-	t.AppendUint32("ell_prime", params.EllPrime)
-	t.AppendUint32("epsilon", params.Epsilon)
-	t.AppendUint32("challenge_bits", params.ChallengeBits)
+	appendSecurityParams(t, params)
 	t.AppendBytes("state", state)
 
 	// Statement.
-	t.AppendBigInt("receiver_N", stmt.ReceiverPaillierN.N)
-	t.AppendBigInt("prover_N", stmt.ProverPaillierN.N)
+	if err := t.AppendBigInt("receiver_N", stmt.ReceiverPaillierN.N); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("prover_N", stmt.ProverPaillierN.N); err != nil {
+		return nil, err
+	}
 	nhatLen := modulusBytes(stmt.VerifierAux.N)
-	t.AppendBytes("verifier_N", fixedModNBytes(stmt.VerifierAux.N, nhatLen))
-	t.AppendBytes("verifier_S", fixedModNBytes(stmt.VerifierAux.S, nhatLen))
-	t.AppendBytes("verifier_T", fixedModNBytes(stmt.VerifierAux.T, nhatLen))
-	t.AppendBigInt("C", stmt.C)
-	t.AppendBigInt("D", stmt.D)
-	t.AppendBigInt("Y", yVal)
+	verifierN, err := fixedModNBytes(stmt.VerifierAux.N, nhatLen)
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof transcript verifier N: %w", err)
+	}
+	verifierS, err := fixedModNBytes(stmt.VerifierAux.S, nhatLen)
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof transcript verifier S: %w", err)
+	}
+	verifierT, err := fixedModNBytes(stmt.VerifierAux.T, nhatLen)
+	if err != nil {
+		return nil, fmt.Errorf("AffGProof transcript verifier T: %w", err)
+	}
+	t.AppendBytes("verifier_N", verifierN)
+	t.AppendBytes("verifier_S", verifierS)
+	t.AppendBytes("verifier_T", verifierT)
+	if err := t.AppendBigInt("C", stmt.C); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("D", stmt.D); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("Y", yVal); err != nil {
+		return nil, err
+	}
 	if err := t.AppendPoint("X", stmt.X); err != nil {
 		return nil, err
 	}
 
 	// Commitments.
-	t.AppendBigInt("A", A)
+	if err := t.AppendBigInt("A", A); err != nil {
+		return nil, err
+	}
 	if err := t.AppendPoint("Bx", Bx); err != nil {
 		return nil, err
 	}
-	t.AppendBigInt("By", By)
-	t.AppendBigInt("E", E)
-	t.AppendBigInt("S", S)
-	t.AppendBigInt("F", F)
-	t.AppendBigInt("T", T)
+	if err := t.AppendBigInt("By", By); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("E", E); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("S", S); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("F", F); err != nil {
+		return nil, err
+	}
+	if err := t.AppendBigInt("T", T); err != nil {
+		return nil, err
+	}
 
 	return t, nil
 }

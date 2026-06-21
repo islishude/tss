@@ -128,8 +128,16 @@ func ExpSignedModCT(modulus, base *big.Int, exp *secret.SignedInt, modLen, expLe
 		return nil, errors.New("base is not invertible modulo modulus")
 	}
 
-	baseBytes := paillierct.FixedEncode(new(big.Int).Mod(base, modulus), modLen)
-	inverseBytes := paillierct.FixedEncode(invBase, modLen)
+	baseMod := new(big.Int).Mod(base, modulus)
+	defer secret.ClearBigInt(baseMod)
+	baseBytes, err := paillierct.FixedEncodeStrict(baseMod, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode base: %w", err)
+	}
+	inverseBytes, err := paillierct.FixedEncodeStrict(invBase, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode inverse base: %w", err)
+	}
 	selectedBase, err := exp.SelectBySign(baseBytes, inverseBytes)
 	clear(baseBytes)
 	clear(inverseBytes)
@@ -142,7 +150,11 @@ func ExpSignedModCT(modulus, base *big.Int, exp *secret.SignedInt, modLen, expLe
 	if len(magnitude) != expLen {
 		return nil, errors.New("secret exponent has invalid width")
 	}
-	out, err := paillierct.ExpCT(paillierct.FixedEncode(modulus, modLen), selectedBase, magnitude)
+	modulusBytes, err := paillierct.FixedEncodeStrict(modulus, modLen)
+	if err != nil {
+		return nil, fmt.Errorf("encode modulus: %w", err)
+	}
+	out, err := paillierct.ExpCT(modulusBytes, selectedBase, magnitude)
 	if err != nil {
 		return nil, err
 	}
@@ -150,12 +162,18 @@ func ExpSignedModCT(modulus, base *big.Int, exp *secret.SignedInt, modLen, expLe
 }
 
 // validateRPParamsForCommit validates Ring-Pedersen auxiliary parameters for
-// use by the modern proof verifiers (Πenc, Πaff-g, Πlog*). It delegates to the
-// canonical ValidateRingPedersenParams to ensure consistent validation of:
-// non-nil fields, composite odd modulus, unit S/T with fixed-width encoding,
-// and non-degenerate values.
+// commitment arithmetic. Proof verifiers must additionally call
+// validateRPParamsForProof so the active SecurityParams modulus floor is
+// enforced.
 func validateRPParamsForCommit(params RingPedersenParams) error {
 	return ValidateRingPedersenParams(&params)
+}
+
+func validateRPParamsForProof(sp SecurityParams, params RingPedersenParams) error {
+	if err := validateRPParamsForCommit(params); err != nil {
+		return err
+	}
+	return sp.CheckRingPedersenModulus(params.N)
 }
 
 // --- Ring-Pedersen parameter generation and Πprm proof ---
@@ -291,10 +309,19 @@ func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, para
 			return nil, err
 		}
 		nonces[i] = nonce
-		commitments[i] = fixedModNBytes(commitment, nLen)
+		commitmentBytes, err := fixedModNBytes(commitment, nLen)
+		if err != nil {
+			nonce.Destroy()
+			secret.ClearBigInt(commitment)
+			return nil, err
+		}
+		commitments[i] = commitmentBytes
 		secret.ClearBigInt(commitment)
 	}
-	transcript := ringPedersenTranscript(domain, params, party, commitments)
+	transcript, err := ringPedersenTranscript(domain, params, party, commitments)
+	if err != nil {
+		return nil, err
+	}
 	challenges := make([]byte, ringPedersenProofRounds)
 	responses := make([][]byte, ringPedersenProofRounds)
 	lambdaBig, err := secretScalarBig(lambda)
@@ -313,7 +340,12 @@ func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, para
 			z.Add(z, lambdaBig)
 		}
 		z.Mod(z, phi)
-		responses[i] = fixedModNBytes(z, nLen)
+		response, err := fixedModNBytes(z, nLen)
+		if err != nil {
+			secret.ClearBigInt(z)
+			return nil, err
+		}
+		responses[i] = response
 		secret.ClearBigInt(z)
 	}
 	return &RingPedersenProof{
@@ -324,9 +356,13 @@ func ProveRingPedersen(reader io.Reader, domain []byte, sk *pai.PrivateKey, para
 	}, nil
 }
 
-// VerifyRingPedersen verifies CGGMP24 Πprm for Ring-Pedersen parameters.
-func VerifyRingPedersen(domain []byte, params *RingPedersenParams, party uint32, proof *RingPedersenProof) bool {
-	if ValidateRingPedersenParams(params) != nil || validateRingPedersenProof(proof) != nil {
+// VerifyRingPedersen verifies CGGMP24 Πprm for Ring-Pedersen parameters under
+// the caller's security profile.
+func VerifyRingPedersen(sp SecurityParams, domain []byte, params *RingPedersenParams, party uint32, proof *RingPedersenProof) bool {
+	if sp.Validate() != nil ||
+		ValidateRingPedersenParams(params) != nil ||
+		sp.CheckRingPedersenModulus(params.N) != nil ||
+		validateRingPedersenProof(proof) != nil {
 		return false
 	}
 	nLen := modulusBytes(params.N)
@@ -341,7 +377,10 @@ func VerifyRingPedersen(domain []byte, params *RingPedersenParams, party uint32,
 			return false
 		}
 	}
-	transcript := ringPedersenTranscript(domain, params, party, proof.Commitments)
+	transcript, err := ringPedersenTranscript(domain, params, party, proof.Commitments)
+	if err != nil {
+		return false
+	}
 	if !bytes.Equal(transcript, proof.TranscriptHash) {
 		return false
 	}
@@ -377,10 +416,18 @@ func ValidateRingPedersenParams(params *RingPedersenParams) error {
 		return errors.New("Ring-Pedersen parameter out of range")
 	}
 	nLen := modulusBytes(params.N)
-	if _, err := decodeFixedUnit("Ring-Pedersen s", fixedModNBytes(params.S, nLen), params.N, nLen); err != nil {
+	sBytes, err := fixedModNBytes(params.S, nLen)
+	if err != nil {
 		return err
 	}
-	if _, err := decodeFixedUnit("Ring-Pedersen t", fixedModNBytes(params.T, nLen), params.N, nLen); err != nil {
+	if _, err := decodeFixedUnit("Ring-Pedersen s", sBytes, params.N, nLen); err != nil {
+		return err
+	}
+	tBytes, err := fixedModNBytes(params.T, nLen)
+	if err != nil {
+		return err
+	}
+	if _, err := decodeFixedUnit("Ring-Pedersen t", tBytes, params.N, nLen); err != nil {
 		return err
 	}
 	if params.S.Cmp(big.NewInt(1)) <= 0 || params.T.Cmp(big.NewInt(1)) <= 0 {
@@ -396,9 +443,18 @@ func (params *RingPedersenParams) MarshalWireMessage(opts ...wire.MarshalOption)
 	}
 	resolved := wire.ResolveMarshalOptions(opts...)
 	nLen := modulusBytes(params.N)
-	n := fixedModNBytes(params.N, nLen)
-	s := fixedModNBytes(params.S, nLen)
-	tv := fixedModNBytes(params.T, nLen)
+	n, err := fixedModNBytes(params.N, nLen)
+	if err != nil {
+		return nil, err
+	}
+	s, err := fixedModNBytes(params.S, nLen)
+	if err != nil {
+		return nil, err
+	}
+	tv, err := fixedModNBytes(params.T, nLen)
+	if err != nil {
+		return nil, err
+	}
 	if err := checkRingPedersenParamBits("N", n, resolved.FieldLimits); err != nil {
 		return nil, err
 	}
@@ -578,12 +634,15 @@ func validateRingPedersenProof(p *RingPedersenProof) error {
 	return nil
 }
 
-func ringPedersenTranscript(domain []byte, params *RingPedersenParams, party uint32, commitments [][]byte) []byte {
-	paramsBytes, _ := MarshalRingPedersenParams(params)
+func ringPedersenTranscript(domain []byte, params *RingPedersenParams, party uint32, commitments [][]byte) ([]byte, error) {
+	paramsBytes, err := MarshalRingPedersenParams(params)
+	if err != nil {
+		return nil, err
+	}
 	return proofTranscript(ringPedersenProofTag, domain,
 		[][]byte{partyBytes(party), paramsBytes},
 		[][]byte{wire.EncodeBytesList(commitments)},
-	)
+	), nil
 }
 
 func ringPedersenChallenge(transcript []byte, round int) byte {

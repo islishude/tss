@@ -35,10 +35,10 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyRingPedersen(domain, aux, 1, rpProof) {
+	if !VerifyRingPedersen(params, domain, aux, 1, rpProof) {
 		t.Fatal("production Ring-Pedersen proof did not verify")
 	}
-	if VerifyRingPedersen([]byte("other"), aux, 1, rpProof) {
+	if VerifyRingPedersen(params, []byte("other"), aux, 1, rpProof) {
 		t.Fatal("production Ring-Pedersen proof verified under wrong domain")
 	}
 

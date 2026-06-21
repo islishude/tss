@@ -168,6 +168,9 @@ func SampleMultRange(rng io.Reader, boundBits uint32, n *big.Int) (*big.Int, err
 	if rng == nil {
 		rng = rand.Reader
 	}
+	if n == nil || n.Sign() <= 0 {
+		return nil, errors.New("invalid modulus")
+	}
 	bound := new(big.Int).Lsh(big.NewInt(1), uint(boundBits)) // 2^boundBits
 	rangeSize := new(big.Int).Mul(bound, n)                   // N * 2^boundBits
 	// Double for signed range: ±(N * 2^boundBits)
@@ -183,6 +186,9 @@ func SampleMultRange(rng io.Reader, boundBits uint32, n *big.Int) (*big.Int, err
 
 // inMultRange checks whether x is in ±(N * 2^bits).
 func inMultRange(x, n *big.Int, bits uint32) bool {
+	if x == nil || n == nil || n.Sign() <= 0 {
+		return false
+	}
 	bound := new(big.Int).Lsh(big.NewInt(1), uint(bits)) // 2^bits
 	bound.Mul(bound, n)                                  // N * 2^bits
 	negBound := new(big.Int).Neg(bound)

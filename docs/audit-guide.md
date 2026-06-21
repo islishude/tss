@@ -26,6 +26,8 @@ there is no legacy proof fallback.
   any non-exact round count or extra proof fields.
 - Paillier ciphertexts must be in `Z*_{N²}` and Ring-Pedersen elements must be in
   `Z*_N` before proof equations are evaluated.
+- `SecurityParams.MinPaillierBits` is enforced for both Paillier public moduli
+  and Ring-Pedersen auxiliary moduli before verifier equations run.
 - Πenc, Πaff-g, and Πlog\* proofs require Ring-Pedersen commitments to hide
   integer witnesses; commitment nonces are sampled from the configured
   `SecurityParams` ranges.

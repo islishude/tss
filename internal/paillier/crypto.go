@@ -45,7 +45,12 @@ func (pk PublicKey) EncryptSecret(reader io.Reader, message *secret.Scalar) (*bi
 	}
 	defer secret.ClearBigInt(randomness)
 	nLen := (pk.N.BitLen() + 7) / 8
-	randomnessSecret, err := secret.NewScalar(paillierct.FixedEncode(randomness, nLen), nLen)
+	randomnessBytes, err := paillierct.FixedEncodeStrict(randomness, nLen)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode randomness: %w", err)
+	}
+	defer clear(randomnessBytes)
+	randomnessSecret, err := secret.NewScalar(randomnessBytes, nLen)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -86,9 +91,18 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 
 	// G^m mod N² via constant-time exponentiation.
 	nLen := (pk.N.BitLen() + 7) / 8
-	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
-	gBytes := paillierct.FixedEncode(pk.G, 2*nLen)
-	mBytes := paillierct.FixedEncode(m, nLen)
+	nSquaredBytes, err := paillierct.FixedEncodeStrict(pk.NSquared, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier encrypt: encode n squared: %w", err)
+	}
+	gBytes, err := paillierct.FixedEncodeStrict(pk.G, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier encrypt: encode generator: %w", err)
+	}
+	mBytes, err := paillierct.FixedEncodeStrict(m, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier encrypt: encode message: %w", err)
+	}
 	defer clear(mBytes)
 	gmBytes, err := paillierct.ExpCT(nSquaredBytes, gBytes, mBytes)
 	if err != nil {
@@ -113,29 +127,35 @@ func (pk PublicKey) EncryptWithRandomness(message, r *big.Int) (*big.Int, error)
 // exponentiation via filippo.io/bigmod with ciphertext blinding to defeat
 // side-channel attacks on the secret exponent λ.
 func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
-	if err := sk.Validate(); err != nil {
+	if err := sk.validateDecryptKey(); err != nil {
 		return nil, err
-	}
-	if sk.Lambda == nil || sk.Mu == nil {
-		return nil, errors.New("invalid private key")
 	}
 	if err := sk.ValidateCiphertext(ciphertext); err != nil {
 		return nil, fmt.Errorf("invalid ciphertext for decryption: %w", err)
 	}
 
 	nLen := (sk.N.BitLen() + 7) / 8
-	nBytes := paillierct.FixedEncode(sk.N, nLen)
-	nSquaredBytes := paillierct.FixedEncode(sk.NSquared, 2*nLen)
+	nBytes, err := paillierct.FixedEncodeStrict(sk.N, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier decryption: encode n: %w", err)
+	}
+	nSquaredBytes, err := paillierct.FixedEncodeStrict(sk.NSquared, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier decryption: encode n squared: %w", err)
+	}
 
 	// u = c^λ mod n² via constant-time exponentiation with ciphertext blinding.
-	ct, err := paillierct.NewPrivateModExp(nSquaredBytes, nLen)
+	ct, err := paillierct.NewPrivateModExp(nBytes, nSquaredBytes, nLen)
 	if err != nil {
 		return nil, fmt.Errorf("paillierct init: %w", err)
 	}
-	cBytes := paillierct.FixedEncode(ciphertext, len(nSquaredBytes))
+	cBytes, err := paillierct.FixedEncodeStrict(ciphertext, len(nSquaredBytes))
+	if err != nil {
+		return nil, fmt.Errorf("paillier decryption: encode ciphertext: %w", err)
+	}
 	lambdaBytes := sk.Lambda.FixedBytes()
 	defer clear(lambdaBytes)
-	uBytes, err := ct.ExpSecretBlinded(rand.Reader, cBytes, lambdaBytes, nBytes)
+	uBytes, err := ct.ExpSecretBlinded(rand.Reader, cBytes, lambdaBytes)
 	if err != nil {
 		return nil, fmt.Errorf("paillier decryption: %w", err)
 	}
@@ -190,10 +210,14 @@ func (pk PublicKey) AddCiphertexts(a, b *big.Int) (*big.Int, error) {
 }
 
 // AddCiphertextsUnchecked homomorphically adds two encrypted plaintexts
-// without validating ciphertext membership in Z*_{n^2}. Callers must ensure
-// both inputs have been validated through upstream proof checks. Basic
-// range checks are still enforced to catch nil, zero, and out-of-range values.
+// without validating ciphertext membership in Z*_{n^2}. Callers must provide a
+// structurally valid PublicKey and ciphertexts already validated through
+// upstream proof checks. Basic range checks are still enforced to catch nil,
+// zero, and out-of-range values.
 func (pk PublicKey) AddCiphertextsUnchecked(a, b *big.Int) (*big.Int, error) {
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
 	if a == nil || b == nil {
 		return nil, errors.New("nil ciphertext")
 	}
@@ -222,13 +246,17 @@ func (pk PublicKey) AddPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 }
 
 // AddPlaintextUnchecked homomorphically adds plaintext to an encrypted value
-// without validating ciphertext membership in Z*_{n^2}. Callers must ensure
-// the ciphertext has been validated through upstream proof checks. Basic
-// range checks are still enforced to catch nil, zero, and out-of-range values.
+// without validating ciphertext membership in Z*_{n^2}. Callers must provide a
+// structurally valid PublicKey and a ciphertext already validated through
+// upstream proof checks. Basic range checks are still enforced to catch nil,
+// zero, and out-of-range values.
 //
 // The G^plaintext mod N² step uses constant-time modular exponentiation because
 // the plaintext exponent may be a secret scalar in some protocol paths.
 func (pk PublicKey) AddPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.Int, error) {
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
 	if ciphertext == nil || plaintext == nil {
 		return nil, errors.New("nil input")
 	}
@@ -236,14 +264,28 @@ func (pk PublicKey) AddPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.
 		return nil, errors.New("ciphertext out of range")
 	}
 	nLen := (pk.N.BitLen() + 7) / 8
-	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
-	gBytes := paillierct.FixedEncode(pk.G, 2*nLen)
-	pBytes := paillierct.FixedEncode(mod(plaintext, pk.N), nLen)
+	nSquaredBytes, err := paillierct.FixedEncodeStrict(pk.NSquared, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier add plaintext: encode n squared: %w", err)
+	}
+	gBytes, err := paillierct.FixedEncodeStrict(pk.G, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier add plaintext: encode generator: %w", err)
+	}
+	p := mod(plaintext, pk.N)
+	defer secret.ClearBigInt(p)
+	pBytes, err := paillierct.FixedEncodeStrict(p, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier add plaintext: encode plaintext: %w", err)
+	}
+	defer clear(pBytes)
 	gmBytes, err := paillierct.ExpCT(nSquaredBytes, gBytes, pBytes)
 	if err != nil {
 		return nil, fmt.Errorf("paillier add plaintext: %w", err)
 	}
+	defer clear(gmBytes)
 	gm := new(big.Int).SetBytes(gmBytes)
+	defer secret.ClearBigInt(gm)
 	out := new(big.Int).Mul(ciphertext, gm)
 	out.Mod(out, pk.NSquared)
 	return out, nil
@@ -269,9 +311,13 @@ func (pk PublicKey) MulPlaintext(ciphertext, plaintext *big.Int) (*big.Int, erro
 
 // MulPlaintextUnchecked homomorphically multiplies an encrypted value by public
 // plaintext without validating ciphertext membership in Z*_{n^2}. Callers must
-// ensure the ciphertext has been validated through upstream proof checks. Basic
-// range checks are still enforced to catch nil, zero, and out-of-range values.
+// provide a structurally valid PublicKey and a ciphertext already validated
+// through upstream proof checks. Basic range checks are still enforced to catch
+// nil, zero, and out-of-range values.
 func (pk PublicKey) MulPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.Int, error) {
+	if err := pk.Validate(); err != nil {
+		return nil, err
+	}
 	if ciphertext == nil || plaintext == nil {
 		return nil, errors.New("nil input")
 	}
@@ -279,13 +325,26 @@ func (pk PublicKey) MulPlaintextUnchecked(ciphertext, plaintext *big.Int) (*big.
 		return nil, errors.New("ciphertext out of range")
 	}
 	nLen := (pk.N.BitLen() + 7) / 8
-	nSquaredBytes := paillierct.FixedEncode(pk.NSquared, 2*nLen)
-	ciphertextBytes := paillierct.FixedEncode(ciphertext, 2*nLen)
-	exponentBytes := paillierct.FixedEncode(mod(plaintext, pk.N), nLen)
+	nSquaredBytes, err := paillierct.FixedEncodeStrict(pk.NSquared, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier multiply plaintext: encode n squared: %w", err)
+	}
+	ciphertextBytes, err := paillierct.FixedEncodeStrict(ciphertext, 2*nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier multiply plaintext: encode ciphertext: %w", err)
+	}
+	p := mod(plaintext, pk.N)
+	defer secret.ClearBigInt(p)
+	exponentBytes, err := paillierct.FixedEncodeStrict(p, nLen)
+	if err != nil {
+		return nil, fmt.Errorf("paillier multiply plaintext: encode plaintext: %w", err)
+	}
+	defer clear(exponentBytes)
 	out, err := paillierct.ExpCT(nSquaredBytes, ciphertextBytes, exponentBytes)
 	if err != nil {
 		return nil, err
 	}
+	defer clear(out)
 	return new(big.Int).SetBytes(out), nil
 }
 
@@ -328,4 +387,18 @@ func mod(x, m *big.Int) *big.Int {
 		out.Add(out, m)
 	}
 	return out
+}
+
+func (sk PrivateKey) validateDecryptKey() error {
+	if err := sk.PublicKey.Validate(); err != nil {
+		return err
+	}
+	if sk.Lambda == nil || sk.Mu == nil {
+		return errors.New("invalid private key")
+	}
+	nLen := (sk.N.BitLen() + 7) / 8
+	if sk.Lambda.FixedLen() != nLen || sk.Mu.FixedLen() != nLen {
+		return errors.New("invalid private key exponent width")
+	}
+	return nil
 }

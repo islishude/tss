@@ -97,9 +97,15 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 		t.Fatal("commitments differ — RNG replay failed")
 	}
 
-	transcript1 := buildEncTranscript(params, []byte("extract-1"), stmt, proof1.S, proof1.A, proof1.C)
+	transcript1, err := buildEncTranscript(params, []byte("extract-1"), stmt, proof1.S, proof1.A, proof1.C)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e1, _ := transcript1.ChallengeSigned(params.ChallengeBits)
-	transcript2 := buildEncTranscript(params, []byte("extract-2"), stmt, proof2.S, proof2.A, proof2.C)
+	transcript2, err := buildEncTranscript(params, []byte("extract-2"), stmt, proof2.S, proof2.A, proof2.C)
+	if err != nil {
+		t.Fatal(err)
+	}
 	e2, _ := transcript2.ChallengeSigned(params.ChallengeBits)
 
 	if e1.Cmp(e2) == 0 {

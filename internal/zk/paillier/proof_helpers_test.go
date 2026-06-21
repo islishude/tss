@@ -38,6 +38,15 @@ func testSignedSecret(t *testing.T, x *big.Int, fixedLen int) *secret.SignedInt 
 	return out
 }
 
+func mustFixedModNBytes(t *testing.T, x *big.Int, fixedLen int) []byte {
+	t.Helper()
+	out, err := fixedModNBytes(x, fixedLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return out
+}
+
 // testPaillierKeyEntry wraps a sync.Once to prevent duplicate key generation
 // under parallel test execution. The cached key is immutable after construction.
 type testPaillierKeyEntry struct {

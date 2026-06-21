@@ -22,17 +22,18 @@ func TestRingPedersenProofChecks(t *testing.T) {
 	}
 	domain := []byte("ring pedersen")
 	party := uint32(3)
+	securityParams := fastProofParams()
 	proof, err := ProveRingPedersen(nil, domain, sk, params, lambda, party)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyRingPedersen(domain, params, party, proof) {
+	if !VerifyRingPedersen(securityParams, domain, params, party, proof) {
 		t.Fatal("Ring-Pedersen proof did not verify")
 	}
-	if VerifyRingPedersen([]byte("other"), params, party, proof) {
+	if VerifyRingPedersen(securityParams, []byte("other"), params, party, proof) {
 		t.Fatal("Ring-Pedersen proof verified under wrong domain")
 	}
-	if VerifyRingPedersen(domain, params, party+1, proof) {
+	if VerifyRingPedersen(securityParams, domain, params, party+1, proof) {
 		t.Fatal("Ring-Pedersen proof verified under wrong party")
 	}
 	decodedParams, err := tss.DecodeBinary[RingPedersenParams](paramsBytes)
@@ -49,14 +50,14 @@ func TestRingPedersenProofChecks(t *testing.T) {
 		if ValidateRingPedersenParams(bad) == nil {
 			t.Fatal("degenerate Ring-Pedersen parameters validated")
 		}
-		if VerifyRingPedersen(domain, bad, party, proof) {
+		if VerifyRingPedersen(securityParams, domain, bad, party, proof) {
 			t.Fatal("Ring-Pedersen proof verified against invalid parameters")
 		}
 	})
 	t.Run("out of range response", func(t *testing.T) {
 		tampered := proof.Clone()
-		tampered.Responses[0] = fixedModNBytes(params.N, nLen)
-		if VerifyRingPedersen(domain, params, party, tampered) {
+		tampered.Responses[0] = mustFixedModNBytes(t, params.N, nLen)
+		if VerifyRingPedersen(securityParams, domain, params, party, tampered) {
 			t.Fatal("Ring-Pedersen proof with out-of-range response verified")
 		}
 	})
@@ -72,7 +73,7 @@ func TestRingPedersenProofChecks(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				tampered := proof.Clone()
 				tc.mutate(tampered)
-				if VerifyRingPedersen(domain, params, party, tampered) {
+				if VerifyRingPedersen(securityParams, domain, params, party, tampered) {
 					t.Fatal("tampered Ring-Pedersen proof verified")
 				}
 			})

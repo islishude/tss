@@ -50,7 +50,12 @@ func secretScalarFromBig(x *big.Int, fixedLen int) (*secret.Scalar, error) {
 	if x.BitLen() > fixedLen*8 {
 		return nil, errors.New("secret integer exceeds fixed width")
 	}
-	return secret.NewScalar(paillierct.FixedEncode(x, fixedLen), fixedLen)
+	encoded, err := paillierct.FixedEncodeStrict(x, fixedLen)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(encoded)
+	return secret.NewScalar(encoded, fixedLen)
 }
 
 func secretScalarBig(x *secret.Scalar) (*big.Int, error) {
@@ -71,7 +76,12 @@ func signedSecretFromBig(x *big.Int, fixedLen int) (*secret.SignedInt, error) {
 	if magnitude.BitLen() > fixedLen*8 {
 		return nil, errors.New("signed secret integer exceeds fixed width")
 	}
-	return secret.NewSignedInt(x.Sign() < 0, paillierct.FixedEncode(magnitude, fixedLen), fixedLen)
+	encoded, err := paillierct.FixedEncodeStrict(magnitude, fixedLen)
+	if err != nil {
+		return nil, err
+	}
+	defer clear(encoded)
+	return secret.NewSignedInt(x.Sign() < 0, encoded, fixedLen)
 }
 
 func signedSecretFromScalar(x *secret.Scalar, fixedLen int) (*secret.SignedInt, error) {
