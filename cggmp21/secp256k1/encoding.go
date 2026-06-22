@@ -26,18 +26,11 @@ func (*keyShareState) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("keyShareState contains secret material; use MarshalBinary")
 }
 
-func relaxThresholdPolicyForExplicitFieldLimits(limits *Limits) {
-	limits.Threshold.MinProductionThreshold = 1
-	limits.Threshold.AllowOneOfOne = true
-	limits.Threshold.AllowOversizedSignerSet = true
-}
-
 func keyShareCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 	limits := DefaultLimits()
 	if fieldLimits == nil {
 		return limits, nil
 	}
-	relaxThresholdPolicyForExplicitFieldLimits(&limits)
 	required := []struct {
 		name string
 		dst  *int
@@ -102,36 +95,40 @@ func (*KeyShare) WireVersion() uint16 { return keyShareWireVersion }
 
 // MarshalWireMessage encodes KeyShare through its private state codec.
 func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-	if k == nil || k.state == nil {
-		return nil, errors.New("nil key share")
-	}
 	resolved := wire.ResolveMarshalOptions(opts...)
 	limits, err := keyShareCodecLimits(resolved.FieldLimits)
 	if err != nil {
 		return nil, err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return k.marshalWireMessageWithLimits(limits, opts...)
+}
+
+func (k *KeyShare) marshalWireMessageWithLimits(limits Limits, opts ...wire.MarshalOption) ([]byte, error) {
+	if k == nil || k.state == nil {
+		return nil, errors.New("nil key share")
 	}
 	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
+	opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	return wire.Marshal(k.state, opts...)
 }
 
 // UnmarshalWireMessage decodes KeyShare through its private state codec.
 func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-	if k == nil {
-		return errors.New("nil key share")
-	}
 	resolved := wire.ResolveUnmarshalOptions(opts...)
 	limits, err := keyShareCodecLimits(resolved.FieldLimits)
 	if err != nil {
 		return err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
+	return k.unmarshalWireMessageWithLimits(in, limits, opts...)
+}
+
+func (k *KeyShare) unmarshalWireMessageWithLimits(in []byte, limits Limits, opts ...wire.UnmarshalOption) error {
+	if k == nil {
+		return errors.New("nil key share")
 	}
+	opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
 	var state keyShareState
 	if err := wire.Unmarshal(in, &state, opts...); err != nil {
 		return err
@@ -193,7 +190,6 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 	if fieldLimits == nil {
 		return limits, nil
 	}
-	relaxThresholdPolicyForExplicitFieldLimits(&limits)
 	required := []struct {
 		name string
 		dst  *int
@@ -234,16 +230,17 @@ func (*Presign) WireVersion() uint16 { return presignWireVersion }
 
 // MarshalWireMessage encodes Presign through its private state codec.
 func (p *Presign) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error) {
-	if p == nil || p.state == nil {
-		return nil, errors.New("nil presign")
-	}
 	resolved := wire.ResolveMarshalOptions(opts...)
 	limits, err := presignCodecLimits(resolved.FieldLimits)
 	if err != nil {
 		return nil, err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.marshalWireMessageWithLimits(limits, opts...)
+}
+
+func (p *Presign) marshalWireMessageWithLimits(limits Limits, opts ...wire.MarshalOption) ([]byte, error) {
+	if p == nil || p.state == nil {
+		return nil, errors.New("nil presign")
 	}
 	if err := p.state.BeforeMarshalWire(); err != nil {
 		return nil, err
@@ -251,22 +248,25 @@ func (p *Presign) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error)
 	if err := p.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
+	opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	return wire.Marshal(p.state, opts...)
 }
 
 // UnmarshalWireMessage decodes Presign through its private state codec.
 func (p *Presign) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption) error {
-	if p == nil {
-		return errors.New("nil presign")
-	}
 	resolved := wire.ResolveUnmarshalOptions(opts...)
 	limits, err := presignCodecLimits(resolved.FieldLimits)
 	if err != nil {
 		return err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
+	return p.unmarshalWireMessageWithLimits(in, limits, opts...)
+}
+
+func (p *Presign) unmarshalWireMessageWithLimits(in []byte, limits Limits, opts ...wire.UnmarshalOption) error {
+	if p == nil {
+		return errors.New("nil presign")
 	}
+	opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
 	var state presignState
 	if err := wire.Unmarshal(in, &state, opts...); err != nil {
 		return err

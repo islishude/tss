@@ -205,15 +205,7 @@ func (p *Presign) MarshalBinary() ([]byte, error) {
 
 // MarshalBinaryWithLimits encodes the presign using explicit local limits.
 func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	if p != nil && p.state != nil {
-		if err := p.state.BeforeMarshalWire(); err != nil {
-			return nil, err
-		}
-	}
-	if err := p.ValidateWithLimits(limits); err != nil {
-		return nil, err
-	}
-	return p.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return p.marshalWireMessageWithLimits(limits)
 }
 
 // UnmarshalBinary decodes a canonical CGGMP21 presign record with size caps.
@@ -231,13 +223,9 @@ func (p *Presign) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 		return fmt.Errorf("presign too large: %d > %d", len(in), limits.State.MaxSerializedPresignBytes)
 	}
 	var decoded Presign
-	if err := decoded.UnmarshalWireMessage(in,
+	if err := decoded.unmarshalWireMessageWithLimits(in, limits,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedPresignBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
-		return err
-	}
-	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	p.state = decoded.state

@@ -170,10 +170,7 @@ func (k *KeyShare) MarshalBinary() ([]byte, error) {
 
 // MarshalBinaryWithLimits encodes the share using explicit local limits.
 func (k *KeyShare) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
-	if err := k.ValidateWithLimits(limits); err != nil {
-		return nil, err
-	}
-	return k.MarshalWireMessage(wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
+	return k.marshalWireMessageWithLimits(limits)
 }
 
 // MarshalJSON rejects default JSON encoding of secret-bearing key shares.
@@ -322,13 +319,9 @@ func (k *KeyShare) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 		return fmt.Errorf("key share too large: %d > %d", len(in), limits.State.MaxSerializedKeyShareBytes)
 	}
 	var decoded KeyShare
-	if err := decoded.UnmarshalWireMessage(in,
+	if err := decoded.unmarshalWireMessageWithLimits(in, limits,
 		wire.WithFrameLimits(limits.frameLimits(limits.State.MaxSerializedKeyShareBytes)),
-		wire.WithFieldLimits(limits.fieldLimits()),
 	); err != nil {
-		return err
-	}
-	if err := decoded.ValidateWithLimits(limits); err != nil {
 		return err
 	}
 	k.state = decoded.state

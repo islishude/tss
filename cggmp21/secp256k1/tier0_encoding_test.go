@@ -95,6 +95,36 @@ func TestFast_PresignStateCodecAppliesCallerLimits(t *testing.T) {
 	}
 }
 
+func TestFast_PresignCodecReceivesCompleteLimits(t *testing.T) {
+	t.Parallel()
+
+	presign := minimalCGGMP21Presign(t)
+	presign.state.Threshold = 1
+	presign.state.Signers = tss.NewPartySet(1)
+	presign.state.VerifyShares = presign.state.VerifyShares[:1]
+	presign.state.Verification.Entries = presign.state.Verification.Entries[:1]
+
+	raw, err := presign.marshalWireMessageWithLimits(testLimits())
+	if err != nil {
+		t.Fatalf("limits-aware codec rejected 1-of-1 presign: %v", err)
+	}
+	var decoded Presign
+	if err := decoded.unmarshalWireMessageWithLimits(raw, testLimits()); err != nil {
+		t.Fatalf("limits-aware codec failed 1-of-1 round trip: %v", err)
+	}
+	if _, err := presign.MarshalWireMessage(
+		wire.WithFieldLimitsForMarshal(testLimits().fieldLimits()),
+	); err == nil {
+		t.Fatal("wire.Message adapter inferred non-production threshold policy from FieldLimits")
+	}
+	if err := decoded.UnmarshalWireMessage(
+		raw,
+		wire.WithFieldLimits(testLimits().fieldLimits()),
+	); err == nil {
+		t.Fatal("wire.Message adapter inferred non-production decode policy from FieldLimits")
+	}
+}
+
 func TestFast_PresignStateRejectsNonCanonicalFieldSet(t *testing.T) {
 	t.Parallel()
 
