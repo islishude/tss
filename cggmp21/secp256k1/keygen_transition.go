@@ -1,8 +1,6 @@
 package secp256k1
 
 import (
-	"bytes"
-
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
 )
@@ -16,15 +14,16 @@ type acceptCGGMPKeygenCommitmentsTx struct {
 }
 
 func (tx *acceptCGGMPKeygenCommitmentsTx) apply(s *KeygenSession) (sessionEffects, error) {
-	pd, err := s.partyEntry(tx.from)
-	if err != nil {
+	if err := s.round1.recordCommitments(
+		tx.from,
+		tx.commitments,
+		tx.chainCodeCommit,
+		tx.paillierPub,
+		tx.ringPedersen,
+	); err != nil {
 		return sessionEffects{}, err
 	}
-	pd.commitments = tx.commitments
-	pd.chainCodeCommit = tx.chainCodeCommit
-	pd.paillierPub = tx.paillierPub
-	pd.ringPedersen = tx.ringPedersen
-	out, err := s.tryComplete()
+	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
 
@@ -39,12 +38,10 @@ type acceptCGGMPKeygenShareTx struct {
 }
 
 func (tx *acceptCGGMPKeygenShareTx) apply(s *KeygenSession) (sessionEffects, error) {
-	pd, err := s.partyEntry(tx.from)
-	if err != nil {
+	if err := s.round1.recordShare(tx.from, tx.share); err != nil {
 		return sessionEffects{}, err
 	}
-	pd.share = tx.share
-	out, err := s.tryComplete()
+	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
 
@@ -69,16 +66,11 @@ type acceptCGGMPKeygenConfirmationTx struct {
 }
 
 func (tx *acceptCGGMPKeygenConfirmationTx) apply(s *KeygenSession) (sessionEffects, error) {
-	pd, err := s.partyEntry(tx.from)
-	if err != nil {
+	if err := s.confirmations.record(tx.from, tx.confirmation); err != nil {
 		return sessionEffects{}, err
 	}
-	pd.chainCode = bytes.Clone(tx.confirmation.ChainCode)
-	pd.confirmation = tx.confirmation
-	if s.pending != nil && allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-		return sessionEffects{}, s.finalizeConfirmedKeyShare()
-	}
-	return sessionEffects{}, nil
+	out, err := s.tryAdvance()
+	return sessionEffects{envelopes: out}, err
 }
 
 func (tx *acceptCGGMPKeygenConfirmationTx) cleanupOnReject() {

@@ -37,15 +37,15 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	if !ok {
 		t.Fatal("missing keygen share from party 2 to party 1")
 	}
-	beforeShares := countNonNilShares(s1.partyData)
-	beforeCommits := countNonNilCommits(s1.partyData)
-	beforePaillier := countNonNilPaillierPubs(s1.partyData)
+	beforeShares := countNonNilShares(s1.round1)
+	beforeCommits := countNonNilCommits(s1.round1)
+	beforePaillier := countNonNilPaillierPubs(s1.round1)
 	out, err := s1.HandleKeygenMessage(testutil.DeliverEnvelope(env))
 	if len(out) != 0 {
 		t.Fatalf("plan mismatch emitted %d envelopes", len(out))
 	}
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
-	if countNonNilShares(s1.partyData) != beforeShares || countNonNilCommits(s1.partyData) != beforeCommits || countNonNilPaillierPubs(s1.partyData) != beforePaillier {
+	if countNonNilShares(s1.round1) != beforeShares || countNonNilCommits(s1.round1) != beforeCommits || countNonNilPaillierPubs(s1.round1) != beforePaillier {
 		t.Fatal("plan mismatch mutated keygen state")
 	}
 	if s1.aborted {
@@ -62,9 +62,9 @@ func findCGGMPEnvelopeTo(envelopes []tss.Envelope, to tss.PartyID, payloadType t
 	return tss.Envelope{}, false
 }
 
-func countNonNilShares(pd map[tss.PartyID]*keygenPartyData) int {
+func countNonNilShares(in *keygenRound1Inbox) int {
 	n := 0
-	for _, d := range pd {
+	for _, d := range in.slots {
 		if d.share != nil {
 			n++
 		}
@@ -72,9 +72,9 @@ func countNonNilShares(pd map[tss.PartyID]*keygenPartyData) int {
 	return n
 }
 
-func countNonNilCommits(pd map[tss.PartyID]*keygenPartyData) int {
+func countNonNilCommits(in *keygenRound1Inbox) int {
 	n := 0
-	for _, d := range pd {
+	for _, d := range in.slots {
 		if d.commitments != nil {
 			n++
 		}
@@ -82,9 +82,9 @@ func countNonNilCommits(pd map[tss.PartyID]*keygenPartyData) int {
 	return n
 }
 
-func countNonNilPaillierPubs(pd map[tss.PartyID]*keygenPartyData) int {
+func countNonNilPaillierPubs(in *keygenRound1Inbox) int {
 	n := 0
-	for _, d := range pd {
+	for _, d := range in.slots {
 		if d.paillierPub.PublicKey != nil {
 			n++
 		}

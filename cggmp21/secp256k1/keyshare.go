@@ -544,7 +544,7 @@ func (k *KeyShare) ValidateWithLimits(limits Limits) error {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	} else {
-		if err := verifyFinalizedKeygenConfirmationSet(k, confirmations); err != nil {
+		if err := verifyKeygenConfirmationSetBinding(k, confirmations); err != nil {
 			return fmt.Errorf("invalid keygen confirmations: %w", err)
 		}
 	}

@@ -85,6 +85,7 @@ func (p *EncProof) Validate() error {
 	return nil
 }
 
+// Desstroy clears the proof's witness-derived integer material.
 func (p *EncProof) Desstroy() {
 	if p == nil {
 		return

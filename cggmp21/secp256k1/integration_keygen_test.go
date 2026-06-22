@@ -57,7 +57,7 @@ func TestThresholdECDSAKeygenPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.PaillierPublicKey = kg1.paillier.PublicKey.Clone()
+	payload.PaillierPublicKey = kg1.local.paillier.PublicKey.Clone()
 	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)

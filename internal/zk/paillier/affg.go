@@ -116,6 +116,7 @@ func (p *AffGProof) Validate() error {
 	return nil
 }
 
+// Destroy clears the proof's witness-derived integer material.
 func (p *AffGProof) Destroy() {
 	if p == nil {
 		return

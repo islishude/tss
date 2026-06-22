@@ -19,19 +19,21 @@ import (
 func TestKeygenSession_Destroy_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	secretScalar := testSecretScalar(t, 42)
-	pd := make(map[tss.PartyID]*keygenPartyData, 2)
-	pd[2] = &keygenPartyData{
-		share:        testSecretScalar(t, 12345),
-		chainCode:    []byte{0x01, 0x02, 0x03},
-		commitments:  [][]byte{{0x0a}},
-		confirmation: &KeygenConfirmation{},
+	round1 := newKeygenRound1Inbox(tss.NewPartySet(2, 3))
+	round1.slots[2] = &keygenRound1Slot{
+		share:       testSecretScalar(t, 12345),
+		commitments: [][]byte{{0x0a}},
 	}
-	pd[3] = &keygenPartyData{
+	round1.slots[3] = &keygenRound1Slot{
 		share: testSecretScalar(t, 67890),
 	}
 	s := &KeygenSession{
-		partyData: pd,
-		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04, 0x05}}},
+		local: &keygenLocalMaterial{
+			chainCode: []byte{0x01, 0x02, 0x03},
+		},
+		round1:        round1,
+		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(2, 3)),
+		pending:       &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04, 0x05}}},
 	}
 
 	s.Destroy()
@@ -341,14 +343,13 @@ func TestPresignSession_Abort_ClearsSecrets(t *testing.T) {
 func TestKeygenSession_Abort_ClearsSecrets(t *testing.T) {
 	t.Parallel()
 	secretScalar := testSecretScalar(t, 42)
-	pd := make(map[tss.PartyID]*keygenPartyData, 1)
-	pd[2] = &keygenPartyData{
-		share:     testSecretScalar(t, 12345),
-		chainCode: []byte{0x01, 0x02, 0x03},
-	}
+	round1 := newKeygenRound1Inbox(tss.NewPartySet(2))
+	round1.slots[2].share = testSecretScalar(t, 12345)
 	s := &KeygenSession{
-		partyData: pd,
-		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04}}},
+		local:         &keygenLocalMaterial{chainCode: []byte{0x01, 0x02, 0x03}},
+		round1:        round1,
+		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(2)),
+		pending:       &KeyShare{state: &keyShareState{Secret: secretScalar, ChainCode: []byte{0x04}}},
 	}
 
 	s.abort()
@@ -481,8 +482,12 @@ func TestDestroy_Idempotent(t *testing.T) {
 	// KeygenSession double-Destroy.
 	secretScalar := testSecretScalar(t, 42)
 	kg := &KeygenSession{
-		partyData: map[tss.PartyID]*keygenPartyData{2: {share: testSecretScalar(t, 1)}},
-		pending:   &KeyShare{state: &keyShareState{Secret: secretScalar}},
+		round1: &keygenRound1Inbox{
+			parties: tss.NewPartySet(2),
+			slots:   map[tss.PartyID]*keygenRound1Slot{2: {share: testSecretScalar(t, 1)}},
+		},
+		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(2)),
+		pending:       &KeyShare{state: &keyShareState{Secret: secretScalar}},
 	}
 	kg.Destroy()
 	kg.Destroy() // must not panic

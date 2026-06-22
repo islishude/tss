@@ -64,7 +64,7 @@ func TestFast_CryptographicStateUsesTypedMaterial(t *testing.T) {
 			},
 		},
 		{
-			typ:    reflect.TypeFor[keygenPartyData](),
+			typ:    reflect.TypeFor[keygenRound1Slot](),
 			fields: []string{"paillierPub", "ringPedersen"},
 		},
 		{
