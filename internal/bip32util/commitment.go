@@ -17,7 +17,7 @@ func ChainCodeCommitment(label string, sessionID tss.SessionID, partyID tss.Part
 	return t.Sum()
 }
 
-// verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.
+// VerifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
 func VerifyChainCodeCommit(label string, sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
 	if len(commit) != sha256.Size || len(chainCode) != ChainCodeSize {
 		return false
