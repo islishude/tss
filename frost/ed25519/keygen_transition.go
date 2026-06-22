@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -224,7 +225,7 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("conflicting keygen confirmation from party %d", base.From))
 	}
-	if !verifyChainCodeCommit(s.cfg.SessionID, base.From, confirmation.ChainCode, pd.chainCodeCommit) {
+	if !bip32util.VerifyChainCodeCommit(frostChainCodeCommitLabel, s.cfg.SessionID, base.From, confirmation.ChainCode, pd.chainCodeCommit) {
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", base.From))
 	}

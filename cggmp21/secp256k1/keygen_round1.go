@@ -55,7 +55,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 		return nil, nil, err
 	}
-	chainCodeCommit := cggmpChainCodeCommit(config.SessionID, config.Self, chainCode)
+	chainCodeCommit := bip32util.ChainCodeCommitment(cggmpChainCodeCommitLabel, config.SessionID, config.Self, chainCode)
 	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(plan.securityParams.MinPaillierBits))
 	if err != nil {
 		return nil, nil, err

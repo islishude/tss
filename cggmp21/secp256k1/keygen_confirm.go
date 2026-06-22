@@ -353,7 +353,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenConfirmationTx(env tss.Envelope) (
 		}
 	}
 	// Verify the revealed chain code against the round 1 hash commitment.
-	if !verifyCGGMPChainCodeCommit(s.cfg.SessionID, env.From, confirmation.ChainCode, pd.chainCodeCommit) {
+	if !bip32util.VerifyChainCodeCommit(cggmpChainCodeCommitLabel, s.cfg.SessionID, env.From, confirmation.ChainCode, pd.chainCodeCommit) {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", env.From))
 	}
 

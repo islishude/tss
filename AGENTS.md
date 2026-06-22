@@ -69,6 +69,7 @@ Do not run stress, long fuzzing, production-parameter, or race suites by default
 - `internal/mta`: Paillier MtA helpers for CGGMP21 presign/sign flows.
 - `internal/zk/*`: zero-knowledge proofs used by CGGMP21 and related primitives.
 - `internal/shamir`: Shamir sharing and interpolation.
+- `internal/bip32util`: BIP32 chain-code aggregation, HMAC-SHA512, chain-code commitments, extended-key version constants, parent-fingerprint computation, and Base58 serialization.
 - `internal/curve/*`: curve-specific scalar, point, commitment, and signature helpers.
 - `internal/testutil`/`internal/testharness`: shared test helpers, deterministic readers, party/session factories, mutation helpers, assertions, fixtures, and reduced-parameter test controls.
 - `internal/testvectors`: all canonical golden tests and vector generation/verification tests reference this directory. See `internal/testvectors/README.md` for the full command reference.

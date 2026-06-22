@@ -7,7 +7,6 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -396,25 +395,4 @@ func verificationShareFor(shares []VerificationShare, id tss.PartyID) ([]byte, b
 		}
 	}
 	return nil, false
-}
-
-const cggmpChainCodeCommitLabel = "cggmp21-secp256k1-chain-code-commit-v1"
-
-// cggmpChainCodeCommit produces a hash commitment for a party's HD chain code.
-// The chain code is revealed in round 2 (keygen confirmation) to prevent last-sender bias.
-func cggmpChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
-	t := transcript.New(cggmpChainCodeCommitLabel)
-	t.AppendBytes("session_id", sessionID[:])
-	t.AppendUint32("party_id", partyID)
-	t.AppendBytes("chain_code", chainCode)
-	return t.Sum()
-}
-
-// verifyCGGMPChainCodeCommit checks that a revealed chain code matches its round 1 commit.
-func verifyCGGMPChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) != sha256.Size || len(chainCode) != bip32util.ChainCodeSize {
-		return false
-	}
-	expected := cggmpChainCodeCommit(sessionID, partyID, chainCode)
-	return bytes.Equal(expected, commit)
 }

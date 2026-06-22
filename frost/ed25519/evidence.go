@@ -15,6 +15,7 @@ const (
 	frostPartySetHashLabel            = "frost-ed25519-party-set-v1"
 	frostCommitmentsHashLabel         = "frost-ed25519-keygen-commitments-v1"
 	frostReshareCommitmentsHashLabel  = "frost-ed25519-reshare-commitments-v1"
+	frostChainCodeCommitLabel         = "frost-ed25519-chain-code-commit-v1"
 )
 
 func frostMarshalEvidence(env tss.Envelope, kind tss.EvidenceKind, reason string, fields ...tss.EvidenceField) []byte {

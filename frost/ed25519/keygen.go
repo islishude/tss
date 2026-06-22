@@ -2,7 +2,6 @@ package ed25519
 
 import (
 	"bytes"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -12,7 +11,6 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/transcript"
 )
 
 // keygenPartyData holds all per-party DKG state for a single participant.
@@ -121,7 +119,7 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
 		return nil, nil, err
 	}
-	chainCodeCommit := chainCodeCommitment(config.SessionID, config.Self, chainCode)
+	chainCodeCommit := bip32util.ChainCodeCommitment(frostChainCodeCommitLabel, config.SessionID, config.Self, chainCode)
 	partyData := make(map[tss.PartyID]*keygenPartyData, len(parties))
 	for _, id := range parties {
 		partyData[id] = &keygenPartyData{}
@@ -287,26 +285,4 @@ func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, 
 		PayloadType: payloadType,
 		Payload:     payload,
 	})
-}
-
-const chainCodeCommitLabel = "frost-ed25519-chain-code-commit-v1"
-
-// chainCodeCommitment produces a hash commitment for a party's HD chain code.
-// The chain code is revealed in round 2 (keygen confirmation) and verified
-// against this commitment to prevent last-sender bias.
-func chainCodeCommitment(sessionID tss.SessionID, partyID tss.PartyID, chainCode []byte) []byte {
-	t := transcript.New(chainCodeCommitLabel)
-	t.AppendBytes("session_id", sessionID[:])
-	t.AppendUint32("party_id", partyID)
-	t.AppendBytes("chain_code", chainCode)
-	return t.Sum()
-}
-
-// verifyChainCodeCommit checks that a revealed chain code matches its round 1 commit.
-func verifyChainCodeCommit(sessionID tss.SessionID, partyID tss.PartyID, chainCode, commit []byte) bool {
-	if len(commit) != sha256.Size || len(chainCode) != bip32util.ChainCodeSize {
-		return false
-	}
-	expected := chainCodeCommitment(sessionID, partyID, chainCode)
-	return bytes.Equal(expected, commit)
 }

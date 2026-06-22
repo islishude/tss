@@ -780,10 +780,8 @@ func digestHash(digest32, contextHash []byte) []byte {
 	return t.Sum()
 }
 
-const signPartialEquationDomain = "cggmp21-secp256k1-sign-partial-equation"
-
 func partialEquationHash(sessionID tss.SessionID, party tss.PartyID, presignTranscriptHash, contextHash, planHash, digestHash, littleR, s, kPoint, chiPoint []byte) []byte {
-	t := transcript.New(signPartialEquationDomain)
+	t := transcript.New("cggmp21-secp256k1-sign-partial-equation")
 	t.AppendBytes("session_id", sessionID[:])
 	t.AppendUint32("party", party)
 	t.AppendBytes("presign_transcript_hash", presignTranscriptHash)

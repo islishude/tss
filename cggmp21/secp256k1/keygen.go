@@ -14,6 +14,7 @@ import (
 const (
 	keygenCommitmentsHashLabel = "cggmp21-secp256k1-keygen-commitments-v1"
 	keygenTranscriptHashLabel  = "cggmp21-secp256k1-keygen-transcript-v1"
+	cggmpChainCodeCommitLabel  = "cggmp21-secp256k1-chain-code-commit-v1"
 )
 
 type keygenState uint8
