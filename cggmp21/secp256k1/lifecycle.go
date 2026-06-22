@@ -3,8 +3,6 @@ package secp256k1
 import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	"github.com/islishude/tss/internal/secret"
-	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // Destroy clears local secret material retained by the keygen session.
@@ -62,41 +60,6 @@ func (s *SignSession) Destroy() {
 func clearScalarMap(xs map[tss.PartyID]secp.Scalar) {
 	for id := range xs {
 		xs[id] = secp.ScalarZero()
+		delete(xs, id)
 	}
-	clear(xs)
-}
-
-func clearEncProof(p *zkpai.EncProof) {
-	if p == nil {
-		return
-	}
-	secret.ClearBigInt(p.S)
-	secret.ClearBigInt(p.A)
-	secret.ClearBigInt(p.C)
-	secret.ClearBigInt(p.Z1)
-	secret.ClearBigInt(p.Z2)
-	secret.ClearBigInt(p.Z3)
-	clear(p.TranscriptHash)
-	*p = zkpai.EncProof{}
-}
-
-func clearAffGProof(p *zkpai.AffGProof) {
-	if p == nil {
-		return
-	}
-	secret.ClearBigInt(p.A)
-	secret.ClearBigInt(p.By)
-	secret.ClearBigInt(p.E)
-	secret.ClearBigInt(p.S)
-	secret.ClearBigInt(p.F)
-	secret.ClearBigInt(p.T)
-	secret.ClearBigInt(p.Y)
-	secret.ClearBigInt(p.Z1)
-	secret.ClearBigInt(p.Z2)
-	secret.ClearBigInt(p.Z3)
-	secret.ClearBigInt(p.Z4)
-	secret.ClearBigInt(p.W)
-	secret.ClearBigInt(p.WY)
-	clear(p.TranscriptHash)
-	*p = zkpai.AffGProof{}
 }

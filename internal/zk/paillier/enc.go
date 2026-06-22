@@ -85,6 +85,19 @@ func (p *EncProof) Validate() error {
 	return nil
 }
 
+func (p *EncProof) Desstroy() {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.C)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	clear(p.TranscriptHash)
+}
+
 // ProveEnc creates a Πenc proof that K = Enc_Ni(k; rho) encrypts a plaintext
 // k in the range ±2^Ell under the prover's Paillier key, with a Ring-Pedersen
 // commitment under the verifier's auxiliary parameters.

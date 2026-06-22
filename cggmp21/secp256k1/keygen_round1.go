@@ -330,7 +330,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 	}
 
 	// ---- 1. PARSE ----
-	p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](env.Payload, s.limits)
+	p, err := tss.DecodeBinaryWithLimits[keygenSharePayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
