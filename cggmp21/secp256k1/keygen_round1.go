@@ -10,7 +10,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -138,7 +138,7 @@ func generateKeygenLocalMaterial(
 	if err != nil {
 		return nil, err
 	}
-	poly, err := shamirsecp.RandomPolynomial(config.Reader(), config.Threshold, nil)
+	poly, err := shamir.RandomPolynomial(config.Reader(), config.Threshold, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -152,7 +152,7 @@ func generateKeygenLocalMaterial(
 		}
 		commitments[i] = encoded
 	}
-	localShare, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, config.Self))
+	localShare, err := secpSecretScalarFromScalar(shamir.Eval(poly, config.Self))
 	if err != nil {
 		clearSecpPolynomial(poly)
 		return nil, err
@@ -239,7 +239,7 @@ func emitKeygenRound1(s *KeygenSession, local *keygenLocalMaterial) (out []tss.E
 		if id == s.cfg.Self {
 			continue
 		}
-		share, err := secpSecretScalarFromScalar(shamirsecp.Eval(local.polynomial, id))
+		share, err := secpSecretScalarFromScalar(shamir.Eval(local.polynomial, id))
 		if err != nil {
 			return nil, err
 		}

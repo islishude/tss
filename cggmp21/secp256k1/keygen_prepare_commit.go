@@ -3,7 +3,7 @@ package secp256k1
 import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 )
 
 type preparedCGGMPKeygenStart struct {
@@ -33,7 +33,7 @@ func (p *preparedCGGMPKeygenStart) markCommitted() {
 	}
 }
 
-func clearSecpPolynomial(poly shamirsecp.Polynomial) {
+func clearSecpPolynomial(poly shamir.Polynomial) {
 	for i := range poly {
 		poly[i] = secp.ScalarZero()
 	}

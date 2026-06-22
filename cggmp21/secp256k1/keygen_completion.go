@@ -289,8 +289,7 @@ func (e keygenShareVerificationError) Error() string { return e.err.Error() }
 func (e keygenShareVerificationError) Unwrap() error { return e.err }
 
 func verificationDealer(err error) tss.PartyID {
-	var verificationErr keygenShareVerificationError
-	if errors.As(err, &verificationErr) {
+	if verificationErr, ok := errors.AsType[keygenShareVerificationError](err); ok {
 		return verificationErr.dealer
 	}
 	return tss.BroadcastPartyId

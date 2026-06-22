@@ -11,7 +11,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -120,7 +120,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		return nil, nil, err
 	}
 	zero := secp.ScalarZero()
-	poly, err := shamirsecp.RandomPolynomial(config.Reader(), config.Threshold, &zero)
+	poly, err := shamir.RandomPolynomial(config.Reader(), config.Threshold, &zero)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -136,7 +136,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		}
 		commitments[i] = enc
 	}
-	localShare, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, oldKey.state.Party))
+	localShare, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, oldKey.state.Party))
 	if err != nil {
 		return nil, nil, err
 	}
@@ -191,7 +191,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if id == oldKey.state.Party {
 			continue
 		}
-		share, err := secpSecretScalarFromScalarAllowZero(shamirsecp.Eval(poly, id))
+		share, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, id))
 		if err != nil {
 			return nil, nil, err
 		}

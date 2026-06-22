@@ -9,7 +9,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 )
 
 // keygenLocalMaterial owns locally generated secret material until it is
@@ -22,7 +22,7 @@ type keygenLocalMaterial struct {
 	paillier        *pai.PrivateKey
 	paillierPub     paillierPublicMaterial
 	ringPedersen    ringPedersenPublicMaterial
-	polynomial      shamirsecp.Polynomial
+	polynomial      shamir.Polynomial
 }
 
 // Destroy clears locally generated secret material.

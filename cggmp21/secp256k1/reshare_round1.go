@@ -7,7 +7,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -33,7 +33,7 @@ func (s *ReshareSession) maybeSendDealerMessages() ([]tss.Envelope, error) {
 }
 
 func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
-	lambda, err := shamirsecp.LagrangeCoefficient(s.selfID, s.dealerParties)
+	lambda, err := shamir.LagrangeCoefficient(s.selfID, s.dealerParties)
 	if err != nil {
 		return nil, err
 	}
@@ -47,7 +47,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if constant.IsZero() {
 		return nil, errors.New("reshare dealer constant is zero")
 	}
-	poly, err := shamirsecp.RandomPolynomial(s.cfg.Reader(), s.newThreshold, &constant)
+	poly, err := shamir.RandomPolynomial(s.cfg.Reader(), s.newThreshold, &constant)
 	if err != nil {
 		return nil, err
 	}
@@ -65,7 +65,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	}
 	dd.commitments = commitments
 	if s.isReceiver {
-		dd.share, err = secpSecretScalarFromScalar(shamirsecp.Eval(poly, s.selfID))
+		dd.share, err = secpSecretScalarFromScalar(shamir.Eval(poly, s.selfID))
 		if err != nil {
 			return nil, err
 		}
@@ -88,7 +88,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if id == s.selfID {
 			continue
 		}
-		share, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, id))
+		share, err := secpSecretScalarFromScalar(shamir.Eval(poly, id))
 		if err != nil {
 			return nil, err
 		}
@@ -304,7 +304,7 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	if err != nil {
 		return fmt.Errorf("invalid old verification share for dealer %d: %w", dealer, err)
 	}
-	lambda, err := shamirsecp.LagrangeCoefficient(dealer, s.dealerParties)
+	lambda, err := shamir.LagrangeCoefficient(dealer, s.dealerParties)
 	if err != nil {
 		return err
 	}
@@ -320,7 +320,7 @@ func (s *ReshareSession) validateDealerCommitments(dealer tss.PartyID, commitmen
 	return nil
 }
 
-func polynomialCommitments(poly shamirsecp.Polynomial) ([][]byte, error) {
+func polynomialCommitments(poly shamir.Polynomial) ([][]byte, error) {
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		if coeff.IsZero() {

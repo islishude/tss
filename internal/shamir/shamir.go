@@ -1,59 +1,43 @@
+// Package shamir implements Shamir secret sharing over the secp256k1 scalar
+// field for CGGMP21.
+//
+// This package is intentionally not generic. All coefficients, shares, and
+// interpolation coefficients are internal/curve/secp256k1.Scalar values.
 package shamir
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
-	"math/big"
 	"slices"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 )
 
-// Share is one Shamir evaluation point over a caller-supplied field order.
-type Share struct {
-	ID    tss.PartyID
-	Value *big.Int
-}
-
-// RandomScalar returns a non-zero scalar modulo order.
-func RandomScalar(reader io.Reader, order *big.Int) (*big.Int, error) {
-	if reader == nil {
-		reader = rand.Reader
-	}
-	if order == nil || order.Sign() <= 0 {
-		return nil, errors.New("invalid order")
-	}
-	for {
-		x, err := rand.Int(reader, order)
-		if err != nil {
-			return nil, err
-		}
-		if x.Sign() != 0 {
-			return x, nil
-		}
-	}
-}
+// Polynomial is a secp256k1 Shamir polynomial in coefficient order.
+// The coefficient at index 0 is the constant term.
+type Polynomial []secp.Scalar
 
 // RandomPolynomial returns coefficients for a degree threshold-1 polynomial.
-func RandomPolynomial(reader io.Reader, order *big.Int, threshold int, constant *big.Int) ([]*big.Int, error) {
+// When constant is nil, the constant term is sampled as a non-zero scalar. When
+// constant is provided, it is used verbatim and may be zero for refresh shares.
+func RandomPolynomial(reader io.Reader, threshold int, constant *secp.Scalar) (Polynomial, error) {
 	if threshold <= 0 {
 		return nil, errors.New("threshold must be positive")
 	}
-	// A threshold of k maps to a degree k-1 polynomial; coeffs[0] is the secret.
-	coeffs := make([]*big.Int, threshold)
+	coeffs := make(Polynomial, threshold)
 	if constant != nil {
-		coeffs[0] = Normalize(constant, order)
+		coeffs[0] = *constant
 	} else {
-		x, err := RandomScalar(reader, order)
+		x, err := secp.RandomScalar(reader)
 		if err != nil {
 			return nil, err
 		}
 		coeffs[0] = x
 	}
 	for i := 1; i < threshold; i++ {
-		x, err := RandomScalar(reader, order)
+		x, err := secp.RandomScalar(reader)
 		if err != nil {
 			return nil, err
 		}
@@ -62,114 +46,47 @@ func RandomPolynomial(reader io.Reader, order *big.Int, threshold int, constant 
 	return coeffs, nil
 }
 
-// Eval evaluates a polynomial at the participant identifier modulo order.
-func Eval(coeffs []*big.Int, id tss.PartyID, order *big.Int) *big.Int {
-	x := new(big.Int).SetUint64(uint64(id))
-	acc := new(big.Int)
-	// Horner evaluation keeps the code compact and avoids temporary powers.
-	for _, coeff := range slices.Backward(coeffs) {
-		acc.Mul(acc, x)
-		acc.Add(acc, coeff)
-		acc.Mod(acc, order)
+// Eval evaluates poly at the participant identifier modulo the secp256k1 order.
+func Eval(poly Polynomial, id tss.PartyID) secp.Scalar {
+	x := secp.ScalarFromUint64(uint64(id))
+	acc := secp.ScalarZero()
+	for _, p := range slices.Backward(poly) {
+		acc = secp.ScalarMul(acc, x)
+		acc = secp.ScalarAdd(acc, p)
 	}
 	return acc
 }
 
 // LagrangeCoefficient returns the coefficient for reconstructing at x=0.
-func LagrangeCoefficient(id tss.PartyID, ids tss.PartySet, order *big.Int) (*big.Int, error) {
+func LagrangeCoefficient(id tss.PartyID, ids tss.PartySet) (secp.Scalar, error) {
 	if id == 0 {
-		return nil, errors.New("party id 0 is reserved")
+		return secp.Scalar{}, errors.New("party id 0 is reserved")
 	}
-	xi := new(big.Int).SetUint64(uint64(id))
-	num := big.NewInt(1)
-	den := big.NewInt(1)
+	xi := secp.ScalarFromUint64(uint64(id))
+	num := secp.ScalarOne()
+	den := secp.ScalarOne()
 	seen := make(map[tss.PartyID]struct{}, len(ids))
 	for _, other := range ids {
 		if other == 0 {
-			return nil, errors.New("party id 0 is reserved")
+			return secp.Scalar{}, errors.New("party id 0 is reserved")
 		}
 		if _, ok := seen[other]; ok {
-			return nil, fmt.Errorf("duplicate party id %d", other)
+			return secp.Scalar{}, fmt.Errorf("duplicate party id %d", other)
 		}
 		seen[other] = struct{}{}
 		if other == id {
 			continue
 		}
-		xj := new(big.Int).SetUint64(uint64(other))
-		// Coefficients are evaluated at x=0 to reconstruct the polynomial constant.
-		num.Mul(num, xj)
-		num.Mod(num, order)
-
-		diff := new(big.Int).Sub(xj, xi)
-		diff.Mod(diff, order)
-		den.Mul(den, diff)
-		den.Mod(den, order)
+		xj := secp.ScalarFromUint64(uint64(other))
+		num = secp.ScalarMul(num, xj)
+		den = secp.ScalarMul(den, secp.ScalarSub(xj, xi))
 	}
 	if _, ok := seen[id]; !ok {
-		return nil, fmt.Errorf("party id %d not in interpolation set", id)
+		return secp.Scalar{}, fmt.Errorf("party id %d not in interpolation set", id)
 	}
-	inv := new(big.Int).ModInverse(den, order)
-	if inv == nil {
-		return nil, errors.New("non-invertible interpolation denominator")
+	inv, err := secp.ScalarInvert(den)
+	if err != nil {
+		return secp.Scalar{}, errors.New("non-invertible interpolation denominator")
 	}
-	out := new(big.Int).Mul(num, inv)
-	out.Mod(out, order)
-	return out, nil
-}
-
-// InterpolateConstant reconstructs the polynomial constant from shares.
-func InterpolateConstant(shares []Share, order *big.Int) (*big.Int, error) {
-	if len(shares) == 0 {
-		return nil, errors.New("no shares")
-	}
-	ids := make(tss.PartySet, len(shares))
-	values := make(map[tss.PartyID]*big.Int, len(shares))
-	for i, share := range shares {
-		if share.Value == nil {
-			return nil, fmt.Errorf("nil share for party %d", share.ID)
-		}
-		ids[i] = share.ID
-		values[share.ID] = share.Value
-	}
-	acc := new(big.Int)
-	for _, id := range ids {
-		lambda, err := LagrangeCoefficient(id, ids, order)
-		if err != nil {
-			return nil, err
-		}
-		term := new(big.Int).Mul(values[id], lambda)
-		acc.Add(acc, term)
-		acc.Mod(acc, order)
-	}
-	return acc, nil
-}
-
-// Normalize reduces x into [0, order).
-func Normalize(x, order *big.Int) *big.Int {
-	out := new(big.Int).Mod(new(big.Int).Set(x), order)
-	if out.Sign() < 0 {
-		out.Add(out, order)
-	}
-	return out
-}
-
-// Add returns a+b modulo order.
-func Add(a, b, order *big.Int) *big.Int {
-	out := new(big.Int).Add(a, b)
-	out.Mod(out, order)
-	return out
-}
-
-// Sub returns a-b modulo order.
-func Sub(a, b, order *big.Int) *big.Int {
-	out := new(big.Int).Sub(a, b)
-	out.Mod(out, order)
-	return out
-}
-
-// Mul returns a*b modulo order.
-func Mul(a, b, order *big.Int) *big.Int {
-	out := new(big.Int).Mul(a, b)
-	out.Mod(out, order)
-	return out
+	return secp.ScalarMul(num, inv), nil
 }

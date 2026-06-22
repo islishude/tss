@@ -10,7 +10,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 )
 
@@ -91,7 +91,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
-	lambda, err := shamirsecp.LagrangeCoefficient(key.state.Party, signers)
+	lambda, err := shamir.LagrangeCoefficient(key.state.Party, signers)
 	if err != nil {
 		return nil, nil, err
 	}

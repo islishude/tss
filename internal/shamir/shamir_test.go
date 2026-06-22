@@ -1,582 +1,343 @@
 package shamir
 
 import (
-	"math/big"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
 
-// --- RandomScalar ---
+var errTestReader = errors.New("test reader failure")
 
-func TestRandomScalarRejectsInvalidOrder(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		order *big.Int
-	}{
-		{"nil order", nil},
-		{"zero order", big.NewInt(0)},
-		{"negative order", big.NewInt(-7)},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := RandomScalar(nil, tc.order)
-			if err == nil {
-				t.Fatal("expected error")
-			}
-		})
-	}
+type failingReader struct{}
+
+func (failingReader) Read(_ []byte) (int, error) {
+	return 0, errTestReader
 }
 
-func TestRandomScalarUsesCryptoRandWhenReaderNil(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	x, err := RandomScalar(nil, order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if x.Sign() <= 0 || x.Cmp(order) >= 0 {
-		t.Fatalf("RandomScalar out of range: %s", x)
-	}
-}
-
-func TestRandomScalarDeterministic(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	r := testutil.DeterministicReader(42)
-	a, err := RandomScalar(r, order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	r = testutil.DeterministicReader(42)
-	b, err := RandomScalar(r, order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if a.Cmp(b) != 0 {
-		t.Fatalf("deterministic RandomScalar mismatch: %s vs %s", a, b)
-	}
-}
-
-func TestRandomScalarNonZero(t *testing.T) {
-	t.Parallel()
-	// With a small order, zero should never appear (loop retries).
-	order := big.NewInt(2)
-	for range 20 {
-		x, err := RandomScalar(nil, order)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if x.Sign() == 0 {
-			t.Fatal("RandomScalar returned zero")
-		}
-	}
-}
-
-// --- RandomPolynomial ---
+var _ io.Reader = failingReader{}
 
 func TestRandomPolynomialRejectsInvalidThreshold(t *testing.T) {
 	t.Parallel()
+
 	tests := []struct {
 		name      string
 		threshold int
 	}{
-		{"zero threshold", 0},
-		{"negative threshold", -1},
+		{name: "zero", threshold: 0},
+		{name: "negative", threshold: -1},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := RandomPolynomial(nil, big.NewInt(101), tc.threshold, nil)
-			if err == nil {
-				t.Fatal("expected error")
+
+			if _, err := RandomPolynomial(nil, tc.threshold, nil); err == nil {
+				t.Fatal("expected invalid threshold error")
 			}
 		})
 	}
 }
 
-func TestRandomPolynomialThresholdOneWithConstant(t *testing.T) {
+func TestRandomPolynomialUsesProvidedConstant(t *testing.T) {
 	t.Parallel()
-	order := big.NewInt(101)
-	coeffs, err := RandomPolynomial(nil, order, 1, big.NewInt(42))
+
+	constant := secp.ScalarZero()
+	poly, err := RandomPolynomial(testutil.DeterministicReader(1), 3, &constant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(coeffs) != 1 {
-		t.Fatalf("expected 1 coefficient, got %d", len(coeffs))
+	if len(poly) != 3 {
+		t.Fatalf("got %d coefficients, want 3", len(poly))
 	}
-	if coeffs[0].Cmp(big.NewInt(42)) != 0 {
-		t.Fatalf("expected constant 42, got %s", coeffs[0])
+	if !poly[0].Equal(constant) {
+		t.Fatal("constant term was not preserved")
+	}
+	if poly[1].IsZero() || poly[2].IsZero() {
+		t.Fatal("expected non-zero random non-constant coefficients")
 	}
 }
 
-func TestRandomPolynomialThresholdOneWithoutConstant(t *testing.T) {
+func TestRandomPolynomialSamplesNonZeroConstantWhenAbsent(t *testing.T) {
 	t.Parallel()
-	order := big.NewInt(101)
-	coeffs, err := RandomPolynomial(nil, order, 1, nil)
+
+	poly, err := RandomPolynomial(testutil.DeterministicReader(2), 2, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(coeffs) != 1 {
-		t.Fatalf("expected 1 coefficient, got %d", len(coeffs))
+	if len(poly) != 2 {
+		t.Fatalf("got %d coefficients, want 2", len(poly))
 	}
-	if coeffs[0].Sign() == 0 || coeffs[0].Cmp(order) >= 0 {
-		t.Fatalf("random constant out of range: %s", coeffs[0])
+	if poly[0].IsZero() {
+		t.Fatal("expected sampled constant term to be non-zero")
+	}
+	if poly[1].IsZero() {
+		t.Fatal("expected sampled non-constant coefficient to be non-zero")
 	}
 }
 
-func TestRandomPolynomialNormalizesConstant(t *testing.T) {
+func TestRandomPolynomialDeterministicForSameReaderSeed(t *testing.T) {
 	t.Parallel()
-	order := big.NewInt(101)
-	// 150 mod 101 = 49
-	coeffs, err := RandomPolynomial(nil, order, 1, big.NewInt(150))
+
+	left, err := RandomPolynomial(testutil.DeterministicReader(3), 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if coeffs[0].Cmp(big.NewInt(49)) != 0 {
-		t.Fatalf("constant not normalized: got %s, want 49", coeffs[0])
-	}
-}
-
-func TestRandomPolynomialDeterministic(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	constant := big.NewInt(7)
-	r := testutil.DeterministicReader(42)
-	a, err := RandomPolynomial(r, order, 3, constant)
+	right, err := RandomPolynomial(testutil.DeterministicReader(3), 4, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
-	r = testutil.DeterministicReader(42)
-	b, err := RandomPolynomial(r, order, 3, constant)
+	if len(left) != len(right) {
+		t.Fatalf("polynomial lengths differ: %d != %d", len(left), len(right))
+	}
+	for i := range left {
+		assertScalarEqual(t, left[i], right[i], "coefficient mismatch")
+	}
+}
+
+func TestRandomPolynomialPropagatesReaderError(t *testing.T) {
+	t.Parallel()
+
+	if _, err := RandomPolynomial(failingReader{}, 1, nil); !errors.Is(err, errTestReader) {
+		t.Fatalf("got error %v, want %v", err, errTestReader)
+	}
+}
+
+func TestRandomPolynomialDoesNotReadWhenThresholdOneConstantProvided(t *testing.T) {
+	t.Parallel()
+
+	constant := secp.ScalarFromUint64(42)
+	poly, err := RandomPolynomial(failingReader{}, 1, &constant)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(a) != len(b) {
-		t.Fatalf("length mismatch: %d vs %d", len(a), len(b))
+	if len(poly) != 1 {
+		t.Fatalf("got %d coefficients, want 1", len(poly))
 	}
-	for i := range a {
-		if a[i].Cmp(b[i]) != 0 {
-			t.Fatalf("coefficient %d mismatch: %s vs %s", i, a[i], b[i])
-		}
+	assertScalarEqual(t, poly[0], constant, "constant term mismatch")
+}
+
+func TestEvalEmptyPolynomialReturnsZero(t *testing.T) {
+	t.Parallel()
+
+	if got := Eval(nil, 7); !got.IsZero() {
+		t.Fatal("empty polynomial should evaluate to zero")
 	}
 }
 
-func TestRandomPolynomialCoefficientsInRange(t *testing.T) {
+func TestEvalAtZeroReturnsConstant(t *testing.T) {
 	t.Parallel()
-	order := big.NewInt(101)
-	coeffs, err := RandomPolynomial(nil, order, 5, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	for i, c := range coeffs {
-		if c.Sign() == 0 {
-			t.Fatalf("coefficient %d is zero", i)
-		}
-		if c.Cmp(order) >= 0 {
-			t.Fatalf("coefficient %d >= order: %s", i, c)
-		}
-	}
-}
 
-// --- Eval ---
-
-func TestEvalEmptyCoeffs(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	result := Eval(nil, 1, order)
-	if result.Sign() != 0 {
-		t.Fatalf("empty coeffs should eval to 0, got %s", result)
-	}
-}
-
-func TestEvalZeroID(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(9), big.NewInt(3)}
-	// f(0) = 42 (the constant term)
-	result := Eval(coeffs, 0, order)
-	if result.Cmp(big.NewInt(42)) != 0 {
-		t.Fatalf("Eval at 0 should return constant: got %s, want 42", result)
-	}
+	poly := knownPolynomial()
+	assertScalarEqual(t, Eval(poly, 0), secp.ScalarFromUint64(42), "constant term mismatch")
 }
 
 func TestEvalKnownPolynomial(t *testing.T) {
 	t.Parallel()
-	// f(x) = 42 + 9x + 3x^2 mod 101
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(9), big.NewInt(3)}
+
+	poly := knownPolynomial()
+	tests := []struct {
+		id   tss.PartyID
+		want secp.Scalar
+	}{
+		{id: 1, want: secp.ScalarFromUint64(54)},
+		{id: 2, want: secp.ScalarFromUint64(72)},
+		{id: 3, want: secp.ScalarFromUint64(96)},
+		{id: 5, want: secp.ScalarFromUint64(162)},
+		{id: 99, want: secp.ScalarFromUint64(30336)},
+	}
+	for _, tc := range tests {
+		t.Run("party", func(t *testing.T) {
+			t.Parallel()
+
+			assertScalarEqual(t, Eval(poly, tc.id), tc.want, "evaluation mismatch")
+		})
+	}
+}
+
+func TestEvalUsesScalarFieldModuloOrder(t *testing.T) {
+	t.Parallel()
+
+	poly := Polynomial{
+		secp.ScalarNeg(secp.ScalarOne()),
+		secp.ScalarOne(),
+	}
+	if got := Eval(poly, 1); !got.IsZero() {
+		t.Fatal("expected (-1 + 1) mod order to be zero")
+	}
+	assertScalarEqual(t, Eval(poly, 2), secp.ScalarOne(), "modular evaluation mismatch")
+}
+
+func TestLagrangeCoefficientKnownTwoPartySet(t *testing.T) {
+	t.Parallel()
+
+	ids := tss.NewPartySet(1, 2)
+	lambda1 := mustLagrangeCoefficient(t, 1, ids)
+	lambda2 := mustLagrangeCoefficient(t, 2, ids)
+
+	assertScalarEqual(t, lambda1, secp.ScalarFromUint64(2), "lambda_1 mismatch")
+	assertScalarEqual(t, lambda2, secp.ScalarNeg(secp.ScalarOne()), "lambda_2 mismatch")
+}
+
+func TestLagrangeCoefficientKnownThreePartySet(t *testing.T) {
+	t.Parallel()
+
+	ids := tss.NewPartySet(1, 2, 3)
+
+	assertScalarEqual(t, mustLagrangeCoefficient(t, 1, ids), secp.ScalarFromUint64(3), "lambda_1 mismatch")
+	assertScalarEqual(t, mustLagrangeCoefficient(t, 2, ids), secp.ScalarNeg(secp.ScalarFromUint64(3)), "lambda_2 mismatch")
+	assertScalarEqual(t, mustLagrangeCoefficient(t, 3, ids), secp.ScalarOne(), "lambda_3 mismatch")
+}
+
+func TestLagrangeCoefficientOrderInvariant(t *testing.T) {
+	t.Parallel()
+
+	left := mustLagrangeCoefficient(t, 3, tss.NewPartySet(1, 3, 5))
+	right := mustLagrangeCoefficient(t, 3, tss.NewPartySet(5, 1, 3))
+
+	assertScalarEqual(t, left, right, "interpolation coefficient should not depend on set order")
+}
+
+func TestLagrangeCoefficientReconstructsConstantAcrossSubsets(t *testing.T) {
+	t.Parallel()
+
+	poly := knownPolynomial()
+	shares := map[tss.PartyID]secp.Scalar{
+		1: Eval(poly, 1),
+		2: Eval(poly, 2),
+		3: Eval(poly, 3),
+		4: Eval(poly, 4),
+		5: Eval(poly, 5),
+	}
+	subsets := []tss.PartySet{
+		tss.NewPartySet(1, 2, 3),
+		tss.NewPartySet(1, 3, 5),
+		tss.NewPartySet(2, 4, 5),
+		tss.NewPartySet(5, 2, 4),
+	}
+	for _, subset := range subsets {
+		t.Run("subset", func(t *testing.T) {
+			t.Parallel()
+
+			got := reconstructConstant(t, shares, subset)
+			assertScalarEqual(t, got, poly[0], "reconstructed constant mismatch")
+		})
+	}
+}
+
+func TestLagrangeCoefficientRejectsInvalidInputs(t *testing.T) {
+	t.Parallel()
 
 	tests := []struct {
 		name string
 		id   tss.PartyID
-		want int64
-	}{
-		{name: "party 1", id: 1, want: 54},   // 42 + 9 + 3 = 54
-		{name: "party 2", id: 2, want: 72},   // 42 + 18 + 12 = 72
-		{name: "party 3", id: 3, want: 96},   // 42 + 27 + 27 = 96
-		{name: "party 5", id: 5, want: 61},   // 42 + 45 + 75 = 162 ≡ 61 mod 101
-		{name: "party 10", id: 10, want: 28}, // 42 + 90 + 300 = 432 ≡ 28 mod 101
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			t.Parallel()
-
-			got := Eval(coeffs, tt.id, order)
-			want := big.NewInt(tt.want)
-			if got.Cmp(want) != 0 {
-				t.Fatalf("Eval(coeffs, %d) = %s, want %s", tt.id, got, want)
-			}
-		})
-	}
-}
-
-func TestEvalLargeID(t *testing.T) {
-	t.Parallel()
-	// f(x) = 5 + 2x mod 1009
-	order := big.NewInt(1009)
-	coeffs := []*big.Int{big.NewInt(5), big.NewInt(2)}
-	// id := tss.PartyID(^uint32(0)) // max uint32
-	id := tss.PartyID(4294967295)
-	result := Eval(coeffs, id, order)
-	// f(2^32-1) = 5 + 2*(2^32-1) = 5 + 2*4294967295 = 5 + 8589934590 = 8589934595
-	// 8589934595 mod 1009 = ...
-	expected := new(big.Int).SetUint64(uint64(id))
-	expected.Mul(expected, big.NewInt(2))
-	expected.Add(expected, big.NewInt(5))
-	expected.Mod(expected, order)
-	if result.Cmp(expected) != 0 {
-		t.Fatalf("Eval with large ID: got %s, want %s", result, expected)
-	}
-}
-
-// --- LagrangeCoefficient ---
-
-func TestLagrangeCoefficientRejectsInvalidInputs(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name  string
-		id    tss.PartyID
-		set   tss.PartySet
-		order int64
-	}{
-		{"id is zero", 0, tss.NewPartySet(1, 2, 3), 101},
-		{"set contains zero", 1, tss.NewPartySet(1, 0, 2), 101},
-		{"duplicate in set", 1, tss.NewPartySet(1, 2, 2), 101},
-		{"id not in set", 3, tss.NewPartySet(1, 2, 4), 101},
-		{"non-invertible denominator", 1, tss.NewPartySet(1, 6), 5},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			_, err := LagrangeCoefficient(tc.id, tc.set, big.NewInt(tc.order))
-			if err == nil {
-				t.Fatal("expected error")
-			}
-		})
-	}
-}
-
-func TestLagrangeCoefficientCorrectness(t *testing.T) {
-	t.Parallel()
-	// For a 2-of-3 sharing over order=101:
-	// f(x) = 42 + 9x, shares at 1, 2, 3.
-	// Lagrange coefficient for point 1 among {1,2}:
-	// λ₁ = 2/(2-1) = 2 (since x=2 is the other point)
-	order := big.NewInt(101)
-	lambda, err := LagrangeCoefficient(1, tss.NewPartySet(1, 2), order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// λ₁ = x₂ / (x₂ - x₁) = 2 / (2-1) = 2 mod 101
-	if lambda.Cmp(big.NewInt(2)) != 0 {
-		t.Fatalf("LagrangeCoefficient(1, {1,2}) = %s, want 2", lambda)
-	}
-}
-
-func TestLagrangeCoefficientReconstructs(t *testing.T) {
-	t.Parallel()
-	// 2-of-3 sharing over order=101: f(x) = 42 + 9x (degree 1, 2 coeffs).
-	// Shares at 1, 2, 3. Any 2 shares should reconstruct 42.
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(9)}
-	shares := []Share{
-		{ID: 1, Value: Eval(coeffs, 1, order)},
-		{ID: 2, Value: Eval(coeffs, 2, order)},
-		{ID: 3, Value: Eval(coeffs, 3, order)},
-	}
-
-	pairs := []struct {
-		name string
 		ids  tss.PartySet
 	}{
-		{name: "{1,2}", ids: tss.NewPartySet(1, 2)},
-		{name: "{2,3}", ids: tss.NewPartySet(2, 3)},
-		{name: "{1,3}", ids: tss.NewPartySet(1, 3)},
-	}
-	for _, tc := range pairs {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-
-			lambda1, err := LagrangeCoefficient(tc.ids[0], tc.ids, order)
-			if err != nil {
-				t.Fatal(err)
-			}
-			lambda2, err := LagrangeCoefficient(tc.ids[1], tc.ids, order)
-			if err != nil {
-				t.Fatal(err)
-			}
-			reconstructed := new(big.Int).Mul(shares[tc.ids[0]-1].Value, lambda1)
-			reconstructed.Add(reconstructed, new(big.Int).Mul(shares[tc.ids[1]-1].Value, lambda2))
-			reconstructed.Mod(reconstructed, order)
-
-			if reconstructed.Cmp(big.NewInt(42)) != 0 {
-				t.Fatalf("reconstruction failed: got %s, want 42", reconstructed)
-			}
-		})
-	}
-}
-
-// --- InterpolateConstant ---
-
-func TestInterpolateConstantRejectsInvalidInputs(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name   string
-		shares []Share
-	}{
-		{"empty shares", nil},
-		{"nil share value", []Share{{ID: 1, Value: nil}}},
+		{name: "zero id", id: 0, ids: tss.NewPartySet(1, 2)},
+		{name: "zero in set", id: 1, ids: tss.PartySet{0, 1}},
+		{name: "duplicate", id: 1, ids: tss.PartySet{1, 2, 2}},
+		{name: "duplicate target", id: 1, ids: tss.PartySet{1, 1}},
+		{name: "missing id", id: 3, ids: tss.NewPartySet(1, 2)},
+		{name: "empty set", id: 1, ids: nil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			_, err := InterpolateConstant(tc.shares, big.NewInt(101))
-			if err == nil {
+
+			if _, err := LagrangeCoefficient(tc.id, tc.ids); err == nil {
 				t.Fatal("expected error")
 			}
 		})
 	}
 }
 
-func TestInterpolateConstant(t *testing.T) {
+func TestFeldmanCommitmentsMatchEvaluatedShares(t *testing.T) {
 	t.Parallel()
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(9), big.NewInt(3)}
-	all := []Share{
-		{ID: 1, Value: Eval(coeffs, 1, order)},
-		{ID: 2, Value: Eval(coeffs, 2, order)},
-		{ID: 5, Value: Eval(coeffs, 5, order)},
+
+	poly := knownPolynomial()
+	commitments := make([]*secp.Point, len(poly))
+	for i, coeff := range poly {
+		commitments[i] = secp.ScalarBaseMult(coeff)
 	}
-	got, err := InterpolateConstant(all, order)
-	if err != nil {
-		t.Fatal(err)
+
+	for _, id := range []tss.PartyID{1, 2, 3, 5} {
+		t.Run("valid share", func(t *testing.T) {
+			t.Parallel()
+
+			share := Eval(poly, id)
+			if err := secp.VerifySharePoints(commitments, id, share); err != nil {
+				t.Fatalf("valid share rejected: %v", err)
+			}
+		})
 	}
-	if got.Cmp(big.NewInt(42)) != 0 {
-		t.Fatalf("constant = %s, want 42", got)
+
+	badShare := secp.ScalarAdd(Eval(poly, 2), secp.ScalarOne())
+	if err := secp.VerifySharePoints(commitments, 2, badShare); err == nil {
+		t.Fatal("expected tampered share rejection")
 	}
 }
 
-func TestInterpolateConstantThreshold(t *testing.T) {
+func TestRefreshZeroConstantReconstructsZero(t *testing.T) {
 	t.Parallel()
-	// For a 2-of-5 sharing, any 2 shares should reconstruct.
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(7)} // degree 1
-	allShares := []Share{
-		{ID: 1, Value: Eval(coeffs, 1, order)},
-		{ID: 2, Value: Eval(coeffs, 2, order)},
-		{ID: 3, Value: Eval(coeffs, 3, order)},
-		{ID: 4, Value: Eval(coeffs, 4, order)},
-		{ID: 5, Value: Eval(coeffs, 5, order)},
+
+	zero := secp.ScalarZero()
+	poly, err := RandomPolynomial(testutil.DeterministicReader(4), 3, &zero)
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	// Try every pair.
-	for i := range len(allShares) {
-		for j := i + 1; j < len(allShares); j++ {
-			subset := []Share{allShares[i], allShares[j]}
-			got, err := InterpolateConstant(subset, order)
-			if err != nil {
-				t.Fatalf("subset {%d,%d}: %v", allShares[i].ID, allShares[j].ID, err)
-			}
-			if got.Cmp(big.NewInt(42)) != 0 {
-				t.Fatalf("subset {%d,%d}: got %s, want 42",
-					allShares[i].ID, allShares[j].ID, got)
-			}
+	shares := map[tss.PartyID]secp.Scalar{
+		1: Eval(poly, 1),
+		2: Eval(poly, 2),
+		3: Eval(poly, 3),
+		4: Eval(poly, 4),
+		5: Eval(poly, 5),
+	}
+	got := reconstructConstant(t, shares, tss.NewPartySet(1, 3, 5))
+	if !got.IsZero() {
+		t.Fatal("expected zero-constant refresh polynomial to reconstruct zero")
+	}
+}
+
+func knownPolynomial() Polynomial {
+	return Polynomial{
+		secp.ScalarFromUint64(42),
+		secp.ScalarFromUint64(9),
+		secp.ScalarFromUint64(3),
+	}
+}
+
+func reconstructConstant(t *testing.T, shares map[tss.PartyID]secp.Scalar, ids tss.PartySet) secp.Scalar {
+	t.Helper()
+
+	acc := secp.ScalarZero()
+	for _, id := range ids {
+		share, ok := shares[id]
+		if !ok {
+			t.Fatalf("missing share for party %d", id)
 		}
+		lambda := mustLagrangeCoefficient(t, id, ids)
+		acc = secp.ScalarAdd(acc, secp.ScalarMul(share, lambda))
 	}
+	return acc
 }
 
-func TestInterpolateConstantAllShares(t *testing.T) {
-	t.Parallel()
-	// Interpolating with all shares should also work (over-determined system).
-	order := big.NewInt(101)
-	coeffs := []*big.Int{big.NewInt(42), big.NewInt(7)}
-	shares := []Share{
-		{ID: 1, Value: Eval(coeffs, 1, order)},
-		{ID: 2, Value: Eval(coeffs, 2, order)},
-		{ID: 3, Value: Eval(coeffs, 3, order)},
-	}
-	got, err := InterpolateConstant(shares, order)
+func mustLagrangeCoefficient(t *testing.T, id tss.PartyID, ids tss.PartySet) secp.Scalar {
+	t.Helper()
+
+	out, err := LagrangeCoefficient(id, ids)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got.Cmp(big.NewInt(42)) != 0 {
-		t.Fatalf("got %s, want 42", got)
-	}
+	return out
 }
 
-// --- Normalize ---
+func assertScalarEqual(t *testing.T, got, want secp.Scalar, msg string) {
+	t.Helper()
 
-func TestNormalize(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	tests := []struct {
-		name  string
-		input int64
-		want  int64
-	}{
-		{"in range", 42, 42},
-		{"above range", 150, 49}, // 150 mod 101 = 49
-		{"negative", -5, 96},     // -5 mod 101 = 96
-		{"zero", 0, 0},
-		{"exact multiple", 202, 0}, // 2*101 ≡ 0 mod 101
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := Normalize(big.NewInt(tc.input), order)
-			if out.Cmp(big.NewInt(tc.want)) != 0 {
-				t.Fatalf("Normalize(%d) = %s, want %d", tc.input, out, tc.want)
-			}
-		})
-	}
-}
-
-func TestAdd(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	tests := []struct {
-		name string
-		a, b int64
-		want int64
-	}{
-		{"basic", 30, 40, 70},
-		{"wrap", 60, 50, 9}, // 110 mod 101 = 9
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := Add(big.NewInt(tc.a), big.NewInt(tc.b), order)
-			if out.Cmp(big.NewInt(tc.want)) != 0 {
-				t.Fatalf("%d+%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
-			}
-		})
-	}
-}
-
-func TestSub(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	tests := []struct {
-		name string
-		a, b int64
-		want int64
-	}{
-		{"basic", 70, 30, 40},
-		{"wrap", 10, 30, 81}, // -20 mod 101 = 81
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := Sub(big.NewInt(tc.a), big.NewInt(tc.b), order)
-			if out.Cmp(big.NewInt(tc.want)) != 0 {
-				t.Fatalf("%d-%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
-			}
-		})
-	}
-}
-
-func TestMul(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	tests := []struct {
-		name string
-		a, b int64
-		want int64
-	}{
-		{"basic", 7, 11, 77},
-		{"wrap", 10, 20, 99}, // 200 mod 101 = 99
-		{"zero", 0, 42, 0},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			out := Mul(big.NewInt(tc.a), big.NewInt(tc.b), order)
-			if out.Cmp(big.NewInt(tc.want)) != 0 {
-				t.Fatalf("%d*%d mod 101 = %s, want %d", tc.a, tc.b, out, tc.want)
-			}
-		})
-	}
-}
-
-// --- Roundtrip: full Shamir sharing flow ---
-
-func TestFullSharingRoundtrip(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-	secret := big.NewInt(42)
-	threshold := 3
-	partyCount := 5
-
-	coeffs, err := RandomPolynomial(nil, order, threshold, secret)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(coeffs) != threshold {
-		t.Fatalf("expected %d coefficients, got %d", threshold, len(coeffs))
-	}
-
-	// Generate shares for all parties.
-	shares := make([]Share, partyCount)
-	for i := range shares {
-		id := tss.PartyID(i + 1)
-		shares[i] = Share{ID: id, Value: Eval(coeffs, id, order)}
-	}
-
-	// Reconstruct with exactly threshold shares.
-	got, err := InterpolateConstant(shares[:threshold], order)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.Cmp(secret) != 0 {
-		t.Fatalf("reconstructed = %s, want %s", got, secret)
-	}
-}
-
-// --- Roundtrip: deterministic sharing ---
-
-func TestDeterministicSharing(t *testing.T) {
-	t.Parallel()
-	order := big.NewInt(101)
-
-	r := testutil.DeterministicReader(42)
-	coeffsA, err := RandomPolynomial(r, order, 3, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	r = testutil.DeterministicReader(42)
-	coeffsB, err := RandomPolynomial(r, order, 3, nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	for i := range coeffsA {
-		if coeffsA[i].Cmp(coeffsB[i]) != 0 {
-			t.Fatalf("non-deterministic coefficient %d: %s vs %s", i, coeffsA[i], coeffsB[i])
-		}
+	if !got.Equal(want) {
+		t.Fatal(msg)
 	}
 }

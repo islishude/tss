@@ -9,7 +9,7 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/mta"
 	"github.com/islishude/tss/internal/secret"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 )
 
 func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPresignRound2Tx, error) {
@@ -321,7 +321,7 @@ func (s *PresignSession) xBarCommitment(id tss.PartyID) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	lambda, err := shamirsecp.LagrangeCoefficient(id, s.signers)
+	lambda, err := shamir.LagrangeCoefficient(id, s.signers)
 	if err != nil {
 		return nil, err
 	}
