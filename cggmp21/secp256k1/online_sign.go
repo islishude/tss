@@ -12,7 +12,6 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 // StartSign starts or idempotently resumes this party's local online signing
@@ -692,7 +691,7 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	if !bytes.Equal(presign.state.KeygenTranscriptHash, key.state.KeygenTranscriptHash) {
 		return errors.New("presign keygen transcript binding mismatch")
 	}
-	if !bytes.Equal(presign.state.PartiesHash, wireutil.PartySetHash(key.state.Parties, partySetHashLabel)) {
+	if !bytes.Equal(presign.state.PartiesHash, tss.PartySetHash(key.state.Parties, partySetHashLabel)) {
 		return errors.New("presign participant set binding mismatch")
 	}
 	_, contextHash, derivation, err := preparePresignContext(key, presign.state.Context)

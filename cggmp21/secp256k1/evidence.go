@@ -10,7 +10,6 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const (
@@ -74,10 +73,10 @@ func VerifyBlameEvidence(encoded []byte, ctx EvidenceContext) error {
 	if evidence.From != 0 && len(ctx.Signers) > 0 && isSignerScopedEvidence(evidence.Kind) && !tss.ContainsParty(ctx.Signers, evidence.From) {
 		return fmt.Errorf("evidence sender %d is not in signer set", evidence.From)
 	}
-	if err := compareEvidenceField(evidence, evidenceFieldPartiesHash, wireutil.PartySetHash(ctx.Parties, partySetHashLabel), len(ctx.Parties) > 0); err != nil {
+	if err := compareEvidenceField(evidence, evidenceFieldPartiesHash, tss.PartySetHash(ctx.Parties, partySetHashLabel), len(ctx.Parties) > 0); err != nil {
 		return err
 	}
-	if err := compareEvidenceField(evidence, evidenceFieldSignerSetHash, wireutil.PartySetHash(ctx.Signers, partySetHashLabel), len(ctx.Signers) > 0); err != nil {
+	if err := compareEvidenceField(evidence, evidenceFieldSignerSetHash, tss.PartySetHash(ctx.Signers, partySetHashLabel), len(ctx.Signers) > 0); err != nil {
 		return err
 	}
 	if err := compareEvidenceField(evidence, evidenceFieldPublicKeyHash, hashBytes(ctx.PublicKey), len(ctx.PublicKey) > 0); err != nil {
@@ -165,7 +164,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 		paillierPublicKeys = nil
 	}
 	fields := []tss.EvidenceField{
-		rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(key.state.Parties, partySetHashLabel)),
+		rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(key.state.Parties, partySetHashLabel)),
 		hashEvidenceField(evidenceFieldPublicKeyHash, key.state.PublicKey),
 		rawEvidenceField(evidenceFieldPaillierPublicKeysHash, paillierPublicSharesHash(paillierPublicKeys)),
 	}
@@ -176,7 +175,7 @@ func keyContextEvidenceFields(key *KeyShare) []tss.EvidenceField {
 }
 
 func signerEvidenceFields(signers tss.PartySet) []tss.EvidenceField {
-	return []tss.EvidenceField{rawEvidenceField(evidenceFieldSignerSetHash, wireutil.PartySetHash(signers, partySetHashLabel))}
+	return []tss.EvidenceField{rawEvidenceField(evidenceFieldSignerSetHash, tss.PartySetHash(signers, partySetHashLabel))}
 }
 
 func rawEvidenceField(key string, value []byte) tss.EvidenceField {

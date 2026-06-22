@@ -12,7 +12,6 @@ import (
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
-	"github.com/islishude/tss/internal/wire/wireutil"
 )
 
 const (
@@ -670,5 +669,5 @@ func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
 }
 
 func signAttemptSignerSetHash(signers tss.PartySet) []byte {
-	return wireutil.PartySetHash(signers, signAttemptSignerSetLabel)
+	return tss.PartySetHash(signers, signAttemptSignerSetLabel)
 }

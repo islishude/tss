@@ -12,7 +12,6 @@ import (
 	"github.com/islishude/tss/internal/secret"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
-	"github.com/islishude/tss/internal/wire/wireutil"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
@@ -131,7 +130,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
 		PublicKey:            slices.Clone(s.key.state.PublicKey),
 		KeygenTranscriptHash: slices.Clone(s.key.state.KeygenTranscriptHash),
-		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
+		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
 		KPoint:               kPointBytes,
 		ChiPoint:             chiPointBytes,
 		XBarPoint:            xBarPoint,
@@ -328,7 +327,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 		AdditiveShift:        slices.Clone(s.derivation.AdditiveShift),
 		PublicKey:            slices.Clone(s.key.state.PublicKey),
 		KeygenTranscriptHash: slices.Clone(s.key.state.KeygenTranscriptHash),
-		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
+		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
 		KPoint:               kPointBytes,
 		ChiPoint:             chiPointBytes,
 		XBarPoint:            xBarPoint,
@@ -398,7 +397,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 		PlanHash:             append([]byte(nil), s.planHash...),
 		PublicKey:            publicKeyPoint,
 		KeygenTranscriptHash: append([]byte(nil), s.key.state.KeygenTranscriptHash...),
-		PartiesHash:          wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel),
+		PartiesHash:          tss.PartySetHash(s.key.state.Parties, partySetHashLabel),
 		KShare:               s.kShare.Clone(),
 	}}
 	stagedPresign.state.ChiShare = chiSecret
@@ -617,7 +616,7 @@ func (s *PresignSession) presignTranscriptHash(R *secp.Point, littleR, delta sec
 	t.AppendBytes("additive_shift", s.derivation.AdditiveShift)
 	t.AppendBytes("public_key", s.key.state.PublicKey)
 	t.AppendBytes("keygen_transcript_hash", s.key.state.KeygenTranscriptHash)
-	t.AppendBytes("parties_hash", wireutil.PartySetHash(s.key.state.Parties, partySetHashLabel))
+	t.AppendBytes("parties_hash", tss.PartySetHash(s.key.state.Parties, partySetHashLabel))
 	for _, id := range s.signers {
 		st, ok := s.partyState(id)
 		if !ok {

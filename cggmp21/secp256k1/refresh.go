@@ -12,7 +12,6 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
-	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -300,7 +299,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"refresh Paillier modulus does not meet security requirements",
 				tss.NewPartySet(env.From),
 				err,
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -315,7 +314,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"invalid refresh Paillier modulus proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Paillier modulus proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -327,7 +326,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"refresh Ring-Pedersen modulus mismatch",
 				tss.NewPartySet(env.From),
 				errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}
@@ -343,7 +342,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				"invalid refresh Ring-Pedersen proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Ring-Pedersen proof"),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
 				observedPaillierKeyHash,
 			)
 		}

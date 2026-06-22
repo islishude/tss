@@ -11,7 +11,7 @@ import (
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
-	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -209,7 +209,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"malformed keygen commitment payload",
 			tss.NewPartySet(env.From),
 			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 		)
 	}
 
@@ -227,8 +227,8 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"invalid keygen commitment",
 			tss.NewPartySet(env.From),
 			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 		)
 	}
 	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
@@ -244,7 +244,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"Paillier modulus does not meet security requirements",
 			tss.NewPartySet(env.From),
 			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -263,7 +263,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"invalid Paillier modulus proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid Paillier modulus proof"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -275,7 +275,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"Ring-Pedersen modulus mismatch",
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -295,7 +295,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			"invalid Ring-Pedersen proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid Ring-Pedersen proof"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}

@@ -16,7 +16,6 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
-	"github.com/islishude/tss/internal/wire/wireutil"
 	"github.com/islishude/tss/internal/zk/schnorr"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
@@ -621,7 +620,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		PlanHash:             planHash[:],
 		PublicKey:            secp.Clone(RPoint),
 		KeygenTranscriptHash: transcript[:],
-		PartiesHash:          wireutil.PartySetHash(tss.NewPartySet(1, 2), partySetHashLabel),
+		PartiesHash:          tss.PartySetHash(tss.NewPartySet(1, 2), partySetHashLabel),
 		VerifyShares: []signVerifyShare{{
 			Party:    1,
 			KPoint:   secp.Clone(RPoint),

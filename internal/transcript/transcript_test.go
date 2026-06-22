@@ -114,3 +114,98 @@ func TestBuilderRejectsEmptyDomainAndLabel(t *testing.T) {
 		})
 	})
 }
+
+func TestByteSlicesHash(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		labelA    string
+		valuesA   [][]byte
+		labelB    string
+		valuesB   [][]byte
+		wantEqual bool
+	}{
+		{
+			name:      "different labels produce different hashes",
+			labelA:    "commitments-v1",
+			valuesA:   [][]byte{{0x01, 0x02}, {0x03}},
+			labelB:    "public-keys-v1",
+			valuesB:   [][]byte{{0x01, 0x02}, {0x03}},
+			wantEqual: false,
+		},
+		{
+			name:      "different values produce different hashes",
+			labelA:    "test-v1",
+			valuesA:   [][]byte{{0x01}, {0x02}},
+			labelB:    "test-v1",
+			valuesB:   [][]byte{{0x02}, {0x01}},
+			wantEqual: false,
+		},
+		{
+			name:      "length prefix prevents collision",
+			labelA:    "test-v1",
+			valuesA:   [][]byte{[]byte("ab"), []byte("c")},
+			labelB:    "test-v1",
+			valuesB:   [][]byte{[]byte("a"), []byte("bc")},
+			wantEqual: false,
+		},
+		{
+			name:      "deterministic",
+			labelA:    "test-v1",
+			valuesA:   [][]byte{{0xde, 0xad}, {0xbe, 0xef}},
+			labelB:    "test-v1",
+			valuesB:   [][]byte{{0xde, 0xad}, {0xbe, 0xef}},
+			wantEqual: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			a := ByteSlicesHash(tc.labelA, tc.valuesA)
+			b := ByteSlicesHash(tc.labelB, tc.valuesB)
+
+			gotEqual := bytes.Equal(a, b)
+			if gotEqual != tc.wantEqual {
+				t.Fatalf("bytes.Equal(ByteSlicesHash(...), ByteSlicesHash(...)) = %v, want %v", gotEqual, tc.wantEqual)
+			}
+		})
+	}
+}
+
+func TestByteSlicesHash_Length(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		label   string
+		values  [][]byte
+		wantLen int
+	}{
+		{
+			name:    "empty slice",
+			label:   "test-v1",
+			values:  nil,
+			wantLen: 32,
+		},
+		{
+			name:    "single slice",
+			label:   "test-v1",
+			values:  [][]byte{{0xaa, 0xbb}},
+			wantLen: 32,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			h := ByteSlicesHash(tc.label, tc.values)
+			if len(h) != tc.wantLen {
+				t.Fatalf("len(ByteSlicesHash(...)) = %d, want %d", len(h), tc.wantLen)
+			}
+		})
+	}
+}

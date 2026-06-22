@@ -8,7 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
-	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -83,7 +83,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	out := []tss.Envelope{dealerEnv}
-	commitmentsHash := wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)
+	commitmentsHash := transcript.ByteSlicesHash(reshareCommitmentsHashLabel, commitments)
 	for _, id := range s.newParties {
 		if id == s.selfID {
 			continue
@@ -169,7 +169,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			"reshare Paillier modulus does not meet security requirements",
 			tss.NewPartySet(env.From),
 			err,
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -184,7 +184,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			"invalid reshare Paillier modulus proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid reshare Paillier modulus proof"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -196,7 +196,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			"reshare Ring-Pedersen modulus mismatch",
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)),
 			observedPaillierKeyHash,
 		)
 	}
@@ -212,7 +212,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			"invalid reshare Ring-Pedersen proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid reshare Ring-Pedersen proof"),
-			rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.newParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)),
 		)
 	}
 	s.newPartyData[env.From] = &reshareNewPartyData{
@@ -241,7 +241,7 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 	if !ok || dd.commitments == nil {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share has no dealer commitments"))
 	}
-	if !bytes.Equal(p.DealerCommitmentHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
+	if !bytes.Equal(p.DealerCommitmentHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
 		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share commitment hash mismatch"))
 	}
 	share, err := secpScalarFromSecret(p.Share)
@@ -263,8 +263,8 @@ func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePaylo
 				tss.EvidenceKindReshareShare,
 				"invalid reshare share",
 				tss.NewPartySet(from),
-				rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.dealerParties, partySetHashLabel)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
+				rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
 				hashEvidenceField("dealer_share_payload_hash", rawPayload),
 			),
 			Err: verifyErr,

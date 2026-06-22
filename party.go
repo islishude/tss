@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+
+	"github.com/islishude/tss/internal/transcript"
 )
 
 // PartySet is an ordered set of protocol participants.
@@ -36,8 +38,17 @@ func NewPartySet(parties ...PartyID) PartySet {
 
 // MergePartySet takes a set slice and returns a new sorted set containing elements which are in either or both of this set and the given set
 func MergePartySet(sets ...PartySet) PartySet {
-	var merged PartySet
-	seen := make(map[PartyID]struct{})
+	var total int
+	for _, set := range sets {
+		total += len(set)
+	}
+	if total == 0 {
+		return nil
+	}
+
+	merged := make(PartySet, 0, total)
+	seen := make(map[PartyID]struct{}, total)
+
 	for _, set := range sets {
 		for _, id := range set {
 			if _, ok := seen[id]; ok {
@@ -91,4 +102,17 @@ func ValidateSignerSet(keyParties PartySet, threshold int, signers PartySet, lim
 		seen[id] = struct{}{}
 	}
 	return nil
+}
+
+// PartySetHash returns a SHA-256 digest that binds a label and a sorted party set.
+//
+// Parties are sorted with [tss.SortParties] before hashing so that the same set
+// always produces the same 32-byte digest regardless of input order.
+//
+// Different labels guarantee domain separation — the same party set hashed under
+// "keygen" and "signing" labels will produce distinct digests.
+func PartySetHash(parties PartySet, label string) []byte {
+	t := transcript.New(label)
+	t.AppendUint32List("parties", parties.Sorted())
+	return t.Sum()
 }

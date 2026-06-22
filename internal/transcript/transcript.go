@@ -102,3 +102,17 @@ func writeLength(h hash.Hash, size int) {
 	binary.BigEndian.PutUint32(encoded[:], uint32(size))
 	_, _ = h.Write(encoded[:])
 }
+
+// ByteSlicesHash returns a SHA-256 digest that binds a label and a sequence of byte slices.
+//
+// Values are encoded as a canonical byte-string list, which prevents
+// concatenation collisions: hashing ["ab", "c"] and ["a", "bc"] produces
+// different digests.
+//
+// Different labels guarantee domain separation. A nil or empty values slice is valid and
+// produces a digest over the label alone.
+func ByteSlicesHash(label string, values [][]byte) []byte {
+	t := New(label)
+	t.AppendBytesList("values", values)
+	return t.Sum()
+}

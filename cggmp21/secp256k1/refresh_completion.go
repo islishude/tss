@@ -8,7 +8,6 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/transcript"
-	"github.com/islishude/tss/internal/wire/wireutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
 )
@@ -47,8 +46,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 					tss.EvidenceKindRefreshShare,
 					"invalid refresh share",
 					tss.NewPartySet(dealer),
-					rawEvidenceField(evidenceFieldPartiesHash, wireutil.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, wireutil.ByteSlicesHash(refreshCommitmentsHashLabel, pd.commitments)),
+					rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+					rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(refreshCommitmentsHashLabel, pd.commitments)),
 				),
 				Err: verifyErr,
 			}

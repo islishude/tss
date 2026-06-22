@@ -4,7 +4,7 @@ import (
 	"crypto/sha256"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/wire/wireutil"
+	"github.com/islishude/tss/internal/transcript"
 )
 
 const (
@@ -47,8 +47,8 @@ func frostKeygenBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitment
 			evidenceEnv,
 			tss.EvidenceKindFrostKeygenShare,
 			"invalid DKG share",
-			tss.EvidenceField{Key: frostEvidenceFieldPartiesHash, Value: wireutil.PartySetHash(config.Parties, frostPartySetHashLabel)},
-			tss.EvidenceField{Key: frostEvidenceFieldCommitmentsHash, Value: wireutil.ByteSlicesHash(frostCommitmentsHashLabel, commitments)},
+			tss.EvidenceField{Key: frostEvidenceFieldPartiesHash, Value: tss.PartySetHash(config.Parties, frostPartySetHashLabel)},
+			tss.EvidenceField{Key: frostEvidenceFieldCommitmentsHash, Value: transcript.ByteSlicesHash(frostCommitmentsHashLabel, commitments)},
 		),
 	}
 }
@@ -71,8 +71,8 @@ func frostReshareBlame(config tss.ThresholdConfig, dealer tss.PartyID, commitmen
 			evidenceEnv,
 			tss.EvidenceKindFrostReshareShare,
 			"invalid reshare share",
-			tss.EvidenceField{Key: frostEvidenceFieldPartiesHash, Value: wireutil.PartySetHash(config.Parties, frostPartySetHashLabel)},
-			tss.EvidenceField{Key: frostEvidenceFieldCommitmentsHash, Value: wireutil.ByteSlicesHash(frostReshareCommitmentsHashLabel, commitments)},
+			tss.EvidenceField{Key: frostEvidenceFieldPartiesHash, Value: tss.PartySetHash(config.Parties, frostPartySetHashLabel)},
+			tss.EvidenceField{Key: frostEvidenceFieldCommitmentsHash, Value: transcript.ByteSlicesHash(frostReshareCommitmentsHashLabel, commitments)},
 		),
 	}
 }
@@ -86,7 +86,7 @@ func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *t
 			env,
 			tss.EvidenceKindFrostPartialSignature,
 			"invalid FROST partial signature",
-			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: wireutil.PartySetHash(signers, frostPartySetHashLabel)},
+			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: tss.PartySetHash(signers, frostPartySetHashLabel)},
 			frostHashField(frostEvidenceFieldPublicKeyHash, publicKey),
 		),
 	}
@@ -107,7 +107,7 @@ func frostAggregateBlame(sessionID tss.SessionID, signers tss.PartySet, publicKe
 			env,
 			tss.EvidenceKindFrostAggregateSignature,
 			"aggregated Ed25519 signature failed verification",
-			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: wireutil.PartySetHash(signers, frostPartySetHashLabel)},
+			tss.EvidenceField{Key: frostEvidenceFieldSignerSetHash, Value: tss.PartySetHash(signers, frostPartySetHashLabel)},
 			frostHashField(frostEvidenceFieldPublicKeyHash, publicKey),
 			frostHashField("message_hash", message),
 			frostHashField("signature_hash", sig),
