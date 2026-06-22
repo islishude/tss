@@ -2,7 +2,6 @@ package ed25519
 
 import (
 	"errors"
-	"sync"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -54,57 +53,6 @@ func TestFROSTReshareStartRejectsNilPlan(t *testing.T) {
 				t.Fatalf("got %v, want ErrCodeInvalidConfig", err)
 			}
 		})
-	}
-}
-
-func TestFROSTKeygenChainCodeCommitAccessorConcurrentWithDelivery(t *testing.T) {
-	t.Parallel()
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	parties := tss.NewPartySet(1, 2)
-	session1, _, err := startFROSTKeygen(tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      1,
-		SessionID: sessionID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out2, err := startFROSTKeygen(tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      2,
-		SessionID: sessionID,
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		for range 1000 {
-			_ = session1.GetChainCodeCommitByPartyID(2)
-		}
-	}()
-	go func() {
-		defer wg.Done()
-		for _, env := range out2 {
-			if _, err := session1.HandleKeygenMessage(testutil.DeliverEnvelope(env)); err != nil {
-				t.Errorf("deliver %s: %v", env.PayloadType, err)
-				return
-			}
-		}
-	}()
-	wg.Wait()
-
-	var nilSession *KeygenSession
-	if got := nilSession.GetChainCodeCommitByPartyID(1); got != nil {
-		t.Fatal("nil session returned a chain-code commitment")
 	}
 }
 

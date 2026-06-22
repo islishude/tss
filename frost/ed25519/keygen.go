@@ -42,27 +42,6 @@ type KeygenSession struct {
 	guard       *tss.EnvelopeGuard               // Transport replay, identity, and policy guard.
 }
 
-// GetChainCodeCommitByPartyID returns a copy of the chain-code commitment for
-// id. It returns nil for a nil session or an unknown party.
-func (s *KeygenSession) GetChainCodeCommitByPartyID(id tss.PartyID) []byte {
-	if s == nil {
-		return nil
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	data, err := s.partyEntry(id)
-	if err == nil {
-		return bytes.Clone(data.chainCodeCommit)
-	}
-	return nil
-}
-
-// GetChainCodeCommitByPartyId returns a copy of the chain-code commitment for
-// id. Deprecated: use GetChainCodeCommitByPartyID.
-func (s *KeygenSession) GetChainCodeCommitByPartyId(id tss.PartyID) []byte {
-	return s.GetChainCodeCommitByPartyID(id)
-}
-
 type keygenCommitmentsPayload struct {
 	Commitments     keygenCommitments `json:"commitments" wire:"1,custom,max_items=threshold"`
 	ChainCodeCommit []byte            `json:"chain_code_commit,omitempty" wire:"2,bytes"`
