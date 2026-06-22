@@ -541,7 +541,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	env, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	env, _, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -735,11 +735,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 
 func sameIntentDifferentAttemptRecord(t testing.TB, record SignAttemptRecord) SignAttemptRecord {
 	t.Helper()
-	env, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload, err := unmarshalSignPartialPayload(env.Payload)
+	env, payload, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
 	if err != nil {
 		t.Fatal(err)
 	}

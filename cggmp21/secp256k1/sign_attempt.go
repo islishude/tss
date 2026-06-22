@@ -324,10 +324,10 @@ func (r SignAttemptResult) validate() error {
 	if len(r.AttemptHash) != sha256.Size {
 		return errors.New("invalid result attempt hash")
 	}
-	if _, err := scalarBytesStrict(r.Signature.R); err != nil {
+	if _, err := secp.ScalarFromBytes(r.Signature.R); err != nil {
 		return fmt.Errorf("invalid result signature r: %w", err)
 	}
-	s, err := scalarStrict(r.Signature.S)
+	s, err := secp.ScalarFromBytes(r.Signature.S)
 	if err != nil {
 		return fmt.Errorf("invalid result signature s: %w", err)
 	}
@@ -365,7 +365,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if !r.SessionID.Valid() || r.Party == tss.BroadcastPartyId {
 		return fmt.Errorf("%w: invalid session or party", ErrSignAttemptCorrupt)
 	}
-	env, err := decodeSignAttemptEnvelopeWithLimits(r.CanonicalBaseEnvelopeBytes, limits)
+	env, payload, err := decodeSignAttemptEnvelopeWithLimits(r.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
 		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -384,10 +384,6 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if env.Protocol != r.Protocol || env.SessionID != r.SessionID ||
 		env.Round != signStartRound || env.From != r.Party || env.To != tss.BroadcastPartyId || env.PayloadType != payloadSignPartial {
 		return fmt.Errorf("%w: envelope binding mismatch", ErrSignAttemptCorrupt)
-	}
-	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
-	if err != nil {
-		return fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
 	expectedDigestBinding := digestHash(r.Digest, r.ContextHash)
 	if !bytes.Equal(r.DigestBindingHash, expectedDigestBinding) || !bytes.Equal(payload.DigestHash, r.DigestBindingHash) {
@@ -414,10 +410,10 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 		return fmt.Errorf("%w: attempt hash mismatch", ErrSignAttemptCorrupt)
 	}
 	if r.Completed {
-		if _, err := scalarBytesStrict(r.SignatureR); err != nil {
+		if _, err := secp.ScalarFromBytes(r.SignatureR); err != nil {
 			return fmt.Errorf("%w: invalid signature r", ErrSignAttemptCorrupt)
 		}
-		s, err := scalarStrict(r.SignatureS)
+		s, err := secp.ScalarFromBytes(r.SignatureS)
 		if err != nil {
 			return fmt.Errorf("%w: invalid signature s", ErrSignAttemptCorrupt)
 		}
@@ -541,7 +537,7 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 	if update.Ack == nil && update.Certificate == nil {
 		return record.Clone(), nil
 	}
-	env, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	env, _, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
@@ -618,40 +614,27 @@ func signAttemptRecipientOrder(recipients tss.PartySet) map[tss.PartyID]int {
 	return order
 }
 
-func scalarBytesStrict(in []byte) ([]byte, error) {
-	if _, err := scalarStrict(in); err != nil {
-		return nil, err
-	}
-	return in, nil
-}
-
-func scalarStrict(in []byte) (secp.Scalar, error) {
-	if len(in) != secp.ScalarSize {
-		return secp.Scalar{}, errors.New("scalar must be 32 bytes")
-	}
-	return secp.ScalarFromBytes(in)
-}
-
-func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, error) {
+func decodeSignAttemptEnvelope(raw []byte) (tss.Envelope, signPartialPayload, error) {
 	return decodeSignAttemptEnvelopeWithLimits(raw, DefaultLimits())
 }
 
-func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelope, error) {
+func decodeSignAttemptEnvelopeWithLimits(raw []byte, limits Limits) (tss.Envelope, signPartialPayload, error) {
 	var env tss.Envelope
 	if err := env.UnmarshalBinary(raw); err != nil {
-		return tss.Envelope{}, err
+		return tss.Envelope{}, signPartialPayload{}, err
 	}
 	canonical, err := env.MarshalBinary()
 	if err != nil {
-		return tss.Envelope{}, err
+		return tss.Envelope{}, signPartialPayload{}, err
 	}
 	if !bytes.Equal(raw, canonical) {
-		return tss.Envelope{}, errors.New("non-canonical envelope")
+		return tss.Envelope{}, signPartialPayload{}, errors.New("non-canonical envelope")
 	}
-	if _, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits); err != nil {
-		return tss.Envelope{}, err
+	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
+	if err != nil {
+		return tss.Envelope{}, payload, err
 	}
-	return env, nil
+	return env, payload, nil
 }
 
 func signAttemptIntentHash(r SignAttemptRecord) []byte {

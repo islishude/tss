@@ -362,11 +362,7 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	if err := validateSignAttemptBindings(key, presign, record, limits); err != nil {
 		return nil, nil, err
 	}
-	env, err := decodeSignAttemptEnvelopeWithLimits(record.CanonicalBaseEnvelopeBytes, limits)
-	if err != nil {
-		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
-	}
-	payload, err := tss.DecodeBinaryValueWithLimits[signPartialPayload](env.Payload, limits)
+	env, payload, err := decodeSignAttemptEnvelopeWithLimits(record.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: %w", ErrSignAttemptCorrupt, err)
 	}
