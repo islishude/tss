@@ -224,7 +224,7 @@ func secpPresign(t testing.TB, shares map[tss.PartyID]*KeyShare, signers tss.Par
 	return secpPresignWithContext(t, shares, signers, testPresignContext())
 }
 
-func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx PresignContext) map[tss.PartyID]*Presign {
+func secpPresignWithContext(t testing.TB, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx tss.SigningContext) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

@@ -92,11 +92,11 @@ func (s SignAttemptDeliveryState) Equal(other SignAttemptDeliveryState) bool {
 		return false
 	}
 	for i := range s.Acks {
-		if !broadcastAckEqual(s.Acks[i], other.Acks[i]) {
+		if !s.Acks[i].Equal(other.Acks[i]) {
 			return false
 		}
 	}
-	return broadcastCertificateEqual(s.Certificate, other.Certificate)
+	return s.Certificate.Equal(other.Certificate)
 }
 
 // SignAttemptDeliveryUpdate records one durable outbox delivery progress update.
@@ -301,7 +301,7 @@ func (SignAttemptRecord) WireVersion() uint16 { return signAttemptWireVersion }
 
 // Validate checks the sign-attempt record against default local limits.
 func (r SignAttemptRecord) Validate() error {
-	return validateSignAttemptRecord(r)
+	return validateSignAttemptRecordWithLimits(r, DefaultLimits())
 }
 
 // ValidateWithLimits checks the sign-attempt record against explicit local
@@ -317,7 +317,8 @@ type SignAttemptResult struct {
 	Signature        Signature
 }
 
-func (r SignAttemptResult) validate() error {
+// Validate checks structural invariants for a SignAttemptResult.
+func (r SignAttemptResult) Validate() error {
 	if len(r.PresignContentID) != sha256.Size {
 		return errors.New("invalid result presign content ID")
 	}
@@ -338,10 +339,6 @@ func (r SignAttemptResult) validate() error {
 		return errors.New("invalid result signature recovery id")
 	}
 	return nil
-}
-
-func validateSignAttemptRecord(r SignAttemptRecord) error {
-	return validateSignAttemptRecordWithLimits(r, DefaultLimits())
 }
 
 func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) error {
@@ -430,7 +427,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 }
 
 func validateSignAttemptCandidate(r SignAttemptRecord) error {
-	if err := validateSignAttemptRecord(r); err != nil {
+	if err := r.Validate(); err != nil {
 		return err
 	}
 	if r.Completed {
@@ -525,7 +522,7 @@ func validateSignAttemptDeliveryAck(ack tss.BroadcastAck, env tss.Envelope, reci
 }
 
 func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := record.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	if len(update.PresignContentID) != sha256.Size || len(update.AttemptHash) != sha256.Size {
@@ -567,7 +564,7 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 		updated.DeliveryState.DeliveryComplete = true
 	}
 	orderSignAttemptDeliveryAcks(&updated)
-	if err := validateSignAttemptRecord(updated); err != nil {
+	if err := updated.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	return updated, nil
@@ -674,34 +671,4 @@ func signAttemptDeliveryPolicyHash(p SignAttemptDeliveryPolicy) []byte {
 
 func signAttemptSignerSetHash(signers tss.PartySet) []byte {
 	return wireutil.PartySetHash(signers, signAttemptSignerSetLabel)
-}
-
-func broadcastAckEqual(a, b tss.BroadcastAck) bool {
-	return a.Party == b.Party &&
-		a.PayloadHash == b.PayloadHash &&
-		a.EnvelopeDigest == b.EnvelopeDigest &&
-		bytes.Equal(a.Signature, b.Signature)
-}
-
-func broadcastCertificateEqual(a, b *tss.BroadcastCertificate) bool {
-	if a == nil || b == nil {
-		return a == nil && b == nil
-	}
-	if a.Protocol != b.Protocol ||
-		a.SessionID != b.SessionID ||
-		a.Round != b.Round ||
-		a.From != b.From ||
-		a.PayloadType != b.PayloadType ||
-		a.PayloadHash != b.PayloadHash ||
-		a.EnvelopeDigest != b.EnvelopeDigest ||
-		!slices.Equal(a.Recipients, b.Recipients) ||
-		len(a.Acks) != len(b.Acks) {
-		return false
-	}
-	for i := range a.Acks {
-		if !broadcastAckEqual(a.Acks[i], b.Acks[i]) {
-			return false
-		}
-	}
-	return true
 }

@@ -25,7 +25,7 @@ type presignContentIDPayload struct {
 	R                    *secp.Point                `wire:"6,custom,len=33"`
 	LittleR              secp.Scalar                `wire:"7,custom,len=32"`
 	TranscriptHash       []byte                     `wire:"8,bytes,len=32"`
-	Context              PresignContext             `wire:"9,nested"`
+	Context              tss.SigningContext         `wire:"9,nested"`
 	ContextHash          []byte                     `wire:"10,bytes,len=32"`
 	Derivation           *tss.DerivationResult      `wire:"11,record"`
 	PlanHash             []byte                     `wire:"12,bytes,len=32"`

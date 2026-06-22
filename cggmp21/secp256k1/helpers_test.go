@@ -228,7 +228,7 @@ func startCGGMP21KeygenWithPlanOption(config tss.ThresholdConfig, option KeygenP
 	return StartKeygen(plan, localConfigFromThresholdConfig(config), guard)
 }
 
-func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, ctx PresignContext, guards ...*tss.EnvelopeGuard) (*PresignSession, []tss.Envelope, error) {
+func startCGGMP21PresignWithContext(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, ctx tss.SigningContext, guards ...*tss.EnvelopeGuard) (*PresignSession, []tss.Envelope, error) {
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
@@ -315,8 +315,8 @@ func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig 
 
 // --- PresignContext factory ---
 
-func testPresignContext() PresignContext {
-	return PresignContext{
+func testPresignContext() tss.SigningContext {
+	return tss.SigningContext{
 		KeyID:   "test-key",
 		ChainID: "test-chain",
 		Derivation: tss.DerivationRequest{

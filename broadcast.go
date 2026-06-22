@@ -1,6 +1,7 @@
 package tss
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"slices"
@@ -354,6 +355,14 @@ func (a BroadcastAck) Clone() BroadcastAck {
 	}
 }
 
+// Equal reports whether a and other are the same BroadcastAck.
+func (a BroadcastAck) Equal(b BroadcastAck) bool {
+	return a.Party == b.Party &&
+		a.PayloadHash == b.PayloadHash &&
+		a.EnvelopeDigest == b.EnvelopeDigest &&
+		bytes.Equal(a.Signature, b.Signature)
+}
+
 // BroadcastCertificate proves that all parties received the same broadcast payload.
 type BroadcastCertificate struct {
 	Protocol    ProtocolID  `wire:"1,string,max_bytes=protocol_name"`
@@ -436,4 +445,30 @@ func (c *BroadcastCertificate) VerifyStructure(env Envelope, parties PartySet) e
 		}
 	}
 	return nil
+}
+
+// Equal reports whether r and other are the same BroadcastCertificate.
+// Both nil receivers compare equal. A nil receiver and a non-nil other
+// are not equal.
+func (a *BroadcastCertificate) Equal(b *BroadcastCertificate) bool {
+	if a == nil || b == nil {
+		return a == nil && b == nil
+	}
+	if a.Protocol != b.Protocol ||
+		a.SessionID != b.SessionID ||
+		a.Round != b.Round ||
+		a.From != b.From ||
+		a.PayloadType != b.PayloadType ||
+		a.PayloadHash != b.PayloadHash ||
+		a.EnvelopeDigest != b.EnvelopeDigest ||
+		!slices.Equal(a.Recipients, b.Recipients) ||
+		len(a.Acks) != len(b.Acks) {
+		return false
+	}
+	for i := range a.Acks {
+		if !a.Acks[i].Equal(b.Acks[i]) {
+			return false
+		}
+	}
+	return true
 }

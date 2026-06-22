@@ -321,32 +321,32 @@ func TestPresignContextValidation(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name    string
-		ctx     PresignContext
+		ctx     tss.SigningContext
 		wantErr string
 	}{
 		{
 			name:    "empty key id",
-			ctx:     PresignContext{ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
+			ctx:     tss.SigningContext{ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
 			wantErr: "key id",
 		},
 		{
 			name:    "empty chain id",
-			ctx:     PresignContext{KeyID: "k", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
+			ctx:     tss.SigningContext{KeyID: "k", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p", MessageDomain: "m"},
 			wantErr: "chain id",
 		},
 		{
 			name:    "empty policy domain",
-			ctx:     PresignContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, MessageDomain: "m"},
+			ctx:     tss.SigningContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, MessageDomain: "m"},
 			wantErr: "policy domain",
 		},
 		{
 			name:    "empty message domain",
-			ctx:     PresignContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p"},
+			ctx:     tss.SigningContext{KeyID: "k", ChainID: "c", Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1}, PolicyDomain: "p"},
 			wantErr: "message domain",
 		},
 		{
 			name: "hardened derivation",
-			ctx: PresignContext{
+			ctx: tss.SigningContext{
 				KeyID: "k", ChainID: "c", PolicyDomain: "p", MessageDomain: "m",
 				Derivation: tss.DerivationRequest{
 					Scheme: tss.DerivationSchemeBIP32Secp256k1,
@@ -357,7 +357,7 @@ func TestPresignContextValidation(t *testing.T) {
 		},
 		{
 			name: "valid",
-			ctx: PresignContext{
+			ctx: tss.SigningContext{
 				KeyID: "k", ChainID: "c", PolicyDomain: "p", MessageDomain: "m",
 				Derivation: tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1},
 			},

@@ -132,7 +132,7 @@ func (s *FileSignAttemptStore) LoadSignAttempt(ctx context.Context, presignConte
 	if err := s.mergeCompletion(&record, presignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := record.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	return record, nil
@@ -211,7 +211,7 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	if ctx == nil {
 		return SignAttemptRecord{}, errors.New("nil context")
 	}
-	if err := result.validate(); err != nil {
+	if err := result.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	if err := validateFileStoreCall(ctx, s, result.PresignContentID); err != nil {
@@ -235,7 +235,7 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	completed.SignatureR = slices.Clone(result.Signature.R)
 	completed.SignatureS = slices.Clone(result.Signature.S)
 	completed.SignatureRecoveryID = result.Signature.RecoveryID
-	if err := validateSignAttemptRecord(completed); err != nil {
+	if err := completed.Validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	objectPath, err := s.writeEncryptedObject(completed, "completion")
@@ -402,7 +402,7 @@ func (s *FileSignAttemptStore) persistDeliveryAck(ctx context.Context, base Sign
 	ackRecord.SignatureS = nil
 	ackRecord.SignatureRecoveryID = 0
 	ackRecord.DeliveryState = SignAttemptDeliveryState{Acks: []tss.BroadcastAck{ack.Clone()}}
-	if err := validateSignAttemptRecord(ackRecord); err != nil {
+	if err := ackRecord.Validate(); err != nil {
 		return err
 	}
 	objectPath, err := s.writeEncryptedObject(ackRecord, "delivery-ack")
@@ -437,7 +437,7 @@ func (s *FileSignAttemptStore) persistDeliveryCertificate(ctx context.Context, b
 		Certificate:      cert.Clone(),
 		DeliveryComplete: true,
 	}
-	if err := validateSignAttemptRecord(certRecord); err != nil {
+	if err := certRecord.Validate(); err != nil {
 		return err
 	}
 	objectPath, err := s.writeEncryptedObject(certRecord, "delivery-certificate")

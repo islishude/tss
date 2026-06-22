@@ -218,7 +218,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		publicKey:  []byte{0x02, 0x02},
 		keygenHash: []byte{0x10, 0x11},
 		signers:    tss.NewPartySet(1, 2),
-		context: PresignContext{KeyID: "key", ChainID: "chain", Derivation: tss.DerivationRequest{
+		context: tss.SigningContext{KeyID: "key", ChainID: "chain", Derivation: tss.DerivationRequest{
 			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
 			Path:         tss.DerivationPath{1, 2},
 			ResolvedPath: tss.DerivationPath{1, 2},
@@ -262,7 +262,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presignTranscript: []byte{0x45, 0x46},
 		contextHash:       []byte{0x50, 0x51},
 		digest:            []byte{0x60, 0x61},
-		request: SignRequest{Context: PresignContext{Derivation: tss.DerivationRequest{
+		request: SignRequest{Context: tss.SigningContext{Derivation: tss.DerivationRequest{
 			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
 			Path:         tss.DerivationPath{3, 4},
 			ResolvedPath: tss.DerivationPath{3, 4},

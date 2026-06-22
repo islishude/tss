@@ -33,9 +33,6 @@ const (
 	DefaultSignAttemptStoreTimeout = 5 * time.Second
 )
 
-// PresignContext binds a presignature to the signing context where it may be consumed.
-type PresignContext = tss.SigningContext
-
 // ErrSignAttemptNotFound reports that no durable attempt exists for a presign.
 var ErrSignAttemptNotFound = errors.New("sign attempt not found")
 
@@ -81,9 +78,9 @@ type SignAttemptStore interface {
 // SignRequest is the context-bound online signing request for a persisted
 // presignature. Message is hashed with the presign context before ECDSA.
 type SignRequest struct {
-	Context      PresignContext   `json:"context"`
-	Message      []byte           `json:"message"`
-	AttemptStore SignAttemptStore `json:"-"` // required durable attempt/outbox store
+	Context      tss.SigningContext `json:"context"`
+	Message      []byte             `json:"message"`
+	AttemptStore SignAttemptStore   `json:"-"` // required durable attempt/outbox store
 
 	// DurableStoreTimeout bounds durable commit/completion work after local
 	// validation. Zero selects DefaultSignAttemptStoreTimeout.
@@ -125,7 +122,7 @@ type presignState struct {
 	ChiShare             *secret.Scalar             `wire:"7,custom,len=32"`                 // Local chi-share secret used once during online signing.
 	DeltaAggregate       *secret.Scalar             `wire:"8,custom,len=32"`                 // Aggregate delta reconstructed from every signer's round-3 share.
 	TranscriptHash       []byte                     `wire:"9,bytes,len=32"`                  // Cross-party presign transcript hash.
-	Context              PresignContext             `wire:"10,nested"`                       // Normalized context bound before online signing.
+	Context              tss.SigningContext         `wire:"10,nested"`                       // Normalized context bound before online signing.
 	ContextHash          []byte                     `wire:"11,bytes,len=32"`                 // Hash of context, used to reject cross-context reuse.
 	Consumed             AtomicBoolWire             `wire:"12,custom,len=1"`                 // Shared in-process one-use marker across shallow copies.
 	PublicKey            *secp.Point                `wire:"13,custom,len=33"`                // Parent group public key before request-time HD derivation.
@@ -408,7 +405,7 @@ type PresignSession struct {
 	limits         Limits                // Local fail-closed resource policy.
 	securityParams SecurityParams        // Cryptographic profile inherited from the key share.
 	signers        tss.PartySet          // Canonical signer set participating in this presign.
-	context        PresignContext        // Normalized context bound to the resulting presign.
+	context        tss.SigningContext    // Normalized context bound to the resulting presign.
 	contextHash    []byte                // Hash of context; echoed through presign/sign validation.
 	derivation     *tss.DerivationResult // Resolved child key/path; destroyed if the session aborts.
 	planHash       []byte                // Digest every presign round payload must echo.

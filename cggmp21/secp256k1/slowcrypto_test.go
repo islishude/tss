@@ -333,7 +333,7 @@ func slowCryptoKeygenWithPlanOption(t *testing.T, threshold, n int, option Keyge
 }
 
 // slowCryptoPresignWithContext runs presign with explicit context and production params.
-func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx PresignContext) map[tss.PartyID]*Presign {
+func slowCryptoPresignWithContext(t *testing.T, shares map[tss.PartyID]*KeyShare, signers tss.PartySet, ctx tss.SigningContext) map[tss.PartyID]*Presign {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {

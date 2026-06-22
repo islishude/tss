@@ -340,7 +340,7 @@ type presignPlanState struct {
 	publicKey   []byte                // Parent group public key before request-time HD derivation.
 	keygenHash  []byte                // Transcript hash of the keygen that produced publicKey and parties.
 	signers     tss.PartySet          // Canonical subset allowed to contribute to this presign.
-	context     PresignContext        // Normalized signing context after path resolution.
+	context     tss.SigningContext    // Normalized signing context after path resolution.
 	contextHash []byte                // Canonical hash of context, used to bind the presign across phases.
 	derivation  *tss.DerivationResult // Resolved child key/path; ChildPublicKey is the verification key.
 }
@@ -360,7 +360,7 @@ type PresignPlanSnapshot struct {
 	PublicKey            []byte
 	KeygenTranscriptHash []byte
 	Signers              tss.PartySet
-	Context              PresignContext
+	Context              tss.SigningContext
 	ContextHash          []byte
 	Derivation           *tss.DerivationResult
 	VerificationKey      []byte
@@ -389,7 +389,7 @@ type PresignPlanOption struct {
 	Key            *KeyShare
 	SessionID      tss.SessionID
 	Signers        tss.PartySet
-	Context        PresignContext
+	Context        tss.SigningContext
 	Limits         *Limits
 	SecurityParams *SecurityParams
 }

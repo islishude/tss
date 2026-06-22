@@ -13,21 +13,21 @@ import (
 )
 
 // Sign runs an in-memory presign and signing exchange for a context-bound message.
-func Sign(message []byte, signers []*KeyShare, ctx PresignContext) ([]byte, *Signature, error) {
+func Sign(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, *Signature, error) {
 	return signWithDigest(message, signers, ctx, false, DefaultLimits())
 }
 
 // SignDigestInteractive runs a full interactive signing exchange for a raw
 // digest after binding ctx before nonce generation. It does not return or
 // persist a reusable Presign.
-func SignDigestInteractive(digest32 []byte, signers []*KeyShare, ctx PresignContext) ([]byte, *Signature, error) {
+func SignDigestInteractive(digest32 []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, *Signature, error) {
 	if len(digest32) != sha256.Size {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
 	return signWithDigest(digest32, signers, ctx, true, DefaultLimits())
 }
 
-func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDigest bool, limits Limits) ([]byte, *Signature, error) {
+func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, rawDigest bool, limits Limits) ([]byte, *Signature, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}

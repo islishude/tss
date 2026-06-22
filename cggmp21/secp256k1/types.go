@@ -154,7 +154,7 @@ type PresignPublicMetadata struct {
 	R                    []byte
 	LittleR              []byte
 	TranscriptHash       []byte
-	Context              PresignContext
+	Context              tss.SigningContext
 	ContextHash          []byte
 	Derivation           *tss.DerivationResult
 	VerificationKey      []byte

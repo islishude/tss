@@ -41,7 +41,7 @@ type exampleKeygenJob struct {
 
 type examplePresignJob struct {
 	run     exampleProtocolRun
-	context cggmp.PresignContext
+	context tss.SigningContext
 }
 
 type exampleSignJob struct {
@@ -335,7 +335,7 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 	return shares, nil
 }
 
-func newExampleCGGMPPresignJob(signers tss.PartySet, ctx cggmp.PresignContext) (examplePresignJob, error) {
+func newExampleCGGMPPresignJob(signers tss.PartySet, ctx tss.SigningContext) (examplePresignJob, error) {
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		return examplePresignJob{}, err
@@ -381,7 +381,7 @@ func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare,
 func runExampleCGGMPPresign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
 	signers tss.PartySet,
-	ctx cggmp.PresignContext,
+	ctx tss.SigningContext,
 ) (map[tss.PartyID]*cggmp.Presign, error) {
 	job, err := newExampleCGGMPPresignJob(signers, ctx)
 	if err != nil {
@@ -534,8 +534,8 @@ func newExampleFileSignAttemptStore() (*cggmp.FileSignAttemptStore, func(), erro
 	}, nil
 }
 
-func examplePresignContext() cggmp.PresignContext {
-	return cggmp.PresignContext{
+func examplePresignContext() tss.SigningContext {
+	return tss.SigningContext{
 		KeyID:         "example-key",
 		ChainID:       "example-chain",
 		Derivation:    tss.DerivationRequest{Scheme: tss.DerivationSchemeBIP32Secp256k1},

@@ -18,13 +18,13 @@ func TestPresignContextRejectsReuseAcrossBoundDomains(t *testing.T) {
 
 	for _, tc := range []struct {
 		name   string
-		mutate func(*PresignContext)
+		mutate func(*tss.SigningContext)
 	}{
-		{name: "key id", mutate: func(c *PresignContext) { c.KeyID = "other-key" }},
-		{name: "chain id", mutate: func(c *PresignContext) { c.ChainID = "other-chain" }},
-		{name: "derivation path", mutate: func(c *PresignContext) { c.Derivation.Path = tss.DerivationPath{1} }},
-		{name: "policy domain", mutate: func(c *PresignContext) { c.PolicyDomain = "other-policy" }},
-		{name: "message domain", mutate: func(c *PresignContext) { c.MessageDomain = "other-message" }},
+		{name: "key id", mutate: func(c *tss.SigningContext) { c.KeyID = "other-key" }},
+		{name: "chain id", mutate: func(c *tss.SigningContext) { c.ChainID = "other-chain" }},
+		{name: "derivation path", mutate: func(c *tss.SigningContext) { c.Derivation.Path = tss.DerivationPath{1} }},
+		{name: "policy domain", mutate: func(c *tss.SigningContext) { c.PolicyDomain = "other-policy" }},
+		{name: "message domain", mutate: func(c *tss.SigningContext) { c.MessageDomain = "other-message" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			requestCtx := ctx.Clone()

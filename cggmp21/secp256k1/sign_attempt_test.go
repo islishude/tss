@@ -727,7 +727,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 	}
 	record.IntentHash = signAttemptIntentHash(record)
 	record.AttemptHash = signAttemptHash(record)
-	if err := validateSignAttemptRecord(record); err != nil {
+	if err := record.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	return record
@@ -761,7 +761,7 @@ func sameIntentDifferentAttemptRecord(t testing.TB, record SignAttemptRecord) Si
 	if !bytes.Equal(out.IntentHash, record.IntentHash) {
 		t.Fatal("helper changed intent hash")
 	}
-	if err := validateSignAttemptRecord(out); err != nil {
+	if err := out.Validate(); err != nil {
 		t.Fatal(err)
 	}
 	return out

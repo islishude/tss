@@ -79,7 +79,7 @@ func TestFast_SignAttemptResultRejectsHighS(t *testing.T) {
 			RecoveryID: 0,
 		},
 	}
-	if err := result.validate(); err == nil {
+	if err := result.Validate(); err == nil {
 		t.Fatal("sign attempt result accepted high-S signature")
 	}
 }

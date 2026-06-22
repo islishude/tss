@@ -11,7 +11,7 @@ import (
 	"github.com/islishude/tss/internal/transcript"
 )
 
-func validatePresignContext(ctx PresignContext) error {
+func validatePresignContext(ctx tss.SigningContext) error {
 	if err := ctx.Validate(); err != nil {
 		return err
 	}
@@ -21,22 +21,22 @@ func validatePresignContext(ctx PresignContext) error {
 	return nil
 }
 
-func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, []byte, *tss.DerivationResult, error) {
+func preparePresignContext(key *KeyShare, ctx tss.SigningContext) (tss.SigningContext, []byte, *tss.DerivationResult, error) {
 	if err := validatePresignContext(ctx); err != nil {
-		return PresignContext{}, nil, nil, err
+		return tss.SigningContext{}, nil, nil, err
 	}
 	if key == nil || key.state == nil {
-		return PresignContext{}, nil, nil, errors.New("nil key share")
+		return tss.SigningContext{}, nil, nil, errors.New("nil key share")
 	}
 	derivation, err := key.Derive(
 		ctx.Derivation.Path,
 		tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode),
 	)
 	if err != nil {
-		return PresignContext{}, nil, nil, err
+		return tss.SigningContext{}, nil, nil, err
 	}
 	if len(ctx.Derivation.ResolvedPath) > 0 && !slices.Equal(ctx.Derivation.ResolvedPath, derivation.ResolvedPath) {
-		return PresignContext{}, nil, nil, errors.New("presign context resolved path mismatch")
+		return tss.SigningContext{}, nil, nil, errors.New("presign context resolved path mismatch")
 	}
 	ctx = ctx.Clone()
 	ctx.Derivation.Path = derivation.RequestedPath.Clone()
@@ -44,7 +44,7 @@ func preparePresignContext(key *KeyShare, ctx PresignContext) (PresignContext, [
 	return ctx, presignContextHash(ctx), derivation.Clone(), nil
 }
 
-func presignContextHash(ctx PresignContext) []byte {
+func presignContextHash(ctx tss.SigningContext) []byte {
 	resolvedPath := ctx.Derivation.ResolvedPath
 	if len(resolvedPath) == 0 {
 		resolvedPath = ctx.Derivation.Path
