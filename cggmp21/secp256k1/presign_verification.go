@@ -22,12 +22,12 @@ type presignVerificationContext struct {
 }
 
 type presignVerificationEntry struct {
-	Party             tss.PartyID   `wire:"1,u32"`
-	Gamma             []byte        `wire:"2,bytes,max_bytes=point"`
-	EncK              []byte        `wire:"3,bytes,max_bytes=paillier_ciphertext"`
-	PaillierPublicKey pai.PublicKey `wire:"4,nested,max_bytes=paillier_public_key"`
-	XBarPoint         *secp.Point   `wire:"5,custom,len=33"`
-	Delta             secp.Scalar   `wire:"6,custom,len=32"`
+	Party             tss.PartyID    `wire:"1,u32"`
+	Gamma             []byte         `wire:"2,bytes,max_bytes=point"`
+	EncK              []byte         `wire:"3,bytes,max_bytes=paillier_ciphertext"`
+	PaillierPublicKey *pai.PublicKey `wire:"4,nested,max_bytes=paillier_public_key"`
+	XBarPoint         *secp.Point    `wire:"5,custom,len=33"`
+	Delta             *secp.Scalar   `wire:"6,custom,len=32"`
 }
 
 func (v presignVerificationContext) clone() presignVerificationContext {
@@ -43,17 +43,18 @@ func (v presignVerificationContext) clone() presignVerificationContext {
 }
 
 func (e presignVerificationEntry) clone() presignVerificationEntry {
-	var publicKey pai.PublicKey
-	if cloned := e.PaillierPublicKey.Clone(); cloned != nil {
-		publicKey = *cloned
+	var delta *secp.Scalar
+	if e.Delta != nil {
+		cloned := *e.Delta
+		delta = &cloned
 	}
 	return presignVerificationEntry{
 		Party:             e.Party,
 		Gamma:             bytes.Clone(e.Gamma),
 		EncK:              bytes.Clone(e.EncK),
-		PaillierPublicKey: publicKey,
+		PaillierPublicKey: e.PaillierPublicKey.Clone(),
 		XBarPoint:         secp.Clone(e.XBarPoint),
-		Delta:             e.Delta,
+		Delta:             delta,
 	}
 }
 
@@ -65,9 +66,11 @@ func (v *presignVerificationContext) destroy() {
 	for i := range v.Entries {
 		clear(v.Entries[i].Gamma)
 		clear(v.Entries[i].EncK)
-		secret.ClearBigInt(v.Entries[i].PaillierPublicKey.N)
-		secret.ClearBigInt(v.Entries[i].PaillierPublicKey.G)
-		secret.ClearBigInt(v.Entries[i].PaillierPublicKey.NSquared)
+		if v.Entries[i].PaillierPublicKey != nil {
+			secret.ClearBigInt(v.Entries[i].PaillierPublicKey.N)
+			secret.ClearBigInt(v.Entries[i].PaillierPublicKey.G)
+			secret.ClearBigInt(v.Entries[i].PaillierPublicKey.NSquared)
+		}
 		v.Entries[i] = presignVerificationEntry{}
 	}
 	v.Entries = nil
@@ -104,16 +107,19 @@ func validatePresignVerificationContext(signers tss.PartySet, context presignVer
 		if len(entry.EncK) > limits.Paillier.MaxCiphertextBytes {
 			return fmt.Errorf("presign verification EncK too large: %d > %d", len(entry.EncK), limits.Paillier.MaxCiphertextBytes)
 		}
-		if err := validatePaillierPublicKeyWithLimits(&entry.PaillierPublicKey, limits); err != nil {
+		if err := validatePaillierPublicKeyWithLimits(entry.PaillierPublicKey, limits); err != nil {
 			return fmt.Errorf("invalid presign verification Paillier key for party %d: %w", entry.Party, err)
 		}
 		if _, err := secp.PointBytes(entry.XBarPoint); err != nil {
 			return fmt.Errorf("invalid presign verification XBarPoint for party %d: %w", entry.Party, err)
 		}
+		if entry.Delta == nil {
+			return fmt.Errorf("nil presign verification delta for party %d", entry.Party)
+		}
 		if entry.Delta.IsZero() {
 			return fmt.Errorf("invalid zero presign verification delta for party %d", entry.Party)
 		}
-		publicKeyBytes, err := canonicalWireMessageBytes(&entry.PaillierPublicKey, limits)
+		publicKeyBytes, err := canonicalWireMessageBytes(entry.PaillierPublicKey, limits)
 		if err != nil {
 			return fmt.Errorf("encode presign verification Paillier key for party %d: %w", entry.Party, err)
 		}
@@ -140,7 +146,7 @@ func presignRound1EchoFromState(state *presignState, limits Limits) ([]byte, err
 	t.AppendBytes("additive_shift", state.Derivation.AdditiveShift)
 	for i := range state.Verification.Entries {
 		entry := &state.Verification.Entries[i]
-		paillierPublicKeyBytes, err := canonicalWireMessageBytes(&entry.PaillierPublicKey, limits)
+		paillierPublicKeyBytes, err := canonicalWireMessageBytes(entry.PaillierPublicKey, limits)
 		if err != nil {
 			return nil, fmt.Errorf("encode Paillier key for party %d: %w", entry.Party, err)
 		}
@@ -193,6 +199,9 @@ func presignTranscriptHashFromState(state *presignState, _ Limits) ([]byte, erro
 		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", entry.Gamma)
 		t.AppendBytes("enc_k", entry.EncK)
+		if entry.Delta == nil {
+			return nil, fmt.Errorf("nil presign verification delta for party %d", id)
+		}
 		t.AppendBytes("delta_share", entry.Delta.Bytes())
 		t.AppendBytes("k_point", kPointBytes)
 		t.AppendBytes("chi_point", chiPointBytes)
@@ -241,7 +250,7 @@ func (p *Presign) VerifyCryptographicMaterialWithLimits(limits Limits) error {
 		if err != nil {
 			return err
 		}
-		paillierPublicKey, err := canonicalWireMessageBytes(&entry.PaillierPublicKey, limits)
+		paillierPublicKey, err := canonicalWireMessageBytes(entry.PaillierPublicKey, limits)
 		if err != nil {
 			return err
 		}
@@ -298,7 +307,10 @@ func (p *Presign) VerifyCryptographicMaterialWithLimits(limits Limits) error {
 	gammaPoints := make([]*secp.Point, 0, len(p.state.Verification.Entries))
 	for i := range p.state.Verification.Entries {
 		entry := &p.state.Verification.Entries[i]
-		deltaSum = secp.ScalarAdd(deltaSum, entry.Delta)
+		if entry.Delta == nil {
+			return fmt.Errorf("nil presign verification delta for party %d", entry.Party)
+		}
+		deltaSum = secp.ScalarAdd(deltaSum, *entry.Delta)
 		gammaPoint, err := secp.PointFromBytes(entry.Gamma)
 		if err != nil {
 			return err

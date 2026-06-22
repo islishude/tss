@@ -198,8 +198,8 @@ func TestCGGMP21PresignRound3PrepareDoesNotMutateAndDestroysStagedSecrets(t *tes
 			if !bytes.Equal(left.round1.payload.EncK, right.round1.payload.EncK) {
 				t.Fatalf("round1 EncK differs for party %d", id)
 			}
-			leftPK, _ := canonicalWireMessageBytes(&left.round1.payload.PaillierPublicKey, s1.limits)
-			rightPK, _ := canonicalWireMessageBytes(&right.round1.payload.PaillierPublicKey, s2.limits)
+			leftPK, _ := canonicalWireMessageBytes(left.round1.payload.PaillierPublicKey, s1.limits)
+			rightPK, _ := canonicalWireMessageBytes(right.round1.payload.PaillierPublicKey, s2.limits)
 			if !bytes.Equal(leftPK, rightPK) {
 				t.Fatalf("round1 Paillier key differs for party %d", id)
 			}

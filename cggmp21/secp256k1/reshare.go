@@ -281,7 +281,7 @@ func startReshareSession(oldKey *KeyShare, plan *ResharePlan, local tss.LocalCon
 		if err != nil {
 			return nil, nil, err
 		}
-		receiverEnv, err := newEnvelope(s.receiverConfig(), 1, s.selfID, tss.BroadcastPartyId, payloadReshareReceiverMaterial, payload)
+		receiverEnv, err := newEnvelope(s.receiverConfig(), reshareStartRound, s.selfID, tss.BroadcastPartyId, payloadReshareReceiverMaterial, payload)
 		if err != nil {
 			return nil, nil, err
 		}

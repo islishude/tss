@@ -114,7 +114,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 		return signVerifyShare{}, fmt.Errorf("missing presign round1 state for party %d", from)
 	}
 	round1From := fromState.round1.payload
-	paillierPublicKeyBytes, err := canonicalWireMessageBytes(&round1From.PaillierPublicKey, s.limits)
+	paillierPublicKeyBytes, err := canonicalWireMessageBytes(round1From.PaillierPublicKey, s.limits)
 	if err != nil {
 		return signVerifyShare{}, err
 	}
@@ -583,9 +583,9 @@ func (s *PresignSession) buildPresignVerificationContext() (presignVerificationC
 			Party:             id,
 			Gamma:             bytes.Clone(state.round1.payload.Gamma),
 			EncK:              bytes.Clone(state.round1.payload.EncK),
-			PaillierPublicKey: *state.round1.payload.PaillierPublicKey.Clone(),
+			PaillierPublicKey: state.round1.payload.PaillierPublicKey.Clone(),
 			XBarPoint:         secp.ScalarMult(verificationPoint, lambda),
-			Delta:             delta,
+			Delta:             &delta,
 		})
 	}
 	return context, nil
@@ -656,7 +656,7 @@ func (s *PresignSession) round1Echo() []byte {
 		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", p.Gamma)
 		t.AppendBytes("enc_k", p.EncK)
-		paillierPublicKeyBytes, _ := canonicalWireMessageBytes(&p.PaillierPublicKey, s.limits)
+		paillierPublicKeyBytes, _ := canonicalWireMessageBytes(p.PaillierPublicKey, s.limits)
 		t.AppendBytes("paillier_public_key", paillierPublicKeyBytes)
 	}
 	return t.Sum()

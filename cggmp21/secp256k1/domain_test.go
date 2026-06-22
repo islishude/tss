@@ -104,7 +104,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startDomain, err := mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, &round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
+	startDomain, err := mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,20 +113,20 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	}
 	mutatedKey := cloneKeyShareValue(shares[1])
 	mutatedKey.state.KeygenTranscriptHash[0] ^= 1
-	mutatedDomain, err := mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, &round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
+	mutatedDomain, err := mtaStartProofDomain(mutatedKey, sessionID, signers, 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
 	if err := mta.VerifyStart(s1.securityParams, mutatedDomain, startFrom2, pk2, rp1, &round1ProofFrom2.EncKProof); err == nil {
 		t.Fatal("MtA start proof verified under mutated key context")
 	}
-	mutatedSignersDomain, err := mtaStartProofDomain(shares[1], sessionID, tss.NewPartySet(1, 2, 3), 2, 1, &round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
+	mutatedSignersDomain, err := mtaStartProofDomain(shares[1], sessionID, tss.NewPartySet(1, 2, 3), 2, 1, round1From2.PaillierPublicKey, s1.contextHash, s1.planHash, testLimits())
 	if err == nil && mta.VerifyStart(s1.securityParams, mutatedSignersDomain, startFrom2, pk2, rp1, &round1ProofFrom2.EncKProof) == nil {
 		t.Fatal("MtA start proof verified under mutated signer set")
 	}
 	wrongContextHash := slices.Clone(s1.contextHash)
 	wrongContextHash[0] ^= 1
-	wrongContextDomain, err := mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, &round1From2.PaillierPublicKey, wrongContextHash, s1.planHash, testLimits())
+	wrongContextDomain, err := mtaStartProofDomain(shares[1], sessionID, signers, 2, 1, round1From2.PaillierPublicKey, wrongContextHash, s1.planHash, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

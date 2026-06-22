@@ -142,11 +142,11 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	out := make([]tss.Envelope, 0, len(config.Parties))
 	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:        commitments,
-		PaillierPublicKey:  paillierKey.PublicKey,
-		PaillierProof:      *modProof,
+		PaillierPublicKey:  &paillierKey.PublicKey,
+		PaillierProof:      modProof,
 		ChainCodeCommit:    chainCodeCommit,
-		RingPedersenParams: *ringPedersenParams,
-		RingPedersenProof:  *ringPedersenProof,
+		RingPedersenParams: ringPedersenParams,
+		RingPedersenProof:  ringPedersenProof,
 		PlanHash:           planHash,
 	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
@@ -231,12 +231,12 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(keygenCommitmentsHashLabel, p.Commitments)),
 		)
 	}
-	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
+	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}
-	pk := &p.PaillierPublicKey
-	proof := &p.PaillierProof
+	pk := p.PaillierPublicKey
+	proof := p.PaillierProof
 	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return nil, verificationErrorWithEvidence(
 			env,
@@ -267,7 +267,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			observedPaillierKeyHash,
 		)
 	}
-	ringParams := &p.RingPedersenParams
+	ringParams := p.RingPedersenParams
 	if ringParams.N.Cmp(pk.N) != 0 {
 		return nil, verificationErrorWithEvidence(
 			env,
@@ -279,7 +279,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			observedPaillierKeyHash,
 		)
 	}
-	ringProof := &p.RingPedersenProof
+	ringProof := p.RingPedersenProof
 	ringDomain, err := keygenRingPedersenDomain(s.cfg, env.From, ringParams, s.planHash, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)

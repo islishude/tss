@@ -173,16 +173,16 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	commitPayload, err := (refreshCommitmentsPayload{
 		Commitments:        commitments,
-		PaillierPublicKey:  newPaillierKey.PublicKey,
-		PaillierProof:      *modProof,
-		RingPedersenParams: *ringPedersenParams,
-		RingPedersenProof:  *ringPedersenProof,
+		PaillierPublicKey:  &newPaillierKey.PublicKey,
+		PaillierProof:      modProof,
+		RingPedersenParams: ringPedersenParams,
+		RingPedersenProof:  ringPedersenProof,
 		PlanHash:           planHash,
 	}).MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := newEnvelope(config, 1, oldKey.state.Party, tss.BroadcastPartyId, payloadRefreshCommitments, commitPayload)
+	commitEnv, err := newEnvelope(config, refreshStartRound, oldKey.state.Party, tss.BroadcastPartyId, payloadRefreshCommitments, commitPayload)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -200,7 +200,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		if err != nil {
 			return nil, nil, err
 		}
-		shareEnv, err := newEnvelope(config, 1, oldKey.state.Party, id, payloadRefreshShare, payload)
+		shareEnv, err := newEnvelope(config, refreshStartRound, oldKey.state.Party, id, payloadRefreshShare, payload)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -276,7 +276,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if pd.commitments != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate refresh commitments"))
 		}
-		p, err := tss.DecodeBinaryValueWithLimits[refreshCommitmentsPayload](env.Payload, s.limits)
+		p, err := tss.DecodeBinaryWithLimits[refreshCommitmentsPayload](env.Payload, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 		}
@@ -286,12 +286,12 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 		if err := validateRefreshCommitments(p.Commitments, s.cfg.Threshold); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
+		observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 		}
-		pk := &p.PaillierPublicKey
-		proof := &p.PaillierProof
+		pk := p.PaillierPublicKey
+		proof := p.PaillierProof
 		if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 			return nil, verificationErrorWithEvidence(
 				env,
@@ -318,7 +318,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				observedPaillierKeyHash,
 			)
 		}
-		ringParams := &p.RingPedersenParams
+		ringParams := p.RingPedersenParams
 		if ringParams.N.Cmp(pk.N) != 0 {
 			return nil, verificationErrorWithEvidence(
 				env,
@@ -330,7 +330,7 @@ func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss
 				observedPaillierKeyHash,
 			)
 		}
-		ringProof := &p.RingPedersenProof
+		ringProof := p.RingPedersenProof
 		ringDomain, err := refreshRingPedersenDomain(s.cfg, env.From, ringParams, s.planHash, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)

@@ -78,7 +78,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		return nil, err
 	}
 	dealerConfig := s.dealerConfig()
-	dealerEnv, err := newEnvelope(dealerConfig, 1, s.selfID, tss.BroadcastPartyId, payloadReshareDealerCommitments, payload)
+	dealerEnv, err := newEnvelope(dealerConfig, reshareStartRound, s.selfID, tss.BroadcastPartyId, payloadReshareDealerCommitments, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -103,7 +103,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		shareEnv, err := newEnvelope(dealerConfig, 1, s.selfID, id, payloadReshareShare, sharePayload)
+		shareEnv, err := newEnvelope(dealerConfig, reshareStartRound, s.selfID, id, payloadReshareShare, sharePayload)
 		if err != nil {
 			return nil, err
 		}

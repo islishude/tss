@@ -531,9 +531,11 @@ func (r *presignRound1State) destroy() {
 	}
 	clear(r.payload.Gamma)
 	clear(r.payload.EncK)
-	secret.ClearBigInt(r.payload.PaillierPublicKey.N)
-	secret.ClearBigInt(r.payload.PaillierPublicKey.G)
-	secret.ClearBigInt(r.payload.PaillierPublicKey.NSquared)
+	if r.payload.PaillierPublicKey != nil {
+		secret.ClearBigInt(r.payload.PaillierPublicKey.N)
+		secret.ClearBigInt(r.payload.PaillierPublicKey.G)
+		secret.ClearBigInt(r.payload.PaillierPublicKey.NSquared)
+	}
 	clear(r.proof.PublicRound1Hash)
 	clearEncProof(&r.proof.EncKProof)
 	*r = presignRound1State{}
@@ -615,10 +617,10 @@ func (s *SignSession) abort() {
 }
 
 type presignRound1Payload struct {
-	Gamma             []byte        `json:"gamma" wire:"1,bytes,max_bytes=point"`
-	EncK              []byte        `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
-	PaillierPublicKey pai.PublicKey `json:"paillier_public_key" wire:"3,nested,max_bytes=paillier_public_key"`
-	PlanHash          []byte        `json:"plan_hash" wire:"4,bytes,len=32"`
+	Gamma             []byte         `json:"gamma" wire:"1,bytes,max_bytes=point"`
+	EncK              []byte         `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
+	PaillierPublicKey *pai.PublicKey `json:"paillier_public_key" wire:"3,nested,max_bytes=paillier_public_key"`
+	PlanHash          []byte         `json:"plan_hash" wire:"4,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1Payload.

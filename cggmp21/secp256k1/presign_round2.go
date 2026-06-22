@@ -145,15 +145,15 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		}
 		peerRound1 := peerState.round1.payload
 		start := mta.StartMessage{Ciphertext: peerRound1.EncK}
-		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		startProofDomain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}
-		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}
-		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, &peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+		sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, peer, s.key.state.Party, peerRound1.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 		if err != nil {
 			return nil, false, err
 		}

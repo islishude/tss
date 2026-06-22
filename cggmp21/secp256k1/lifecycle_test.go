@@ -142,10 +142,11 @@ func testAffGProof(seed int64) zkpai.AffGProof {
 // and abort cleanup.
 func newTestPresignSession(t *testing.T) *PresignSession {
 	t.Helper()
+	paillierPublicKey := testPaillierPublicKey(600)
 	party := presignPartyState{
 		id: 2,
 		round1: presignRound1State{
-			payload:       presignRound1Payload{Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: testPaillierPublicKey(600)},
+			payload:       presignRound1Payload{Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: &paillierPublicKey},
 			havePayload:   true,
 			proof:         presignRound1ProofPayload{PublicRound1Hash: []byte{0xdd}, EncKProof: testEncProof(700)},
 			proofEnvelope: tss.Envelope{},

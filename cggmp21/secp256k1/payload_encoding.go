@@ -123,13 +123,25 @@ func (p keygenCommitmentsPayload) Validate() error {
 	if err := validateCommitmentPoints(p.Commitments); err != nil {
 		return err
 	}
+	if p.PaillierPublicKey == nil {
+		return errors.New("nil Paillier public key")
+	}
+	if p.PaillierProof == nil {
+		return errors.New("nil Paillier proof")
+	}
 	if err := p.PaillierProof.Validate(); err != nil {
 		return err
+	}
+	if p.RingPedersenParams == nil {
+		return errors.New("nil Ring-Pedersen parameters")
+	}
+	if p.RingPedersenProof == nil {
+		return errors.New("nil Ring-Pedersen proof")
 	}
 	if err := p.RingPedersenProof.Validate(); err != nil {
 		return err
 	}
-	if len(p.ChainCodeCommit) != 32 {
+	if len(p.ChainCodeCommit) != sha256.Size {
 		return errors.New("chain code must be 32 bytes")
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -143,10 +155,10 @@ func (p keygenCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if err := validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits); err != nil {
+	if err := validatePaillierPublicKeyWithLimits(p.PaillierPublicKey, limits); err != nil {
 		return err
 	}
-	if err := validateRingPedersenParamsWithLimits(&p.RingPedersenParams, limits); err != nil {
+	if err := validateRingPedersenParamsWithLimits(p.RingPedersenParams, limits); err != nil {
 		return err
 	}
 	return nil
@@ -211,6 +223,9 @@ func (p presignRound1Payload) Validate() error {
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return err
 	}
+	if p.PaillierPublicKey == nil {
+		return errors.New("nil Paillier public key")
+	}
 	if len(p.PlanHash) != sha256.Size {
 		return errors.New("presign round1 plan hash must be 32 bytes")
 	}
@@ -222,7 +237,7 @@ func (p presignRound1Payload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	return validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits)
+	return validatePaillierPublicKeyWithLimits(p.PaillierPublicKey, limits)
 }
 
 // MarshalBinary encodes the presign round-one proof payload.
@@ -539,12 +554,12 @@ func (p reshareReceiverMaterialPayload) ValidateWithLimits(limits Limits) error 
 }
 
 type refreshCommitmentsPayload struct {
-	Commitments        [][]byte                 `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PaillierPublicKey  pai.PublicKey            `wire:"2,nested,max_bytes=paillier_public_key"`
-	PaillierProof      zkpai.ModulusProof       `wire:"3,nested,max_bytes=zk_proof"`
-	RingPedersenParams zkpai.RingPedersenParams `wire:"4,nested,max_bytes=ring_pedersen_params"`
-	RingPedersenProof  zkpai.RingPedersenProof  `wire:"5,nested,max_bytes=paillier_proof"`
-	PlanHash           []byte                   `wire:"6,bytes,len=32"`
+	Commitments        [][]byte                  `wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PaillierPublicKey  *pai.PublicKey            `wire:"2,nested,max_bytes=paillier_public_key"`
+	PaillierProof      *zkpai.ModulusProof       `wire:"3,nested,max_bytes=zk_proof"`
+	RingPedersenParams *zkpai.RingPedersenParams `wire:"4,nested,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  *zkpai.RingPedersenProof  `wire:"5,nested,max_bytes=paillier_proof"`
+	PlanHash           []byte                    `wire:"6,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for refreshCommitmentsPayload.
@@ -591,8 +606,20 @@ func (p refreshCommitmentsPayload) Validate() error {
 	if err := validateRefreshCommitments(p.Commitments, len(p.Commitments)); err != nil {
 		return err
 	}
+	if p.PaillierPublicKey == nil {
+		return errors.New("nil Paillier public key")
+	}
+	if p.PaillierProof == nil {
+		return errors.New("nil Paillier proof")
+	}
 	if err := p.PaillierProof.Validate(); err != nil {
 		return err
+	}
+	if p.RingPedersenParams == nil {
+		return errors.New("nil Ring-Pedersen parameters")
+	}
+	if p.RingPedersenProof == nil {
+		return errors.New("nil Ring-Pedersen proof")
 	}
 	if err := p.RingPedersenProof.Validate(); err != nil {
 		return err
@@ -608,10 +635,10 @@ func (p refreshCommitmentsPayload) ValidateWithLimits(limits Limits) error {
 	if err := p.Validate(); err != nil {
 		return err
 	}
-	if err := validatePaillierPublicKeyWithLimits(&p.PaillierPublicKey, limits); err != nil {
+	if err := validatePaillierPublicKeyWithLimits(p.PaillierPublicKey, limits); err != nil {
 		return err
 	}
-	if err := validateRingPedersenParamsWithLimits(&p.RingPedersenParams, limits); err != nil {
+	if err := validateRingPedersenParamsWithLimits(p.RingPedersenParams, limits); err != nil {
 		return err
 	}
 	return nil

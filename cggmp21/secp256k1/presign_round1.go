@@ -160,7 +160,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	presignPayload := presignRound1Payload{
 		Gamma:             gammaComm,
 		EncK:              slices.Clone(startOpening.Message.Ciphertext),
-		PaillierPublicKey: *paillierPub,
+		PaillierPublicKey: paillierPub,
 		PlanHash:          slices.Clone(planHash),
 	}
 	payload, err := presignPayload.MarshalBinaryWithLimits(limits)
@@ -385,7 +385,7 @@ func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acc
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 	publicHash, _ := presignRound1PublicHash(p, s.limits)
-	observedPaillierField, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
+	observedPaillierField, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
 	if err != nil {
 		observedPaillierField = rawEvidenceField(evidenceFieldObservedPaillierKeyHash, hashBytes(nil))
 	}
@@ -424,7 +424,7 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 	if err != nil {
 		return err
 	}
-	observedPKBytes, err := canonicalWireMessageBytes(&p.PaillierPublicKey, s.limits)
+	observedPKBytes, err := canonicalWireMessageBytes(p.PaillierPublicKey, s.limits)
 	if err != nil {
 		return err
 	}
@@ -455,7 +455,7 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 		return err
 	}
 	start := mta.StartMessage{Ciphertext: public.EncK}
-	domain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, &public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+	domain, err := mtaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		return err
 	}

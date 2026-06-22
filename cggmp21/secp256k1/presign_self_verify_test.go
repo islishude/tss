@@ -49,7 +49,7 @@ func TestThresholdECDSA_PresignCryptographicSelfVerificationTamperMatrix(t *test
 			return nil
 		}},
 		{name: "Paillier public key", mutate: func(p *Presign) error {
-			p.state.Verification.Entries[0].PaillierPublicKey = *p.state.Verification.Entries[1].PaillierPublicKey.Clone()
+			p.state.Verification.Entries[0].PaillierPublicKey = p.state.Verification.Entries[1].PaillierPublicKey.Clone()
 			return nil
 		}},
 		{name: "x bar point", mutate: func(p *Presign) error {
@@ -57,7 +57,8 @@ func TestThresholdECDSA_PresignCryptographicSelfVerificationTamperMatrix(t *test
 			return nil
 		}},
 		{name: "delta share", mutate: func(p *Presign) error {
-			p.state.Verification.Entries[0].Delta = secp.ScalarFromUint64(7)
+			delta := secp.ScalarFromUint64(7)
+			p.state.Verification.Entries[0].Delta = &delta
 			return nil
 		}},
 		{name: "K point", mutate: func(p *Presign) error {

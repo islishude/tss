@@ -572,6 +572,9 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 // wire-format testing. No keygen or Paillier crypto is performed.
 func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	one := secp.ScalarOne()
+	otherOne := one
+	paillier65 := testPaillierPublicKey(65)
+	paillier77 := testPaillierPublicKey(77)
 	RPoint := secp.ScalarBaseMult(one)
 	R, err := secp.PointBytes(RPoint)
 	if err != nil {
@@ -639,16 +642,16 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 				Party:             1,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
-				PaillierPublicKey: testPaillierPublicKey(65),
+				PaillierPublicKey: &paillier65,
 				XBarPoint:         secp.Clone(RPoint),
-				Delta:             one,
+				Delta:             &one,
 			}, {
 				Party:             2,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
-				PaillierPublicKey: testPaillierPublicKey(77),
+				PaillierPublicKey: &paillier77,
 				XBarPoint:         secp.Clone(RPoint),
-				Delta:             one,
+				Delta:             &otherOne,
 			}},
 		},
 		KShare:         kShare,

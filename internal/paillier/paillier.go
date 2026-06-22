@@ -4,6 +4,7 @@ import (
 	"errors"
 	"math/big"
 
+	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -33,22 +34,10 @@ func (pk *PublicKey) Clone() *PublicKey {
 	if pk == nil {
 		return nil
 	}
-	var n *big.Int
-	if pk.N != nil {
-		n = new(big.Int).Set(pk.N)
-	}
-	var g *big.Int
-	if pk.G != nil {
-		g = new(big.Int).Set(pk.G)
-	}
-	var ns *big.Int
-	if pk.NSquared != nil {
-		ns = new(big.Int).Set(pk.NSquared)
-	}
 	return &PublicKey{
-		N:        n,
-		G:        g,
-		NSquared: ns,
+		N:        tss.CloneBigInt(pk.N),
+		G:        tss.CloneBigInt(pk.G),
+		NSquared: tss.CloneBigInt(pk.NSquared),
 	}
 }
 

@@ -59,13 +59,13 @@ type KeygenSession struct {
 }
 
 type keygenCommitmentsPayload struct {
-	Commitments        [][]byte                 `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
-	PaillierPublicKey  pai.PublicKey            `json:"paillier_public_key" wire:"2,nested,max_bytes=paillier_public_key"`
-	PaillierProof      zkpai.ModulusProof       `json:"paillier_proof" wire:"3,nested,max_bytes=zk_proof"`
-	ChainCodeCommit    []byte                   `json:"chain_code_commit,omitempty" wire:"4,bytes,len=32"`
-	RingPedersenParams zkpai.RingPedersenParams `json:"ring_pedersen_params" wire:"5,nested,max_bytes=ring_pedersen_params"`
-	RingPedersenProof  zkpai.RingPedersenProof  `json:"ring_pedersen_proof" wire:"6,nested,max_bytes=paillier_proof"`
-	PlanHash           []byte                   `json:"plan_hash" wire:"7,bytes,len=32"`
+	Commitments        [][]byte                  `json:"commitments" wire:"1,byteslist,max_bytes=point,max_items=threshold"`
+	PaillierPublicKey  *pai.PublicKey            `json:"paillier_public_key" wire:"2,nested,max_bytes=paillier_public_key"`
+	PaillierProof      *zkpai.ModulusProof       `json:"paillier_proof" wire:"3,nested,max_bytes=zk_proof"`
+	ChainCodeCommit    []byte                    `json:"chain_code_commit,omitempty" wire:"4,bytes,len=32"`
+	RingPedersenParams *zkpai.RingPedersenParams `json:"ring_pedersen_params" wire:"5,nested,max_bytes=ring_pedersen_params"`
+	RingPedersenProof  *zkpai.RingPedersenProof  `json:"ring_pedersen_proof" wire:"6,nested,max_bytes=paillier_proof"`
+	PlanHash           []byte                    `json:"plan_hash" wire:"7,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenCommitmentsPayload.

@@ -42,7 +42,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proofBytes, err := canonicalWireMessageBytes(&payload.PaillierProof, testLimits())
+	proofBytes, err := canonicalWireMessageBytes(payload.PaillierProof, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,7 +86,7 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	proofBytes, err := canonicalWireMessageBytes(&payload.RingPedersenProof, testLimits())
+	proofBytes, err := canonicalWireMessageBytes(payload.RingPedersenProof, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -126,25 +126,25 @@ func marshalKeygenCommitmentsPayloadBypass(p keygenCommitmentsPayload, o keygenC
 		return nil, errors.New("chain code must be 32 bytes")
 	}
 	// Apply overrides: use original value when override is nil.
-	pkBytes, err := canonicalWireMessageBytes(&p.PaillierPublicKey, testLimits())
+	pkBytes, err := canonicalWireMessageBytes(p.PaillierPublicKey, testLimits())
 	if err != nil {
 		return nil, err
 	}
 	if o.PaillierPublicKey != nil {
 		pkBytes = o.PaillierPublicKey
 	}
-	modProof, err := canonicalWireMessageBytes(&p.PaillierProof, testLimits())
+	modProof, err := canonicalWireMessageBytes(p.PaillierProof, testLimits())
 	if err != nil {
 		return nil, err
 	}
 	if o.PaillierProof != nil {
 		modProof = o.PaillierProof
 	}
-	ringPedersenParams, err := canonicalWireMessageBytes(&p.RingPedersenParams, testLimits())
+	ringPedersenParams, err := canonicalWireMessageBytes(p.RingPedersenParams, testLimits())
 	if err != nil {
 		return nil, err
 	}
-	rpProof, err := canonicalWireMessageBytes(&p.RingPedersenProof, testLimits())
+	rpProof, err := canonicalWireMessageBytes(p.RingPedersenProof, testLimits())
 	if err != nil {
 		return nil, err
 	}
@@ -400,7 +400,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	// Use a bypass that skips key validation but still produces valid wire format.
-	keyBytes, err := canonicalWireMessageBytes(&payload.PaillierPublicKey, testLimits())
+	keyBytes, err := canonicalWireMessageBytes(payload.PaillierPublicKey, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

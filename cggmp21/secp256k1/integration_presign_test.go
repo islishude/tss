@@ -979,7 +979,7 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	payload.PaillierPublicKey = *paillierPublicKey
+	payload.PaillierPublicKey = paillierPublicKey
 	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
