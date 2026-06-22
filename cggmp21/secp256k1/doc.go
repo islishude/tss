@@ -21,4 +21,6 @@
 //
 // Rejected transitions destroy uncommitted secret material. Readiness is
 // derived from accepted per-party state rather than manually maintained counts.
+// Persisted presigns contain the public verification context required to replay
+// signprep proofs and recompute their transcript before StartSign or ResumeSign.
 package secp256k1

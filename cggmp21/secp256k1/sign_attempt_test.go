@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
+	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 
@@ -115,7 +118,7 @@ func TestFast_SignAttemptRecordRejectsTampering(t *testing.T) {
 		mutate func(*SignAttemptRecord)
 	}{
 		{"protocol_version", func(r *SignAttemptRecord) { r.ProtocolVersion++ }},
-		{"presign", func(r *SignAttemptRecord) { r.PresignID[0] ^= 1 }},
+		{"presign", func(r *SignAttemptRecord) { r.PresignContentID[0] ^= 1 }},
 		{"session", func(r *SignAttemptRecord) { r.SessionID[0] ^= 1 }},
 		{"digest", func(r *SignAttemptRecord) { r.Digest[0] ^= 1 }},
 		{"digest_binding", func(r *SignAttemptRecord) { r.DigestBindingHash[0] ^= 1 }},
@@ -248,7 +251,7 @@ func TestFast_FileSignAttemptStoreIdempotentAndConflictingCommits(t *testing.T) 
 		t.Fatal("idempotent commit changed the durable envelope")
 	}
 	conflict := testSignAttemptRecord(t, 2)
-	conflict.PresignID = bytes.Clone(record.PresignID)
+	conflict.PresignContentID = bytes.Clone(record.PresignContentID)
 	conflict.IntentHash = signAttemptIntentHash(conflict)
 	conflict.AttemptHash = signAttemptHash(conflict)
 	if _, err := store.CommitSignAttempt(ctx, conflict); !errors.Is(err, ErrSignAttemptConflict) {
@@ -259,12 +262,90 @@ func TestFast_FileSignAttemptStoreIdempotentAndConflictingCommits(t *testing.T) 
 		t.Fatalf("non-deterministic commit error = %v", err)
 	}
 
-	claimBytes, err := os.ReadFile(store.claimPath(record.PresignID))
+	claimBytes, err := os.ReadFile(store.claimPath(record.PresignContentID))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if bytes.Contains(claimBytes, record.CanonicalBaseEnvelopeBytes) {
 		t.Fatal("file store persisted the confidential envelope in plaintext")
+	}
+}
+
+func TestFast_FileSignAttemptStoreUsesOpaqueStoreKeys(t *testing.T) {
+	t.Parallel()
+	first := newFastFileSignAttemptStore(t)
+	second := newFastFileSignAttemptStore(t)
+	contentID := bytes.Repeat([]byte{0xa5}, sha256.Size)
+
+	firstKey := first.storeKey(contentID)
+	if !bytes.Equal(firstKey, first.storeKey(contentID)) {
+		t.Fatal("store key derivation is not deterministic")
+	}
+	if bytes.Equal(firstKey, second.storeKey(contentID)) {
+		t.Fatal("different file stores derived the same opaque store key")
+	}
+	contentHex := hex.EncodeToString(contentID)
+	for _, path := range []string{
+		first.claimPath(contentID),
+		first.ackPath(contentID, 1),
+		first.certificatePath(contentID),
+		first.completionPath(contentID),
+		first.burnPath(contentID),
+	} {
+		if strings.Contains(path, contentHex) {
+			t.Fatal("secret-tainted content ID appeared in a file-store path")
+		}
+	}
+}
+
+func TestFast_FileSignAttemptStoreKeyStableAcrossInstances(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	params := &tss.PassphraseParams{Time: 1, Memory: 1024, Threads: 1}
+	first, err := NewFileSignAttemptStore(directory, []byte("stable-passphrase"), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer first.Destroy()
+	second, err := NewFileSignAttemptStore(directory, []byte("stable-passphrase"), params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer second.Destroy()
+	contentID := bytes.Repeat([]byte{0xb6}, sha256.Size)
+	if !bytes.Equal(first.storeKey(contentID), second.storeKey(contentID)) {
+		t.Fatal("reopened file store derived a different opaque store key")
+	}
+}
+
+func TestFast_FileSignAttemptStoreMetadataDoesNotExposePlaintextHashOrContentID(t *testing.T) {
+	t.Parallel()
+	store := newFastFileSignAttemptStore(t)
+	record := testSignAttemptRecord(t, 1)
+	if _, err := store.CommitSignAttempt(context.Background(), record); err != nil {
+		t.Fatal(err)
+	}
+	entries, err := os.ReadDir(store.objects)
+	if err != nil {
+		t.Fatal(err)
+	}
+	contentHex := hex.EncodeToString(record.PresignContentID)
+	foundMeta := false
+	for _, entry := range entries {
+		if !strings.HasSuffix(entry.Name(), ".meta") {
+			continue
+		}
+		foundMeta = true
+		raw, err := os.ReadFile(filepath.Join(store.objects, entry.Name()))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if bytes.Contains(raw, []byte("plaintext_sha256")) || bytes.Contains(raw, []byte(contentHex)) {
+			t.Fatal("file-store metadata exposed secret-derived plaintext information")
+		}
+	}
+	if !foundMeta {
+		t.Fatal("expected file-store metadata")
 	}
 }
 
@@ -332,8 +413,8 @@ func TestFast_FileSignAttemptStoreCompletionIsIdempotent(t *testing.T) {
 		t.Fatal(err)
 	}
 	result := SignAttemptResult{
-		PresignID:   bytes.Clone(record.PresignID),
-		AttemptHash: bytes.Clone(record.AttemptHash),
+		PresignContentID: bytes.Clone(record.PresignContentID),
+		AttemptHash:      bytes.Clone(record.AttemptHash),
 		Signature: Signature{
 			R:          bytes.Repeat([]byte{1}, 32),
 			S:          bytes.Repeat([]byte{2}, 32),
@@ -357,7 +438,7 @@ func TestFast_FileSignAttemptStoreCompletionIsIdempotent(t *testing.T) {
 	if !completed.Completed || !bytes.Equal(completed.SignatureR, repeated.SignatureR) {
 		t.Fatal("completion was not idempotent")
 	}
-	loaded, err := store.LoadSignAttempt(ctx, record.PresignID)
+	loaded, err := store.LoadSignAttempt(ctx, record.PresignContentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -374,7 +455,7 @@ func TestFast_FileSignAttemptStoreTamperedCiphertextFailsClosed(t *testing.T) {
 	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	path := store.claimPath(record.PresignID)
+	path := store.claimPath(record.PresignContentID)
 	raw, err := os.ReadFile(path) //nolint:gosec // test-owned temporary directory
 	if err != nil {
 		t.Fatal(err)
@@ -383,8 +464,53 @@ func TestFast_FileSignAttemptStoreTamperedCiphertextFailsClosed(t *testing.T) {
 	if err := os.WriteFile(path, raw, 0o600); err != nil { //nolint:gosec // test-owned temporary directory
 		t.Fatal(err)
 	}
-	if _, err := store.LoadSignAttempt(ctx, record.PresignID); !errors.Is(err, ErrSignAttemptCorrupt) {
+	if _, err := store.LoadSignAttempt(ctx, record.PresignContentID); !errors.Is(err, ErrSignAttemptCorrupt) {
 		t.Fatalf("tampered ciphertext error = %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreTamperedAADFailsClosed(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newFastFileSignAttemptStore(t)
+	record := testSignAttemptRecord(t, 1)
+	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	path := store.claimPath(record.PresignContentID)
+	raw, err := os.ReadFile(path) //nolint:gosec // test-owned temporary directory
+	if err != nil {
+		t.Fatal(err)
+	}
+	const storageKeyIDOffset = 13
+	if len(raw) <= storageKeyIDOffset {
+		t.Fatal("encrypted attempt is too short")
+	}
+	raw[storageKeyIDOffset] ^= 1
+	if err := os.WriteFile(path, raw, 0o600); err != nil { //nolint:gosec // test-owned temporary directory
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSignAttempt(ctx, record.PresignContentID); !errors.Is(err, ErrSignAttemptCorrupt) {
+		t.Fatalf("tampered AAD error = %v", err)
+	}
+}
+
+func TestFast_FileSignAttemptStoreRejectsObjectKindSwap(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newFastFileSignAttemptStore(t)
+	record := testSignAttemptRecord(t, 1)
+	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Link(
+		store.claimPath(record.PresignContentID),
+		store.completionPath(record.PresignContentID),
+	); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.LoadSignAttempt(ctx, record.PresignContentID); !errors.Is(err, ErrSignAttemptCorrupt) {
+		t.Fatalf("object-kind swap error = %v", err)
 	}
 }
 
@@ -399,7 +525,7 @@ func TestFast_FileSignAttemptStoreOrphanObjectDoesNotClaimPresign(t *testing.T) 
 	if _, err := os.Stat(objectPath); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.LoadSignAttempt(context.Background(), record.PresignID); !errors.Is(err, ErrSignAttemptNotFound) {
+	if _, err := store.LoadSignAttempt(context.Background(), record.PresignContentID); !errors.Is(err, ErrSignAttemptNotFound) {
 		t.Fatalf("orphan object created a claim: %v", err)
 	}
 	if _, err := store.CommitSignAttempt(context.Background(), record); err != nil {
@@ -421,9 +547,9 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 	}
 	ack1 := testBroadcastAck(env, 1)
 	updated, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
-		PresignID:   record.PresignID,
-		AttemptHash: record.AttemptHash,
-		Ack:         &ack1,
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Ack:              &ack1,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -432,9 +558,9 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		t.Fatalf("unexpected partial delivery state: %#v", updated.DeliveryState)
 	}
 	if repeated, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
-		PresignID:   record.PresignID,
-		AttemptHash: record.AttemptHash,
-		Ack:         &ack1,
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Ack:              &ack1,
 	}); err != nil {
 		t.Fatal(err)
 	} else if len(repeated.DeliveryState.Acks) != 1 {
@@ -446,9 +572,9 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		t.Fatal(err)
 	}
 	completed, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
-		PresignID:   record.PresignID,
-		AttemptHash: record.AttemptHash,
-		Certificate: cert,
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Certificate:      cert,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -457,7 +583,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		len(completed.DeliveryState.Acks) != len(record.DeliveryPolicy.Recipients) {
 		t.Fatalf("delivery certificate was not durable: %#v", completed.DeliveryState)
 	}
-	loaded, err := store.LoadSignAttempt(ctx, record.PresignID)
+	loaded, err := store.LoadSignAttempt(ctx, record.PresignContentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -471,16 +597,23 @@ func TestFast_FileSignAttemptStoreBurnBlocksFutureAttempts(t *testing.T) {
 	ctx := context.Background()
 	store := newFastFileSignAttemptStore(t)
 	record := testSignAttemptRecord(t, 1)
-	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: record.PresignID, Reason: "operator requested"}); err != nil {
+	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignContentID: record.PresignContentID, Reason: "operator requested"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := store.LoadSignAttempt(ctx, record.PresignID); !errors.Is(err, ErrSignAttemptBurned) {
+	raw, err := os.ReadFile(store.claimPath(record.PresignContentID))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if bytes.Contains(raw, []byte("operator requested")) || bytes.Contains(raw, []byte(signAttemptBurnMagic)) {
+		t.Fatal("burn tombstone was persisted in plaintext")
+	}
+	if _, err := store.LoadSignAttempt(ctx, record.PresignContentID); !errors.Is(err, ErrSignAttemptBurned) {
 		t.Fatalf("burned load error = %v", err)
 	}
 	if _, err := store.CommitSignAttempt(ctx, record); !errors.Is(err, ErrSignAttemptBurned) {
 		t.Fatalf("commit after burn error = %v", err)
 	}
-	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: record.PresignID, Reason: "repeat"}); err != nil {
+	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignContentID: record.PresignContentID, Reason: "repeat"}); err != nil {
 		t.Fatalf("repeat burn should be idempotent: %v", err)
 	}
 }
@@ -493,10 +626,10 @@ func TestFast_FileSignAttemptStoreBurnAfterCommitConflicts(t *testing.T) {
 	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
 		t.Fatal(err)
 	}
-	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignID: record.PresignID, Reason: "too late"}); !errors.Is(err, ErrSignAttemptConflict) {
+	if err := store.BurnPresign(ctx, SignAttemptBurn{PresignContentID: record.PresignContentID, Reason: "too late"}); !errors.Is(err, ErrSignAttemptConflict) {
 		t.Fatalf("burn after commit error = %v", err)
 	}
-	loaded, err := store.LoadSignAttempt(ctx, record.PresignID)
+	loaded, err := store.LoadSignAttempt(ctx, record.PresignContentID)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -573,7 +706,7 @@ func testSignAttemptRecord(t testing.TB, marker byte) SignAttemptRecord {
 		RecordVersion:              signAttemptRecordVersion,
 		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
 		ProtocolVersion:            tss.ProtocolVersion,
-		PresignID:                  bytes.Repeat([]byte{0x55}, sha256.Size),
+		PresignContentID:           bytes.Repeat([]byte{0x55}, sha256.Size),
 		SessionID:                  sessionID,
 		Party:                      1,
 		SignerSetHash:              signAttemptSignerSetHash(tss.NewPartySet(1, 2)),

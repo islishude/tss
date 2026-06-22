@@ -202,6 +202,9 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 		{name: "point", dst: &limits.Curve.MaxPointBytes},
 		{name: "signers", dst: &limits.Threshold.MaxSigners},
 		{name: "threshold", dst: &limits.Threshold.MaxThreshold},
+		{name: "paillier_modulus_bits", dst: &limits.Paillier.MaxModulusBits},
+		{name: "paillier_public_key", dst: &limits.Paillier.MaxPublicKeyBytes},
+		{name: "paillier_ciphertext", dst: &limits.Paillier.MaxCiphertextBytes},
 		{name: "signprep_proof", dst: &limits.SignPrep.MaxProofBytes},
 	}
 	for _, item := range required {
@@ -214,6 +217,12 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 		}
 		*item.dst = value
 	}
+	limits.SignPrep.MaxVerificationEntryBytes =
+		limits.Curve.MaxPointBytes*2 +
+			limits.Paillier.MaxCiphertextBytes +
+			limits.Paillier.MaxPublicKeyBytes + 64
+	limits.SignPrep.MaxVerificationContextBytes =
+		4 + limits.Threshold.MaxSigners*(4+limits.SignPrep.MaxVerificationEntryBytes)
 	return limits, nil
 }
 

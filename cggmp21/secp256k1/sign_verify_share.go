@@ -28,6 +28,27 @@ func (s signVerifyShare) Clone() signVerifyShare {
 	}
 }
 
+func (s *signVerifyShare) destroy() {
+	if s == nil {
+		return
+	}
+	if s.Proof != nil {
+		clear(s.Proof.MPoint)
+		clear(s.Proof.KCommitment)
+		clear(s.Proof.MCommitment)
+		clear(s.Proof.DLEQA1)
+		clear(s.Proof.DLEQA2)
+		if s.Proof.KResponse != nil {
+			s.Proof.KResponse.Destroy()
+		}
+		clear(s.Proof.MResponse)
+		if s.Proof.DLEQResponse != nil {
+			s.Proof.DLEQResponse.Destroy()
+		}
+	}
+	*s = signVerifyShare{}
+}
+
 func (s signVerifyShare) kPointBytes() ([]byte, error) {
 	return secp.PointBytes(s.KPoint)
 }

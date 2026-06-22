@@ -513,6 +513,10 @@ func (s *PresignSession) maybePreparePresignCompletion() (*preparedPresignComple
 		}
 		verifyShares = append(verifyShares, st.round3.verifyShare.Clone())
 	}
+	verification, err := s.buildPresignVerificationContext()
+	if err != nil {
+		return nil, false, err
+	}
 	deltaSecret, err := secpSecretScalarFromScalar(delta)
 	if err != nil {
 		return nil, false, err
@@ -534,13 +538,58 @@ func (s *PresignSession) maybePreparePresignCompletion() (*preparedPresignComple
 		KeygenTranscriptHash: bytes.Clone(base.KeygenTranscriptHash),
 		PartiesHash:          bytes.Clone(base.PartiesHash),
 		VerifyShares:         verifyShares,
+		Verification:         verification,
 		KShare:               base.KShare.Clone(),
 		ChiShare:             base.ChiShare.Clone(),
-		Delta:                deltaSecret,
+		DeltaAggregate:       deltaSecret,
 		Consumed:             NewAtomicBoolWire(false),
 		attempt:              newPresignAttemptBinding(false),
 	}}
 	return &preparedPresignCompletion{presign: completed}, true, nil
+}
+
+func (s *PresignSession) buildPresignVerificationContext() (presignVerificationContext, error) {
+	context := presignVerificationContext{
+		SessionID:  s.sessionID,
+		Round1Echo: s.round1Echo(),
+		Entries:    make([]presignVerificationEntry, 0, len(s.signers)),
+	}
+	for _, id := range s.signers {
+		state, ok := s.partyState(id)
+		if !ok || !state.round1.havePayload || !state.round3.haveDelta {
+			context.destroy()
+			return presignVerificationContext{}, fmt.Errorf("missing persisted verification material for party %d", id)
+		}
+		lambda, err := shamirsecp.LagrangeCoefficient(id, s.signers)
+		if err != nil {
+			context.destroy()
+			return presignVerificationContext{}, err
+		}
+		verificationShare, ok := s.key.verificationShare(id)
+		if !ok {
+			context.destroy()
+			return presignVerificationContext{}, fmt.Errorf("missing verification share for party %d", id)
+		}
+		verificationPoint, err := secp.PointFromBytes(verificationShare)
+		if err != nil {
+			context.destroy()
+			return presignVerificationContext{}, err
+		}
+		delta, err := secpScalarFromSecret(state.round3.delta)
+		if err != nil {
+			context.destroy()
+			return presignVerificationContext{}, err
+		}
+		context.Entries = append(context.Entries, presignVerificationEntry{
+			Party:             id,
+			Gamma:             bytes.Clone(state.round1.payload.Gamma),
+			EncK:              bytes.Clone(state.round1.payload.EncK),
+			PaillierPublicKey: *state.round1.payload.PaillierPublicKey.Clone(),
+			XBarPoint:         secp.ScalarMult(verificationPoint, lambda),
+			Delta:             delta,
+		})
+	}
+	return context, nil
 }
 
 func (s *PresignSession) commitPresignCompletion(p *preparedPresignCompletion) {

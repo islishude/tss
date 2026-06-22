@@ -356,6 +356,14 @@ and vector regeneration. RFC-defined hashes and plain content hashes such as
 - `cggmp21/secp256k1.VerificationShare`
 - `cggmp21/secp256k1.PaillierPublicShare`
 
+The CGGMP21 `Presign` record includes a canonical persisted verification context
+containing the presign session ID, round-1 echo, and one signer-ordered entry for
+the round-1 public payload, Paillier public key, weighted verification point, and
+round-3 delta share. Missing, duplicate, extra, or out-of-order entries are
+rejected. Decoding performs structural validation only; callers use
+`VerifyCryptographicMaterialWithLimits` for proof replay and transcript
+recomputation. The retired presign field set without this context is rejected.
+
 `Envelope` and `BlameEvidence` carry their schema version only in the TLV frame
 header. Their field tags are contiguous and do not include a duplicate body
 version field. Semantic protocol-version binding uses `tss.ProtocolVersion`

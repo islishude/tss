@@ -15,7 +15,7 @@ func TestSignAttemptCoordinatorClaimFailureDoesNotAdoptRecord(t *testing.T) {
 		inner:     newTestSignAttemptStore(),
 		commitErr: storeErr,
 	}
-	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignID)
+	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignContentID)
 	_, err := coordinator.claim(context.Background(), record)
 	if !errors.Is(err, ErrSignAttemptOutcomeUnknown) || !errors.Is(err, storeErr) {
 		t.Fatalf("claim error = %v", err)
@@ -28,7 +28,7 @@ func TestSignAttemptCoordinatorClaimFailureDoesNotAdoptRecord(t *testing.T) {
 func TestSignAttemptCoordinatorDeliveryFailureDoesNotAdvanceRecord(t *testing.T) {
 	record := testSignAttemptRecord(t, 1)
 	store := &coordinatorTestStore{inner: newTestSignAttemptStore()}
-	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignID)
+	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignContentID)
 	if _, err := coordinator.claim(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
@@ -46,7 +46,7 @@ func TestSignAttemptCoordinatorDeliveryFailureDoesNotAdvanceRecord(t *testing.T)
 func TestSignAttemptCoordinatorCompletionFailureDoesNotAdvanceRecord(t *testing.T) {
 	record := testSignAttemptRecord(t, 1)
 	store := &coordinatorTestStore{inner: newTestSignAttemptStore()}
-	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignID)
+	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignContentID)
 	if _, err := coordinator.claim(context.Background(), record); err != nil {
 		t.Fatal(err)
 	}
@@ -68,7 +68,7 @@ func TestSignAttemptCoordinatorCompletionFailureDoesNotAdvanceRecord(t *testing.
 func TestSignAttemptCoordinatorBurnIsolatedFromOnlineState(t *testing.T) {
 	record := testSignAttemptRecord(t, 1)
 	store := newTestSignAttemptStore()
-	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignID)
+	coordinator := newTestSignAttemptCoordinator(t, store, record.PresignContentID)
 	if err := coordinator.burn(context.Background(), "operator discard"); err != nil {
 		t.Fatal(err)
 	}

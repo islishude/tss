@@ -258,7 +258,7 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 
 	sign := &SignPlan{state: &signPlanState{
 		sessionID:         cggmpPlanTestSession(0x53),
-		presignID:         []byte{0x40, 0x41},
+		presignContentID:  []byte{0x40, 0x41},
 		presignTranscript: []byte{0x45, 0x46},
 		contextHash:       []byte{0x50, 0x51},
 		digest:            []byte{0x60, 0x61},
@@ -272,13 +272,12 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	if !ok {
 		t.Fatal("missing sign plan snapshot")
 	}
-	signSnapshot.PresignID[0] ^= 0xff
 	signSnapshot.PresignTranscriptHash[0] ^= 0xff
 	signSnapshot.ContextHash[0] ^= 0xff
 	signSnapshot.MessageDigest[0] ^= 0xff
 	signSnapshot.Request.Message[0] ^= 0xff
 	signSnapshot.Request.Context.Derivation.Path[0] = 99
-	if sign.state.presignID[0] != 0x40 ||
+	if sign.state.presignContentID[0] != 0x40 ||
 		sign.state.presignTranscript[0] != 0x45 ||
 		sign.state.contextHash[0] != 0x50 ||
 		sign.state.digest[0] != 0x60 ||

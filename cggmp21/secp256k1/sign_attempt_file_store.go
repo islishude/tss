@@ -3,6 +3,8 @@ package secp256k1
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"errors"
@@ -14,11 +16,15 @@ import (
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/transcript"
+	"golang.org/x/crypto/argon2"
 )
 
 const (
 	signAttemptFileObjectKeyLabel = "cggmp21-secp256k1-sign-attempt-file-object-v1"
+	signAttemptStoreKeyLabel      = "cggmp21-secp256k1-sign-attempt-store-key-v1"
 	signAttemptBurnMagic          = "cggmp21-sign-attempt-burn-v1\n"
+	signAttemptStoreSaltFile      = ".store-key-salt"
+	signAttemptStoreSaltSize      = 32
 )
 
 // FileSignAttemptStore is an encrypted append-only reference implementation of
@@ -33,13 +39,15 @@ type FileSignAttemptStore struct {
 	completions          string
 	burns                string
 	passphrase           []byte
+	storeSecret          []byte
 	params               *tss.PassphraseParams
 }
 
 // NewFileSignAttemptStore creates an encrypted append-only file store. All
 // directories must reside on one filesystem because atomic hard links establish
-// presign claims and durable delivery/completion objects. A nil params value
-// selects [tss.DefaultPassphraseParams].
+// presign claims and durable delivery/completion objects. Paths use an
+// HMAC-derived opaque store key rather than the secret-tainted presign content
+// ID. A nil params value selects [tss.DefaultPassphraseParams].
 func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.PassphraseParams) (*FileSignAttemptStore, error) {
 	if directory == "" {
 		return nil, errors.New("empty sign attempt store directory")
@@ -57,10 +65,11 @@ func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.Pa
 		burns:                filepath.Join(directory, "burns"),
 		passphrase:           slices.Clone(passphrase),
 	}
-	if params != nil {
-		copied := *params
-		store.params = &copied
+	if params == nil {
+		params = tss.DefaultPassphraseParams()
 	}
+	copied := *params
+	store.params = &copied
 	for _, path := range []string{
 		store.root,
 		store.objects,
@@ -75,6 +84,17 @@ func NewFileSignAttemptStore(directory string, passphrase []byte, params *tss.Pa
 			return nil, fmt.Errorf("create sign attempt store directory: %w", err)
 		}
 	}
+	salt, err := loadOrCreateSignAttemptStoreSalt(store.root)
+	if err != nil {
+		store.Destroy()
+		return nil, err
+	}
+	store.storeSecret, err = deriveSignAttemptStoreSecret(passphrase, salt, store.params)
+	clear(salt)
+	if err != nil {
+		store.Destroy()
+		return nil, err
+	}
 	return store, nil
 }
 
@@ -85,29 +105,31 @@ func (s *FileSignAttemptStore) Destroy() {
 	}
 	clear(s.passphrase)
 	s.passphrase = nil
+	clear(s.storeSecret)
+	s.storeSecret = nil
 }
 
 // LoadSignAttempt loads the immutable claim and merges append-only delivery and
 // completion objects. A burn tombstone returns ErrSignAttemptBurned.
-func (s *FileSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
-	if err := validateFileStoreCall(ctx, s, presignID); err != nil {
+func (s *FileSignAttemptStore) LoadSignAttempt(ctx context.Context, presignContentID []byte) (SignAttemptRecord, error) {
+	if err := validateFileStoreCall(ctx, s, presignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	base, err := s.readClaimRecord(presignID)
+	base, err := s.readClaimRecord(presignContentID)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if !bytes.Equal(base.PresignID, presignID) {
+	if !bytes.Equal(base.PresignContentID, presignContentID) {
 		return SignAttemptRecord{}, fmt.Errorf("%w: claim key mismatch", ErrSignAttemptCorrupt)
 	}
 	record := base.Clone()
-	if err := s.mergeDeliveryAcks(&record, presignID); err != nil {
+	if err := s.mergeDeliveryAcks(&record, presignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if err := s.mergeDeliveryCertificate(&record, presignID); err != nil {
+	if err := s.mergeDeliveryCertificate(&record, presignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if err := s.mergeCompletion(&record, presignID); err != nil {
+	if err := s.mergeCompletion(&record, presignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
 	if err := validateSignAttemptRecord(record); err != nil {
@@ -116,7 +138,7 @@ func (s *FileSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []
 	return record, nil
 }
 
-// CommitSignAttempt atomically creates the only claim for candidate.PresignID.
+// CommitSignAttempt atomically creates the only claim for candidate.PresignContentID.
 // An existing exact attempt is returned idempotently; the same intent with a
 // different attempt is ErrSignAttemptNonDeterminism.
 func (s *FileSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
@@ -126,14 +148,14 @@ func (s *FileSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate 
 	if err := validateSignAttemptCandidate(candidate); err != nil {
 		return SignAttemptCommit{}, err
 	}
-	if err := validateFileStoreCall(ctx, s, candidate.PresignID); err != nil {
+	if err := validateFileStoreCall(ctx, s, candidate.PresignContentID); err != nil {
 		return SignAttemptCommit{}, err
 	}
 	objectPath, err := s.writeEncryptedObject(candidate, "base-attempt")
 	if err != nil {
 		return SignAttemptCommit{}, err
 	}
-	claimPath := s.claimPath(candidate.PresignID)
+	claimPath := s.claimPath(candidate.PresignContentID)
 	if err := os.Link(objectPath, claimPath); err != nil {
 		removeFileStoreObject(objectPath)
 		if errors.Is(err, fs.ErrExist) {
@@ -153,13 +175,13 @@ func (s *FileSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, up
 	if ctx == nil {
 		return SignAttemptRecord{}, errors.New("nil context")
 	}
-	if len(update.PresignID) != sha256.Size {
-		return SignAttemptRecord{}, errors.New("invalid delivery update presign ID")
+	if len(update.PresignContentID) != sha256.Size {
+		return SignAttemptRecord{}, errors.New("invalid delivery update presign content ID")
 	}
-	if err := validateFileStoreCall(ctx, s, update.PresignID); err != nil {
+	if err := validateFileStoreCall(ctx, s, update.PresignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	record, err := s.LoadSignAttempt(ctx, update.PresignID)
+	record, err := s.LoadSignAttempt(ctx, update.PresignContentID)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
@@ -180,7 +202,7 @@ func (s *FileSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, up
 			return SignAttemptRecord{}, err
 		}
 	}
-	return s.LoadSignAttempt(context.WithoutCancel(ctx), update.PresignID)
+	return s.LoadSignAttempt(context.WithoutCancel(ctx), update.PresignContentID)
 }
 
 // CompleteSignAttempt atomically persists the final signature for an existing
@@ -192,10 +214,10 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	if err := result.validate(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if err := validateFileStoreCall(ctx, s, result.PresignID); err != nil {
+	if err := validateFileStoreCall(ctx, s, result.PresignContentID); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	record, err := s.LoadSignAttempt(ctx, result.PresignID)
+	record, err := s.LoadSignAttempt(ctx, result.PresignContentID)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
@@ -220,11 +242,11 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	completionPath := s.completionPath(result.PresignID)
+	completionPath := s.completionPath(result.PresignContentID)
 	if err := os.Link(objectPath, completionPath); err != nil {
 		removeFileStoreObject(objectPath)
 		if errors.Is(err, fs.ErrExist) {
-			existing, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), result.PresignID)
+			existing, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), result.PresignContentID)
 			if loadErr != nil {
 				return SignAttemptRecord{}, loadErr
 			}
@@ -248,18 +270,18 @@ func (s *FileSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 // BurnPresign durably writes a tombstone for a presign with no existing attempt.
 // The burn and attempt commit share the same claim path, so only one can win.
 func (s *FileSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttemptBurn) error {
-	if err := validateFileStoreCall(ctx, s, burn.PresignID); err != nil {
+	if err := validateFileStoreCall(ctx, s, burn.PresignContentID); err != nil {
 		return err
 	}
 	objectPath, err := s.writeBurnObject(burn)
 	if err != nil {
 		return err
 	}
-	claimPath := s.claimPath(burn.PresignID)
+	claimPath := s.claimPath(burn.PresignContentID)
 	if err := os.Link(objectPath, claimPath); err != nil {
 		removeFileStoreObject(objectPath)
 		if errors.Is(err, fs.ErrExist) {
-			_, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), burn.PresignID)
+			_, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), burn.PresignContentID)
 			if errors.Is(loadErr, ErrSignAttemptBurned) {
 				return nil
 			}
@@ -273,7 +295,7 @@ func (s *FileSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttempt
 	if err := syncDirectory(s.claims); err != nil {
 		return fmt.Errorf("sync sign attempt burn claim: %w", err)
 	}
-	burnPath := s.burnPath(burn.PresignID)
+	burnPath := s.burnPath(burn.PresignContentID)
 	if err := os.Link(objectPath, burnPath); err != nil && !errors.Is(err, fs.ErrExist) {
 		return fmt.Errorf("link sign attempt burn tombstone: %w", err)
 	}
@@ -284,7 +306,7 @@ func (s *FileSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttempt
 }
 
 func (s *FileSignAttemptStore) existingCommit(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error) {
-	existing, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), candidate.PresignID)
+	existing, loadErr := s.LoadSignAttempt(context.WithoutCancel(ctx), candidate.PresignContentID)
 	if loadErr != nil {
 		return SignAttemptCommit{}, loadErr
 	}
@@ -297,15 +319,15 @@ func (s *FileSignAttemptStore) existingCommit(ctx context.Context, candidate Sig
 	return SignAttemptCommit{}, ErrSignAttemptConflict
 }
 
-func (s *FileSignAttemptStore) mergeDeliveryAcks(record *SignAttemptRecord, presignID []byte) error {
-	pattern := filepath.Join(s.deliveryAcks, hex.EncodeToString(presignID)+"-*")
+func (s *FileSignAttemptStore) mergeDeliveryAcks(record *SignAttemptRecord, presignContentID []byte) error {
+	pattern := filepath.Join(s.deliveryAcks, hex.EncodeToString(s.storeKey(presignContentID))+"-*")
 	paths, err := filepath.Glob(pattern)
 	if err != nil {
 		return fmt.Errorf("glob sign attempt delivery acks: %w", err)
 	}
 	slices.Sort(paths)
 	for _, path := range paths {
-		ackRecord, err := s.readRecord(path)
+		ackRecord, err := s.readRecord(path, "delivery-ack")
 		if err != nil {
 			return err
 		}
@@ -315,9 +337,9 @@ func (s *FileSignAttemptStore) mergeDeliveryAcks(record *SignAttemptRecord, pres
 		}
 		for _, ack := range ackRecord.DeliveryState.Acks {
 			updated, err := applySignAttemptDeliveryUpdate(*record, SignAttemptDeliveryUpdate{
-				PresignID:   presignID,
-				AttemptHash: record.AttemptHash,
-				Ack:         &ack,
+				PresignContentID: presignContentID,
+				AttemptHash:      record.AttemptHash,
+				Ack:              &ack,
 			})
 			if err != nil {
 				return err
@@ -328,8 +350,8 @@ func (s *FileSignAttemptStore) mergeDeliveryAcks(record *SignAttemptRecord, pres
 	return nil
 }
 
-func (s *FileSignAttemptStore) mergeDeliveryCertificate(record *SignAttemptRecord, presignID []byte) error {
-	certRecord, err := s.readRecord(s.certificatePath(presignID))
+func (s *FileSignAttemptStore) mergeDeliveryCertificate(record *SignAttemptRecord, presignContentID []byte) error {
+	certRecord, err := s.readRecord(s.certificatePath(presignContentID), "delivery-certificate")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -341,9 +363,9 @@ func (s *FileSignAttemptStore) mergeDeliveryCertificate(record *SignAttemptRecor
 		return fmt.Errorf("%w: delivery certificate does not match claim", ErrSignAttemptCorrupt)
 	}
 	updated, err := applySignAttemptDeliveryUpdate(*record, SignAttemptDeliveryUpdate{
-		PresignID:   presignID,
-		AttemptHash: record.AttemptHash,
-		Certificate: certRecord.DeliveryState.Certificate,
+		PresignContentID: presignContentID,
+		AttemptHash:      record.AttemptHash,
+		Certificate:      certRecord.DeliveryState.Certificate,
 	})
 	if err != nil {
 		return err
@@ -352,8 +374,8 @@ func (s *FileSignAttemptStore) mergeDeliveryCertificate(record *SignAttemptRecor
 	return nil
 }
 
-func (s *FileSignAttemptStore) mergeCompletion(record *SignAttemptRecord, presignID []byte) error {
-	completed, err := s.readRecord(s.completionPath(presignID))
+func (s *FileSignAttemptStore) mergeCompletion(record *SignAttemptRecord, presignContentID []byte) error {
+	completed, err := s.readRecord(s.completionPath(presignContentID), "completion")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -387,7 +409,7 @@ func (s *FileSignAttemptStore) persistDeliveryAck(ctx context.Context, base Sign
 	if err != nil {
 		return err
 	}
-	ackPath := s.ackPath(base.PresignID, ack.Party)
+	ackPath := s.ackPath(base.PresignContentID, ack.Party)
 	if err := os.Link(objectPath, ackPath); err != nil {
 		removeFileStoreObject(objectPath)
 		if errors.Is(err, fs.ErrExist) {
@@ -422,7 +444,7 @@ func (s *FileSignAttemptStore) persistDeliveryCertificate(ctx context.Context, b
 	if err != nil {
 		return err
 	}
-	certPath := s.certificatePath(base.PresignID)
+	certPath := s.certificatePath(base.PresignContentID)
 	if err := os.Link(objectPath, certPath); err != nil {
 		removeFileStoreObject(objectPath)
 		if errors.Is(err, fs.ErrExist) {
@@ -436,7 +458,7 @@ func (s *FileSignAttemptStore) persistDeliveryCertificate(ctx context.Context, b
 	return nil
 }
 
-func validateFileStoreCall(ctx context.Context, store *FileSignAttemptStore, presignID []byte) error {
+func validateFileStoreCall(ctx context.Context, store *FileSignAttemptStore, presignContentID []byte) error {
 	if ctx == nil {
 		return errors.New("nil context")
 	}
@@ -446,8 +468,11 @@ func validateFileStoreCall(ctx context.Context, store *FileSignAttemptStore, pre
 	if len(store.passphrase) == 0 {
 		return errors.New("file sign attempt store is destroyed")
 	}
-	if len(presignID) != sha256.Size {
-		return errors.New("invalid presign ID")
+	if len(store.storeSecret) != sha256.Size {
+		return errors.New("file sign attempt store key is unavailable")
+	}
+	if len(presignContentID) != sha256.Size {
+		return errors.New("invalid presign content ID")
 	}
 	return ctx.Err()
 }
@@ -457,19 +482,19 @@ func (s *FileSignAttemptStore) writeEncryptedObject(record SignAttemptRecord, ki
 	if err != nil {
 		return "", err
 	}
-	rawHash := sha256.Sum256(raw)
-	keyID := signAttemptFileObjectKeyID(kind, record)
+	keyID := s.signAttemptFileObjectKeyID(kind, record)
 	encrypted, err := tss.EncryptSignAttemptWithPassphrase(raw, s.passphrase, keyID, s.params)
 	clear(raw)
 	if err != nil {
 		return "", err
 	}
+	ciphertextHash := sha256.Sum256(encrypted)
 	path, err := writeSyncedTempFile(s.objects, "attempt-*", encrypted)
 	clear(encrypted)
 	if err != nil {
 		return "", err
 	}
-	meta := fmt.Appendf(nil, "kind=%s\nplaintext_sha256=%x\n", kind, rawHash[:])
+	meta := fmt.Appendf(nil, "kind=%s\nciphertext_sha256=%x\n", kind, ciphertextHash[:])
 	if err := writeFileStoreMeta(path, meta); err != nil {
 		removeFileStoreObject(path)
 		return "", err
@@ -482,14 +507,23 @@ func (s *FileSignAttemptStore) writeEncryptedObject(record SignAttemptRecord, ki
 }
 
 func (s *FileSignAttemptStore) writeBurnObject(burn SignAttemptBurn) (string, error) {
+	if err := validateSignAttemptBurn(burn); err != nil {
+		return "", err
+	}
 	raw := append([]byte(signAttemptBurnMagic), []byte(burn.Reason)...)
-	rawHash := sha256.Sum256(raw)
-	path, err := writeSyncedTempFile(s.objects, "burn-*", raw)
+	keyID := s.signAttemptBurnObjectKeyID(burn)
+	encrypted, err := tss.EncryptSignAttemptWithPassphrase(raw, s.passphrase, keyID, s.params)
 	clear(raw)
 	if err != nil {
 		return "", err
 	}
-	meta := fmt.Appendf(nil, "kind=burn\nplaintext_sha256=%x\n", rawHash[:])
+	ciphertextHash := sha256.Sum256(encrypted)
+	path, err := writeSyncedTempFile(s.objects, "burn-*", encrypted)
+	clear(encrypted)
+	if err != nil {
+		return "", err
+	}
+	meta := fmt.Appendf(nil, "kind=burn\nciphertext_sha256=%x\n", ciphertextHash[:])
 	if err := writeFileStoreMeta(path, meta); err != nil {
 		removeFileStoreObject(path)
 		return "", err
@@ -554,10 +588,10 @@ func writeFileStoreMeta(path string, meta []byte) error {
 	return nil
 }
 
-func (s *FileSignAttemptStore) readClaimRecord(presignID []byte) (SignAttemptRecord, error) {
-	raw, err := os.ReadFile(s.claimPath(presignID))
+func (s *FileSignAttemptStore) readClaimRecord(presignContentID []byte) (SignAttemptRecord, error) {
+	encrypted, err := os.ReadFile(s.claimPath(presignContentID))
 	if errors.Is(err, fs.ErrNotExist) {
-		if s.burnExists(presignID) {
+		if s.burnExists(presignContentID) {
 			return SignAttemptRecord{}, ErrSignAttemptBurned
 		}
 		return SignAttemptRecord{}, ErrSignAttemptNotFound
@@ -565,43 +599,88 @@ func (s *FileSignAttemptStore) readClaimRecord(presignID []byte) (SignAttemptRec
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if isSignAttemptBurnObject(raw) {
-		return SignAttemptRecord{}, ErrSignAttemptBurned
-	}
-	return s.decryptRecord(raw)
-}
-
-func (s *FileSignAttemptStore) readRecord(path string) (SignAttemptRecord, error) {
-	encrypted, err := os.ReadFile(path) //nolint:gosec // fixed-width hex names under caller-selected root
+	raw, keyID, err := s.decryptObject(encrypted)
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
-	return s.decryptRecord(encrypted)
-}
-
-func (s *FileSignAttemptStore) decryptRecord(encrypted []byte) (SignAttemptRecord, error) {
-	raw, err := tss.DecryptSignAttemptWithPassphrase(encrypted, s.passphrase)
-	if err != nil {
-		return SignAttemptRecord{}, fmt.Errorf("%w: decrypt attempt: %w", ErrSignAttemptCorrupt, err)
-	}
 	defer clear(raw)
+	if isSignAttemptBurnObject(raw) {
+		burn := SignAttemptBurn{
+			PresignContentID: slices.Clone(presignContentID),
+			Reason:           string(raw[len(signAttemptBurnMagic):]),
+		}
+		if err := validateSignAttemptBurn(burn); err != nil ||
+			keyID != s.signAttemptBurnObjectKeyID(burn) {
+			return SignAttemptRecord{}, fmt.Errorf("%w: burn object binding mismatch", ErrSignAttemptCorrupt)
+		}
+		return SignAttemptRecord{}, ErrSignAttemptBurned
+	}
 	record, err := tss.DecodeBinaryValue[SignAttemptRecord](raw)
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("%w: decode attempt: %w", ErrSignAttemptCorrupt, err)
 	}
+	if keyID != s.signAttemptFileObjectKeyID("base-attempt", record) {
+		return SignAttemptRecord{}, fmt.Errorf("%w: base attempt AAD binding mismatch", ErrSignAttemptCorrupt)
+	}
 	return record, nil
 }
 
-func signAttemptFileObjectKeyID(kind string, record SignAttemptRecord) string {
+func (s *FileSignAttemptStore) readRecord(path, kind string) (SignAttemptRecord, error) {
+	encrypted, err := os.ReadFile(path) //nolint:gosec // fixed-width hex names under caller-selected root
+	if err != nil {
+		return SignAttemptRecord{}, err
+	}
+	return s.decryptRecord(encrypted, kind)
+}
+
+func (s *FileSignAttemptStore) decryptRecord(encrypted []byte, kind string) (SignAttemptRecord, error) {
+	raw, keyID, err := s.decryptObject(encrypted)
+	if err != nil {
+		return SignAttemptRecord{}, err
+	}
+	defer clear(raw)
+	if isSignAttemptBurnObject(raw) {
+		return SignAttemptRecord{}, fmt.Errorf("%w: unexpected burn object", ErrSignAttemptCorrupt)
+	}
+	record, err := tss.DecodeBinaryValue[SignAttemptRecord](raw)
+	if err != nil {
+		return SignAttemptRecord{}, fmt.Errorf("%w: decode attempt: %w", ErrSignAttemptCorrupt, err)
+	}
+	if keyID != s.signAttemptFileObjectKeyID(kind, record) {
+		return SignAttemptRecord{}, fmt.Errorf("%w: %s AAD binding mismatch", ErrSignAttemptCorrupt, kind)
+	}
+	return record, nil
+}
+
+func (s *FileSignAttemptStore) decryptObject(encrypted []byte) ([]byte, string, error) {
+	raw, keyID, err := tss.DecryptSignAttemptWithPassphraseAndKeyID(encrypted, s.passphrase)
+	if err != nil {
+		return nil, "", fmt.Errorf("%w: decrypt attempt: %w", ErrSignAttemptCorrupt, err)
+	}
+	return raw, keyID, nil
+}
+
+func (s *FileSignAttemptStore) signAttemptFileObjectKeyID(kind string, record SignAttemptRecord) string {
 	t := transcript.New(signAttemptFileObjectKeyLabel)
 	t.AppendString("kind", kind)
+	t.AppendBytes("store_key", s.storeKey(record.PresignContentID))
 	t.AppendString("protocol", string(record.Protocol))
-	t.AppendBytes("presign_id", record.PresignID)
+	t.AppendBytes("presign_content_id", record.PresignContentID)
 	t.AppendBytes("attempt_hash", record.AttemptHash)
+	t.AppendBytes("intent_hash", record.IntentHash)
 	t.AppendBytes("session_id", record.SessionID[:])
 	t.AppendUint32("party", record.Party)
 	t.AppendUint16("record_version", record.RecordVersion)
 	return "cggmp21-sign-attempt:" + kind + ":" + hex.EncodeToString(t.Sum())
+}
+
+func (s *FileSignAttemptStore) signAttemptBurnObjectKeyID(burn SignAttemptBurn) string {
+	t := transcript.New(signAttemptFileObjectKeyLabel)
+	t.AppendString("kind", "burn")
+	t.AppendBytes("store_key", s.storeKey(burn.PresignContentID))
+	t.AppendBytes("presign_content_id", burn.PresignContentID)
+	t.AppendString("reason", burn.Reason)
+	return "cggmp21-sign-attempt:burn:" + hex.EncodeToString(t.Sum())
 }
 
 func isSignAttemptBurnObject(raw []byte) bool {
@@ -613,29 +692,96 @@ func removeFileStoreObject(path string) {
 	_ = os.Remove(path + ".meta")
 }
 
-func (s *FileSignAttemptStore) burnExists(presignID []byte) bool {
-	_, err := os.Stat(s.burnPath(presignID))
+func (s *FileSignAttemptStore) burnExists(presignContentID []byte) bool {
+	_, err := os.Stat(s.burnPath(presignContentID))
 	return err == nil
 }
 
-func (s *FileSignAttemptStore) claimPath(presignID []byte) string {
-	return filepath.Join(s.claims, hex.EncodeToString(presignID))
+func (s *FileSignAttemptStore) claimPath(presignContentID []byte) string {
+	return filepath.Join(s.claims, hex.EncodeToString(s.storeKey(presignContentID)))
 }
 
-func (s *FileSignAttemptStore) ackPath(presignID []byte, party tss.PartyID) string {
-	return filepath.Join(s.deliveryAcks, fmt.Sprintf("%s-%010d", hex.EncodeToString(presignID), party))
+func (s *FileSignAttemptStore) ackPath(presignContentID []byte, party tss.PartyID) string {
+	return filepath.Join(s.deliveryAcks, fmt.Sprintf("%s-%010d", hex.EncodeToString(s.storeKey(presignContentID)), party))
 }
 
-func (s *FileSignAttemptStore) certificatePath(presignID []byte) string {
-	return filepath.Join(s.deliveryCertificates, hex.EncodeToString(presignID))
+func (s *FileSignAttemptStore) certificatePath(presignContentID []byte) string {
+	return filepath.Join(s.deliveryCertificates, hex.EncodeToString(s.storeKey(presignContentID)))
 }
 
-func (s *FileSignAttemptStore) completionPath(presignID []byte) string {
-	return filepath.Join(s.completions, hex.EncodeToString(presignID))
+func (s *FileSignAttemptStore) completionPath(presignContentID []byte) string {
+	return filepath.Join(s.completions, hex.EncodeToString(s.storeKey(presignContentID)))
 }
 
-func (s *FileSignAttemptStore) burnPath(presignID []byte) string {
-	return filepath.Join(s.burns, hex.EncodeToString(presignID))
+func (s *FileSignAttemptStore) burnPath(presignContentID []byte) string {
+	return filepath.Join(s.burns, hex.EncodeToString(s.storeKey(presignContentID)))
+}
+
+func (s *FileSignAttemptStore) storeKey(contentID []byte) []byte {
+	mac := hmac.New(sha256.New, s.storeSecret)
+	_, _ = mac.Write([]byte(signAttemptStoreKeyLabel))
+	_, _ = mac.Write(contentID)
+	return mac.Sum(nil)
+}
+
+func deriveSignAttemptStoreSecret(passphrase, salt []byte, params *tss.PassphraseParams) ([]byte, error) {
+	if len(passphrase) == 0 || len(salt) != signAttemptStoreSaltSize {
+		return nil, errors.New("invalid sign attempt store key material")
+	}
+	if params == nil || params.Time == 0 || params.Memory == 0 || params.Threads == 0 {
+		return nil, errors.New("invalid sign attempt store KDF parameters")
+	}
+	return argon2.IDKey(passphrase, salt, params.Time, params.Memory, params.Threads, sha256.Size), nil
+}
+
+func loadOrCreateSignAttemptStoreSalt(root string) ([]byte, error) {
+	path := filepath.Join(root, signAttemptStoreSaltFile)
+	salt, err := os.ReadFile(path) //nolint:gosec // fixed store-local salt path under caller-selected root
+	if err == nil {
+		if len(salt) != signAttemptStoreSaltSize {
+			clear(salt)
+			return nil, errors.New("invalid sign attempt store salt")
+		}
+		return salt, nil
+	}
+	if !errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("read sign attempt store salt: %w", err)
+	}
+	salt = make([]byte, signAttemptStoreSaltSize)
+	if _, err := rand.Read(salt); err != nil {
+		return nil, fmt.Errorf("generate sign attempt store salt: %w", err)
+	}
+	file, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // fixed store-local salt path under caller-selected root
+	if errors.Is(err, fs.ErrExist) {
+		clear(salt)
+		return loadOrCreateSignAttemptStoreSalt(root)
+	}
+	if err != nil {
+		clear(salt)
+		return nil, fmt.Errorf("create sign attempt store salt: %w", err)
+	}
+	if _, err := file.Write(salt); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		clear(salt)
+		return nil, fmt.Errorf("write sign attempt store salt: %w", err)
+	}
+	if err := file.Sync(); err != nil {
+		_ = file.Close()
+		_ = os.Remove(path)
+		clear(salt)
+		return nil, fmt.Errorf("sync sign attempt store salt: %w", err)
+	}
+	if err := file.Close(); err != nil {
+		_ = os.Remove(path)
+		clear(salt)
+		return nil, fmt.Errorf("close sign attempt store salt: %w", err)
+	}
+	if err := syncDirectory(root); err != nil {
+		clear(salt)
+		return nil, fmt.Errorf("sync sign attempt store root: %w", err)
+	}
+	return salt, nil
 }
 
 func syncDirectory(path string) error {

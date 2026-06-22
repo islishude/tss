@@ -41,7 +41,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		shares[share.state.Party] = share
 	}
 	ids = tss.SortParties(ids)
-	presignID, err := tss.NewSessionID(nil)
+	presignSessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -52,13 +52,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx PresignContext, rawDi
 		return nil, nil, err
 	}
 	for _, id := range ids {
-		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, presignID, simPolicies, tss.NewInMemoryReplayCache())
+		guard, err := tss.NewEnvelopeGuard(id, shares[id].state.Parties, tss.ProtocolCGGMP21Secp256k1, presignSessionID, simPolicies, tss.NewInMemoryReplayCache())
 		if err != nil {
 			return nil, nil, err
 		}
 		plan, err := NewPresignPlan(PresignPlanOption{
 			Key:       shares[id],
-			SessionID: presignID,
+			SessionID: presignSessionID,
 			Signers:   ids,
 			Context:   ctx,
 			Limits:    &limits,
@@ -185,7 +185,7 @@ func newSimulationSignAttemptStore() *simulationSignAttemptStore {
 }
 
 // LoadSignAttempt loads an in-memory simulation attempt.
-func (s *simulationSignAttemptStore) LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error) {
+func (s *simulationSignAttemptStore) LoadSignAttempt(ctx context.Context, presignContentID []byte) (SignAttemptRecord, error) {
 	if s == nil {
 		return SignAttemptRecord{}, errors.New("nil simulation sign attempt store")
 	}
@@ -197,10 +197,10 @@ func (s *simulationSignAttemptStore) LoadSignAttempt(ctx context.Context, presig
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if _, ok := s.burns[string(presignID)]; ok {
+	if _, ok := s.burns[string(presignContentID)]; ok {
 		return SignAttemptRecord{}, ErrSignAttemptBurned
 	}
-	record, ok := s.attempts[string(presignID)]
+	record, ok := s.attempts[string(presignContentID)]
 	if !ok {
 		return SignAttemptRecord{}, ErrSignAttemptNotFound
 	}
@@ -218,7 +218,7 @@ func (s *simulationSignAttemptStore) CommitSignAttempt(ctx context.Context, cand
 	if err := validateSignAttemptCandidate(candidate); err != nil {
 		return SignAttemptCommit{}, err
 	}
-	key := string(candidate.PresignID)
+	key := string(candidate.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -245,7 +245,7 @@ func (s *simulationSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Conte
 	if err := ctx.Err(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	key := string(update.PresignID)
+	key := string(update.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -271,7 +271,7 @@ func (s *simulationSignAttemptStore) CompleteSignAttempt(ctx context.Context, re
 	if err := ctx.Err(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	key := string(result.PresignID)
+	key := string(result.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -309,7 +309,7 @@ func (s *simulationSignAttemptStore) BurnPresign(ctx context.Context, burn SignA
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	key := string(burn.PresignID)
+	key := string(burn.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.attempts[key]; ok {

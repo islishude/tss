@@ -71,8 +71,8 @@ func TestFast_SignAttemptResultRejectsHighS(t *testing.T) {
 
 	highS := secp.ScalarNeg(secp.ScalarFromUint64(1))
 	result := SignAttemptResult{
-		PresignID:   bytes.Repeat([]byte{0x11}, sha256.Size),
-		AttemptHash: bytes.Repeat([]byte{0x22}, sha256.Size),
+		PresignContentID: bytes.Repeat([]byte{0x11}, sha256.Size),
+		AttemptHash:      bytes.Repeat([]byte{0x22}, sha256.Size),
 		Signature: Signature{
 			R:          secp.ScalarFromUint64(1).Bytes(),
 			S:          highS.Bytes(),

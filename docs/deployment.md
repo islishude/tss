@@ -129,7 +129,10 @@ if secp256k1.IsPresignConsumed(presign) {
 Restored CGGMP21 presigns require a durable sign-attempt record. Provide
 `SignRequest.AttemptStore`. `CommitSignAttempt` is the only StartSign
 linearization point; `LoadSignAttempt` is for `ResumeSign` and diagnostics.
-The store must atomically bind a presign ID to one intent and one attempt. A
+The store must atomically bind a secret-tainted presign content ID to one intent
+and one attempt. It must derive an opaque store-local key before using the
+content ID in paths or indexes and must not expose it in logs, metrics, or
+plaintext metadata. A
 repeated identical attempt returns `SignAttemptExistingSame`; the same intent
 with a different attempt returns `secp256k1.ErrSignAttemptNonDeterminism`; a
 different intent returns `secp256k1.ErrSignAttemptConflict`; a durable tombstone

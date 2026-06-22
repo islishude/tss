@@ -33,8 +33,11 @@ Callers must provide:
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
 - an atomic durable `SignAttemptStore` for CGGMP21 presigns. `StartSign`
   refuses to sign unless `SignRequest.AttemptStore` is provided. The store is
-  the only StartSign linearization point and must bind one presign ID to one
-  immutable attempt. Conflicts, burn tombstones, and same-intent/different-attempt
+  the only StartSign linearization point and must bind one presign content ID to
+  one immutable attempt. The content ID commits to nonce secrets and is
+  secret-tainted: implementations must derive an opaque store-local key and
+  must not expose the content ID in paths, logs, metrics, or plaintext metadata.
+  Conflicts, burn tombstones, and same-intent/different-attempt
   non-determinism are consumed outcomes; ordinary I/O, timeout, or cancellation
   errors during commit have unknown outcome and must be recovered by retrying or
   resuming the same attempt. `LoadSignAttempt` is not a StartSign concurrency
@@ -320,7 +323,21 @@ share to the caller because durable replacement may already have succeeded.
 
 ## One-Time Presigns
 
-CGGMP21 presigns include nonce-derived local material. Reusing a presign can break ECDSA security. `StartSign` validates all bindings, constructs and self-verifies a candidate partial, and canonical-encodes its envelope before consuming the presign. It then atomically commits the immutable intent and exact envelope through `SignRequest.AttemptStore`. Only a committed envelope may be returned or transmitted. A commit error has an unknown outcome: the presign remains bound and callers may only retry or `ResumeSign` the same attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt record is the restart and outbox boundary. Presigns remain bound to the key share and all `tss.SigningContext` fields, including requested and resolved derivation paths.
+CGGMP21 presigns include nonce-derived local material. Reusing a presign can
+break ECDSA security. Serialized presigns persist enough public context to replay
+every signprep proof and recompute the round-1 echo and presign transcript.
+`UnmarshalBinary` is structural only; importers should explicitly call
+`VerifyCryptographicMaterialWithLimits`. `StartSign` and `ResumeSign` enforce
+the same full self-verification before durable attempt work. `StartSign` then
+constructs and self-verifies a candidate partial and canonical-encodes its
+envelope before consuming the presign. It atomically commits the immutable
+intent and exact envelope through `SignRequest.AttemptStore`. Only a committed
+envelope may be returned or transmitted. A commit error has an unknown outcome:
+the presign remains bound and callers may only retry or `ResumeSign` the same
+attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt
+record is the restart and outbox boundary. Presigns remain bound to the key
+share, security parameters, and all `tss.SigningContext` fields, including
+requested and resolved derivation paths.
 
 ## Blame Evidence
 

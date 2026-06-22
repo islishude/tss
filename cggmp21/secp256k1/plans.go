@@ -520,7 +520,7 @@ func (p *PresignPlan) validateKey(key *KeyShare, local tss.LocalConfig) error {
 
 type signPlanState struct {
 	sessionID         tss.SessionID         // Online signing session; partial-signature envelopes are scoped to it.
-	presignID         []byte                // Durable one-use identifier for the consumed presign.
+	presignContentID  []byte                // Secret-tainted content commitment for the consumed presign.
 	presignTranscript []byte                // Presign transcript hash carried into partial verification.
 	contextHash       []byte                // Hash of the context already bound when the presign was created.
 	derivation        *tss.DerivationResult // Resolved child key/path that must match the presign.
@@ -537,7 +537,6 @@ type SignPlan struct {
 // SignPlanSnapshot is a caller-owned copy of online signing plan metadata.
 type SignPlanSnapshot struct {
 	SessionID             tss.SessionID
-	PresignID             []byte
 	PresignTranscriptHash []byte
 	ContextHash           []byte
 	Derivation            *tss.DerivationResult
@@ -549,7 +548,6 @@ type SignPlanSnapshot struct {
 func (s SignPlanSnapshot) Clone() SignPlanSnapshot {
 	return SignPlanSnapshot{
 		SessionID:             s.SessionID,
-		PresignID:             bytes.Clone(s.PresignID),
 		PresignTranscriptHash: bytes.Clone(s.PresignTranscriptHash),
 		ContextHash:           bytes.Clone(s.ContextHash),
 		Derivation:            s.Derivation.Clone(),
@@ -618,9 +616,13 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 		DurableStoreTimeout: request.DurableStoreTimeout,
 	}
 	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
+	contentID, err := presign.contentIDWithLimits(limits)
+	if err != nil {
+		return nil, invalidPlanConfig(key.state.Party, err)
+	}
 	return &SignPlan{state: &signPlanState{
 		sessionID:         option.SessionID,
-		presignID:         presign.id(),
+		presignContentID:  contentID,
 		presignTranscript: slices.Clone(presign.state.TranscriptHash),
 		contextHash:       slices.Clone(contextHash),
 		derivation:        derivation.Clone(),
@@ -645,7 +647,6 @@ func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 	}
 	return SignPlanSnapshot{
 		SessionID:             p.state.sessionID,
-		PresignID:             bytes.Clone(p.state.presignID),
 		PresignTranscriptHash: bytes.Clone(p.state.presignTranscript),
 		ContextHash:           bytes.Clone(p.state.contextHash),
 		Derivation:            p.state.derivation.Clone(),
@@ -683,7 +684,11 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	if local.Self != key.state.Party {
 		return errors.New("local self must match key share party")
 	}
-	if !bytes.Equal(p.state.presignID, presign.id()) {
+	contentID, err := presign.contentIDWithLimits(p.limits)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(p.state.presignContentID, contentID) {
 		return errors.New("sign plan presign mismatch")
 	}
 	if !bytes.Equal(p.state.presignTranscript, presign.state.TranscriptHash) {

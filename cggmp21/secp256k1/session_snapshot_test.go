@@ -161,7 +161,7 @@ func snapshotCGGMPSignSession(s *SignSession) cggmpSignSnapshot {
 		Aborted:        s.aborted,
 		HasSignature:   s.signature != nil,
 		PartialSenders: cggmpSnapshotMapKeys(s.partials),
-		HasAttempt:     len(s.attempt.PresignID) != 0 || len(s.attempt.AttemptHash) != 0,
+		HasAttempt:     len(s.attempt.PresignContentID) != 0 || len(s.attempt.AttemptHash) != 0,
 		HasCoordinator: s.coordinator != nil,
 	}
 }

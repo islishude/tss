@@ -184,9 +184,10 @@ func clonePresignForTest(p *Presign) *Presign {
 		KeygenTranscriptHash: slices.Clone(p.state.KeygenTranscriptHash),
 		PartiesHash:          slices.Clone(p.state.PartiesHash),
 		VerifyShares:         tss.CloneSlice(p.state.VerifyShares),
+		Verification:         p.state.Verification.clone(),
 		KShare:               p.state.KShare.Clone(),
 		ChiShare:             p.state.ChiShare.Clone(),
-		Delta:                p.state.Delta.Clone(),
+		DeltaAggregate:       p.state.DeltaAggregate.Clone(),
 	}}
 }
 
@@ -418,7 +419,7 @@ func (s *testSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate 
 	if err := validateSignAttemptCandidate(candidate); err != nil {
 		return SignAttemptCommit{}, err
 	}
-	key := string(candidate.PresignID)
+	key := string(candidate.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -444,7 +445,7 @@ func (s *testSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, up
 	if err := ctx.Err(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	key := string(update.PresignID)
+	key := string(update.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -469,7 +470,7 @@ func (s *testSignAttemptStore) CompleteSignAttempt(ctx context.Context, result S
 	if err := ctx.Err(); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	key := string(result.PresignID)
+	key := string(result.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.burns[key]; ok {
@@ -506,7 +507,7 @@ func (s *testSignAttemptStore) BurnPresign(ctx context.Context, burn SignAttempt
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	key := string(burn.PresignID)
+	key := string(burn.PresignContentID)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if _, ok := s.attempts[key]; ok {
@@ -597,6 +598,8 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 	if err != nil {
 		tb.Fatal("delta: " + err.Error())
 	}
+	var verificationSessionID tss.SessionID
+	copy(verificationSessionID[:], bytes.Repeat([]byte{0x31}, len(verificationSessionID)))
 	return &Presign{state: &presignState{
 		Consumed:       NewAtomicBoolWire(false),
 		attempt:        newPresignAttemptBinding(false),
@@ -630,9 +633,28 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 			ChiPoint: secp.Clone(RPoint),
 			Proof:    minimalProof.Clone(),
 		}},
-		KShare:   kShare,
-		ChiShare: chiShare,
-		Delta:    delta,
+		Verification: presignVerificationContext{
+			SessionID:  verificationSessionID,
+			Round1Echo: bytes.Repeat([]byte{0x32}, 32),
+			Entries: []presignVerificationEntry{{
+				Party:             1,
+				Gamma:             slices.Clone(R),
+				EncK:              []byte{1},
+				PaillierPublicKey: testPaillierPublicKey(65),
+				XBarPoint:         secp.Clone(RPoint),
+				Delta:             one,
+			}, {
+				Party:             2,
+				Gamma:             slices.Clone(R),
+				EncK:              []byte{1},
+				PaillierPublicKey: testPaillierPublicKey(77),
+				XBarPoint:         secp.Clone(RPoint),
+				Delta:             one,
+			}},
+		},
+		KShare:         kShare,
+		ChiShare:       chiShare,
+		DeltaAggregate: delta,
 	}}
 }
 

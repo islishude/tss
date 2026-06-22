@@ -11,11 +11,14 @@ const (
 	maxCGGMPThreshold = 16
 	maxCGGMPSigners   = 16
 
-	maxSignPrepProofBytes         = 512 << 10
-	maxSignVerifyShareRecordBytes = signVerifyShareRecordFixedBytes + 65*2 + maxSignPrepProofBytes
-	maxSignVerifyShareBytes       = maxSignVerifyShareRecordBytes
-	maxSignVerifySharesBytes      = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
-	maxSignPartialPayloadBytes    = 32*6 + maxSignPrepProofBytes + 256
+	maxSignPrepProofBytes            = 512 << 10
+	maxSignVerifyShareRecordBytes    = signVerifyShareRecordFixedBytes + 65*2 + maxSignPrepProofBytes
+	maxSignVerifyShareBytes          = maxSignVerifyShareRecordBytes
+	maxSignVerifySharesBytes         = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
+	maxSignPartialPayloadBytes       = 32*6 + maxSignPrepProofBytes + 256
+	maxPresignVerificationEntryBytes = tss.DefaultMaxPaillierCiphertextBytes +
+		tss.DefaultMaxPaillierPublicKeyBytes + 256
+	maxPresignVerificationContextBytes = 4 + maxCGGMPSigners*(4+maxPresignVerificationEntryBytes)
 )
 
 // StateLimits caps serialized CGGMP21 key material.
@@ -55,10 +58,12 @@ type ZKLimits struct {
 
 // SignPrepLimits caps CGGMP21 signprep and partial signature sizes.
 type SignPrepLimits struct {
-	MaxProofBytes              int
-	MaxVerifyShareBytes        int
-	MaxVerifySharesBytes       int
-	MaxSignPartialPayloadBytes int
+	MaxProofBytes               int
+	MaxVerifyShareBytes         int
+	MaxVerifySharesBytes        int
+	MaxSignPartialPayloadBytes  int
+	MaxVerificationEntryBytes   int
+	MaxVerificationContextBytes int
 }
 
 // Limits defines local fail-closed resource and policy bounds for CGGMP21.
@@ -112,10 +117,12 @@ func DefaultLimits() Limits {
 			MaxProofBytes: tss.DefaultMaxZKProofBytes,
 		},
 		SignPrep: SignPrepLimits{
-			MaxProofBytes:              maxSignPrepProofBytes,
-			MaxVerifyShareBytes:        maxSignVerifyShareBytes,
-			MaxVerifySharesBytes:       maxSignVerifySharesBytes,
-			MaxSignPartialPayloadBytes: maxSignPartialPayloadBytes,
+			MaxProofBytes:               maxSignPrepProofBytes,
+			MaxVerifyShareBytes:         maxSignVerifyShareBytes,
+			MaxVerifySharesBytes:        maxSignVerifySharesBytes,
+			MaxSignPartialPayloadBytes:  maxSignPartialPayloadBytes,
+			MaxVerificationEntryBytes:   maxPresignVerificationEntryBytes,
+			MaxVerificationContextBytes: maxPresignVerificationContextBytes,
 		},
 		TLV: tss.TLVLimits{
 			MaxFields:     tss.DefaultMaxWireFields,

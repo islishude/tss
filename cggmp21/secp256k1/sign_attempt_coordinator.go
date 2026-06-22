@@ -12,16 +12,19 @@ import (
 	"github.com/islishude/tss"
 )
 
-// presignHandle is the store-facing identity boundary for one presign. Its
-// current bytes come from Presign.id(); a future persisted non-secret UID can
-// replace that derivation without changing online-sign state transitions.
+// presignHandle is the store-facing secret-tainted content identity boundary
+// for one presign.
 type presignHandle []byte
 
-func newPresignHandle(presign *Presign) (presignHandle, error) {
+func newPresignHandle(presign *Presign, limits Limits) (presignHandle, error) {
 	if presign == nil || presign.state == nil {
 		return nil, errors.New("nil presign")
 	}
-	handle := presignHandle(presign.id())
+	contentID, err := presign.contentIDWithLimits(limits)
+	if err != nil {
+		return nil, err
+	}
+	handle := presignHandle(contentID)
 	if len(handle) != sha256.Size {
 		return nil, errors.New("invalid presign handle")
 	}
@@ -99,10 +102,10 @@ func (c *signAttemptCoordinator) updateDelivery(ctx context.Context, ack *tss.Br
 	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
 	defer cancel()
 	updated, err := c.store.UpdateSignAttemptDelivery(storeCtx, SignAttemptDeliveryUpdate{
-		PresignID:   slices.Clone(c.attempt.PresignID),
-		AttemptHash: slices.Clone(c.attempt.AttemptHash),
-		Ack:         ack,
-		Certificate: certificate,
+		PresignContentID: slices.Clone(c.attempt.PresignContentID),
+		AttemptHash:      slices.Clone(c.attempt.AttemptHash),
+		Ack:              ack,
+		Certificate:      certificate,
 	})
 	if err != nil {
 		return SignAttemptRecord{}, err
@@ -120,8 +123,8 @@ func (c *signAttemptCoordinator) complete(ctx context.Context, signature Signatu
 	storeCtx, cancel := durableStoreContext(ctx, c.timeout)
 	defer cancel()
 	completed, err := c.store.CompleteSignAttempt(storeCtx, SignAttemptResult{
-		PresignID:   slices.Clone(c.attempt.PresignID),
-		AttemptHash: slices.Clone(c.attempt.AttemptHash),
+		PresignContentID: slices.Clone(c.attempt.PresignContentID),
+		AttemptHash:      slices.Clone(c.attempt.AttemptHash),
 		Signature: Signature{
 			R:          slices.Clone(signature.R),
 			S:          slices.Clone(signature.S),
@@ -150,10 +153,14 @@ func (c *signAttemptCoordinator) burn(ctx context.Context, reason string) error 
 	if ctx == nil {
 		return errors.New("nil context")
 	}
-	return c.store.BurnPresign(ctx, SignAttemptBurn{
-		PresignID: slices.Clone(c.handle),
-		Reason:    reason,
-	})
+	burn := SignAttemptBurn{
+		PresignContentID: slices.Clone(c.handle),
+		Reason:           reason,
+	}
+	if err := validateSignAttemptBurn(burn); err != nil {
+		return err
+	}
+	return c.store.BurnPresign(ctx, burn)
 }
 
 func (c *signAttemptCoordinator) record() (SignAttemptRecord, bool) {
@@ -167,7 +174,7 @@ func (c *signAttemptCoordinator) validateCandidateIdentity(candidate SignAttempt
 	if c == nil || c.store == nil {
 		return errors.New("sign attempt coordinator unavailable")
 	}
-	if !bytes.Equal(candidate.PresignID, c.handle) {
+	if !bytes.Equal(candidate.PresignContentID, c.handle) {
 		return fmt.Errorf("%w: candidate presign identity mismatch", ErrSignAttemptCorrupt)
 	}
 	if err := validateSignAttemptRecordWithLimits(candidate, c.limits); err != nil {
@@ -180,7 +187,7 @@ func (c *signAttemptCoordinator) acceptRecord(record SignAttemptRecord) error {
 	if c == nil {
 		return errors.New("nil sign attempt coordinator")
 	}
-	if !bytes.Equal(record.PresignID, c.handle) {
+	if !bytes.Equal(record.PresignContentID, c.handle) {
 		return fmt.Errorf("%w: durable presign identity mismatch", ErrSignAttemptCorrupt)
 	}
 	if err := validateSignAttemptRecordWithLimits(record, c.limits); err != nil {

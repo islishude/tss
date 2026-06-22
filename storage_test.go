@@ -115,6 +115,13 @@ func TestEncryptDecryptSignAttemptWithPassphrase(t *testing.T) {
 	if !bytes.Equal(decrypted, plaintext) {
 		t.Fatal("sign attempt round trip mismatch")
 	}
+	decrypted, keyID, err := DecryptSignAttemptWithPassphraseAndKeyID(encrypted, passphrase)
+	if err != nil {
+		t.Fatalf("DecryptSignAttemptWithPassphraseAndKeyID: %v", err)
+	}
+	if !bytes.Equal(decrypted, plaintext) || keyID != "attempt-1" {
+		t.Fatal("sign attempt authenticated key ID mismatch")
+	}
 	if _, err := DecryptPresignWithPassphrase(encrypted, passphrase); err == nil {
 		t.Fatal("sign attempt ciphertext accepted as a presign record")
 	}

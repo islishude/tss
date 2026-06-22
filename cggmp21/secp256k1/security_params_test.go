@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"context"
 	"sort"
 	"testing"
 
@@ -116,8 +117,16 @@ func TestCGGMP21ArtifactsPersistSecurityParams(t *testing.T) {
 	if restoredPresign.SecurityParams() != want {
 		t.Fatalf("presign security params = %+v, want %+v", restoredPresign.SecurityParams(), want)
 	}
-	if !bytes.Equal(presign.id(), restoredPresign.id()) {
-		t.Fatal("presign ID changed after security-profile round trip")
+	presignContentID, err := presign.contentID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restoredContentID, err := restoredPresign.contentID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(presignContentID, restoredContentID) {
+		t.Fatal("presign content ID changed after security-profile round trip")
 	}
 }
 
@@ -143,6 +152,11 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 	presigns := secpPresignWithContext(t, shares, tss.NewPartySet(1, 2), testPresignContext())
 	mismatched := clonePresignForTest(presigns[1])
 	mismatched.state.SecurityParams = production
+	if err := validatePresign(shares[1], mismatched, limits); err == nil {
+		t.Fatal("presign validation accepted mismatched key and presign security params")
+	} else if err.Error() != "presign security params mismatch" {
+		t.Fatalf("presign validation error = %q, want security params mismatch", err)
+	}
 	if _, err := NewSignPlan(SignPlanOption{
 		Key:       shares[1],
 		Presign:   mismatched,
@@ -155,6 +169,18 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 		Limits: &limits,
 	}); err == nil {
 		t.Fatal("sign plan accepted mismatched key and presign security params")
+	}
+	if _, _, err := ResumeSignWithLimits(
+		context.Background(),
+		shares[1],
+		mismatched,
+		newTestSignAttemptStore(),
+		nil,
+		limits,
+	); err == nil {
+		t.Fatal("ResumeSign accepted mismatched key and presign security params")
+	} else if err.Error() != "presign security params mismatch" {
+		t.Fatalf("ResumeSign error = %q, want security params mismatch", err)
 	}
 }
 

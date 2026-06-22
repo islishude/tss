@@ -104,7 +104,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 	if store == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.Party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
 	}
-	handle, err := newPresignHandle(presign)
+	handle, err := newPresignHandle(presign, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -238,11 +238,15 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return SignAttemptRecord{}, err
 	}
+	contentID, err := presign.contentIDWithLimits(limits)
+	if err != nil {
+		return SignAttemptRecord{}, err
+	}
 	record := SignAttemptRecord{
 		RecordVersion:              signAttemptRecordVersion,
 		Protocol:                   tss.ProtocolCGGMP21Secp256k1,
 		ProtocolVersion:            tss.ProtocolVersion,
-		PresignID:                  presign.id(),
+		PresignContentID:           contentID,
 		SessionID:                  sessionID,
 		Party:                      key.state.Party,
 		SignerSetHash:              signAttemptSignerSetHash(presign.state.Signers),
@@ -306,7 +310,10 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, nil, err
 	}
-	handle, err := newPresignHandle(presign)
+	if err := presign.VerifyCryptographicMaterialWithLimits(limits); err != nil {
+		return nil, nil, err
+	}
+	handle, err := newPresignHandle(presign, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -418,7 +425,11 @@ func validateSignAttemptBindings(key *KeyShare, presign *Presign, record SignAtt
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
 		return err
 	}
-	if !bytes.Equal(record.PresignID, presign.id()) ||
+	contentID, err := presign.contentIDWithLimits(limits)
+	if err != nil {
+		return err
+	}
+	if !bytes.Equal(record.PresignContentID, contentID) ||
 		record.Party != key.state.Party ||
 		!bytes.Equal(record.SignerSetHash, signAttemptSignerSetHash(presign.state.Signers)) ||
 		!bytes.Equal(record.ContextHash, presign.state.ContextHash) {
@@ -438,7 +449,7 @@ func BurnPresign(ctx context.Context, store SignAttemptStore, presign *Presign, 
 	if presign == nil || presign.state == nil {
 		return errors.New("nil presign")
 	}
-	handle, err := newPresignHandle(presign)
+	handle, err := newPresignHandle(presign, DefaultLimits())
 	if err != nil {
 		return err
 	}
@@ -671,6 +682,9 @@ func validatePresign(key *KeyShare, presign *Presign, limits Limits) error {
 	}
 	if presign.state.Threshold != key.state.Threshold {
 		return errors.New("presign threshold mismatch")
+	}
+	if validSecurityParams(key.state.SecurityParams) && presign.state.SecurityParams != key.state.SecurityParams {
+		return errors.New("presign security params mismatch")
 	}
 	presignPublicKey, err := secp.PointBytes(presign.state.PublicKey)
 	if err != nil {

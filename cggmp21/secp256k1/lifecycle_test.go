@@ -430,11 +430,11 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	additiveShift := []byte{0x08, 0x09, 0x0a}
 	p := &Presign{state: &presignState{
 
-		Consumed: NewAtomicBoolWire(false),
-		attempt:  newPresignAttemptBinding(false),
-		KShare:   kShare,
-		ChiShare: chiShare,
-		Delta:    delta,
+		Consumed:       NewAtomicBoolWire(false),
+		attempt:        newPresignAttemptBinding(false),
+		KShare:         kShare,
+		ChiShare:       chiShare,
+		DeltaAggregate: delta,
 		Derivation: &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
 			ChildPublicKey: childPublicKey,
@@ -456,7 +456,7 @@ func TestPresign_Destroy_ClearsSecrets(t *testing.T) {
 	if p.state.ChiShare.FixedLen() != 0 {
 		t.Error("chiShare not zeroed")
 	}
-	if p.state.Delta.FixedLen() != 0 {
+	if p.state.DeltaAggregate.FixedLen() != 0 {
 		t.Error("delta not zeroed")
 	}
 	testutil.AssertBytesCleared(t, childPublicKey)

@@ -34,8 +34,9 @@ Online partial verification and final ECDSA aggregation are independent of the
 durable store. A sign-attempt coordinator owns claim, load/resume, delivery,
 completion, and burn operations and validates that returned records preserve the
 same presign and attempt identity. The current store handle is derived from
-`Presign.id()` behind this coordinator boundary so a future persisted non-secret
-presign UID can replace that derivation without changing online-sign transitions.
+an internal secret-tainted `contentID`. Store implementations must derive an
+opaque store-local key before using that value for paths, indexes, metadata, or
+other durable identifiers.
 
 ## Production Run Recipes
 
@@ -86,7 +87,8 @@ Public run metadata:
 
 - Fresh signing session ID.
 - Key ID.
-- Local presign ID.
+- Local inventory ID for the encrypted presign record. This application ID must
+  not be the internal secret-derived content commitment.
 - Signer set exactly matching the presign binding.
 - `SignRequest` intent including message or digest, context, LowS policy, and
   `AttemptStore`.
@@ -290,10 +292,12 @@ callers can persist or hand it to the online signer without mutating
 session-owned material.
 
 Each internal verify-share entry contains the signer ID, `KPoint_i = k_i·G`,
-`ChiPoint_i = χ_i·G`, and a signprep proof binding those points to the presign
-transcript. Each entry is bound into the presign transcript hash. `StartSign`
-calls `Presign.VerifySignMaterial()` to validate the structural integrity of all
-verify shares before entering online signing.
+`ChiPoint_i = χ_i·G`, and a signprep proof. The serialized presign also persists
+the round-1 public payloads, Paillier public keys, weighted verification points,
+round-3 delta shares, presign session ID, and round-1 echo required to rebuild
+every proof statement. `Presign.VerifyCryptographicMaterialWithLimits` replays
+all signprep checks, recomputes the presign transcript, and checks local
+secret/public and aggregate-delta consistency.
 
 ### Round 1: Nonce Commitments
 
@@ -417,7 +421,14 @@ Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the internal
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 
-Before any outbound partial is constructed, `StartSign` verifies that the presign is bound to the same key public key, keygen transcript hash, participant set, context hash, and derivation result (including the child verification key) as the supplied `KeyShare`. It also calls `Presign.VerifySignMaterial()` to check the structural integrity of all internal verify-share entries (valid points and signprep proofs). Full cryptographic verification of each signprep proof occurs during presign round 3; the presign transcript hash binds every proof hash, so tampering is caught by transcript mismatch.
+Before any outbound partial is constructed, `StartSign` verifies that the
+presign is bound to the same security parameters, key public key, keygen
+transcript hash, participant set, context hash, and derivation result (including
+the child verification key) as the supplied `KeyShare`. It then calls
+`Presign.VerifyCryptographicMaterialWithLimits` to replay every signprep proof,
+recompute the round-1 echo and presign transcript, and verify local nonce shares,
+aggregate delta, `R`, and `r`. `ResumeSign` performs the same verification before
+loading the durable attempt.
 
 No private key share, nonce share, or Paillier secret material leaves the process.
 
@@ -471,7 +482,8 @@ err = BurnPresign(ctx, store, presign, "operator discard")
 and canonical envelope encoding before mutation. It checks `ctx.Err()` and then
 calls `CommitSignAttempt` directly; `LoadSignAttempt` is reserved for
 `ResumeSign` and diagnostics, not StartSign's concurrency decision. The store
-must linearize by presign ID:
+must linearize by the presign content ID while preventing that secret-tainted
+value from becoming a public storage identifier:
 
 - no record: create the base attempt and encrypted outbox, returning
   `SignAttemptCreated`;
@@ -488,8 +500,8 @@ completion use `context.WithTimeout(context.WithoutCancel(ctx),
 DurableStoreTimeout)` so user cancellation after local validation does not
 unnecessarily abandon a presign whose durable outcome is unknown.
 
-`IntentHash` binds protocol/version, presign ID, session ID, local party, signer
-set hash, context hash, 32-byte digest, and digest binding hash.
+`IntentHash` binds protocol/version, presign content ID, session ID, local party,
+signer set hash, context hash, 32-byte digest, and digest binding hash.
 `AttemptHash` additionally binds the exact canonical base envelope hash, envelope
 digest, payload hash, and delivery policy snapshot. The digest stored
 in the record is the raw 32-byte ECDSA digest; `DigestBindingHash` matches the
@@ -514,6 +526,23 @@ the session keeps an internal pending-completion state; call `RetryCompletion`
 to persist the same computed signature result idempotently. `BurnPresign` writes
 a durable tombstone only when no attempt exists; `MarkPresignConsumed` is
 local-only protection and is not a durable lifecycle decision.
+
+The internal `contentID` is a domain-separated commitment over the complete
+canonical persisted presign state, including nonce secrets and verification
+context. It is secret-tainted and must never be logged, exported, used as a
+metric label, placed in plaintext metadata, or used directly as a filename.
+`FileSignAttemptStore` derives `storeKey = HMAC(storeSecret, contentID)` from
+store-local Argon2id key material, uses only `storeKey` for paths, encrypts burn
+tombstones and attempt objects, authenticates their bindings through AEAD AAD,
+and stores only ciphertext hashes in sidecar metadata.
+
+`UnmarshalBinary` performs strict canonical decoding and structural validation;
+it intentionally does not run expensive proof verification. Applications that
+import or restore a presign must call
+`VerifyCryptographicMaterialWithLimits` before making it available for signing.
+`StartSign` and `ResumeSign` enforce that verification even if the application
+omits the explicit import-time check. Retired presign wire shapes are not
+decoded.
 
 ## Refresh
 
@@ -924,7 +953,7 @@ context := metadata.Context // includes a copied derivation path
 
 ```go
 request := SignRequest{Context: ctx, Message: message, AttemptStore: store}
-// AttemptStore atomically binds the internal presign ID to the exact encrypted outbox.
+// AttemptStore atomically binds the internal content commitment through an opaque store key.
 plan, err := NewSignPlan(SignPlanOption{
     Key: share, Presign: presign, SessionID: sessionID, Request: request,
 })

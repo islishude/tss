@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"unicode/utf8"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -100,28 +101,47 @@ func (s SignAttemptDeliveryState) Equal(other SignAttemptDeliveryState) bool {
 
 // SignAttemptDeliveryUpdate records one durable outbox delivery progress update.
 type SignAttemptDeliveryUpdate struct {
-	PresignID   []byte
-	AttemptHash []byte
-	Ack         *tss.BroadcastAck
-	Certificate *tss.BroadcastCertificate
+	PresignContentID []byte
+	AttemptHash      []byte
+	Ack              *tss.BroadcastAck
+	Certificate      *tss.BroadcastCertificate
 }
 
 // SignAttemptBurn is a durable tombstone for a presign that must not be used.
 type SignAttemptBurn struct {
-	PresignID []byte
-	Reason    string
+	PresignContentID []byte
+	Reason           string
+}
+
+func validateSignAttemptBurn(burn SignAttemptBurn) error {
+	if len(burn.PresignContentID) != sha256.Size {
+		return errors.New("invalid burn presign content ID")
+	}
+	if burn.Reason == "" {
+		return errors.New("empty burn reason")
+	}
+	if len(burn.Reason) > 256 || !utf8.ValidString(burn.Reason) {
+		return errors.New("invalid burn reason")
+	}
+	for _, r := range burn.Reason {
+		if r < 0x20 || r == 0x7f {
+			return errors.New("burn reason contains control characters")
+		}
+	}
+	return nil
 }
 
 // SignAttemptRecord is the canonical durable binding between one presign and
 // one online signing intent. CanonicalBaseEnvelopeBytes contains a confidential
-// partial signature and must be encrypted at rest.
+// partial signature and must be encrypted at rest. PresignContentID is
+// secret-tainted and must not be logged or used directly as a public storage key.
 type SignAttemptRecord struct {
-	RecordVersion   uint16         `wire:"1,u16"`
-	Protocol        tss.ProtocolID `wire:"2,string,max_bytes=protocol_name"`
-	ProtocolVersion uint16         `wire:"3,u16"`
-	PresignID       []byte         `wire:"4,bytes,len=32"`
-	AttemptHash     []byte         `wire:"5,bytes,len=32"`
-	IntentHash      []byte         `wire:"6,bytes,len=32"`
+	RecordVersion    uint16         `wire:"1,u16"`
+	Protocol         tss.ProtocolID `wire:"2,string,max_bytes=protocol_name"`
+	ProtocolVersion  uint16         `wire:"3,u16"`
+	PresignContentID []byte         `wire:"4,bytes,len=32"` // Secret-derived presign content commitment.
+	AttemptHash      []byte         `wire:"5,bytes,len=32"`
+	IntentHash       []byte         `wire:"6,bytes,len=32"`
 
 	SessionID     tss.SessionID `wire:"7,bytes,len=32"`
 	Party         tss.PartyID   `wire:"8,u32"`
@@ -152,7 +172,7 @@ func (r SignAttemptRecord) Clone() SignAttemptRecord {
 		RecordVersion:              r.RecordVersion,
 		Protocol:                   r.Protocol,
 		ProtocolVersion:            r.ProtocolVersion,
-		PresignID:                  slices.Clone(r.PresignID),
+		PresignContentID:           slices.Clone(r.PresignContentID),
 		AttemptHash:                slices.Clone(r.AttemptHash),
 		IntentHash:                 slices.Clone(r.IntentHash),
 		SessionID:                  r.SessionID,
@@ -190,7 +210,7 @@ func (r SignAttemptRecord) Equal(other SignAttemptRecord) bool {
 // SameAttempt reports whether r and other identify the same committed attempt.
 // It compares the presign, intent, and attempt hashes only.
 func (r SignAttemptRecord) SameAttempt(other SignAttemptRecord) bool {
-	return bytes.Equal(r.PresignID, other.PresignID) &&
+	return bytes.Equal(r.PresignContentID, other.PresignContentID) &&
 		bytes.Equal(r.IntentHash, other.IntentHash) &&
 		bytes.Equal(r.AttemptHash, other.AttemptHash)
 }
@@ -203,7 +223,7 @@ func (r SignAttemptRecord) SameBaseAttempt(other SignAttemptRecord) bool {
 		r.ProtocolVersion == other.ProtocolVersion &&
 		r.SessionID == other.SessionID &&
 		r.Party == other.Party &&
-		bytes.Equal(r.PresignID, other.PresignID) &&
+		bytes.Equal(r.PresignContentID, other.PresignContentID) &&
 		bytes.Equal(r.AttemptHash, other.AttemptHash) &&
 		bytes.Equal(r.IntentHash, other.IntentHash) &&
 		bytes.Equal(r.SignerSetHash, other.SignerSetHash) &&
@@ -292,14 +312,14 @@ func (r SignAttemptRecord) ValidateWithLimits(limits Limits) error {
 
 // SignAttemptResult supplies the final signature for an existing durable attempt.
 type SignAttemptResult struct {
-	PresignID   []byte
-	AttemptHash []byte
-	Signature   Signature
+	PresignContentID []byte
+	AttemptHash      []byte
+	Signature        Signature
 }
 
 func (r SignAttemptResult) validate() error {
-	if len(r.PresignID) != sha256.Size {
-		return errors.New("invalid result presign ID")
+	if len(r.PresignContentID) != sha256.Size {
+		return errors.New("invalid result presign content ID")
 	}
 	if len(r.AttemptHash) != sha256.Size {
 		return errors.New("invalid result attempt hash")
@@ -334,7 +354,7 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	if r.ProtocolVersion != tss.ProtocolVersion {
 		return fmt.Errorf("%w: unexpected protocol version %d", ErrSignAttemptCorrupt, r.ProtocolVersion)
 	}
-	if len(r.PresignID) != sha256.Size || len(r.AttemptHash) != sha256.Size ||
+	if len(r.PresignContentID) != sha256.Size || len(r.AttemptHash) != sha256.Size ||
 		len(r.IntentHash) != sha256.Size || len(r.SignerSetHash) != sha256.Size ||
 		len(r.SignPlanHash) != sha256.Size ||
 		len(r.ContextHash) != sha256.Size || len(r.Digest) != sha256.Size ||
@@ -344,9 +364,6 @@ func validateSignAttemptRecordWithLimits(r SignAttemptRecord, limits Limits) err
 	}
 	if !r.SessionID.Valid() || r.Party == tss.BroadcastPartyId {
 		return fmt.Errorf("%w: invalid session or party", ErrSignAttemptCorrupt)
-	}
-	if len(r.CanonicalBaseEnvelopeBytes) == 0 || len(r.CanonicalBaseEnvelopeBytes) > tss.DefaultMaxEnvelopeBytes {
-		return fmt.Errorf("%w: invalid envelope length", ErrSignAttemptCorrupt)
 	}
 	env, err := decodeSignAttemptEnvelopeWithLimits(r.CanonicalBaseEnvelopeBytes, limits)
 	if err != nil {
@@ -515,10 +532,10 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 	if err := validateSignAttemptRecord(record); err != nil {
 		return SignAttemptRecord{}, err
 	}
-	if len(update.PresignID) != sha256.Size || len(update.AttemptHash) != sha256.Size {
+	if len(update.PresignContentID) != sha256.Size || len(update.AttemptHash) != sha256.Size {
 		return SignAttemptRecord{}, errors.New("invalid delivery update identity")
 	}
-	if !bytes.Equal(update.PresignID, record.PresignID) || !bytes.Equal(update.AttemptHash, record.AttemptHash) {
+	if !bytes.Equal(update.PresignContentID, record.PresignContentID) || !bytes.Equal(update.AttemptHash, record.AttemptHash) {
 		return SignAttemptRecord{}, ErrSignAttemptConflict
 	}
 	if update.Ack == nil && update.Certificate == nil {
@@ -642,7 +659,7 @@ func signAttemptIntentHash(r SignAttemptRecord) []byte {
 	t.AppendUint16("record_version", r.RecordVersion)
 	t.AppendString("protocol", string(r.Protocol))
 	t.AppendUint16("protocol_version", r.ProtocolVersion)
-	t.AppendBytes("presign_id", r.PresignID)
+	t.AppendBytes("presign_content_id", r.PresignContentID)
 	t.AppendBytes("session_id", r.SessionID[:])
 	t.AppendUint32("party", r.Party)
 	t.AppendBytes("signer_set_hash", r.SignerSetHash)

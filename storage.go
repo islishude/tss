@@ -126,6 +126,22 @@ func DecryptSignAttemptWithPassphrase(encoded, passphrase []byte) ([]byte, error
 	return decrypt(encoded, passphrase, recordTypeSignAttempt)
 }
 
+// DecryptSignAttemptWithPassphraseAndKeyID decrypts a sign-attempt encoding and
+// returns its authenticated caller-assigned key ID. Callers that use keyID to
+// bind object kind or storage identity must compare the returned value with the
+// expected value after decoding the plaintext record.
+func DecryptSignAttemptWithPassphraseAndKeyID(encoded, passphrase []byte) ([]byte, string, error) {
+	hdr, err := parseHeader(encoded)
+	if err != nil {
+		return nil, "", err
+	}
+	plaintext, err := decrypt(encoded, passphrase, recordTypeSignAttempt)
+	if err != nil {
+		return nil, "", err
+	}
+	return plaintext, hdr.keyID, nil
+}
+
 func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, params *PassphraseParams) ([]byte, error) {
 	if params == nil {
 		params = DefaultPassphraseParams()

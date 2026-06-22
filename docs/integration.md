@@ -86,7 +86,7 @@ type ProtocolRun struct {
 
     KeyID       string
     ParentKeyID string
-    PresignID   string
+    PresignInventoryID string
 
     PlanHash []byte
     Context  any
@@ -317,14 +317,17 @@ across machines.
 
 ### CGGMP21 secp256k1 Sign
 
-Public metadata includes a fresh signing session ID, key ID, local presign ID,
-signer set exactly matching the presign binding, and `secp256k1.SignRequest`
-intent. The sign session ID belongs to the online signing attempt, not to the
-earlier presign run.
+Public metadata includes a fresh signing session ID, key ID, local inventory ID
+for the encrypted presign record, signer set exactly matching the presign
+binding, and `secp256k1.SignRequest` intent. The inventory ID must not be the
+internal secret-derived presign content commitment. The sign session ID belongs
+to the online signing attempt, not to the earlier presign run.
 
 Each signer loads the local key share and local presign, verifies the presign is
-not consumed locally, reconstructs `secp256k1.NewSignPlan`, calls
-`secp256k1.StartSign`, and routes `HandleSignMessage` output.
+not consumed locally, calls `VerifyCryptographicMaterialWithLimits` after
+decoding, reconstructs `secp256k1.NewSignPlan`, calls `secp256k1.StartSign`, and
+routes `HandleSignMessage` output. `StartSign` and `ResumeSign` repeat the strong
+verification before durable attempt operations.
 
 `StartSign` must commit through `SignAttemptStore` before releasing outbound
 envelopes. An unknown commit outcome consumes the presign operationally. Recover

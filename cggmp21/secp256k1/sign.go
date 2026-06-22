@@ -15,7 +15,6 @@ import (
 	"github.com/islishude/tss/internal/mta"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
-	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/signprep"
@@ -26,7 +25,6 @@ const (
 	presignContextHashLabel    = "cggmp21-secp256k1-presign-context-v1"
 	presignRound1EchoLabel     = "cggmp21-secp256k1-presign-round1-echo-v1"
 	presignRound1PublicLabel   = "cggmp21-secp256k1-presign-round1-public-v1"
-	presignIDLabel             = "cggmp21-secp256k1-presign-id-v1"
 	signMessageDigestLabel     = "cggmp21-secp256k1-sign-message-v1"
 	mtaResponseEvidenceLabel   = "cggmp21-secp256k1-mta-response-evidence-v1"
 
@@ -59,8 +57,8 @@ var ErrSignAttemptCorrupt = errors.New("sign attempt record corrupt")
 var errPresignSignerMissing = errors.New("sender is not in signer set")
 
 // SignAttemptStore is the durable one-use and outbox boundary for online
-// signing. CommitSignAttempt must atomically bind one presign ID to one immutable
-// intent and its exact canonical outbound envelope.
+// signing. CommitSignAttempt must atomically bind one secret-tainted presign
+// content ID to one immutable intent and its exact canonical outbound envelope.
 //
 // CommitSignAttempt accepts an incomplete candidate, creates the attempt, or
 // returns the existing exact attempt. ErrSignAttemptConflict, ErrSignAttemptBurned,
@@ -69,10 +67,12 @@ var errPresignSignerMissing = errors.New("sender is not in signer set")
 // resume only the same intent. LoadSignAttempt is for ResumeSign and inspection;
 // it is not part of StartSign's linearization path.
 // CompleteSignAttempt is idempotent and must make the final signature durable
-// before returning success.
+// before returning success. Presign content IDs are secret-tainted commitments;
+// stores must derive opaque store-local keys before using them in paths,
+// indexes, logs, metrics, or plaintext metadata.
 type SignAttemptStore interface {
 	CommitSignAttempt(ctx context.Context, candidate SignAttemptRecord) (SignAttemptCommit, error)
-	LoadSignAttempt(ctx context.Context, presignID []byte) (SignAttemptRecord, error)
+	LoadSignAttempt(ctx context.Context, presignContentID []byte) (SignAttemptRecord, error)
 	UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error)
 	CompleteSignAttempt(ctx context.Context, result SignAttemptResult) (SignAttemptRecord, error)
 	BurnPresign(ctx context.Context, burn SignAttemptBurn) error
@@ -116,26 +116,27 @@ type Presign struct {
 }
 
 type presignState struct {
-	Party                tss.PartyID            `wire:"1,u32"`                           // Local owner of this presign share.
-	Threshold            int                    `wire:"2,u32"`                           // Number of signer partials required to complete ECDSA signing.
-	Signers              tss.PartySet           `wire:"3,u32list,max_items=signers"`     // Canonical signer set authorized for this presign.
-	R                    *secp.Point            `wire:"4,custom,len=33"`                 // Aggregate nonce point R.
-	LittleR              secp.Scalar            `wire:"5,custom,len=32"`                 // ECDSA r scalar derived from R.
-	KShare               *secret.Scalar         `wire:"6,custom,len=32"`                 // Local nonce-share secret used once during online signing.
-	ChiShare             *secret.Scalar         `wire:"7,custom,len=32"`                 // Local chi-share secret used once during online signing.
-	Delta                *secret.Scalar         `wire:"8,custom,len=32"`                 // Local aggregate-delta share from presign completion.
-	TranscriptHash       []byte                 `wire:"9,bytes,len=32"`                  // Cross-party presign transcript hash.
-	Context              PresignContext         `wire:"10,nested"`                       // Normalized context bound before online signing.
-	ContextHash          []byte                 `wire:"11,bytes,len=32"`                 // Hash of context, used to reject cross-context reuse.
-	Consumed             AtomicBoolWire         `wire:"12,custom,len=1"`                 // Shared in-process one-use marker across shallow copies.
-	PublicKey            *secp.Point            `wire:"13,custom,len=33"`                // Parent group public key before request-time HD derivation.
-	KeygenTranscriptHash []byte                 `wire:"14,bytes,len=32"`                 // Transcript hash of the keygen that produced PublicKey.
-	PartiesHash          []byte                 `wire:"15,bytes,len=32"`                 // Hash of the full key-share participant set.
-	VerifyShares         []signVerifyShare      `wire:"16,recordlist,max_items=signers"` // Per-signer public verification material for online partials.
-	PlanHash             []byte                 `wire:"17,bytes,len=32"`                 // Digest of the presign lifecycle plan accepted by all signers.
-	SecurityParams       SecurityParams         `wire:"18,record"`                       // Cryptographic profile inherited from the key share.
-	Derivation           *tss.DerivationResult  `wire:"19,record"`                       // Resolved child key/path; ChildPublicKey is the verification key.
-	attempt              *presignAttemptBinding `wire:"-"`                               // Durable attempt binding/outbox state for one-use signing.
+	Party                tss.PartyID                `wire:"1,u32"`                           // Local owner of this presign share.
+	Threshold            int                        `wire:"2,u32"`                           // Number of signer partials required to complete ECDSA signing.
+	Signers              tss.PartySet               `wire:"3,u32list,max_items=signers"`     // Canonical signer set authorized for this presign.
+	R                    *secp.Point                `wire:"4,custom,len=33"`                 // Aggregate nonce point R.
+	LittleR              secp.Scalar                `wire:"5,custom,len=32"`                 // ECDSA r scalar derived from R.
+	KShare               *secret.Scalar             `wire:"6,custom,len=32"`                 // Local nonce-share secret used once during online signing.
+	ChiShare             *secret.Scalar             `wire:"7,custom,len=32"`                 // Local chi-share secret used once during online signing.
+	DeltaAggregate       *secret.Scalar             `wire:"8,custom,len=32"`                 // Aggregate delta reconstructed from every signer's round-3 share.
+	TranscriptHash       []byte                     `wire:"9,bytes,len=32"`                  // Cross-party presign transcript hash.
+	Context              PresignContext             `wire:"10,nested"`                       // Normalized context bound before online signing.
+	ContextHash          []byte                     `wire:"11,bytes,len=32"`                 // Hash of context, used to reject cross-context reuse.
+	Consumed             AtomicBoolWire             `wire:"12,custom,len=1"`                 // Shared in-process one-use marker across shallow copies.
+	PublicKey            *secp.Point                `wire:"13,custom,len=33"`                // Parent group public key before request-time HD derivation.
+	KeygenTranscriptHash []byte                     `wire:"14,bytes,len=32"`                 // Transcript hash of the keygen that produced PublicKey.
+	PartiesHash          []byte                     `wire:"15,bytes,len=32"`                 // Hash of the full key-share participant set.
+	VerifyShares         []signVerifyShare          `wire:"16,recordlist,max_items=signers"` // Per-signer public verification material for online partials.
+	PlanHash             []byte                     `wire:"17,bytes,len=32"`                 // Digest of the presign lifecycle plan accepted by all signers.
+	SecurityParams       SecurityParams             `wire:"18,record"`                       // Cryptographic profile inherited from the key share.
+	Derivation           *tss.DerivationResult      `wire:"19,record"`                       // Resolved child key/path; ChildPublicKey is the verification key.
+	Verification         presignVerificationContext `wire:"20,record"`                       // Persisted public context required to replay signprep verification.
+	attempt              *presignAttemptBinding     `wire:"-"`                               // Durable attempt binding/outbox state for one-use signing.
 }
 
 // PartyID returns the owner of the local presign share.
@@ -246,46 +247,6 @@ func (p *Presign) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	return nil
 }
 
-// id returns a content-derived presign identifier suitable for use as an
-// idempotency key in a durable [SignAttemptStore]. The returned hash is computed
-// from all persisted presign fields, including secret material, and does not
-// depend on the public transcript hash or the local consumed claim. Tampering with any
-// persisted field changes the identifier, so a storage layer cannot alter the
-// idempotency key independently of the presign contents.
-func (p *Presign) id() []byte {
-	if p == nil || p.state == nil {
-		return nil
-	}
-
-	t := transcript.New(presignIDLabel)
-	appendSecurityParamsTranscript(t, p.state.SecurityParams)
-	t.AppendBytes("context_hash", p.state.ContextHash)
-	appendDerivationResultTranscript(t, p.state.Derivation)
-	t.AppendBytes("plan_hash", p.state.PlanHash)
-	publicKeyBytes, _ := secp.PointBytes(p.state.PublicKey)
-	t.AppendBytes("public_key", publicKeyBytes)
-	t.AppendBytes("keygen_transcript_hash", p.state.KeygenTranscriptHash)
-	t.AppendBytes("parties_hash", p.state.PartiesHash)
-	t.AppendUint32List("signers", p.state.Signers)
-	for _, vs := range p.state.VerifyShares {
-		kPointBytes, _ := vs.kPointBytes()
-		chiPointBytes, _ := vs.chiPointBytes()
-		proofBytes, _ := vs.proofBytes()
-		t.AppendUint32("verify_share_party", vs.Party)
-		t.AppendBytes("k_point", kPointBytes)
-		t.AppendBytes("chi_point", chiPointBytes)
-		proofHash := sha256.Sum256(proofBytes)
-		t.AppendBytes("proof_hash", proofHash[:])
-	}
-	rBytes, _ := secp.PointBytes(p.state.R)
-	t.AppendBytes("r_point", rBytes)
-	t.AppendBytes("little_r", p.state.LittleR.Bytes())
-	t.AppendBytes("k_share", p.state.KShare.FixedBytes())
-	t.AppendBytes("chi_share", p.state.ChiShare.FixedBytes())
-	t.AppendBytes("delta", p.state.Delta.FixedBytes())
-	return t.Sum()
-}
-
 func (p *Presign) verificationKey() []byte {
 	if p == nil || p.state == nil || p.state.Derivation == nil {
 		return nil
@@ -346,7 +307,7 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if _, err := secpScalarFromSecret(p.state.ChiShare); err != nil {
 		return fmt.Errorf("invalid chi share: %w", err)
 	}
-	if _, err := secpScalarFromSecret(p.state.Delta); err != nil {
+	if _, err := secpScalarFromSecret(p.state.DeltaAggregate); err != nil {
 		return fmt.Errorf("invalid delta: %w", err)
 	}
 	if len(p.state.TranscriptHash) != sha256.Size {
@@ -387,29 +348,22 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if err := validateSignVerifyShares(p.state.Signers, p.state.VerifyShares, limits); err != nil {
 		return fmt.Errorf("invalid presign verify shares: %w", err)
 	}
+	if err := validatePresignVerificationContext(p.state.Signers, p.state.Verification, limits); err != nil {
+		return fmt.Errorf("invalid presign verification context: %w", err)
+	}
 	return nil
 }
 
-// VerifySignMaterial performs a structural integrity check on all sign verify share
-// entries in the presign record. Full cryptographic verification of each signprep
-// proof happens during presign round 3 (with session ID bound). At StartSign time
-// the presign transcript hash already binds every proof hash, so tampering would
-// be caught by transcript mismatch. This method catches malformed proofs or
-// invalid point encodings that may have resulted from storage corruption.
+// VerifySignMaterial performs complete cryptographic self-verification of the
+// persisted presign material.
 func (p *Presign) VerifySignMaterial() error {
 	return p.VerifySignMaterialWithLimits(DefaultLimits())
 }
 
-// VerifySignMaterialWithLimits checks persisted signing verification material
-// using explicit local resource limits.
+// VerifySignMaterialWithLimits is an alias for
+// [Presign.VerifyCryptographicMaterialWithLimits].
 func (p *Presign) VerifySignMaterialWithLimits(limits Limits) error {
-	if p == nil || p.state == nil {
-		return errors.New("nil presign")
-	}
-	if err := validateSignVerifyShares(p.state.Signers, p.state.VerifyShares, limits); err != nil {
-		return err
-	}
-	return nil
+	return p.VerifyCryptographicMaterialWithLimits(limits)
 }
 
 // Destroy marks the presign consumed and clears its local secret shares.
@@ -429,9 +383,14 @@ func (p *Presign) Destroy() {
 	if p.state.ChiShare != nil {
 		p.state.ChiShare.Destroy()
 	}
-	if p.state.Delta != nil {
-		p.state.Delta.Destroy()
+	if p.state.DeltaAggregate != nil {
+		p.state.DeltaAggregate.Destroy()
 	}
+	for i := range p.state.VerifyShares {
+		p.state.VerifyShares[i].destroy()
+	}
+	p.state.VerifyShares = nil
+	p.state.Verification.destroy()
 	if p.state.Derivation != nil {
 		p.state.Derivation.Destroy()
 	}

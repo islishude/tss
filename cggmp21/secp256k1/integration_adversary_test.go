@@ -212,15 +212,12 @@ func TestIntegration_PresignRejectsTamperedVerifySharePoints(t *testing.T) {
 				}
 
 				err := r.VerifySignMaterial()
-				if err == nil {
-					// The point might still be a valid compressed point.
-					// VerifySignMaterial only checks structural validity.
-					continue
+				if err != nil {
+					t.Logf("%s tampering correctly detected: %v", tc.field, err)
+					return
 				}
-				t.Logf("%s tampering correctly detected: %v", tc.field, err)
-				return
 			}
-			t.Logf("%s tampering produced a structurally valid but semantically wrong record — caught during online signing", tc.field)
+			t.Fatalf("%s tampering passed presign cryptographic self-verification", tc.field)
 		})
 	}
 }

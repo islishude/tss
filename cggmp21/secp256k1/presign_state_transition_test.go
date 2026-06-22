@@ -291,7 +291,7 @@ func TestCGGMP21PresignCompletionPrepareDoesNotMutateAndDestroysFinalPresign(t *
 	assertCGGMPSnapshotUnchanged(t, before, after)
 	stagedK := prepared.presign.state.KShare
 	stagedChi := prepared.presign.state.ChiShare
-	stagedDelta := prepared.presign.state.Delta
+	stagedDelta := prepared.presign.state.DeltaAggregate
 	prepared.destroy()
 	if !testutil.IsZeroBytes(stagedK.FixedBytes()) ||
 		!testutil.IsZeroBytes(stagedChi.FixedBytes()) ||
