@@ -14,13 +14,13 @@ import (
 // primeRingPedersenFixture returns a VerifierAux whose modulus is a 512-bit
 // prime. ValidateRingPedersenParams (called by validateRPParamsForCommit)
 // rejects prime moduli because Ring-Pedersen commitments require a composite N.
-func primeRingPedersenFixture() RingPedersenParams {
+func primeRingPedersenFixture() *RingPedersenParams {
 	// 2^511 + 111, a 512-bit prime.
 	primeN, ok := new(big.Int).SetString("6703903964971298549787012499102923063739682910296196688861780721860882015036773488400937149083451713845015929093243025426876941405973284973216824503042159", 10)
 	if !ok {
 		panic("failed to parse hardcoded prime")
 	}
-	return RingPedersenParams{
+	return &RingPedersenParams{
 		N: primeN,
 		S: big.NewInt(2),
 		T: big.NewInt(3),
@@ -162,9 +162,9 @@ func encProofFixture(t *testing.T) (SecurityParams, EncStatement, EncWitness, *E
 		t.Fatal(err)
 	}
 	stmt := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertext,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	witness := EncWitness{K: kSecret, Rho: rho}
 	proof, err := ProveEnc(params, []byte("enc matrix"), stmt, witness, nil)
@@ -196,11 +196,11 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		t.Fatal(err)
 	}
 	xSigned := testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell))
-	xMulC, err := OMulCT(&sk.PublicKey, xSigned, c, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(sk.PublicKey, xSigned, c, signedPowerOfTwoBytes(params.Ell))
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := OAdd(&sk.PublicKey, xMulC, encYReceiver)
+	d, err := OAdd(sk.PublicKey, xMulC, encYReceiver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -209,13 +209,13 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		t.Fatal(err)
 	}
 	stmt := AffGStatement{
-		ReceiverPaillierN: &sk.PublicKey,
-		ProverPaillierN:   &sk.PublicKey,
+		ReceiverPaillierN: sk.PublicKey,
+		ProverPaillierN:   sk.PublicKey,
 		C:                 c,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		VerifierAux:       *aux,
+		VerifierAux:       aux,
 	}
 	witness := AffGWitness{X: xSecret, Y: ySecret, Rho: rho, RhoY: rhoY}
 	proof, err := ProveAffG(params, []byte("affg matrix"), stmt, witness, nil)
@@ -242,11 +242,11 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 	}
 	base := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
 	stmt := LogStarStatement{
-		PaillierN:   &sk.PublicKey,
+		PaillierN:   sk.PublicKey,
 		C:           c,
 		X:           secp.ScalarMult(base, secp.ScalarFromBigInt(x)),
 		B:           base,
-		VerifierAux: *aux,
+		VerifierAux: aux,
 	}
 	witness := LogStarWitness{X: xSecret, Rho: rho}
 	proof, err := ProveLogStar(params, []byte("logstar matrix"), stmt, witness, nil)

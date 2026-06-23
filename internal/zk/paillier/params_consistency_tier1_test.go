@@ -16,14 +16,14 @@ func TestCheckPaillierModulus(t *testing.T) {
 
 	// Test with a key that meets the minimum (requires keygen)
 	sk1024 := testPaillierKey(t, 1024)
-	err := sp.CheckPaillierModulus(&sk1024.PublicKey)
+	err := sp.CheckPaillierModulus(sk1024.PublicKey)
 	if err == nil {
 		t.Error("DefaultSecurityParams should reject 1024-bit modulus (MinPaillierBits=3072)")
 	}
 
 	// Explicit reduced parameters should accept 1024-bit.
 	fast := fastSecurityParams()
-	if err := fast.CheckPaillierModulus(&sk1024.PublicKey); err != nil {
+	if err := fast.CheckPaillierModulus(sk1024.PublicKey); err != nil {
 		t.Errorf("test security params rejected 1024-bit modulus: %v", err)
 	}
 }

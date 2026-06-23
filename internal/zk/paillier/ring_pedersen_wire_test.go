@@ -81,7 +81,7 @@ func TestRingPedersenParamsWireRejectsOversizedModulus(t *testing.T) {
 
 	params := seedRingPedersenParams()
 	_, err := wire.Marshal(params, wire.WithFieldLimitsForMarshal(wire.FieldLimits{
-		"paillier_modulus_bits": 7,
+		"paillier_modulus_bits": 3,
 	}))
 	if err == nil {
 		t.Fatal("expected oversized modulus rejection during marshal")
@@ -101,6 +101,23 @@ func TestRingPedersenParamsWireRejectsOversizedModulus(t *testing.T) {
 	}))
 	if err == nil {
 		t.Fatal("expected oversized modulus rejection during unmarshal")
+	}
+}
+
+func TestRingPedersenParamsWireRejectsRetiredFixedWidthLayout(t *testing.T) {
+	t.Parallel()
+
+	retired, err := wire.MarshalFields(ringPedersenParamsVersion, ringPedersenParamsType, []wire.Field{
+		{Tag: 1, Value: []byte{0x01, 0x3b}},
+		{Tag: 2, Value: []byte{0x00, 0x02}},
+		{Tag: 3, Value: []byte{0x00, 0x04}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var decoded RingPedersenParams
+	if err := wire.Unmarshal(retired, &decoded, wire.WithFieldLimits(ringPedersenParamsTestLimits())); err == nil {
+		t.Fatal("retired fixed-width Ring-Pedersen layout was accepted")
 	}
 }
 

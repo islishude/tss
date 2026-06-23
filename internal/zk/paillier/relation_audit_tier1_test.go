@@ -49,7 +49,7 @@ func TestEncProofRelationCompleteness(t *testing.T) {
 	// Wrong prover Paillier key → transcript hash mismatch → rejection.
 	wrongKey := testPaillierKey(t, 1024)
 	wrongStmt := stmt
-	wrongStmt.ProverPaillierN = &wrongKey.PublicKey
+	wrongStmt.ProverPaillierN = wrongKey.PublicKey
 	if err := VerifyEnc(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("EncProof verified with wrong prover N (not transcript-bound)")
 	}
@@ -327,9 +327,9 @@ func TestEncProofStatementOpensCiphertext(t *testing.T) {
 	}
 	params := fastProofParams()
 	stmt := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertext,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	// Witness with wrong k: the ciphertext K does not decrypt to wrongK.
 	badWitness := EncWitness{

@@ -26,7 +26,7 @@ func TestModulusProofChallengeDistribution(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyModulus(domain, &sk.PublicKey, party, proof) {
+	if !VerifyModulus(domain, sk.PublicKey, party, proof) {
 		t.Fatal("modulus proof did not verify")
 	}
 
@@ -255,7 +255,7 @@ func TestSecurityParamsAuditBitBoundary(t *testing.T) {
 	sp := DefaultSecurityParams()
 	sk := testPaillierKey(t, 3072)
 
-	if err := sp.CheckPaillierModulus(&sk.PublicKey); err != nil {
+	if err := sp.CheckPaillierModulus(sk.PublicKey); err != nil {
 		t.Fatalf("3072-bit key rejected by production params: %v", err)
 	}
 }

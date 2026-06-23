@@ -98,7 +98,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	modDomain, err := refreshPaillierDomain(config, config.Self, &newPaillierKey.PublicKey, planHash, limits)
+	modDomain, err := refreshPaillierDomain(config, config.Self, newPaillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -173,7 +173,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	commitPayload, err := (refreshCommitmentsPayload{
 		Commitments:        commitments,
-		PaillierPublicKey:  &newPaillierKey.PublicKey,
+		PaillierPublicKey:  newPaillierKey.PublicKey,
 		PaillierProof:      modProof,
 		RingPedersenParams: ringPedersenParams,
 		RingPedersenProof:  ringPedersenProof,

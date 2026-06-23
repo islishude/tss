@@ -84,16 +84,16 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
-	start, err := Start(nil, testSecretScalar(tb, a), &skA.PublicKey)
+	start, err := Start(nil, testSecretScalar(tb, a), skA.PublicKey)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	params := testSecurityParams()
-	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, &skA.PublicKey, *rpB)
+	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, skA.PublicKey, rpB)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(tb, b), bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(tb, b), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 	if err != nil {
 		tb.Fatal(err)
 	}

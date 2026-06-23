@@ -219,7 +219,7 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 	}
 	defer logRandomness.Destroy()
 	localRP := localRingPedersen.Params.Clone()
-	logDomain, err := logProofDomain(localProofShare, &s.local.paillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
+	logDomain, err := logProofDomain(localProofShare, s.local.paillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -228,11 +228,11 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 		return nil, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
-		PaillierN:   &s.local.paillier.PublicKey,
+		PaillierN:   s.local.paillier.PublicKey,
 		C:           logCiphertext,
 		X:           verificationPoint,
 		B:           secp.ScalarBaseMult(secp.ScalarOne()),
-		VerifierAux: *localRP,
+		VerifierAux: localRP,
 	}
 	logWitness := zkpai.LogStarWitness{X: secretScalar, Rho: logRandomness}
 	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())

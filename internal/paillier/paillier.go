@@ -45,11 +45,11 @@ func (pk *PublicKey) Clone() *PublicKey {
 // All private factors and exponents use fixed-length secret.Scalar values to
 // prevent accidental logging and long-lived variable-width representations.
 type PrivateKey struct {
-	PublicKey
-	Lambda *secret.Scalar
-	Mu     *secret.Scalar
-	P      *secret.Scalar
-	Q      *secret.Scalar
+	*PublicKey `wire:"1,record"`
+	Lambda     *secret.Scalar `wire:"2,custom"`
+	Mu         *secret.Scalar `wire:"3,custom"`
+	P          *secret.Scalar `wire:"4,custom"`
+	Q          *secret.Scalar `wire:"5,custom"`
 }
 
 // MarshalJSON rejects default JSON encoding of Paillier private keys.
@@ -65,13 +65,8 @@ func (sk *PrivateKey) Clone() *PrivateKey {
 	if sk == nil {
 		return nil
 	}
-	pk := sk.PublicKey.Clone()
-	var publicKey PublicKey
-	if pk != nil {
-		publicKey = *pk
-	}
 	return &PrivateKey{
-		PublicKey: publicKey,
+		PublicKey: sk.PublicKey.Clone(),
 		Lambda:    sk.Lambda.Clone(),
 		Mu:        sk.Mu.Clone(),
 		P:         sk.P.Clone(),

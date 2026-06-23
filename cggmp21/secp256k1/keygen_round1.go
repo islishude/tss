@@ -110,7 +110,7 @@ func generateKeygenLocalMaterial(
 	cleanup := newCleanupStack()
 	defer cleanup.run()
 	cleanup.add(paillierKey.Destroy)
-	modDomain, err := keygenModulusDomain(config, config.Self, &paillierKey.PublicKey, planHash, limits)
+	modDomain, err := keygenModulusDomain(config, config.Self, paillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +219,7 @@ func emitKeygenRound1(s *KeygenSession, local *keygenLocalMaterial) (out []tss.E
 	out = make([]tss.Envelope, 0, len(s.cfg.Parties))
 	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:        local.commitments,
-		PaillierPublicKey:  &local.paillier.PublicKey,
+		PaillierPublicKey:  local.paillier.PublicKey,
 		PaillierProof:      local.paillierPub.Proof,
 		ChainCodeCommit:    local.chainCodeCommit,
 		RingPedersenParams: local.ringPedersen.Params,

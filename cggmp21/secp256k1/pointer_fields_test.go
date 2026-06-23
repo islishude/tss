@@ -71,7 +71,7 @@ func TestCGGMP21PresignRound1PointerFieldRoundTrip(t *testing.T) {
 	payload := presignRound1Payload{
 		Gamma:             gamma,
 		EncK:              []byte{1},
-		PaillierPublicKey: &publicKey,
+		PaillierPublicKey: publicKey,
 		PlanHash:          bytes.Repeat([]byte{0x42}, 32),
 	}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())

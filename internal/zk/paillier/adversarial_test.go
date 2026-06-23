@@ -155,9 +155,9 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	stmtZero := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertextZero,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	witnessZero := EncWitness{
 		K:   testSecpSecretScalar(t, zeroK),
@@ -186,22 +186,22 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	xSecret := testSignedSecret(t, xVal, signedPowerOfTwoBytes(params.Ell))
-	xMulC, err := OMulCT(&sk.PublicKey, xSecret, ciphertextX, signedPowerOfTwoBytes(params.Ell))
+	xMulC, err := OMulCT(sk.PublicKey, xSecret, ciphertextX, signedPowerOfTwoBytes(params.Ell))
 	if err != nil {
 		t.Fatal(err)
 	}
-	dZero, err := OAdd(&sk.PublicKey, xMulC, encYZero)
+	dZero, err := OAdd(sk.PublicKey, xMulC, encYZero)
 	if err != nil {
 		t.Fatal(err)
 	}
 	stmtAffGZero := AffGStatement{
-		ReceiverPaillierN: &sk.PublicKey,
-		ProverPaillierN:   &sk.PublicKey,
+		ReceiverPaillierN: sk.PublicKey,
+		ProverPaillierN:   sk.PublicKey,
 		C:                 ciphertextX,
 		D:                 dZero,
 		Y:                 encYZero,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xVal)),
-		VerifierAux:       *aux,
+		VerifierAux:       aux,
 	}
 	// Witness: Rho is the randomness for Enc_Nj(y; rho) inside D, which is encYZero's rhoYZero.
 	witnessAffGZero := AffGWitness{
@@ -238,11 +238,11 @@ func TestRingPedersenCommitmentCollisionResistance(t *testing.T) {
 
 	len1 := max(signedPowerOfTwoBytes(256), multRangeBytes(params.N, 256))
 	len2 := max(signedPowerOfTwoBytes(256), multRangeBytes(params.N, 256))
-	c1, err := RPCommitCT(*params, testSignedSecret(t, a1, len1), testSignedSecret(t, b1, len1), len1)
+	c1, err := RPCommitCT(params, testSignedSecret(t, a1, len1), testSignedSecret(t, b1, len1), len1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	c2, err := RPCommitCT(*params, testSignedSecret(t, a2, len2), testSignedSecret(t, b2, len2), len2)
+	c2, err := RPCommitCT(params, testSignedSecret(t, a2, len2), testSignedSecret(t, b2, len2), len2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -360,9 +360,9 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 		t.Fatal(err)
 	}
 	stmt := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertext,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	witness := EncWitness{
 		K:   testSecpSecretScalar(t, k),
@@ -377,7 +377,7 @@ func TestProofRejectsInvalidRingPedersenParams(t *testing.T) {
 	badAux := *aux
 	badAux.S = big.NewInt(1) // degenerate
 	badStmt := stmt
-	badStmt.VerifierAux = badAux
+	badStmt.VerifierAux = &badAux
 	if err := VerifyEnc(params, []byte("degenerate test"), badStmt, proof); err == nil {
 		t.Fatal("EncProof verified with degenerate RP params (S=1)")
 	}

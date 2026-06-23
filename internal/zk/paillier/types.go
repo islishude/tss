@@ -68,9 +68,9 @@ func (p *ModulusProof) Clone() *ModulusProof {
 // RingPedersenParams are CGGMP Ring-Pedersen public parameters. N must match
 // the party Paillier modulus and s,t must be non-degenerate elements of Z*_N.
 type RingPedersenParams struct {
-	N *big.Int
-	S *big.Int
-	T *big.Int
+	N *big.Int `wire:"1,bigpos,max_bits=paillier_modulus_bits"`
+	S *big.Int `wire:"2,bigpos,max_bits=paillier_modulus_bits"`
+	T *big.Int `wire:"3,bigpos,max_bits=paillier_modulus_bits"`
 }
 
 // WireType returns the canonical wire type identifier for RingPedersenParams.

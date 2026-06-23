@@ -17,9 +17,15 @@ import (
 //   - skA: initiator's Paillier private key
 //   - pkB: responder's Paillier public key (Ni in Πaff-g)
 //   - verifierAux: initiator's own Ring-Pedersen parameters
-func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux zkpai.RingPedersenParams) (*secret.Scalar, error) {
+func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*secret.Scalar, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
+	}
+	if pkB == nil {
+		return nil, errors.New("nil Paillier public key")
+	}
+	if verifierAux == nil {
+		return nil, errors.New("nil RingPedersenParams")
 	}
 	if err := start.Validate(); err != nil {
 		return nil, err
@@ -36,7 +42,7 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 	}
 
 	stmt := zkpai.AffGStatement{
-		ReceiverPaillierN: &skA.PublicKey,
+		ReceiverPaillierN: skA.PublicKey,
 		ProverPaillierN:   pkB,
 		C:                 encA,
 		D:                 resp,

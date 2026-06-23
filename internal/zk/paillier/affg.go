@@ -34,7 +34,7 @@ type AffGStatement struct {
 	Y *big.Int    // Y = Enc_Ni(y; rhoY) (responder encrypts y under own key)
 	X *secp.Point // X = x * G (responder's curve commitment)
 
-	VerifierAux RingPedersenParams // initiator's RP params (Nhat_j = Nj)
+	VerifierAux *RingPedersenParams // initiator's RP params (Nhat_j = Nj)
 }
 
 // AffGWitness is the secret witness for a Πaff-g proof.

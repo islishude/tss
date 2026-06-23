@@ -160,16 +160,19 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pBytes, err := encodePositiveSecretScalar(sk.P)
-	if err != nil {
-		t.Fatal(err)
-	}
-	badPrivate, err := testutil.RewriteWireField(privRaw, privateKeyType, 5, append([]byte{0}, pBytes...))
+	pBytes := sk.P.FixedBytes()
+	badPrivate, err := testutil.RewriteWireFieldByName(
+		privRaw,
+		privateKeyType,
+		PrivateKey{},
+		"P",
+		append([]byte{0}, pBytes...),
+	)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := tss.DecodeBinary[PrivateKey](badPrivate); err == nil {
-		t.Fatal("expected non-minimal private factor rejection")
+		t.Fatal("expected wrong-width private factor rejection")
 	}
 	wrongType, err := wire.MarshalFields(publicKeyWireVersion, "wrong.paillier.public-key", nil)
 	if err != nil {
@@ -177,6 +180,68 @@ func TestRejectsNonCanonicalPublicKey(t *testing.T) {
 	}
 	if _, err := tss.DecodeBinary[PublicKey](wrongType); err == nil {
 		t.Fatal("expected wrong public key type rejection")
+	}
+}
+
+func TestPrivateKeyWireRejectsRetiredFlatLayout(t *testing.T) {
+	t.Parallel()
+
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	retired, err := wire.MarshalFields(privateKeyVersion, privateKeyType, []wire.Field{
+		{Tag: 1, Value: sk.N.Bytes()},
+		{Tag: 2, Value: sk.G.Bytes()},
+		{Tag: 3, Value: sk.Lambda.FixedBytes()},
+		{Tag: 4, Value: sk.Mu.FixedBytes()},
+		{Tag: 5, Value: sk.P.FixedBytes()},
+		{Tag: 6, Value: sk.Q.FixedBytes()},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinary[PrivateKey](retired); err == nil {
+		t.Fatal("retired flat private-key layout was accepted")
+	}
+}
+
+func TestPrivateKeyWireDecodeIsFailAtomic(t *testing.T) {
+	t.Parallel()
+
+	original, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	replacement, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := replacement.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	bad, err := testutil.RewriteWireFieldByName(
+		raw,
+		privateKeyType,
+		PrivateKey{},
+		"Q",
+		[]byte{1},
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	before := original.Clone()
+	if err := original.UnmarshalBinary(bad); err == nil {
+		t.Fatal("invalid private key was accepted")
+	}
+	if original.N.Cmp(before.N) != 0 ||
+		!original.Lambda.Equal(before.Lambda) ||
+		!original.Mu.Equal(before.Mu) ||
+		!original.P.Equal(before.P) ||
+		!original.Q.Equal(before.Q) {
+		t.Fatal("failed private-key decode mutated receiver")
 	}
 }
 

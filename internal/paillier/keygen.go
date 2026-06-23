@@ -170,7 +170,7 @@ func generateKeyInner(ctx context.Context, reader io.Reader, bits int) (*Private
 		}
 		clearSecrets()
 		return &PrivateKey{
-			PublicKey: PublicKey{
+			PublicKey: &PublicKey{
 				N:        n,
 				NSquared: nSquared,
 				G:        g,
@@ -224,7 +224,11 @@ func generatePrimePairWithSearch(ctx context.Context, bits int, search primeSear
 	launch := func(side primeSide, bits int, workers int) {
 		go func() {
 			prime, err := search(searchCtx, side, bits, workers)
-			resultCh <- primeSearchResult{side: side, prime: prime, err: err}
+			select {
+			case <-searchCtx.Done():
+				return
+			case resultCh <- primeSearchResult{side: side, prime: prime, err: err}:
+			}
 		}()
 	}
 	launch(primeSideP, pBits, pWorkers)
@@ -302,7 +306,11 @@ func safePrimeWithWorkers(ctx context.Context, reader io.Reader, bits, workers i
 	for range workers {
 		go func() {
 			prime, err := safePrime(searchCtx, reader, bits)
-			results <- primeResult{prime: prime, err: err}
+			select {
+			case <-searchCtx.Done():
+				return
+			case results <- primeResult{prime: prime, err: err}:
+			}
 		}()
 	}
 

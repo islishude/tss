@@ -122,7 +122,7 @@ func TestCheckedHomomorphicRejectNonUnitCiphertext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pk := &sk.PublicKey
+	pk := sk.PublicKey
 
 	// N is in range but not coprime to N^2.
 	bad := new(big.Int).Set(sk.N)
@@ -172,7 +172,7 @@ func TestUncheckedHelpersRejectOutOfRange(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pk := &sk.PublicKey
+	pk := sk.PublicKey
 
 	tests := []struct {
 		name string
@@ -354,7 +354,7 @@ func TestUncheckedHelpersAcceptValidCiphertexts(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	pk := &sk.PublicKey
+	pk := sk.PublicKey
 
 	c1, _, err := pk.Encrypt(nil, big.NewInt(10))
 	if err != nil {

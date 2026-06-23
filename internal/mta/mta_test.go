@@ -23,34 +23,34 @@ func TestMTAProductShares(t *testing.T) {
 	responseDomain := []byte("response")
 	aSecret := testSecretScalar(t, a)
 	bSecret := testSecretScalar(t, b)
-	start, err := Start(nil, aSecret, &skA.PublicKey)
+	start, err := Start(nil, aSecret, skA.PublicKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	startProof, err := ProveStartForVerifier(params, nil, startDomain, start, &skA.PublicKey, *rpB)
+	startProof, err := ProveStartForVerifier(params, nil, startDomain, start, skA.PublicKey, rpB)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyStart(params, startDomain, start.Message, &skA.PublicKey, *rpB, startProof); err != nil {
+	if err := VerifyStart(params, startDomain, start.Message, skA.PublicKey, rpB, startProof); err != nil {
 		t.Fatal(err)
 	}
-	if err := VerifyStart(params, []byte("other-start"), start.Message, &skA.PublicKey, *rpB, startProof); err == nil {
+	if err := VerifyStart(params, []byte("other-start"), start.Message, skA.PublicKey, rpB, startProof); err == nil {
 		t.Fatal("start proof verified under wrong domain")
 	}
-	if err := VerifyStart(params, startDomain, start.Message, &skA.PublicKey, *rpA, startProof); err == nil {
+	if err := VerifyStart(params, startDomain, start.Message, skA.PublicKey, rpA, startProof); err == nil {
 		t.Fatal("start proof verified for wrong verifier aux")
 	}
-	response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA)
+	response, betaShare, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, nil, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpB, *rpA); err == nil {
+	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, nil, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA); err == nil {
 		t.Fatal("missing start proof accepted")
 	}
-	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, &skA.PublicKey, &skB.PublicKey, *rpA, *rpA); err == nil {
+	if _, _, err := Respond(params, nil, startDomain, responseDomain, start.Message, startProof, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpA, rpA); err == nil {
 		t.Fatal("start proof for different verifier accepted")
 	}
-	alphaShare, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA)
+	alphaShare, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -107,7 +107,7 @@ func TestMTAProductShares(t *testing.T) {
 		t.Fatal("JSON MtA response decoded")
 	}
 	response.Proof.TranscriptHash[0] ^= 1
-	if _, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, &skB.PublicKey, *rpA); err == nil {
+	if _, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA); err == nil {
 		t.Fatal("tampered response proof verified")
 	}
 }

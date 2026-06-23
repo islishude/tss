@@ -13,7 +13,10 @@ import (
 // generator is n+1. Validate does NOT enforce a minimum modulus size — callers
 // that need a security-parameter bit-length check should use ValidateBits or
 // SecurityParams.CheckPaillierModulus.
-func (pk PublicKey) Validate() error {
+func (pk *PublicKey) Validate() error {
+	if pk == nil {
+		return errors.New("nil PublicKey")
+	}
 	if pk.N == nil || pk.N.Sign() <= 0 {
 		return errors.New("invalid modulus")
 	}
@@ -47,7 +50,7 @@ func (pk PublicKey) Validate() error {
 }
 
 // ValidateBits checks public key structure against an explicit minimum size.
-func (pk PublicKey) ValidateBits(minBits int) error {
+func (pk *PublicKey) ValidateBits(minBits int) error {
 	if err := pk.Validate(); err != nil {
 		return err
 	}

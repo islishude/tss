@@ -28,9 +28,9 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		t.Fatal(err)
 	}
 	encStmt := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertextK,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	encProof, err := ProveEnc(params, []byte("enc canonical"), encStmt, EncWitness{
 		K:   testSecpSecretScalar(t, k),
@@ -69,7 +69,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		t.Fatal(err)
 	}
 	xMulC, err := OMulCT(
-		&sk.PublicKey,
+		sk.PublicKey,
 		testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell)),
 		encX,
 		signedPowerOfTwoBytes(params.Ell),
@@ -77,7 +77,7 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	responseD, err := OAdd(&sk.PublicKey, xMulC, encYReceiver)
+	responseD, err := OAdd(sk.PublicKey, xMulC, encYReceiver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -86,13 +86,13 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		t.Fatal(err)
 	}
 	affGStmt := AffGStatement{
-		ReceiverPaillierN: &sk.PublicKey,
-		ProverPaillierN:   &sk.PublicKey,
+		ReceiverPaillierN: sk.PublicKey,
+		ProverPaillierN:   sk.PublicKey,
 		C:                 encX,
 		D:                 responseD,
 		Y:                 encYProver,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		VerifierAux:       *aux,
+		VerifierAux:       aux,
 	}
 	affGProof, err := ProveAffG(params, []byte("affg canonical"), affGStmt, AffGWitness{
 		X:    testSecpSecretScalar(t, x),
@@ -131,11 +131,11 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		t.Fatal(err)
 	}
 	logStmt := LogStarStatement{
-		PaillierN:   &sk.PublicKey,
+		PaillierN:   sk.PublicKey,
 		C:           logC,
 		X:           secp.ScalarBaseMult(secp.ScalarFromBigInt(logX)),
 		B:           secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1))),
-		VerifierAux: *aux,
+		VerifierAux: aux,
 	}
 	logProof, err := ProveLogStar(params, []byte("logstar canonical"), logStmt, LogStarWitness{
 		X:   testSecpSecretScalar(t, logX),

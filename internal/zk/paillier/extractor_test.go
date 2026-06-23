@@ -65,9 +65,9 @@ func TestEncProofSpecialSoundness(t *testing.T) {
 		t.Fatal(err)
 	}
 	stmt := EncStatement{
-		ProverPaillierN: &sk.PublicKey,
+		ProverPaillierN: sk.PublicKey,
 		CiphertextK:     ciphertext,
-		VerifierAux:     *aux,
+		VerifierAux:     aux,
 	}
 	witness := EncWitness{
 		K:   testSecpSecretScalar(t, k),
@@ -149,7 +149,7 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		t.Fatal(err)
 	}
 	xMulC, err := OMulCT(
-		&sk.PublicKey,
+		sk.PublicKey,
 		testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell)),
 		c,
 		signedPowerOfTwoBytes(params.Ell),
@@ -157,7 +157,7 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := OAdd(&sk.PublicKey, xMulC, encYReceiver)
+	d, err := OAdd(sk.PublicKey, xMulC, encYReceiver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -166,13 +166,13 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		t.Fatal(err)
 	}
 	stmt := AffGStatement{
-		ReceiverPaillierN: &sk.PublicKey,
-		ProverPaillierN:   &sk.PublicKey,
+		ReceiverPaillierN: sk.PublicKey,
+		ProverPaillierN:   sk.PublicKey,
 		C:                 c,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		VerifierAux:       *aux,
+		VerifierAux:       aux,
 	}
 	witness := AffGWitness{
 		X:    testSecpSecretScalar(t, x),
@@ -263,11 +263,11 @@ func TestLogStarProofSpecialSoundness(t *testing.T) {
 	}
 	base := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
 	stmt := LogStarStatement{
-		PaillierN:   &sk.PublicKey,
+		PaillierN:   sk.PublicKey,
 		C:           c,
 		X:           secp.ScalarMult(base, secp.ScalarFromBigInt(x)),
 		B:           base,
-		VerifierAux: *aux,
+		VerifierAux: aux,
 	}
 	witness := LogStarWitness{
 		X:   testSecpSecretScalar(t, x),

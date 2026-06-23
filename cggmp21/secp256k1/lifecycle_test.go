@@ -87,9 +87,9 @@ func mustTestSecretScalar(t *testing.T, value uint64) *secret.Scalar {
 	return out
 }
 
-func testPaillierPublicKey(seed int64) pai.PublicKey {
+func testPaillierPublicKey(seed int64) *pai.PublicKey {
 	n := big.NewInt(seed)
-	return pai.PublicKey{
+	return &pai.PublicKey{
 		N:        n,
 		G:        big.NewInt(seed + 1),
 		NSquared: new(big.Int).Mul(n, n),
@@ -148,7 +148,7 @@ func newTestPresignSession(t *testing.T) *PresignSession {
 	party := presignPartyState{
 		id: 2,
 		round1: presignRound1State{
-			payload:       presignRound1Payload{Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: &paillierPublicKey},
+			payload:       presignRound1Payload{Gamma: []byte{0xaa}, EncK: []byte{0xbb}, PaillierPublicKey: paillierPublicKey},
 			havePayload:   true,
 			proof:         presignRound1ProofPayload{PublicRound1Hash: []byte{0xdd}, EncKProof: testEncProof(700)},
 			proofEnvelope: tss.Envelope{},

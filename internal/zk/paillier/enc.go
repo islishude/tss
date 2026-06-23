@@ -26,7 +26,7 @@ const encProofType = "zk.paillier.enc-proof"
 type EncStatement struct {
 	ProverPaillierN *pai.PublicKey
 	CiphertextK     *big.Int
-	VerifierAux     RingPedersenParams
+	VerifierAux     *RingPedersenParams
 }
 
 // EncWitness is the secret witness for a Πenc proof.

@@ -143,7 +143,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	}
 	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
 	// Πenc proof bound to that public payload and the peer's RP parameters.
-	startOpening, err := mta.Start(config.Reader(), kShareSecret, &paillierKey.PublicKey)
+	startOpening, err := mta.Start(config.Reader(), kShareSecret, paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -225,11 +225,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proofDomain, err := mtaStartProofDomain(key, sessionID, signers, key.state.Party, peer, &paillierKey.PublicKey, contextHash, planHash, limits)
+		proofDomain, err := mtaStartProofDomain(key, sessionID, signers, key.state.Party, peer, paillierKey.PublicKey, contextHash, planHash, limits)
 		if err != nil {
 			return nil, nil, err
 		}
-		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, &s.paillier.PublicKey, peerRP)
+		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, s.paillier.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}

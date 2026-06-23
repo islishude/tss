@@ -824,15 +824,15 @@ func (k *KeyShare) paillierPublicShares(limits Limits) ([]PaillierPublicShare, e
 }
 
 // ringPedersenPublicFor returns the Ring-Pedersen parameters for a given party.
-func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID, _ Limits) (zkpai.RingPedersenParams, error) {
+func (k *KeyShare) ringPedersenPublicFor(id tss.PartyID, _ Limits) (*zkpai.RingPedersenParams, error) {
 	data, err := k.partyDataFor(id)
 	if err != nil {
-		return zkpai.RingPedersenParams{}, err
+		return nil, err
 	}
 	if data.RingPedersenParams == nil {
-		return zkpai.RingPedersenParams{}, fmt.Errorf("missing Ring-Pedersen params for party %d", id)
+		return nil, fmt.Errorf("missing Ring-Pedersen params for party %d", id)
 	}
-	return *data.RingPedersenParams.Clone(), nil
+	return data.RingPedersenParams.Clone(), nil
 }
 
 func (k *KeyShare) verificationShare(id tss.PartyID) ([]byte, bool) {

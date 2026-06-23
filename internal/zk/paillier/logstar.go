@@ -28,7 +28,7 @@ type LogStarStatement struct {
 	C           *big.Int    // C = Enc_N(x; rho)
 	X           *secp.Point // X = x * B
 	B           *secp.Point // base point (usually G)
-	VerifierAux RingPedersenParams
+	VerifierAux *RingPedersenParams
 }
 
 // LogStarWitness is the secret witness for a Πlog* proof.
@@ -72,7 +72,7 @@ func (p *LogStarProof) Clone() *LogStarProof {
 		Z1:             tss.CloneBigInt(p.Z1),
 		Z2:             tss.CloneBigInt(p.Z2),
 		Z3:             tss.CloneBigInt(p.Z3),
-		TranscriptHash: append([]byte(nil), p.TranscriptHash...),
+		TranscriptHash: bytes.Clone(p.TranscriptHash),
 	}
 }
 

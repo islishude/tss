@@ -20,10 +20,10 @@ func TestSlowCrypto_PaillierZKProductionProofs(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyModulus(domain, &sk.PublicKey, 1, modProof) {
+	if !VerifyModulus(domain, sk.PublicKey, 1, modProof) {
 		t.Fatal("production modulus proof did not verify")
 	}
-	if VerifyModulus([]byte("other"), &sk.PublicKey, 1, modProof) {
+	if VerifyModulus([]byte("other"), sk.PublicKey, 1, modProof) {
 		t.Fatal("production modulus proof verified under wrong domain")
 	}
 
@@ -89,7 +89,7 @@ func slowEncProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux *
 	if err != nil {
 		t.Fatal(err)
 	}
-	stmt := EncStatement{ProverPaillierN: &sk.PublicKey, CiphertextK: ciphertext, VerifierAux: *aux}
+	stmt := EncStatement{ProverPaillierN: sk.PublicKey, CiphertextK: ciphertext, VerifierAux: aux}
 	witness := EncWitness{
 		K:   testSecpSecretScalar(t, k),
 		Rho: testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
@@ -114,7 +114,7 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 		t.Fatal(err)
 	}
 	xMulC, err := OMulCT(
-		&sk.PublicKey,
+		sk.PublicKey,
 		testSignedSecret(t, x, signedPowerOfTwoBytes(params.Ell)),
 		c,
 		signedPowerOfTwoBytes(params.Ell),
@@ -122,7 +122,7 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 	if err != nil {
 		t.Fatal(err)
 	}
-	d, err := OAdd(&sk.PublicKey, xMulC, encYReceiver)
+	d, err := OAdd(sk.PublicKey, xMulC, encYReceiver)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -131,13 +131,13 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 		t.Fatal(err)
 	}
 	stmt := AffGStatement{
-		ReceiverPaillierN: &sk.PublicKey,
-		ProverPaillierN:   &sk.PublicKey,
+		ReceiverPaillierN: sk.PublicKey,
+		ProverPaillierN:   sk.PublicKey,
 		C:                 c,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
-		VerifierAux:       *aux,
+		VerifierAux:       aux,
 	}
 	witness := AffGWitness{
 		X:    testSecpSecretScalar(t, x),
@@ -161,11 +161,11 @@ func slowLogStarProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, a
 	}
 	base := secp.ScalarBaseMult(secp.ScalarFromBigInt(big.NewInt(1)))
 	stmt := LogStarStatement{
-		PaillierN:   &sk.PublicKey,
+		PaillierN:   sk.PublicKey,
 		C:           c,
 		X:           secp.ScalarMult(base, secp.ScalarFromBigInt(x)),
 		B:           base,
-		VerifierAux: *aux,
+		VerifierAux: aux,
 	}
 	witness := LogStarWitness{
 		X:   testSecpSecretScalar(t, x),

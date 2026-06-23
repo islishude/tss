@@ -118,7 +118,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	proofConfig := s.receiverConfig()
-	modDomain, err := resharePaillierDomain(proofConfig, s.selfID, &newPaillierKey.PublicKey, s.planHash, s.limits)
+	modDomain, err := resharePaillierDomain(proofConfig, s.selfID, newPaillierKey.PublicKey, s.planHash, s.limits)
 	if err != nil {
 		return err
 	}

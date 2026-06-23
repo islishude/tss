@@ -85,7 +85,7 @@ func TestNewProofVerifiersRejectMalformedProofsWithoutPanic(t *testing.T) {
 
 func TestProofVerifiersRejectSmallRingPedersenAuxModulus(t *testing.T) {
 	params, stmt, _, proof := encProofFixture(t)
-	stmt.VerifierAux = RingPedersenParams{
+	stmt.VerifierAux = &RingPedersenParams{
 		N: big.NewInt(15),
 		S: big.NewInt(2),
 		T: big.NewInt(4),

@@ -265,7 +265,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		return nil, err
 	}
 
-	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	deltaDomain, err := mtaDeltaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -287,7 +287,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		alphaDelta.Destroy()
 		return nil, err
 	}
-	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, &s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
+	sigmaDomain, err := mtaSigmaResponseDomain(s.key, s.sessionID, s.signers, s.key.state.Party, from, s.paillier.PublicKey, s.contextHash, s.planHash, s.limits)
 	if err != nil {
 		alphaDelta.Destroy()
 		return nil, err

@@ -165,7 +165,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	localStart := mta.StartMessage{
 		Ciphertext: selfState.round1.payload.EncK,
 	}
-	responseDomain, err := mtaDeltaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, &s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
+	responseDomain, err := mtaDeltaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -182,7 +182,7 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 	if _, err := mta.Finish(s1.securityParams, responseDomain, localStart, round2Payload.Delta, peerState.round1.payload.Gamma, s1.paillier, responderPK, selfRP); err != nil {
 		t.Fatal(err)
 	}
-	wrongResponseDomain, err := mtaSigmaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, &s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
+	wrongResponseDomain, err := mtaSigmaResponseDomain(s1.key, sessionID, signers, s1.key.PartyID(), 2, s1.paillier.PublicKey, s1.contextHash, s1.planHash, s1.limits)
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -80,9 +80,19 @@ func responseMessageFieldLimits() wire.FieldLimits {
 //   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
-func Respond(params zkpai.SecurityParams, reader io.Reader, startProofDomain, responseDomain []byte, start StartMessage, startProof *zkpai.EncProof, b *secret.Scalar, bCommitment []byte, pkA, pkB *pai.PublicKey, startVerifierAux, affGVerifierAux zkpai.RingPedersenParams) (*ResponseMessage, *secret.Scalar, error) {
+func Respond(
+	params zkpai.SecurityParams, reader io.Reader,
+	startProofDomain, responseDomain []byte,
+	start StartMessage, startProof *zkpai.EncProof,
+	b *secret.Scalar, bCommitment []byte,
+	pkA, pkB *pai.PublicKey,
+	startVerifierAux, affGVerifierAux *zkpai.RingPedersenParams,
+) (*ResponseMessage, *secret.Scalar, error) {
 	if reader == nil {
 		reader = rand.Reader
+	}
+	if startVerifierAux == nil || affGVerifierAux == nil {
+		return nil, nil, errors.New("nil RingPedersenParams")
 	}
 	if err := VerifyStart(params, startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
 		return nil, nil, err

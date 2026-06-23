@@ -20,7 +20,7 @@ func TestEncProofVerificationMatrix(t *testing.T) {
 
 	wrongKey := testPaillierKey(t, 1024)
 	wrongStmt := stmt
-	wrongStmt.ProverPaillierN = &wrongKey.PublicKey
+	wrongStmt.ProverPaillierN = wrongKey.PublicKey
 	if err := VerifyEnc(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("EncProof verified under wrong Paillier key")
 	}
@@ -77,7 +77,7 @@ func TestAffGProofVerificationMatrix(t *testing.T) {
 
 	wrongKey := testPaillierKey(t, 1024)
 	wrongStmt := stmt
-	wrongStmt.ProverPaillierN = &wrongKey.PublicKey
+	wrongStmt.ProverPaillierN = wrongKey.PublicKey
 	if err := VerifyAffG(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("AffGProof verified under wrong Paillier key")
 	}
@@ -137,7 +137,7 @@ func TestLogStarProofVerificationMatrix(t *testing.T) {
 
 	wrongKey := testPaillierKey(t, 1024)
 	wrongStmt := stmt
-	wrongStmt.PaillierN = &wrongKey.PublicKey
+	wrongStmt.PaillierN = wrongKey.PublicKey
 	if err := VerifyLogStar(params, state, wrongStmt, proof); err == nil {
 		t.Fatal("LogStarProof verified under wrong Paillier key")
 	}

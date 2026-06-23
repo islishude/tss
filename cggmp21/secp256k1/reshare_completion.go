@@ -202,7 +202,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	defer logRandomness.Destroy()
 	localRP := selfNPD.ringPedersen.Params.Clone()
-	logDomain, err := logProofDomain(localProofShare, &s.newPaillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
+	logDomain, err := logProofDomain(localProofShare, s.newPaillier.PublicKey, localVerificationShare, transcriptHash, s.limits)
 	if err != nil {
 		return nil, err
 	}
@@ -211,11 +211,11 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		return nil, fmt.Errorf("invalid verification share: %w", err)
 	}
 	logStmt := zkpai.LogStarStatement{
-		PaillierN:   &s.newPaillier.PublicKey,
+		PaillierN:   s.newPaillier.PublicKey,
 		C:           logCiphertext,
 		X:           verificationPoint,
 		B:           secp.ScalarBaseMult(secp.ScalarOne()),
-		VerifierAux: *localRP,
+		VerifierAux: localRP,
 	}
 	logWitness := zkpai.LogStarWitness{X: newSecretScalar, Rho: logRandomness}
 	logProof, err := zkpai.ProveLogStar(s.securityParams, logDomain, logStmt, logWitness, s.cfg.Reader())

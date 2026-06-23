@@ -20,13 +20,13 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !VerifyModulus(domain, &sk.PublicKey, party, proof) {
+	if !VerifyModulus(domain, sk.PublicKey, party, proof) {
 		t.Fatal("modulus proof did not verify")
 	}
-	if VerifyModulus([]byte("other"), &sk.PublicKey, party, proof) {
+	if VerifyModulus([]byte("other"), sk.PublicKey, party, proof) {
 		t.Fatal("modulus proof verified under wrong domain")
 	}
-	if VerifyModulus(domain, &sk.PublicKey, party+1, proof) {
+	if VerifyModulus(domain, sk.PublicKey, party+1, proof) {
 		t.Fatal("modulus proof verified under wrong party")
 	}
 
@@ -34,14 +34,14 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 	t.Run("jacobi w", func(t *testing.T) {
 		tampered := proof.Clone()
 		tampered.W = mustFixedModNBytes(t, big.NewInt(1), nLen)
-		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+		if VerifyModulus(domain, sk.PublicKey, party, tampered) {
 			t.Fatal("modulus proof with Jacobi(w,N) != -1 verified")
 		}
 	})
 	t.Run("round count", func(t *testing.T) {
 		tampered := proof.Clone()
 		tampered.X = tampered.X[:modulusProofRounds-1]
-		if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+		if VerifyModulus(domain, sk.PublicKey, party, tampered) {
 			t.Fatal("modulus proof with wrong tuple count verified")
 		}
 		if _, err := Marshal(tampered); err == nil {
@@ -74,7 +74,7 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 			t.Run(tc.name, func(t *testing.T) {
 				tampered := proof.Clone()
 				tc.mutate(tampered)
-				if VerifyModulus(domain, &sk.PublicKey, party, tampered) {
+				if VerifyModulus(domain, sk.PublicKey, party, tampered) {
 					t.Fatal("modulus proof with invalid Z_N* element verified")
 				}
 			})
@@ -83,12 +83,12 @@ func TestModulusProofCGGMP24Checks(t *testing.T) {
 	t.Run("equations", func(t *testing.T) {
 		tamperedZ := proof.Clone()
 		tamperedZ.Z[0][len(tamperedZ.Z[0])-1] ^= 1
-		if VerifyModulus(domain, &sk.PublicKey, party, tamperedZ) {
+		if VerifyModulus(domain, sk.PublicKey, party, tamperedZ) {
 			t.Fatal("modulus proof with bad z^N equation verified")
 		}
 		tamperedX := proof.Clone()
 		tamperedX.X[0][len(tamperedX.X[0])-1] ^= 1
-		if VerifyModulus(domain, &sk.PublicKey, party, tamperedX) {
+		if VerifyModulus(domain, sk.PublicKey, party, tamperedX) {
 			t.Fatal("modulus proof with bad x^4 equation verified")
 		}
 	})
