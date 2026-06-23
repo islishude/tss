@@ -84,28 +84,6 @@ func (s *ReshareSession) abort() {
 	s.clearSensitive()
 }
 
-func (s *KeygenSession) clearIntermediateSecrets() {
-	if s == nil {
-		return
-	}
-	for _, pd := range s.partyData {
-		if pd.share != nil {
-			pd.share.Destroy()
-			pd.share = nil
-		}
-		clear(pd.chainCode)
-		pd.chainCode = nil
-		if pd.confirmation != nil {
-			clear(pd.confirmation.ChainCode)
-			pd.confirmation = nil
-		}
-	}
-	clearScalars(s.ownPoly)
-	clearEnvelopePayloads(s.ownMessages)
-	s.ownPoly = nil
-	s.ownMessages = nil
-}
-
 func clearScalars(xs []*fed.Scalar) {
 	for i := range xs {
 		if xs[i] != nil {

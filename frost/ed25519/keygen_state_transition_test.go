@@ -96,16 +96,21 @@ func TestFROSTKeygenPendingPrepareDoesNotMutateAndDestroysStagedShare(t *testing
 	installFROSTKeygenRound1(t, session2, out1)
 
 	before := snapshotFROSTKeygenSession(session1)
-	prepared, ok, err := session1.maybePreparePendingKeyShare()
+	snap, ok, err := session1.round1.snapshot()
+	if err != nil || !ok {
+		t.Fatalf("round1 snapshot: ok=%v err=%v", ok, err)
+	}
+	defer snap.Destroy()
+	prepared, err := session1.preparePendingKeyMaterial(snap)
 	after := snapshotFROSTKeygenSession(session1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !ok || prepared == nil {
+	if prepared == nil {
 		t.Fatal("complete round-1 state did not prepare a pending key share")
 	}
 	assertFROSTSnapshotUnchanged(t, before, after)
-	stagedSecret := prepared.share.state.Secret
+	stagedSecret := prepared.pending.secret
 	if stagedSecret == nil || testutil.IsZeroBytes(stagedSecret.FixedBytes()) {
 		t.Fatal("prepared pending key share has no staged secret")
 	}
@@ -123,11 +128,11 @@ func TestFROSTKeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 	defer session2.Destroy()
 	installFROSTKeygenRound1(t, session1, out2)
 	installFROSTKeygenRound1(t, session2, out1)
-	_, err := session1.tryComplete()
+	_, err := session1.tryAdvance()
 	if err != nil {
 		t.Fatal(err)
 	}
-	remoteConfirmations, err := session2.tryComplete()
+	remoteConfirmations, err := session2.tryAdvance()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,11 +143,16 @@ func TestFROSTKeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 	}
 	remoteConfirmation.TranscriptHash = bytes.Clone(remoteConfirmation.TranscriptHash)
 	remoteConfirmation.TranscriptHash[0] ^= 1
-	session1.partyData[session2.cfg.Self].chainCode = bytes.Clone(remoteConfirmation.ChainCode)
-	session1.partyData[session2.cfg.Self].confirmation = remoteConfirmation
+	session1.confirmations.chainCodes[session2.cfg.Self] = bytes.Clone(remoteConfirmation.ChainCode)
+	session1.confirmations.confirmations[session2.cfg.Self] = remoteConfirmation
 
 	before := snapshotFROSTKeygenSession(session1)
-	prepared, ok, err := session1.maybePrepareFinalKeyShare()
+	confirmationSnap, ok, snapErr := session1.confirmations.snapshot()
+	if snapErr != nil || !ok {
+		t.Fatalf("confirmation snapshot: ok=%v err=%v", ok, snapErr)
+	}
+	defer confirmationSnap.Destroy()
+	prepared, err := session1.buildFinalKeyShare(confirmationSnap)
 	after := snapshotFROSTKeygenSession(session1)
 	if err == nil {
 		if prepared != nil {
@@ -150,52 +160,10 @@ func TestFROSTKeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 		}
 		t.Fatal("expected mismatched confirmation to fail final preparation")
 	}
-	if ok || prepared != nil {
+	if prepared != nil {
 		t.Fatal("failed final preparation returned a staged key share")
 	}
 	assertFROSTSnapshotUnchanged(t, before, after)
-}
-
-func TestFROSTPreparedKeygenStartDestroyClearsOwnedState(t *testing.T) {
-	t.Parallel()
-
-	parties := tss.NewPartySet(1, 2)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	session, out, err := startFROSTKeygen(tss.ThresholdConfig{
-		Threshold: 2,
-		Parties:   parties,
-		Self:      1,
-		SessionID: sessionID,
-	}, testFROSTGuard(1, parties, sessionID))
-	if err != nil {
-		t.Fatal(err)
-	}
-	ownedOut := tss.CloneSlice(out)
-	prepared := &preparedKeygenStart{
-		session: session,
-		out:     ownedOut,
-	}
-	prepared.destroy()
-
-	if !session.aborted {
-		t.Fatal("destroyed prepared keygen start did not abort staged session")
-	}
-	if session.ownPoly != nil || session.ownMessages != nil {
-		t.Fatal("destroyed prepared keygen start retained local resources")
-	}
-	for _, pd := range session.partyData {
-		if pd.share != nil {
-			t.Fatal("destroyed prepared keygen start retained a DKG share")
-		}
-	}
-	for _, env := range ownedOut {
-		if !testutil.IsZeroBytes(env.Payload) {
-			t.Fatal("destroyed prepared keygen start retained an outbound payload")
-		}
-	}
 }
 
 func frostKeygenTransitionSessions(t *testing.T) (*KeygenSession, []tss.Envelope) {
@@ -246,11 +214,11 @@ func installFROSTKeygenRound1(t *testing.T, session *KeygenSession, remoteOut []
 	if err != nil {
 		t.Fatal(err)
 	}
-	pd := session.partyData[commitmentEnv.From]
+	slot := session.round1.slots[commitmentEnv.From]
 	commitments := commitment.Commitments.Clone()
-	pd.commitments = &commitments
-	pd.chainCodeCommit = bytes.Clone(commitment.ChainCodeCommit)
-	pd.share = share.Share
+	slot.commitments = &commitments
+	slot.chainCodeCommit = bytes.Clone(commitment.ChainCodeCommit)
+	slot.share = share.Share
 }
 
 func mustFROSTEnvelope(t *testing.T, envelopes []tss.Envelope, payloadType tss.PayloadType, to tss.PartyID) tss.Envelope {

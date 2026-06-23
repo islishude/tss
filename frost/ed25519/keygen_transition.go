@@ -6,7 +6,6 @@ import (
 	"fmt"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/secret"
 )
 
@@ -21,13 +20,13 @@ func (tx *acceptKeygenCommitmentsTx) apply(s *KeygenSession) (sessionEffects, er
 	if tx == nil || tx.duplicate {
 		return sessionEffects{}, nil
 	}
-	pd, err := s.partyEntry(tx.from)
+	slot, err := s.round1.slot(tx.from)
 	if err != nil {
 		return sessionEffects{}, err
 	}
-	pd.commitments = &tx.commitments
-	pd.chainCodeCommit = tx.chainCodeCommit
-	out, err := s.tryComplete()
+	slot.commitments = &tx.commitments
+	slot.chainCodeCommit = tx.chainCodeCommit
+	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
 
@@ -46,12 +45,12 @@ func (tx *acceptKeygenShareTx) apply(s *KeygenSession) (sessionEffects, error) {
 	if tx == nil || tx.duplicate {
 		return sessionEffects{}, nil
 	}
-	pd, err := s.partyEntry(tx.from)
+	slot, err := s.round1.slot(tx.from)
 	if err != nil {
 		return sessionEffects{}, err
 	}
-	pd.share = tx.share
-	out, err := s.tryComplete()
+	slot.share = tx.share
+	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
 
@@ -80,16 +79,10 @@ func (tx *acceptKeygenConfirmationTx) apply(s *KeygenSession) (sessionEffects, e
 	if tx == nil || tx.duplicate {
 		return sessionEffects{}, nil
 	}
-	pd, err := s.partyEntry(tx.from)
-	if err != nil {
-		return sessionEffects{}, err
-	}
-	pd.chainCode = bytes.Clone(tx.confirmation.ChainCode)
-	pd.confirmation = tx.confirmation
-	if s.pending != nil && allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-		return sessionEffects{}, s.finalizeConfirmedKeyShare()
-	}
-	return sessionEffects{}, nil
+	s.confirmations.chainCodes[tx.from] = bytes.Clone(tx.confirmation.ChainCode)
+	s.confirmations.confirmations[tx.from] = tx.confirmation
+	out, err := s.tryAdvance()
+	return sessionEffects{envelopes: out}, err
 }
 
 func (tx *acceptKeygenConfirmationTx) cleanupOnReject() {
@@ -138,13 +131,13 @@ func (s *KeygenSession) buildAcceptKeygenCommitmentsTx(base tss.Envelope) (*acce
 	if err := payload.Commitments.ValidateThreshold(s.cfg.Threshold); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
-	pd, err := s.partyEntry(base.From)
+	slot, err := s.round1.slot(base.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
 	commitments := payload.Commitments.Clone()
-	if pd.commitments != nil {
-		if pd.commitments.Equal(commitments) && bytes.Equal(pd.chainCodeCommit, payload.ChainCodeCommit) {
+	if slot.commitments != nil {
+		if slot.commitments.Equal(commitments) && bytes.Equal(slot.chainCodeCommit, payload.ChainCodeCommit) {
 			return &acceptKeygenCommitmentsTx{from: base.From, duplicate: true}, nil
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting commitments"))
@@ -168,14 +161,14 @@ func (s *KeygenSession) buildAcceptKeygenShareTx(base tss.Envelope) (*acceptKeyg
 		payload.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
-	pd, err := s.partyEntry(base.From)
+	slot, err := s.round1.slot(base.From)
 	if err != nil {
 		payload.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
-	if pd.share != nil {
+	if slot.share != nil {
 		defer payload.Share.Destroy()
-		if pd.share.Equal(payload.Share) {
+		if slot.share.Equal(payload.Share) {
 			return &acceptKeygenShareTx{from: base.From, duplicate: true}, nil
 		}
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting share"))
@@ -212,12 +205,13 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 	if err := requirePlanHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
-	pd, err := s.partyEntry(base.From)
+	slot, err := s.round1.slot(base.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}
-	if pd.confirmation != nil {
-		existing, err := pd.confirmation.MarshalBinary()
+	existingConfirmation := s.confirmations.confirmations[base.From]
+	if existingConfirmation != nil {
+		existing, err := existingConfirmation.MarshalBinary()
 		if err == nil && bytes.Equal(existing, canonical) {
 			clear(confirmation.ChainCode)
 			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil
@@ -225,12 +219,12 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("conflicting keygen confirmation from party %d", base.From))
 	}
-	if !bip32util.VerifyChainCodeCommit(frostChainCodeCommitLabel, s.cfg.SessionID, base.From, confirmation.ChainCode, pd.chainCodeCommit) {
+	if err := verifyFROSTKeygenCommitRevealChainCode(s.cfg.SessionID, base.From, confirmation.ChainCode, slot.chainCodeCommit); err != nil {
 		clear(confirmation.ChainCode)
-		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("keygen confirmation chain code does not match round 1 commit from party %d", base.From))
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
 	if s.pending != nil {
-		if err := verifyKeygenConfirmationForShare(s.pending, confirmation); err != nil {
+		if err := verifyKeygenConfirmationForPending(s.pending, confirmation); err != nil {
 			clear(confirmation.ChainCode)
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 		}

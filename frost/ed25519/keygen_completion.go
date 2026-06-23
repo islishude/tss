@@ -2,43 +2,52 @@ package ed25519
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/secret"
 )
 
-func (s *KeygenSession) tryComplete() ([]tss.Envelope, error) {
-	if s.completed {
+func (s *KeygenSession) tryAdvance() ([]tss.Envelope, error) {
+	if s == nil || s.completed || s.aborted {
 		return nil, nil
 	}
-	if s.pending != nil {
-		if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-			return nil, s.finalizeConfirmedKeyShare()
+	if s.pending == nil {
+		snap, ok, err := s.round1.snapshot()
+		if err != nil || !ok {
+			return nil, err
 		}
-		return nil, nil
+		defer snap.Destroy()
+		return s.completeRound1(snap)
 	}
-	prepared, ok, err := s.maybePreparePendingKeyShare()
+	snap, ok, err := s.confirmations.snapshot()
+	if err != nil || !ok {
+		return nil, err
+	}
+	defer snap.Destroy()
+	return nil, s.completeConfirmationRound(snap)
+}
+
+func (s *KeygenSession) completeRound1(snap *frostKeygenRound1Snapshot) ([]tss.Envelope, error) {
+	prepared, err := s.preparePendingKeyMaterial(snap)
 	if err != nil {
 		return nil, err
 	}
-	if !ok {
-		return nil, nil
-	}
 	defer prepared.destroy()
-	effects := s.commitPendingKeyShare(prepared)
-	if allConfirmationsReceived(s.partyData, s.cfg.Parties) {
-		if err := s.finalizeConfirmedKeyShare(); err != nil {
-			return nil, err
-		}
+	out := s.commitPendingKeyShare(prepared)
+	more, err := s.tryAdvance()
+	if err != nil {
+		return nil, err
 	}
-	return effects.envelopes, nil
+	return append(out, more...), nil
 }
 
 type preparedPendingKeyShare struct {
-	share        *KeyShare
+	pending      *frostPendingKeyShare
 	confirmation *KeygenConfirmation
 	env          tss.Envelope
 	committed    bool
@@ -48,173 +57,197 @@ func (p *preparedPendingKeyShare) destroy() {
 	if p == nil || p.committed {
 		return
 	}
-	if p.share != nil {
-		p.share.Destroy()
-		p.share = nil
+	if p.pending != nil {
+		p.pending.Destroy()
+		p.pending = nil
 	}
 	if p.confirmation != nil {
 		clear(p.confirmation.ChainCode)
 		p.confirmation = nil
 	}
 	clear(p.env.Payload)
+	p.env.Payload = nil
 }
 
-func (s *KeygenSession) maybePreparePendingKeyShare() (*preparedPendingKeyShare, bool, error) {
-	if s.completed || s.pending != nil {
-		return nil, false, nil
+func (s *KeygenSession) preparePendingKeyMaterial(snap *frostKeygenRound1Snapshot) (*preparedPendingKeyShare, error) {
+	if s.pending != nil || s.completed {
+		return nil, errors.New("keygen round1 already completed")
 	}
-	if !allRound1Received(s.partyData, s.cfg.Parties) {
-		return nil, false, nil
+	if s.local == nil {
+		return nil, errors.New("missing keygen local material")
 	}
-	for _, id := range s.cfg.Parties {
-		d := s.partyData[id]
-		share, err := edScalarFromSecret(d.share)
-		if err != nil {
-			return nil, false, err
-		}
-		// Verify f_dealer(self) * B against the dealer's public polynomial commitments.
-		verifyErr := d.commitments.VerifyShare(s.cfg.Self, share)
-		share.Set(fed.NewScalar())
-		if verifyErr != nil {
-			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
-				"party_id", s.cfg.Self,
-				"dealer", id,
-			)
-			return nil, false, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: keygenStartRound,
-				Party: id,
-				Blame: frostKeygenBlame(s.cfg, id, d.commitments.BytesList()),
-				Err:   verifyErr,
-			}
-		}
+	if err := verifyFROSTKeygenShares(s.cfg, snap); err != nil {
+		return nil, err
 	}
-	secret := fed.NewScalar()
-	for _, id := range s.cfg.Parties {
-		share, err := edScalarFromSecret(s.partyData[id].share)
-		if err != nil {
-			secret.Set(fed.NewScalar())
-			return nil, false, err
-		}
-		secret.Add(secret, share)
-		share.Set(fed.NewScalar())
-	}
-	secretScalar, err := newEdSecretScalar(secret.Bytes())
-	secret.Set(fed.NewScalar())
+	secretScalar, err := aggregateFROSTKeygenSecret(s.cfg.Parties, snap.shares)
 	if err != nil {
-		return nil, false, err
+		return nil, err
 	}
-	groupPoints := make([]*fed.Point, s.cfg.Threshold)
-	for degree := 0; degree < s.cfg.Threshold; degree++ {
-		points := make([]*fed.Point, 0, len(s.cfg.Parties))
-		for _, id := range s.cfg.Parties {
-			p, err := s.partyData[id].commitments.PointAt(degree)
-			if err != nil {
-				secretScalar.Destroy()
-				return nil, false, err
-			}
-			points = append(points, p)
-		}
-		// Summing same-degree commitments yields the public polynomial for the group secret.
-		groupPoints[degree] = edcurve.AddPoints(points...)
-	}
-	groupCommitments, err := newGroupCommitmentsFromPoints(groupPoints, s.cfg.Threshold)
-	if err != nil {
-		secretScalar.Destroy()
-		return nil, false, fmt.Errorf("invalid group public key: %w", err)
-	}
-	verificationShares := make([]VerificationShare, 0, len(s.cfg.Parties))
-	partyData := make(map[tss.PartyID]keySharePartyData, len(s.cfg.Parties))
-	for _, id := range s.cfg.Parties {
-		pub, err := groupCommitments.Eval(id)
-		if err != nil {
+	committed := false
+	defer func() {
+		if !committed {
 			secretScalar.Destroy()
-			return nil, false, err
 		}
-		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: pub.Clone()})
-		partyData[id] = keySharePartyData{VerificationShare: pub}
-	}
-	// Chain code commitment binds the aggregate of all round-1 chain code
-	// commitments into the transcript. Individual chain codes are revealed
-	// and verified in round 2 confirmations.
-	chainCodeCommitMap := make(map[tss.PartyID][]byte, len(s.cfg.Parties))
-	for _, id := range s.cfg.Parties {
-		chainCodeCommitMap[id] = s.partyData[id].chainCodeCommit
-	}
-	chainCodeCommitAggregate, err := bip32util.AggregateChainCode(s.cfg.Parties, chainCodeCommitMap)
+	}()
+	group, err := aggregateFROSTKeygenCommitments(s.cfg.Parties, s.cfg.Threshold, snap.commitments)
 	if err != nil {
-		secretScalar.Destroy()
-		return nil, false, err
+		return nil, err
 	}
-	dealerCommits := make(map[tss.PartyID][][]byte, len(s.cfg.Parties))
-	for _, id := range s.cfg.Parties {
-		dealerCommits[id] = s.partyData[id].commitments.BytesList()
-	}
-	keygenTranscriptHash := frostKeygenTranscriptHash(s.cfg.SessionID, s.cfg.Threshold, s.cfg.Parties, chainCodeCommitAggregate, s.planHash, dealerCommits, groupCommitments.BytesList(), verificationShares)
-	share := &KeyShare{state: &keyShareState{
-		Party:                s.cfg.Self,
-		Threshold:            s.cfg.Threshold,
-		Parties:              s.cfg.Parties.Clone(),
-		PublicKey:            groupCommitments.PublicKey(),
-		ChainCode:            bytes.Clone(s.partyData[s.cfg.Self].chainCode),
-		Secret:               secretScalar,
-		GroupCommitments:     groupCommitments.Clone(),
-		PartyData:            partyData,
-		KeygenSessionID:      s.cfg.SessionID,
-		KeygenTranscriptHash: keygenTranscriptHash,
-		PlanHash:             bytes.Clone(s.planHash),
-	}}
-	if err := share.validateConsistencyWithoutConfirmations(); err != nil {
-		share.Destroy()
-		return nil, false, err
-	}
-	confirmation, err := share.NewConfirmation()
+	partyData, verificationShares, err := deriveFROSTVerificationShares(s.cfg.Parties, group)
 	if err != nil {
-		share.Destroy()
-		return nil, false, err
+		return nil, err
 	}
-	encodedConfirmation, err := confirmation.MarshalBinary()
+	transcriptHash, err := buildFROSTKeygenTranscriptHash(s.cfg, s.planHash, snap, group, verificationShares)
+	if err != nil {
+		return nil, err
+	}
+	pending := &frostPendingKeyShare{
+		party:                s.cfg.Self,
+		threshold:            s.cfg.Threshold,
+		parties:              s.cfg.Parties.Clone(),
+		publicKey:            group.PublicKey(),
+		secret:               secretScalar,
+		groupCommitments:     group.Clone(),
+		partyData:            partyData,
+		keygenSessionID:      s.cfg.SessionID,
+		keygenTranscriptHash: transcriptHash,
+		planHash:             bytes.Clone(s.planHash),
+		localChainCode:       bytes.Clone(s.local.chainCode),
+	}
+	confirmation, err := newFROSTKeygenConfirmation(pending)
+	if err != nil {
+		pending.Destroy()
+		return nil, err
+	}
+	encoded, err := confirmation.MarshalBinary()
 	if err != nil {
 		clear(confirmation.ChainCode)
-		share.Destroy()
-		return nil, false, err
+		pending.Destroy()
+		return nil, err
 	}
-	confirmationEnv, err := newEnvelope(s.cfg, keygenConfirmationRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenConfirmation, encodedConfirmation)
+	env, err := newEnvelope(s.cfg, keygenConfirmationRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenConfirmation, encoded)
+	clear(encoded)
 	if err != nil {
-		clear(encodedConfirmation)
 		clear(confirmation.ChainCode)
-		share.Destroy()
-		return nil, false, err
+		pending.Destroy()
+		return nil, err
 	}
-	return &preparedPendingKeyShare{
-		share:        share,
-		confirmation: confirmation,
-		env:          confirmationEnv,
-	}, true, nil
+	committed = true
+	return &preparedPendingKeyShare{pending: pending, confirmation: confirmation, env: env}, nil
 }
 
-func (s *KeygenSession) commitPendingKeyShare(p *preparedPendingKeyShare) sessionEffects {
+func (s *KeygenSession) commitPendingKeyShare(p *preparedPendingKeyShare) []tss.Envelope {
 	if p == nil {
-		return sessionEffects{}
+		return nil
 	}
-	s.partyData[s.cfg.Self].confirmation = p.confirmation
-	s.pending = p.share
+	s.confirmations.confirmations[s.cfg.Self] = p.confirmation
+	s.confirmations.chainCodes[s.cfg.Self] = bytes.Clone(p.confirmation.ChainCode)
+	s.pending = p.pending
+	s.state = keygenAwaitingConfirmations
+	if s.local != nil {
+		s.local.Destroy()
+		s.local = nil
+	}
+	s.round1.DestroySecrets()
 	p.committed = true
 	s.cfg.Logger().Info(s.cfg.Ctx(), "keygen local material complete",
 		"party_id", s.cfg.Self,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
-	return sessionEffects{envelopes: []tss.Envelope{p.env}}
+	return []tss.Envelope{p.env}
 }
 
-// allRound1Received returns true when every party has submitted commitments,
-// shares, and chain code commitments.
-func allRound1Received(pd map[tss.PartyID]*keygenPartyData, parties tss.PartySet) bool {
-	for _, id := range parties {
-		d := pd[id]
-		if d == nil || d.commitments == nil || d.share == nil || d.chainCodeCommit == nil {
-			return false
+func verifyFROSTKeygenShares(cfg tss.ThresholdConfig, snap *frostKeygenRound1Snapshot) error {
+	for _, id := range cfg.Parties {
+		share, err := edScalarFromSecret(snap.shares[id])
+		if err != nil {
+			return err
+		}
+		verifyErr := snap.commitments[id].VerifyShare(cfg.Self, share)
+		share.Set(fed.NewScalar())
+		if verifyErr != nil {
+			cfg.Logger().Warn(cfg.Ctx(), "invalid DKG share", "party_id", cfg.Self, "dealer", id)
+			return &tss.ProtocolError{
+				Code:  tss.ErrCodeVerification,
+				Round: keygenStartRound,
+				Party: id,
+				Blame: frostKeygenBlame(cfg, id, snap.commitments[id].BytesList()),
+				Err:   verifyErr,
+			}
 		}
 	}
-	return true
+	return nil
+}
+
+func aggregateFROSTKeygenSecret(parties tss.PartySet, shares map[tss.PartyID]*secret.Scalar) (*secret.Scalar, error) {
+	total := fed.NewScalar()
+	for _, id := range parties {
+		share, err := edScalarFromSecret(shares[id])
+		if err != nil {
+			total.Set(fed.NewScalar())
+			return nil, err
+		}
+		total.Add(total, share)
+		share.Set(fed.NewScalar())
+	}
+	out, err := newEdSecretScalar(total.Bytes())
+	total.Set(fed.NewScalar())
+	return out, err
+}
+
+func aggregateFROSTKeygenCommitments(parties tss.PartySet, threshold int, commitments map[tss.PartyID]*keygenCommitments) (groupCommitments, error) {
+	points := make([]*fed.Point, threshold)
+	for degree := range threshold {
+		degreePoints := make([]*fed.Point, 0, len(parties))
+		for _, id := range parties {
+			point, err := commitments[id].PointAt(degree)
+			if err != nil {
+				return groupCommitments{}, err
+			}
+			degreePoints = append(degreePoints, point)
+		}
+		points[degree] = edcurve.AddPoints(degreePoints...)
+	}
+	group, err := newGroupCommitmentsFromPoints(points, threshold)
+	if err != nil {
+		return groupCommitments{}, fmt.Errorf("invalid group public key: %w", err)
+	}
+	return group, nil
+}
+
+func deriveFROSTVerificationShares(parties tss.PartySet, group groupCommitments) (map[tss.PartyID]keySharePartyData, []VerificationShare, error) {
+	partyData := make(map[tss.PartyID]keySharePartyData, len(parties))
+	verificationShares := make([]VerificationShare, 0, len(parties))
+	for _, id := range parties {
+		public, err := group.Eval(id)
+		if err != nil {
+			return nil, nil, err
+		}
+		partyData[id] = keySharePartyData{VerificationShare: public}
+		verificationShares = append(verificationShares, VerificationShare{Party: id, PublicKey: public.Clone()})
+	}
+	return partyData, verificationShares, nil
+}
+
+func buildFROSTKeygenTranscriptHash(cfg tss.ThresholdConfig, planHash []byte, snap *frostKeygenRound1Snapshot, group groupCommitments, verificationShares []VerificationShare) ([]byte, error) {
+	chainCodeCommits := make(map[tss.PartyID][]byte, len(cfg.Parties))
+	dealerCommits := make(map[tss.PartyID][][]byte, len(cfg.Parties))
+	for _, id := range cfg.Parties {
+		chainCodeCommits[id] = snap.chainCodeCommits[id]
+		dealerCommits[id] = snap.commitments[id].BytesList()
+	}
+	aggregate, err := bip32util.AggregateChainCode(cfg.Parties, chainCodeCommits)
+	if err != nil {
+		return nil, err
+	}
+	return frostKeygenTranscriptHash(
+		cfg.SessionID,
+		cfg.Threshold,
+		cfg.Parties,
+		aggregate,
+		planHash,
+		dealerCommits,
+		group.BytesList(),
+		verificationShares,
+	), nil
 }

@@ -110,13 +110,13 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 	}
 	publicKey := share.state.PublicKey.Bytes()
 	keygen.Destroy()
-	for _, pd := range keygen.partyData {
-		if pd.share != nil {
+	for _, slot := range keygen.round1.slots {
+		if slot.share != nil {
 			t.Fatal("keygen share map was not cleared")
 		}
 	}
-	if keygen.ownPoly != nil {
-		t.Fatal("keygen polynomial was not released")
+	if keygen.local != nil {
+		t.Fatal("keygen local material was not released")
 	}
 	if keygen.keyShare == nil || !testutil.IsZeroBytes(keygen.keyShare.state.Secret.FixedBytes()) {
 		t.Fatal("completed key share secret was not cleared")
@@ -208,19 +208,16 @@ func TestFROSTKeygenCompletionClearsIntermediateSecrets(t *testing.T) {
 	if share, ok := keygen.KeyShare(); !ok || share == nil {
 		t.Fatal("single-party keygen did not complete")
 	}
-	for _, pd := range keygen.partyData {
-		if pd.share != nil {
+	for _, slot := range keygen.round1.slots {
+		if slot.share != nil {
 			t.Fatal("completed keygen retained received share scalars")
 		}
 	}
-	if keygen.ownPoly != nil {
-		t.Fatal("completed keygen retained local polynomial")
+	if keygen.local != nil {
+		t.Fatal("completed keygen retained local material")
 	}
-	if keygen.ownMessages != nil {
-		t.Fatal("completed keygen retained secret outbound messages")
-	}
-	for _, pd := range keygen.partyData {
-		if pd.chainCode != nil {
+	for _, chainCode := range keygen.confirmations.chainCodes {
+		if chainCode != nil {
 			t.Fatal("completed keygen retained chain codes")
 		}
 	}
