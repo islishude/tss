@@ -67,15 +67,15 @@ func (s *RefreshSession) finalizeConfirmedShare() error {
 		}
 		confirmations[i] = c
 	}
-	if err := verifyFinalizedKeygenConfirmationSet(s.newShare, confirmations); err != nil {
+	if err := verifyKeygenConfirmationSetBinding(s.newShare, confirmations); err != nil {
 		s.abort()
 		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, s.oldKey.state.Party, err)
 	}
 	// Verify preserved chain code on each confirmation.
 	for _, c := range confirmations {
-		if !bytes.Equal(c.ChainCode, s.newShare.state.ChainCode) {
+		if err := verifyConfirmationPreservedChainCode(s.newShare.state.ChainCode, c); err != nil {
 			s.abort()
-			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, fmt.Errorf("keygen confirmation chain code mismatch from party %d", c.Sender))
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, c.Sender, err)
 		}
 	}
 	for _, confirmation := range confirmations {

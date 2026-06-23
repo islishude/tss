@@ -537,7 +537,7 @@ func (r *presignRound1State) destroy() {
 		secret.ClearBigInt(r.payload.PaillierPublicKey.NSquared)
 	}
 	clear(r.proof.PublicRound1Hash)
-	clearEncProof(&r.proof.EncKProof)
+	r.proof.EncKProof.Desstroy()
 	*r = presignRound1State{}
 }
 
@@ -546,9 +546,9 @@ func (r *presignRound2State) destroy() {
 		return
 	}
 	clear(r.payload.Delta.Ciphertext)
-	clearAffGProof(&r.payload.Delta.Proof)
+	r.payload.Delta.Proof.Destroy()
 	clear(r.payload.Sigma.Ciphertext)
-	clearAffGProof(&r.payload.Sigma.Proof)
+	r.payload.Sigma.Proof.Destroy()
 	clear(r.payload.Round1Echo)
 	*r = presignRound2State{}
 }

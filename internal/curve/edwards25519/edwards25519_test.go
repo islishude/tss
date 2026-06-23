@@ -3,10 +3,10 @@ package edwards25519
 import (
 	"bytes"
 	"math/big"
+	"slices"
 	"testing"
 
 	fed "filippo.io/edwards25519"
-	"github.com/islishude/tss/internal/shamir"
 )
 
 func TestScalarFromBigOne(t *testing.T) {
@@ -98,13 +98,26 @@ func TestVerifyScalarShareRejectsNilShare(t *testing.T) {
 	}
 }
 
+func evalBigPolynomial(coeffs []*big.Int, id uint32, order *big.Int) *big.Int {
+	x := new(big.Int).SetUint64(uint64(id))
+	acc := new(big.Int)
+	for _, coeff := range slices.Backward(coeffs) {
+		acc.Mul(acc, x)
+		acc.Add(acc, coeff)
+		acc.Mod(acc, order)
+	}
+	return acc
+}
+
 func TestVerifyShare(t *testing.T) {
 	t.Parallel()
 	order := Order()
-	coeffs, err := shamir.RandomPolynomial(nil, order, 3, nil)
-	if err != nil {
-		t.Fatal(err)
+	coeffs := []*big.Int{
+		big.NewInt(42),
+		big.NewInt(9),
+		big.NewInt(3),
 	}
+
 	commitments := make([][]byte, len(coeffs))
 	for i, coeff := range coeffs {
 		p, err := ScalarBaseMultBig(coeff)
@@ -114,7 +127,7 @@ func TestVerifyShare(t *testing.T) {
 		commitments[i] = p.Bytes()
 	}
 	for id := uint32(1); id <= 5; id++ {
-		share := shamir.Eval(coeffs, id, order)
+		share := evalBigPolynomial(coeffs, id, order)
 		if err := VerifyShare(commitments, id, share); err != nil {
 			t.Fatalf("id %d: %v", id, err)
 		}

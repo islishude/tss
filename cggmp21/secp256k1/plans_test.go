@@ -168,9 +168,10 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := &KeygenSession{
-		cfg:       tss.ThresholdConfig{SessionID: sessionID},
-		planHash:  wantPlanHash,
-		partyData: map[tss.PartyID]*keygenPartyData{confirmation.Sender: {}},
+		cfg:           tss.ThresholdConfig{SessionID: sessionID},
+		planHash:      wantPlanHash,
+		round1:        newKeygenRound1Inbox(tss.NewPartySet(confirmation.Sender)),
+		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(confirmation.Sender)),
 	}
 	_, err = s.buildAcceptCGGMPKeygenConfirmationTx(tss.Envelope{
 		Round:   keygenConfirmationRound,
@@ -181,7 +182,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	if !errors.Is(protocolErr.Err, errPlanHashMismatch) {
 		t.Fatalf("confirmation error = %v, want plan mismatch sentinel", protocolErr.Err)
 	}
-	if s.partyData[confirmation.Sender].confirmation != nil || s.partyData[confirmation.Sender].chainCode != nil {
+	if len(s.confirmations.slots) != 0 || len(s.confirmations.reveals) != 0 {
 		t.Fatal("early confirmation plan mismatch mutated keygen state")
 	}
 	if shouldAbortSession(err) {

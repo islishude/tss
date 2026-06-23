@@ -116,6 +116,27 @@ func (p *AffGProof) Validate() error {
 	return nil
 }
 
+// Destroy clears the proof's witness-derived integer material.
+func (p *AffGProof) Destroy() {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.By)
+	secret.ClearBigInt(p.E)
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.F)
+	secret.ClearBigInt(p.T)
+	secret.ClearBigInt(p.Y)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	secret.ClearBigInt(p.Z4)
+	secret.ClearBigInt(p.W)
+	secret.ClearBigInt(p.WY)
+	clear(p.TranscriptHash)
+}
+
 // ProveAffG creates a Πaff-g proof for the MtA response.
 func ProveAffG(params SecurityParams, state []byte, stmt AffGStatement, w AffGWitness, rng io.Reader) (*AffGProof, error) {
 	var lastErr error

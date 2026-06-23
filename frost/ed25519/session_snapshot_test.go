@@ -69,14 +69,16 @@ func snapshotFROSTKeygenSession(s *KeygenSession) frostKeygenSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	snap := frostKeygenSnapshot{
-		Completed:      s.completed,
-		Aborted:        s.aborted,
-		HasPending:     s.pending != nil,
-		HasKeyShare:    s.keyShare != nil,
-		OwnPolyLen:     len(s.ownPoly),
-		OwnMessagesLen: len(s.ownMessages),
+		Completed:   s.completed,
+		Aborted:     s.aborted,
+		HasPending:  s.pending != nil,
+		HasKeyShare: s.keyShare != nil,
 	}
-	for id, data := range s.partyData {
+	if s.local != nil {
+		snap.OwnPolyLen = len(s.local.polynomial)
+		snap.OwnMessagesLen = len(s.local.ownMessages)
+	}
+	for id, data := range s.round1.slots {
 		if data == nil {
 			continue
 		}
@@ -86,7 +88,7 @@ func snapshotFROSTKeygenSession(s *KeygenSession) frostKeygenSnapshot {
 		if data.share != nil {
 			snap.ShareSenders = append(snap.ShareSenders, id)
 		}
-		if data.confirmation != nil {
+		if s.confirmations.confirmations[id] != nil {
 			snap.ConfirmationSenders = append(snap.ConfirmationSenders, id)
 		}
 	}

@@ -10,7 +10,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
@@ -31,156 +31,29 @@ import (
 // equivocation. A mismatch indicates a dishonest participant or compromised
 // transport and requires aborting the key material.
 func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*KeygenSession, []tss.Envelope, error) {
-	config, err := plan.thresholdConfig(local)
+	config, limits, securityParams, planHash, err := resolveKeygenStart(plan, local, guard)
 	if err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, local.Self, err)
-	}
-	limits := plan.limits
-	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
-	}
-	planHash, err := plan.Digest()
-	if err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
-	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
+		return nil, nil, err
 	}
 
-	// Sort parties to ensure consistent broadcast ordering and transcript hashes across
-	config.Parties = config.SortedParties()
-
-	chainCode := make([]byte, bip32util.ChainCodeSize)
-	defer clear(chainCode)
-	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
-		return nil, nil, err
-	}
-	chainCodeCommit := bip32util.ChainCodeCommitment(cggmpChainCodeCommitLabel, config.SessionID, config.Self, chainCode)
-	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(plan.securityParams.MinPaillierBits))
+	localMaterial, err := generateKeygenLocalMaterial(config, limits, securityParams, planHash)
 	if err != nil {
 		return nil, nil, err
 	}
-	cleanup := newCleanupStack()
-	defer cleanup.run()
-	cleanup.add(paillierKey.Destroy)
-	modDomain, err := keygenModulusDomain(config, config.Self, &paillierKey.PublicKey, planHash, limits)
+	s, err := newKeygenSession(config, limits, securityParams, planHash, guard, localMaterial)
 	if err != nil {
+		localMaterial.Destroy()
 		return nil, nil, err
 	}
-	modProof, err := zkpai.ProveModulus(config.Reader(), modDomain, paillierKey, config.Self)
-	if err != nil {
-		return nil, nil, err
-	}
-	ringPedersenParams, ringPedersenLambda, err := zkpai.GenerateRingPedersenParams(config.Reader(), paillierKey)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer ringPedersenLambda.Destroy()
-	ringDomain, err := keygenRingPedersenDomain(config, config.Self, ringPedersenParams, planHash, limits)
-	if err != nil {
-		return nil, nil, err
-	}
-	ringPedersenProof, err := zkpai.ProveRingPedersen(config.Reader(), ringDomain, paillierKey, ringPedersenParams, ringPedersenLambda, config.Self)
-	if err != nil {
-		return nil, nil, err
-	}
-	poly, err := shamirsecp.RandomPolynomial(config.Reader(), config.Threshold, nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	defer clearSecpPolynomial(poly)
-	commitments := make([][]byte, len(poly))
-	for i, coeff := range poly {
-		point := secp.ScalarBaseMult(coeff)
-		enc, err := secp.PointBytes(point)
-		if err != nil {
-			return nil, nil, err
-		}
-		commitments[i] = enc
-	}
-	localShare, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, config.Self))
-	if err != nil {
-		return nil, nil, err
-	}
-	cleanup.add(localShare.Destroy)
-	partyData := make(map[tss.PartyID]*keygenPartyData, len(config.Parties))
-	for _, id := range config.Parties {
-		if id == config.Self {
-			partyData[id] = &keygenPartyData{
-				commitments:     commitments,
-				share:           localShare,
-				chainCode:       bytes.Clone(chainCode),
-				chainCodeCommit: bytes.Clone(chainCodeCommit),
-				paillierPub: paillierPublicMaterial{
-					Party:     id,
-					PublicKey: paillierKey.PublicKey.Clone(),
-					Proof:     modProof.Clone(),
-				},
-				ringPedersen: ringPedersenPublicMaterial{
-					Party:  id,
-					Params: ringPedersenParams.Clone(),
-					Proof:  ringPedersenProof.Clone(),
-				},
-			}
-		} else {
-			partyData[id] = new(keygenPartyData)
-		}
-	}
-	s := &KeygenSession{
-		cfg:            config,
-		limits:         limits,
-		securityParams: plan.securityParams,
-		planHash:       bytes.Clone(planHash),
-		partyData:      partyData,
-		paillier:       paillierKey,
-		state:          keygenCollecting,
-		guard:          guard,
-	}
-	cleanup.disarm()
 	prepared := &preparedCGGMPKeygenStart{session: s}
 	defer prepared.destroy()
-	out := make([]tss.Envelope, 0, len(config.Parties))
-	commitPayload, err := (keygenCommitmentsPayload{
-		Commitments:        commitments,
-		PaillierPublicKey:  &paillierKey.PublicKey,
-		PaillierProof:      modProof,
-		ChainCodeCommit:    chainCodeCommit,
-		RingPedersenParams: ringPedersenParams,
-		RingPedersenProof:  ringPedersenProof,
-		PlanHash:           planHash,
-	}).MarshalBinaryWithLimits(s.limits)
+	out, err := emitKeygenRound1(s, localMaterial)
 	if err != nil {
 		return nil, nil, err
 	}
-	commitEnv, err := newEnvelope(config, keygenStartRound, config.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
-	clear(commitPayload)
-	if err != nil {
-		return nil, nil, err
-	}
-	out = append(out, commitEnv)
 	prepared.out = out
-	for _, id := range config.Parties {
-		if id == config.Self {
-			continue
-		}
-		share, err := secpSecretScalarFromScalar(shamirsecp.Eval(poly, id))
-		if err != nil {
-			return nil, nil, err
-		}
-		payload, err := (keygenSharePayload{Share: share, PlanHash: planHash}).MarshalBinaryWithLimits(s.limits)
-		share.Destroy()
-		if err != nil {
-			return nil, nil, err
-		}
-		shareEnv, err := newEnvelope(config, keygenStartRound, config.Self, id, payloadKeygenShare, payload)
-		clear(payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, shareEnv)
-		prepared.out = out
-	}
-	completionOut, err := s.tryComplete()
+	localMaterial.clearPolynomial()
+	completionOut, err := s.tryAdvance()
 	if err != nil {
 		return nil, nil, err
 	}
@@ -190,12 +63,207 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 	return s, out, nil
 }
 
+func resolveKeygenStart(
+	plan *KeygenPlan,
+	local tss.LocalConfig,
+	guard *tss.EnvelopeGuard,
+) (tss.ThresholdConfig, Limits, SecurityParams, []byte, error) {
+	config, err := plan.thresholdConfig(local)
+	if err != nil {
+		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
+			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, local.Self, err)
+	}
+	limits := plan.limits
+	if err := config.ValidateWithLimits(limits.ThresholdLimits()); err != nil {
+		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
+			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
+	}
+	planHash, err := plan.Digest()
+	if err != nil {
+		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
+			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
+	}
+	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
+			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
+	}
+	config.Parties = config.SortedParties()
+	return config, limits, plan.securityParams, planHash, nil
+}
+
+func generateKeygenLocalMaterial(
+	config tss.ThresholdConfig,
+	limits Limits,
+	securityParams SecurityParams,
+	planHash []byte,
+) (*keygenLocalMaterial, error) {
+	chainCode := make([]byte, bip32util.ChainCodeSize)
+	defer clear(chainCode)
+	if _, err := io.ReadFull(config.Reader(), chainCode); err != nil {
+		return nil, err
+	}
+	chainCodeCommit := bip32util.ChainCodeCommitment(cggmpChainCodeCommitLabel, config.SessionID, config.Self, chainCode)
+	paillierKey, err := generatePaillierKey(config.Ctx(), config.Reader(), int(securityParams.MinPaillierBits))
+	if err != nil {
+		return nil, err
+	}
+	cleanup := newCleanupStack()
+	defer cleanup.run()
+	cleanup.add(paillierKey.Destroy)
+	modDomain, err := keygenModulusDomain(config, config.Self, &paillierKey.PublicKey, planHash, limits)
+	if err != nil {
+		return nil, err
+	}
+	modProof, err := zkpai.ProveModulus(config.Reader(), modDomain, paillierKey, config.Self)
+	if err != nil {
+		return nil, err
+	}
+	ringPedersenParams, ringPedersenLambda, err := zkpai.GenerateRingPedersenParams(config.Reader(), paillierKey)
+	if err != nil {
+		return nil, err
+	}
+	defer ringPedersenLambda.Destroy()
+	ringDomain, err := keygenRingPedersenDomain(config, config.Self, ringPedersenParams, planHash, limits)
+	if err != nil {
+		return nil, err
+	}
+	ringPedersenProof, err := zkpai.ProveRingPedersen(
+		config.Reader(),
+		ringDomain,
+		paillierKey,
+		ringPedersenParams,
+		ringPedersenLambda,
+		config.Self,
+	)
+	if err != nil {
+		return nil, err
+	}
+	poly, err := shamir.RandomPolynomial(config.Reader(), config.Threshold, nil)
+	if err != nil {
+		return nil, err
+	}
+	commitments := make([][]byte, len(poly))
+	for i, coeff := range poly {
+		point := secp.ScalarBaseMult(coeff)
+		encoded, err := secp.PointBytes(point)
+		if err != nil {
+			clearSecpPolynomial(poly)
+			return nil, err
+		}
+		commitments[i] = encoded
+	}
+	localShare, err := secpSecretScalarFromScalar(shamir.Eval(poly, config.Self))
+	if err != nil {
+		clearSecpPolynomial(poly)
+		return nil, err
+	}
+	material := &keygenLocalMaterial{
+		commitments:     commitments,
+		localShare:      localShare,
+		chainCode:       bytes.Clone(chainCode),
+		chainCodeCommit: bytes.Clone(chainCodeCommit),
+		paillier:        paillierKey,
+		paillierPub: paillierPublicMaterial{
+			Party:     config.Self,
+			PublicKey: paillierKey.PublicKey.Clone(),
+			Proof:     modProof.Clone(),
+		},
+		ringPedersen: ringPedersenPublicMaterial{
+			Party:  config.Self,
+			Params: ringPedersenParams.Clone(),
+			Proof:  ringPedersenProof.Clone(),
+		},
+		polynomial: poly,
+	}
+	cleanup.disarm()
+	return material, nil
+}
+
+func newKeygenSession(
+	config tss.ThresholdConfig,
+	limits Limits,
+	securityParams SecurityParams,
+	planHash []byte,
+	guard *tss.EnvelopeGuard,
+	local *keygenLocalMaterial,
+) (*KeygenSession, error) {
+	round1 := newKeygenRound1Inbox(config.Parties)
+	if err := round1.recordLocal(config.Self, local); err != nil {
+		return nil, err
+	}
+	return &KeygenSession{
+		cfg:            config,
+		limits:         limits,
+		securityParams: securityParams,
+		planHash:       bytes.Clone(planHash),
+		local:          local,
+		round1:         round1,
+		confirmations:  newKeygenConfirmationInbox(config.Parties),
+		state:          keygenCollectingRound1,
+		guard:          guard,
+	}, nil
+}
+
+func emitKeygenRound1(s *KeygenSession, local *keygenLocalMaterial) (out []tss.Envelope, err error) {
+	if s == nil || local == nil || local.paillier == nil {
+		return nil, errors.New("incomplete keygen start state")
+	}
+	defer func() {
+		if err != nil {
+			for i := range out {
+				clear(out[i].Payload)
+			}
+			out = nil
+		}
+	}()
+	out = make([]tss.Envelope, 0, len(s.cfg.Parties))
+	commitPayload, err := (keygenCommitmentsPayload{
+		Commitments:        local.commitments,
+		PaillierPublicKey:  &local.paillier.PublicKey,
+		PaillierProof:      local.paillierPub.Proof,
+		ChainCodeCommit:    local.chainCodeCommit,
+		RingPedersenParams: local.ringPedersen.Params,
+		RingPedersenProof:  local.ringPedersen.Proof,
+		PlanHash:           s.planHash,
+	}).MarshalBinaryWithLimits(s.limits)
+	if err != nil {
+		return nil, err
+	}
+	commitEnv, err := newEnvelope(s.cfg, keygenStartRound, s.cfg.Self, tss.BroadcastPartyId, payloadKeygenCommitments, commitPayload)
+	clear(commitPayload)
+	if err != nil {
+		return nil, err
+	}
+	out = append(out, commitEnv)
+	for _, id := range s.cfg.Parties {
+		if id == s.cfg.Self {
+			continue
+		}
+		share, err := secpSecretScalarFromScalar(shamir.Eval(local.polynomial, id))
+		if err != nil {
+			return nil, err
+		}
+		payload, err := (keygenSharePayload{Share: share, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		share.Destroy()
+		if err != nil {
+			return nil, err
+		}
+		shareEnv, err := newEnvelope(s.cfg, keygenStartRound, s.cfg.Self, id, payloadKeygenShare, payload)
+		clear(payload)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, shareEnv)
+	}
+	return out, nil
+}
+
 func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*acceptCGGMPKeygenCommitmentsTx, error) {
-	pd, err := s.partyEntry(env.From)
+	slot, err := s.round1.slot(env.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if pd.commitments != nil {
+	if slot.commitments != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate commitments"))
 	}
 
@@ -321,16 +389,16 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 }
 
 func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*acceptCGGMPKeygenShareTx, error) {
-	pd, err := s.partyEntry(env.From)
+	slot, err := s.round1.slot(env.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if pd.share != nil {
+	if slot.share != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate share"))
 	}
 
 	// ---- 1. PARSE ----
-	p, err := tss.DecodeBinaryValueWithLimits[keygenSharePayload](env.Payload, s.limits)
+	p, err := tss.DecodeBinaryWithLimits[keygenSharePayload](env.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
@@ -356,13 +424,13 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 	// when they are already available. If the commitments have not arrived
 	// yet, defer verification to tryComplete (which re-checks all shares
 	// once every party's commitments are in).
-	if pd := s.partyData[env.From]; pd.commitments != nil {
-		if err := secp.VerifyShare(pd.commitments, s.cfg.Self, share); err != nil {
+	if slot.commitments != nil {
+		if err := secp.VerifyShare(slot.commitments, s.cfg.Self, share); err != nil {
 			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
 				"party_id", s.cfg.Self,
 				"dealer", env.From,
 			)
-			protoErr, evErr := s.buildShareVerificationBlame(env.From, pd.commitments, err)
+			protoErr, evErr := s.buildShareVerificationBlame(env.From, slot.commitments, err)
 			if evErr != nil {
 				p.Share.Destroy()
 				return nil, evErr

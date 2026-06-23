@@ -140,7 +140,9 @@ func TestCGGMP21KeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 		t.Fatalf("prepare party 1 pending share: ok=%v err=%v", ok, err)
 	}
 	defer pending1.destroy()
-	session1.commitCGGMPPendingKeyShare(pending1)
+	if _, err := session1.commitCGGMPPendingKeyShare(pending1); err != nil {
+		t.Fatal(err)
+	}
 
 	pending2, ok, err := session2.maybePrepareCGGMPPendingKeyShare()
 	if err != nil || !ok {
@@ -153,8 +155,9 @@ func TestCGGMP21KeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 	}
 	remoteConfirmation.TranscriptHash = bytes.Clone(remoteConfirmation.TranscriptHash)
 	remoteConfirmation.TranscriptHash[0] ^= 1
-	session1.partyData[session2.cfg.Self].chainCode = bytes.Clone(remoteConfirmation.ChainCode)
-	session1.partyData[session2.cfg.Self].confirmation = remoteConfirmation
+	if err := session1.confirmations.record(session2.cfg.Self, remoteConfirmation); err != nil {
+		t.Fatal(err)
+	}
 
 	before := snapshotCGGMPKeygenSession(session1)
 	prepared, ok, err := session1.maybePrepareCGGMPFinalKeyShare()
@@ -171,24 +174,71 @@ func TestCGGMP21KeygenFinalPrepareFailureDoesNotInstallKeyShare(t *testing.T) {
 	assertCGGMPSnapshotUnchanged(t, before, after)
 }
 
+func TestCGGMP21KeygenConfirmationBeforePendingIsRevalidatedAndCompletes(t *testing.T) {
+	session1, out1, session2, out2 := cggmpTwoPartyKeygenSessions(t)
+	defer session1.Destroy()
+	defer session2.Destroy()
+	installCGGMPKeygenRound1(t, session2, out1)
+
+	pending2, ok, err := session2.maybePrepareCGGMPPendingKeyShare()
+	if err != nil || !ok {
+		t.Fatalf("prepare party 2 pending share: ok=%v err=%v", ok, err)
+	}
+	defer pending2.destroy()
+
+	commitmentTx, err := session1.buildAcceptCGGMPKeygenCommitmentsTx(out2[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := commitmentTx.apply(session1); err != nil {
+		t.Fatal(err)
+	}
+	commitmentTx.markCommitted()
+
+	confirmationTx, err := session1.buildAcceptCGGMPKeygenConfirmationTx(pending2.env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := confirmationTx.apply(session1); err != nil {
+		t.Fatal(err)
+	}
+	confirmationTx.markCommitted()
+	if session1.pending != nil || session1.completed {
+		t.Fatal("early confirmation advanced keygen before round1 completed")
+	}
+
+	shareEnv := mustCGGMPEnvelope(t, out2, payloadKeygenShare, session1.cfg.Self)
+	shareTx, err := session1.buildAcceptCGGMPKeygenShareTx(shareEnv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := shareTx.apply(session1); err != nil {
+		t.Fatal(err)
+	}
+	shareTx.markCommitted()
+	if !session1.completed || session1.keyShare == nil {
+		t.Fatal("buffered confirmation did not complete after pending share construction")
+	}
+}
+
 func TestCGGMP21PreparedKeygenStartDestroyClearsOwnedState(t *testing.T) {
 	session1, out1, session2, _ := cggmpTwoPartyKeygenSessions(t)
 	session2.Destroy()
 	ownedOut := tss.CloneSlice(out1)
-	paillierP := session1.paillier.P
+	paillierP := session1.local.paillier.P
 	prepared := &preparedCGGMPKeygenStart{
 		session: session1,
 		out:     ownedOut,
 	}
 	prepared.destroy()
 
-	if !session1.aborted || session1.paillier != nil {
+	if !session1.aborted || session1.local != nil {
 		t.Fatal("destroyed prepared keygen start retained live session resources")
 	}
 	if !testutil.IsZeroBytes(paillierP.FixedBytes()) {
 		t.Fatal("destroyed prepared keygen start did not clear Paillier private material")
 	}
-	for _, pd := range session1.partyData {
+	for _, pd := range session1.round1.slots {
 		if pd.share != nil {
 			t.Fatal("destroyed prepared keygen start retained a DKG share")
 		}
@@ -235,18 +285,24 @@ func installCGGMPKeygenRound1(t *testing.T, session *KeygenSession, remoteOut []
 	if err != nil {
 		t.Fatal(err)
 	}
-	pd := session.partyData[commitmentTx.from]
-	pd.commitments = commitmentTx.commitments
-	pd.chainCodeCommit = commitmentTx.chainCodeCommit
-	pd.paillierPub = commitmentTx.paillierPub
-	pd.ringPedersen = commitmentTx.ringPedersen
+	if err := session.round1.recordCommitments(
+		commitmentTx.from,
+		commitmentTx.commitments,
+		commitmentTx.chainCodeCommit,
+		commitmentTx.paillierPub,
+		commitmentTx.ringPedersen,
+	); err != nil {
+		t.Fatal(err)
+	}
 
 	shareEnv := mustCGGMPEnvelope(t, remoteOut, payloadKeygenShare, session.cfg.Self)
 	shareTx, err := session.buildAcceptCGGMPKeygenShareTx(shareEnv)
 	if err != nil {
 		t.Fatal(err)
 	}
-	pd.share = shareTx.share
+	if err := session.round1.recordShare(shareTx.from, shareTx.share); err != nil {
+		t.Fatal(err)
+	}
 	shareTx.markCommitted()
 }
 

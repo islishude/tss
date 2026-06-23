@@ -104,7 +104,7 @@ func TestFROSTKeyShareRejectsTamperedConfirmationChainCode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := verifyFinalizedKeygenConfirmationSet(tampered, confirmations, true); err == nil {
+	if err := verifyKeygenConfirmationSetAggregateChainCode(tampered, confirmations); err == nil {
 		t.Fatal("expected tampered confirmation chain code to be rejected")
 	}
 }
@@ -180,19 +180,16 @@ func TestFROSTKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
 		t.Fatal("aborted session returned a key share")
 	}
-	for _, pd := range sessions[1].partyData {
-		if pd.share != nil {
+	for _, slot := range sessions[1].round1.slots {
+		if slot.share != nil {
 			t.Fatal("aborted keygen retained received share scalars")
 		}
 	}
-	if sessions[1].ownPoly != nil {
-		t.Fatal("aborted keygen retained local polynomial")
+	if sessions[1].local != nil {
+		t.Fatal("aborted keygen retained local material")
 	}
-	if sessions[1].ownMessages != nil {
-		t.Fatal("aborted keygen retained secret outbound messages")
-	}
-	for _, pd := range sessions[1].partyData {
-		if pd.chainCode != nil {
+	for _, chainCode := range sessions[1].confirmations.chainCodes {
+		if chainCode != nil {
 			t.Fatal("aborted keygen retained chain codes")
 		}
 	}

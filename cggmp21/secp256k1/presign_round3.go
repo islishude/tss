@@ -10,7 +10,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
-	shamirsecp "github.com/islishude/tss/internal/shamir/secp256k1"
+	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	"github.com/islishude/tss/internal/zk/signprep"
 )
@@ -93,7 +93,7 @@ func (s *PresignSession) verifyRemoteSignprepProof(from tss.PartyID, p presignRo
 	if err != nil {
 		return signVerifyShare{}, err
 	}
-	lambda, err := shamirsecp.LagrangeCoefficient(from, s.signers)
+	lambda, err := shamir.LagrangeCoefficient(from, s.signers)
 	if err != nil {
 		return signVerifyShare{}, err
 	}
@@ -291,7 +291,7 @@ func (s *PresignSession) preparePresignRound3Output() (*preparedPresignRound3Out
 	}
 
 	// Compute XBarPoint.
-	lambda, err := shamirsecp.LagrangeCoefficient(s.key.state.Party, s.signers)
+	lambda, err := shamir.LagrangeCoefficient(s.key.state.Party, s.signers)
 	if err != nil {
 		return nil, false, err
 	}
@@ -559,7 +559,7 @@ func (s *PresignSession) buildPresignVerificationContext() (presignVerificationC
 			context.destroy()
 			return presignVerificationContext{}, fmt.Errorf("missing persisted verification material for party %d", id)
 		}
-		lambda, err := shamirsecp.LagrangeCoefficient(id, s.signers)
+		lambda, err := shamir.LagrangeCoefficient(id, s.signers)
 		if err != nil {
 			context.destroy()
 			return presignVerificationContext{}, err

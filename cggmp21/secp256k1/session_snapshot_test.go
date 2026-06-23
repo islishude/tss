@@ -65,20 +65,26 @@ func snapshotCGGMPKeygenSession(s *KeygenSession) cggmpKeygenSnapshot {
 		State:       s.state,
 		HasPending:  s.pending != nil,
 		HasKeyShare: s.keyShare != nil,
-		HasPaillier: s.paillier != nil,
+		HasPaillier: s.local != nil && s.local.paillier != nil,
 	}
-	for id, data := range s.partyData {
-		if data == nil {
-			continue
+	if s.round1 != nil {
+		for id, data := range s.round1.slots {
+			if data == nil {
+				continue
+			}
+			if len(data.commitments) != 0 {
+				snap.CommitmentSenders = append(snap.CommitmentSenders, id)
+			}
+			if data.share != nil {
+				snap.ShareSenders = append(snap.ShareSenders, id)
+			}
 		}
-		if len(data.commitments) != 0 {
-			snap.CommitmentSenders = append(snap.CommitmentSenders, id)
-		}
-		if data.share != nil {
-			snap.ShareSenders = append(snap.ShareSenders, id)
-		}
-		if data.confirmation != nil {
-			snap.ConfirmationSenders = append(snap.ConfirmationSenders, id)
+	}
+	if s.confirmations != nil {
+		for id, data := range s.confirmations.slots {
+			if data != nil {
+				snap.ConfirmationSenders = append(snap.ConfirmationSenders, id)
+			}
 		}
 	}
 	snap.CommitmentSenders = tss.PartySet(snap.CommitmentSenders).Sorted()
