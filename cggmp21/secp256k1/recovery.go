@@ -19,7 +19,7 @@ import (
 // When sWasNegated is true (low-S normalization occurred), the recovery point becomes -R:
 // X is unchanged but Y parity flips, so bit 0 is inverted.
 func recoveryIDFromPresignR(rPointBytes []byte, sWasNegated bool) (uint8, error) {
-	if len(rPointBytes) != 33 || (rPointBytes[0] != 0x02 && rPointBytes[0] != 0x03) {
+	if len(rPointBytes) != secp.PubkeyLength || (rPointBytes[0] != 0x02 && rPointBytes[0] != 0x03) {
 		return 0, errors.New("invalid presign R point: must be 33-byte compressed SEC1")
 	}
 

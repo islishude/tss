@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
 	"github.com/islishude/tss/internal/wire"
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -246,9 +247,7 @@ func wireMessageSize(msg wire.Message) int {
 	return len(raw)
 }
 
-func proofWireBytes(proof interface {
-	MarshalWireValue() ([]byte, error)
-}) ([]byte, error) {
+func proofWireBytes(proof wire.ValueMarshaler) ([]byte, error) {
 	if proof == nil {
 		return nil, nil
 	}
@@ -265,9 +264,7 @@ func proofWireBytes(proof interface {
 	return proof.MarshalWireValue()
 }
 
-func proofWireSize(proof interface {
-	MarshalWireValue() ([]byte, error)
-}) int {
+func proofWireSize(proof wire.ValueMarshaler) int {
 	raw, err := proofWireBytes(proof)
 	if err != nil {
 		return 0
@@ -353,8 +350,8 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if _, err := secp.PointFromBytes(k.state.PublicKey); err != nil {
 		return fmt.Errorf("invalid group public key: %w", err)
 	}
-	if len(k.state.ChainCode) != 32 {
-		return errors.New("chain code must be 32 bytes")
+	if len(k.state.ChainCode) != bip32util.ChainCodeSize {
+		return fmt.Errorf("chain code must be %d bytes", bip32util.ChainCodeSize)
 	}
 	if _, err := secpScalarFromSecret(k.state.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)

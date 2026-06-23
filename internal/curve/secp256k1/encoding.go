@@ -61,7 +61,7 @@ func (s *Scalar) UnmarshalWireValue(in []byte) error {
 
 // PointFromBytes parses canonical compressed SEC 1 point bytes.
 func PointFromBytes(in []byte) (*Point, error) {
-	if len(in) != 33 || (in[0] != 0x02 && in[0] != 0x03) {
+	if len(in) != PubkeyLength || (in[0] != 0x02 && in[0] != 0x03) {
 		return nil, errors.New("secp256k1 point must be compressed")
 	}
 	x, err := FieldElementFromBytes(in[1:])

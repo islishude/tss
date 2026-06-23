@@ -230,11 +230,11 @@ func (r *DerivationResult) Clone() *DerivationResult {
 		return nil
 	}
 	out := *r
-	out.ChildPublicKey = append([]byte(nil), r.ChildPublicKey...)
-	out.ChildChainCode = append([]byte(nil), r.ChildChainCode...)
+	out.ChildPublicKey = bytes.Clone(r.ChildPublicKey)
+	out.ChildChainCode = bytes.Clone(r.ChildChainCode)
 	out.RequestedPath = r.RequestedPath.Clone()
 	out.ResolvedPath = r.ResolvedPath.Clone()
-	out.AdditiveShift = append([]byte(nil), r.AdditiveShift...)
+	out.AdditiveShift = bytes.Clone(r.AdditiveShift)
 	return &out
 }
 

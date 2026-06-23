@@ -7,6 +7,8 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/bip32util"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -98,14 +100,14 @@ func TestBIP32SingleLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.ChildPublicKey) != 33 {
-		t.Fatal("child public key must be 33 bytes")
+	if len(result.ChildPublicKey) != secp.PubkeyLength {
+		t.Fatalf("child public key must be %d bytes", secp.PubkeyLength)
 	}
 	if len(result.AdditiveShift) != 32 {
 		t.Fatal("additive shift must be 32 bytes")
 	}
-	if len(result.ChildChainCode) != 32 {
-		t.Fatal("child chain code must be 32 bytes")
+	if len(result.ChildChainCode) != bip32util.ChainCodeSize {
+		t.Fatalf("child chain code must be %d bytes", bip32util.ChainCodeSize)
 	}
 	derived, err := DerivePublicKey(pubKey, result.AdditiveShift)
 	if err != nil {
@@ -127,14 +129,14 @@ func TestBIP32MultiLevel(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(result.ChildPublicKey) != 33 {
-		t.Fatal("child public key must be 33 bytes")
+	if len(result.ChildPublicKey) != secp.PubkeyLength {
+		t.Fatalf("child public key must be %d bytes", secp.PubkeyLength)
 	}
 	if len(result.AdditiveShift) != 32 {
 		t.Fatal("additive shift must be 32 bytes")
 	}
-	if len(result.ChildChainCode) != 32 {
-		t.Fatal("child chain code must be 32 bytes")
+	if len(result.ChildChainCode) != bip32util.ChainCodeSize {
+		t.Fatalf("child chain code must be %d bytes", bip32util.ChainCodeSize)
 	}
 	// Two-step cumulative should produce consistent chain code with direct.
 	_, err = DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0, 1})
