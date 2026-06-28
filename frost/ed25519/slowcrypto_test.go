@@ -16,10 +16,7 @@ import (
 func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -60,10 +57,7 @@ func slowFrostKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 func slowFrostKeygenHD(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

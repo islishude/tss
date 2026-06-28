@@ -77,10 +77,7 @@ type protocolHarness struct {
 
 func newHarness(t testing.TB, threshold, n int) *protocolHarness {
 	t.Helper()
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	return &protocolHarness{
 		threshold: threshold,
 		parties:   parties,
@@ -100,10 +97,7 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
@@ -151,10 +145,7 @@ func runSecpKeygen(threshold, n int) (map[tss.PartyID]*KeyShare, error) {
 	if err != nil {
 		return nil, err
 	}
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
@@ -194,10 +185,7 @@ func secpKeygenWithPlanOption(t testing.TB, threshold, n int, option KeygenPlanO
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {

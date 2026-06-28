@@ -246,10 +246,7 @@ func TestThresholdECDSAProactiveRefreshScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			parties := make(tss.PartySet, tc.n)
-			for i := range parties {
-				parties[i] = tss.PartyID(i + 1)
-			}
+			parties := testutil.MustPartySet(tc.n)
 
 			sessions := runRefresh(t, shares, parties, sessionID)
 

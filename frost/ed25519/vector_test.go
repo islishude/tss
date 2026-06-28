@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/testvectors"
 )
 
@@ -34,10 +35,7 @@ func deterministicRNG(seedHex string) *rand.ChaCha8 {
 func frostVectorKeygen(t *testing.T, seedHex string, threshold, n int) []*KeyShare {
 	t.Helper()
 	rng := deterministicRNG(seedHex)
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	session, err := tss.NewSessionID(rng)
 	if err != nil {
 		t.Fatal(err)

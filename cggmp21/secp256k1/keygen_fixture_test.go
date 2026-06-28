@@ -191,14 +191,6 @@ func validateDecodedKeygenFixtureShare(share *KeyShare, expectedID tss.PartyID, 
 	return nil
 }
 
-func keygenFixtureParties(n int) tss.PartySet {
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
-	return parties
-}
-
 func TestCommittedKeygenFixturesCoverCachedCombinations(t *testing.T) {
 	for _, key := range requiredKeygenFixtureOrder {
 		t.Run(fmt.Sprintf("%d-of-%d", key.threshold, key.n), func(t *testing.T) {

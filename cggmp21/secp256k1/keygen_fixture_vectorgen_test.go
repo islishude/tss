@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/testvectors"
 )
 
@@ -17,7 +18,7 @@ func TestGenerateKeygenFixtures(t *testing.T) {
 	fixtures := make([]keygenFixtureFile, 0, len(requiredKeygenFixtureOrder))
 	for _, key := range requiredKeygenFixtureOrder {
 		shares := secpKeygen(t, key.threshold, key.n)
-		parties := keygenFixtureParties(key.n)
+		parties := testutil.MustPartySet(key.n)
 		fixture := keygenFixtureFile{
 			Description:  fmt.Sprintf("CGGMP21 secp256k1 %d-of-%d keygen fixture", key.threshold, key.n),
 			Threshold:    key.threshold,
@@ -67,7 +68,7 @@ func TestGenerateKeygenFixtures(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%d-of-%d generated fixture decode: %v", key.threshold, key.n, err)
 		}
-		for _, id := range keygenFixtureParties(key.n) {
+		for _, id := range testutil.MustPartySet(key.n) {
 			if err := shares[id].ValidateWithLimits(testLimits()); err != nil {
 				t.Fatalf("%d-of-%d party %d generated fixture validate: %v", key.threshold, key.n, id, err)
 			}

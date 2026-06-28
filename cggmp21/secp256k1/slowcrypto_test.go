@@ -16,10 +16,7 @@ import (
 func slowCryptoKeygen(t *testing.T, threshold, n int) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -293,10 +290,7 @@ func TestSlowCrypto_BIP32DeriveAndSignProduction(t *testing.T) {
 func slowCryptoKeygenWithPlanOption(t *testing.T, threshold, n int, option KeygenPlanOption) map[tss.PartyID]*KeyShare {
 	t.Helper()
 
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)

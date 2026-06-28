@@ -23,10 +23,7 @@ func TestCGGMP21ConcurrentKeygenWithMutex(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	type lockedSession struct {
 		*KeygenSession
 		mu sync.Mutex

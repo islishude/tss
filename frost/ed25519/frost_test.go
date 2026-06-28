@@ -701,10 +701,7 @@ func frostKeygenInner(t testing.TB, threshold, n int) map[tss.PartyID]*KeyShare 
 	if err != nil {
 		t.Fatal(err)
 	}
-	parties := make(tss.PartySet, n)
-	for i := range parties {
-		parties[i] = tss.PartyID(i + 1)
-	}
+	parties := testutil.MustPartySet(n)
 	sessions := make(map[tss.PartyID]*KeygenSession, n)
 	messages := make([]tss.Envelope, 0)
 	for _, id := range parties {
@@ -1067,10 +1064,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 				oldSecrets[id] = raw
 			}
 
-			parties := make(tss.PartySet, tc.parties)
-			for i := range parties {
-				parties[i] = tss.PartyID(i + 1)
-			}
+			parties := testutil.MustPartySet(tc.parties)
 			refreshSessions := make(map[tss.PartyID]*ReshareSession, tc.parties)
 			messages := make([]tss.Envelope, 0)
 			for _, id := range parties {
