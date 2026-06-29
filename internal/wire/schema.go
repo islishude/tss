@@ -211,12 +211,17 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 	}
 
 	// Parse options.
+	seenOptions := make(map[string]bool)
 	for _, opt := range parts[optStart:] {
 		opt = strings.TrimSpace(opt)
 		if opt == "" {
 			continue
 		}
 		if opt == "optional" {
+			if seenOptions["optional"] {
+				return fieldSchema{}, fmt.Errorf("duplicate wire option %q", "optional")
+			}
+			seenOptions["optional"] = true
 			fs.optional = true
 			continue
 		}
@@ -226,6 +231,10 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 		}
 		key := strings.TrimSpace(kv[0])
 		val := strings.TrimSpace(kv[1])
+		if seenOptions[key] {
+			return fieldSchema{}, fmt.Errorf("duplicate wire option %q", key)
+		}
+		seenOptions[key] = true
 
 		switch key {
 		case "len":
@@ -239,10 +248,19 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			fs.fixedLen = n
 			fs.fixedLenSet = true
 		case "max_bytes":
+			if !validLimitName(val) {
+				return fieldSchema{}, fmt.Errorf("invalid max_bytes limit name %q", val)
+			}
 			fs.maxBytes = val
 		case "max_items":
+			if !validLimitName(val) {
+				return fieldSchema{}, fmt.Errorf("invalid max_items limit name %q", val)
+			}
 			fs.maxItems = val
 		case "max_bits":
+			if !validLimitName(val) {
+				return fieldSchema{}, fmt.Errorf("invalid max_bits limit name %q", val)
+			}
 			fs.maxBits = val
 		default:
 			return fieldSchema{}, fmt.Errorf("unknown option %q", key)
@@ -283,6 +301,9 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 			fs.fixedLenSet = true
 		}
 	}
+	if err := validateFieldOptions(fs); err != nil {
+		return fieldSchema{}, err
+	}
 	if fs.kind == kindPartyBytes {
 		if err := fs.initPartyBytesSchema(false); err != nil {
 			return fieldSchema{}, err
@@ -295,6 +316,103 @@ func parseFieldTag(f reflect.StructField, tagStr string) (fieldSchema, error) {
 	}
 
 	return fs, nil
+}
+
+func validLimitName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if i == 0 {
+			if r < 'a' || r > 'z' {
+				return false
+			}
+			continue
+		}
+		if (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '_' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func validateFieldOptions(fs fieldSchema) error {
+	if fs.fixedLenSet && !kindSupportsFixedLen(fs) {
+		return fmt.Errorf("len is not supported for %s fields", kindName(fs.kind))
+	}
+	if fs.maxBytes != "" && !kindSupportsMaxBytes(fs) {
+		return fmt.Errorf("max_bytes is not supported for %s fields", kindName(fs.kind))
+	}
+	if fs.maxItems != "" && !kindSupportsMaxItems(fs.kind) {
+		return fmt.Errorf("max_items is not supported for %s fields", kindName(fs.kind))
+	}
+	if fs.maxBits != "" && !kindSupportsMaxBits(fs) {
+		return fmt.Errorf("max_bits is not supported for %s fields", kindName(fs.kind))
+	}
+	return nil
+}
+
+func kindSupportsFixedLen(fs fieldSchema) bool {
+	switch fs.kind {
+	case kindBytes, kindString, kindCustom, kindCustomList, kindBigInt, kindBigUint, kindBigPos:
+		return true
+	case kindMap:
+		return kindConsumesFixedLen(fs.mapValueKind)
+	default:
+		return false
+	}
+}
+
+func kindConsumesFixedLen(kind wireKind) bool {
+	switch kind {
+	case kindBytes, kindString, kindCustom, kindBigInt, kindBigUint, kindBigPos:
+		return true
+	default:
+		return false
+	}
+}
+
+func kindSupportsMaxBytes(fs fieldSchema) bool {
+	switch fs.kind {
+	case kindBytes, kindString, kindBytesList, kindPartyBytes, kindPartyBytePairs,
+		kindNested, kindCustom, kindCustomList, kindBigInt, kindBigUint, kindBigPos:
+		return true
+	case kindMap:
+		return kindConsumesMaxBytes(fs.mapValueKind)
+	default:
+		return false
+	}
+}
+
+func kindConsumesMaxBytes(kind wireKind) bool {
+	switch kind {
+	case kindBytes, kindString, kindCustom, kindBigInt, kindBigUint, kindBigPos:
+		return true
+	default:
+		return false
+	}
+}
+
+func kindSupportsMaxItems(kind wireKind) bool {
+	switch kind {
+	case kindU32List, kindBytesList, kindPartyBytes, kindPartyBytePairs,
+		kindCustom, kindCustomList, kindRecordList, kindMap:
+		return true
+	default:
+		return false
+	}
+}
+
+func kindSupportsMaxBits(fs fieldSchema) bool {
+	switch fs.kind {
+	case kindBytes, kindBigInt, kindBigUint, kindBigPos:
+		return true
+	case kindMap:
+		return fs.mapValueKind == kindBytes
+	default:
+		return false
+	}
 }
 
 func (fs fieldSchema) shouldOmit(fv reflect.Value) bool {

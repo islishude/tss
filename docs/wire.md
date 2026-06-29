@@ -81,6 +81,7 @@ When the kind is omitted or the second segment is not a recognised kind name, th
 | `record`         | struct / pointer to struct                              | record body (field count + fields), no envelope                       |
 | `recordlist`     | `[]struct` / `[]*struct`                                | `uint32 count` + length-prefixed record bodies                        |
 | `custom`         | type implementing `ValueMarshaler` / `ValueUnmarshaler` | caller-defined canonical bytes                                        |
+| `customlist`     | `[]T` / `[]*T` where `T` implements value codecs        | `uint32 count` + repeated length-prefixed canonical custom value      |
 | `bigint`         | `big.Int` / `*big.Int`                                  | signed-magnitude `[sign byte][minimal BE magnitude]`                  |
 | `biguint`        | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero = empty                            |
 | `bigpos`         | `big.Int` / `*big.Int`                                  | minimal big-endian magnitude; zero rejected                           |
@@ -125,13 +126,25 @@ the wire format of existing fields if their Go type were refactored to a map.
 
 #### Options
 
-- `len=N` — fixed byte length (validated on decode)
+- `len=N` — fixed byte length (validated on encode and decode)
 - `max_bytes=name` — semantic byte limit (from `wire.WithFieldLimits`)
 - `max_bits=name` — semantic bit-length limit for bigint/biguint/bigpos (validates `BitLen()`) or conservative `len*8` upper bound for bytes (from `wire.WithFieldLimits`)
 - `max_items=name` — semantic item count limit
 - `optional` — valid only on pointer `record`, `nested`, `custom`, `bigint`,
   `biguint`, and `bigpos` fields; nil is omitted on marshal and an absent tag
   decodes as nil. Without `optional`, pointer fields remain required.
+
+Each option is validated against the field kind at schema parse time. Unsupported
+options, duplicate options, and malformed limit names are rejected before
+marshal/unmarshal. Named semantic limits must match `[a-z][a-z0-9_]*`.
+
+| Option      | Supported Kinds                                                                                                                                                               |
+| ----------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `len`       | `bytes`, `string`, `custom`, `customlist` items, `bigint`, `biguint`, `bigpos`, supported map values                                                                          |
+| `max_bytes` | `bytes`, `string`, `byteslist` items, `partybytes` items, `partybytepairs` items, `nested`, `custom`, `customlist` items, `bigint`, `biguint`, `bigpos`, supported map values |
+| `max_bits`  | `bytes`, `bigint`, `biguint`, `bigpos`, byte-valued map values                                                                                                                |
+| `max_items` | `u32list`, `byteslist`, `partybytes`, `partybytepairs`, count-prefixed `custom`, `customlist`, `recordlist`, `map`                                                            |
+| `optional`  | pointer `record`, `nested`, `custom`, `bigint`, `biguint`, `bigpos`                                                                                                           |
 
 For custom fields, `max_items` is supported only for count-prefixed custom
 values. A field tagged `wire:"N,custom,max_items=name"` must encode its raw
@@ -141,6 +154,10 @@ against the global repeated-field limit and the named field limit after
 parse the custom payload body or validate individual items; those remain the
 custom type's responsibility. `max_items` is an upper bound, not an exact-count
 protocol invariant.
+
+For `customlist`, `len=N` and `max_bytes=name` apply to each item, not to the
+whole list. `max_items=name` applies to the list count. Nil items are rejected;
+a nil slice encodes as an empty list.
 
 ### Interfaces
 

@@ -2,6 +2,7 @@ package wire
 
 import (
 	"bytes"
+	"math/big"
 	"reflect"
 	"testing"
 )
@@ -108,6 +109,163 @@ func TestSchemaRejectsOptionalPrimitivePointers(t *testing.T) {
 	for _, typ := range tests {
 		if _, err := getSchema(typ); err == nil {
 			t.Fatalf("accepted optional primitive field in %s", typ)
+		}
+	}
+}
+
+func TestSchemaRejectsUnsupportedTagOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		typ  reflect.Type
+	}{
+		{
+			name: "max_bytes on u32",
+			typ: reflect.TypeFor[struct {
+				Count uint32 `wire:"1,u32,max_bytes=count"`
+			}](),
+		},
+		{
+			name: "max_bits on string",
+			typ: reflect.TypeFor[struct {
+				Name string `wire:"1,string,max_bits=name_bits"`
+			}](),
+		},
+		{
+			name: "max_items on bool",
+			typ: reflect.TypeFor[struct {
+				Flag bool `wire:"1,bool,max_items=flags"`
+			}](),
+		},
+		{
+			name: "len on u32list",
+			typ: reflect.TypeFor[struct {
+				IDs []uint32 `wire:"1,u32list,len=4"`
+			}](),
+		},
+		{
+			name: "max_bytes on record",
+			typ: reflect.TypeFor[struct {
+				Inner simpleMessage `wire:"1,record,max_bytes=inner"`
+			}](),
+		},
+		{
+			name: "max_bits on byteslist",
+			typ: reflect.TypeFor[struct {
+				Items [][]byte `wire:"1,byteslist,max_bits=item_bits"`
+			}](),
+		},
+		{
+			name: "max_bytes on fixed width map value",
+			typ: reflect.TypeFor[struct {
+				Items map[uint32]uint32 `wire:"1,map,max_bytes=item"`
+			}](),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			if _, err := getSchema(tc.typ); err == nil {
+				t.Fatalf("accepted unsupported tag option in %s", tc.typ)
+			}
+		})
+	}
+}
+
+func TestSchemaRejectsDuplicateTagOptions(t *testing.T) {
+	t.Parallel()
+
+	tests := []reflect.Type{
+		reflect.TypeFor[struct {
+			Hash []byte `wire:"1,bytes,len=32,len=64"`
+		}](),
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bytes=a,max_bytes=b"`
+		}](),
+		reflect.TypeFor[struct {
+			IDs []uint32 `wire:"1,u32list,max_items=a,max_items=b"`
+		}](),
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bits=a,max_bits=b"`
+		}](),
+		reflect.TypeFor[struct {
+			Inner *simpleMessage `wire:"1,record,optional,optional"`
+		}](),
+	}
+	for _, typ := range tests {
+		if _, err := getSchema(typ); err == nil {
+			t.Fatalf("accepted duplicate tag option in %s", typ)
+		}
+	}
+}
+
+func TestSchemaRejectsInvalidLimitNames(t *testing.T) {
+	t.Parallel()
+
+	tests := []reflect.Type{
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bytes="`
+		}](),
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bytes=Point"`
+		}](),
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bits=point-bits"`
+		}](),
+		reflect.TypeFor[struct {
+			IDs []uint32 `wire:"1,u32list,max_items=1parties"`
+		}](),
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,max_bytes=???"`
+		}](),
+	}
+	for _, typ := range tests {
+		if _, err := getSchema(typ); err == nil {
+			t.Fatalf("accepted invalid limit name in %s", typ)
+		}
+	}
+}
+
+func TestSchemaAcceptsSupportedTagOptionMatrix(t *testing.T) {
+	t.Parallel()
+
+	tests := []reflect.Type{
+		reflect.TypeFor[struct {
+			Data []byte `wire:"1,bytes,len=32,max_bytes=field,max_bits=field_bits"`
+		}](),
+		reflect.TypeFor[struct {
+			Name string `wire:"1,string,len=4,max_bytes=name"`
+		}](),
+		reflect.TypeFor[struct {
+			Items [][]byte `wire:"1,byteslist,max_bytes=item,max_items=items"`
+		}](),
+		reflect.TypeFor[struct {
+			Items []PartyBytes[uint32] `wire:"1,partybytes,max_bytes=item,max_items=items"`
+		}](),
+		reflect.TypeFor[struct {
+			Inner *simpleMessage `wire:"1,nested,optional,max_bytes=inner"`
+		}](),
+		reflect.TypeFor[struct {
+			Data customBytes `wire:"1,custom,len=2,max_bytes=field,max_items=items"`
+		}](),
+		reflect.TypeFor[struct {
+			Items []customBytes `wire:"1,customlist,len=2,max_bytes=item,max_items=items"`
+		}](),
+		reflect.TypeFor[struct {
+			Val *big.Int `wire:"1,bigpos,len=2,max_bytes=field,max_bits=field_bits,optional"`
+		}](),
+		reflect.TypeFor[struct {
+			Items []simpleMessage `wire:"1,recordlist,max_items=items"`
+		}](),
+		reflect.TypeFor[struct {
+			Items map[uint32][]byte `wire:"1,map,len=2,max_bytes=item,max_bits=item_bits,max_items=items"`
+		}](),
+	}
+	for _, typ := range tests {
+		if _, err := getSchema(typ); err != nil {
+			t.Fatalf("rejected supported tag option combination in %s: %v", typ, err)
 		}
 	}
 }
