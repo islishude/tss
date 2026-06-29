@@ -249,20 +249,26 @@ func startCGGMP21Sign(key *KeyShare, presign *Presign, sessionID tss.SessionID, 
 	guard := chooseTestGuard(guards, func() *tss.EnvelopeGuard {
 		return testCGGMP21Guard(key.state.Party, testCGGMP21GuardParties(key.state.Parties, key.state.Party), sessionID)
 	})
-	if request.AttemptStore == nil {
-		request.AttemptStore = newTestSignAttemptStore()
-	}
 	plan, err := NewSignPlan(SignPlanOption{
-		Key:       key,
-		Presign:   presign,
-		SessionID: sessionID,
-		Request:   request,
-		Limits:    testLimitsPtr(),
+		Key:     key,
+		Presign: presign,
+		Intent: SignIntent{
+			SessionID: sessionID,
+			Context:   request.Context,
+			Message:   request.Message,
+			Signers:   presign.state.Signers,
+		},
+		Limits: testLimitsPtr(),
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartSign(key, presign, plan, tss.LocalConfig{Self: key.state.Party, Context: context.Background()}, guard)
+	return StartSign(key, plan, SignRuntime{
+		Local:        tss.LocalConfig{Self: key.state.Party, Context: context.Background()},
+		Guard:        guard,
+		Presign:      presign,
+		AttemptStore: newTestSignAttemptStore(),
+	})
 }
 
 func startCGGMP21Refresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*RefreshSession, []tss.Envelope, error) {

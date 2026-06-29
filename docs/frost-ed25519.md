@@ -384,7 +384,11 @@ plan, err := NewSignPlan(SignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers,
     Context: ctx, Message: message,
 })
-sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID()}, guard)
+runtime := SignRuntime{
+    Local: tss.LocalConfig{Self: share.PartyID()},
+    Guard: guard,
+}
+sess, out, err := StartSign(share, plan, runtime)
 ```
 
 Each signer derives the same child key from the context path and adds the internal shift during partial generation. The resulting signature verifies against the child public key:
@@ -649,7 +653,11 @@ plan, err := NewSignPlan(SignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers,
     Context: ctx, Message: message,
 })
-sess, out, err := StartSign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: nonceReader}, guard)
+runtime := SignRuntime{
+    Local: tss.LocalConfig{Self: share.PartyID(), Rand: nonceReader},
+    Guard: guard,
+}
+sess, out, err := StartSign(share, plan, runtime)
 out, err := sess.HandleSignMessage(env)
 sig, ok := sess.Signature()
 ```

@@ -112,22 +112,26 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, r
 		if rawDigest {
 			session, out, err = startSignDigestBound(context.Background(), shares[id], presign, signID, input, presign.state.ContextHash, attemptStore, guard, limits)
 		} else {
-			request := SignRequest{
-				Context:      ctx,
-				Message:      input,
-				AttemptStore: attemptStore,
-			}
 			plan, planErr := NewSignPlan(SignPlanOption{
-				Key:       shares[id],
-				Presign:   presign,
-				SessionID: signID,
-				Request:   request,
-				Limits:    &limits,
+				Key:     shares[id],
+				Presign: presign,
+				Intent: SignIntent{
+					SessionID: signID,
+					Context:   ctx,
+					Message:   input,
+					Signers:   presign.state.Signers,
+				},
+				Limits: &limits,
 			})
 			if planErr != nil {
 				return nil, nil, planErr
 			}
-			session, out, err = StartSign(shares[id], presign, plan, tss.LocalConfig{Self: id, Context: context.Background()}, guard)
+			session, out, err = StartSign(shares[id], plan, SignRuntime{
+				Local:        tss.LocalConfig{Self: id, Context: context.Background()},
+				Guard:        guard,
+				Presign:      presign,
+				AttemptStore: attemptStore,
+			})
 		}
 		if err != nil {
 			return nil, nil, err

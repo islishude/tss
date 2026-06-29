@@ -105,7 +105,10 @@ func startFROSTSign(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartSign(key, plan, tss.LocalConfig{Self: key.state.Party}, guard)
+	return StartSign(key, plan, SignRuntime{
+		Local: tss.LocalConfig{Self: key.state.Party},
+		Guard: guard,
+	})
 }
 
 func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, message []byte, opts SignOptions, guards ...*tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
@@ -126,7 +129,10 @@ func startFROSTSignWithOptions(key *KeyShare, sessionID tss.SessionID, signers t
 	if err != nil {
 		return nil, nil, err
 	}
-	return StartSign(key, plan, tss.LocalConfig{Self: key.state.Party, Rand: opts.NonceReader}, guard)
+	return StartSign(key, plan, SignRuntime{
+		Local: tss.LocalConfig{Self: key.state.Party, Rand: opts.NonceReader},
+		Guard: guard,
+	})
 }
 
 func startFROSTRefresh(oldKey *KeyShare, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, []tss.Envelope, error) {

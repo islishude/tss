@@ -158,13 +158,13 @@ func TestCGGMP21RejectsSecurityParamsMismatch(t *testing.T) {
 		t.Fatalf("presign validation error = %q, want security params mismatch", err)
 	}
 	if _, err := NewSignPlan(SignPlanOption{
-		Key:       shares[1],
-		Presign:   mismatched,
-		SessionID: sessionID,
-		Request: SignRequest{
-			Context:      testPresignContext(),
-			Message:      []byte("security profile mismatch"),
-			AttemptStore: newTestSignAttemptStore(),
+		Key:     shares[1],
+		Presign: mismatched,
+		Intent: SignIntent{
+			SessionID: sessionID,
+			Context:   testPresignContext(),
+			Message:   []byte("security profile mismatch"),
+			Signers:   mismatched.state.Signers,
 		},
 		Limits: &limits,
 	}); err == nil {

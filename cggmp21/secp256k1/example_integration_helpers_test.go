@@ -47,6 +47,7 @@ type examplePresignJob struct {
 type exampleSignJob struct {
 	run     exampleProtocolRun
 	request cggmp.SignRequest
+	store   cggmp.SignAttemptStore
 }
 
 type exampleCGGMPSecurity struct {
@@ -423,12 +424,15 @@ func runExampleCGGMPPresign(
 	return presigns, nil
 }
 
-func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest) (exampleSignJob, error) {
+func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest, store cggmp.SignAttemptStore) (exampleSignJob, error) {
 	// The signing session ID is generated for this online signing attempt.
 	// It is distinct from the earlier presign session ID.
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		return exampleSignJob{}, err
+	}
+	if store == nil {
+		return exampleSignJob{}, errors.New("missing example sign attempt store")
 	}
 	return exampleSignJob{
 		run: exampleProtocolRun{
@@ -441,6 +445,7 @@ func newExampleCGGMPSignJob(signers tss.PartySet, request cggmp.SignRequest) (ex
 			threshold: len(signers),
 		},
 		request: request.Clone(),
+		store:   store,
 	}, nil
 }
 
@@ -457,28 +462,38 @@ func startExampleCGGMPSignParty(job exampleSignJob, share *cggmp.KeyShare, presi
 		return nil, nil, err
 	}
 	plan, err := cggmp.NewSignPlan(cggmp.SignPlanOption{
-		Key:       share,
-		Presign:   presign,
-		SessionID: job.run.sessionID,
-		Request:   job.request,
+		Key:     share,
+		Presign: presign,
+		Intent: cggmp.SignIntent{
+			SessionID: job.run.sessionID,
+			Context:   job.request.Context,
+			Message:   job.request.Message,
+			Signers:   job.run.signers,
+		},
 	})
 	if err != nil {
 		return nil, nil, err
 	}
-	return cggmp.StartSign(share, presign, plan, tss.LocalConfig{Self: self}, guard)
+	return cggmp.StartSign(share, plan, cggmp.SignRuntime{
+		Local:        tss.LocalConfig{Self: self},
+		Guard:        guard,
+		Presign:      presign,
+		AttemptStore: job.store,
+	})
 }
 
 // runExampleCGGMPSign executes the online phase and returns the common group
 // public key together with the threshold signature. StartSign performs the
-// durable one-use claim through the SignRequest's configured presign store, so a
+// durable one-use claim through the configured presign store, so a
 // successful or conflicting committed attempt cannot reuse these presigns.
 func runExampleCGGMPSign(
 	shares map[tss.PartyID]*cggmp.KeyShare,
 	presigns map[tss.PartyID]*cggmp.Presign,
 	signers tss.PartySet,
 	request cggmp.SignRequest,
+	store cggmp.SignAttemptStore,
 ) ([]byte, *cggmp.Signature, error) {
-	job, err := newExampleCGGMPSignJob(signers, request)
+	job, err := newExampleCGGMPSignJob(signers, request, store)
 	if err != nil {
 		return nil, nil, err
 	}

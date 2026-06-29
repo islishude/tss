@@ -75,28 +75,57 @@ type SignAttemptStore interface {
 	BurnPresign(ctx context.Context, burn SignAttemptBurn) error
 }
 
-// SignRequest is the context-bound online signing request for a persisted
-// presignature. Message is hashed with the presign context before ECDSA.
+// SignRequest is the context-bound message to verify against a signature.
+// Message is hashed with the signing context before ECDSA verification.
 type SignRequest struct {
-	Context      tss.SigningContext `json:"context"`
-	Message      []byte             `json:"message"`
-	AttemptStore SignAttemptStore   `json:"-"` // required durable attempt/outbox store
-
-	// DurableStoreTimeout bounds durable commit/completion work after local
-	// validation. Zero selects DefaultSignAttemptStoreTimeout.
-	DurableStoreTimeout time.Duration `json:"-"`
+	Context tss.SigningContext `json:"context"`
+	Message []byte             `json:"message"`
 }
 
-// Clone returns a caller-owned copy of the sign request. The AttemptStore
-// interface value is preserved by reference because it is an execution
-// dependency, not mutable data.
+// Clone returns a caller-owned copy of the sign request.
 func (r SignRequest) Clone() SignRequest {
 	return SignRequest{
-		Context:             r.Context.Clone(),
-		Message:             slices.Clone(r.Message),
-		AttemptStore:        r.AttemptStore,
-		DurableStoreTimeout: r.DurableStoreTimeout,
+		Context: r.Context.Clone(),
+		Message: slices.Clone(r.Message),
 	}
+}
+
+// SignIntent is the shared online signing intent all CGGMP21 signers must
+// accept before producing a partial signature.
+type SignIntent struct {
+	SessionID tss.SessionID
+	Context   tss.SigningContext
+	Message   []byte
+	Signers   tss.PartySet
+}
+
+// Clone returns a caller-owned copy of the sign intent.
+func (i SignIntent) Clone() SignIntent {
+	return SignIntent{
+		SessionID: i.SessionID,
+		Context:   i.Context.Clone(),
+		Message:   slices.Clone(i.Message),
+		Signers:   i.Signers.Clone(),
+	}
+}
+
+// Request returns the context-bound request represented by the intent.
+func (i SignIntent) Request() SignRequest {
+	return SignRequest{
+		Context: i.Context.Clone(),
+		Message: slices.Clone(i.Message),
+	}
+}
+
+// SignRuntime contains this process's local execution dependencies for
+// CGGMP21 online signing. These values are not shared intent and are not part
+// of the sign plan digest.
+type SignRuntime struct {
+	Local               tss.LocalConfig
+	Guard               *tss.EnvelopeGuard
+	Presign             *Presign
+	AttemptStore        SignAttemptStore
+	DurableStoreTimeout time.Duration
 }
 
 // Presign contains one local offline signing record and must be consumed once.

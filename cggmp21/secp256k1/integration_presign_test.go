@@ -676,20 +676,26 @@ func TestThresholdECDSA_StartSignRequiresSignAttemptStore(t *testing.T) {
 	}
 	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
 	plan, err := NewSignPlan(SignPlanOption{
-		Key:       shares[1],
-		Presign:   presigns[1],
-		SessionID: sessionID,
-		Request: SignRequest{
-			Context: testPresignContext(),
-			Message: []byte("missing store"),
+		Key:     shares[1],
+		Presign: presigns[1],
+		Intent: SignIntent{
+			SessionID: sessionID,
+			Context:   testPresignContext(),
+			Message:   []byte("missing store"),
+			Signers:   presigns[1].state.Signers,
 		},
 		Limits: testLimitsPtr(),
 	})
+	if err != nil {
+		t.Fatalf("NewSignPlan: %v", err)
+	}
 	var session *SignSession
 	var out []tss.Envelope
-	if err == nil {
-		session, out, err = StartSign(shares[1], presigns[1], plan, tss.LocalConfig{Self: 1, Context: context.Background()}, guard)
-	}
+	session, out, err = StartSign(shares[1], plan, SignRuntime{
+		Local:   tss.LocalConfig{Self: 1, Context: context.Background()},
+		Guard:   guard,
+		Presign: presigns[1],
+	})
 	if session != nil || out != nil {
 		t.Fatal("StartSign without store returned signing output")
 	}

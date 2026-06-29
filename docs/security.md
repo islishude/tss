@@ -32,7 +32,7 @@ Callers must provide:
 - replay protection via `ReplayCache` and session-id freshness;
 - durable storage encryption for key shares and presigns (`tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` are Argon2id-based reference/demo implementations — production should use a KMS or HSM);
 - an atomic durable `SignAttemptStore` for CGGMP21 presigns. `StartSign`
-  refuses to sign unless `SignRequest.AttemptStore` is provided. The store is
+  refuses to sign unless `SignRuntime.AttemptStore` is provided. The store is
   the only StartSign linearization point and must bind one presign content ID to
   one immutable attempt. The content ID commits to nonce secrets and is
   secret-tainted: implementations must derive an opaque store-local key and
@@ -70,6 +70,10 @@ Before passing an inbound envelope to any state machine, the caller must open ra
 wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
 set `ReceiveInfo.Peer`; `OpenEnvelope` and the guard both check that this peer
 matches `Envelope.From`.
+
+Callers using `tssrun.Dispatcher` can standardize this sequence with
+`tssrun.DispatchInbound`, which opens raw bytes through a `tssrun.Receiver`
+before routing to the registered protocol session.
 
 The envelope digest is computed from the protocol, semantic
 `tss.ProtocolVersion`, session, round, sender, recipient, payload type, and
@@ -336,7 +340,7 @@ every signprep proof and recompute the round-1 echo and presign transcript.
 the same full self-verification before durable attempt work. `StartSign` then
 constructs and self-verifies a candidate partial and canonical-encodes its
 envelope before consuming the presign. It atomically commits the immutable
-intent and exact envelope through `SignRequest.AttemptStore`. Only a committed
+intent and exact envelope through `SignRuntime.AttemptStore`. Only a committed
 envelope may be returned or transmitted. A commit error has an unknown outcome:
 the presign remains bound and callers may only retry or `ResumeSign` the same
 attempt. `MarshalBinary` persists a consumed snapshot, while the durable attempt

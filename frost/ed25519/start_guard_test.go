@@ -70,7 +70,10 @@ func TestFROSTStartRequiresEnvelopeGuard(t *testing.T) {
 			self:    1,
 			parties: parties,
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, error) {
-				_, out, err := StartSign(shares[1], signPlan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartSign(shares[1], signPlan, SignRuntime{
+					Local: tss.LocalConfig{Self: 1},
+					Guard: guard,
+				})
 				return out, err
 			},
 		},

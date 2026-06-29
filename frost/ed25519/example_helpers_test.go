@@ -236,7 +236,10 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := frost.StartSign(shares[id], plan, tss.LocalConfig{Self: id, Rand: opts.NonceReader}, guard)
+		session, out, err := frost.StartSign(shares[id], plan, frost.SignRuntime{
+			Local: tss.LocalConfig{Self: id, Rand: opts.NonceReader},
+			Guard: guard,
+		})
 		if err != nil {
 			return nil, nil, err
 		}

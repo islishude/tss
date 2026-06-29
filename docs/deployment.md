@@ -127,7 +127,7 @@ if secp256k1.IsPresignConsumed(presign) {
 ```
 
 Restored CGGMP21 presigns require a durable sign-attempt record. Provide
-`SignRequest.AttemptStore`. `CommitSignAttempt` is the only StartSign
+`SignRuntime.AttemptStore`. `CommitSignAttempt` is the only StartSign
 linearization point; `LoadSignAttempt` is for `ResumeSign` and diagnostics.
 The store must atomically bind a secret-tainted presign content ID to one intent
 and one attempt. It must derive an opaque store-local key before using the
@@ -164,7 +164,11 @@ signGuard, err := (tss.GuardConfig{
 signPlan, err := ed25519.NewSignPlan(ed25519.SignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers, Message: message,
 })
-signSession, out, err := ed25519.StartSign(share, signPlan, tss.LocalConfig{Self: share.PartyID()}, signGuard)
+signRuntime := ed25519.SignRuntime{
+    Local: tss.LocalConfig{Self: share.PartyID()},
+    Guard: signGuard,
+}
+signSession, out, err := ed25519.StartSign(share, signPlan, signRuntime)
 // Route out (round 1 commitments) to other signers.
 // Handle round 1 responses; obtain round 2 partials.
 sig, ok := signSession.Signature()
@@ -211,9 +215,8 @@ encrypted, _ := tss.EncryptPresignWithPassphrase(rawPresign, passphrase, "presig
 // Online signing (fast, one round):
 message := []byte("payload")
 request := secp256k1.SignRequest{
-    Context:      ctx,
-    Message:      message,
-    AttemptStore: store, // required durable intent and encrypted outbox
+    Context: ctx,
+    Message: message,
 }
 signGuard, err := (tss.GuardConfig{
     Self:        keyShare.PartyID(),
@@ -225,9 +228,16 @@ signGuard, err := (tss.GuardConfig{
     AckVerifier: ackVerifier,
 }).BuildGuard()
 signPlan, _ := secp256k1.NewSignPlan(secp256k1.SignPlanOption{
-    Key: keyShare, Presign: presign, SessionID: sessionID, Request: request,
+    Key: keyShare, Presign: presign,
+    Intent: secp256k1.SignIntent{SessionID: sessionID, Context: request.Context, Message: request.Message, Signers: signers},
 })
-signSession, out, _ := secp256k1.StartSign(keyShare, presign, signPlan, tss.LocalConfig{Self: keyShare.PartyID(), Context: context.Background()}, signGuard)
+signRuntime := secp256k1.SignRuntime{
+    Local: tss.LocalConfig{Self: keyShare.PartyID(), Context: context.Background()},
+    Guard: signGuard,
+    Presign: presign,
+    AttemptStore: store, // required durable intent and encrypted outbox
+}
+signSession, out, _ := secp256k1.StartSign(keyShare, signPlan, signRuntime)
 // Route the single partial-signature round.
 sig, ok := signSession.Signature()
 secp256k1.VerifySignature(publicKey, request, sig) // true

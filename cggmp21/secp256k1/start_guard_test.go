@@ -88,7 +88,12 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 			parties: tss.NewPartySet(1, 2),
 			start: func(guard *tss.EnvelopeGuard) ([]tss.Envelope, bool, error) {
 				p := minimalPresign()
-				_, out, err := StartSign(key, p, signPlan, tss.LocalConfig{Self: 1}, guard)
+				_, out, err := StartSign(key, signPlan, SignRuntime{
+					Local:        tss.LocalConfig{Self: 1},
+					Guard:        guard,
+					Presign:      p,
+					AttemptStore: newTestSignAttemptStore(),
+				})
 				return out, IsPresignConsumed(p), err
 			},
 		},

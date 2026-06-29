@@ -195,6 +195,14 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	return nil
 }
 
+// ValidateForRound validates an incoming envelope against the sender set allowed
+// by the current protocol round or payload. The guard's configured Parties field
+// remains the construction-time party universe; allowedSenders is the
+// lifecycle-specific sender set for this message.
+func (g *EnvelopeGuard) ValidateForRound(env InboundEnvelope, allowedSenders PartySet) error {
+	return g.ValidateWithParties(env, allowedSenders)
+}
+
 // RequireEnvelopeGuard verifies that guard is bound to the expected protocol
 // session and has the fixed validation dependencies required by inbound
 // handlers. It does not validate the guard's party set; protocol handlers pass
@@ -226,19 +234,19 @@ func RequireEnvelopeGuard(guard *EnvelopeGuard, expectedProtocol ProtocolID, exp
 // This ensures transport authentication, confidentiality enforcement, broadcast
 // consistency, and replay detection are applied uniformly in all code paths.
 //
-// The parties parameter specifies which participants are accepted as senders
-// for this message. The guard's configured [EnvelopeGuard.Parties] field is NOT
-// used to restrict the sender set — callers must supply the appropriate party
-// set per round or per payload type. For sessions where the trusted party
-// universe changes between rounds (e.g. reshare with old and new party
-// subsets), this design avoids coupling the guard's construction-time party set
-// to per-message validation.
-func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, parties PartySet, self PartyID) error {
+// The allowedSenders parameter specifies which participants are accepted as
+// senders for this message. The guard's configured [EnvelopeGuard.Parties] field
+// is the construction-time party universe; callers must supply the appropriate
+// allowed sender set per round or per payload type. For sessions where the
+// trusted party universe changes between rounds (e.g. reshare with old and new
+// party subsets), this design avoids coupling guard construction to
+// per-message validation.
+func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, allowedSenders PartySet, self PartyID) error {
 	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
 		return err
 	}
-	if len(parties) == 0 {
-		return errors.New("parties must not be empty")
+	if len(allowedSenders) == 0 {
+		return errors.New("allowed senders must not be empty")
 	}
-	return guard.ValidateWithParties(env, parties)
+	return guard.ValidateForRound(env, allowedSenders)
 }

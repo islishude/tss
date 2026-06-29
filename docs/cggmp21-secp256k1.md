@@ -459,11 +459,19 @@ durable attempt record is authoritative after restart:
 // Check before use:
 if IsPresignConsumed(presign) { /* discard */ }
 
-// NewSignPlan/StartSign require request.AttemptStore and commit before returning out:
+// NewSignPlan binds shared intent; StartSign requires runtime.AttemptStore and
+// commits before returning out:
 plan, err := NewSignPlan(SignPlanOption{
-    Key: share, Presign: presign, SessionID: sessionID, Request: request,
+    Key: share, Presign: presign,
+    Intent: SignIntent{SessionID: sessionID, Context: request.Context, Message: request.Message, Signers: signers},
 })
-sess, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: ctx}, guard)
+runtime := SignRuntime{
+    Local: tss.LocalConfig{Self: share.PartyID(), Context: ctx},
+    Guard: guard,
+    Presign: presign,
+    AttemptStore: store,
+}
+sess, out, err := StartSign(share, plan, runtime)
 
 // After restart, replay the exact committed envelope while delivery is pending,
 // or load the final signature if completion is durable:
@@ -499,7 +507,7 @@ value from becoming a public storage identifier:
 Conflict, burn, and non-determinism are mapped to `ErrCodeConsumed`. Any other
 commit error is returned as `ErrSignAttemptOutcomeUnknown`. Commit and automatic
 completion use `context.WithTimeout(context.WithoutCancel(ctx),
-DurableStoreTimeout)` so user cancellation after local validation does not
+SignRuntime.DurableStoreTimeout)` so user cancellation after local validation does not
 unnecessarily abandon a presign whose durable outcome is unknown. The concrete
 error may be `SignAttemptOutcomeUnknownError`, which carries a non-secret
 `SignAttemptDescriptor` with the session ID, local party, signer-set hash,
@@ -967,12 +975,19 @@ context := metadata.Context // includes a copied derivation path
 ### Online Signing
 
 ```go
-request := SignRequest{Context: ctx, Message: message, AttemptStore: store}
+request := SignRequest{Context: ctx, Message: message}
 // AttemptStore atomically binds the internal content commitment through an opaque store key.
 plan, err := NewSignPlan(SignPlanOption{
-    Key: share, Presign: presign, SessionID: sessionID, Request: request,
+    Key: share, Presign: presign,
+    Intent: SignIntent{SessionID: sessionID, Context: request.Context, Message: request.Message, Signers: signers},
 })
-ss, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.PartyID(), Context: context.Background()}, guard)
+runtime := SignRuntime{
+    Local: tss.LocalConfig{Self: share.PartyID(), Context: context.Background()},
+    Guard: guard,
+    Presign: presign,
+    AttemptStore: store,
+}
+ss, out, err := StartSign(share, plan, runtime)
 out, err := ss.HandleSignMessage(env)
 sig, ok := ss.Signature()
 ok := VerifySignature(publicKey, request, sig)

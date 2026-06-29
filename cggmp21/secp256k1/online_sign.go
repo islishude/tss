@@ -15,13 +15,15 @@ import (
 )
 
 // StartSign starts or idempotently resumes this party's local online signing
-// attempt from a shared immutable lifecycle plan using a context-bound
-// presignature. The session ID identifies the signing attempt, not the earlier
-// presign run. The supplied Presign is consumed through the SignAttemptStore
+// attempt from a shared immutable lifecycle plan using local runtime
+// dependencies. The session ID identifies the signing attempt, not the earlier
+// presign run. The runtime Presign is consumed through the SignAttemptStore
 // boundary before outbound messages are released. If the commit outcome is
 // unknown, the application must not reuse the presign with another session or
 // digest; recover the same attempt with ResumeSign.
-func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelope, error) {
+	local := runtime.Local
+	presign := runtime.Presign
 	if key == nil || key.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil key share"))
 	}
@@ -34,8 +36,11 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 	if plan == nil || plan.state == nil {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("nil sign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
+	if runtime.AttemptStore == nil {
+		return nil, nil, invalidPlanConfig(local.Self, errors.New("SignRuntime.AttemptStore is required for durable sign-attempt commit"))
 	}
 	if err := key.ValidateWithLimits(plan.limits); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
@@ -55,8 +60,8 @@ func StartSign(key *KeyShare, presign *Presign, plan *SignPlan, local tss.LocalC
 		plan.state.digest,
 		plan.state.contextHash,
 		planHash,
-		plan.state.request.AttemptStore,
-		guard, durableStoreTimeout(plan.state.request.DurableStoreTimeout),
+		runtime.AttemptStore,
+		runtime.Guard, durableStoreTimeout(runtime.DurableStoreTimeout),
 		plan.limits,
 	)
 }
@@ -101,7 +106,7 @@ func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign
 		return nil, nil, errors.New("sign plan hash must be 32 bytes")
 	}
 	if store == nil {
-		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.Party, errors.New("SignRequest.AttemptStore is required for durable sign-attempt commit"))
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 1, key.state.Party, errors.New("SignRuntime.AttemptStore is required for durable sign-attempt commit"))
 	}
 	handle, err := newPresignHandle(presign, limits)
 	if err != nil {

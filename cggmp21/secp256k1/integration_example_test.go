@@ -46,11 +46,10 @@ func Example_full_lifecycle() {
 	}
 	defer cleanup()
 	request := cggmp.SignRequest{
-		Context:      ctx,
-		Message:      []byte("example full lifecycle"),
-		AttemptStore: store,
+		Context: ctx,
+		Message: []byte("example full lifecycle"),
 	}
-	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)
+	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, parties, request, store)
 	if err != nil {
 		panic(err)
 	}
@@ -78,11 +77,10 @@ func Example_multiParty() {
 	}
 	defer cleanup()
 	request := cggmp.SignRequest{
-		Context:      ctx,
-		Message:      []byte("multi-party threshold signature"),
-		AttemptStore: store,
+		Context: ctx,
+		Message: []byte("multi-party threshold signature"),
 	}
-	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, signers, request)
+	publicKey, signature, err := runExampleCGGMPSign(shares, presigns, signers, request, store)
 	if err != nil {
 		panic(err)
 	}
@@ -156,11 +154,10 @@ func ExampleStartRefresh() {
 	}
 	defer cleanup()
 	request := cggmp.SignRequest{
-		Context:      ctx,
-		Message:      []byte("post-refresh signing"),
-		AttemptStore: store,
+		Context: ctx,
+		Message: []byte("post-refresh signing"),
 	}
-	publicKey, signature, err := runExampleCGGMPSign(refreshed, presigns, parties, request)
+	publicKey, signature, err := runExampleCGGMPSign(refreshed, presigns, parties, request, store)
 	if err != nil {
 		panic(err)
 	}
@@ -252,11 +249,10 @@ func ExampleStartReshareDealer() {
 	}
 	defer cleanup()
 	request := cggmp.SignRequest{
-		Context:      ctx,
-		Message:      []byte("post-reshare signing"),
-		AttemptStore: store,
+		Context: ctx,
+		Message: []byte("post-reshare signing"),
 	}
-	publicKey, signature, err := runExampleCGGMPSign(reshared, presigns, newParties, request)
+	publicKey, signature, err := runExampleCGGMPSign(reshared, presigns, newParties, request, store)
 	if err != nil {
 		panic(err)
 	}
@@ -292,11 +288,10 @@ func ExampleDeriveNonHardenedBIP32() {
 	}
 	defer cleanup()
 	request := cggmp.SignRequest{
-		Context:      ctx,
-		Message:      []byte("bip32 derived signing"),
-		AttemptStore: store,
+		Context: ctx,
+		Message: []byte("bip32 derived signing"),
 	}
-	_, signature, err := runExampleCGGMPSign(shares, presigns, parties, request)
+	_, signature, err := runExampleCGGMPSign(shares, presigns, parties, request, store)
 	if err != nil {
 		panic(err)
 	}

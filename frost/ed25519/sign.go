@@ -95,12 +95,21 @@ func (signPartialPayload) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("frost ed25519 sign partial payload must use wire encoding (MarshalBinary)")
 }
 
+// SignRuntime contains this process's local execution dependencies for FROST
+// signing. These values are not shared intent and are not part of the sign plan
+// digest.
+type SignRuntime struct {
+	Local tss.LocalConfig
+	Guard *tss.EnvelopeGuard
+}
+
 // StartSign starts a FROST signing session from a shared immutable lifecycle
 // plan and local runtime configuration. In production, the shared plan means
 // equivalent authenticated sign-run metadata, not a shared Go object. The run
 // creator must distribute one signing session ID, signer set, message, and
 // derivation context so every signer reconstructs an equivalent plan locally.
-func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.EnvelopeGuard) (*SignSession, []tss.Envelope, error) {
+func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession, []tss.Envelope, error) {
+	local := runtime.Local
 	if key == nil || key.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil key share"))
 	}
@@ -113,7 +122,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 	if plan == nil || plan.state == nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, errors.New("nil sign plan"))
 	}
-	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolFROSTEd25519, plan.state.sessionID, local.Self); err != nil {
+	if err := tss.RequireEnvelopeGuard(runtime.Guard, tss.ProtocolFROSTEd25519, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, local.Self, err)
 	}
 	// Validate the local key against the immutable plan before deriving nonce
@@ -245,7 +254,7 @@ func StartSign(key *KeyShare, plan *SignPlan, local tss.LocalConfig, guard *tss.
 		eNonce:           eNonce,
 		deltaScalar:      deltaScalar,
 		commitMessage:    env,
-		guard:            guard,
+		guard:            runtime.Guard,
 	}
 	out := []tss.Envelope{env}
 	partial, err := s.tryEmitPartial()
@@ -458,7 +467,10 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 		if err != nil {
 			return nil, nil, err
 		}
-		session, out, err := StartSign(shares[id], plan, tss.LocalConfig{Self: id, Rand: opts.NonceReader}, guard)
+		session, out, err := StartSign(shares[id], plan, SignRuntime{
+			Local: tss.LocalConfig{Self: id, Rand: opts.NonceReader},
+			Guard: guard,
+		})
 		if err != nil {
 			return nil, nil, err
 		}

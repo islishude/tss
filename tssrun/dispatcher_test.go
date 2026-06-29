@@ -60,6 +60,36 @@ func TestDurableBufferUnknownSessionStoresWithoutDelivery(t *testing.T) {
 	}
 }
 
+func TestDispatchInboundOpensRawEnvelopeBeforeRouting(t *testing.T) {
+	ctx := context.Background()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatalf("NewSessionID: %v", err)
+	}
+	env := testEnvelope(t, sessionID, 1, 2)
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	registry := NewMemorySessionRegistry()
+	session := &testSession{}
+	key := SessionKey{Protocol: env.Protocol, SessionID: env.SessionID, Party: 2}
+	if err := registry.Put(ctx, key, session); err != nil {
+		t.Fatalf("Put: %v", err)
+	}
+	dispatcher := Dispatcher{Self: 2, Registry: registry}
+	err = DispatchInbound(ctx, EnvelopeReceiver{}, &dispatcher, raw, tss.ReceiveInfo{
+		Peer:       env.From,
+		Protection: tss.ChannelConfidential,
+	})
+	if err != nil {
+		t.Fatalf("DispatchInbound: %v", err)
+	}
+	if session.handled != 1 {
+		t.Fatalf("session handled %d envelopes, want 1", session.handled)
+	}
+}
+
 type testSession struct {
 	out       []tss.Envelope
 	err       error

@@ -195,6 +195,12 @@ A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use
 not running under `go test` to prevent accidental production use. Sessions expose
 `Guard()` as a read-only accessor for transport adapters.
 
+The guard's configured `Parties` field is the construction-time party universe.
+Protocol handlers that have lifecycle-specific sender sets call
+`ValidateForRound(inbound, allowedSenders)` through `ValidateInbound`, so reshare
+and similar flows can accept different sender sets in different rounds without
+weakening transport, policy, replay, or broadcast-certificate checks.
+
 ### BroadcastCertificate
 
 When a policy requires `BroadcastConsistencyRequired`, the transport must supply

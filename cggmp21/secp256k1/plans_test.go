@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
@@ -102,24 +101,21 @@ func TestCGGMP21KeygenPlanZeroValueIsInvalid(t *testing.T) {
 	}
 }
 
-func TestCGGMP21SignPlanDigestBindsEffectiveDurableTimeout(t *testing.T) {
+func TestCGGMP21SignPlanDigestExcludesRuntimeDependencies(t *testing.T) {
 	t.Parallel()
 
-	newPlan := func(timeout time.Duration) *SignPlan {
+	newPlan := func(signers tss.PartySet) *SignPlan {
 		return &SignPlan{state: &signPlanState{
 			sessionID:         cggmpPlanTestSession(0x54),
 			presignTranscript: bytes.Repeat([]byte{0x11}, 32),
 			contextHash:       bytes.Repeat([]byte{0x22}, 32),
+			signers:           signers.Clone(),
 			digest:            bytes.Repeat([]byte{0x33}, 32),
-			request: SignRequest{
-				AttemptStore:        newTestSignAttemptStore(),
-				DurableStoreTimeout: timeout,
-			},
 		}}
 	}
 
-	assertSameCGGMPPlanDigest(t, newPlan(0), newPlan(DefaultSignAttemptStoreTimeout))
-	assertDifferentCGGMPPlanDigest(t, "sub-millisecond durable timeout", newPlan(1200*time.Microsecond), newPlan(1900*time.Microsecond))
+	assertSameCGGMPPlanDigest(t, newPlan(tss.NewPartySet(1, 2)), newPlan(tss.NewPartySet(1, 2)))
+	assertDifferentCGGMPPlanDigest(t, "signer set", newPlan(tss.NewPartySet(1, 2)), newPlan(tss.NewPartySet(1, 3)))
 }
 
 func TestCGGMP21SignPlanMismatchDoesNotAbortSession(t *testing.T) {
@@ -263,11 +259,17 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 		presignTranscript: []byte{0x45, 0x46},
 		contextHash:       []byte{0x50, 0x51},
 		digest:            []byte{0x60, 0x61},
-		request: SignRequest{Context: tss.SigningContext{Derivation: tss.DerivationRequest{
-			Scheme:       tss.DerivationSchemeBIP32Secp256k1,
-			Path:         tss.DerivationPath{3, 4},
-			ResolvedPath: tss.DerivationPath{3, 4},
-		}}, Message: []byte("message")},
+		signers:           tss.NewPartySet(1, 2),
+		intent: SignIntent{
+			SessionID: cggmpPlanTestSession(0x53),
+			Context: tss.SigningContext{Derivation: tss.DerivationRequest{
+				Scheme:       tss.DerivationSchemeBIP32Secp256k1,
+				Path:         tss.DerivationPath{3, 4},
+				ResolvedPath: tss.DerivationPath{3, 4},
+			}},
+			Message: []byte("message"),
+			Signers: tss.NewPartySet(1, 2),
+		},
 	}}
 	signSnapshot, ok := sign.Snapshot()
 	if !ok {
@@ -276,14 +278,16 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	signSnapshot.PresignTranscriptHash[0] ^= 0xff
 	signSnapshot.ContextHash[0] ^= 0xff
 	signSnapshot.MessageDigest[0] ^= 0xff
-	signSnapshot.Request.Message[0] ^= 0xff
-	signSnapshot.Request.Context.Derivation.Path[0] = 99
+	signSnapshot.Intent.Message[0] ^= 0xff
+	signSnapshot.Intent.Context.Derivation.Path[0] = 99
+	signSnapshot.Intent.Signers[0] = 99
 	if sign.state.presignContentID[0] != 0x40 ||
 		sign.state.presignTranscript[0] != 0x45 ||
 		sign.state.contextHash[0] != 0x50 ||
 		sign.state.digest[0] != 0x60 ||
-		sign.state.request.Message[0] != 'm' ||
-		sign.state.request.Context.Derivation.Path[0] != 3 {
+		sign.state.intent.Message[0] != 'm' ||
+		sign.state.intent.Context.Derivation.Path[0] != 3 ||
+		sign.state.intent.Signers[0] != 1 {
 		t.Fatal("sign plan snapshot aliases internal state")
 	}
 }

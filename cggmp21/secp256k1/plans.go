@@ -525,7 +525,8 @@ type signPlanState struct {
 	contextHash       []byte                // Hash of the context already bound when the presign was created.
 	derivation        *tss.DerivationResult // Resolved child key/path that must match the presign.
 	digest            []byte                // Context-bound message digest signed by ECDSA.
-	request           SignRequest           // Caller request snapshot; AttemptStore is kept by reference.
+	signers           tss.PartySet          // Canonical signer set participating in this online signature.
+	intent            SignIntent            // Caller intent snapshot.
 }
 
 // SignPlan is the shared CGGMP21 online signing intent.
@@ -541,7 +542,7 @@ type SignPlanSnapshot struct {
 	ContextHash           []byte
 	Derivation            *tss.DerivationResult
 	MessageDigest         []byte
-	Request               SignRequest
+	Intent                SignIntent
 }
 
 // Clone returns a deep copy of the sign plan snapshot.
@@ -552,24 +553,23 @@ func (s SignPlanSnapshot) Clone() SignPlanSnapshot {
 		ContextHash:           bytes.Clone(s.ContextHash),
 		Derivation:            s.Derivation.Clone(),
 		MessageDigest:         bytes.Clone(s.MessageDigest),
-		Request:               s.Request.Clone(),
+		Intent:                s.Intent.Clone(),
 	}
 }
 
 // SignPlanOption configures CGGMP21 online signing plan construction.
 type SignPlanOption struct {
-	Key       *KeyShare
-	Presign   *Presign
-	SessionID tss.SessionID
-	Request   SignRequest
-	Limits    *Limits
+	Key     *KeyShare
+	Presign *Presign
+	Intent  SignIntent
+	Limits  *Limits
 }
 
-// NewSignPlan constructs a sign plan for a key, presign, and request.
+// NewSignPlan constructs a sign plan for a key, presign, and shared intent.
 func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	key := option.Key
 	presign := option.Presign
-	request := option.Request
+	intent := option.Intent
 	limits := limitsOrDefault(option.Limits)
 	if key == nil || key.state == nil {
 		return nil, invalidPlanConfig(0, errors.New("nil key share"))
@@ -577,11 +577,8 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	if presign == nil || presign.state == nil {
 		return nil, invalidPlanConfig(key.state.Party, errors.New("nil presign"))
 	}
-	if !option.SessionID.Valid() {
+	if !intent.SessionID.Valid() {
 		return nil, invalidPlanConfig(key.state.Party, tss.ErrInvalidSessionID)
-	}
-	if request.AttemptStore == nil {
-		return nil, invalidPlanConfig(key.state.Party, errors.New("sign request attempt store is required"))
 	}
 	if err := validatePresign(key, presign, limits); err != nil {
 		return nil, invalidPlanConfig(key.state.Party, err)
@@ -593,10 +590,20 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	if limits.Payload.MaxMessageBytes <= 0 {
 		return nil, invalidPlanConfig(key.state.Party, errors.New("max message bytes must be positive"))
 	}
-	if len(request.Message) > limits.Payload.MaxMessageBytes {
-		return nil, invalidPlanConfig(key.state.Party, fmt.Errorf("message too large: %d > %d", len(request.Message), limits.Payload.MaxMessageBytes))
+	if len(intent.Message) > limits.Payload.MaxMessageBytes {
+		return nil, invalidPlanConfig(key.state.Party, fmt.Errorf("message too large: %d > %d", len(intent.Message), limits.Payload.MaxMessageBytes))
 	}
-	normalizedContext, contextHash, derivation, err := preparePresignContext(key, request.Context)
+	signers := tss.SortParties(intent.Signers)
+	if len(signers) == 0 {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("sign intent signers must not be empty"))
+	}
+	if !slices.Equal(signers, presign.state.Signers) {
+		return nil, invalidPlanConfig(key.state.Party, errors.New("sign intent signer set mismatch"))
+	}
+	if err := validateSignerSet(key, signers, limits); err != nil {
+		return nil, invalidPlanConfig(key.state.Party, err)
+	}
+	normalizedContext, contextHash, derivation, err := preparePresignContext(key, intent.Context)
 	if err != nil {
 		return nil, invalidPlanConfig(key.state.Party, err)
 	}
@@ -609,25 +616,26 @@ func NewSignPlan(option SignPlanOption) (*SignPlan, error) {
 	if !slices.Equal(derivation.ResolvedPath, presign.state.Derivation.ResolvedPath) {
 		return nil, invalidPlanConfig(key.state.Party, errors.New("presign resolved path mismatch"))
 	}
-	req := SignRequest{
-		Context:             normalizedContext.Clone(),
-		Message:             slices.Clone(request.Message),
-		AttemptStore:        request.AttemptStore,
-		DurableStoreTimeout: request.DurableStoreTimeout,
+	normalizedIntent := SignIntent{
+		SessionID: intent.SessionID,
+		Context:   normalizedContext.Clone(),
+		Message:   slices.Clone(intent.Message),
+		Signers:   signers.Clone(),
 	}
-	digest := signMessageDigest(contextHash, request.Context.MessageDomain, request.Message)
+	digest := signMessageDigest(contextHash, intent.Context.MessageDomain, intent.Message)
 	contentID, err := presign.contentIDWithLimits(limits)
 	if err != nil {
 		return nil, invalidPlanConfig(key.state.Party, err)
 	}
 	return &SignPlan{state: &signPlanState{
-		sessionID:         option.SessionID,
+		sessionID:         intent.SessionID,
 		presignContentID:  contentID,
 		presignTranscript: slices.Clone(presign.state.TranscriptHash),
 		contextHash:       slices.Clone(contextHash),
 		derivation:        derivation.Clone(),
 		digest:            slices.Clone(digest),
-		request:           req,
+		signers:           signers.Clone(),
+		intent:            normalizedIntent,
 	}, limits: limits}, nil
 }
 
@@ -639,8 +647,7 @@ func (p *SignPlan) SessionID() tss.SessionID {
 	return p.state.sessionID
 }
 
-// Snapshot returns a caller-owned sign plan snapshot. The AttemptStore interface
-// value inside Request is preserved because it is an execution dependency.
+// Snapshot returns a caller-owned sign plan snapshot.
 func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 	if p == nil || p.state == nil {
 		return SignPlanSnapshot{}, false
@@ -651,7 +658,7 @@ func (p *SignPlan) Snapshot() (SignPlanSnapshot, bool) {
 		ContextHash:           bytes.Clone(p.state.contextHash),
 		Derivation:            p.state.derivation.Clone(),
 		MessageDigest:         bytes.Clone(p.state.digest),
-		Request:               p.state.request.Clone(),
+		Intent:                p.state.intent.Clone(),
 	}, true
 }
 
@@ -665,9 +672,8 @@ func (p *SignPlan) Digest() ([]byte, error) {
 	t.AppendBytes("presign_transcript_hash", p.state.presignTranscript)
 	t.AppendBytes("context_hash", p.state.contextHash)
 	appendDerivationResultTranscript(t, p.state.derivation)
+	t.AppendUint32List("signers", p.state.signers)
 	t.AppendBytes("message_digest", p.state.digest)
-	t.AppendBool("has_attempt_store", p.state.request.AttemptStore != nil)
-	t.AppendUint64("durable_store_timeout_ns", uint64(durableStoreTimeout(p.state.request.DurableStoreTimeout)))
 	return t.Sum(), nil
 }
 
@@ -699,6 +705,9 @@ func (p *SignPlan) validate(key *KeyShare, presign *Presign, local tss.LocalConf
 	}
 	if !p.state.derivation.Equal(presign.state.Derivation) {
 		return errors.New("sign plan derivation mismatch")
+	}
+	if !slices.Equal(p.state.signers, presign.state.Signers) {
+		return errors.New("sign plan signer set mismatch")
 	}
 	return validatePresign(key, presign, p.limits)
 }
