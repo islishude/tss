@@ -224,7 +224,7 @@ func TestFast_ShallowCopiesShareLifecycleState(t *testing.T) {
 
 	presign := &Presign{state: &presignState{Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false)}}
 	presignHandle := *presign
-	if err := MarkPresignConsumed(&presignHandle); err != nil {
+	if err := DiscardLocalPresignHandle(&presignHandle); err != nil {
 		t.Fatal(err)
 	}
 	if !IsPresignConsumed(presign) {

@@ -82,10 +82,11 @@ func (b *presignAttemptBinding) discard() {
 	}
 }
 
-// MarkPresignConsumed marks p's local claim consumed.
-// It irreversibly discards an available presign and never releases an existing
-// attempt binding. It is not a substitute for [SignAttemptStore].
-func MarkPresignConsumed(p *Presign) error {
+// DiscardLocalPresignHandle discards p's local in-process presign handle.
+// It marks the local claim consumed, never releases an existing attempt binding,
+// and is not a durable tombstone. Production discard paths should prefer
+// [BurnPresign] when a SignAttemptStore is available.
+func DiscardLocalPresignHandle(p *Presign) error {
 	if p == nil || p.state == nil {
 		return errors.New("nil presign")
 	}

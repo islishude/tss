@@ -318,6 +318,11 @@ signature is returned or emitted. Tests that instrument stores should distinguis
 `SignAttemptCreated`, `SignAttemptExistingSame`, conflict, burn, and
 same-intent/different-attempt non-determinism.
 
+External `SignAttemptStore` implementations should run
+`secp256k1test.RunSignAttemptStoreSuite` with backend-specific candidate
+records and add storage-specific tests for opaque store keys, at-rest
+encryption, crash consistency, and KMS or database transaction behavior.
+
 Delivery state is durable attempt state. Tests must cover ACK idempotency,
 certificate persistence, mismatched payload/transcript/recipient rejection, and
 the rule that `ResumeSign` stops returning outbound replay once delivery is

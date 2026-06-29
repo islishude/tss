@@ -201,28 +201,28 @@ func TestPresignDestroyMarksTestCopyConsumed(t *testing.T) {
 	}
 }
 
-func TestMarkPresignConsumedMarksInPlace(t *testing.T) {
+func TestDiscardLocalPresignHandleMarksInPlace(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
 	cp := clonePresignForTest(p)
 
-	if err := MarkPresignConsumed(p); err != nil {
+	if err := DiscardLocalPresignHandle(p); err != nil {
 		t.Fatal(err)
 	}
 	if !IsPresignConsumed(p) {
-		t.Fatal("MarkPresignConsumed did not mark the original presign consumed")
+		t.Fatal("DiscardLocalPresignHandle did not mark the original presign consumed")
 	}
 	if !IsPresignConsumed(cp) {
-		t.Fatal("MarkPresignConsumed did not update the shared claim")
+		t.Fatal("DiscardLocalPresignHandle did not update the shared claim")
 	}
 }
 
-func TestMarkPresignConsumedDoesNotReleaseBoundAttempt(t *testing.T) {
+func TestDiscardLocalPresignHandleDoesNotReleaseBoundAttempt(t *testing.T) {
 	p := minimalCGGMP21Presign(t)
 	intent := bytes.Repeat([]byte{1}, 32)
 	if !bindPresignToAttempt(p, intent, false) {
 		t.Fatal("failed to bind test attempt")
 	}
-	if err := MarkPresignConsumed(p); err != nil {
+	if err := DiscardLocalPresignHandle(p); err != nil {
 		t.Fatal(err)
 	}
 	if !bindPresignToAttempt(p, intent, true) {
@@ -252,8 +252,8 @@ func TestPresignMissingClaimFailsClosed(t *testing.T) {
 	if p.state.Consumed.Bool != nil {
 		t.Fatal("attempt binding lazily initialized missing claim state")
 	}
-	if err := MarkPresignConsumed(p); err == nil {
-		t.Fatal("MarkPresignConsumed accepted missing claim state")
+	if err := DiscardLocalPresignHandle(p); err == nil {
+		t.Fatal("DiscardLocalPresignHandle accepted missing claim state")
 	}
 	cp := clonePresignForTest(p)
 	if cp.state.Consumed.Bool != nil || !IsPresignConsumed(cp) {
@@ -274,8 +274,8 @@ func TestPresignMissingAttemptBindingFailsClosed(t *testing.T) {
 	if bindPresignToAttempt(p, bytes.Repeat([]byte{1}, 32), false) {
 		t.Fatal("presign without attempt state was bound")
 	}
-	if err := MarkPresignConsumed(p); err == nil {
-		t.Fatal("MarkPresignConsumed accepted missing attempt state")
+	if err := DiscardLocalPresignHandle(p); err == nil {
+		t.Fatal("DiscardLocalPresignHandle accepted missing attempt state")
 	}
 }
 

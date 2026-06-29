@@ -41,6 +41,79 @@ type SignAttemptCommit struct {
 	Record SignAttemptRecord
 }
 
+// SignAttemptDescriptor is the non-secret recovery identity for one durable
+// online signing attempt. It intentionally excludes the presign content ID, the
+// raw ECDSA digest, canonical envelopes, partial signatures, and completion
+// material.
+type SignAttemptDescriptor struct {
+	SessionID         tss.SessionID
+	Party             tss.PartyID
+	SignerSetHash     []byte
+	SignPlanHash      []byte
+	ContextHash       []byte
+	DigestBindingHash []byte
+	AttemptHash       []byte
+}
+
+// Clone returns an independent copy of the descriptor.
+func (d SignAttemptDescriptor) Clone() SignAttemptDescriptor {
+	return SignAttemptDescriptor{
+		SessionID:         d.SessionID,
+		Party:             d.Party,
+		SignerSetHash:     slices.Clone(d.SignerSetHash),
+		SignPlanHash:      slices.Clone(d.SignPlanHash),
+		ContextHash:       slices.Clone(d.ContextHash),
+		DigestBindingHash: slices.Clone(d.DigestBindingHash),
+		AttemptHash:       slices.Clone(d.AttemptHash),
+	}
+}
+
+// SignAttemptMetadata is the non-secret load result applications can use to
+// construct recovery control-plane state before calling ResumeSign.
+type SignAttemptMetadata struct {
+	Descriptor       SignAttemptDescriptor
+	DeliveryComplete bool
+	Completed        bool
+}
+
+// Clone returns an independent copy of the metadata.
+func (m SignAttemptMetadata) Clone() SignAttemptMetadata {
+	return SignAttemptMetadata{
+		Descriptor:       m.Descriptor.Clone(),
+		DeliveryComplete: m.DeliveryComplete,
+		Completed:        m.Completed,
+	}
+}
+
+// SignAttemptOutcomeUnknownError reports a commit error whose durable outcome
+// is unknown and carries the non-secret descriptor for the attempted recovery
+// intent.
+type SignAttemptOutcomeUnknownError struct {
+	Cause      error
+	Descriptor SignAttemptDescriptor
+}
+
+// Error returns the public error string.
+func (e *SignAttemptOutcomeUnknownError) Error() string {
+	if e == nil || e.Cause == nil {
+		return ErrSignAttemptOutcomeUnknown.Error()
+	}
+	return ErrSignAttemptOutcomeUnknown.Error() + ": " + e.Cause.Error()
+}
+
+// Unwrap returns the underlying store error.
+func (e *SignAttemptOutcomeUnknownError) Unwrap() error {
+	if e == nil {
+		return nil
+	}
+	return e.Cause
+}
+
+// Is preserves errors.Is(err, ErrSignAttemptOutcomeUnknown).
+func (e *SignAttemptOutcomeUnknownError) Is(target error) bool {
+	return target == ErrSignAttemptOutcomeUnknown
+}
+
 // SignAttemptDeliveryPolicy snapshots the delivery policy that applies to the
 // committed outbound signing envelope.
 type SignAttemptDeliveryPolicy struct {
@@ -204,6 +277,28 @@ func (r SignAttemptRecord) Equal(other SignAttemptRecord) bool {
 		bytes.Equal(r.SignatureR, other.SignatureR) &&
 		bytes.Equal(r.SignatureS, other.SignatureS) &&
 		r.SignatureRecoveryID == other.SignatureRecoveryID
+}
+
+// Descriptor returns a non-secret recovery descriptor for r.
+func (r SignAttemptRecord) Descriptor() SignAttemptDescriptor {
+	return SignAttemptDescriptor{
+		SessionID:         r.SessionID,
+		Party:             r.Party,
+		SignerSetHash:     slices.Clone(r.SignerSetHash),
+		SignPlanHash:      slices.Clone(r.SignPlanHash),
+		ContextHash:       slices.Clone(r.ContextHash),
+		DigestBindingHash: slices.Clone(r.DigestBindingHash),
+		AttemptHash:       slices.Clone(r.AttemptHash),
+	}
+}
+
+// Metadata returns non-secret recovery and lifecycle metadata for r.
+func (r SignAttemptRecord) Metadata() SignAttemptMetadata {
+	return SignAttemptMetadata{
+		Descriptor:       r.Descriptor(),
+		DeliveryComplete: r.DeliveryState.DeliveryComplete,
+		Completed:        r.Completed,
+	}
 }
 
 // SameAttempt reports whether r and other identify the same committed attempt.

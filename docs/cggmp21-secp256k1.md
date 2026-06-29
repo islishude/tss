@@ -467,10 +467,12 @@ sess, out, err := StartSign(share, presign, plan, tss.LocalConfig{Self: share.Pa
 
 // After restart, replay the exact committed envelope while delivery is pending,
 // or load the final signature if completion is durable:
+meta, err := LoadSignAttemptMetadata(ctx, restoredPresign, store)
+guard, err = buildGuardFromMetadata(meta)
 sess, out, err = ResumeSign(ctx, share, restoredPresign, store, guard)
 
 // Optionally persist a local-only consumed snapshot for operators:
-_ = MarkPresignConsumed(presign)
+_ = DiscardLocalPresignHandle(presign)
 rawConsumed, _ := presign.MarshalBinary()
 encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
 
@@ -498,7 +500,11 @@ Conflict, burn, and non-determinism are mapped to `ErrCodeConsumed`. Any other
 commit error is returned as `ErrSignAttemptOutcomeUnknown`. Commit and automatic
 completion use `context.WithTimeout(context.WithoutCancel(ctx),
 DurableStoreTimeout)` so user cancellation after local validation does not
-unnecessarily abandon a presign whose durable outcome is unknown.
+unnecessarily abandon a presign whose durable outcome is unknown. The concrete
+error may be `SignAttemptOutcomeUnknownError`, which carries a non-secret
+`SignAttemptDescriptor` with the session ID, local party, signer-set hash,
+sign-plan hash, context hash, digest-binding hash, and attempt hash for recovery
+control-plane records.
 
 `IntentHash` binds protocol/version, presign content ID, session ID, local party,
 signer set hash, context hash, 32-byte digest, and digest binding hash.
@@ -524,8 +530,15 @@ Signature completion is persisted through `CompleteSignAttempt` before
 `Signature()` becomes available. If completion persistence fails or times out,
 the session keeps an internal pending-completion state; call `RetryCompletion`
 to persist the same computed signature result idempotently. `BurnPresign` writes
-a durable tombstone only when no attempt exists; `MarkPresignConsumed` is
-local-only protection and is not a durable lifecycle decision.
+a durable tombstone only when no attempt exists; `DiscardLocalPresignHandle` is
+local-only handle protection and is not a durable lifecycle decision.
+
+`SignAttemptStore` is not a complete session journal. It persists the one-use
+claim, local outbound envelope, delivery progress, and final signature. It does
+not persist inbound remote partials already accepted by the process before a
+crash. Applications that need crash recovery after partial inbound delivery must
+keep a durable inbox or message log and redeliver those envelopes after
+`ResumeSign`.
 
 The internal `contentID` is a domain-separated commitment over the complete
 canonical persisted presign state, including nonce secrets and verification
@@ -535,6 +548,8 @@ metric label, placed in plaintext metadata, or used directly as a filename.
 store-local Argon2id key material, uses only `storeKey` for paths, encrypts burn
 tombstones and attempt objects, authenticates their bindings through AEAD AAD,
 and stores only ciphertext hashes in sidecar metadata.
+External stores should run `secp256k1test.RunSignAttemptStoreSuite` and add
+backend-specific crash, transaction, encryption, and key-management tests.
 
 `UnmarshalBinary` performs strict canonical decoding and structural validation;
 it intentionally does not run expensive proof verification. Applications that
@@ -991,7 +1006,7 @@ newShare, err := receiver.Result()
 ### Presign Lifecycle
 
 ```go
-err := MarkPresignConsumed(presign)
+err := DiscardLocalPresignHandle(presign)
 ok := IsPresignConsumed(presign)
 ```
 

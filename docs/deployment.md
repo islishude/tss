@@ -138,7 +138,9 @@ with a different attempt returns `secp256k1.ErrSignAttemptNonDeterminism`; a
 different intent returns `secp256k1.ErrSignAttemptConflict`; a durable tombstone
 returns `secp256k1.ErrSignAttemptBurned`. These are consumed outcomes. Any
 other commit error has an unknown outcome and must be recovered with the same
-request or `ResumeSign`.
+request or `ResumeSign`. Implementations should run
+`secp256k1test.RunSignAttemptStoreSuite` and add backend-specific crash,
+encryption, and transaction tests.
 
 ### 4. Signing
 
@@ -235,7 +237,7 @@ After signing, you may persist a consumed snapshot for operational clarity, but
 this is not a replacement for the durable attempt record:
 
 ```go
-_ = secp256k1.MarkPresignConsumed(presign)
+_ = secp256k1.DiscardLocalPresignHandle(presign)
 rawConsumed, _ := presign.MarshalBinary()
 encrypted, _ := tss.EncryptPresignWithPassphrase(rawConsumed, passphrase, "presign-1", nil)
 // Persist updated record so operators can see the consumed snapshot.
@@ -247,7 +249,10 @@ encrypted outbox through `SignAttemptStore`. An identical retry replays the same
 attempt. A conflicting intent, burn tombstone, or same-intent/different-attempt
 non-determinism fails with `ErrCodeConsumed`. Storage timeout, cancellation, or
 I/O error during commit returns `ErrSignAttemptOutcomeUnknown`; never release
-that presign. Retry the same intent or call `ResumeSign`.
+that presign. Retry the same intent or call `ResumeSign`. The error may be a
+`SignAttemptOutcomeUnknownError`; its descriptor contains only non-secret
+recovery identity such as session ID, signer-set hash, sign-plan hash,
+context hash, digest-binding hash, and attempt hash.
 
 `ResumeSign` returns the exact committed envelope only until delivery is
 durably complete. An at-least-once dispatcher should keep replaying it until
@@ -255,6 +260,12 @@ durably complete. An at-least-once dispatcher should keep replaying it until
 and the required broadcast certificate. After the delivery certificate is
 durable, `ResumeSign` rebuilds the session without returning outbound replay.
 Signature completion alone is not a delivery acknowledgment.
+
+`SignAttemptStore` protects the one-use presign claim, local outbound replay,
+delivery progress, and completion persistence. It is not a complete online
+signing event log: inbound remote partials received before a crash must be
+recovered from an application durable inbox or message log and delivered again
+after `ResumeSign`.
 
 `NewFileSignAttemptStore` is an encrypted append-only reference implementation.
 It fsyncs immutable encrypted objects, creates the presign claim or burn

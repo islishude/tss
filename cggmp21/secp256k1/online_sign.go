@@ -323,12 +323,12 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 	record, err := coordinator.load(ctx)
 	if err != nil {
 		if errors.Is(err, ErrSignAttemptCorrupt) {
-			_ = MarkPresignConsumed(presign)
+			_ = DiscardLocalPresignHandle(presign)
 		}
 		return nil, nil, err
 	}
 	if err := validateSignAttemptRecordWithLimits(record, limits); err != nil {
-		_ = MarkPresignConsumed(presign)
+		_ = DiscardLocalPresignHandle(presign)
 		return nil, nil, err
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, record.SessionID, key.state.Party); err != nil {
@@ -342,12 +342,12 @@ func ResumeSignWithLimits(ctx context.Context, key *KeyShare, presign *Presign, 
 
 func resumeMatchingSignAttempt(ctx context.Context, key *KeyShare, presign *Presign, candidate, durable SignAttemptRecord, coordinator *signAttemptCoordinator, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if err := validateSignAttemptRecordWithLimits(durable, limits); err != nil {
-		_ = MarkPresignConsumed(presign)
+		_ = DiscardLocalPresignHandle(presign)
 		return nil, nil, err
 	}
 	if !candidate.SameAttempt(durable) {
 		if !bindPresignToAttempt(presign, durable.IntentHash, true) {
-			_ = MarkPresignConsumed(presign)
+			_ = DiscardLocalPresignHandle(presign)
 		}
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeConsumed, 1, key.state.Party, ErrSignAttemptConflict)
 	}
@@ -455,7 +455,7 @@ func BurnPresign(ctx context.Context, store SignAttemptStore, presign *Presign, 
 	if err := coordinator.burn(ctx, reason); err != nil {
 		return err
 	}
-	return MarkPresignConsumed(presign)
+	return DiscardLocalPresignHandle(presign)
 }
 
 // Guard returns the session's envelope guard for use by transport adapters.

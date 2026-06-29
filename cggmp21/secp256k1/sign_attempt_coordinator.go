@@ -66,7 +66,10 @@ func (c *signAttemptCoordinator) claim(ctx context.Context, candidate SignAttemp
 		if signAttemptConsumedError(err) {
 			return SignAttemptCommit{}, err
 		}
-		return SignAttemptCommit{}, fmt.Errorf("%w: %w", ErrSignAttemptOutcomeUnknown, err)
+		return SignAttemptCommit{}, &SignAttemptOutcomeUnknownError{
+			Cause:      err,
+			Descriptor: candidate.Descriptor(),
+		}
 	}
 	if commit.Status != SignAttemptCreated && commit.Status != SignAttemptExistingSame {
 		return SignAttemptCommit{}, fmt.Errorf("%w: invalid commit status", ErrSignAttemptCorrupt)

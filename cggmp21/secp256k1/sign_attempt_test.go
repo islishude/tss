@@ -227,6 +227,25 @@ func TestFast_SignAttemptRecordRejectsJSONDecoding(t *testing.T) {
 	}
 }
 
+func TestFast_SignAttemptDescriptorExcludesSecretTaintedIdentity(t *testing.T) {
+	t.Parallel()
+	record := testSignAttemptRecord(t, 1)
+	descriptor := record.Descriptor()
+	if descriptor.SessionID != record.SessionID ||
+		descriptor.Party != record.Party ||
+		!bytes.Equal(descriptor.AttemptHash, record.AttemptHash) {
+		t.Fatal("descriptor did not preserve recovery identity")
+	}
+	if bytes.Equal(descriptor.AttemptHash, record.PresignContentID) ||
+		bytes.Equal(descriptor.DigestBindingHash, record.Digest) {
+		t.Fatal("descriptor exposed secret-tainted content ID or raw digest")
+	}
+	descriptor.AttemptHash[0] ^= 1
+	if bytes.Equal(descriptor.AttemptHash, record.AttemptHash) {
+		t.Fatal("descriptor did not clone record hashes")
+	}
+}
+
 func TestFast_FileSignAttemptStoreIdempotentAndConflictingCommits(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

@@ -224,8 +224,24 @@ func TestThresholdECDSA_SignAttemptOutcomeUnknownResumesSameIntent(t *testing.T)
 	if !IsPresignConsumed(presigns[1]) {
 		t.Fatal("outcome-unknown commit did not retain local binding")
 	}
+	var unknown *SignAttemptOutcomeUnknownError
+	if !errors.As(err, &unknown) {
+		t.Fatalf("outcome-unknown error type = %T, want SignAttemptOutcomeUnknownError", err)
+	}
+	if unknown.Descriptor.SessionID != sessionID ||
+		unknown.Descriptor.Party != shares[1].PartyID() ||
+		!bytes.Equal(unknown.Descriptor.ContextHash, mustPresignContextHash(t, presigns[1])) {
+		t.Fatal("outcome-unknown descriptor did not preserve recovery identity")
+	}
 
-	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sessionID)
+	metadata, err := LoadSignAttemptMetadata(context.Background(), presigns[1], store)
+	if err != nil {
+		t.Fatalf("load sign attempt metadata: %v", err)
+	}
+	if metadata.Descriptor.SessionID != sessionID || metadata.Completed || metadata.DeliveryComplete {
+		t.Fatal("metadata did not describe the committed incomplete attempt")
+	}
+	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), metadata.Descriptor.SessionID)
 	session, out, err = startSignDigestBound(context.Background(), shares[1], presigns[1], sessionID, digest[:], mustPresignContextHash(t, presigns[1]), store, guard, testLimits())
 	if err != nil {
 		t.Fatalf("resume same attempt: %v", err)
