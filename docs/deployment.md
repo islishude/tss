@@ -343,38 +343,29 @@ received, err := tss.OpenEnvelope(data, tss.ReceiveInfo{
 ### Message Routing Pattern
 
 ```go
-func routeMessages(registry SessionRegistry, transport Transport) error {
+func routeMessages(ctx context.Context, dispatcher *tssrun.Dispatcher, transport Transport) error {
     for {
         raw, info, cert := transport.Recv()
         env, err := tss.OpenEnvelope(raw, info, tss.WithBroadcastCertificate(cert))
         if err != nil {
             return err
         }
-        session := registry.Lookup(env.Protocol(), env.SessionID())
-        if session == nil {
-            return ErrUnknownProtocolRun
-        }
-        out, err := session.HandleMessage(env)
-        if err != nil {
+        if err := dispatcher.Dispatch(ctx, env); err != nil {
             var pe *tss.ProtocolError
             if errors.As(err, &pe) && pe.Blame != nil {
                 logBlame(pe.Blame)
             }
             // Abort session or continue based on error code.
-        }
-        for _, e := range out {
-            transport.Send(e)
-        }
-        if session.IsCompleted() {
-            return nil
+            return err
         }
     }
 }
 ```
 
-Applications should route inbound envelopes by `(Protocol, SessionID, To)`.
-Unknown-session envelopes should be rejected or durably buffered and revalidated
-after the matching run is accepted.
+Applications should route opened inbound envelopes through
+`tssrun.Dispatcher`, backed by a `SessionRegistry` keyed by
+`(Protocol, SessionID, local party)`. Unknown-session envelopes should be
+rejected or durably buffered and revalidated after the matching run is accepted.
 
 ## Refresh and Reshare Installation
 

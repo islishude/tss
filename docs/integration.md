@@ -1,8 +1,8 @@
 # Production Integration Model
 
-This document describes the application-level model for running the interactive
-protocols in this repository across processes or machines. It is an integration
-contract, not a new public API.
+This document describes the production integration contract implemented by the
+`tssrun` package for running the interactive protocols in this repository across
+processes or machines.
 
 All interactive protocols in this library are party-local state machines. The
 library does not create, distribute, authorize, schedule, or recover protocol
@@ -42,7 +42,7 @@ The application is responsible for:
 
 ## Control Plane vs Data Plane
 
-The control plane creates and authorizes `ProtocolRun` metadata, distributes it
+The control plane creates and authorizes `tssrun.RunIntent` metadata, distributes it
 to participants, records acceptance and completion, and owns lifecycle
 decisions.
 
@@ -57,45 +57,35 @@ secrets. A faulty coordinator can cause liveness failures or propose invalid
 runs, but each party must independently validate policy and plan metadata before
 starting.
 
-## ProtocolRun Metadata
+## RunIntent Metadata
 
-Production systems usually have an application-level run or job record similar
-to this conceptual shape:
+Production systems should persist application run metadata equivalent to
+`tssrun.RunIntent`:
 
 ```go
-type ProtocolRunKind string
-
-const (
-    RunKeygen  ProtocolRunKind = "keygen"
-    RunPresign ProtocolRunKind = "presign"
-    RunSign    ProtocolRunKind = "sign"
-    RunRefresh ProtocolRunKind = "refresh"
-    RunReshare ProtocolRunKind = "reshare"
-)
-
-type ProtocolRun struct {
+type RunIntent struct {
     RunID     string
     Protocol  tss.ProtocolID
-    Kind      ProtocolRunKind
+    Kind      tssrun.RunKind
     SessionID tss.SessionID
 
     Parties   tss.PartySet
+    Signers   tss.PartySet
     Threshold int
 
-    Signers tss.PartySet
+    KeyID         string
+    KeyGeneration tssrun.KeyGeneration
+    ParentKeyID   string
+    PresignID     string
 
-    KeyID       string
-    ParentKeyID string
-    PresignInventoryID string
-
-    PlanHash []byte
-    Context  any
+    PlanDigest    []byte
+    ContextDigest []byte
 }
 ```
 
 `RunID` is an application identifier. `SessionID` is the protocol-level nonce
 bound into envelopes, plans, transcripts, proofs, and replay protection.
-`PlanHash` is derived from the library plan and can be exchanged or recorded by
+`PlanDigest` is derived from the library plan and can be exchanged or recorded by
 the control plane before data-plane messages are released.
 
 The actual fields should match the deployment's storage and policy model. The
@@ -118,7 +108,7 @@ implements durable unknown-session buffering and revalidation.
 
 The session ID is public, but it must be fresh and unpredictable.
 
-## Plan Construction and PlanHash Acceptance
+## Plan Construction and Plan Digest Acceptance
 
 "Shared plan" means equivalent public metadata, not a shared Go object. Each
 party reconstructs its own plan from the same authenticated run metadata. The
@@ -141,14 +131,14 @@ if err != nil {
     return err
 }
 
-if err := store.AcceptRun(job.RunID, job.SessionID, planHash); err != nil {
+if err := tssrun.AcceptPlanDigest(ctx, runStore, run, self, planHash); err != nil {
     return err
 }
 ```
 
 A typical control-plane flow is:
 
-1. A proposer creates `ProtocolRun` metadata.
+1. A proposer creates `tssrun.RunIntent` metadata.
 2. Each party validates metadata against local policy.
 3. Each party reconstructs the plan.
 4. Each party records `planHash` acceptance.
@@ -176,7 +166,9 @@ if err != nil {
     return err
 }
 
-registry.Put(job.Protocol, job.SessionID, session)
+if err := tssrun.RegisterStartedSession(ctx, runStore, registry, run, self, session); err != nil {
+    return err
+}
 return transport.SendAll(out)
 ```
 
@@ -197,19 +189,16 @@ func OnEnvelope(raw []byte, info tss.ReceiveInfo, cert *tss.BroadcastCertificate
         return err
     }
 
-    session := registry.Lookup(in.Protocol(), in.SessionID())
-    if session == nil {
-        return ErrUnknownProtocolRun
-    }
-
-    out, err := session.Handle(in)
-    if err != nil {
-        return err
-    }
-
-    return transport.SendAll(out)
+    return dispatcher.Dispatch(ctx, in)
 }
 ```
+
+The dispatcher looks up active sessions by
+`protocol + session_id + local_party`. If no session is registered, the default
+`tssrun.RejectUnknownSession` policy fails closed. A deployment that implements
+durable buffering should use `tssrun.UnknownEnvelopeStore` semantics: buffered
+envelopes are already opened with `tss.OpenEnvelope`, but they still must be
+looked up and revalidated through the registered protocol session before use.
 
 Direct messages carrying private shares or protocol secrets must be delivered
 over channels that `OpenEnvelope` receives as `ChannelConfidential`. Broadcast

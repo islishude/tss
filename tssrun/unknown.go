@@ -1,0 +1,96 @@
+package tssrun
+
+import (
+	"context"
+	"sync"
+
+	"github.com/islishude/tss"
+)
+
+// RejectUnknownSession is the fail-closed default unknown-session policy.
+type RejectUnknownSession struct{}
+
+// OnUnknownEnvelope rejects the inbound envelope.
+func (RejectUnknownSession) OnUnknownEnvelope(context.Context, tss.InboundEnvelope) error {
+	return ErrUnknownSession
+}
+
+// DurableBufferUnknownSession stores unknown-session envelopes for later
+// revalidation by the caller after a run is accepted and a session is registered.
+type DurableBufferUnknownSession struct {
+	Store UnknownEnvelopeStore
+}
+
+// OnUnknownEnvelope stores the envelope without delivering it to a session.
+func (p DurableBufferUnknownSession) OnUnknownEnvelope(ctx context.Context, in tss.InboundEnvelope) error {
+	if p.Store == nil {
+		return ErrUnknownSession
+	}
+	return p.Store.PutUnknown(ctx, in)
+}
+
+// UnknownEnvelopeStore stores opened inbound envelopes that could not yet be routed.
+type UnknownEnvelopeStore interface {
+	PutUnknown(ctx context.Context, in tss.InboundEnvelope) error
+	LoadBySession(ctx context.Context, protocol tss.ProtocolID, sessionID tss.SessionID) ([]tss.InboundEnvelope, error)
+	DeleteBySession(ctx context.Context, protocol tss.ProtocolID, sessionID tss.SessionID) error
+}
+
+// MemoryUnknownEnvelopeStore is an in-memory reference unknown-envelope store.
+type MemoryUnknownEnvelopeStore struct {
+	mu        sync.Mutex
+	envelopes map[unknownIndex][]tss.InboundEnvelope
+}
+
+type unknownIndex struct {
+	protocol  tss.ProtocolID
+	sessionID tss.SessionID
+}
+
+// NewMemoryUnknownEnvelopeStore returns an empty unknown-envelope store.
+func NewMemoryUnknownEnvelopeStore() *MemoryUnknownEnvelopeStore {
+	return &MemoryUnknownEnvelopeStore{envelopes: make(map[unknownIndex][]tss.InboundEnvelope)}
+}
+
+// PutUnknown stores an opened inbound envelope for later revalidation.
+func (s *MemoryUnknownEnvelopeStore) PutUnknown(ctx context.Context, in tss.InboundEnvelope) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	idx := unknownIndex{protocol: in.Protocol(), sessionID: in.SessionID()}
+	if idx.protocol == "" || !idx.sessionID.Valid() {
+		return ErrInvalidSessionKey
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.envelopes[idx] = append(s.envelopes[idx], in)
+	return nil
+}
+
+// LoadBySession returns buffered envelopes for a protocol/session.
+func (s *MemoryUnknownEnvelopeStore) LoadBySession(ctx context.Context, protocol tss.ProtocolID, sessionID tss.SessionID) ([]tss.InboundEnvelope, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if protocol == "" || !sessionID.Valid() {
+		return nil, ErrInvalidSessionKey
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	buffered := s.envelopes[unknownIndex{protocol: protocol, sessionID: sessionID}]
+	return append([]tss.InboundEnvelope(nil), buffered...), nil
+}
+
+// DeleteBySession deletes buffered envelopes for a protocol/session.
+func (s *MemoryUnknownEnvelopeStore) DeleteBySession(ctx context.Context, protocol tss.ProtocolID, sessionID tss.SessionID) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if protocol == "" || !sessionID.Valid() {
+		return ErrInvalidSessionKey
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.envelopes, unknownIndex{protocol: protocol, sessionID: sessionID})
+	return nil
+}

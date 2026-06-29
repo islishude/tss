@@ -70,6 +70,7 @@ locally, and route envelopes over authenticated transport.
 | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
 | [docs/root-package.md](docs/root-package.md)                             | Root package types, envelopes, errors, blame evidence.                                        |
 | [docs/integration.md](docs/integration.md)                               | Production protocol-run model: control plane, session IDs, plan metadata, routing, recovery.  |
+| [docs/tssrun.md](docs/tssrun.md)                                         | Public integration API for run stores, session registry, dispatching, and durable boundaries. |
 | [docs/frost-ed25519.md](docs/frost-ed25519.md)                           | Full FROST Ed25519 protocol: DKG, signing, resharing, BIP32.                                  |
 | [docs/cggmp21-secp256k1.md](docs/cggmp21-secp256k1.md)                   | Full CGGMP21 secp256k1 protocol: keygen, presign, signing, refresh, resharing, HD derivation. |
 | [docs/architecture.md](docs/architecture.md)                             | Package boundaries, transport model, state-machine lifecycle.                                 |

@@ -95,6 +95,11 @@ network transport, peer authentication, storage encryption, secure deletion of
 persisted records, retries, consensus over session creation, KMS/HSM policy,
 and operational alerting.
 
+Use the `tssrun` package to make run acceptance, session registry lookup,
+unknown-session policy, and durable cutover boundaries explicit. Its memory
+stores are reference implementations only; production deployments need durable,
+recoverable stores with their own encryption and access control.
+
 See [docs/deployment.md](deployment.md) for a complete deployment guide covering
 key lifecycle, transport integration, persistence encryption, backup, and
 monitoring.

@@ -103,6 +103,8 @@ the guard runs.
 Applications should route inbound envelopes by `(Protocol, SessionID, To)`.
 `OpenEnvelope` validates transport metadata and returns an inbound envelope that
 must be dispatched to the locally registered session for that protocol run.
+The `tssrun` package provides the public `SessionRegistry` and `Dispatcher`
+contracts for this routing layer.
 
 ### Encoding
 
