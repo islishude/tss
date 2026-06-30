@@ -119,7 +119,7 @@ func TestSlowCrypto_Sign3of5(t *testing.T) {
 		selected = append(selected, shares[id])
 	}
 	msg := []byte("slowcrypto frost 3-of-5 production")
-	pub, sig, err := Sign(msg, selected, testFROSTSigningContext())
+	pub, sig, err := signFROSTSimulation(msg, selected, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -195,7 +195,7 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 	// Sign with refreshed shares.
 	msg := []byte("slowcrypto frost refresh production")
 	signers := []*KeyShare{refreshed[1], refreshed[2]}
-	pub, sig, err := Sign(msg, signers, testFROSTSigningContext())
+	pub, sig, err := signFROSTSimulation(msg, signers, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestSlowCrypto_Reshare3of4(t *testing.T) {
 
 	// All 4 new parties can sign (need 2-of-4).
 	msg := []byte("slowcrypto frost reshare production")
-	pub, sig, err := Sign(msg, []*KeyShare{newShares[1], newShares[4]}, testFROSTSigningContext())
+	pub, sig, err := signFROSTSimulation(msg, []*KeyShare{newShares[1], newShares[4]}, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestSlowCrypto_HDDeriveAndSign(t *testing.T) {
 		selected = append(selected, shares[id])
 	}
 	msg := []byte("slowcrypto frost hd production")
-	pub, sig, err := SignWithOptions(msg, selected, SignOptions{Context: testFROSTSigningContext(path)})
+	pub, sig, err := signFROSTSimulationWithOptions(msg, selected, SignOptions{Context: testFROSTSigningContext(path)})
 	if err != nil {
 		t.Fatal(err)
 	}

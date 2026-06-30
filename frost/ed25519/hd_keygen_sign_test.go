@@ -68,12 +68,12 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext([]uint32{0})})
+		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext([]uint32{0})})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(pub, result.ChildPublicKey) {
-			t.Fatal("SignWithOptions with additive shift returns shifted public key")
+			t.Fatal("signing with additive shift returns shifted public key")
 		}
 		if !stded25519.Verify(stded25519.PublicKey(result.ChildPublicKey), msg, sig) {
 			t.Fatal("HD signature did not verify against derived public key")
@@ -97,12 +97,12 @@ func TestHDSignScenarios(t *testing.T) {
 			t.Fatal(err)
 		}
 
-		pub, sig, err := SignWithOptions(msg, []*KeyShare{key1, key2}, SignOptions{Context: testFROSTSigningContext([]uint32{5})})
+		pub, sig, err := signFROSTSimulationWithOptions(msg, []*KeyShare{key1, key2}, SignOptions{Context: testFROSTSigningContext([]uint32{5})})
 		if err != nil {
 			t.Fatal(err)
 		}
 		if !bytes.Equal(pub, result.ChildPublicKey) {
-			t.Fatal("SignWithOptions with additive shift returns shifted public key")
+			t.Fatal("signing with additive shift returns shifted public key")
 		}
 		if !stded25519.Verify(stded25519.PublicKey(result.ChildPublicKey), msg, sig) {
 			t.Fatal("HD threshold signature did not verify against derived key")
@@ -116,11 +116,11 @@ func TestHDSignScenarios(t *testing.T) {
 		share := shares[1]
 		msg := []byte("zero shift test")
 
-		pub1, sig1, err := SignWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext()})
+		pub1, sig1, err := signFROSTSimulationWithOptions(msg, []*KeyShare{share}, SignOptions{Context: testFROSTSigningContext()})
 		if err != nil {
 			t.Fatal(err)
 		}
-		pub2, sig2, err := Sign(msg, []*KeyShare{share}, testFROSTSigningContext())
+		pub2, sig2, err := signFROSTSimulation(msg, []*KeyShare{share}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}

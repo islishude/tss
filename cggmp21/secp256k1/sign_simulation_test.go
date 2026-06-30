@@ -3,31 +3,16 @@ package secp256k1
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
 	"errors"
 	"fmt"
 	"sync"
 	"time"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/testutil"
 )
 
-// Sign runs an in-memory presign and signing exchange for a context-bound message.
-func Sign(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, *Signature, error) {
-	return signWithDigest(message, signers, ctx, false, DefaultLimits())
-}
-
-// SignDigestInteractive runs a full interactive signing exchange for a raw
-// digest after binding ctx before nonce generation. It does not return or
-// persist a reusable Presign.
-func SignDigestInteractive(digest32 []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, *Signature, error) {
-	if len(digest32) != sha256.Size {
-		return nil, nil, errors.New("digest must be 32 bytes")
-	}
-	return signWithDigest(digest32, signers, ctx, true, DefaultLimits())
-}
-
-func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, rawDigest bool, limits Limits) ([]byte, *Signature, error) {
+func signCGGMP21Simulation(input []byte, signers []*KeyShare, ctx tss.SigningContext, rawDigest bool, limits Limits) ([]byte, *Signature, error) {
 	if len(signers) == 0 {
 		return nil, nil, errors.New("no signers")
 	}
@@ -162,17 +147,13 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, r
 }
 
 func openSimulationInbound(env tss.Envelope) (tss.InboundEnvelope, error) {
-	raw, err := env.MarshalBinary()
-	if err != nil {
-		return tss.InboundEnvelope{}, err
-	}
-	return tss.OpenEnvelope(raw, tss.ReceiveInfo{
+	return testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{
 		Peer:       env.From,
 		Protection: tss.ChannelConfidential,
 		ChannelID:  "simulation",
 		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
 		ReceivedAt: time.Now(),
-	})
+	}, nil)
 }
 
 type simulationSignAttemptStore struct {
@@ -328,8 +309,8 @@ func (s *simulationSignAttemptStore) BurnPresign(ctx context.Context, burn SignA
 
 // simulationCGGMP21Policies returns the production CGGMP21 policy set with
 // broadcast consistency relaxed to None for all payload types. It is used by
-// in-memory simulation helpers ([Sign], [SignDigestInteractive]) that route
-// messages directly without broadcast certificate coordination.
+// test-only in-memory simulations that route messages directly without
+// broadcast certificate coordination.
 func simulationCGGMP21Policies() (tss.PolicySet, error) {
 	entries := CGGMP21Policies().Entries()
 	relaxed := make([]tss.DeliveryPolicy, len(entries))

@@ -298,9 +298,11 @@ sig = R || z
 
 This is verified with `crypto/ed25519.Verify(PK, message, sig)`. A failed final verification returns `ProtocolError` with `EvidenceKindFrostAggregateSignature` blame.
 
-### In-Memory Sign Helper
+### Signing Entry Point
 
-For tests and simple integrations, `Sign(message, shares, ctx)` runs the full two-round exchange in-process. The `tss.SigningContext` binds the key, chain, derivation path, policy domain, and message domain without changing the message bytes:
+Applications create a shared sign plan and run one `SignSession` per signer with
+`StartSign`. The `tss.SigningContext` binds the key, chain, derivation path,
+policy domain, and message domain without changing the message bytes:
 
 ```go
 ctx := tss.SigningContext{
@@ -311,7 +313,13 @@ ctx := tss.SigningContext{
     },
     PolicyDomain: "policy", MessageDomain: "app",
 }
-pub, sig, err := ed25519.Sign(message, []*KeyShare{share1, share2}, ctx)
+plan, err := ed25519.NewSignPlan(ed25519.SignPlanOption{
+    Key: share, SessionID: sessionID, Signers: signers, Context: ctx, Message: message,
+})
+session, out, err := ed25519.StartSign(share, plan, ed25519.SignRuntime{
+    Local: tss.LocalConfig{Self: self},
+    Guard: guard,
+})
 ```
 
 ## Resharing
@@ -700,8 +708,6 @@ childChain := result.ChildChainCode
 ### Convenience
 
 ```go
-pub, sig, err := Sign(message, shares, ctx)
-pub, sig, err := SignWithOptions(message, shares, SignOptions{Context: ctx})
 share, err := UnmarshalKeyShare(raw)
 ```
 

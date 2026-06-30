@@ -87,7 +87,7 @@ func TestRFC9591EndToEndSignature(t *testing.T) {
 
 	// Sign with signers P1, P3 (matching the RFC test vector).
 	signers := []*KeyShare{key1, key3}
-	pub, sig, err := Sign(message, signers, testFROSTSigningContext())
+	pub, sig, err := signFROSTSimulation(message, signers, testFROSTSigningContext())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,7 +234,7 @@ func TestRFC9591ThresholdCombinations(t *testing.T) {
 			for i, id := range tt.signers {
 				signerShares[i] = shares[id]
 			}
-			pub, sig, err := Sign(message, signerShares, testFROSTSigningContext())
+			pub, sig, err := signFROSTSimulation(message, signerShares, testFROSTSigningContext())
 			if err != nil {
 				t.Fatalf("signing failed: %v", err)
 			}

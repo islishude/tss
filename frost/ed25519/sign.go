@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"slices"
 	"sync"
-	"time"
 
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
@@ -370,167 +369,17 @@ func (s *SignSession) clearNonceScalars() {
 	}
 	if s.dNonce != nil {
 		s.dNonce.Destroy()
+		s.dNonce = nil
 	}
 	if s.eNonce != nil {
 		s.eNonce.Destroy()
+		s.eNonce = nil
 	}
-	s.dNonce = nil
-	s.eNonce = nil
 }
 
 func validateSignerSet(key *KeyShare, signers tss.PartySet, limits Limits) error {
-	if key.state.Threshold < limits.Threshold.MinProductionThreshold {
-		if !limits.Threshold.AllowOneOfOne || key.state.Threshold != 1 || len(key.state.Parties) != 1 {
-			return fmt.Errorf("key threshold %d is below production minimum %d", key.state.Threshold, limits.Threshold.MinProductionThreshold)
-		}
+	if err := limits.Threshold.ValidateThreshold(key.state.Threshold, len(key.state.Parties)); err != nil {
+		return err
 	}
 	return tss.ValidateSignerSet(key.state.Parties, key.state.Threshold, signers, limits.ThresholdLimits())
-}
-
-// Sign runs an in-memory FROST signing exchange for tests and simple integrations.
-// newInProcessGuard creates an EnvelopeGuard for in-process signing where all
-// signer keys are available locally (e.g., Sign, SignWithOptions, SignDigest).
-// It uses relaxed broadcast consistency since there is no actual transport layer.
-func newInProcessGuard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) (*tss.EnvelopeGuard, error) {
-	policies, err := inProcessPolicies()
-	if err != nil {
-		return nil, err
-	}
-	return tss.NewEnvelopeGuard(
-		self,
-		parties,
-		tss.ProtocolFROSTEd25519,
-		sessionID,
-		policies,
-		tss.NewInMemoryReplayCache(),
-	)
-}
-
-// inProcessPolicies returns FROSTPolicies() with broadcast consistency relaxed.
-func inProcessPolicies() (tss.PolicySet, error) {
-	entries := FROSTPolicies().Entries()
-	relaxed := make([]tss.DeliveryPolicy, len(entries))
-	for i, p := range entries {
-		relaxed[i] = p
-		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
-	}
-	return tss.NewPolicySet(relaxed...)
-}
-
-// Sign runs an in-memory FROST signing exchange and returns the child public key and signature.
-func Sign(message []byte, signers []*KeyShare, ctx tss.SigningContext) ([]byte, []byte, error) {
-	return SignWithOptions(message, signers, SignOptions{Context: ctx})
-}
-
-// SignWithOptions runs an in-memory FROST signing exchange with context-bound
-// HD derivation. It is an in-process orchestration helper and does not replace
-// authenticated transport or broadcast-consistency enforcement.
-func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]byte, []byte, error) {
-	if len(signers) == 0 {
-		return nil, nil, errors.New("no signers")
-	}
-	ids := make(tss.PartySet, len(signers))
-	shares := make(map[tss.PartyID]*KeyShare, len(signers))
-	for i, share := range signers {
-		if err := share.ValidateConsistency(); err != nil {
-			return nil, nil, err
-		}
-		ids[i] = share.state.Party
-		shares[share.state.Party] = share
-	}
-	ids = tss.SortParties(ids)
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		return nil, nil, err
-	}
-	sessions := make(map[tss.PartyID]*SignSession, len(signers))
-	defer func() {
-		for _, session := range sessions {
-			session.Destroy()
-		}
-	}()
-	round1 := make([]tss.Envelope, 0, len(signers))
-	round2 := make([]tss.Envelope, 0, len(signers))
-	for _, id := range ids {
-		guard, err := newInProcessGuard(id, shares[id].state.Parties, sessionID)
-		if err != nil {
-			return nil, nil, err
-		}
-		plan, err := NewSignPlan(SignPlanOption{
-			Key:       shares[id],
-			SessionID: sessionID,
-			Signers:   ids,
-			Context:   opts.Context,
-			Message:   message,
-			Limits:    opts.Limits,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		session, out, err := StartSign(shares[id], plan, SignRuntime{
-			Local: tss.LocalConfig{Self: id, Rand: opts.NonceReader},
-			Guard: guard,
-		})
-		if err != nil {
-			return nil, nil, err
-		}
-		sessions[id] = session
-		for _, env := range out {
-			if env.Round == signStartRound {
-				round1 = append(round1, env)
-			} else {
-				round2 = append(round2, env)
-			}
-		}
-	}
-	for _, env := range round1 {
-		for _, id := range ids {
-			if id == env.From {
-				continue
-			}
-			inbound, err := openInProcessInbound(env)
-			if err != nil {
-				return nil, nil, err
-			}
-			out, err := sessions[id].Handle(inbound)
-			if err != nil {
-				return nil, nil, err
-			}
-			round2 = append(round2, out...)
-		}
-	}
-	for _, env := range round2 {
-		for _, id := range ids {
-			if id == env.From {
-				continue
-			}
-			inbound, err := openInProcessInbound(env)
-			if err != nil {
-				return nil, nil, err
-			}
-			if _, err := sessions[id].Handle(inbound); err != nil {
-				return nil, nil, err
-			}
-		}
-	}
-	sig, ok := sessions[ids[0]].Signature()
-	if !ok {
-		return nil, nil, errors.New("signature not completed")
-	}
-	// Return the actual verification key — shifted when HD additive shift is in use.
-	return sessions[ids[0]].VerificationKeyBytes(), sig, nil
-}
-
-func openInProcessInbound(env tss.Envelope) (tss.InboundEnvelope, error) {
-	raw, err := env.MarshalBinary()
-	if err != nil {
-		return tss.InboundEnvelope{}, err
-	}
-	return tss.OpenEnvelope(raw, tss.ReceiveInfo{
-		Peer:       env.From,
-		Protection: tss.ChannelConfidential,
-		ChannelID:  "inprocess",
-		PeerKeyID:  fmt.Sprintf("party-%d", env.From),
-		ReceivedAt: time.Now(),
-	})
 }

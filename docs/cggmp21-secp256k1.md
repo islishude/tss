@@ -1031,7 +1031,6 @@ ok := IsPresignConsumed(presign)
 share, err := UnmarshalKeyShare(raw)
 presign, err := UnmarshalPresign(raw)
 plan, err := UnmarshalResharePlan(rawPlan)
-pubKey, sig, err := Sign(message, shares, ctx) // in-memory exchange
 ```
 
 ## Constant-Time Guarantees

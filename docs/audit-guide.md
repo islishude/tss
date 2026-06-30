@@ -44,9 +44,8 @@ there is no legacy proof fallback.
 - Reshare receiver Paillier/Ring-Pedersen proofs and final reshare key-share
   proofs bind the canonical `ResharePlan.Digest()` so receiver material cannot
   be replayed across old/new party sets, thresholds, chain codes, or dealer sets.
-- Raw digest signing is only available through full interactive signing
-  (`SignDigestInteractive`); persisted presigns use `StartSign` with a
-  context-bound message.
+- Raw digest signing is not exposed through a public convenience API; persisted
+  presigns use `StartSign` with a context-bound message.
 
 See [paillier-zk-proofs.md](paillier-zk-proofs.md) for proof statements,
 transcript inputs, and verifier checks.

@@ -59,7 +59,7 @@ func generateFROSTVectors(t *testing.T, name string) {
 			signerShares[j] = shares[pid-1]
 		}
 		limits := testLimits()
-		_, sig, err := SignWithOptions(msg, signerShares, SignOptions{Context: testFROSTSigningContext(), Limits: &limits})
+		_, sig, err := signFROSTSimulationWithOptions(msg, signerShares, SignOptions{Context: testFROSTSigningContext(), Limits: &limits})
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -532,12 +532,12 @@ type errNilPresignError struct{}
 
 func (errNilPresignError) Error() string { return "nil presign" }
 
-// SignDigest is a convenience wrapper around SignDigestInteractive for tests.
+// SignDigest runs a full interactive raw-digest signing simulation for tests.
 func SignDigest(digest32 []byte, signers []*KeyShare) ([]byte, *Signature, error) {
 	if len(digest32) != sha256.Size {
 		return nil, nil, errors.New("digest must be 32 bytes")
 	}
-	return signWithDigest(digest32, signers, testPresignContext(), true, testLimits())
+	return signCGGMP21Simulation(digest32, signers, testPresignContext(), true, testLimits())
 }
 
 func deliverKeygenMessages(t testing.TB, sessions map[tss.PartyID]*KeygenSession, parties tss.PartySet, messages []tss.Envelope) {

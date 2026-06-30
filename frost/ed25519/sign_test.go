@@ -355,18 +355,3 @@ func TestSecretSharePayloadMarshalJSONRejects(t *testing.T) {
 		t.Fatal("reshareSharePayload.MarshalJSON should reject JSON encoding")
 	}
 }
-
-func TestInProcessGuardUsesNoAckVerifier(t *testing.T) {
-	t.Parallel()
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	guard, err := newInProcessGuard(1, tss.NewPartySet(1, 2), sessionID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if guard.AckVerifier != nil {
-		t.Fatal("in-process guard installed an ack verifier despite relaxed policies")
-	}
-}

@@ -77,7 +77,7 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	ctx := testPresignContext()
 	ctx.Derivation.Path = tss.DerivationPath(path).Clone()
 	request := SignRequest{Context: ctx, Message: []byte("interactive hd")}
-	pub, sig, err := Sign(request.Message, signers, ctx)
+	pub, sig, err := signCGGMP21Simulation(request.Message, signers, ctx, false, testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}

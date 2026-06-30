@@ -31,14 +31,14 @@ Ring-Pedersen Πprm semantics.
 
 ## Presign And Signing
 
-| Requirement                                                                     | Code Location                                                | Status |
-| ------------------------------------------------------------------------------- | ------------------------------------------------------------ | ------ |
-| Bind presigns to `tss.SigningContext`/`PresignContext` before nonce generation  | `NewPresignPlan` + `StartPresign`                            | DONE   |
-| Bind key id, chain id, derivation path, policy domain, and message domain       | `presignContextHash`, `Presign` TLV                          | DONE   |
-| Move BIP32 path resolution into presign creation                                | `preparePresignContext`, `tryEmitRound3`                     | DONE   |
-| Reject online signing under mismatched context, path, or derived key before use | `StartSign`                                                  | DONE   |
-| Mark presign consumed before emitting online partial                            | `startSignDigestBound`                                       | DONE   |
-| Avoid raw digest signing with persisted presigns                                | public API; `SignDigestInteractive` is full-interactive only | DONE   |
+| Requirement                                                                     | Code Location                                        | Status |
+| ------------------------------------------------------------------------------- | ---------------------------------------------------- | ------ |
+| Bind presigns to `tss.SigningContext`/`PresignContext` before nonce generation  | `NewPresignPlan` + `StartPresign`                    | DONE   |
+| Bind key id, chain id, derivation path, policy domain, and message domain       | `presignContextHash`, `Presign` TLV                  | DONE   |
+| Move BIP32 path resolution into presign creation                                | `preparePresignContext`, `tryEmitRound3`             | DONE   |
+| Reject online signing under mismatched context, path, or derived key before use | `StartSign`                                          | DONE   |
+| Mark presign consumed before emitting online partial                            | `startSignDigestBound`                               | DONE   |
+| Avoid raw digest signing with persisted presigns                                | no public raw-digest signing helper; use `StartSign` | DONE   |
 
 ## Negative Tests
 

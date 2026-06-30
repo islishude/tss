@@ -230,7 +230,7 @@ type BroadcastCertificate struct {
 }
 ```
 
-CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates. All broadcast-mode policies in FROST and CGGMP21 policy sets now require `BroadcastConsistencyRequired`. In-memory test helpers relax this with `inProcessPolicies()` / `simulationCGGMP21Policies()`.
+CGGMP21 keygen round 1 (commitments, Paillier keys, proofs) and refresh/reshare round 1 commitments require broadcast consistency certificates. All broadcast-mode policies in FROST and CGGMP21 policy sets now require `BroadcastConsistencyRequired`. Tests that route messages in-process use package-local policy helpers to relax broadcast consistency.
 
 In single-process examples, broadcast consistency may be simulated in memory.
 Production transports must collect and persist acknowledgments or certificates

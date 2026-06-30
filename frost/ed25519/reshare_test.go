@@ -78,7 +78,7 @@ func TestReshareHDChainCodePreservedForNewRecipient(t *testing.T) {
 	}
 
 	message := []byte("HD reshare recipient signing")
-	pub, sig, err := SignWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{Context: testFROSTSigningContext(path)})
+	pub, sig, err := signFROSTSimulationWithOptions(message, []*KeyShare{newShares[2], newShares[4]}, SignOptions{Context: testFROSTSigningContext(path)})
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -221,7 +221,7 @@ func TestFROSTSignScenarios(t *testing.T) {
 			for _, id := range tc.signers {
 				selected = append(selected, shares[id])
 			}
-			pub, sig, err := Sign([]byte("hello frost"), selected, testFROSTSigningContext())
+			pub, sig, err := signFROSTSimulation([]byte("hello frost"), selected, testFROSTSigningContext())
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -835,7 +835,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		// All 4 new parties can sign.
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("add party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
+		pub, sig, err := signFROSTSimulation([]byte("add party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -872,7 +872,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		newShares := collectReshareShares(t, newParties, reshareSessions)
 		// Party 3 is removed from the new participant set.
 		_ = oldShares[3]
-		pub, sig, err := Sign([]byte("remove party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
+		pub, sig, err := signFROSTSimulation([]byte("remove party test"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -915,7 +915,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 		newShares := collectReshareShares(t, newParties, reshareSessions)
 
 		// 3-of-4: need 3 signers.
-		pub, sig, err := Sign([]byte("threshold increase"), []*KeyShare{newShares[1], newShares[2], newShares[4]}, testFROSTSigningContext())
+		pub, sig, err := signFROSTSimulation([]byte("threshold increase"), []*KeyShare{newShares[1], newShares[2], newShares[4]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -959,7 +959,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		deliverReshareMessages(t, tss.NewPartySet(1, 2, 3, 4), messages, reshareSessions)
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("replace party"), []*KeyShare{newShares[2], newShares[4]}, testFROSTSigningContext())
+		pub, sig, err := signFROSTSimulation([]byte("replace party"), []*KeyShare{newShares[2], newShares[4]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -996,7 +996,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 
 		deliverReshareMessages(t, newParties, messages, reshareSessions)
 		newShares := collectReshareShares(t, newParties, reshareSessions)
-		pub, sig, err := Sign([]byte("threshold decrease"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
+		pub, sig, err := signFROSTSimulation([]byte("threshold decrease"), []*KeyShare{newShares[1], newShares[2]}, testFROSTSigningContext())
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -1133,7 +1133,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 			for _, id := range parties[:tc.threshold] {
 				signers = append(signers, newShares[id])
 			}
-			pub, sig, err := Sign([]byte("refresh test"), signers, testFROSTSigningContext())
+			pub, sig, err := signFROSTSimulation([]byte("refresh test"), signers, testFROSTSigningContext())
 			if err != nil {
 				t.Fatal(err)
 			}
