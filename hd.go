@@ -306,7 +306,7 @@ func (r *DerivationResult) Validate() error {
 	if len(r.RequestedPath) != len(r.ResolvedPath) {
 		return errors.New("requested and resolved path depth mismatch")
 	}
-	if r.Depth != uint8(len(r.ResolvedPath)) {
+	if int(r.Depth) != len(r.ResolvedPath) {
 		return errors.New("derivation depth mismatch")
 	}
 	if len(r.AdditiveShift) != 0 && len(r.AdditiveShift) != 32 {

@@ -65,31 +65,13 @@ func presignContextHash(ctx tss.SigningContext) []byte {
 }
 
 func validateDerivationResult(result *tss.DerivationResult, scheme tss.DerivationScheme) error {
-	if result == nil {
-		return errors.New("nil derivation result")
+	if err := result.Validate(); err != nil {
+		return fmt.Errorf("invalid derivation result: %w", err)
 	}
 	if result.Scheme != scheme {
 		return fmt.Errorf("derivation scheme must be %q", scheme)
 	}
-	if len(result.ChildPublicKey) == 0 {
-		return errors.New("missing child public key")
-	}
-	if len(result.ChildChainCode) != 32 {
-		return errors.New("child chain code must be 32 bytes")
-	}
-	if err := result.RequestedPath.ValidateNonHardened(); err != nil {
-		return err
-	}
-	if err := result.ResolvedPath.ValidateNonHardened(); err != nil {
-		return err
-	}
-	if len(result.RequestedPath) != len(result.ResolvedPath) {
-		return errors.New("requested and resolved path depth mismatch")
-	}
-	if result.Depth != uint8(len(result.ResolvedPath)) {
-		return errors.New("derivation depth mismatch")
-	}
-	if len(result.AdditiveShift) != 32 {
+	if len(result.AdditiveShift) != secp.ScalarSize {
 		return errors.New("additive shift must be 32 bytes")
 	}
 	if _, err := secp.PointFromBytes(result.ChildPublicKey); err != nil {
