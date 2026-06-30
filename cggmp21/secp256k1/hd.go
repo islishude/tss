@@ -18,17 +18,7 @@ import (
 //
 // Only non-hardened indices (i < 2^31) are supported. If path is nil or empty,
 // the parent key is returned unchanged with a zero additive shift.
-//
-// Use DeriveNonHardenedBIP32Extended for the full DerivationResult including
-// resolved path, depth, fingerprint, and child number.
 func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
-	return bip32util.DeriveSecp256k1(publicKey, chainCode, path, opts...)
-}
-
-// DeriveNonHardenedBIP32Extended performs non-hardened BIP32 public derivation
-// and returns the full [DerivationResult] including resolved path, depth,
-// parent fingerprint, and child number.
-func DeriveNonHardenedBIP32Extended(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	return bip32util.DeriveSecp256k1(publicKey, chainCode, path, opts...)
 }
 
@@ -164,23 +154,4 @@ func (x ExtendedPublicKey) Derive(path tss.DerivationPath, opts ...tss.DeriveOpt
 		PublicKey:         result.ChildPublicKey,
 	}
 	return child, result.AdditiveShift, nil
-}
-
-// DerivePublicKey applies a secp256k1 additive scalar shift to publicKey.
-func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
-	base, err := secp.PointFromBytes(publicKey)
-	if err != nil {
-		return nil, err
-	}
-	if len(additiveShift) == 0 {
-		return secp.PointBytes(base)
-	}
-	shift, err := secp.ScalarFromBytesAllowZero(additiveShift)
-	if err != nil {
-		return nil, fmt.Errorf("invalid additive shift: %w", err)
-	}
-	if shift.IsZero() {
-		return secp.PointBytes(base)
-	}
-	return secp.PointBytes(secp.Add(base, secp.ScalarBaseMult(shift)))
 }

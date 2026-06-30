@@ -174,13 +174,13 @@ func TestExtendedPublicKeyDeriveScenarios(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		result, err := DeriveNonHardenedBIP32Extended(known.PublicKey, known.ChainCode[:], path)
+		result, err := DeriveNonHardenedBIP32(known.PublicKey, known.ChainCode[:], path)
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		if !bytes.Equal(childXPub.PublicKey, result.ChildPublicKey) {
-			t.Error("xpub Derive public key mismatch with DeriveNonHardenedBIP32Extended")
+			t.Error("xpub Derive public key mismatch with DeriveNonHardenedBIP32")
 		}
 		if !bytes.Equal(shift, result.AdditiveShift) {
 			t.Error("xpub Derive additive shift mismatch")

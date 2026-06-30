@@ -659,7 +659,7 @@ func VerifySignatureForContext(parentPublicKey []byte, chainCode []byte, ctx tss
 	if err := validatePresignContext(ctx); err != nil {
 		return false
 	}
-	derivation, err := DeriveNonHardenedBIP32Extended(parentPublicKey, chainCode, ctx.Derivation.Path, tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode))
+	derivation, err := DeriveNonHardenedBIP32(parentPublicKey, chainCode, ctx.Derivation.Path, tss.WithInvalidChildMode(ctx.Derivation.InvalidChildMode))
 	if err != nil {
 		return false
 	}

@@ -85,7 +85,7 @@ func (k *KeyShare) Derive(path tss.DerivationPath, opts ...tss.DeriveOption) (*t
 	if k == nil || k.state == nil {
 		return nil, errors.New("nil key share")
 	}
-	return DeriveNonHardenedBIP32Extended(k.state.PublicKey, k.state.ChainCode, path.Clone(), opts...)
+	return DeriveNonHardenedBIP32(k.state.PublicKey, k.state.ChainCode, path.Clone(), opts...)
 }
 
 // VerificationShare returns a caller-owned public verification share for party.

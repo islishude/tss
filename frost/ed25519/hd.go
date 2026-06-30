@@ -15,9 +15,3 @@ import (
 func DeriveNonHardenedBIP32(publicKey, chainCode []byte, path tss.DerivationPath, opts ...tss.DeriveOption) (*tss.DerivationResult, error) {
 	return bip32util.DeriveEd25519KhovratovichLaw(publicKey, chainCode, path, opts...)
 }
-
-// DerivePublicKey returns the child Ed25519 public key produced by adding
-// the additive scalar shift times the base point to publicKey.
-func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
-	return bip32util.DeriveEd25519PublicKey(publicKey, additiveShift)
-}

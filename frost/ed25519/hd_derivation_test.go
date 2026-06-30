@@ -3,75 +3,10 @@ package ed25519
 import (
 	"bytes"
 	"errors"
-	"math/big"
 	"testing"
 
-	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
-	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
-
-func TestDerivePublicKey(t *testing.T) {
-	t.Parallel()
-
-	shares := frostKeygen(t, 1, 1)
-	pub := shares[1].state.PublicKey.Bytes()
-
-	t.Run("nil shift returns original", func(t *testing.T) {
-		t.Parallel()
-
-		same, err := DerivePublicKey(pub, nil)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(same, pub) {
-			t.Fatal("DerivePublicKey with nil shift should return original key")
-		}
-	})
-
-	t.Run("zero shift returns original", func(t *testing.T) {
-		t.Parallel()
-
-		same, err := DerivePublicKey(pub, make([]byte, 32))
-		if err != nil {
-			t.Fatal(err)
-		}
-		if !bytes.Equal(same, pub) {
-			t.Fatal("DerivePublicKey with zero shift should return original key")
-		}
-	})
-
-	t.Run("non-zero shift derives valid child", func(t *testing.T) {
-		t.Parallel()
-
-		shift := make([]byte, 32)
-		shift[0] = 1
-		child, err := DerivePublicKey(pub, shift)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if bytes.Equal(child, pub) {
-			t.Fatal("DerivePublicKey with non-zero shift should produce different key")
-		}
-		if _, err := edcurve.PointFromBytes(child); err != nil {
-			t.Fatal(err)
-		}
-	})
-
-	t.Run("identity child is rejected", func(t *testing.T) {
-		t.Parallel()
-
-		parent := fed.NewIdentityPoint().ScalarBaseMult(edcurve.ScalarOne()).Bytes()
-		negativeOne := new(big.Int).Sub(edcurve.Order(), big.NewInt(1))
-		shift, err := scalarBytes(negativeOne)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if _, err := DerivePublicKey(parent, shift); err == nil {
-			t.Fatal("DerivePublicKey accepted identity child public key")
-		}
-	})
-}
 
 func TestDeriveNonHardenedBIP32MatchesPublicMetadata(t *testing.T) {
 	t.Parallel()

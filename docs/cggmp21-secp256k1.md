@@ -640,7 +640,7 @@ The Πlog\* proof (LogStarProof, discrete-log equality with Ring-Pedersen commit
 
 ## BIP32 HD Derivation
 
-HD derivation is implemented via `KeyShare.Derive(path)`, `DeriveNonHardenedBIP32`, and `DerivePublicKey`. Set `PresignContext`/`tss.SigningContext.Derivation.Path` before presign generation; the derived child key, resolved path, child chain code, and internal additive shift are stored in the presign and cannot be changed during online signing.
+HD derivation is implemented via `KeyShare.Derive(path)`, `DeriveNonHardenedBIP32`. Set `PresignContext`/`tss.SigningContext.Derivation.Path` before presign generation; the derived child key, resolved path, child chain code, and internal additive shift are stored in the presign and cannot be changed during online signing.
 
 ## Blame Evidence
 

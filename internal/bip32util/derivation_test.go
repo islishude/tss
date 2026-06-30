@@ -356,7 +356,15 @@ func assertSecpShiftDerivesChild(t testing.TB, parentPub []byte, got *tss.Deriva
 func assertEd25519ShiftDerivesChild(t testing.TB, parentPub []byte, got *tss.DerivationResult) {
 	t.Helper()
 
-	child, err := DeriveEd25519PublicKey(parentPub, got.AdditiveShift)
+	parentPoint, err := edcurve.PointFromBytes(parentPub)
+	if err != nil {
+		t.Fatal(err)
+	}
+	shift, err := edcurve.ScalarFromCanonical(got.AdditiveShift)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := deriveEd25519PublicKey(parentPoint, shift)
 	if err != nil {
 		t.Fatal(err)
 	}
