@@ -323,7 +323,7 @@ func (s *SignSession) Signature() ([]byte, bool) {
 	if !s.completed {
 		return nil, false
 	}
-	return append([]byte(nil), s.signature...), true
+	return bytes.Clone(s.signature), true
 }
 
 // VerifyKey returns the Ed25519 public key used for signature verification.

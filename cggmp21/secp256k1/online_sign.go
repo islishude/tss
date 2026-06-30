@@ -66,14 +66,6 @@ func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession
 	)
 }
 
-func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
-	var planHash []byte
-	if presign != nil && presign.state != nil {
-		planHash = presign.state.PlanHash
-	}
-	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, store, guard, DefaultSignAttemptStoreTimeout, limits)
-}
-
 func startSignDigestBoundWithTimeout(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash, planHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, storeTTL time.Duration, limits Limits) (*SignSession, []tss.Envelope, error) {
 	if ctx == nil {
 		return nil, nil, errors.New("nil context")
@@ -539,7 +531,12 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 
 // Signature returns the completed ECDSA signature.
 func (s *SignSession) Signature() (*Signature, bool) {
-	if s == nil || !s.completed {
+	if s == nil {
+		return nil, false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.completed {
 		return nil, false
 	}
 	return &Signature{
@@ -645,12 +642,12 @@ func VerifySignature(publicKey []byte, request SignRequest, sig *Signature) bool
 
 // VerificationKeyForContext derives the child verification key for ctx from key.
 func VerificationKeyForContext(key *KeyShare, ctx tss.SigningContext) ([]byte, error) {
-	normalized, _, derivation, err := preparePresignContext(key, ctx)
+	_, _, derivation, err := preparePresignContext(key, ctx)
 	if err != nil {
 		return nil, err
 	}
-	_ = normalized
-	return slices.Clone(derivation.ChildPublicKey), nil
+	// derivation is a deep copy value
+	return derivation.ChildPublicKey, nil
 }
 
 // VerifySignatureForContext verifies a context-bound canonical low-S signature

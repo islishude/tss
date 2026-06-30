@@ -712,3 +712,11 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
 	}
 	return proof
 }
+
+func startSignDigestBound(ctx context.Context, key *KeyShare, presign *Presign, sessionID tss.SessionID, digest32, contextHash []byte, store SignAttemptStore, guard *tss.EnvelopeGuard, limits Limits) (*SignSession, []tss.Envelope, error) {
+	var planHash []byte
+	if presign != nil && presign.state != nil {
+		planHash = presign.state.PlanHash
+	}
+	return startSignDigestBoundWithTimeout(ctx, key, presign, sessionID, digest32, contextHash, planHash, store, guard, DefaultSignAttemptStoreTimeout, limits)
+}
