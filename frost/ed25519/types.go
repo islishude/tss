@@ -1,13 +1,10 @@
 package ed25519
 
 import (
-	"errors"
-	"fmt"
 	"io"
 	"math/big"
 	"slices"
 
-	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 	"github.com/islishude/tss/internal/secret"
@@ -136,25 +133,4 @@ type SignOptions struct {
 
 	// Limits overrides the default protocol limits. When nil, DefaultLimits is used.
 	Limits *Limits
-}
-
-// DerivePublicKey returns the child Ed25519 public key produced by adding
-// the additive scalar shift times the base point to publicKey.
-func DerivePublicKey(publicKey, additiveShift []byte) ([]byte, error) {
-	base, err := edcurve.PointFromBytes(publicKey)
-	if err != nil {
-		return nil, err
-	}
-	if len(additiveShift) == 0 {
-		return base.Bytes(), nil
-	}
-	shift, err := edcurve.ScalarFromCanonical(additiveShift)
-	if err != nil {
-		return nil, fmt.Errorf("invalid additive shift: %w", err)
-	}
-	shifted := edcurve.AddPoints(base, fed.NewIdentityPoint().ScalarBaseMult(shift))
-	if edcurve.IsIdentity(shifted) {
-		return nil, errors.New("derived public key is identity")
-	}
-	return shifted.Bytes(), nil
 }

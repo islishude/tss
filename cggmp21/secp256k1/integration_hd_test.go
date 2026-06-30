@@ -7,8 +7,6 @@ import (
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/bip32util"
-	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -63,6 +61,34 @@ func TestThresholdECDSAHDAdditiveShift(t *testing.T) {
 	}
 }
 
+func TestThresholdECDSADeriveMatchesPublicMetadata(t *testing.T) {
+	t.Parallel()
+
+	shares := CachedKeygenShares(t, 1, 1)
+	share := shares[1]
+	metadata, ok := share.PublicMetadata()
+	if !ok {
+		t.Fatal("missing public metadata")
+	}
+	path := tss.DerivationPath{0, 11}
+
+	fromShare, err := share.Derive(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	fromMetadata, err := DeriveNonHardenedBIP32(metadata.PublicKey, metadata.ChainCode, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	if !bytes.Equal(fromShare.ChildPublicKey, fromMetadata.ChildPublicKey) {
+		t.Fatal("KeyShare.Derive child public key differs from public metadata derivation")
+	}
+	if fromShare.Scheme != tss.DerivationSchemeBIP32Secp256k1 {
+		t.Fatalf("scheme = %q, want %q", fromShare.Scheme, tss.DerivationSchemeBIP32Secp256k1)
+	}
+}
+
 func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	t.Parallel()
 
@@ -86,76 +112,6 @@ func TestThresholdECDSASignInteractiveReturnsDerivedPublicKey(t *testing.T) {
 	}
 	if !VerifySignature(pub, request, sig) {
 		t.Fatal("interactive signature did not verify with returned key")
-	}
-}
-
-func TestBIP32SingleLevel(t *testing.T) {
-	t.Parallel()
-
-	shares := CachedKeygenShares(t, 1, 1)
-	pubKey := mustKeySharePublicKey(t, shares[1])
-	chainCode := mustKeyShareChainCode(t, shares[1])
-
-	result, err := DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.ChildPublicKey) != secp.PubkeyLength {
-		t.Fatalf("child public key must be %d bytes", secp.PubkeyLength)
-	}
-	if len(result.AdditiveShift) != 32 {
-		t.Fatal("additive shift must be 32 bytes")
-	}
-	if len(result.ChildChainCode) != bip32util.ChainCodeSize {
-		t.Fatalf("child chain code must be %d bytes", bip32util.ChainCodeSize)
-	}
-	derived, err := DerivePublicKey(pubKey, result.AdditiveShift)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(derived, result.ChildPublicKey) {
-		t.Fatal("DeriveNonHardenedBIP32 and DerivePublicKey mismatch")
-	}
-}
-
-func TestBIP32MultiLevel(t *testing.T) {
-	t.Parallel()
-
-	shares := CachedKeygenShares(t, 1, 1)
-	pubKey := mustKeySharePublicKey(t, shares[1])
-	chainCode := mustKeyShareChainCode(t, shares[1])
-
-	result, err := DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0, 1, 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(result.ChildPublicKey) != secp.PubkeyLength {
-		t.Fatalf("child public key must be %d bytes", secp.PubkeyLength)
-	}
-	if len(result.AdditiveShift) != 32 {
-		t.Fatal("additive shift must be 32 bytes")
-	}
-	if len(result.ChildChainCode) != bip32util.ChainCodeSize {
-		t.Fatalf("child chain code must be %d bytes", bip32util.ChainCodeSize)
-	}
-	// Two-step cumulative should produce consistent chain code with direct.
-	_, err = DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0, 1})
-	if err != nil {
-		t.Fatal(err)
-	}
-	finalResult, err := DeriveNonHardenedBIP32(pubKey, chainCode, []uint32{0, 1, 2})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(result.ChildChainCode, finalResult.ChildChainCode) {
-		t.Fatal("multi-level chain code mismatch")
-	}
-	derived, err := DerivePublicKey(pubKey, result.AdditiveShift)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if !bytes.Equal(derived, result.ChildPublicKey) {
-		t.Fatal("DeriveNonHardenedBIP32 and DerivePublicKey mismatch for multi-level")
 	}
 }
 
@@ -221,19 +177,6 @@ func TestBIP32RejectsHardened(t *testing.T) {
 	_, err = DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), []uint32{0, tss.HardenedKeyStart + 1})
 	if err == nil {
 		t.Fatal("expected error for hardened index in path")
-	}
-}
-
-func TestBIP32RejectsEmptyChainCode(t *testing.T) {
-	t.Parallel()
-
-	shares := CachedKeygenShares(t, 1, 1)
-	if len(mustKeyShareChainCode(t, shares[1])) > 0 {
-		t.Skip("unexpected chain code with HD disabled")
-	}
-	_, err := DeriveNonHardenedBIP32(mustKeySharePublicKey(t, shares[1]), mustKeyShareChainCode(t, shares[1]), []uint32{0})
-	if err == nil {
-		t.Fatal("expected error for empty chain code")
 	}
 }
 

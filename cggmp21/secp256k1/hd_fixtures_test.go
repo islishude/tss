@@ -1,10 +1,8 @@
 package secp256k1
 
 import (
-	"bytes"
 	"testing"
 
-	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 )
 
@@ -31,29 +29,6 @@ func mustParseXPub(t testing.TB, raw string) *ExtendedPublicKey {
 		t.Fatalf("parse xpub: %v", err)
 	}
 	return xpub
-}
-
-func assertDerivationMatchesXPub(t testing.TB, got *tss.DerivationResult, want *ExtendedPublicKey) {
-	t.Helper()
-
-	if !bytes.Equal(got.ChildPublicKey, want.PublicKey) {
-		t.Errorf("public key mismatch:\n  got: %x\n want: %x", got.ChildPublicKey, want.PublicKey)
-	}
-	if !bytes.Equal(got.ChildChainCode, want.ChainCode[:]) {
-		t.Errorf("chain code mismatch:\n  got: %x\n want: %x", got.ChildChainCode, want.ChainCode[:])
-	}
-}
-
-func assertAdditiveShiftDerivesChild(t testing.TB, parent *ExtendedPublicKey, got *tss.DerivationResult) {
-	t.Helper()
-
-	derivedPub, err := DerivePublicKey(parent.PublicKey, got.AdditiveShift)
-	if err != nil {
-		t.Fatalf("DerivePublicKey with additive shift: %v", err)
-	}
-	if !bytes.Equal(derivedPub, got.ChildPublicKey) {
-		t.Error("additive shift does not produce child public key")
-	}
 }
 
 // fakeHMACForInvalidChild forces IL to be a specific value to trigger
