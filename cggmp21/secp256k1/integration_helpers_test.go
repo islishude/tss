@@ -16,7 +16,7 @@ func deliverPresignMessagesTo(t testing.TB, session *PresignSession, receiver ts
 		if env.From == receiver || (env.To != 0 && env.To != receiver) {
 			continue
 		}
-		next, err := session.HandlePresignMessage(testutil.DeliverEnvelope(env))
+		next, err := session.Handle(testutil.DeliverEnvelope(env))
 		if err != nil {
 			t.Fatal(err)
 		}

@@ -727,10 +727,10 @@ func (s *PresignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.signers, s.key.state.Party)
 }
 
-// HandlePresignMessage validates and applies one presign envelope.
+// Handle validates and applies one presign envelope.
 // It dispatches to per-round transitions that decode, validate, verify,
 // prepare, commit, and only then return effects.
-func (s *PresignSession) HandlePresignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil presign session")

@@ -81,7 +81,7 @@ func TestCGGMP21PresignRound2MalformedRejectDoesNotMutate(t *testing.T) {
 	}
 
 	before := snapshotCGGMPPresignSession(s1)
-	out, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
+	out, err := s1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPPresignSession(s1)
 	if err == nil {
 		t.Fatal("expected malformed round2 payload to be rejected")
@@ -159,7 +159,7 @@ func TestCGGMP21PresignRound3MalformedRejectDoesNotMutate(t *testing.T) {
 	}
 
 	before := snapshotCGGMPPresignSession(s1)
-	out, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
+	out, err := s1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPPresignSession(s1)
 	if err == nil {
 		t.Fatal("expected malformed round3 payload to be rejected")

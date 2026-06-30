@@ -38,7 +38,7 @@ func TestFROSTKeygenRejectNoMutationInvariant(t *testing.T) {
 	bad.Payload = []byte("malformed keygen commitments")
 
 	before := snapshotFROSTKeygenSession(kg1)
-	out, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(bad))
+	out, err := kg1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTKeygenSession(kg1)
 
 	if err == nil {
@@ -72,7 +72,7 @@ func TestFROSTSignRejectNoMutationInvariant(t *testing.T) {
 	bad.Payload = []byte("malformed nonce commitment")
 
 	before := snapshotFROSTSignSession(sign1)
-	out, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(bad))
+	out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTSignSession(sign1)
 
 	if err == nil {
@@ -115,7 +115,7 @@ func TestFROSTReshareRejectNoMutationInvariant(t *testing.T) {
 	bad.Payload = []byte("malformed reshare commitments")
 
 	before := snapshotFROSTReshareSession(refresh1)
-	out, err := refresh1.HandleReshareMessage(testutil.DeliverEnvelope(bad))
+	out, err := refresh1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTReshareSession(refresh1)
 
 	if err == nil {

@@ -83,7 +83,7 @@ type frostRefreshSession struct {
 
 // Handle applies one inbound FROST refresh envelope.
 func (s frostRefreshSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
-	return s.session.HandleReshareMessage(in)
+	return s.session.Handle(in)
 }
 
 // KeyShare returns the refreshed FROST key share after completion.

@@ -16,7 +16,7 @@ func TestCGGMP21KeygenMalformedCommitmentRejectDoesNotMutate(t *testing.T) {
 	bad.Payload = []byte("malformed keygen commitment")
 
 	before := snapshotCGGMPKeygenSession(session1)
-	out, err := session1.HandleKeygenMessage(testutil.DeliverEnvelope(bad))
+	out, err := session1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPKeygenSession(session1)
 	if err == nil {
 		t.Fatal("expected malformed keygen commitment to be rejected")

@@ -243,7 +243,8 @@ and `ResumeSign`.
 Public metadata includes a fresh keygen session ID, parties, threshold, and any
 application key identifier. Each party reconstructs `ed25519.NewKeygenPlan`,
 records the plan digest, builds a guard for `tss.ProtocolFROSTEd25519`, calls
-`ed25519.StartKeygen`, and routes `HandleKeygenMessage` output.
+`ed25519.StartKeygen`, dispatches inbound envelopes to the session's `Handle`
+method, and routes any returned envelopes.
 
 `KeygenSession.KeyShare()` becomes available only after the confirmation round.
 Persist the encrypted local key share before marking the party complete.
@@ -253,8 +254,8 @@ Persist the encrypted local key share before marking the party complete.
 Public metadata includes a fresh signing session ID, key ID or key generation
 ID, signer set, message, and any signing context or derivation request. Each
 signer reconstructs `ed25519.NewSignPlan`, calls `ed25519.StartSign`, routes
-`HandleSignMessage` output, and verifies the final signature before exposing
-the result.
+inbound envelopes through the session's `Handle` method, and verifies the final
+signature before exposing the result.
 
 HD derivation is local/public context resolution, not an interactive run. The
 signing run must still bind the resolved derivation context.
@@ -264,7 +265,7 @@ signing run must still bind the resolved derivation context.
 Public metadata includes a fresh refresh session ID and the current key
 generation ID. Each party loads the current key share, reconstructs
 `ed25519.NewRefreshPlan`, calls `ed25519.StartRefresh`, and routes
-`HandleReshareMessage` output.
+inbound envelopes through the session's `Handle` method.
 
 Refresh preserves party set, threshold, group public key, and chain code. Treat
 the refreshed key share as staged output and install it with compare-and-swap
@@ -275,8 +276,8 @@ against the expected current generation.
 Public metadata includes a fresh reshare session ID, old key generation ID, old
 dealer set, new recipient set, and new threshold. Old parties call
 `ed25519.StartReshare`; new-only recipients call
-`ed25519.StartReshareRecipient`. All parties route `HandleReshareMessage`
-output.
+`ed25519.StartReshareRecipient`. All parties dispatch inbound envelopes to the
+session's `Handle` method and route any returned envelopes.
 
 The control plane owns the cutover. It must not retire the old generation until
 the required new-generation commit condition is satisfied.
@@ -287,7 +288,7 @@ Public metadata includes a fresh keygen session ID, parties, threshold, and any
 explicit security parameters. Each party reconstructs
 `secp256k1.NewKeygenPlan`, records the plan digest, builds a guard for
 `tss.ProtocolCGGMP21Secp256k1`, calls `secp256k1.StartKeygen`, and routes
-`HandleKeygenMessage` output.
+inbound envelopes through the session's `Handle` method.
 
 `KeygenSession.KeyShare()` becomes available only after confirmation. Persist
 the encrypted local key share before marking it usable.
@@ -298,7 +299,7 @@ Public metadata includes a fresh presign session ID, key ID or key generation
 ID, signer set, and `secp256k1.PresignContext`. Each signer loads its local key
 share, validates membership and threshold policy, reconstructs
 `secp256k1.NewPresignPlan`, calls `secp256k1.StartPresign`, and routes
-`HandlePresignMessage` output.
+inbound envelopes through the session's `Handle` method.
 
 A completed presign is a per-party local one-use record. Persist the encrypted
 `Presign` before exposing it to inventory. There is no shared presign object
@@ -315,8 +316,8 @@ to the online signing attempt, not to the earlier presign run.
 Each signer loads the local key share and local presign, verifies the presign is
 not consumed locally, calls `VerifyCryptographicMaterialWithLimits` after
 decoding, reconstructs `secp256k1.NewSignPlan`, calls `secp256k1.StartSign`, and
-routes `HandleSignMessage` output. `StartSign` and `ResumeSign` repeat the strong
-verification before durable attempt operations.
+routes inbound envelopes through the session's `Handle` method. `StartSign` and
+`ResumeSign` repeat the strong verification before durable attempt operations.
 
 `StartSign` must commit through `SignAttemptStore` before releasing outbound
 envelopes. An unknown commit outcome consumes the presign operationally. Recover
@@ -328,7 +329,7 @@ different digest.
 Public metadata includes a fresh refresh session ID and current key generation
 ID. Each party loads the current key share, reconstructs
 `secp256k1.NewRefreshPlan`, calls `secp256k1.StartRefresh`, and routes
-`HandleRefreshMessage` output.
+inbound envelopes through the session's `Handle` method.
 
 The refreshed key share is staged output. Install it only with compare-and-swap
 against the expected current key generation.

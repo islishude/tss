@@ -40,7 +40,7 @@ func TestFROSTSignCommitmentPlanHashRejectDoesNotMutate(t *testing.T) {
 	}
 
 	before := snapshotFROSTSignSession(sign1)
-	out, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(bad))
+	out, err := sign1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTSignSession(sign1)
 
 	if err == nil {
@@ -137,7 +137,7 @@ func TestFROSTSignMalformedPartialRejectDoesNotMutate(t *testing.T) {
 	partialFrom2.Payload = []byte("malformed partial")
 
 	before := snapshotFROSTSignSession(sessions[1])
-	out, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(partialFrom2))
+	out, err := sessions[1].Handle(testutil.DeliverEnvelope(partialFrom2))
 	after := snapshotFROSTSignSession(sessions[1])
 	if err == nil {
 		t.Fatal("expected malformed partial to be rejected")

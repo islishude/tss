@@ -84,7 +84,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, r
 			if err != nil {
 				return nil, nil, err
 			}
-			out, err := presignSessions[id].HandlePresignMessage(inbound)
+			out, err := presignSessions[id].Handle(inbound)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -148,7 +148,7 @@ func signWithDigest(input []byte, signers []*KeyShare, ctx tss.SigningContext, r
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, err := signSessions[id].HandleSignMessage(inbound); err != nil {
+			if _, err := signSessions[id].Handle(inbound); err != nil {
 				return nil, nil, err
 			}
 		}

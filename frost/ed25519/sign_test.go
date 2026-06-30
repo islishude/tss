@@ -93,7 +93,7 @@ func TestSignClearsNonceAfterPartial(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	round2, err := session.HandleSignMessage(testutil.DeliverEnvelope(out2[0]))
+	round2, err := session.Handle(testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -160,7 +160,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 			if env.From == receiver {
 				continue
 			}
-			out, err := sessions[receiver].HandleSignMessage(testutil.DeliverEnvelope(env))
+			out, err := sessions[receiver].Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver commitment from %d to %d: %v", env.From, receiver, err)
 			}
@@ -171,11 +171,11 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("expected two remote partials, got %d", len(round2))
 	}
 
-	if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[2])); err != nil {
+	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[2])); err != nil {
 		t.Fatal(err)
 	}
 	for _, env := range round2 {
-		if _, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := sessions[1].Handle(testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatalf("early partial from %d returned fatal error: %v", env.From, err)
 		}
 	}
@@ -183,7 +183,7 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 		t.Fatalf("signature completed before all commitments arrived: %x", sig)
 	}
 
-	out, err := sessions[1].HandleSignMessage(testutil.DeliverEnvelope(round1[3]))
+	out, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[3]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -231,10 +231,10 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := session1.HandleSignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	partials2, err := session2.HandleSignMessage(testutil.DeliverEnvelope(out1[0]))
+	partials2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -259,7 +259,7 @@ func TestSignBlameEvidenceBindsBadPartialPayload(t *testing.T) {
 	badPartial := partials2[0]
 	badPartial.Payload = badPayload
 
-	_, err = session1.HandleSignMessage(testutil.DeliverEnvelope(badPartial))
+	_, err = session1.Handle(testutil.DeliverEnvelope(badPartial))
 	protocolErr := assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if protocolErr.Blame == nil || len(protocolErr.Blame.Evidence) == 0 {
 		t.Fatal("invalid partial did not carry blame evidence")

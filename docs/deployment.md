@@ -68,7 +68,7 @@ guard, err := (tss.GuardConfig{
 }).BuildGuard()
 session, envelopes, err := secp256k1.StartKeygen(plan, local, guard)
 // Route envelopes to other parties via authenticated transport. Keep routing
-// any envelopes returned by HandleKeygenMessage; keygen emits a confirmation
+// any envelopes returned by session.Handle; keygen emits a confirmation
 // round before KeyShare() becomes available.
 ```
 

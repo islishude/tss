@@ -31,7 +31,7 @@ func TestPresignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadPresignRound1,
 		Payload:     []byte{},
 	}
-	_, err = s.HandlePresignMessage(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -53,7 +53,7 @@ func TestSignSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadSignPartial,
 		Payload:     []byte{},
 	}
-	_, err = s.HandleSignMessage(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil session rejection")
 	}
@@ -75,7 +75,7 @@ func TestKeygenSessionRejectsNil(t *testing.T) {
 		PayloadType: payloadKeygenCommitments,
 		Payload:     []byte{},
 	}
-	_, err = s.HandleKeygenMessage(testutil.DeliverEnvelope(env))
+	_, err = s.Handle(testutil.DeliverEnvelope(env))
 	if err == nil {
 		t.Fatal("expected nil keygen session rejection")
 	}

@@ -7,7 +7,7 @@ manager.
 
 ## Session Surface
 
-Protocol sessions implement:
+Every interactive protocol session exposes the same inbound handler surface:
 
 ```go
 type ProtocolSession interface {
@@ -17,9 +17,17 @@ type ProtocolSession interface {
 }
 ```
 
-The existing protocol-specific methods such as `HandleKeygenMessage`,
-`HandlePresignMessage`, and `HandleSignMessage` remain available. `Handle` is a
-uniform alias for dispatchers.
+`Handle` is the protocol state-machine entrypoint for already opened inbound
+envelopes. It does not decode transport bytes and it does not bypass
+`EnvelopeGuard`: callers must first create a `tss.InboundEnvelope` with
+`tss.OpenEnvelope`, using transport-authenticated `tss.ReceiveInfo`, then route
+that inbound envelope to the locally registered session.
+
+`Completed` is a terminal-state hint for dispatchers and registries. Completed
+or retired sessions should be removed from the active registry so stale
+envelopes fail closed through the unknown-session policy. `Destroy` releases
+session-owned secret material; caller-owned key shares and presigns retain their
+own lifecycle rules.
 
 ## Run Store
 
@@ -47,9 +55,19 @@ production store must be durable and recoverable.
 protocol + session_id + local_party
 ```
 
-`Dispatcher.Dispatch` routes opened inbound envelopes to the registered
-`ProtocolSession` and sends returned outbox envelopes through a caller-provided
-`Transport`.
+`Dispatcher.Dispatch` accepts an already opened `tss.InboundEnvelope`, looks up
+the active session, calls `ProtocolSession.Handle`, and sends returned outbox
+envelopes through a caller-provided `Transport`.
+
+The receive path is:
+
+```text
+raw bytes + transport facts
+  -> tss.OpenEnvelope
+  -> tssrun.Dispatcher.Dispatch
+  -> ProtocolSession.Handle
+  -> Transport.SendAll
+```
 
 The default unknown-session behavior is fail-closed rejection. If a deployment
 buffers unknown sessions, buffered messages must be replayed only after a run is

@@ -168,7 +168,7 @@ func TestSlowCrypto_Refresh2of3(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleReshareMessage(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}

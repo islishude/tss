@@ -500,10 +500,10 @@ func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.presign.state.Signers, s.key.state.Party)
 }
 
-// HandleSignMessage validates and applies one online signing envelope.
+// Handle validates and applies one online signing envelope.
 //
 // Follows the handler template (see doc.go).
-func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")

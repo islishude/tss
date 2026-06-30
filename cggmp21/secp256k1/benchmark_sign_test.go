@@ -40,7 +40,7 @@ func BenchmarkCGGMP21OnlineSign2of3(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				if _, err := signSessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
+				if _, err := signSessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
 					b.Fatal(err)
 				}
 			}
@@ -76,7 +76,7 @@ func BenchmarkCGGMP21OnlineSign3of5(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				if _, err := signSessions[id].HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
+				if _, err := signSessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
 					b.Fatal(err)
 				}
 			}

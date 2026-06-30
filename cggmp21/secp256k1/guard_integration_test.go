@@ -64,7 +64,7 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	}
 	// Deliberately omit BroadcastCertificate even though policy requires it.
 
-	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
+	_, err = session.Handle(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrMissingBroadcastCertificate) {
 		t.Fatalf("expected ErrMissingBroadcastCertificate, got %v", err)
 	}
@@ -97,7 +97,7 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	}
 	// Confidential is deliberately left false.
 
-	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
+	_, err = session.Handle(testutil.DeliverEnvelopeWithProtection(shareEnv, tss.ChannelPlaintext))
 	if !errors.Is(err, tss.ErrMissingConfidentiality) {
 		t.Fatalf("expected ErrMissingConfidentiality or rejection, got %v", err)
 	}
@@ -195,10 +195,10 @@ func TestCGGMP21KeygenRejectsReplay(t *testing.T) {
 	}
 
 	// First delivery: may fail (invalid payload) but should NOT fail with ErrDuplicateMessage.
-	_, _ = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
+	_, _ = session.Handle(testutil.DeliverEnvelope(commitEnv))
 
 	// Second delivery: must fail with ErrDuplicateMessage if it passed the guard the first time.
-	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(commitEnv))
+	_, err = session.Handle(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrDuplicateMessage) {
 		// If it wasn't ErrDuplicateMessage, ensure it's some other valid error (not nil).
 		if err == nil {
@@ -234,7 +234,7 @@ func TestCGGMP21KeygenRejectsUnknownPayloadPolicy(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.HandleKeygenMessage(testutil.DeliverEnvelope(env))
+	_, err = session.Handle(testutil.DeliverEnvelope(env))
 	if !errors.Is(err, tss.ErrUnknownPayloadPolicy) {
 		t.Fatalf("expected ErrUnknownPayloadPolicy, got %v", err)
 	}

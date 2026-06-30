@@ -119,7 +119,7 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 			if tc.protect != tss.ChannelProtectionUnknown {
 				in = testutil.DeliverEnvelopeWithProtection(mutated, tc.protect)
 			}
-			_, err := kg1.HandleKeygenMessage(in)
+			_, err := kg1.Handle(in)
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -150,8 +150,8 @@ func TestFROSTKeygenEnvelopeFailClosed(t *testing.T) {
 
 		dup := commit
 
-		_, _ = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
-		_, err = sess2.HandleKeygenMessage(testutil.DeliverEnvelope(dup))
+		_, _ = sess2.Handle(testutil.DeliverEnvelope(dup))
+		_, err = sess2.Handle(testutil.DeliverEnvelope(dup))
 		if !errors.Is(err, tss.ErrDuplicateMessage) {
 			t.Fatalf("expected ErrDuplicateMessage on second delivery, got %v", err)
 		}
@@ -258,7 +258,7 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 			mutated := tc.mutate(tc.env)
 
-			_, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(mutated))
+			_, err := sign1.Handle(testutil.DeliverEnvelope(mutated))
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -284,8 +284,8 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 		dup := commit2
 
-		_, _ = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
-		_, err = sess2.HandleSignMessage(testutil.DeliverEnvelope(dup))
+		_, _ = sess2.Handle(testutil.DeliverEnvelope(dup))
+		_, err = sess2.Handle(testutil.DeliverEnvelope(dup))
 		if !errors.Is(err, tss.ErrDuplicateMessage) {
 			t.Fatalf("expected ErrDuplicateMessage on second delivery, got %v", err)
 		}
@@ -312,14 +312,14 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 
 		// Deliver party 2's commitment to party 1 → party 1 emits its partial.
 		cb := out2[0]
-		_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(cb))
+		_, err = sess1.Handle(testutil.DeliverEnvelope(cb))
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Deliver party 1's commitment to party 2 → party 2 emits its partial.
 		ca := out1[0]
-		party2Partials, err := sess2.HandleSignMessage(testutil.DeliverEnvelope(ca))
+		party2Partials, err := sess2.Handle(testutil.DeliverEnvelope(ca))
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -329,13 +329,13 @@ func TestFROSTSignEnvelopeFailClosed(t *testing.T) {
 		party2Partial := party2Partials[0]
 
 		// First delivery of party 2's partial to party 1 triggers aggregation → session completes.
-		_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(party2Partial))
+		_, err = sess1.Handle(testutil.DeliverEnvelope(party2Partial))
 		if err != nil {
 			t.Fatal(err)
 		}
 
 		// Second delivery of any valid message to a completed session is rejected.
-		_, err = sess1.HandleSignMessage(testutil.DeliverEnvelope(party2Partial))
+		_, err = sess1.Handle(testutil.DeliverEnvelope(party2Partial))
 		_ = assertFROSTProtocolCode(t, err, tss.ErrCodeCompleted)
 	})
 }
@@ -419,7 +419,7 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 
 			mutated := tc.mutate(tc.base)
 
-			_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelope(mutated))
+			_, err := reshare1.Handle(testutil.DeliverEnvelope(mutated))
 			if err == nil {
 				t.Fatal("expected error, got nil")
 			}
@@ -440,7 +440,7 @@ func TestFROSTReshareEnvelopeFailClosed(t *testing.T) {
 
 		mutated := share
 
-		_, err := reshare1.HandleReshareMessage(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
+		_, err := reshare1.Handle(testutil.DeliverEnvelopeWithProtection(mutated, tss.ChannelPlaintext))
 		if !errors.Is(err, tss.ErrMissingConfidentiality) {
 			t.Fatalf("expected ErrMissingConfidentiality, got %v", err)
 		}

@@ -236,8 +236,8 @@ func (s *RefreshSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
-// HandleRefreshMessage validates and applies one refresh envelope.
-func (s *RefreshSession) HandleRefreshMessage(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+// Handle validates and applies one refresh envelope.
+func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	env := in.Envelope()
 	if s == nil {
 		return nil, errors.New("nil refresh session")

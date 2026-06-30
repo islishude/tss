@@ -11,7 +11,7 @@ import (
 )
 
 func (s *ReshareSession) handleReshareConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
-	// validateInbound was already called by HandleReshareMessage.
+	// validateInbound was already called by Handle.
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("reshare confirmation in wrong round"))
 	}

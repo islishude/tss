@@ -142,7 +142,7 @@ func TestFROSTSessionDestroyClearsLocalSecrets(t *testing.T) {
 		t.Fatal(err)
 	}
 	env := out2[0]
-	if _, err := sign.HandleSignMessage(testutil.DeliverEnvelope(env)); err != nil {
+	if _, err := sign.Handle(testutil.DeliverEnvelope(env)); err != nil {
 		t.Fatal(err)
 	}
 	if sign.dNonce != nil || sign.eNonce != nil {

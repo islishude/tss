@@ -562,7 +562,7 @@ func deliverKeygenMessagesE(sessions map[tss.PartyID]*KeygenSession, parties tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				return fmt.Errorf("deliver %s from %d to %d: %w", env.PayloadType, env.From, id, err)
 			}

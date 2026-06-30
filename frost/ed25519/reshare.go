@@ -344,8 +344,8 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	return prepared.session, prepared.out, nil
 }
 
-// HandleReshareMessage validates and applies one reshare envelope.
-func (s *ReshareSession) HandleReshareMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+// Handle validates and applies one reshare envelope.
+func (s *ReshareSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil reshare session")

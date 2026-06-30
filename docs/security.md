@@ -71,9 +71,9 @@ wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
 set `ReceiveInfo.Peer`; `OpenEnvelope` and the guard both check that this peer
 matches `Envelope.From`.
 
-Callers using `tssrun.Dispatcher` can standardize this sequence with
-`tssrun.DispatchInbound`, which opens raw bytes through a `tssrun.Receiver`
-before routing to the registered protocol session.
+Callers using `tssrun.Dispatcher` still open raw transport bytes with
+`tss.OpenEnvelope` first, then pass the resulting `tss.InboundEnvelope` to
+`Dispatcher.Dispatch` for registry lookup and `ProtocolSession.Handle` routing.
 
 The envelope digest is computed from the protocol, semantic
 `tss.ProtocolVersion`, session, round, sender, recipient, payload type, and
@@ -289,7 +289,7 @@ Applications must keep delivering keygen envelopes until the protocol-specific
 completion accessor returns a share:
 
 ```go
-out, err := kg.HandleKeygenMessage(env)
+out, err := kg.Handle(env)
 share, ok := kg.KeyShare() // FROST; CGGMP21 also exposes Complete()
 ```
 

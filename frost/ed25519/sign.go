@@ -279,8 +279,8 @@ func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.key.state.Parties, s.key.state.Party)
 }
 
-// HandleSignMessage validates and applies one FROST signing envelope.
-func (s *SignSession) HandleSignMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+// Handle validates and applies one FROST signing envelope.
+func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil sign session")
@@ -492,7 +492,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			if err != nil {
 				return nil, nil, err
 			}
-			out, err := sessions[id].HandleSignMessage(inbound)
+			out, err := sessions[id].Handle(inbound)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -508,7 +508,7 @@ func SignWithOptions(message []byte, signers []*KeyShare, opts SignOptions) ([]b
 			if err != nil {
 				return nil, nil, err
 			}
-			if _, err := sessions[id].HandleSignMessage(inbound); err != nil {
+			if _, err := sessions[id].Handle(inbound); err != nil {
 				return nil, nil, err
 			}
 		}

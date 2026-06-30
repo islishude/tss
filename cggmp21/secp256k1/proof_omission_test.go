@@ -55,7 +55,7 @@ func TestKeygenRejectsMissingModulusProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted modulus proof")
 	}
 }
@@ -99,7 +99,7 @@ func TestKeygenRejectsMissingRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Ring-Pedersen proof")
 	}
 }
@@ -193,7 +193,7 @@ func TestKeygenRejectsInvalidModulusProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid modulus proof")
 	}
 }
@@ -228,7 +228,7 @@ func TestKeygenRejectsInvalidRingPedersenProof(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with invalid Ring-Pedersen proof")
 	}
 }
@@ -370,7 +370,7 @@ func TestKeyShareValidateRejectsMissingRingPedersenProof(t *testing.T) {
 // TestKeygenRejectsCorruptedPaillierPublicKey verifies that a keygen
 // commitments message with a structurally invalid Paillier public key
 // is rejected. The pai.UnmarshalPublicKey call inside marshalKeygenCommitmentsPayload
-// catches this before the message is even sent, and HandleKeygenMessage
+// catches this before the message is even sent, and Handle
 // also validates it on receipt.
 func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 	t.Parallel()
@@ -392,7 +392,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 
 	// The Paillier public key is validated at multiple levels:
 	// 1. marshalKeygenCommitmentsPayload calls pai.UnmarshalPublicKey
-	// 2. HandleKeygenMessage calls pai.UnmarshalPublicKey again
+	// 2. Handle calls pai.UnmarshalPublicKey again
 	// A structurally invalid key (not valid TLV) is caught at level 1 (send-side)
 	// or level 2 (receive-side). We verify the receive-side here.
 	payload, err := unmarshalKeygenCommitmentsPayload(out2[0].Payload)
@@ -413,7 +413,7 @@ func TestKeygenRejectsCorruptedPaillierPublicKey(t *testing.T) {
 		t.Fatal(err)
 	}
 	out2[0].Payload = mutated
-	if _, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(out2[0])); err == nil {
+	if _, err := kg1.Handle(testutil.DeliverEnvelope(out2[0])); err == nil {
 		t.Fatal("keygen accepted commitments message with corrupted Paillier public key")
 	}
 }

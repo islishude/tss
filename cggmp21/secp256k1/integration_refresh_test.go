@@ -35,7 +35,7 @@ func runRefresh(t *testing.T, shares map[tss.PartyID]*KeyShare, parties tss.Part
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleRefreshMessage(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -70,7 +70,7 @@ func TestThresholdECDSAProactiveRefresh1of1(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, env := range out {
-		if _, err := session.HandleRefreshMessage(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := session.Handle(testutil.DeliverEnvelope(env)); err != nil {
 			if !strings.Contains(err.Error(), "already completed") {
 				t.Fatal(err)
 			}
@@ -122,7 +122,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalRefreshSharePayload(out2[1].Payload)
@@ -145,7 +145,7 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[1]))
+	_, err = session.Handle(testutil.DeliverEnvelope(out2[1]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -197,7 +197,7 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.HandleRefreshMessage(testutil.DeliverEnvelope(out2[0]))
+	_, err = session.Handle(testutil.DeliverEnvelope(out2[0]))
 	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
 		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)
 	}

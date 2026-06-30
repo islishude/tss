@@ -97,7 +97,7 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	partialOut, err := sign1.HandleSignMessage(testutil.DeliverEnvelope(signOut2[0]))
+	partialOut, err := sign1.Handle(testutil.DeliverEnvelope(signOut2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}

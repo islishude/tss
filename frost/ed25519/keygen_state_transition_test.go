@@ -44,7 +44,7 @@ func TestFROSTKeygenInvalidChainCodeCommitRejectDoesNotMutate(t *testing.T) {
 	}
 
 	before := snapshotFROSTKeygenSession(session)
-	out, err := session.HandleKeygenMessage(testutil.DeliverEnvelope(bad))
+	out, err := session.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotFROSTKeygenSession(session)
 	if err == nil {
 		t.Fatal("expected invalid chain-code commitment to be rejected")

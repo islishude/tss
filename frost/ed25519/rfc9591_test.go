@@ -184,18 +184,18 @@ func TestRFC9591Ed25519SigningVector(t *testing.T) {
 	assertCommitmentEnvelope(t, out1[0], v.p1HidingCommitment, v.p1BindingCommitment)
 	assertCommitmentEnvelope(t, out3[0], v.p3HidingCommitment, v.p3BindingCommitment)
 
-	p1Partial, err := s1.HandleSignMessage(testutil.DeliverEnvelope(out3[0]))
+	p1Partial, err := s1.Handle(testutil.DeliverEnvelope(out3[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	p3Partial, err := s3.HandleSignMessage(testutil.DeliverEnvelope(out1[0]))
+	p3Partial, err := s3.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	assertPartialEnvelope(t, p1Partial[0], v.p1SignatureShare)
 	assertPartialEnvelope(t, p3Partial[0], v.p3SignatureShare)
 
-	if _, err := s1.HandleSignMessage(testutil.DeliverEnvelope(p3Partial[0])); err != nil {
+	if _, err := s1.Handle(testutil.DeliverEnvelope(p3Partial[0])); err != nil {
 		t.Fatal(err)
 	}
 	sig, ok := s1.Signature()

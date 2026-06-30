@@ -226,7 +226,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			out, err := sessions[id].HandleKeygenMessage(testutil.DeliverEnvelope(env))
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -248,7 +248,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if fromParty2.PayloadType == "" {
 		t.Fatal("missing confirmation from party 2")
 	}
-	if _, err := sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(fromParty2)); err != nil {
+	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(fromParty2)); err != nil {
 		t.Fatal(err)
 	}
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
@@ -266,7 +266,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = sessions[1].HandleKeygenMessage(testutil.DeliverEnvelope(conflicting))
+	_, err = sessions[1].Handle(testutil.DeliverEnvelope(conflicting))
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeVerification)
 	if share, ok := sessions[1].KeyShare(); ok || share != nil {
 		t.Fatal("aborted session returned a key share")

@@ -101,7 +101,7 @@ func TestThresholdECDSATamperedOnlinePartialFails(t *testing.T) {
 			continue
 		}
 		delivered = true
-		if _, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(messages[0])); err == nil {
+		if _, err := sessions[id].Handle(testutil.DeliverEnvelope(messages[0])); err == nil {
 			t.Fatal("expected tampered partial rejection")
 		} else {
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[id], signers, presigns[id]))

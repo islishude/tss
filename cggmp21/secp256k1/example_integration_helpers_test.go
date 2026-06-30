@@ -318,7 +318,7 @@ func runExampleCGGMPKeygen(option cggmp.KeygenPlanOption) (map[tss.PartyID]*cggm
 	if err := security.route(queue, parties, func(tss.Envelope) tss.PartySet {
 		return parties
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].HandleKeygenMessage(env)
+		return sessions[id].Handle(env)
 	}); err != nil {
 		return nil, err
 	}
@@ -405,7 +405,7 @@ func runExampleCGGMPPresign(
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].HandlePresignMessage(env)
+		return sessions[id].Handle(env)
 	}); err != nil {
 		return nil, err
 	}
@@ -514,7 +514,7 @@ func runExampleCGGMPSign(
 	if err := security.route(queue, signerSet, func(tss.Envelope) tss.PartySet {
 		return signerSet
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
-		return sessions[id].HandleSignMessage(env)
+		return sessions[id].Handle(env)
 	}); err != nil {
 		return nil, nil, err
 	}

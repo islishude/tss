@@ -165,9 +165,9 @@ commitments with different challenges via distinct domain labels.
 
 **Covered by**: `proof_omission_test.go` (Tier 2, `integration`)
 
-- Corrupted Πmod → keygen HandleKeygenMessage returns error
-- Corrupted Πprm → keygen HandleKeygenMessage returns error
-- Corrupted PaillierPublicKey → keygen HandleKeygenMessage returns error
+- Corrupted Πmod → keygen Handle returns error
+- Corrupted Πprm → keygen Handle returns error
+- Corrupted PaillierPublicKey → keygen Handle returns error
 - bit-flipped Πmod/Πprm → rejected at protocol level
 - Missing LogStarProof → KeyShare.MarshalBinary returns error
 - Tampered LogStarProof → KeyShare.MarshalBinary returns error

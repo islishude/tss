@@ -37,7 +37,7 @@ func TestCGGMP21KeygenRejectNoMutationInvariant(t *testing.T) {
 	bad.Round = 2
 
 	before := snapshotCGGMPKeygenSession(kg1)
-	out, err := kg1.HandleKeygenMessage(testutil.DeliverEnvelope(bad))
+	out, err := kg1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPKeygenSession(kg1)
 
 	if err == nil {
@@ -68,7 +68,7 @@ func TestCGGMP21PresignRejectNoMutationInvariant(t *testing.T) {
 	bad.Round = 2
 
 	before := snapshotCGGMPPresignSession(s1)
-	out, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(bad))
+	out, err := s1.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPPresignSession(s1)
 
 	if err == nil {
@@ -107,7 +107,7 @@ func TestCGGMP21SignRejectNoMutationInvariant(t *testing.T) {
 	}
 
 	before := snapshotCGGMPSignSession(s)
-	out, err := s.HandleSignMessage(testutil.DeliverEnvelope(bad))
+	out, err := s.Handle(testutil.DeliverEnvelope(bad))
 	after := snapshotCGGMPSignSession(s)
 
 	if err == nil {

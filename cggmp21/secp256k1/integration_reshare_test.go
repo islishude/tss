@@ -33,17 +33,17 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	dealer2Out, err := session2.HandleReshareMessage(testutil.DeliverEnvelope(out1[0]))
+	dealer2Out, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(dealer2Out) < 2 {
 		t.Fatalf("dealer 2 emitted %d messages, want commitment and share", len(dealer2Out))
 	}
-	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(dealer2Out[0])); err != nil {
+	if _, err := session.Handle(testutil.DeliverEnvelope(dealer2Out[0])); err != nil {
 		t.Fatal(err)
 	}
 	payload, err := unmarshalReshareSharePayload(dealer2Out[1].Payload)
@@ -67,7 +67,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(dealer2Out[1]))
+	_, err = session.Handle(testutil.DeliverEnvelope(dealer2Out[1]))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -92,7 +92,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	dealer2Out, err := session2.HandleReshareMessage(testutil.DeliverEnvelope(out1[0]))
+	dealer2Out, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,16 +113,16 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if commitment.Payload == nil || share.Payload == nil {
 		t.Fatal("missing dealer 2 commitment or share")
 	}
-	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(share)); err != nil {
+	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err != nil {
 		t.Fatalf("share before commitments should be buffered: %v", err)
 	}
 	if pendingDealerCount(session1) != 1 {
 		t.Fatalf("got %d pending shares, want 1", pendingDealerCount(session1))
 	}
-	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session1.HandleReshareMessage(testutil.DeliverEnvelope(commitment)); err != nil {
+	if _, err := session1.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
 		t.Fatal(err)
 	}
 	if pendingDealerCount(session1) != 0 {
@@ -199,7 +199,7 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 				skipped = append(skipped, skippedConfirmation{to: id, env: env})
 				continue
 			}
-			out, err := session.HandleReshareMessage(testutil.DeliverEnvelope(env))
+			out, err := session.Handle(testutil.DeliverEnvelope(env))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
@@ -215,7 +215,7 @@ func TestThresholdECDSAReshareOldOnlyDealersWaitForConfirmations(t *testing.T) {
 		}
 	}
 	for _, item := range skipped {
-		if _, err := sessions[item.to].HandleReshareMessage(testutil.DeliverEnvelope(item.env)); err != nil {
+		if _, err := sessions[item.to].Handle(testutil.DeliverEnvelope(item.env)); err != nil {
 			t.Fatalf("deliver skipped confirmation from %d to %d: %v", item.env.From, item.to, err)
 		}
 	}

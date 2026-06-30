@@ -169,7 +169,7 @@ func TestFROSTReshareDealerOnlyRejectsInboundShareWithoutMutation(t *testing.T) 
 	share.To = 1
 
 	before := snapshotFROSTReshareSession(dealerOnly)
-	out, err := dealerOnly.HandleReshareMessage(testutil.DeliverEnvelope(share))
+	out, err := dealerOnly.Handle(testutil.DeliverEnvelope(share))
 	after := snapshotFROSTReshareSession(dealerOnly)
 	if err == nil {
 		t.Fatal("expected dealer-only session to reject inbound share")
@@ -221,7 +221,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	share.From = 99
 
 	before := snapshotFROSTReshareSession(recipient)
-	out, err := recipient.HandleReshareMessage(testutil.DeliverEnvelope(share))
+	out, err := recipient.Handle(testutil.DeliverEnvelope(share))
 	after := snapshotFROSTReshareSession(recipient)
 	if err == nil {
 		t.Fatal("expected share from non-dealer to be rejected")
@@ -264,7 +264,7 @@ func TestFROSTReshareDealerOnlyCompletionNeedsOnlyCommitments(t *testing.T) {
 	}
 	for _, id := range tss.NewPartySet(2, 3) {
 		env := mustFROSTEnvelope(t, outputs[id], payloadReshareCommitments, tss.BroadcastPartyId)
-		if _, err := dealerOnly.HandleReshareMessage(testutil.DeliverEnvelope(env)); err != nil {
+		if _, err := dealerOnly.Handle(testutil.DeliverEnvelope(env)); err != nil {
 			t.Fatal(err)
 		}
 	}

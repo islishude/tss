@@ -41,7 +41,8 @@ Public run metadata includes a fresh keygen session ID, parties, threshold, and
 any application key identifier. Each party validates the metadata, reconstructs
 `NewKeygenPlan`, records the plan digest acceptance, builds an `EnvelopeGuard`
 for `tss.ProtocolFROSTEd25519` and the same session ID, calls `StartKeygen`
-locally, and routes `KeygenSession.HandleKeygenMessage` output.
+locally, dispatches inbound envelopes to `KeygenSession.Handle`, and routes any
+returned envelopes.
 
 The keygen session ID is stored in `KeyShare` metadata after completion.
 `KeygenSession.KeyShare()` becomes available only after the confirmation round.
@@ -53,8 +54,8 @@ key usable.
 Public run metadata includes a fresh signing session ID, key ID or key
 generation ID, signer set, message, and any signing context or derivation
 request. Each signer reconstructs `NewSignPlan`, calls `StartSign`, routes
-nonce commitments and partial signatures through `SignSession.HandleSignMessage`,
-and verifies the final signature before exposing the result.
+nonce commitments and partial signatures through `SignSession.Handle`, and
+verifies the final signature before exposing the result.
 
 HD derivation is local/public context resolution, not an interactive run. The
 signing run must bind the resolved derivation context.
@@ -64,7 +65,7 @@ signing run must bind the resolved derivation context.
 Public run metadata includes a fresh refresh session ID, current key generation
 ID, and the current public key metadata. Each party reconstructs
 `NewRefreshPlan` from its current local `KeyShare`, calls `StartRefresh`, routes
-`ReshareSession.HandleReshareMessage`, and obtains the staged output through
+`ReshareSession.Handle`, and obtains the staged output through
 `ReshareSession.KeyShare()`.
 
 Refresh preserves party set, threshold, group public key, and chain code.
@@ -77,7 +78,7 @@ Public run metadata includes a fresh reshare session ID, old key generation ID,
 old parties, new parties, and new threshold. Old parties act as dealers and call
 `StartReshare`. New-only recipients call `StartReshareRecipient`. New-only
 recipients need public reshare metadata out of band before starting the
-recipient flow. All roles route `ReshareSession.HandleReshareMessage`.
+recipient flow. All roles route `ReshareSession.Handle`.
 
 The control plane owns old/new generation cutover and must not retire the old
 generation until the required new-generation commit condition is satisfied.
@@ -639,7 +640,7 @@ option := KeygenPlanOption{
 }
 plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
-out, err := kg.HandleKeygenMessage(env)
+out, err := kg.Handle(env)
 share, ok := kg.KeyShare()
 metadata, ok := share.PublicMetadata()
 publicKey := metadata.PublicKey.Bytes()
@@ -658,7 +659,7 @@ runtime := SignRuntime{
     Guard: guard,
 }
 sess, out, err := StartSign(share, plan, runtime)
-out, err := sess.HandleSignMessage(env)
+out, err := sess.Handle(env)
 sig, ok := sess.Signature()
 ```
 
@@ -677,7 +678,7 @@ recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
 recipient, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: self}, guard)
 refreshPlan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldShare, SessionID: sessionID})
 refresh, out, err := StartRefresh(oldShare, refreshPlan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-out, err := sess.HandleReshareMessage(env)
+out, err := sess.Handle(env)
 newShare, ok := sess.KeyShare()
 ```
 

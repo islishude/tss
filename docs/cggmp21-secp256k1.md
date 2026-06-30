@@ -57,7 +57,7 @@ Each party validates the metadata, reconstructs `NewKeygenPlan`, records the
 plan digest acceptance, builds an `EnvelopeGuard` for
 `tss.ProtocolCGGMP21Secp256k1` and the same session ID, calls `StartKeygen`
 locally, and routes outbox envelopes. Inbound envelopes are dispatched to
-`KeygenSession.HandleKeygenMessage`.
+`KeygenSession.Handle`.
 
 `KeygenSession.KeyShare()` returns a key share only after the confirmation round
 completes. The local `KeyShare` must be encrypted and durably persisted before
@@ -75,7 +75,7 @@ Public run metadata:
 Each signer loads its local `KeyShare`, validates that it owns a share for the
 requested generation, validates signer-set threshold and membership,
 reconstructs `NewPresignPlan`, calls `StartPresign` locally, and routes
-`PresignSession.HandlePresignMessage` output.
+inbound envelopes through `PresignSession.Handle`.
 
 `PresignSession.Presign()` returns the completed local record. Persist the
 encrypted `Presign` before exposing it to inventory. A completed presign is a
@@ -95,7 +95,7 @@ Public run metadata:
 
 Each signer loads the local `KeyShare` and local `Presign`, verifies the presign
 is not consumed locally, reconstructs `NewSignPlan`, calls `StartSign`, and
-routes `SignSession.HandleSignMessage` output.
+routes inbound envelopes through `SignSession.Handle`.
 
 The signing session ID identifies the online signing attempt, not the earlier
 presign run. `StartSign` must commit through `SignAttemptStore` before releasing
@@ -117,7 +117,7 @@ Public run metadata:
 
 Each party reconstructs `NewRefreshPlan` from its current local `KeyShare` and
 the shared session ID, calls `StartRefresh`, routes
-`RefreshSession.HandleRefreshMessage`, and obtains the staged output through
+`RefreshSession.Handle`, and obtains the staged output through
 `RefreshSession.KeyShare()`.
 
 Install the refreshed share only with compare-and-swap against the expected
@@ -137,7 +137,7 @@ Public run metadata:
 
 Old-only parties call `StartReshareDealer`. New-only parties call
 `StartReshareReceiver`. Overlap parties call `StartReshareOverlap`. All roles
-route `ReshareSession.HandleReshareMessage`.
+route `ReshareSession.Handle`.
 
 New receiver parties persist the new `KeyShare` returned by
 `ReshareSession.Result()`. Old-only parties do not install a new share. The
@@ -938,7 +938,7 @@ option := KeygenPlanOption{
 }
 plan, err := NewKeygenPlan(option)
 kg, out, err := StartKeygen(plan, tss.LocalConfig{Self: self, Rand: rng}, guard)
-out, err := kg.HandleKeygenMessage(env)
+out, err := kg.Handle(env)
 share, ok := kg.Complete()
 ```
 
@@ -964,7 +964,7 @@ plan, err := NewPresignPlan(PresignPlanOption{
     Key: share, SessionID: sessionID, Signers: signers, Context: ctx,
 })
 ps, out, err := StartPresign(share, plan, tss.LocalConfig{Self: share.PartyID(), Rand: rng}, guard)
-out, err := ps.HandlePresignMessage(env)
+out, err := ps.Handle(env)
 presign, ok := ps.Presign()
 // presign ownership has moved from the session to the caller; persist it immediately.
 metadata, ok := presign.PublicMetadata()
@@ -988,7 +988,7 @@ runtime := SignRuntime{
     AttemptStore: store,
 }
 ss, out, err := StartSign(share, plan, runtime)
-out, err := ss.HandleSignMessage(env)
+out, err := ss.Handle(env)
 sig, ok := ss.Signature()
 ok := VerifySignature(publicKey, request, sig)
 ```
@@ -998,7 +998,7 @@ ok := VerifySignature(publicKey, request, sig)
 ```go
 plan, err := NewRefreshPlan(RefreshPlanOption{OldKey: oldShare, SessionID: sessionID})
 rs, out, err := StartRefresh(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-out, err := rs.HandleRefreshMessage(env)
+out, err := rs.Handle(env)
 newShare, ok := rs.KeyShare()
 ```
 
@@ -1014,7 +1014,7 @@ plan, err = UnmarshalResharePlan(rawPlan)
 dealer, out, err := StartReshareDealer(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 receiver, out, err := StartReshareReceiver(plan, tss.LocalConfig{Self: localParty, Rand: rng}, guard)
 overlap, out, err := StartReshareOverlap(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
-out, err := overlap.HandleReshareMessage(env)
+out, err := overlap.Handle(env)
 newShare, err := receiver.Result()
 ```
 

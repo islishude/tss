@@ -93,7 +93,7 @@ type cggmpRefreshSession struct {
 
 // Handle applies one inbound CGGMP21 refresh envelope.
 func (s cggmpRefreshSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
-	return s.session.HandleRefreshMessage(in)
+	return s.session.Handle(in)
 }
 
 // KeyShare returns the refreshed CGGMP21 key share after completion.

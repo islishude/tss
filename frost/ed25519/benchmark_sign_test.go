@@ -38,7 +38,7 @@ func BenchmarkFROSTSign2of3(b *testing.B) {
 				if id == env.From {
 					continue
 				}
-				_, err := sessions[id].HandleSignMessage(testutil.DeliverEnvelope(env))
+				_, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
 				if err != nil {
 					b.Fatal(err)
 				}

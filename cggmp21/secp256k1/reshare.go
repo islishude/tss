@@ -309,8 +309,8 @@ func (s *ReshareSession) receiverConfig() tss.ThresholdConfig {
 	return config
 }
 
-// HandleReshareMessage validates and applies one reshare envelope.
-func (s *ReshareSession) HandleReshareMessage(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
+// Handle validates and applies one reshare envelope.
+func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	env := in.Envelope()
 	if s == nil {
 		return nil, errors.New("nil reshare session")

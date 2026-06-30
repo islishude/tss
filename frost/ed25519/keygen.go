@@ -73,8 +73,8 @@ func (s *KeygenSession) validateInbound(env tss.InboundEnvelope) error {
 	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, s.cfg.Parties, s.cfg.Self)
 }
 
-// HandleKeygenMessage validates and applies one DKG envelope.
-func (s *KeygenSession) HandleKeygenMessage(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
+// Handle validates and applies one DKG envelope.
+func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err error) {
 	base := env.Envelope()
 	if s == nil {
 		return nil, errors.New("nil keygen session")

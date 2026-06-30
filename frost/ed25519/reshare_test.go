@@ -276,7 +276,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := session.HandleReshareMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
 
@@ -303,7 +303,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 	bad := out2[1]
 	bad.Payload = badPayload
 
-	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(bad))
+	_, err = session.Handle(testutil.DeliverEnvelope(bad))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeVerification)
 	if !session.aborted {
 		t.Fatal("verification error did not abort reshare session")
@@ -312,7 +312,7 @@ func TestReshareVerificationErrorAbortsSession(t *testing.T) {
 		t.Fatal("aborted reshare session retained share references")
 	}
 
-	_, err = session.HandleReshareMessage(testutil.DeliverEnvelope(out2[1]))
+	_, err = session.Handle(testutil.DeliverEnvelope(out2[1]))
 	_ = assertFROSTProtocolCode(t, err, tss.ErrCodeAborted)
 }
 

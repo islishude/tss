@@ -171,7 +171,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, parties, km)
-			out, err := kgSessions[id].HandleKeygenMessage(delivered)
+			out, err := kgSessions[id].Handle(delivered)
 			if err != nil {
 				t.Fatalf("keygen delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -220,7 +220,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, signers, km)
-			out, err := psSessions[id].HandlePresignMessage(delivered)
+			out, err := psSessions[id].Handle(delivered)
 			if err != nil {
 				t.Fatalf("presign delivery from %d to %d (type=%s): %v", env.From, id, env.PayloadType, err)
 			}
@@ -270,7 +270,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 				continue
 			}
 			delivered := deliverWithCertificate(t, env, id, signers, km)
-			_, err := signSessions[id].HandleSignMessage(delivered)
+			_, err := signSessions[id].Handle(delivered)
 			if err != nil {
 				t.Fatalf("sign delivery from %d to %d: %v", env.From, id, err)
 			}
@@ -337,7 +337,7 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, err = session.HandleKeygenMessage(in)
+	_, err = session.Handle(in)
 	if !errors.Is(err, tss.ErrInvalidBroadcastCertificate) {
 		t.Fatalf("expected ErrInvalidBroadcastCertificate for mismatched cert, got %v", err)
 	}

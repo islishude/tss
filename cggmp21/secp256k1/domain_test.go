@@ -134,16 +134,16 @@ func TestCGGMP21MTADomainsBindPresignContext(t *testing.T) {
 		t.Fatal("MtA start proof verified under mutated presign context")
 	}
 
-	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[0])); err != nil {
+	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s1.HandlePresignMessage(testutil.DeliverEnvelope(out2[1])); err != nil {
+	if _, err := s1.Handle(testutil.DeliverEnvelope(out2[1])); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[0])); err != nil {
+	if _, err := s2.Handle(testutil.DeliverEnvelope(out1[0])); err != nil {
 		t.Fatal(err)
 	}
-	round2, err := s2.HandlePresignMessage(testutil.DeliverEnvelope(out1[1]))
+	round2, err := s2.Handle(testutil.DeliverEnvelope(out1[1]))
 	if err != nil {
 		t.Fatal(err)
 	}
