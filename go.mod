@@ -5,7 +5,7 @@ go 1.26.3
 require (
 	filippo.io/bigmod v0.1.0
 	filippo.io/edwards25519 v1.2.0
-	golang.org/x/crypto v0.52.0
+	golang.org/x/crypto v0.53.0
 )
 
-require golang.org/x/sys v0.45.0 // indirect
+require golang.org/x/sys v0.46.0 // indirect
