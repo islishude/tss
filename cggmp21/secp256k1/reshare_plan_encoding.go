@@ -90,12 +90,10 @@ func (p *ResharePlan) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, er
 	if err != nil {
 		return nil, err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimitsForMarshal(config.limits.fieldLimits()))
-	}
 	if err := p.ValidateWithLimits(config.limits); err != nil {
 		return nil, err
 	}
+	opts = append(opts, wire.WithFieldLimitsForMarshal(config.limits.fieldLimits()))
 	return wire.Marshal(p.state, opts...)
 }
 
@@ -109,9 +107,7 @@ func (p *ResharePlan) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOpti
 	if err != nil {
 		return err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimits(config.limits.fieldLimits()))
-	}
+	opts = append(opts, wire.WithFieldLimits(config.limits.fieldLimits()))
 	var state resharePlanState
 	if err := wire.Unmarshal(in, &state, opts...); err != nil {
 		return err

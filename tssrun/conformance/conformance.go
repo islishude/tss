@@ -69,11 +69,52 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.MarkStarted(ctx, run.RunID, 1); err != nil {
 		t.Fatalf("MarkStarted: %v", err)
 	}
+	if err := store.AcceptPlan(ctx, run.RunID, 2, digest); err != nil {
+		t.Fatalf("AcceptPlan second party: %v", err)
+	}
+	if err := store.MarkStarted(ctx, run.RunID, 2); err != nil {
+		t.Fatalf("MarkStarted second party: %v", err)
+	}
 	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{OutputDigest: []byte("out")}); err != nil {
 		t.Fatalf("MarkCompleted: %v", err)
 	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
+		t.Fatalf("lookup after one local completion: %v", err)
+	}
+	if err := store.MarkStarted(ctx, run.RunID, 1); !errors.Is(err, tssrun.ErrRunCompleted) {
+		t.Fatalf("completed party restart: got %v, want ErrRunCompleted", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 2, tssrun.LocalRunResult{OutputDigest: []byte("out-2")}); err != nil {
+		t.Fatalf("MarkCompleted second party: %v", err)
+	}
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, tssrun.ErrRunCompleted) {
 		t.Fatalf("completed lookup: got %v, want ErrRunCompleted", err)
+	}
+	if err := store.AcceptPlan(ctx, run.RunID, 3, digest); !errors.Is(err, tssrun.ErrRunCompleted) {
+		t.Fatalf("late completed-run accept: got %v, want ErrRunCompleted", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, tssrun.ErrRunCompleted) {
+		t.Fatalf("late completed-run lookup: got %v, want ErrRunCompleted", err)
+	}
+
+	aborted := testRunIntent(t, "run-aborted")
+	if err := store.CreateRun(ctx, aborted); err != nil {
+		t.Fatalf("CreateRun aborted: %v", err)
+	}
+	if err := store.AcceptPlan(ctx, aborted.RunID, 1, digest); err != nil {
+		t.Fatalf("AcceptPlan aborted: %v", err)
+	}
+	if err := store.AbortRun(ctx, aborted.RunID, 1, "operator abort"); err != nil {
+		t.Fatalf("AbortRun aborted: %v", err)
+	}
+	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("aborted lookup: got %v, want ErrRunAborted", err)
+	}
+	if err := store.AcceptPlan(ctx, aborted.RunID, 2, digest); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("late aborted-run accept: got %v, want ErrRunAborted", err)
+	}
+	if _, err := store.LookupBySession(ctx, aborted.Protocol, aborted.SessionID); !errors.Is(err, tssrun.ErrRunAborted) {
+		t.Fatalf("late aborted-run lookup: got %v, want ErrRunAborted", err)
 	}
 }
 

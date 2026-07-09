@@ -42,7 +42,10 @@ context digest.
 - Each party accepts one plan digest per run.
 - Re-accepting the same digest is idempotent.
 - Accepting a different digest fails with `ErrPlanDigestConflict`.
-- Completed and aborted sessions are not returned by `LookupBySession`.
+- One local party completing or aborting does not retire another accepted local
+  party for the same run.
+- Runs with no accepted local party still active are not returned by
+  `LookupBySession`, and new parties cannot accept that terminal run later.
 
 `MemoryRunStore` is a reference implementation for tests and examples only. A
 production store must be durable and recoverable.

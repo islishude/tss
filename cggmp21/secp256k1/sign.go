@@ -776,13 +776,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		defer tx.cleanupOnReject()
-		effects, err := tx.apply(s)
-		if err != nil {
-			return nil, err
-		}
-		tx.markCommitted()
-		return effects.envelopes, nil
+		return applyPresignTransition(s, tx)
 
 	case payloadPresignRound1Proof:
 		if base.Round != presignStartRound {
@@ -798,13 +792,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		defer tx.cleanupOnReject()
-		effects, err := tx.apply(s)
-		if err != nil {
-			return nil, err
-		}
-		tx.markCommitted()
-		return effects.envelopes, nil
+		return applyPresignTransition(s, tx)
 
 	case payloadPresignRound2:
 		if base.Round != presignRound2 {
@@ -817,13 +805,7 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		defer tx.cleanupOnReject()
-		effects, err := tx.apply(s)
-		if err != nil {
-			return nil, err
-		}
-		tx.markCommitted()
-		return effects.envelopes, nil
+		return applyPresignTransition(s, tx)
 
 	case payloadPresignRound3:
 		if base.Round != presignRound3 {
@@ -836,17 +818,21 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 		if err != nil {
 			return nil, err
 		}
-		defer tx.cleanupOnReject()
-		effects, err := tx.apply(s)
-		if err != nil {
-			return nil, err
-		}
-		tx.markCommitted()
-		return effects.envelopes, nil
+		return applyPresignTransition(s, tx)
 
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
+}
+
+func applyPresignTransition(s *PresignSession, tx sessionTransition[PresignSession]) ([]tss.Envelope, error) {
+	defer tx.cleanupOnReject()
+	effects, err := tx.apply(s)
+	if err != nil {
+		return nil, err
+	}
+	tx.markCommitted()
+	return effects.envelopes, nil
 }
 
 // Presign returns the completed local presign record and transfers ownership to

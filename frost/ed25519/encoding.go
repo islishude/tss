@@ -98,12 +98,10 @@ func (k *KeyShare) MarshalWireMessage(opts ...wire.MarshalOption) ([]byte, error
 	if err != nil {
 		return nil, err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
-	}
 	if err := k.ValidateWithLimits(limits); err != nil {
 		return nil, err
 	}
+	opts = append(opts, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 	return wire.Marshal(k.state, opts...)
 }
 
@@ -117,9 +115,7 @@ func (k *KeyShare) UnmarshalWireMessage(in []byte, opts ...wire.UnmarshalOption)
 	if err != nil {
 		return err
 	}
-	if resolved.FieldLimits == nil {
-		opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
-	}
+	opts = append(opts, wire.WithFieldLimits(limits.fieldLimits()))
 	var state keyShareState
 	if err := wire.Unmarshal(in, &state, opts...); err != nil {
 		(&KeyShare{state: &state}).Destroy()

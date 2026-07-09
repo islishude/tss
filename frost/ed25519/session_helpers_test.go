@@ -1,31 +1,6 @@
 package ed25519
 
-import (
-	"reflect"
-	"testing"
-)
-
-func TestSessionCleanupStackLIFOAndDisarm(t *testing.T) {
-	t.Parallel()
-
-	var calls []int
-	cleanup := newCleanupStack()
-	cleanup.add(func() { calls = append(calls, 1) })
-	cleanup.add(func() { calls = append(calls, 2) })
-	cleanup.run()
-	cleanup.run()
-	if want := []int{2, 1}; !reflect.DeepEqual(calls, want) {
-		t.Fatalf("cleanup calls = %v, want %v", calls, want)
-	}
-
-	disarmed := newCleanupStack()
-	disarmed.add(func() { calls = append(calls, 3) })
-	disarmed.disarm()
-	disarmed.run()
-	if want := []int{2, 1}; !reflect.DeepEqual(calls, want) {
-		t.Fatalf("disarmed cleanup calls = %v, want %v", calls, want)
-	}
-}
+import "testing"
 
 func TestSessionTransitionShape(t *testing.T) {
 	t.Parallel()

@@ -7,6 +7,8 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/sessiontx"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -58,17 +60,15 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err := s.validateDealerCommitments(s.selfID, commitments); err != nil {
 		return nil, err
 	}
-	dd := s.dealerData[s.selfID]
-	if dd == nil {
-		dd = &reshareDealerPartyData{}
-		s.dealerData[s.selfID] = dd
-	}
-	dd.commitments = commitments
+	cleanup := sessiontx.NewCleanupStack()
+	defer cleanup.Run()
+	var selfShare *secret.Scalar
 	if s.isReceiver {
-		dd.share, err = secpSecretScalarFromScalar(shamir.Eval(poly, s.selfID))
+		selfShare, err = secpSecretScalarFromScalar(shamir.Eval(poly, s.selfID))
 		if err != nil {
 			return nil, err
 		}
+		cleanup.Add(selfShare.Destroy)
 	}
 	payload, err := (reshareDealerCommitmentsPayload{
 		Commitments: commitments,
@@ -109,6 +109,22 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		}
 		out = append(out, shareEnv)
 	}
+	dd := s.dealerData[s.selfID]
+	if dd == nil {
+		dd = &reshareDealerPartyData{}
+		s.dealerData[s.selfID] = dd
+	}
+	if dd.commitments != nil {
+		return nil, errors.New("duplicate local reshare dealer commitments")
+	}
+	if selfShare != nil && dd.share != nil {
+		return nil, errors.New("duplicate local reshare share")
+	}
+	dd.commitments = tss.CloneByteSlices(commitments)
+	if selfShare != nil {
+		dd.share = selfShare
+	}
+	cleanup.Disarm()
 	return out, nil
 }
 

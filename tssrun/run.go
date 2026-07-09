@@ -99,13 +99,12 @@ type RunStore interface {
 }
 
 type runRecord struct {
-	intent      RunIntent
-	status      RunStatus
-	accepted    map[tss.PartyID][]byte
-	started     map[tss.PartyID]bool
-	completed   map[tss.PartyID]LocalRunResult
-	aborted     map[tss.PartyID]string
-	acceptedAny bool
+	intent    RunIntent
+	status    RunStatus
+	accepted  map[tss.PartyID][]byte
+	started   map[tss.PartyID]bool
+	completed map[tss.PartyID]LocalRunResult
+	aborted   map[tss.PartyID]string
 }
 
 // MemoryRunStore is a mutex-protected reference RunStore for tests and examples.
@@ -172,10 +171,11 @@ func (s *MemoryRunStore) AcceptPlan(ctx context.Context, runID string, self tss.
 	if !ok {
 		return ErrRunNotFound
 	}
-	if _, ok := rec.aborted[self]; ok || rec.status == RunAborted {
+	rec.refreshStatus()
+	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
 	}
-	if _, ok := rec.completed[self]; ok || rec.status == RunCompleted {
+	if _, ok := rec.completed[self]; ok {
 		return ErrRunCompleted
 	}
 	if old, ok := rec.accepted[self]; ok {
@@ -184,11 +184,14 @@ func (s *MemoryRunStore) AcceptPlan(ctx context.Context, runID string, self tss.
 		}
 		return ErrPlanDigestConflict
 	}
-	rec.accepted[self] = bytes.Clone(digest)
-	rec.acceptedAny = true
-	if rec.status == RunProposed {
-		rec.status = RunAccepted
+	switch rec.status {
+	case RunAborted:
+		return ErrRunAborted
+	case RunCompleted:
+		return ErrRunCompleted
 	}
+	rec.accepted[self] = bytes.Clone(digest)
+	rec.refreshStatus()
 	return nil
 }
 
@@ -204,6 +207,7 @@ func (s *MemoryRunStore) LookupBySession(ctx context.Context, protocol tss.Proto
 		return RunIntent{}, ErrRunNotFound
 	}
 	rec := s.byRunID[runID]
+	rec.refreshStatus()
 	switch rec.status {
 	case RunAccepted, RunStarted:
 		return rec.intent.Clone(), nil
@@ -227,17 +231,17 @@ func (s *MemoryRunStore) MarkStarted(ctx context.Context, runID string, self tss
 	if !ok {
 		return ErrRunNotFound
 	}
-	if rec.status == RunAborted {
+	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
 	}
-	if rec.status == RunCompleted {
+	if _, ok := rec.completed[self]; ok {
 		return ErrRunCompleted
 	}
 	if _, ok := rec.accepted[self]; !ok {
 		return ErrRunNotAccepted
 	}
 	rec.started[self] = true
-	rec.status = RunStarted
+	rec.refreshStatus()
 	return nil
 }
 
@@ -252,14 +256,14 @@ func (s *MemoryRunStore) MarkCompleted(ctx context.Context, runID string, self t
 	if !ok {
 		return ErrRunNotFound
 	}
-	if rec.status == RunAborted {
+	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
 	}
 	if _, ok := rec.started[self]; !ok {
 		return ErrRunNotAccepted
 	}
 	rec.completed[self] = result.Clone()
-	rec.status = RunCompleted
+	rec.refreshStatus()
 	return nil
 }
 
@@ -274,12 +278,44 @@ func (s *MemoryRunStore) AbortRun(ctx context.Context, runID string, self tss.Pa
 	if !ok {
 		return ErrRunNotFound
 	}
-	if rec.status == RunCompleted {
+	if _, ok := rec.completed[self]; ok {
 		return ErrRunCompleted
 	}
 	rec.aborted[self] = reason
-	rec.status = RunAborted
+	rec.refreshStatus()
 	return nil
+}
+
+func (r *runRecord) refreshStatus() {
+	if r == nil {
+		return
+	}
+	activeAccepted := false
+	activeStarted := false
+	for party := range r.accepted {
+		if _, ok := r.completed[party]; ok {
+			continue
+		}
+		if _, ok := r.aborted[party]; ok {
+			continue
+		}
+		activeAccepted = true
+		if r.started[party] {
+			activeStarted = true
+		}
+	}
+	switch {
+	case activeStarted:
+		r.status = RunStarted
+	case activeAccepted:
+		r.status = RunAccepted
+	case len(r.completed) > 0:
+		r.status = RunCompleted
+	case len(r.aborted) > 0:
+		r.status = RunAborted
+	default:
+		r.status = RunProposed
+	}
 }
 
 // AcceptPlanDigest records local plan acceptance through the RunStore.

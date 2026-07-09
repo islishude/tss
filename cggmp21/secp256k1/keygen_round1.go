@@ -10,6 +10,7 @@ import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/sessiontx"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -107,9 +108,9 @@ func generateKeygenLocalMaterial(
 	if err != nil {
 		return nil, err
 	}
-	cleanup := newCleanupStack()
-	defer cleanup.run()
-	cleanup.add(paillierKey.Destroy)
+	cleanup := sessiontx.NewCleanupStack()
+	defer cleanup.Run()
+	cleanup.Add(paillierKey.Destroy)
 	modDomain, err := keygenModulusDomain(config, config.Self, paillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, err
@@ -175,7 +176,7 @@ func generateKeygenLocalMaterial(
 		},
 		polynomial: poly,
 	}
-	cleanup.disarm()
+	cleanup.Disarm()
 	return material, nil
 }
 

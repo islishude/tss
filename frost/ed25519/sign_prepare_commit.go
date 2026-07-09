@@ -6,6 +6,7 @@ import (
 	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
+	"github.com/islishude/tss/internal/sessiontx"
 )
 
 type preparedSignPartial struct {
@@ -33,8 +34,8 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	if s.dNonce == nil || s.eNonce == nil {
 		return nil, false, errors.New("signing nonce is unavailable")
 	}
-	cleanup := newCleanupStack()
-	defer cleanup.run()
+	cleanup := sessiontx.NewCleanupStack()
+	defer cleanup.Run()
 
 	R, rhos, err := s.groupCommitment()
 	if err != nil {
@@ -69,7 +70,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	defer lambdaC.Set(fed.NewScalar())
 	rho := rhos[s.key.state.Party]
 	z := fed.NewScalar().Multiply(rho, e)
-	cleanup.add(func() { z.Set(fed.NewScalar()) })
+	cleanup.Add(func() { z.Set(fed.NewScalar()) })
 	z.Add(z, d)
 	lcs := fed.NewScalar().Multiply(lambdaC, x)
 	defer lcs.Set(fed.NewScalar())
@@ -87,7 +88,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 	if err != nil {
 		return nil, false, err
 	}
-	cleanup.add(func() { clear(payload) })
+	cleanup.Add(func() { clear(payload) })
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   s.sessionID,
@@ -104,7 +105,7 @@ func (s *SignSession) prepareLocalPartial() (*preparedSignPartial, bool, error) 
 		env:     env,
 		payload: payload,
 	}
-	cleanup.disarm()
+	cleanup.Disarm()
 	return prepared, true, nil
 }
 

@@ -9,6 +9,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/sessiontx"
 	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 	"github.com/islishude/tss/internal/zk/schnorr"
@@ -118,10 +119,10 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 	if err != nil {
 		return nil, err
 	}
-	cleanup := newCleanupStack()
-	defer cleanup.run()
+	cleanup := sessiontx.NewCleanupStack()
+	defer cleanup.Run()
 	shareOwnsSecret := false
-	cleanup.add(func() {
+	cleanup.Add(func() {
 		if !shareOwnsSecret {
 			secretScalar.Destroy()
 		}
@@ -212,7 +213,7 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 		KeygenTranscriptHash:   transcriptHash,
 	}}
 	shareOwnsSecret = true
-	cleanup.add(share.Destroy)
+	cleanup.Add(share.Destroy)
 	logCiphertext, logRandomness, err := s.local.paillier.EncryptSecret(s.cfg.Reader(), secretScalar)
 	if err != nil {
 		return nil, err
@@ -256,7 +257,7 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 		clear(confirmation.ChainCode)
 		return nil, err
 	}
-	cleanup.disarm()
+	cleanup.Disarm()
 	return &preparedCGGMPPendingKeyShare{
 		share:        share,
 		confirmation: confirmation,

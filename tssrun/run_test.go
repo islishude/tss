@@ -59,6 +59,70 @@ func TestMemoryRunStoreLookupLifecycle(t *testing.T) {
 	}
 }
 
+func TestMemoryRunStoreCompletionIsScopedToLocalParty(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryRunStore()
+	run := testRunIntent(t, "run-1")
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	digest := []byte("plan-digest")
+	for _, party := range []tss.PartyID{1, 2} {
+		if err := store.AcceptPlan(ctx, run.RunID, party, digest); err != nil {
+			t.Fatalf("AcceptPlan party %d: %v", party, err)
+		}
+		if err := store.MarkStarted(ctx, run.RunID, party); err != nil {
+			t.Fatalf("MarkStarted party %d: %v", party, err)
+		}
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 1, LocalRunResult{OutputDigest: []byte("out-1")}); err != nil {
+		t.Fatalf("MarkCompleted party 1: %v", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
+		t.Fatalf("LookupBySession after one local completion: %v", err)
+	}
+	if err := store.MarkStarted(ctx, run.RunID, 1); !errors.Is(err, ErrRunCompleted) {
+		t.Fatalf("completed party restart got %v, want ErrRunCompleted", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 2, LocalRunResult{OutputDigest: []byte("out-2")}); err != nil {
+		t.Fatalf("MarkCompleted party 2: %v", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, ErrRunCompleted) {
+		t.Fatalf("expected ErrRunCompleted after all active local parties completed, got %v", err)
+	}
+	if err := store.AcceptPlan(ctx, run.RunID, 3, digest); !errors.Is(err, ErrRunCompleted) {
+		t.Fatalf("late completed-run AcceptPlan got %v, want ErrRunCompleted", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, ErrRunCompleted) {
+		t.Fatalf("late completed-run lookup got %v, want ErrRunCompleted", err)
+	}
+}
+
+func TestMemoryRunStoreRejectsLateAcceptAfterAbort(t *testing.T) {
+	ctx := context.Background()
+	store := NewMemoryRunStore()
+	run := testRunIntent(t, "run-1")
+	if err := store.CreateRun(ctx, run); err != nil {
+		t.Fatalf("CreateRun: %v", err)
+	}
+	digest := []byte("plan-digest")
+	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
+		t.Fatalf("AcceptPlan: %v", err)
+	}
+	if err := store.AbortRun(ctx, run.RunID, 1, "operator abort"); err != nil {
+		t.Fatalf("AbortRun: %v", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, ErrRunAborted) {
+		t.Fatalf("aborted lookup got %v, want ErrRunAborted", err)
+	}
+	if err := store.AcceptPlan(ctx, run.RunID, 2, digest); !errors.Is(err, ErrRunAborted) {
+		t.Fatalf("late aborted-run AcceptPlan got %v, want ErrRunAborted", err)
+	}
+	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, ErrRunAborted) {
+		t.Fatalf("late aborted-run lookup got %v, want ErrRunAborted", err)
+	}
+}
+
 func TestRegisterStartedSessionRollsBackRegistryOnStoreFailure(t *testing.T) {
 	ctx := context.Background()
 	store := NewMemoryRunStore()
