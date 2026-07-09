@@ -156,13 +156,16 @@ func TestThresholdECDSA_PresignCopiesShareClaim(t *testing.T) {
 	}
 }
 
-func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) {
+func TestThresholdECDSA_RestoredPresignRejectsNewSignAttempt(t *testing.T) {
 	t.Parallel()
 	shares := CachedKeygenShares(t, 2, 3)
 	presigns := secpPresign(t, shares, tss.NewPartySet(1, 2))
 	raw, err := presigns[1].MarshalBinary()
 	if err != nil {
 		t.Fatal(err)
+	}
+	if !IsPresignConsumed(presigns[1]) {
+		t.Fatal("MarshalBinary did not consume the local presign handle")
 	}
 	restoredA, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
@@ -175,10 +178,10 @@ func TestThresholdECDSA_RestoredSignAttemptStoreSerializesIntents(t *testing.T) 
 
 	store := newTestSignAttemptStore()
 	digest := sha256.Sum256([]byte("restored store claims once"))
-	startSignDigestWithStoreMustSucceed(t, shares[1], restoredA, digest[:], store)
+	startSignDigestWithStoreMustBeConsumed(t, shares[1], restoredA, digest[:], store)
 	startSignDigestWithStoreMustBeConsumed(t, shares[1], restoredB, digest[:], store)
-	if !IsPresignConsumed(restoredB) {
-		t.Fatal("store conflict did not leave restored presign consumed")
+	if !IsPresignConsumed(restoredA) || !IsPresignConsumed(restoredB) {
+		t.Fatal("restored presign snapshots became reusable")
 	}
 }
 
@@ -1015,8 +1018,8 @@ func TestThresholdECDSAPaillierPublicKeyMismatchRejected(t *testing.T) {
 }
 
 // TestThresholdECDSA_PresignRoundTripScenarios verifies that presign
-// marshal/unmarshal round-trip preserves the consumed state correctly:
-// fresh presigns can still sign, consumed presigns stay consumed.
+// marshal/unmarshal round-trips produce consumed snapshots. Serialized presigns
+// are recovery-only handles; they must not create a second usable presign.
 func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
@@ -1068,42 +1071,23 @@ func TestThresholdECDSA_PresignRoundTripScenarios(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Presign MarshalBinary: %v", err)
 			}
+			if !IsPresignConsumed(presign) {
+				t.Fatal("MarshalBinary did not consume the local presign handle")
+			}
 			restored, err := tss.DecodeBinaryWithLimits[Presign](raw, testLimits())
 			if err != nil {
 				t.Fatalf("UnmarshalPresign: %v", err)
 			}
 
-			if tc.preConsume {
-				if !IsPresignConsumed(restored) {
-					t.Fatal("consumed state was not preserved through round-trip")
-				}
-				// Attempting to sign with the consumed restored presign must fail.
-				sessionID2, err := tss.NewSessionID(nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				_, _, err = StartSignDigest(shares[tc.signers[0]], restored, sessionID2, digest[:])
-				_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
-			} else {
-				if IsPresignConsumed(restored) {
-					t.Fatal("fresh presign after round-trip is consumed")
-				}
-				sessionID, err := tss.NewSessionID(nil)
-				if err != nil {
-					t.Fatal(err)
-				}
-				signSession, _, err := StartSignDigestWithStore(shares[tc.signers[0]], restored, sessionID, digest[:], newTestSignAttemptStore())
-				if err != nil {
-					t.Fatalf("StartSignDigest with round-tripped presign: %v", err)
-				}
-				sig, ok := signSession.Signature()
-				if !ok {
-					t.Fatal("expected sign session to produce a signature")
-				}
-				if !VerifyDigest(mustKeySharePublicKey(t, shares[tc.signers[0]]), digest[:], sig) {
-					t.Fatal("ECDSA signature from round-tripped presign did not verify")
-				}
+			if !IsPresignConsumed(restored) {
+				t.Fatal("serialized presign restored as reusable")
 			}
+			sessionID, err := tss.NewSessionID(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, _, err = StartSignDigestWithStore(shares[tc.signers[0]], restored, sessionID, digest[:], newTestSignAttemptStore())
+			_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 		})
 	}
 }

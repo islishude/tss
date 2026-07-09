@@ -31,14 +31,6 @@ func Example_full_lifecycle() {
 	if err != nil {
 		panic(err)
 	}
-	rawPresign, err := presigns[1].MarshalBinary()
-	if err != nil {
-		panic(err)
-	}
-	presigns[1], err = tss.DecodeBinary[cggmp.Presign](rawPresign)
-	if err != nil {
-		panic(err)
-	}
 
 	store, cleanup, err := newExampleFileSignAttemptStore()
 	if err != nil {
@@ -302,7 +294,7 @@ func ExampleDeriveNonHardenedBIP32() {
 	// false
 }
 
-// Example_serialization demonstrates key-share and presign binary round trips.
+// Example_serialization demonstrates key-share round trips and consumed presign snapshots.
 func Example_serialization() {
 	parties := tss.NewPartySet(1, 2)
 	shares, err := runExampleCGGMPKeygen(cggmp.KeygenPlanOption{Parties: parties, Threshold: 2})
@@ -332,8 +324,8 @@ func Example_serialization() {
 	if err != nil {
 		panic(err)
 	}
-	fmt.Println("presign round-trip:", !cggmp.IsPresignConsumed(restoredPresign))
+	fmt.Println("presign restored usable:", !cggmp.IsPresignConsumed(restoredPresign))
 	// Output:
 	// key share round-trip: true
-	// presign round-trip: true
+	// presign restored usable: false
 }

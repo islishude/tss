@@ -34,7 +34,7 @@ func TestSignAttemptCoordinatorDeliveryFailureDoesNotAdvanceRecord(t *testing.T)
 	}
 	before, _ := coordinator.record()
 	store.deliveryErr = errors.New("delivery unavailable")
-	if _, err := coordinator.updateDelivery(context.Background(), nil, nil); !errors.Is(err, store.deliveryErr) {
+	if _, err := coordinator.updateDelivery(context.Background(), nil, nil, nil); !errors.Is(err, store.deliveryErr) {
 		t.Fatalf("delivery error = %v", err)
 	}
 	after, _ := coordinator.record()

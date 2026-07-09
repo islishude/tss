@@ -476,7 +476,11 @@ func (s *SignSession) UpdateDelivery(ctx context.Context, ack *tss.BroadcastAck,
 	if s.coordinator == nil {
 		return errors.New("sign attempt coordinator unavailable during delivery update")
 	}
-	updated, err := s.coordinator.updateDelivery(ctx, ack, certificate)
+	var verifier tss.BroadcastAckVerifier
+	if s.guard != nil {
+		verifier = s.guard.AckVerifier
+	}
+	updated, err := s.coordinator.updateDelivery(ctx, ack, certificate, verifier)
 	if err != nil {
 		return err
 	}

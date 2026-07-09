@@ -73,6 +73,28 @@ func TestGenerateKeyReturnsContextCancellation(t *testing.T) {
 	}
 }
 
+func TestSafePrimeWithWorkersReturnsCanceledContext(t *testing.T) {
+	t.Parallel()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := safePrimeWithWorkers(ctx, crand.Reader, 512, 2)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("safePrimeWithWorkers error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("safePrimeWithWorkers did not return after context cancellation")
+	}
+}
+
 func TestGeneratePrimePairRetriesOnlyQOnDuplicate(t *testing.T) {
 	t.Parallel()
 

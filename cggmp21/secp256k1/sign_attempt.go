@@ -177,6 +177,11 @@ type SignAttemptDeliveryUpdate struct {
 	AttemptHash      []byte
 	Ack              *tss.BroadcastAck
 	Certificate      *tss.BroadcastCertificate
+	// AckVerifier verifies Ack and Certificate signatures before they are made
+	// durable. Certificate updates require a non-nil verifier.
+	AckVerifier tss.BroadcastAckVerifier
+
+	certificateVerified bool
 }
 
 // SignAttemptBurn is a durable tombstone for a presign that must not be used.
@@ -635,20 +640,32 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 	recipients := record.DeliveryPolicy.Recipients
 	updated := record.Clone()
 	if update.Ack != nil {
+		if update.AckVerifier != nil {
+			if err := tss.VerifyBroadcastAck(env, *update.Ack, update.AckVerifier); err != nil {
+				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w", ErrSignAttemptCorrupt, err)
+			}
+		}
 		if err := addSignAttemptDeliveryAck(&updated, update.Ack.Clone(), env, recipients); err != nil {
 			return SignAttemptRecord{}, err
 		}
 	}
 	if update.Certificate != nil {
 		cert := update.Certificate.Clone()
-		if err := cert.VerifyStructure(env, recipients); err != nil {
-			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
+		if update.certificateVerified {
+			if err := cert.VerifyStructure(env, recipients); err != nil {
+				return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
+			}
+		} else {
+			if err := cert.VerifyFull(env, recipients, update.AckVerifier); err != nil {
+				return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate: %w", ErrSignAttemptCorrupt, err)
+			}
 		}
 		cert.Recipients = updated.DeliveryPolicy.Recipients.Clone()
 		orderSignAttemptCertificateAcks(cert, updated.DeliveryPolicy.Recipients)
 		if _, err := cert.MarshalBinary(); err != nil {
 			return SignAttemptRecord{}, fmt.Errorf("%w: delivery certificate encoding: %w", ErrSignAttemptCorrupt, err)
 		}
+		updated.DeliveryState.Acks = nil
 		for _, ack := range cert.Acks {
 			if err := addSignAttemptDeliveryAck(&updated, ack.Clone(), env, recipients); err != nil {
 				return SignAttemptRecord{}, err

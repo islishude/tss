@@ -227,12 +227,14 @@ func (p Presign) MarshalJSON() ([]byte, error) {
 	return nil, errors.New("cggmp21 secp256k1 presign contains secret material; use MarshalBinary")
 }
 
-// MarshalBinary encodes the presign record using the object-level wire codec.
+// MarshalBinary encodes a consumed snapshot of the presign record using the
+// object-level wire codec.
 func (p *Presign) MarshalBinary() ([]byte, error) {
 	return p.MarshalBinaryWithLimits(DefaultLimits())
 }
 
-// MarshalBinaryWithLimits encodes the presign using explicit local limits.
+// MarshalBinaryWithLimits encodes a consumed snapshot of the presign using
+// explicit local limits.
 func (p *Presign) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
 	return p.marshalWireMessageWithLimits(limits)
 }

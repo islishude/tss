@@ -136,8 +136,9 @@ Every wire type must have deterministic marshaling and strict decoding:
   marshaling or rejected during decoding.
 - JSON fallback decoding is forbidden for key shares, presigns, proofs,
   envelopes, and blame evidence.
-- A consumed presign remains consumed across marshal/unmarshal and storage
-  encryption round trips.
+- CGGMP21 presign marshaling produces a consumed snapshot; a serialized presign
+  must restore as recovery-only unless a durable sign-attempt record authorizes
+  exact-attempt resume.
 
 Golden vectors are wire compatibility contracts:
 
@@ -253,7 +254,8 @@ Required behavior:
   rejects the mathematically equivalent high-S form, and recovery ID parity
   reflects any `S -> n-S` normalization.
 - Shallow copies and test-only deep copies cannot create independent claims.
-- Marshal/unmarshal and encrypt/decrypt preserve consumed state.
+- Marshal/unmarshal and encrypt/decrypt must not create a reusable presign; a
+  serialized CGGMP21 presign restores consumed.
 - Independently restored copies are still serialized by the same durable
   `SignAttemptStore`.
 - Production code does not expose an API that clones a reusable presign.
@@ -300,7 +302,7 @@ outbound, and after outbound when they are meaningful for the phase.
 | Keygen incomplete or unconfirmed     | No exportable MPC key share                                                |
 | Keygen complete and confirmed        | Usable key share                                                           |
 | Presign incomplete                   | No usable presign                                                          |
-| Presign complete, never claimed      | Usable unconsumed presign                                                  |
+| Presign complete, never claimed      | Serialized snapshot is consumed; no new attempt can start from it          |
 | Attempt committed or outcome unknown | Resume only the bound attempt and exact envelope while delivery is pending |
 | Delivery certificate durable         | Resume the session without outbound replay                                 |
 | Completion computed but not durable  | Signature remains unavailable; retry persists same result                  |

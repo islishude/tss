@@ -594,6 +594,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		PresignContentID: record.PresignContentID,
 		AttemptHash:      record.AttemptHash,
 		Certificate:      cert,
+		AckVerifier:      testBroadcastAckVerifier(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -608,6 +609,51 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 	}
 	if !loaded.DeliveryState.DeliveryComplete {
 		t.Fatal("loaded attempt lost durable delivery completion")
+	}
+}
+
+func TestFast_FileSignAttemptStoreDeliveryCertificateRequiresAuthenticatedAcks(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newFastFileSignAttemptStore(t)
+	record := testSignAttemptRecord(t, 1)
+	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack1 := testBroadcastAck(env, 1)
+	ack2 := testBroadcastAck(env, 2)
+	cert, err := tss.NewBroadcastCertificate(env, record.DeliveryPolicy.Recipients, []tss.BroadcastAck{ack1, ack2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Certificate:      cert,
+	}); !errors.Is(err, tss.ErrMissingAckVerifier) {
+		t.Fatalf("certificate without verifier error = %v, want ErrMissingAckVerifier", err)
+	}
+	rejectVerifier := tss.NewInMemoryAckVerifier(func(tss.PartyID, [32]byte, []byte) error {
+		return errors.New("invalid ack signature")
+	})
+	if _, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Certificate:      cert,
+		AckVerifier:      rejectVerifier,
+	}); !errors.Is(err, tss.ErrInvalidBroadcastCertificate) {
+		t.Fatalf("certificate with bad signatures error = %v, want ErrInvalidBroadcastCertificate", err)
+	}
+	loaded, err := store.LoadSignAttempt(ctx, record.PresignContentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.DeliveryState.DeliveryComplete || loaded.DeliveryState.Certificate != nil {
+		t.Fatal("unauthenticated certificate advanced durable delivery state")
 	}
 }
 
@@ -791,6 +837,15 @@ func testBroadcastAck(env tss.Envelope, party tss.PartyID) tss.BroadcastAck {
 	ack.PayloadHash = tss.PayloadHashFromEnvelope(env)
 	ack.EnvelopeDigest = env.Digest()
 	return ack
+}
+
+func testBroadcastAckVerifier() tss.BroadcastAckVerifier {
+	return tss.NewInMemoryAckVerifier(func(party tss.PartyID, _ [32]byte, signature []byte) error {
+		if len(signature) == 1 && signature[0] == byte(party) {
+			return nil
+		}
+		return errors.New("invalid ack signature")
+	})
 }
 
 func newFastFileSignAttemptStore(t testing.TB) *FileSignAttemptStore {

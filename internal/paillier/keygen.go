@@ -316,7 +316,13 @@ func safePrimeWithWorkers(ctx context.Context, reader io.Reader, bits, workers i
 
 	var firstErr error
 	for range workers {
-		result := <-results
+		var result primeResult
+		select {
+		case result = <-results:
+		case <-ctx.Done():
+			cancel()
+			return nil, ctx.Err()
+		}
 		if result.err == nil {
 			cancel()
 			return result.prime, nil

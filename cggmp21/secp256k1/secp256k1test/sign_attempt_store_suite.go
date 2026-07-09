@@ -59,6 +59,7 @@ func RunSignAttemptStoreSuite(t testing.TB, factory SignAttemptStoreFactory) {
 	run("different completion result conflicts", checkSignAttemptCompletionConflict)
 	run("delivery ack is idempotent", checkSignAttemptDeliveryAckIdempotent)
 	run("delivery certificate marks delivery complete", checkSignAttemptDeliveryCertificate)
+	run("delivery certificate requires verifier", checkSignAttemptDeliveryCertificateRequiresVerifier)
 	run("load merges base delivery and completion", checkSignAttemptLoadMergesState)
 }
 
@@ -252,6 +253,7 @@ func checkSignAttemptDeliveryCertificate(t testing.TB, fixture SignAttemptStoreF
 		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
 		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
 		Certificate:      cert,
+		AckVerifier:      signAttemptAckVerifier(),
 	})
 	if err != nil {
 		t.Fatalf("certificate update: %v", err)
@@ -261,6 +263,29 @@ func checkSignAttemptDeliveryCertificate(t testing.TB, fixture SignAttemptStoreF
 	}
 	if len(updated.DeliveryState.Acks) != len(fixture.Candidate.DeliveryPolicy.Recipients) {
 		t.Fatal("certificate update did not journal all recipient acknowledgments")
+	}
+}
+
+func checkSignAttemptDeliveryCertificateRequiresVerifier(t testing.TB, fixture SignAttemptStoreFixture) {
+	t.Helper()
+	ctx := context.Background()
+	if _, err := fixture.Store.CommitSignAttempt(ctx, fixture.Candidate); err != nil {
+		t.Fatalf("commit candidate: %v", err)
+	}
+	cert := signAttemptCertificate(t, fixture.Candidate)
+	if _, err := fixture.Store.UpdateSignAttemptDelivery(ctx, secp256k1.SignAttemptDeliveryUpdate{
+		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
+		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
+		Certificate:      cert,
+	}); !errors.Is(err, tss.ErrMissingAckVerifier) {
+		t.Fatalf("certificate without verifier error = %v, want ErrMissingAckVerifier", err)
+	}
+	loaded, err := fixture.Store.LoadSignAttempt(ctx, fixture.Candidate.PresignContentID)
+	if err != nil {
+		t.Fatalf("load after rejected certificate: %v", err)
+	}
+	if loaded.DeliveryState.DeliveryComplete || loaded.DeliveryState.Certificate != nil {
+		t.Fatal("rejected certificate advanced durable delivery state")
 	}
 }
 
@@ -275,6 +300,7 @@ func checkSignAttemptLoadMergesState(t testing.TB, fixture SignAttemptStoreFixtu
 		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
 		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
 		Certificate:      cert,
+		AckVerifier:      signAttemptAckVerifier(),
 	}); err != nil {
 		t.Fatalf("certificate update: %v", err)
 	}
@@ -313,6 +339,15 @@ func signAttemptAck(env tss.Envelope, party tss.PartyID) tss.BroadcastAck {
 		PayloadHash:    tss.PayloadHashFromEnvelope(env),
 		EnvelopeDigest: env.Digest(),
 	}
+}
+
+func signAttemptAckVerifier() tss.BroadcastAckVerifier {
+	return tss.NewInMemoryAckVerifier(func(party tss.PartyID, _ [32]byte, signature []byte) error {
+		if len(signature) == 1 && signature[0] == byte(party) {
+			return nil
+		}
+		return errors.New("invalid ack signature")
+	})
 }
 
 func signAttemptCertificate(t testing.TB, record secp256k1.SignAttemptRecord) *tss.BroadcastCertificate {

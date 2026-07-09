@@ -169,8 +169,8 @@ func (s *FileSignAttemptStore) CommitSignAttempt(ctx context.Context, candidate 
 	return SignAttemptCommit{Status: SignAttemptCreated, Record: candidate.Clone()}, nil
 }
 
-// UpdateSignAttemptDelivery atomically persists a structurally valid delivery
-// ACK or final broadcast certificate for the exact attempt hash.
+// UpdateSignAttemptDelivery atomically persists a valid delivery ACK or final
+// authenticated broadcast certificate for the exact attempt hash.
 func (s *FileSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, update SignAttemptDeliveryUpdate) (SignAttemptRecord, error) {
 	if ctx == nil {
 		return SignAttemptRecord{}, errors.New("nil context")
@@ -198,7 +198,7 @@ func (s *FileSignAttemptStore) UpdateSignAttemptDelivery(ctx context.Context, up
 		}
 	}
 	if update.Certificate != nil {
-		if err := s.persistDeliveryCertificate(ctx, record, update.Certificate.Clone()); err != nil {
+		if err := s.persistDeliveryCertificate(ctx, updated, updated.DeliveryState.Certificate.Clone()); err != nil {
 			return SignAttemptRecord{}, err
 		}
 	}
@@ -363,9 +363,10 @@ func (s *FileSignAttemptStore) mergeDeliveryCertificate(record *SignAttemptRecor
 		return fmt.Errorf("%w: delivery certificate does not match claim", ErrSignAttemptCorrupt)
 	}
 	updated, err := applySignAttemptDeliveryUpdate(*record, SignAttemptDeliveryUpdate{
-		PresignContentID: presignContentID,
-		AttemptHash:      record.AttemptHash,
-		Certificate:      certRecord.DeliveryState.Certificate,
+		PresignContentID:    presignContentID,
+		AttemptHash:         record.AttemptHash,
+		Certificate:         certRecord.DeliveryState.Certificate,
+		certificateVerified: true,
 	})
 	if err != nil {
 		return err

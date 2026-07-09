@@ -4,7 +4,6 @@ package secp256k1
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"testing"
 
@@ -77,8 +76,8 @@ func TestCGGMP21_KeyShare_PostCrashIntegrity(t *testing.T) {
 	}
 }
 
-// TestCGGMP21_Presign_PostCrashRecovery verifies that a fresh Presign
-// survives marshal/unmarshal and starts signing successfully.
+// TestCGGMP21_Presign_PostCrashRecovery verifies that a serialized fresh
+// Presign is a consumed recovery-only snapshot and cannot start a new attempt.
 func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	t.Parallel()
 
@@ -89,32 +88,23 @@ func TestCGGMP21_Presign_PostCrashRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if !IsPresignConsumed(presigns[1]) {
+		t.Fatal("MarshalBinary did not consume the local presign handle")
+	}
 
 	restored, err := tss.DecodeBinary[Presign](raw)
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	if IsPresignConsumed(restored) {
-		t.Fatal("restored presign is already consumed")
+	if !IsPresignConsumed(restored) {
+		t.Fatal("restored serialized presign is reusable")
 	}
 
 	sid, _ := tss.NewSessionID(nil)
 	digest := sha256.Sum256([]byte("fresh presign recovery"))
-	guard := testCGGMP21Guard(shares[1].PartyID(), mustKeyShareParties(t, shares[1]), sid)
-	if _, _, err := startSignDigestBound(context.Background(), shares[1], restored, sid, digest[:], mustPresignContextHash(t, restored), nil, guard, testLimits()); err == nil {
-		t.Fatal("startSignDigestBound without SignAttemptStore succeeded")
-	} else {
-		_ = testutil.AssertProtocolError(t, err, tss.ErrCodeInvalidConfig)
-	}
-	sid, _ = tss.NewSessionID(nil)
-	_, outbox, err := StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestSignAttemptStore())
-	if err != nil {
-		t.Fatalf("StartSignDigest with restored presign failed: %v", err)
-	}
-	if len(outbox) == 0 {
-		t.Fatal("expected partial signature from restored presign")
-	}
+	_, _, err = StartSignDigestWithStore(shares[1], restored, sid, digest[:], newTestSignAttemptStore())
+	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 }
 
 // TestCGGMP21_Presign_ConsumedPostCrash verifies that a consumed

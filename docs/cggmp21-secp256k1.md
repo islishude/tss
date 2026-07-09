@@ -452,8 +452,9 @@ Presign records are strictly one-use. The security boundary is durable commit
 or an externally observable send, whichever happens first. The durable record is
 an immutable attempt, not a lease: after a presign is committed, possibly
 committed, or possibly sent, it can only resume the same attempt.
-`MarshalBinary` includes a consumed snapshot in the presign record, but the
-durable attempt record is authoritative after restart:
+`MarshalBinary` marks the local handle consumed and includes a consumed snapshot
+in the presign record. A serialized presign cannot start a new attempt after
+restore; the durable attempt record is authoritative for exact-attempt recovery:
 
 ```go
 // Check before use:
@@ -528,11 +529,12 @@ adjusted when normalization replaces `S` with `n-S`. `VerifyDigest`,
 though the corresponding ECDSA equation is mathematically valid.
 
 Delivery progress is part of the durable attempt. `UpdateSignAttemptDelivery`
-stores structurally valid ACKs and a final broadcast certificate for the exact
-`AttemptHash`; duplicate ACKs are idempotent and never overwrite the first
-stored ACK for a party. `ResumeSign` returns the exact base envelope only while
-delivery is incomplete. Once the final certificate is durable, `ResumeSign`
-rebuilds the session without returning outbound replay.
+stores valid ACKs and requires a verifier-backed final broadcast certificate for
+the exact `AttemptHash`; duplicate partial ACKs are idempotent, and certificate
+completion records the verified certificate ACK set. `ResumeSign` returns the
+exact base envelope only while delivery is incomplete. Once the final
+certificate is durable, `ResumeSign` rebuilds the session without returning
+outbound replay.
 
 Signature completion is persisted through `CompleteSignAttempt` before
 `Signature()` becomes available. If completion persistence fails or times out,

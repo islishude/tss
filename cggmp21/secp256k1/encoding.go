@@ -165,6 +165,7 @@ func (state *presignState) BeforeMarshalWire() error {
 	if state.Consumed.Bool == nil {
 		state.Consumed = NewAtomicBoolWire(true)
 	}
+	state.Consumed.Store(true)
 	return nil
 }
 
@@ -176,7 +177,8 @@ func (state *presignState) AfterUnmarshalWire() error {
 	if state.Consumed.Bool == nil {
 		return errors.New("presign consumed state unavailable")
 	}
-	state.attempt = newPresignAttemptBinding(state.Consumed.Load())
+	state.Consumed.Store(true)
+	state.attempt = newPresignAttemptBinding(true)
 	return nil
 }
 

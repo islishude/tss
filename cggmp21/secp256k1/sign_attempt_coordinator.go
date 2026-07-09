@@ -98,7 +98,7 @@ func (c *signAttemptCoordinator) load(ctx context.Context) (SignAttemptRecord, e
 	return c.attempt.Clone(), nil
 }
 
-func (c *signAttemptCoordinator) updateDelivery(ctx context.Context, ack *tss.BroadcastAck, certificate *tss.BroadcastCertificate) (SignAttemptRecord, error) {
+func (c *signAttemptCoordinator) updateDelivery(ctx context.Context, ack *tss.BroadcastAck, certificate *tss.BroadcastCertificate, verifier tss.BroadcastAckVerifier) (SignAttemptRecord, error) {
 	if err := c.requireAttempt(); err != nil {
 		return SignAttemptRecord{}, err
 	}
@@ -109,6 +109,7 @@ func (c *signAttemptCoordinator) updateDelivery(ctx context.Context, ack *tss.Br
 		AttemptHash:      slices.Clone(c.attempt.AttemptHash),
 		Ack:              ack,
 		Certificate:      certificate,
+		AckVerifier:      verifier,
 	})
 	if err != nil {
 		return SignAttemptRecord{}, err

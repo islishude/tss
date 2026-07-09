@@ -96,7 +96,8 @@ encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
 // Store `encrypted` in durable storage (database, file, secrets manager).
 ```
 
-For CGGMP21, presign records must also be persisted:
+For CGGMP21, `Presign.MarshalBinary` writes a consumed snapshot. Do not expose
+that serialized record as reusable unused-presign inventory:
 
 ```go
 raw, _ := presign.MarshalBinary()
@@ -114,25 +115,25 @@ raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
 share, err := secp256k1.UnmarshalKeyShare(raw)
 ```
 
-For CGGMP21 presign records, the serialized consumed flag is only a local
-snapshot. It is useful for discarding records that were already persisted as
-consumed, but it is not the durable one-use boundary:
+For CGGMP21 presign records, serialized snapshots restore as consumed. They
+cannot start a new online signing attempt:
 
 ```go
 raw, _ := tss.DecryptPresignWithPassphrase(encrypted, passphrase)
 presign, _ := secp256k1.UnmarshalPresign(raw)
 if secp256k1.IsPresignConsumed(presign) {
-    // Discard; do not reuse.
+    // Do not call StartSign with this snapshot.
 }
 ```
 
-Restored CGGMP21 presigns require a durable sign-attempt record. Provide
-`SignRuntime.AttemptStore`. `CommitSignAttempt` is the only StartSign
-linearization point; `LoadSignAttempt` is for `ResumeSign` and diagnostics.
-The store must atomically bind a secret-tainted presign content ID to one intent
-and one attempt. It must derive an opaque store-local key before using the
-content ID in paths or indexes and must not expose it in logs, metrics, or
-plaintext metadata. A
+Restored CGGMP21 presign snapshots are recovery-only: provide
+`SignRuntime.AttemptStore` and call `ResumeSign` only when a durable sign
+attempt already exists for that presign. `CommitSignAttempt` is the only
+StartSign linearization point; `LoadSignAttempt` is for `ResumeSign` and
+diagnostics. The store must atomically bind a secret-tainted presign content ID
+to one intent and one attempt. It must derive an opaque store-local key before
+using the content ID in paths or indexes and must not expose it in logs,
+metrics, or plaintext metadata. A
 repeated identical attempt returns `SignAttemptExistingSame`; the same intent
 with a different attempt returns `secp256k1.ErrSignAttemptNonDeterminism`; a
 different intent returns `secp256k1.ErrSignAttemptConflict`; a durable tombstone
@@ -208,9 +209,7 @@ presignPlan, err := secp256k1.NewPresignPlan(secp256k1.PresignPlanOption{
 presignSession, out, err := secp256k1.StartPresign(keyShare, presignPlan, tss.LocalConfig{Self: keyShare.PartyID()}, presignGuard)
 // Route messages. Obtain Presign record.
 presign, _ := presignSession.Presign()
-// Persist presign immediately.
-rawPresign, _ := presign.MarshalBinary()
-encrypted, _ := tss.EncryptPresignWithPassphrase(rawPresign, passphrase, "presign-1", nil)
+// Keep the fresh local presign handle private until StartSign commits it.
 
 // Online signing (fast, one round):
 message := []byte("payload")
@@ -267,9 +266,9 @@ context hash, digest-binding hash, and attempt hash.
 `ResumeSign` returns the exact committed envelope only until delivery is
 durably complete. An at-least-once dispatcher should keep replaying it until
 `UpdateSignAttemptDelivery` has persisted acknowledgments from every recipient
-and the required broadcast certificate. After the delivery certificate is
-durable, `ResumeSign` rebuilds the session without returning outbound replay.
-Signature completion alone is not a delivery acknowledgment.
+and the required verifier-backed broadcast certificate. After the delivery
+certificate is durable, `ResumeSign` rebuilds the session without returning
+outbound replay. Signature completion alone is not a delivery acknowledgment.
 
 `SignAttemptStore` protects the one-use presign claim, local outbound replay,
 delivery progress, and completion persistence. It is not a complete online

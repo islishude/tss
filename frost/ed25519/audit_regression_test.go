@@ -75,6 +75,14 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	}
 
 	shares := frostKeygen(t, 2, 2)
+	confirmation, err := shares[1].NewConfirmation()
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmationRaw, err := confirmation.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
 	signSessionID, err := tss.NewSessionID(nil)
 	if err != nil {
 		t.Fatal(err)
@@ -153,6 +161,10 @@ func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 		}},
 		{"keygen share", keygenShareRaw, func(raw []byte, limits Limits) error {
 			var payload keygenSharePayload
+			return payload.UnmarshalBinaryWithLimits(raw, limits)
+		}},
+		{"keygen confirmation", confirmationRaw, func(raw []byte, limits Limits) error {
+			var payload KeygenConfirmation
 			return payload.UnmarshalBinaryWithLimits(raw, limits)
 		}},
 		{"nonce commitment", signOut1[0].Payload, func(raw []byte, limits Limits) error {

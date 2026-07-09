@@ -183,7 +183,7 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 	if base.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen confirmation in wrong round"))
 	}
-	confirmation, err := tss.DecodeBinary[KeygenConfirmation](base.Payload)
+	confirmation, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](base.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
 	}

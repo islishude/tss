@@ -129,8 +129,17 @@ func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
 
 // UnmarshalBinary decodes a canonical TLV keygen confirmation.
 func (c *KeygenConfirmation) UnmarshalBinary(in []byte) error {
+	return c.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical TLV keygen confirmation using
+// explicit local resource limits.
+func (c *KeygenConfirmation) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded KeygenConfirmation
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.payloadFrameLimits()),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	if err := decoded.Validate(); err != nil {
