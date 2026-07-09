@@ -905,21 +905,6 @@ func startSignDigestMustBeConsumed(t *testing.T, share *KeyShare, presign *Presi
 	_ = testutil.AssertProtocolError(t, err, tss.ErrCodeConsumed)
 }
 
-func startSignDigestWithStoreMustSucceed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store SignAttemptStore) {
-	t.Helper()
-	sessionID, err := tss.NewSessionID(nil)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, out, err := StartSignDigestWithStore(share, presign, sessionID, digest, store)
-	if err != nil {
-		t.Fatalf("StartSignDigestWithStore: %v", err)
-	}
-	if len(out) == 0 {
-		t.Fatal("StartSignDigestWithStore returned no signing partial")
-	}
-}
-
 func startSignDigestWithStoreMustBeConsumed(t *testing.T, share *KeyShare, presign *Presign, digest []byte, store SignAttemptStore) {
 	t.Helper()
 	sessionID, err := tss.NewSessionID(nil)
