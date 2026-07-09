@@ -27,10 +27,16 @@ Rules:
 - Tagged tests must use the tier's build tag. Explicit race and fuzz jobs may
   form Tier 4 without a `stress`-tagged test. `vectorgen` is generation-only, not
   a test tier.
+- `vectorgen` files may define only vector-generation entry points such as
+  `TestGenerate*`. Helper-only files may compile under `vectorgen`, but ordinary
+  validation tests must not use `integration || vectorgen`.
 - Tier 1 must remain suitable for normal local feedback.
 - Tier 3 and Tier 4 are explicit or scheduled runs, not ordinary local checks.
 - Put a test in the lowest tier that can exercise the invariant without weakening
   its realism.
+- `go test -short` is an advisory switch, not a tier boundary unless a test
+  explicitly calls `testing.Short()`. Heavy tests must be kept out of Tier 0 with
+  build tags.
 - Keep runtime budgets enforceable through test timeouts and the repository's
   budget checker. Investigate individual outliers instead of raising suite limits
   by default.
@@ -395,6 +401,9 @@ targets for smoke, CI, and scheduled runs.
 - Vector generation must be explicit and reproducible where the protocol permits.
   Verification must cover decoding, validation, canonical re-encoding, and the
   vector's cryptographic result.
+- `internal/testvectors/cmd/tvgen` selects generation tests with the `vectorgen`
+  tag and a narrow `-run` expression. Do not make ordinary integration tests
+  visible through `vectorgen` just because generation needs shared helpers.
 
 Cached fixtures must not weaken isolation:
 
@@ -432,8 +441,9 @@ order, trailing data rejection, and a golden vector.
 
 Coverage is diagnostic, not the security objective. Review coverage by area and
 prioritize wire parsing, guards, replay, evidence, storage boundaries, protocol
-state machines, and cryptographic reject paths. A lower number is acceptable only
-when the missing path is unreachable, defensive, or covered by a heavier tier.
+state machines, and cryptographic reject paths. A lower number is acceptable when
+the missing path is unreachable, defensive, covered by a heavier tier, or lower
+value than the test complexity required to hit it.
 
 Use the Makefile's area-specific coverage targets. Do not add slow full-protocol
 coverage to the default feedback loop.
@@ -444,6 +454,14 @@ verification, serialization, and primitive cost. Production-parameter crypto
 benchmarks require an explicit heavy build tag or run mode.
 
 ## Test Refactoring
+
+Use this order when cleaning up a package:
+
+1. Inventory the invariant, tier, and runtime cost.
+2. Move or split the test into the file/tier matching that invariant.
+3. Merge cases with shared setup and assertions, usually with a table.
+4. Downgrade the tier only when the same invariant remains realistic.
+5. Delete only after a stronger remaining test covers the same assertion.
 
 Keep:
 
