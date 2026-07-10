@@ -23,6 +23,9 @@ func (tx *acceptCGGMPKeygenCommitmentsTx) apply(s *KeygenSession) (sessionEffect
 	); err != nil {
 		return sessionEffects{}, err
 	}
+	if err := s.promotePendingKeygenConfirmation(tx.from); err != nil {
+		return sessionEffects{}, err
+	}
 	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
@@ -62,10 +65,18 @@ func (tx *acceptCGGMPKeygenShareTx) markCommitted() {
 type acceptCGGMPKeygenConfirmationTx struct {
 	from         tss.PartyID
 	confirmation *KeygenConfirmation
+	pending      bool
 	committed    bool
 }
 
 func (tx *acceptCGGMPKeygenConfirmationTx) apply(s *KeygenSession) (sessionEffects, error) {
+	if tx.pending {
+		if s.pendingConfirmations == nil {
+			s.pendingConfirmations = make(map[tss.PartyID]*KeygenConfirmation)
+		}
+		s.pendingConfirmations[tx.from] = tx.confirmation
+		return sessionEffects{}, nil
+	}
 	if err := s.confirmations.record(tx.from, tx.confirmation); err != nil {
 		return sessionEffects{}, err
 	}

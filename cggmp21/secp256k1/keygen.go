@@ -30,19 +30,20 @@ const (
 type KeygenSession struct {
 	mu sync.Mutex
 
-	cfg            tss.ThresholdConfig      // Local threshold runtime view fixed by the keygen plan.
-	limits         Limits                   // Local fail-closed resource policy.
-	securityParams SecurityParams           // Cryptographic profile for Paillier and proof material.
-	planHash       []byte                   // Digest every keygen payload must echo.
-	local          *keygenLocalMaterial     // Locally generated material before pending-share commit.
-	round1         *keygenRound1Inbox       // Accepted round-1 material keyed by dealer.
-	confirmations  *keygenConfirmationInbox // Accepted confirmation material keyed by sender.
-	completed      bool                     // Terminal success flag after the key share is confirmed.
-	aborted        bool                     // Terminal failure/destruction flag.
-	state          keygenState              // Phase marker for collection, confirmation, success, or abort.
-	pending        *KeyShare                // Completed but not yet confirmed key share.
-	keyShare       *KeyShare                // Confirmed key share retained by the session.
-	guard          *tss.EnvelopeGuard       // Transport replay, identity, and policy guard.
+	cfg                  tss.ThresholdConfig                 // Local threshold runtime view fixed by the keygen plan.
+	limits               Limits                              // Local fail-closed resource policy.
+	securityParams       SecurityParams                      // Cryptographic profile for Paillier and proof material.
+	planHash             []byte                              // Digest every keygen payload must echo.
+	local                *keygenLocalMaterial                // Locally generated material before pending-share commit.
+	round1               *keygenRound1Inbox                  // Accepted round-1 material keyed by dealer.
+	confirmations        *keygenConfirmationInbox            // Accepted confirmation material keyed by sender.
+	pendingConfirmations map[tss.PartyID]*KeygenConfirmation // Confirmations awaiting sender round-1 commitments.
+	completed            bool                                // Terminal success flag after the key share is confirmed.
+	aborted              bool                                // Terminal failure/destruction flag.
+	state                keygenState                         // Phase marker for collection, confirmation, success, or abort.
+	pending              *KeyShare                           // Completed but not yet confirmed key share.
+	keyShare             *KeyShare                           // Confirmed key share retained by the session.
+	guard                *tss.EnvelopeGuard                  // Transport replay, identity, and policy guard.
 }
 
 type keygenCommitmentsPayload struct {

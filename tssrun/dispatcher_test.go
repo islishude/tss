@@ -60,6 +60,43 @@ func TestDurableBufferUnknownSessionStoresWithoutDelivery(t *testing.T) {
 	}
 }
 
+func TestMemoryUnknownEnvelopeStoreRejectsWhenBounded(t *testing.T) {
+	ctx := context.Background()
+	in := testInboundEnvelope(t)
+	sameSession := testEnvelope(t, in.SessionID(), 1, 2)
+	raw, err := sameSession.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary: %v", err)
+	}
+	second, err := tss.OpenEnvelope(raw, tss.ReceiveInfo{Peer: 1, Protection: tss.ChannelConfidential})
+	if err != nil {
+		t.Fatalf("OpenEnvelope: %v", err)
+	}
+
+	perSession := NewBoundedMemoryUnknownEnvelopeStore(2, 1)
+	if err := perSession.PutUnknown(ctx, in); err != nil {
+		t.Fatalf("PutUnknown first: %v", err)
+	}
+	if err := perSession.PutUnknown(ctx, second); !errors.Is(err, ErrUnknownSessionBufferFull) {
+		t.Fatalf("PutUnknown over per-session quota error = %v, want ErrUnknownSessionBufferFull", err)
+	}
+
+	global := NewBoundedMemoryUnknownEnvelopeStore(1, 1)
+	other := testInboundEnvelope(t)
+	if err := global.PutUnknown(ctx, in); err != nil {
+		t.Fatalf("PutUnknown global first: %v", err)
+	}
+	if err := global.PutUnknown(ctx, other); !errors.Is(err, ErrUnknownSessionBufferFull) {
+		t.Fatalf("PutUnknown over global quota error = %v, want ErrUnknownSessionBufferFull", err)
+	}
+	if err := global.DeleteBySession(ctx, in.Protocol(), in.SessionID()); err != nil {
+		t.Fatalf("DeleteBySession: %v", err)
+	}
+	if err := global.PutUnknown(ctx, other); err != nil {
+		t.Fatalf("PutUnknown after delete: %v", err)
+	}
+}
+
 func TestDispatchInboundOpensRawEnvelopeBeforeRouting(t *testing.T) {
 	ctx := context.Background()
 	sessionID, err := tss.NewSessionID(nil)

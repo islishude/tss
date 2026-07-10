@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 
 	"golang.org/x/crypto/argon2"
 	"golang.org/x/crypto/chacha20poly1305"
@@ -38,11 +37,12 @@ const (
 	// maxKeyIDLen is the maximum length of a caller-assigned key identifier.
 	maxKeyIDLen = 255
 
-	// Argon2id upper bounds for decrypting untrusted input.
-	// These are generous enough for any legitimate use while preventing DOS.
-	maxKDFTime    = 1000
-	maxKDFMemory  = 1024 * 1024 // 1 GiB
-	maxKDFThreads = math.MaxUint8
+	// Argon2id upper bounds for decrypting unauthenticated input.
+	// Defaults remain within these limits; callers that need larger costs should
+	// use a storage backend that authenticates metadata before KDF evaluation.
+	maxKDFTime    = 4
+	maxKDFMemory  = 128 * 1024 // 128 MiB
+	maxKDFThreads = 8
 
 	// Default Argon2id parameters as recommended by RFC 9106 §7.3 for
 	// non-interactive passphrase-based key derivation.
@@ -65,6 +65,10 @@ type PassphraseParams struct {
 	Threads uint8
 }
 
+// ErrStorageKeyIDMismatch is returned when an authenticated storage record is
+// valid but is bound to a different caller-assigned key ID.
+var ErrStorageKeyIDMismatch = errors.New("storage key id mismatch")
+
 // DefaultPassphraseParams returns RFC 9106 recommended Argon2id parameters for
 // non-interactive passphrase-based key derivation (time=3, memory=64 MiB, threads=4).
 func DefaultPassphraseParams() *PassphraseParams {
@@ -86,10 +90,10 @@ func EncryptKeyShareWithPassphrase(plaintext, passphrase []byte, keyID string, p
 }
 
 // DecryptKeyShareWithPassphrase decrypts an encoding produced by
-// [EncryptKeyShareWithPassphrase]. A wrong passphrase causes AEAD
-// authentication failure.
-func DecryptKeyShareWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
-	return decrypt(encoded, passphrase, recordTypeKeyShare)
+// [EncryptKeyShareWithPassphrase] and requires its authenticated key ID to
+// match expectedKeyID.
+func DecryptKeyShareWithPassphrase(encoded, passphrase []byte, expectedKeyID string) ([]byte, error) {
+	return decryptExpectedKeyID(encoded, passphrase, recordTypeKeyShare, expectedKeyID)
 }
 
 // EncryptPresignWithPassphrase encrypts a presign record with a passphrase using
@@ -103,10 +107,10 @@ func EncryptPresignWithPassphrase(plaintext, passphrase []byte, keyID string, pa
 }
 
 // DecryptPresignWithPassphrase decrypts an encoding produced by
-// [EncryptPresignWithPassphrase]. A wrong passphrase causes AEAD
-// authentication failure.
-func DecryptPresignWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
-	return decrypt(encoded, passphrase, recordTypePresign)
+// [EncryptPresignWithPassphrase] and requires its authenticated key ID to match
+// expectedKeyID.
+func DecryptPresignWithPassphrase(encoded, passphrase []byte, expectedKeyID string) ([]byte, error) {
+	return decryptExpectedKeyID(encoded, passphrase, recordTypePresign, expectedKeyID)
 }
 
 // EncryptSignAttemptWithPassphrase encrypts a sign-attempt record with a
@@ -120,10 +124,10 @@ func EncryptSignAttemptWithPassphrase(plaintext, passphrase []byte, keyID string
 }
 
 // DecryptSignAttemptWithPassphrase decrypts an encoding produced by
-// [EncryptSignAttemptWithPassphrase]. A wrong passphrase causes AEAD
-// authentication failure.
-func DecryptSignAttemptWithPassphrase(encoded, passphrase []byte) ([]byte, error) {
-	return decrypt(encoded, passphrase, recordTypeSignAttempt)
+// [EncryptSignAttemptWithPassphrase] and requires its authenticated key ID to
+// match expectedKeyID.
+func DecryptSignAttemptWithPassphrase(encoded, passphrase []byte, expectedKeyID string) ([]byte, error) {
+	return decryptExpectedKeyID(encoded, passphrase, recordTypeSignAttempt, expectedKeyID)
 }
 
 // DecryptSignAttemptWithPassphraseAndKeyID decrypts a sign-attempt encoding and
@@ -140,6 +144,22 @@ func DecryptSignAttemptWithPassphraseAndKeyID(encoded, passphrase []byte) ([]byt
 		return nil, "", err
 	}
 	return plaintext, hdr.keyID, nil
+}
+
+func decryptExpectedKeyID(encoded, passphrase []byte, recordType uint8, expectedKeyID string) ([]byte, error) {
+	hdr, err := parseHeader(encoded)
+	if err != nil {
+		return nil, err
+	}
+	plaintext, err := decrypt(encoded, passphrase, recordType)
+	if err != nil {
+		return nil, err
+	}
+	if hdr.keyID != expectedKeyID {
+		clear(plaintext)
+		return nil, fmt.Errorf("%w: got %q, want %q", ErrStorageKeyIDMismatch, hdr.keyID, expectedKeyID)
+	}
+	return plaintext, nil
 }
 
 func encrypt(plaintext, passphrase []byte, recordType uint8, keyID string, params *PassphraseParams) ([]byte, error) {
@@ -331,35 +351,33 @@ func buildAAD(recordType uint8, keyID string, salt []byte, params *PassphrasePar
 	return aad
 }
 
-// validateParams checks that PassphraseParams fields are non-zero.
+// validateParams checks that PassphraseParams fields are within supported bounds.
 func validateParams(params *PassphraseParams) error {
-	if params.Time == 0 {
-		return errors.New("tss: PassphraseParams.Time must be non-zero")
-	}
-	if params.Memory == 0 {
-		return errors.New("tss: PassphraseParams.Memory must be non-zero")
-	}
-	if params.Threads == 0 {
-		return errors.New("tss: PassphraseParams.Threads must be non-zero")
-	}
-	return nil
+	return validateKDFParams(params.Time, params.Memory, params.Threads)
 }
 
 // deriveKeyArgon2id derives a 32-byte key from a passphrase and salt using Argon2id.
-// It rejects zero parameters and values exceeding generous upper bounds
+// It rejects zero parameters and values exceeding fixed upper bounds
 // to prevent resource-exhaustion attacks when decrypting untrusted input.
 func deriveKeyArgon2id(passphrase, salt []byte, time, memory uint32, threads uint8) ([]byte, error) {
-	if time == 0 || memory == 0 || threads == 0 {
-		return nil, errors.New("tss: invalid argon2id parameters: zero value")
-	}
-	if time > maxKDFTime {
-		return nil, fmt.Errorf("tss: argon2id time %d exceeds maximum %d", time, maxKDFTime)
-	}
-	if memory > maxKDFMemory {
-		return nil, fmt.Errorf("tss: argon2id memory %d KiB exceeds maximum %d KiB", memory, maxKDFMemory)
-	}
-	if threads > maxKDFThreads {
-		return nil, fmt.Errorf("tss: argon2id threads %d exceeds maximum %d", threads, maxKDFThreads)
+	if err := validateKDFParams(time, memory, threads); err != nil {
+		return nil, err
 	}
 	return argon2.IDKey(passphrase, salt, time, memory, threads, keyLen), nil
+}
+
+func validateKDFParams(time, memory uint32, threads uint8) error {
+	if time == 0 || memory == 0 || threads == 0 {
+		return errors.New("tss: invalid argon2id parameters: zero value")
+	}
+	if time > maxKDFTime {
+		return fmt.Errorf("tss: argon2id time %d exceeds maximum %d", time, maxKDFTime)
+	}
+	if memory > maxKDFMemory {
+		return fmt.Errorf("tss: argon2id memory %d KiB exceeds maximum %d KiB", memory, maxKDFMemory)
+	}
+	if threads > maxKDFThreads {
+		return fmt.Errorf("tss: argon2id threads %d exceeds maximum %d", threads, maxKDFThreads)
+	}
+	return nil
 }

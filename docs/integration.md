@@ -88,6 +88,11 @@ bound into envelopes, plans, transcripts, proofs, and replay protection.
 `PlanDigest` is derived from the library plan and can be exchanged or recorded by
 the control plane before data-plane messages are released.
 
+Run admission requires a non-empty key ID for every kind. Refresh and reshare
+bind the current key generation. Presign and sign bind the signer set, key
+generation, and a 32-byte normalized signing-context digest; CGGMP21 presign
+and sign also bind the one-use presign ID.
+
 The actual fields should match the deployment's storage and policy model. The
 important invariant is that all public intent needed to reconstruct the same
 protocol plan is authenticated and accepted before the first envelope is
@@ -171,6 +176,11 @@ if err := tssrun.RegisterStartedSession(ctx, runStore, registry, run, self, sess
 }
 return transport.SendAll(out)
 ```
+
+Registration makes the session routable before the durable `MarkStarted`
+operation completes. Inbound dispatches that enter during this window wait for
+the durable decision: successful startup forwards them to the session, while a
+failed startup returns the storage error and retires the registry entry.
 
 ## Envelope Routing and Session Registry
 

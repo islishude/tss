@@ -10,6 +10,10 @@ import (
 
 const proofWireVersion = 1
 const proofWireType = "zk.signprep.proof"
+const (
+	proofMaxBytes      = 1024
+	proofMaxPointBytes = 65
+)
 
 // Validate checks the proof's structural invariants.
 // MPoint, MCommitment, and MResponse may be nil when M_i = 0 (point at infinity).
@@ -18,6 +22,9 @@ func (p *Proof) Validate() error {
 		return errors.New("signprep: nil proof")
 	}
 	mtaIsZero := len(p.MPoint) == 0
+	if mtaIsZero && (len(p.MCommitment) != 0 || len(p.MResponse) != 0) {
+		return errors.New("signprep: zero MPoint must not carry M proof fields")
+	}
 
 	if !mtaIsZero {
 		if _, err := secp.PointFromBytes(p.MPoint); err != nil {
@@ -55,17 +62,31 @@ func (p *Proof) Validate() error {
 // MarshalBinary encodes the proof using the object-level wire codec.
 // wire.Marshal calls Validate via the Validator interface.
 func (p *Proof) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(p)
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(proofFieldLimits()))
 }
 
 // UnmarshalBinary decodes a TLV signprep proof record.
 func (p *Proof) UnmarshalBinary(in []byte) error {
 	var decoded Proof
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(wire.FrameLimits{
+			MaxTotalBytes: proofMaxBytes,
+			MaxFields:     8,
+			MaxFieldBytes: proofMaxPointBytes,
+		}),
+		wire.WithFieldLimits(proofFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
 	return nil
+}
+
+func proofFieldLimits() wire.FieldLimits {
+	return wire.FieldLimits{
+		"point":  proofMaxPointBytes,
+		"scalar": secp.ScalarSize,
+	}
 }
 
 // MarshalWireValue encodes the proof as a canonical TLV proof record for

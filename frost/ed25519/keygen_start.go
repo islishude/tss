@@ -111,14 +111,15 @@ func newFROSTKeygenSession(cfg tss.ThresholdConfig, limits Limits, planHash []by
 		return nil, err
 	}
 	return &KeygenSession{
-		cfg:           cfg,
-		limits:        limits,
-		planHash:      bytes.Clone(planHash),
-		guard:         guard,
-		local:         local,
-		round1:        round1,
-		confirmations: newFROSTKeygenConfirmationInbox(cfg.Parties),
-		state:         keygenCollectingRound1,
+		cfg:                  cfg,
+		limits:               limits,
+		planHash:             bytes.Clone(planHash),
+		guard:                guard,
+		local:                local,
+		round1:               round1,
+		confirmations:        newFROSTKeygenConfirmationInbox(cfg.Parties),
+		pendingConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		state:                keygenCollectingRound1,
 	}, nil
 }
 

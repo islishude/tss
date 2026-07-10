@@ -22,6 +22,10 @@ const (
 // Online signing APIs currently accept only indices below this value.
 const HardenedKeyStart uint32 = 1 << 31
 
+// MaxDerivationDepth is the maximum path depth representable by BIP32 extended
+// keys and derivation results.
+const MaxDerivationDepth = 255
+
 // DerivationScheme identifies the public child-key derivation algorithm.
 type DerivationScheme string
 
@@ -45,6 +49,8 @@ var (
 	ErrInvalidChild = errors.New("invalid child derivation")
 	// ErrDerivationDepthOverflow reports that a path exceeds the BIP32 255-level depth.
 	ErrDerivationDepthOverflow = errors.New("derivation depth overflow")
+	// ErrInvalidChildMode reports an undefined invalid-child handling mode.
+	ErrInvalidChildMode = errors.New("invalid child mode")
 	// ErrInvalidExtendedPublicKey is returned when an extended public key fails
 	// validation (bad version, invalid point, etc.).
 	ErrInvalidExtendedPublicKey = errors.New("invalid extended public key")
@@ -65,23 +71,30 @@ func ParseDerivationPath(s string) (DerivationPath, error) {
 		return nil, nil
 	}
 	if !strings.HasPrefix(s, "m/") {
-		return nil, fmt.Errorf("invalid derivation path %q", s)
+		return nil, errors.New("invalid derivation path")
+	}
+	depth := strings.Count(s[2:], "/") + 1
+	if depth > MaxDerivationDepth {
+		return nil, fmt.Errorf("%w: path has %d indices (max %d)", ErrDerivationDepthOverflow, depth, MaxDerivationDepth)
 	}
 	parts := strings.Split(s[2:], "/")
 	if len(parts) == 0 {
 		return nil, fmt.Errorf("invalid derivation path %q", s)
 	}
 	out := make(DerivationPath, 0, len(parts))
-	for _, part := range parts {
+	for i, part := range parts {
 		if part == "" {
-			return nil, fmt.Errorf("invalid derivation path %q", s)
+			return nil, fmt.Errorf("invalid derivation path element %d", i)
+		}
+		if len(part) > 10 {
+			return nil, fmt.Errorf("invalid derivation path element %d: decimal index too long", i)
 		}
 		if strings.HasSuffix(part, "'") || strings.HasSuffix(part, "h") || strings.HasSuffix(part, "H") {
-			return nil, fmt.Errorf("%w: %q", ErrHardenedDerivationUnsupported, part)
+			return nil, fmt.Errorf("%w at path element %d", ErrHardenedDerivationUnsupported, i)
 		}
 		v, err := strconv.ParseUint(part, 10, 32)
 		if err != nil {
-			return nil, fmt.Errorf("invalid derivation path element %q: %w", part, err)
+			return nil, fmt.Errorf("invalid derivation path element %d: %w", i, err)
 		}
 		out = append(out, uint32(v))
 	}
@@ -122,8 +135,11 @@ func (p DerivationPath) Clone() DerivationPath {
 	return append(DerivationPath(nil), p...)
 }
 
-// ValidateNonHardened rejects hardened indices.
+// ValidateNonHardened rejects paths deeper than BIP32 permits and hardened indices.
 func (p DerivationPath) ValidateNonHardened() error {
+	if len(p) > MaxDerivationDepth {
+		return fmt.Errorf("%w: path has %d indices (max %d)", ErrDerivationDepthOverflow, len(p), MaxDerivationDepth)
+	}
 	for i, index := range p {
 		if index >= HardenedKeyStart {
 			return fmt.Errorf("%w at path element %d: index %d", ErrHardenedDerivationUnsupported, i, index)
@@ -146,6 +162,11 @@ const (
 	// SkipInvalidChild increments the index and retries until a valid child or hardened range.
 	SkipInvalidChild
 )
+
+// Valid reports whether mode is a defined invalid-child handling strategy.
+func (m InvalidChildMode) Valid() bool {
+	return m == ErrorOnInvalidChild || m == SkipInvalidChild
+}
 
 // DeriveOption is a functional option for HD public derivation.
 type DeriveOption interface {
@@ -362,6 +383,9 @@ func (SigningContext) WireVersion() uint16 { return signingContextWireVersion }
 
 // MarshalBinary encodes the signing context using canonical TLV.
 func (c SigningContext) MarshalBinary() ([]byte, error) {
+	if err := c.Validate(); err != nil {
+		return nil, err
+	}
 	return wire.Marshal(c)
 }
 
@@ -375,6 +399,9 @@ func (c *SigningContext) UnmarshalBinary(in []byte) error {
 	}
 	var decoded SigningContext
 	if err := wire.Unmarshal(in, &decoded); err != nil {
+		return err
+	}
+	if err := decoded.Validate(); err != nil {
 		return err
 	}
 	*c = decoded
@@ -391,6 +418,9 @@ func (c SigningContext) Validate() error {
 	}
 	if c.Derivation.Scheme == "" {
 		return errors.New("signing context derivation scheme is required")
+	}
+	if !c.Derivation.InvalidChildMode.Valid() {
+		return fmt.Errorf("%w: %d", ErrInvalidChildMode, c.Derivation.InvalidChildMode)
 	}
 	if err := c.Derivation.Path.ValidateNonHardened(); err != nil {
 		return err

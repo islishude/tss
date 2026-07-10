@@ -27,6 +27,9 @@ func DeriveSecp256k1(publicKey, chainCode []byte, path tss.DerivationPath, opts 
 	}
 
 	cfg := tss.ResolveDeriveConfig(opts)
+	if !cfg.InvalidChildMode.Valid() {
+		return nil, fmt.Errorf("%w: %d", tss.ErrInvalidChildMode, cfg.InvalidChildMode)
+	}
 	if path.IsMaster() {
 		return &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeBIP32Secp256k1,
@@ -95,6 +98,9 @@ func DeriveEd25519KhovratovichLaw(publicKey, chainCode []byte, path tss.Derivati
 	}
 
 	cfg := tss.ResolveDeriveConfig(opts)
+	if !cfg.InvalidChildMode.Valid() {
+		return nil, fmt.Errorf("%w: %d", tss.ErrInvalidChildMode, cfg.InvalidChildMode)
+	}
 	if path.IsMaster() {
 		return &tss.DerivationResult{
 			Scheme:         tss.DerivationSchemeEd25519KhovratovichLaw,

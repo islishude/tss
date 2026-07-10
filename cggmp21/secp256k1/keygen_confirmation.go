@@ -27,11 +27,11 @@ type KeygenConfirmation struct {
 	SessionID       tss.SessionID `wire:"1,bytes,len=32"`
 	Sender          tss.PartyID   `wire:"2,u32"`
 	Threshold       int           `wire:"3,u32"`
-	Parties         tss.PartySet  `wire:"4,u32list"`
-	PublicKey       []byte        `wire:"5,bytes"`
-	TranscriptHash  []byte        `wire:"6,bytes"`
-	CommitmentsHash []byte        `wire:"7,bytes"`
-	ChainCode       []byte        `wire:"8,bytes"`
+	Parties         tss.PartySet  `wire:"4,u32list,max_items=parties"`
+	PublicKey       []byte        `wire:"5,bytes,max_bytes=point"`
+	TranscriptHash  []byte        `wire:"6,bytes,len=32"`
+	CommitmentsHash []byte        `wire:"7,bytes,len=32"`
+	ChainCode       []byte        `wire:"8,bytes,len=32"`
 	PlanHash        []byte        `wire:"9,bytes,len=32"`
 }
 
@@ -182,13 +182,27 @@ func (c KeygenConfirmation) Validate() error {
 // MarshalBinary encodes the confirmation using the object-level wire codec.
 // wire.Marshal calls Validate via the Validator interface.
 func (c KeygenConfirmation) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(c)
+	return c.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits encodes the confirmation with explicit local limits.
+func (c KeygenConfirmation) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return wire.Marshal(c, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
 // UnmarshalBinary decodes a canonical TLV keygen confirmation.
 func (c *KeygenConfirmation) UnmarshalBinary(in []byte) error {
+	return c.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical TLV keygen confirmation with
+// explicit local limits.
+func (c *KeygenConfirmation) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
 	var decoded KeygenConfirmation
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.frameLimits(limits.Payload.MaxMessageBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	*c = decoded

@@ -165,6 +165,7 @@ func TestCGGMP21EarlyConfirmationPlanMismatchDoesNotMutate(t *testing.T) {
 	}
 	s := &KeygenSession{
 		cfg:           tss.ThresholdConfig{SessionID: sessionID},
+		limits:        testLimits(),
 		planHash:      wantPlanHash,
 		round1:        newKeygenRound1Inbox(tss.NewPartySet(confirmation.Sender)),
 		confirmations: newKeygenConfirmationInbox(tss.NewPartySet(confirmation.Sender)),

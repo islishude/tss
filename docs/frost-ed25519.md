@@ -174,6 +174,10 @@ local pending material. The resulting `KeyShare` stores the local scalar share
 code, keygen session ID, keygen transcript hash, and keygen confirmation
 evidence.
 
+A canonical confirmation that arrives before its sender's round-1 commitment
+is held in that sender's bounded pending slot. It is verified and promoted only
+after the commitment arrives, so transport reordering does not abort DKG.
+
 ### Domain Separation
 
 Keygen commitment hashing uses the label `frost-ed25519-keygen-commitments-v1`. The full domain binds `(session ID, threshold, sorted parties, dealer ID, commitment bytes)`.

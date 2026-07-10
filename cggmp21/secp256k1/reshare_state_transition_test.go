@@ -1,10 +1,72 @@
 package secp256k1
 
 import (
+	"bytes"
 	"testing"
 
 	"github.com/islishude/tss"
+	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/testutil"
 )
+
+func TestDestroyPendingReshareShareClearsOwnedSecretState(t *testing.T) {
+	t.Parallel()
+	scalar, err := secret.NewScalar(bytes.Repeat([]byte{1}, 32), 32)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pending := &pendingReshareShare{
+		payload: reshareSharePayload{
+			Share:                scalar,
+			DealerCommitmentHash: bytes.Repeat([]byte{2}, 32),
+			PlanHash:             bytes.Repeat([]byte{3}, 32),
+		},
+		raw: bytes.Repeat([]byte{4}, 64),
+	}
+	destroyPendingReshareShare(pending)
+	if pending.payload.Share != nil {
+		t.Fatal("pending reshare retained its secret scalar handle")
+	}
+	for name, value := range map[string][]byte{
+		"commitment hash": pending.payload.DealerCommitmentHash,
+		"plan hash":       pending.payload.PlanHash,
+		"raw payload":     pending.raw,
+	} {
+		if !bytes.Equal(value, make([]byte, len(value))) {
+			t.Fatalf("pending reshare retained %s bytes", name)
+		}
+	}
+}
+
+func TestCompletedReshareStillValidatesIgnoredEnvelope(t *testing.T) {
+	t.Parallel()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := tss.NewPartySet(1, 2, 3)
+	session := &ReshareSession{
+		cfg:           tss.ThresholdConfig{SessionID: sessionID},
+		selfID:        1,
+		dealerParties: tss.NewPartySet(1),
+		newParties:    tss.NewPartySet(2, 3),
+		completed:     true,
+		guard:         testCGGMP21Guard(1, parties, sessionID),
+	}
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    "wrong-protocol",
+		SessionID:   sessionID,
+		Round:       keygenConfirmationRound,
+		From:        2,
+		PayloadType: payloadKeygenConfirmation,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Handle(testutil.DeliverEnvelope(env)); err == nil {
+		t.Fatal("completed reshare ignored envelope before guard validation")
+	}
+}
 
 func TestCGGMP21ReshareDealerMessagesFailureDoesNotCommitLocalDealerData(t *testing.T) {
 	t.Parallel()

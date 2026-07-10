@@ -72,7 +72,7 @@ func (s *SignSession) prepareAggregate() (*preparedAggregateSignature, bool, err
 		return nil, false, &tss.ProtocolError{
 			Code:  tss.ErrCodeVerification,
 			Round: signRound2,
-			Blame: frostAggregateBlame(s.sessionID, s.signers, verifyKey, s.message, sig),
+			Blame: frostAggregateBlame(s.sessionID, s.key.state.Party, s.signers, verifyKey, s.message, sig),
 			Err:   errors.New("aggregated Ed25519 signature failed verification"),
 		}
 	}

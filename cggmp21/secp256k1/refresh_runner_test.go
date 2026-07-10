@@ -61,6 +61,7 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 		SessionIDSource: func(context.Context, *KeyShare) (tss.SessionID, error) {
 			return sessionID, nil
 		},
+		ClaimSessionID: func(context.Context, tss.SessionID) error { return nil },
 		CommitKeyShare: func(_ context.Context, previous, refreshed *KeyShare) error {
 			if previous != current {
 				t.Fatal("scheduler did not pass the loaded share to commit")

@@ -7,6 +7,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -20,7 +21,7 @@ const (
 
 // StartMessage carries an encrypted multiplicand.
 type StartMessage struct {
-	Ciphertext []byte `json:"ciphertext" wire:"1,bytes"`
+	Ciphertext []byte `json:"ciphertext" wire:"1,bytes,max_bytes=paillier_ciphertext"`
 }
 
 // WireType returns the canonical wire type identifier for StartMessage.
@@ -38,17 +39,34 @@ type StartOpening struct {
 
 // MarshalBinary encodes the MtA start message using the object-level wire codec.
 func (m StartMessage) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(m)
+	return wire.Marshal(m, wire.WithFieldLimitsForMarshal(startMessageFieldLimits()))
 }
 
 // UnmarshalBinary decodes a TLV MtA start message.
 func (m *StartMessage) UnmarshalBinary(in []byte) error {
 	var decoded StartMessage
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(
+		in,
+		&decoded,
+		wire.WithFrameLimits(mtaMessageFrameLimits()),
+		wire.WithFieldLimits(startMessageFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*m = decoded
 	return nil
+}
+
+func startMessageFieldLimits() wire.FieldLimits {
+	return wire.FieldLimits{"paillier_ciphertext": tss.DefaultMaxPaillierCiphertextBytes}
+}
+
+func mtaMessageFrameLimits() wire.FrameLimits {
+	return wire.FrameLimits{
+		MaxTotalBytes: tss.DefaultMaxMTAResponseBytes,
+		MaxFields:     tss.DefaultMaxWireFields,
+		MaxFieldBytes: tss.DefaultMaxZKProofBytes,
+	}
 }
 
 // Validate checks the canonical ciphertext integer.

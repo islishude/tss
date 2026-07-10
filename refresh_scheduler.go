@@ -31,6 +31,8 @@ type RefreshSession[K KeyShare] interface {
 // RefreshRunner adapts an algorithm-specific refresh protocol to the shared
 // scheduler.
 type RefreshRunner[K KeyShare] interface {
+	// Protocol returns the protocol whose replay state the runner uses.
+	Protocol() ProtocolID
 	// StartRefresh constructs one algorithm-specific refresh session.
 	StartRefresh(context.Context, K, RefreshRunConfig) (RefreshSession[K], []Envelope, error)
 }
@@ -52,6 +54,9 @@ type RefreshSchedulerOptions[K KeyShare] struct {
 	// SessionIDSource returns the externally coordinated unique session ID for
 	// the next run. Every participant in one run must receive the same ID.
 	SessionIDSource func(context.Context, K) (SessionID, error)
+	// ClaimSessionID durably and atomically records first use of a session ID.
+	// A claimed ID remains unavailable even if this refresh later fails.
+	ClaimSessionID func(context.Context, SessionID) error
 	// CommitKeyShare atomically persists and installs refreshed if previous is
 	// still current. A nil result transfers ownership of refreshed to the
 	// callback. On a normal error the scheduler destroys refreshed. If the
@@ -78,6 +83,8 @@ func NewRefreshScheduler[K KeyShare](opts RefreshSchedulerOptions[K]) (*RefreshS
 		return nil, errors.New("refresh transport must not be nil")
 	case isNilRefreshValue(opts.Runner):
 		return nil, errors.New("refresh runner must not be nil")
+	case opts.Runner.Protocol() == "":
+		return nil, errors.New("refresh runner protocol must not be empty")
 	case isNilRefreshValue(opts.ReplayCache):
 		return nil, ErrMissingReplayCache
 	case isNilRefreshValue(opts.AckVerifier):
@@ -86,6 +93,8 @@ func NewRefreshScheduler[K KeyShare](opts RefreshSchedulerOptions[K]) (*RefreshS
 		return nil, errors.New("LoadKeyShare callback must not be nil")
 	case opts.SessionIDSource == nil:
 		return nil, errors.New("SessionIDSource callback must not be nil")
+	case opts.ClaimSessionID == nil:
+		return nil, errors.New("ClaimSessionID callback must not be nil")
 	case opts.CommitKeyShare == nil:
 		return nil, errors.New("CommitKeyShare callback must not be nil")
 	}
@@ -149,7 +158,7 @@ func (s *RefreshScheduler[K]) end() {
 	s.mu.Unlock()
 }
 
-func (s *RefreshScheduler[K]) runOnce(ctx context.Context) error {
+func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 	if err := ctx.Err(); err != nil {
 		return err
 	}
@@ -167,6 +176,15 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) error {
 	if !sessionID.Valid() {
 		return fmt.Errorf("refresh session id: %w", ErrInvalidSessionID)
 	}
+	if err := s.opts.ClaimSessionID(ctx, sessionID); err != nil {
+		return fmt.Errorf("claim refresh session id: %w", err)
+	}
+	protocol := s.opts.Runner.Protocol()
+	defer func() {
+		if err := s.opts.ReplayCache.RetireSession(protocol, sessionID); err != nil {
+			runErr = errors.Join(runErr, fmt.Errorf("retire refresh replay state: %w", err))
+		}
+	}()
 	session, out, err := s.opts.Runner.StartRefresh(ctx, current, RefreshRunConfig{
 		SessionID:   sessionID,
 		ReplayCache: s.opts.ReplayCache,

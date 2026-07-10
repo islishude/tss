@@ -44,6 +44,9 @@ func (s *SignSession) abort() {
 	}
 	clearScalarMap(s.partials)
 	s.partialEnvelopes = nil
+	clearScalarMap(s.pendingPartials)
+	s.pendingPartials = nil
+	s.pendingEnvelopes = nil
 	clear(s.message)
 	s.message = nil
 	clear(s.signature)
@@ -58,6 +61,9 @@ func (s *SignSession) clearCompletedSigningState() {
 	clearScalarMap(s.partials)
 	s.partials = nil
 	s.partialEnvelopes = nil
+	clearScalarMap(s.pendingPartials)
+	s.pendingPartials = nil
+	s.pendingEnvelopes = nil
 	clear(s.message)
 	s.message = nil
 }

@@ -2,6 +2,7 @@ package schnorr
 
 import (
 	"bytes"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -68,6 +69,23 @@ func TestProof(t *testing.T) {
 	malformed.Response = append([]byte{0}, proof.Response...)
 	if _, err := malformed.MarshalBinary(); err == nil {
 		t.Fatal("malformed response encoded")
+	}
+}
+
+func TestProofDecoderRejectsOversizedFieldAtWireBoundary(t *testing.T) {
+	t.Parallel()
+
+	raw, err := wire.MarshalFields(proofWireVersion, proofWireType, []wire.Field{
+		{Tag: 1, Value: make([]byte, proofMaxPointBytes+1)},
+		{Tag: 2, Value: make([]byte, secp.ScalarSize)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proof Proof
+	err = proof.UnmarshalBinary(raw)
+	if err == nil || !strings.Contains(err.Error(), "wire field 1 too large") {
+		t.Fatalf("oversized Schnorr commitment got %v, want wire field rejection", err)
 	}
 }
 

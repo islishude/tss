@@ -114,7 +114,7 @@ func TestReplayCacheNilCheckAndStore(t *testing.T) {
 	}
 }
 
-func TestReplayCacheFIFOEviction(t *testing.T) {
+func TestReplayCacheFailsClosedAtCapacity(t *testing.T) {
 	t.Parallel()
 	capacity := 3
 	c := NewBoundedReplayCache(capacity)
@@ -127,25 +127,53 @@ func TestReplayCacheFIFOEviction(t *testing.T) {
 			t.Fatalf("fill slot %d: %v", i, err)
 		}
 	}
-	if len(c.order) != capacity {
-		t.Fatalf("order length = %d, want %d", len(c.order), capacity)
+	if len(c.seen) != capacity {
+		t.Fatalf("cache length = %d, want %d", len(c.seen), capacity)
 	}
 
-	// Insert one more — the oldest (i=0) should be evicted.
+	// A new slot must not evict replay history.
 	slot := MessageSlotKey{Protocol: "test", SessionID: SessionID{0xff}, From: 99, PayloadType: "msg"}
 	hash := sha256.Sum256([]byte{0xff})
-	if err := c.CheckAndStore(slot, hash); err != nil {
-		t.Fatalf("insert after fill: %v", err)
+	if err := c.CheckAndStore(slot, hash); !errors.Is(err, ErrReplayCacheFull) {
+		t.Fatalf("insert after fill got %v, want ErrReplayCacheFull", err)
 	}
-	if len(c.order) != capacity {
-		t.Fatalf("order length after eviction = %d, want %d", len(c.order), capacity)
+	if len(c.seen) != capacity {
+		t.Fatalf("cache length after rejection = %d, want %d", len(c.seen), capacity)
 	}
 
-	// The evicted entry must be re-accepted as new.
-	evicted := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x00}, From: 1, PayloadType: "msg"}
-	evictedHash := sha256.Sum256([]byte{0x00})
-	if err := c.CheckAndStore(evicted, evictedHash); err != nil {
-		t.Fatalf("evicted entry should be re-acceptable: %v", err)
+	// Existing slots retain duplicate and equivocation protection while full.
+	existing := MessageSlotKey{Protocol: "test", SessionID: SessionID{0x00}, From: 1, PayloadType: "msg"}
+	existingHash := sha256.Sum256([]byte{0x00})
+	if err := c.CheckAndStore(existing, existingHash); !errors.Is(err, ErrDuplicateMessage) {
+		t.Fatalf("existing duplicate got %v, want ErrDuplicateMessage", err)
+	}
+	changedHash := sha256.Sum256([]byte("changed"))
+	if err := c.CheckAndStore(existing, changedHash); !errors.Is(err, ErrEquivocation) {
+		t.Fatalf("existing conflict got %v, want ErrEquivocation", err)
+	}
+}
+
+func TestReplayCacheRetireSessionReleasesOnlyTerminalSession(t *testing.T) {
+	t.Parallel()
+	cache := NewBoundedReplayCache(2)
+	sessionA := SessionID{1}
+	sessionB := SessionID{2}
+	slotA := MessageSlotKey{Protocol: ProtocolFROSTEd25519, SessionID: sessionA, From: 1, PayloadType: "a"}
+	slotB := MessageSlotKey{Protocol: ProtocolFROSTEd25519, SessionID: sessionB, From: 1, PayloadType: "b"}
+	if err := cache.CheckAndStore(slotA, [32]byte{1}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.CheckAndStore(slotB, [32]byte{2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := cache.RetireSession(ProtocolFROSTEd25519, sessionA); err != nil {
+		t.Fatalf("RetireSession: %v", err)
+	}
+	if err := cache.CheckAndStore(slotA, [32]byte{1}); err != nil {
+		t.Fatalf("retired slot was not released: %v", err)
+	}
+	if err := cache.CheckAndStore(slotB, [32]byte{2}); !errors.Is(err, ErrDuplicateMessage) {
+		t.Fatalf("other session replay state got %v, want ErrDuplicateMessage", err)
 	}
 }
 

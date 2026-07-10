@@ -58,6 +58,7 @@ func RunSignAttemptStoreSuite(t testing.TB, factory SignAttemptStoreFactory) {
 	run("completion is idempotent", checkSignAttemptCompletionIdempotent)
 	run("different completion result conflicts", checkSignAttemptCompletionConflict)
 	run("delivery ack is idempotent", checkSignAttemptDeliveryAckIdempotent)
+	run("delivery ack requires verifier", checkSignAttemptDeliveryAckRequiresVerifier)
 	run("delivery certificate marks delivery complete", checkSignAttemptDeliveryCertificate)
 	run("delivery certificate requires verifier", checkSignAttemptDeliveryCertificateRequiresVerifier)
 	run("load merges base delivery and completion", checkSignAttemptLoadMergesState)
@@ -225,6 +226,7 @@ func checkSignAttemptDeliveryAckIdempotent(t testing.TB, fixture SignAttemptStor
 		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
 		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
 		Ack:              &ack,
+		AckVerifier:      signAttemptAckVerifier(),
 	})
 	if err != nil {
 		t.Fatalf("first ack: %v", err)
@@ -233,12 +235,37 @@ func checkSignAttemptDeliveryAckIdempotent(t testing.TB, fixture SignAttemptStor
 		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
 		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
 		Ack:              &ack,
+		AckVerifier:      signAttemptAckVerifier(),
 	})
 	if err != nil {
 		t.Fatalf("second ack: %v", err)
 	}
 	if len(first.DeliveryState.Acks) != 1 || len(second.DeliveryState.Acks) != 1 {
 		t.Fatal("duplicate delivery ack was not idempotent")
+	}
+}
+
+func checkSignAttemptDeliveryAckRequiresVerifier(t testing.TB, fixture SignAttemptStoreFixture) {
+	t.Helper()
+	ctx := context.Background()
+	env := signAttemptEnvelope(t, fixture.Candidate)
+	ack := signAttemptAck(env, fixture.Candidate.DeliveryPolicy.Recipients[0])
+	if _, err := fixture.Store.CommitSignAttempt(ctx, fixture.Candidate); err != nil {
+		t.Fatalf("commit candidate: %v", err)
+	}
+	if _, err := fixture.Store.UpdateSignAttemptDelivery(ctx, secp256k1.SignAttemptDeliveryUpdate{
+		PresignContentID: bytes.Clone(fixture.Candidate.PresignContentID),
+		AttemptHash:      bytes.Clone(fixture.Candidate.AttemptHash),
+		Ack:              &ack,
+	}); !errors.Is(err, tss.ErrMissingAckVerifier) {
+		t.Fatalf("ack without verifier error = %v, want ErrMissingAckVerifier", err)
+	}
+	loaded, err := fixture.Store.LoadSignAttempt(ctx, fixture.Candidate.PresignContentID)
+	if err != nil {
+		t.Fatalf("load after rejected ack: %v", err)
+	}
+	if len(loaded.DeliveryState.Acks) != 0 || loaded.DeliveryState.DeliveryComplete {
+		t.Fatal("rejected ack advanced durable delivery state")
 	}
 }
 

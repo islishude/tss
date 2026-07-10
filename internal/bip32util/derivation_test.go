@@ -138,6 +138,20 @@ func TestDeriveSecp256k1RejectsInvalidInputs(t *testing.T) {
 	}
 }
 
+func TestDerivationRejectsUnknownInvalidChildMode(t *testing.T) {
+	t.Parallel()
+	mode := tss.WithInvalidChildMode(tss.InvalidChildMode(255))
+	secpParent := mustParseTestXPub(t, xpubTV2Master)
+	if _, err := DeriveSecp256k1(secpParent.PublicKey, secpParent.ChainCode[:], []uint32{0}, mode); !errors.Is(err, tss.ErrInvalidChildMode) {
+		t.Fatalf("secp256k1 derivation got %v, want ErrInvalidChildMode", err)
+	}
+	edPub := testutil.MustDecodeHex(t, ed25519HDVectorParentPubHex)
+	edChain := testutil.MustDecodeHex(t, ed25519HDVectorChainCodeHex)
+	if _, err := DeriveEd25519KhovratovichLaw(edPub, edChain, []uint32{0}, mode); !errors.Is(err, tss.ErrInvalidChildMode) {
+		t.Fatalf("ed25519 derivation got %v, want ErrInvalidChildMode", err)
+	}
+}
+
 func TestDeriveSecp256k1EmptyPathReturnsParent(t *testing.T) {
 	t.Parallel()
 

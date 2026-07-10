@@ -35,12 +35,12 @@ const (
 // knowledge of the factorization of N using verifier-derived challenges y_i;
 // the proof never carries y_i values supplied by the prover.
 type ModulusProof struct {
-	W              []byte   `json:"w" wire:"1,bytes"`
-	TranscriptHash []byte   `json:"transcript_hash" wire:"2,bytes"`
-	X              [][]byte `json:"x" wire:"3,byteslist"`
-	A              []byte   `json:"a" wire:"4,bytes"`
-	B              []byte   `json:"b" wire:"5,bytes"`
-	Z              [][]byte `json:"z" wire:"6,byteslist"`
+	W              []byte   `json:"w" wire:"1,bytes,max_bytes=paillier_modulus"`
+	TranscriptHash []byte   `json:"transcript_hash" wire:"2,bytes,len=32"`
+	X              [][]byte `json:"x" wire:"3,byteslist,max_bytes=paillier_modulus,max_items=proof_rounds"`
+	A              []byte   `json:"a" wire:"4,bytes,len=128"`
+	B              []byte   `json:"b" wire:"5,bytes,len=128"`
+	Z              [][]byte `json:"z" wire:"6,byteslist,max_bytes=paillier_modulus,max_items=proof_rounds"`
 }
 
 // WireType returns the canonical wire type identifier for ModulusProof.
@@ -94,10 +94,10 @@ func (params *RingPedersenParams) Clone() *RingPedersenParams {
 // RingPedersenProof is CGGMP24 Πprm proving knowledge of lambda such that
 // s = t^lambda mod N for Ring-Pedersen parameters (N, s, t).
 type RingPedersenProof struct {
-	TranscriptHash []byte   `json:"transcript_hash" wire:"1,bytes"`
-	Commitments    [][]byte `json:"commitments" wire:"2,byteslist"`
-	Challenges     []byte   `json:"challenges" wire:"3,bytes"`
-	Responses      [][]byte `json:"responses" wire:"4,byteslist"`
+	TranscriptHash []byte   `json:"transcript_hash" wire:"1,bytes,len=32"`
+	Commitments    [][]byte `json:"commitments" wire:"2,byteslist,max_bytes=paillier_modulus,max_items=proof_rounds"`
+	Challenges     []byte   `json:"challenges" wire:"3,bytes,len=128"`
+	Responses      [][]byte `json:"responses" wire:"4,byteslist,max_bytes=paillier_modulus,max_items=proof_rounds"`
 }
 
 // WireType returns the canonical wire type identifier for RingPedersenProof.

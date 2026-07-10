@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -242,6 +243,35 @@ func TestPrivateKeyWireDecodeIsFailAtomic(t *testing.T) {
 		!original.P.Equal(before.P) ||
 		!original.Q.Equal(before.Q) {
 		t.Fatal("failed private-key decode mutated receiver")
+	}
+}
+
+func TestStandaloneKeyDecodersEnforceObjectByteCaps(t *testing.T) {
+	t.Parallel()
+
+	for name, tc := range map[string]struct {
+		maxBytes int
+		decode   func([]byte) error
+	}{
+		"public": {
+			maxBytes: tss.DefaultMaxPaillierPublicKeyBytes,
+			decode: func(in []byte) error {
+				var key PublicKey
+				return key.UnmarshalBinary(in)
+			},
+		},
+		"private": {
+			maxBytes: tss.DefaultMaxPaillierPrivateKeyBytes,
+			decode: func(in []byte) error {
+				var key PrivateKey
+				return key.UnmarshalBinary(in)
+			},
+		},
+	} {
+		err := tc.decode(make([]byte, tc.maxBytes+1))
+		if err == nil || !strings.Contains(err.Error(), "wire input too large") {
+			t.Errorf("%s key oversized decode got %v, want wire frame rejection", name, err)
+		}
 	}
 }
 

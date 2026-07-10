@@ -139,8 +139,8 @@ func Example_encryptDecrypt() {
 	keyMaterial := []byte("this is a serialized key share")
 
 	// --- 1. Encrypt key material with a passphrase ---
-	// The optional PassphraseParams can tune scrypt cost parameters.
-	// A nil params uses production defaults (N=32768, r=8, p=1).
+	// The optional PassphraseParams can tune Argon2id cost parameters.
+	// Nil parameters use the documented production defaults.
 	encrypted, err := tss.EncryptKeyShareWithPassphrase(keyMaterial, passphrase, "my-key-id", nil)
 	if err != nil {
 		panic(err)
@@ -149,7 +149,7 @@ func Example_encryptDecrypt() {
 	// --- 2. Decrypt the ciphertext with the same passphrase ---
 	// DecryptKeyShareWithPassphrase verifies the key ID and AEAD tag,
 	// returning the original plaintext only if both are correct.
-	decrypted, err := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase, "my-key-id")
 	if err != nil {
 		panic(err)
 	}

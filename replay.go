@@ -2,6 +2,7 @@ package tss
 
 import (
 	"crypto/sha256"
+	"errors"
 	"sync"
 )
 
@@ -10,12 +11,11 @@ import (
 // use a durable shared cache (e.g. Redis) keyed by session ID + slot key.
 //
 // MaxEntries limits the number of cached slots (0 = use default of 100000).
-// Eviction is FIFO: when the limit is exceeded, the oldest entry is removed
-// to bound memory usage while preserving recent entries for replay detection.
+// The cache fails closed with [ErrReplayCacheFull] instead of evicting security
+// state that may still be needed to reject a replay or equivocation.
 type InMemoryReplayCache struct {
 	mu         sync.Mutex
 	seen       map[messageSlotKey][32]byte
-	order      []messageSlotKey // FIFO insertion order for deterministic eviction
 	maxEntries int
 }
 
@@ -37,9 +37,9 @@ func NewInMemoryReplayCache() *InMemoryReplayCache {
 	return NewBoundedReplayCache(defaultReplayCacheMaxEntries)
 }
 
-// NewBoundedReplayCache returns an in-memory replay cache with a FIFO eviction
-// policy: when the number of cached keys exceeds maxEntries, the oldest entry
-// (by insertion order) is evicted.
+// NewBoundedReplayCache returns a bounded in-memory replay cache. Once full,
+// new slots fail with [ErrReplayCacheFull]; existing slots remain available for
+// duplicate and equivocation checks.
 //
 // maxEntries must be positive. Values <= 0 are replaced with the default of
 // [defaultReplayCacheMaxEntries]. The default is intentionally large enough to
@@ -51,7 +51,6 @@ func NewBoundedReplayCache(maxEntries int) *InMemoryReplayCache {
 	}
 	return &InMemoryReplayCache{
 		seen:       make(map[messageSlotKey][32]byte, maxEntries),
-		order:      make([]messageSlotKey, 0, maxEntries),
 		maxEntries: maxEntries,
 	}
 }
@@ -79,23 +78,38 @@ func (c *InMemoryReplayCache) CheckAndStore(slot MessageSlotKey, payloadHash [32
 	}
 	existing, ok := c.seen[sk]
 	if !ok {
-		// FIFO eviction: remove the oldest entry before inserting a new one
-		// when at capacity. This guarantees deterministic eviction order and
-		// prevents an attacker from selectively evicting arbitrary entries
-		// through map iteration randomization.
-		if len(c.order) >= c.maxEntries {
-			oldest := c.order[0]
-			delete(c.seen, oldest)
-			c.order = c.order[1:]
+		if len(c.seen) >= c.maxEntries {
+			return ErrReplayCacheFull
 		}
 		c.seen[sk] = payloadHash
-		c.order = append(c.order, sk)
 		return nil
 	}
 	if existing == payloadHash {
 		return ErrDuplicateMessage
 	}
 	return ErrEquivocation
+}
+
+// RetireSession removes replay history for a terminal session. Callers must
+// durably prevent the session ID from being reused before retiring its state.
+func (c *InMemoryReplayCache) RetireSession(protocol ProtocolID, sessionID SessionID) error {
+	if c == nil {
+		return ErrMissingReplayCache
+	}
+	if protocol == "" {
+		return errors.New("replay cache protocol is empty")
+	}
+	if !sessionID.Valid() {
+		return ErrInvalidSessionID
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for slot := range c.seen {
+		if slot.protocol == protocol && slot.sessionID == sessionID {
+			delete(c.seen, slot)
+		}
+	}
+	return nil
 }
 
 // SlotKeyFromEnvelope constructs a [MessageSlotKey] from the envelope's identifying fields.

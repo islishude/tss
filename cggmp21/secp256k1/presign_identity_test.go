@@ -144,3 +144,20 @@ func TestFast_PresignVerificationContextRejectsSignerSetMismatch(t *testing.T) {
 		})
 	}
 }
+
+func TestFast_PresignRejectsChildVerificationKeyDetachedFromParent(t *testing.T) {
+	t.Parallel()
+
+	presign := minimalCGGMP21Presign(t)
+	if err := presign.ValidateWithLimits(testLimits()); err != nil {
+		t.Fatalf("valid presign fixture: %v", err)
+	}
+	child, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromUint64(2)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	presign.state.Derivation.ChildPublicKey = child
+	if err := presign.ValidateWithLimits(testLimits()); err == nil {
+		t.Fatal("presign accepted child verification key detached from parent and shift")
+	}
+}

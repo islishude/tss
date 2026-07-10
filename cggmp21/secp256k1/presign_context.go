@@ -80,6 +80,28 @@ func validateDerivationResult(result *tss.DerivationResult, scheme tss.Derivatio
 	return nil
 }
 
+func validateSecp256k1DerivationBinding(parent *secp.Point, result *tss.DerivationResult) error {
+	if parent == nil || result == nil {
+		return errors.New("nil secp256k1 derivation binding")
+	}
+	shift, err := secp.ScalarFromBytesAllowZero(result.AdditiveShift)
+	if err != nil {
+		return fmt.Errorf("invalid additive shift: %w", err)
+	}
+	child, err := secp.PointFromBytes(result.ChildPublicKey)
+	if err != nil {
+		return fmt.Errorf("invalid child public key: %w", err)
+	}
+	expected := secp.Clone(parent)
+	if !shift.IsZero() {
+		expected = secp.Add(expected, secp.ScalarBaseMult(shift))
+	}
+	if !secp.Equal(expected, child) {
+		return errors.New("child public key does not match parent key and additive shift")
+	}
+	return nil
+}
+
 func appendDerivationResultTranscript(t *transcript.Builder, result *tss.DerivationResult) {
 	if result == nil {
 		t.AppendString("derivation_scheme", "")

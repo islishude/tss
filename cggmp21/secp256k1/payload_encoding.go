@@ -58,7 +58,10 @@ func marshalPayloadWithLimits[T any](p T, limits Limits) ([]byte, error) {
 
 func unmarshalPayloadWithLimits[T any](dst *T, in []byte, limits Limits) error {
 	var decoded T
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(limits.fieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(limits.frameLimits(limits.Payload.MaxMessageBytes)),
+		wire.WithFieldLimits(limits.fieldLimits()),
+	); err != nil {
 		return err
 	}
 	if err := validatePayloadWithLimits(decoded, limits); err != nil {

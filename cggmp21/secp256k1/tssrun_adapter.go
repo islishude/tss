@@ -18,8 +18,12 @@ func (s *KeygenSession) Completed() bool {
 
 // Completed reports whether the presign session has produced a presign record.
 func (s *PresignSession) Completed() bool {
-	_, ok := s.Presign()
-	return ok
+	if s == nil {
+		return false
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.completed
 }
 
 // Completed reports whether the signing session has produced a signature.

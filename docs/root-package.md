@@ -242,6 +242,7 @@ complete.
 ```go
 type ReplayCache interface {
     CheckAndStore(slot MessageSlotKey, payloadHash [32]byte) error
+    RetireSession(protocol ProtocolID, sessionID SessionID) error
 }
 ```
 
@@ -250,12 +251,20 @@ type ReplayCache interface {
 - `nil` when the slot is new (first use).
 - `ErrDuplicateMessage` when the slot exists with the same payload hash (harmless duplicate, silently dropped by the guard).
 - `ErrEquivocation` when the slot exists with a different payload hash (malicious or faulty sender).
+- `ErrReplayCacheFull` when a bounded cache cannot record a new slot without forgetting existing replay history.
 
 `MessageSlotKey` identifies a unique protocol message slot by `(protocol, sessionID, round, from, to, payloadType)`. The payload is excluded from the slot key, so two different payloads in the same slot constitute equivocation.
 
 `SlotKeyFromEnvelope` and `PayloadHashFromEnvelope` construct the arguments for `CheckAndStore` from an envelope.
 
-Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache` is provided for single-process use.
+`RetireSession` removes only one terminal session's replay history. Call it only
+after the session ID is durably unavailable for reuse. The refresh scheduler
+does this automatically after every claimed run reaches a terminal outcome.
+
+Production sessions must use a non-nil `ReplayCache`. An `InMemoryReplayCache`
+is provided for single-process use and fails closed at its configured capacity;
+operators must size it for all concurrently active session replay state and
+retire terminal sessions promptly.
 
 ## ProtocolError
 
@@ -384,9 +393,13 @@ raw, _ := share.MarshalBinary()
 encrypted, _ := tss.EncryptKeyShareWithPassphrase(raw, passphrase, "key-1", nil)
 // store encrypted...
 
-raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
+raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase, "key-1")
 share, _ := secp256k1.UnmarshalKeyShare(raw)
 ```
+
+Decrypt helpers require the expected key ID and compare it only after AEAD
+authentication. A valid same-type ciphertext encrypted under the same
+passphrase but for another key ID is rejected with `ErrStorageKeyIDMismatch`.
 
 These are **reference/demo implementations**. Production deployments should use a KMS or HSM. See [docs/deployment.md](deployment.md) for the full persistence guide.
 

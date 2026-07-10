@@ -340,6 +340,7 @@ func (s *FileSignAttemptStore) mergeDeliveryAcks(record *SignAttemptRecord, pres
 				PresignContentID: presignContentID,
 				AttemptHash:      record.AttemptHash,
 				Ack:              &ack,
+				ackVerified:      true,
 			})
 			if err != nil {
 				return err

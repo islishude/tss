@@ -23,7 +23,7 @@ const (
 
 // ResponseMessage carries an MtA ciphertext response and transcript proof.
 type ResponseMessage struct {
-	Ciphertext []byte          `json:"ciphertext" wire:"1,bytes"`
+	Ciphertext []byte          `json:"ciphertext" wire:"1,bytes,max_bytes=paillier_ciphertext"`
 	Proof      zkpai.AffGProof `json:"proof" wire:"2,nested,max_bytes=zk_proof"`
 }
 
@@ -41,7 +41,12 @@ func (m ResponseMessage) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary decodes a TLV MtA response message.
 func (m *ResponseMessage) UnmarshalBinary(in []byte) error {
 	var decoded ResponseMessage
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(responseMessageFieldLimits())); err != nil {
+	if err := wire.Unmarshal(
+		in,
+		&decoded,
+		wire.WithFrameLimits(mtaMessageFrameLimits()),
+		wire.WithFieldLimits(responseMessageFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*m = decoded
@@ -61,11 +66,12 @@ func (m ResponseMessage) Validate() error {
 
 func responseMessageFieldLimits() wire.FieldLimits {
 	return wire.FieldLimits{
-		"zk_proof":         tss.DefaultMaxZKProofBytes,
-		"paillier_modulus": tss.DefaultMaxPaillierCiphertextBytes,
-		"point":            tss.DefaultMaxPointBytes,
-		"signed_response":  tss.DefaultMaxPaillierCiphertextBytes,
-		"paillier_signed":  tss.DefaultMaxPaillierCiphertextBytes,
+		"paillier_ciphertext": tss.DefaultMaxPaillierCiphertextBytes,
+		"zk_proof":            tss.DefaultMaxZKProofBytes,
+		"paillier_modulus":    tss.DefaultMaxPaillierCiphertextBytes,
+		"point":               tss.DefaultMaxPointBytes,
+		"signed_response":     tss.DefaultMaxPaillierCiphertextBytes,
+		"paillier_signed":     tss.DefaultMaxPaillierCiphertextBytes,
 	}
 }
 

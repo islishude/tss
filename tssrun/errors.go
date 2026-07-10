@@ -17,6 +17,10 @@ var ErrSessionAlreadyUsed = errors.New("tssrun: session already used")
 // ErrRunNotAccepted reports that the local party has not accepted the plan.
 var ErrRunNotAccepted = errors.New("tssrun: run not accepted")
 
+// ErrRunPartyNotParticipant reports that a lifecycle mutation names a party
+// outside the run's participant set.
+var ErrRunPartyNotParticipant = errors.New("tssrun: party is not a run participant")
+
 // ErrRunCompleted reports that the requested run has completed locally.
 var ErrRunCompleted = errors.New("tssrun: run completed")
 
@@ -26,11 +30,17 @@ var ErrRunAborted = errors.New("tssrun: run aborted")
 // ErrUnknownSession reports that no active session is registered for an inbound envelope.
 var ErrUnknownSession = errors.New("tssrun: unknown session")
 
+// ErrUnknownSessionBufferFull reports that the unknown-session buffer quota is full.
+var ErrUnknownSessionBufferFull = errors.New("tssrun: unknown session buffer full")
+
 // ErrSessionConflict reports that a session registry key is already occupied.
 var ErrSessionConflict = errors.New("tssrun: session conflict")
 
 // ErrInvalidRunIntent reports malformed or incomplete run metadata.
 var ErrInvalidRunIntent = errors.New("tssrun: invalid run intent")
+
+// ErrInvalidRunResult reports malformed local completion metadata.
+var ErrInvalidRunResult = errors.New("tssrun: invalid local run result")
 
 // ErrInvalidSessionKey reports a malformed session registry key.
 var ErrInvalidSessionKey = errors.New("tssrun: invalid session key")

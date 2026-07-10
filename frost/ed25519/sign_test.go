@@ -182,6 +182,9 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	if sig, ok := sessions[1].Signature(); ok {
 		t.Fatalf("signature completed before all commitments arrived: %x", sig)
 	}
+	if len(sessions[1].partials) != 0 || len(sessions[1].pendingPartials) != 2 {
+		t.Fatalf("early partial state: accepted=%d pending=%d, want 0 accepted and 2 pending", len(sessions[1].partials), len(sessions[1].pendingPartials))
+	}
 
 	out, err := sessions[1].Handle(testutil.DeliverEnvelope(round1[3]))
 	if err != nil {
@@ -205,6 +208,48 @@ func TestSignOutOfOrderPartialsWaitForCommitments(t *testing.T) {
 	}
 	if sessions[1].partialEnvelopes != nil {
 		t.Fatal("completed signing session retained partial envelopes")
+	}
+	if sessions[1].pendingPartials != nil || sessions[1].pendingEnvelopes != nil {
+		t.Fatal("completed signing session retained pending partial state")
+	}
+}
+
+func TestSignNonSignerDoesNotConsumeReplayCapacity(t *testing.T) {
+	t.Parallel()
+	shares := frostKeygen(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := tss.NewPartySet(1, 2, 3)
+	guard, err := tss.NewEnvelopeGuard(1, parties, tss.ProtocolFROSTEd25519, sessionID, testFROSTPolicies(), tss.NewBoundedReplayCache(1))
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := startFROSTSign(shares[1], sessionID, tss.NewPartySet(1, 2), []byte("signer guard"), guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, signerOut, err := startFROSTSign(shares[2], sessionID, tss.NewPartySet(1, 2), []byte("signer guard"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	nonSigner, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    tss.ProtocolFROSTEd25519,
+		SessionID:   sessionID,
+		Round:       signStartRound,
+		From:        3,
+		PayloadType: payloadSignCommitment,
+		Payload:     []byte("not decoded"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Handle(testutil.DeliverEnvelope(nonSigner)); err == nil {
+		t.Fatal("non-signer envelope accepted")
+	}
+	if _, err := session.Handle(testutil.DeliverEnvelope(signerOut[0])); err != nil {
+		t.Fatalf("valid signer rejected after non-signer input: %v", err)
 	}
 }
 

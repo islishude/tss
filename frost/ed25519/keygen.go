@@ -19,19 +19,20 @@ const (
 
 // KeygenSession tracks dealerless FROST DKG state for one local party.
 type KeygenSession struct {
-	mu            sync.Mutex
-	cfg           tss.ThresholdConfig
-	limits        Limits
-	planHash      []byte
-	guard         *tss.EnvelopeGuard
-	local         *frostKeygenLocalMaterial
-	round1        *frostKeygenRound1Inbox
-	confirmations *frostKeygenConfirmationInbox
-	pending       *frostPendingKeyShare
-	keyShare      *KeyShare
-	state         keygenState
-	completed     bool
-	aborted       bool
+	mu                   sync.Mutex
+	cfg                  tss.ThresholdConfig
+	limits               Limits
+	planHash             []byte
+	guard                *tss.EnvelopeGuard
+	local                *frostKeygenLocalMaterial
+	round1               *frostKeygenRound1Inbox
+	confirmations        *frostKeygenConfirmationInbox
+	pendingConfirmations map[tss.PartyID]*KeygenConfirmation
+	pending              *frostPendingKeyShare
+	keyShare             *KeyShare
+	state                keygenState
+	completed            bool
+	aborted              bool
 }
 
 type keygenCommitmentsPayload struct {
@@ -137,6 +138,12 @@ func (s *KeygenSession) abort() {
 	}
 	if s.confirmations != nil {
 		s.confirmations.ClearReveals()
+	}
+	for id, confirmation := range s.pendingConfirmations {
+		if confirmation != nil {
+			clear(confirmation.ChainCode)
+		}
+		delete(s.pendingConfirmations, id)
 	}
 	s.aborted = true
 	if s.pending != nil {

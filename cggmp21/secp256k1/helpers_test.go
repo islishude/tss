@@ -689,6 +689,7 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
 		SessionID:            tss.SessionID{1},
 		Party:                1,
 		Signers:              tss.NewPartySet(1),
+		PlanHash:             bytes.Repeat([]byte{0x99}, 32),
 		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
 		PublicKey:            kPoint,
 		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),

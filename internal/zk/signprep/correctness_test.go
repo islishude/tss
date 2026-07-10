@@ -3,12 +3,14 @@ package signprep
 import (
 	"bytes"
 	"math/big"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
+	"github.com/islishude/tss/internal/wire"
 )
 
 type signPrepProofFixture struct {
@@ -142,6 +144,27 @@ func TestSignPrepProofRejectsStatementMutation(t *testing.T) {
 	}
 }
 
+func TestSignPrepProofRejectsUnderboundStatements(t *testing.T) {
+	t.Parallel()
+
+	fx := newSignPrepProofFixture(t, 80, withSignPrepParty(1, tss.NewPartySet(1, 2, 3)))
+	for name, mutate := range map[string]func(*Statement){
+		"missing plan hash": func(stmt *Statement) { stmt.PlanHash = nil },
+		"unsorted signers":  func(stmt *Statement) { stmt.Signers = tss.PartySet{2, 1, 3} },
+		"duplicate signers": func(stmt *Statement) { stmt.Signers = tss.PartySet{1, 2, 2} },
+		"party not signer":  func(stmt *Statement) { stmt.Signers = tss.NewPartySet(2, 3) },
+	} {
+		stmt := fx.stmt.Clone()
+		mutate(&stmt)
+		if _, err := Prove(testutil.DeterministicReader(81), stmt, fx.wit); err == nil {
+			t.Errorf("Prove accepted %s", name)
+		}
+		if err := Verify(stmt, fx.proof); err == nil {
+			t.Errorf("Verify accepted %s", name)
+		}
+	}
+}
+
 func TestSignPrepProofEncodingRoundTrip(t *testing.T) {
 	t.Parallel()
 
@@ -247,6 +270,36 @@ func TestSignPrepProofRejectsNilProof(t *testing.T) {
 	}
 }
 
+func TestSignPrepProofRejectsUnusedZeroMFields(t *testing.T) {
+	t.Parallel()
+
+	fx := newSignPrepProofFixture(t, 12, withSignPrepParty(12, tss.NewPartySet(12)))
+	proof := fx.proof.Clone()
+	proof.MPoint = nil
+	if err := proof.Validate(); err == nil || !strings.Contains(err.Error(), "zero MPoint") {
+		t.Fatalf("zero-M proof with unused fields got %v, want semantic rejection", err)
+	}
+	if _, err := proof.MarshalBinary(); err == nil || !strings.Contains(err.Error(), "zero MPoint") {
+		t.Fatalf("zero-M proof with unused fields marshaled: %v", err)
+	}
+}
+
+func TestSignPrepProofDecoderRejectsOversizedFieldAtWireBoundary(t *testing.T) {
+	t.Parallel()
+
+	raw, err := wire.MarshalFields(proofWireVersion, proofWireType, []wire.Field{
+		{Tag: 1, Value: make([]byte, proofMaxPointBytes+1)},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var proof Proof
+	err = proof.UnmarshalBinary(raw)
+	if err == nil || !strings.Contains(err.Error(), "wire field 1 too large") {
+		t.Fatalf("oversized signprep point got %v, want wire field rejection", err)
+	}
+}
+
 func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOption) signPrepProofFixture {
 	t.Helper()
 
@@ -260,6 +313,7 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 		SessionID:            tss.SessionID{byte(seed)},
 		Party:                tss.PartyID(seed),
 		Signers:              tss.NewPartySet(tss.PartyID(seed)),
+		PlanHash:             bytes.Repeat([]byte{0x99}, 32),
 		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
 		PublicKey:            kPoint,
 		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),

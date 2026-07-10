@@ -17,10 +17,15 @@ const proofWireVersion = 1
 
 const proofWireType = "zk.schnorr.proof"
 
+const (
+	proofMaxBytes      = 256
+	proofMaxPointBytes = 65
+)
+
 // Proof is a Schnorr proof of knowledge over secp256k1.
 type Proof struct {
-	Commitment []byte `wire:"1,bytes"`
-	Response   []byte `wire:"2,bytes"`
+	Commitment []byte `wire:"1,bytes,max_bytes=point"`
+	Response   []byte `wire:"2,bytes,max_bytes=scalar"`
 }
 
 // Clone returns a copy of Proof
@@ -97,7 +102,7 @@ func Verify(domain, public []byte, proof *Proof) bool {
 
 // MarshalBinary encodes the proof using the object-level wire codec.
 func (p *Proof) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(p)
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(proofFieldLimits()))
 }
 
 // MarshalWireValue encodes the proof as a canonical TLV value for custom wire
@@ -112,11 +117,25 @@ func (p *Proof) MarshalWireValue() ([]byte, error) {
 // UnmarshalBinary decodes a TLV Schnorr proof record.
 func (p *Proof) UnmarshalBinary(in []byte) error {
 	var decoded Proof
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(wire.FrameLimits{
+			MaxTotalBytes: proofMaxBytes,
+			MaxFields:     2,
+			MaxFieldBytes: proofMaxPointBytes,
+		}),
+		wire.WithFieldLimits(proofFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded
 	return nil
+}
+
+func proofFieldLimits() wire.FieldLimits {
+	return wire.FieldLimits{
+		"point":  proofMaxPointBytes,
+		"scalar": secp.ScalarSize,
+	}
 }
 
 // UnmarshalWireValue decodes the proof from a canonical custom wire field

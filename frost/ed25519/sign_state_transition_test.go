@@ -238,3 +238,29 @@ func TestFROSTSignAggregateFailureDoesNotCommit(t *testing.T) {
 	}
 	assertFROSTSnapshotUnchanged(t, before, after)
 }
+
+func TestFROSTAggregateBlameEvidenceIsDecodable(t *testing.T) {
+	t.Parallel()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	blame := frostAggregateBlame(
+		sessionID,
+		1,
+		tss.NewPartySet(1, 2),
+		bytes.Repeat([]byte{1}, 32),
+		[]byte("message"),
+		bytes.Repeat([]byte{2}, 64),
+	)
+	if blame == nil || len(blame.Evidence) == 0 {
+		t.Fatal("aggregate blame omitted evidence")
+	}
+	evidence, err := tss.DecodeBinary[tss.BlameEvidence](blame.Evidence)
+	if err != nil {
+		t.Fatalf("decode aggregate blame evidence: %v", err)
+	}
+	if evidence.Kind != tss.EvidenceKindFrostAggregateSignature || evidence.From != 1 {
+		t.Fatalf("unexpected aggregate evidence kind=%q from=%d", evidence.Kind, evidence.From)
+	}
+}

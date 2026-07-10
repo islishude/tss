@@ -47,6 +47,11 @@ func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare]
 	return runner
 }
 
+// Protocol returns the CGGMP21 protocol identifier.
+func (*refreshRunner) Protocol() tss.ProtocolID {
+	return tss.ProtocolCGGMP21Secp256k1
+}
+
 // StartRefresh constructs one CGGMP21 refresh session.
 func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, config tss.RefreshRunConfig) (tss.RefreshSession[*KeyShare], []tss.Envelope, error) {
 	if current == nil || current.state == nil {

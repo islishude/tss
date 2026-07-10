@@ -3,6 +3,7 @@ package conformance
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
 	"testing"
 
@@ -35,6 +36,12 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	ctx := context.Background()
 	store := newStore(t)
 	run := testRunIntent(t, "run-1")
+	invalidRun := run.Clone()
+	invalidRun.RunID = "run-missing-plan"
+	invalidRun.PlanDigest = nil
+	if err := store.CreateRun(ctx, invalidRun); !errors.Is(err, tssrun.ErrInvalidRunIntent) {
+		t.Fatalf("missing plan digest: got %v, want ErrInvalidRunIntent", err)
+	}
 	if err := store.CreateRun(ctx, run); err != nil {
 		t.Fatalf("CreateRun: %v", err)
 	}
@@ -50,14 +57,29 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, tssrun.ErrRunNotAccepted) {
 		t.Fatalf("unaccepted lookup: got %v, want ErrRunNotAccepted", err)
 	}
-	digest := []byte("plan-digest")
+	digest := run.PlanDigest
+	if err := store.AcceptPlan(ctx, run.RunID, 1, runDigest("other-digest")); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
+		t.Fatalf("unbound initial digest: got %v, want ErrPlanDigestConflict", err)
+	}
+	if err := store.AcceptPlan(ctx, run.RunID, 4, digest); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant accept: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.MarkStarted(ctx, run.RunID, 4); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant start: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 4, tssrun.LocalRunResult{OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant complete: got %v, want ErrRunPartyNotParticipant", err)
+	}
+	if err := store.AbortRun(ctx, run.RunID, 4, "invalid party"); !errors.Is(err, tssrun.ErrRunPartyNotParticipant) {
+		t.Fatalf("non-participant abort: got %v, want ErrRunPartyNotParticipant", err)
+	}
 	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
 		t.Fatalf("AcceptPlan: %v", err)
 	}
 	if err := store.AcceptPlan(ctx, run.RunID, 1, digest); err != nil {
 		t.Fatalf("idempotent AcceptPlan: %v", err)
 	}
-	if err := store.AcceptPlan(ctx, run.RunID, 1, []byte("other-digest")); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
+	if err := store.AcceptPlan(ctx, run.RunID, 1, runDigest("other-digest")); !errors.Is(err, tssrun.ErrPlanDigestConflict) {
 		t.Fatalf("digest conflict: got %v, want ErrPlanDigestConflict", err)
 	}
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
@@ -75,8 +97,21 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.MarkStarted(ctx, run.RunID, 2); err != nil {
 		t.Fatalf("MarkStarted second party: %v", err)
 	}
-	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{OutputDigest: []byte("out")}); err != nil {
+	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{KeyID: run.KeyID}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
+		t.Fatalf("empty completion digest: got %v, want ErrInvalidRunResult", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 1, tssrun.LocalRunResult{KeyID: "other-key", OutputDigest: runDigest("out")}); !errors.Is(err, tssrun.ErrInvalidRunResult) {
+		t.Fatalf("mismatched completion metadata: got %v, want ErrInvalidRunResult", err)
+	}
+	result1 := keygenRunResult(run, "out")
+	if err := store.MarkCompleted(ctx, run.RunID, 1, result1); err != nil {
 		t.Fatalf("MarkCompleted: %v", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 1, result1); err != nil {
+		t.Fatalf("idempotent MarkCompleted: %v", err)
+	}
+	if err := store.MarkCompleted(ctx, run.RunID, 1, keygenRunResult(run, "other-out")); !errors.Is(err, tssrun.ErrRunCompleted) {
+		t.Fatalf("completed result overwrite: got %v, want ErrRunCompleted", err)
 	}
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); err != nil {
 		t.Fatalf("lookup after one local completion: %v", err)
@@ -84,7 +119,7 @@ func runRunStore(t *testing.T, newStore func(testing.TB) tssrun.RunStore) {
 	if err := store.MarkStarted(ctx, run.RunID, 1); !errors.Is(err, tssrun.ErrRunCompleted) {
 		t.Fatalf("completed party restart: got %v, want ErrRunCompleted", err)
 	}
-	if err := store.MarkCompleted(ctx, run.RunID, 2, tssrun.LocalRunResult{OutputDigest: []byte("out-2")}); err != nil {
+	if err := store.MarkCompleted(ctx, run.RunID, 2, keygenRunResult(run, "out-2")); err != nil {
 		t.Fatalf("MarkCompleted second party: %v", err)
 	}
 	if _, err := store.LookupBySession(ctx, run.Protocol, run.SessionID); !errors.Is(err, tssrun.ErrRunCompleted) {
@@ -190,12 +225,27 @@ func testRunIntent(t *testing.T, runID string) tssrun.RunIntent {
 		t.Fatalf("NewSessionID: %v", err)
 	}
 	return tssrun.RunIntent{
-		RunID:     runID,
-		Protocol:  tss.ProtocolFROSTEd25519,
-		Kind:      tssrun.RunKeygen,
-		SessionID: sessionID,
-		Parties:   tss.NewPartySet(1, 2, 3),
-		Threshold: 2,
+		RunID:      runID,
+		Protocol:   tss.ProtocolFROSTEd25519,
+		Kind:       tssrun.RunKeygen,
+		SessionID:  sessionID,
+		Parties:    tss.NewPartySet(1, 2, 3),
+		Threshold:  2,
+		KeyID:      "key-1",
+		PlanDigest: runDigest("plan-digest"),
+	}
+}
+
+func runDigest(label string) []byte {
+	digest := sha256.Sum256([]byte(label))
+	return digest[:]
+}
+
+func keygenRunResult(run tssrun.RunIntent, label string) tssrun.LocalRunResult {
+	return tssrun.LocalRunResult{
+		KeyID:         run.KeyID,
+		KeyGeneration: "gen-1",
+		OutputDigest:  runDigest(label),
 	}
 }
 

@@ -29,6 +29,8 @@ type SignSession struct {
 	commitments      map[tss.PartyID]nonceCommitment // Round-1 nonce commitments by signer.
 	partials         map[tss.PartyID]*fed.Scalar     // Validated partial signature scalars by signer.
 	partialEnvelopes map[tss.PartyID]tss.Envelope    // Original partial envelopes retained for blame evidence.
+	pendingPartials  map[tss.PartyID]*fed.Scalar     // Parsed partials awaiting the complete commitment set.
+	pendingEnvelopes map[tss.PartyID]tss.Envelope    // Original envelopes for pending partials.
 	dNonce           *secret.Scalar                  // Local hiding nonce; secret until partial generation.
 	eNonce           *secret.Scalar                  // Local binding nonce; secret until partial generation.
 	deltaScalar      *fed.Scalar                     // Additive HD shift applied to the local signing share.
@@ -249,6 +251,8 @@ func StartSign(key *KeyShare, plan *SignPlan, runtime SignRuntime) (*SignSession
 		commitments:      map[tss.PartyID]nonceCommitment{key.state.Party: commitment},
 		partials:         make(map[tss.PartyID]*fed.Scalar),
 		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
+		pendingPartials:  make(map[tss.PartyID]*fed.Scalar),
+		pendingEnvelopes: make(map[tss.PartyID]tss.Envelope),
 		dNonce:           dNonce,
 		eNonce:           eNonce,
 		deltaScalar:      deltaScalar,
@@ -275,7 +279,7 @@ func (s *SignSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *SignSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.key.state.Parties, s.key.state.Party)
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.sessionID, s.signers, s.key.state.Party)
 }
 
 // Handle validates and applies one FROST signing envelope.

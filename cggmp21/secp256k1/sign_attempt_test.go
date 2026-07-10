@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -224,6 +225,24 @@ func TestFast_SignAttemptRecordRejectsJSONDecoding(t *testing.T) {
 	var record SignAttemptRecord
 	if err := json.Unmarshal([]byte(`{"Protocol":"cggmp21-secp256k1"}`), &record); err == nil {
 		t.Fatal("sign attempt accepted direct JSON decoding")
+	}
+}
+
+func TestFast_SignAttemptRecordFormattingRedactsConfidentialFields(t *testing.T) {
+	t.Parallel()
+	record := testSignAttemptRecord(t, 1)
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "pointer", value: &record},
+		{name: "value", value: record},
+	} {
+		for _, format := range []string{"%v", "%+v", "%#v", "%x"} {
+			if got := fmt.Sprintf(format, tc.value); got != signAttemptRecordRedacted {
+				t.Fatalf("%s SignAttemptRecord formatted with %s without redaction", tc.name, format)
+			}
+		}
 	}
 }
 
@@ -569,6 +588,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		PresignContentID: record.PresignContentID,
 		AttemptHash:      record.AttemptHash,
 		Ack:              &ack1,
+		AckVerifier:      testBroadcastAckVerifier(),
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -580,6 +600,7 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 		PresignContentID: record.PresignContentID,
 		AttemptHash:      record.AttemptHash,
 		Ack:              &ack1,
+		AckVerifier:      testBroadcastAckVerifier(),
 	}); err != nil {
 		t.Fatal(err)
 	} else if len(repeated.DeliveryState.Acks) != 1 {
@@ -609,6 +630,35 @@ func TestFast_FileSignAttemptStoreDeliveryProgressIsDurable(t *testing.T) {
 	}
 	if !loaded.DeliveryState.DeliveryComplete {
 		t.Fatal("loaded attempt lost durable delivery completion")
+	}
+}
+
+func TestFast_FileSignAttemptStoreDeliveryAckRequiresVerifier(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+	store := newFastFileSignAttemptStore(t)
+	record := testSignAttemptRecord(t, 1)
+	if _, err := store.CommitSignAttempt(ctx, record); err != nil {
+		t.Fatal(err)
+	}
+	env, _, err := decodeSignAttemptEnvelope(record.CanonicalBaseEnvelopeBytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ack := testBroadcastAck(env, 1)
+	if _, err := store.UpdateSignAttemptDelivery(ctx, SignAttemptDeliveryUpdate{
+		PresignContentID: record.PresignContentID,
+		AttemptHash:      record.AttemptHash,
+		Ack:              &ack,
+	}); !errors.Is(err, tss.ErrMissingAckVerifier) {
+		t.Fatalf("ack without verifier error = %v, want ErrMissingAckVerifier", err)
+	}
+	loaded, err := store.LoadSignAttempt(ctx, record.PresignContentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(loaded.DeliveryState.Acks) != 0 || loaded.DeliveryState.DeliveryComplete {
+		t.Fatal("unauthenticated ack advanced durable delivery state")
 	}
 }
 

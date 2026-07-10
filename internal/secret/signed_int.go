@@ -3,6 +3,7 @@ package secret
 import (
 	"crypto/subtle"
 	"errors"
+	"fmt"
 )
 
 const signedIntRedacted = "<secret.SignedInt:redacted>"
@@ -146,4 +147,9 @@ func (s *SignedInt) String() string {
 // GoString returns a redacted representation.
 func (s *SignedInt) GoString() string {
 	return signedIntRedacted
+}
+
+// Format writes a redacted representation for all fmt verbs.
+func (s SignedInt) Format(state fmt.State, verb rune) {
+	_, _ = fmt.Fprint(state, signedIntRedacted)
 }

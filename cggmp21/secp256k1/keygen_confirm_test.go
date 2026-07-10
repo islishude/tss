@@ -272,3 +272,60 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 		t.Fatal("aborted session returned a key share")
 	}
 }
+
+func TestKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.T) {
+	t.Parallel()
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parties := tss.NewPartySet(1, 2, 3)
+	sessions := make(map[tss.PartyID]*KeygenSession, len(parties))
+	var messages []tss.Envelope
+	for _, id := range parties {
+		session, out, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: id, SessionID: sessionID})
+		if err != nil {
+			t.Fatal(err)
+		}
+		sessions[id] = session
+		messages = append(messages, out...)
+	}
+
+	var early tss.Envelope
+	for _, env := range messages {
+		if env.From == 2 || (env.To != tss.BroadcastPartyId && env.To != 2) {
+			continue
+		}
+		out, err := sessions[2].Handle(testutil.DeliverEnvelope(env))
+		if err != nil {
+			t.Fatalf("prepare party 2 with %s from %d: %v", env.PayloadType, env.From, err)
+		}
+		for _, produced := range out {
+			if produced.PayloadType == payloadKeygenConfirmation {
+				early = produced
+			}
+		}
+	}
+	if early.PayloadType == "" {
+		t.Fatal("party 2 did not produce a confirmation")
+	}
+	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(early)); err != nil {
+		t.Fatalf("early confirmation: %v", err)
+	}
+	if sessions[1].aborted || sessions[1].pendingConfirmations[2] == nil {
+		t.Fatal("early confirmation was not buffered without aborting")
+	}
+
+	for _, env := range messages {
+		if env.From == 1 || (env.To != tss.BroadcastPartyId && env.To != 1) {
+			continue
+		}
+		if _, err := sessions[1].Handle(testutil.DeliverEnvelope(env)); err != nil {
+			t.Fatalf("deliver round 1 %s from %d: %v", env.PayloadType, env.From, err)
+		}
+	}
+	_, ok, lookupErr := sessions[1].confirmations.confirmation(2)
+	if lookupErr != nil || !ok || sessions[1].aborted || sessions[1].pendingConfirmations[2] != nil {
+		t.Fatalf("buffered confirmation was not promoted: present=%v aborted=%v err=%v", ok, sessions[1].aborted, lookupErr)
+	}
+}

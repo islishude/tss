@@ -97,8 +97,12 @@ type MessageSlotKey struct {
 //   - Stores the payload hash and returns nil when the slot is new.
 //   - Returns [ErrDuplicateMessage] when the slot exists with the same payload hash.
 //   - Returns [ErrEquivocation] when the slot exists with a different payload hash.
+//
+// RetireSession removes replay state only after the identified session is
+// terminal and its session ID is durably unavailable for reuse.
 type ReplayCache interface {
 	CheckAndStore(slot MessageSlotKey, payloadHash [32]byte) error
+	RetireSession(protocol ProtocolID, sessionID SessionID) error
 }
 
 // EnvelopeInput carries the caller-provided fields for constructing an Envelope.

@@ -175,6 +175,7 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"paillier_modulus":           l.Paillier.MaxCiphertextBytes,
 		"signed_response":            l.Paillier.MaxCiphertextBytes,
 		"paillier_signed":            l.Paillier.MaxCiphertextBytes,
+		"proof_rounds":               128,
 		"signprep_proof":             l.SignPrep.MaxProofBytes,
 		"signprep_partial_signature": l.SignPrep.MaxSignPartialPayloadBytes,
 		"envelope":                   tss.DefaultMaxEnvelopeBytes,

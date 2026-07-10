@@ -17,6 +17,23 @@ type Scalar struct {
 	buf []byte
 }
 
+const scalarRedacted = "<secret.Scalar:redacted>"
+
+// String returns a redacted representation.
+func (s *Scalar) String() string {
+	return scalarRedacted
+}
+
+// GoString returns a redacted representation.
+func (s *Scalar) GoString() string {
+	return scalarRedacted
+}
+
+// Format writes a redacted representation for all fmt verbs.
+func (s Scalar) Format(state fmt.State, verb rune) {
+	_, _ = fmt.Fprint(state, scalarRedacted)
+}
+
 // NewScalar creates a Scalar from big-endian bytes. The input must be exactly
 // fixedLen bytes or shorter (left-padded with zeros). Inputs longer than fixedLen
 // are rejected to prevent silent truncation of high bytes.

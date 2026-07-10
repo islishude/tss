@@ -38,6 +38,11 @@ func NewRefreshRunner(options RefreshRunnerOptions) tss.RefreshRunner[*KeyShare]
 	return runner
 }
 
+// Protocol returns the FROST protocol identifier.
+func (*refreshRunner) Protocol() tss.ProtocolID {
+	return tss.ProtocolFROSTEd25519
+}
+
 // StartRefresh constructs one FROST refresh session.
 func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, config tss.RefreshRunConfig) (tss.RefreshSession[*KeyShare], []tss.Envelope, error) {
 	metadata, ok := current.PublicMetadata()

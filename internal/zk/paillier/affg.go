@@ -427,6 +427,9 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if err := proof.Validate(); err != nil {
 		return err
 	}
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
+		return fmt.Errorf("AffGProof: invalid verifier aux: %w", err)
+	}
 	Ni := stmt.ProverPaillierN
 	Nj := stmt.ReceiverPaillierN
 	Nhat := stmt.VerifierAux.N
@@ -460,10 +463,6 @@ func VerifyAffG(params SecurityParams, state []byte, stmt AffGStatement, proof *
 	if stmt.X == nil {
 		return errors.New("AffGProof: nil X point")
 	}
-	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
-		return fmt.Errorf("AffGProof: invalid verifier aux: %w", err)
-	}
-
 	// Validate proof fields.
 	if _, err := RequireZN2Star(proof.A, Nj.N); err != nil {
 		return fmt.Errorf("AffGProof: A not in Z*_Nj^2: %w", err)
@@ -616,7 +615,10 @@ func (p *AffGProof) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary decodes a canonical TLV AffGProof.
 func (p *AffGProof) UnmarshalBinary(in []byte) error {
 	var decoded AffGProof
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxZKProofBytes)),
+		wire.WithFieldLimits(zkFieldLimits()),
+	); err != nil {
 		return err
 	}
 	if err := decoded.Validate(); err != nil {

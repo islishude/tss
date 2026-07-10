@@ -72,13 +72,13 @@ func (w Witness) Clone() Witness {
 
 // Proof is a CGGMP21 signprep proof.
 type Proof struct {
-	MPoint       []byte         `wire:"1,bytes"`
-	KCommitment  []byte         `wire:"2,bytes"`
-	MCommitment  []byte         `wire:"3,bytes"`
-	DLEQA1       []byte         `wire:"4,bytes"`
-	DLEQA2       []byte         `wire:"5,bytes"`
+	MPoint       []byte         `wire:"1,bytes,max_bytes=point"`
+	KCommitment  []byte         `wire:"2,bytes,max_bytes=point"`
+	MCommitment  []byte         `wire:"3,bytes,max_bytes=point"`
+	DLEQA1       []byte         `wire:"4,bytes,max_bytes=point"`
+	DLEQA2       []byte         `wire:"5,bytes,max_bytes=point"`
 	KResponse    *secret.Scalar `wire:"6,custom,len=32"`
-	MResponse    []byte         `wire:"7,bytes"`
+	MResponse    []byte         `wire:"7,bytes,max_bytes=scalar"`
 	DLEQResponse *secret.Scalar `wire:"8,custom,len=32"`
 }
 

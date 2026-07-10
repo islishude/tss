@@ -267,6 +267,9 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	if err := proof.Validate(); err != nil {
 		return err
 	}
+	if err := validateRPParamsForProof(params, statement.VerifierAux); err != nil {
+		return fmt.Errorf("EncProof: invalid verifier aux: %w", err)
+	}
 
 	Ni := statement.ProverPaillierN
 	Nj := statement.VerifierAux.N
@@ -277,9 +280,6 @@ func VerifyEnc(params SecurityParams, state []byte, statement EncStatement, proo
 	}
 	if _, err := RequireZN2Star(statement.CiphertextK, Ni.N); err != nil {
 		return fmt.Errorf("EncProof: ciphertext K not in Z*_N^2: %w", err)
-	}
-	if err := validateRPParamsForProof(params, statement.VerifierAux); err != nil {
-		return fmt.Errorf("EncProof: invalid verifier aux: %w", err)
 	}
 	if _, err := RequireZNStar(proof.S, Nj); err != nil {
 		return fmt.Errorf("EncProof: S not in Z*_N_j: %w", err)
@@ -363,7 +363,10 @@ func (p *EncProof) MarshalBinary() ([]byte, error) {
 // UnmarshalBinary decodes a canonical TLV EncProof.
 func (p *EncProof) UnmarshalBinary(in []byte) error {
 	var decoded EncProof
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxZKProofBytes)),
+		wire.WithFieldLimits(zkFieldLimits()),
+	); err != nil {
 		return err
 	}
 	if err := decoded.Validate(); err != nil {

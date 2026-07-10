@@ -317,6 +317,16 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	allowedParties := s.dealerParties
+	if env.PayloadType == payloadReshareReceiverMaterial || env.PayloadType == payloadKeygenConfirmation {
+		allowedParties = s.newParties
+	}
+	if err := s.validateInbound(in, allowedParties); err != nil {
+		if errors.Is(err, tss.ErrDuplicateMessage) {
+			return nil, tss.ErrDuplicateMessage
+		}
+		return nil, err
+	}
 	if s.completed {
 		if (!s.isReceiver && env.PayloadType == payloadReshareReceiverMaterial) || env.PayloadType == payloadKeygenConfirmation {
 			return nil, nil
@@ -333,25 +343,7 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	}()
 
 	if env.PayloadType == payloadKeygenConfirmation {
-		if err := s.validateInbound(in, s.newParties); err != nil {
-			if errors.Is(err, tss.ErrDuplicateMessage) {
-				return nil, tss.ErrDuplicateMessage
-			}
-			return nil, err
-		}
 		return s.handleReshareConfirmation(env)
-	}
-
-	// Validate against the appropriate party set based on payload type.
-	allowedParties := s.dealerParties
-	if env.PayloadType == payloadReshareReceiverMaterial {
-		allowedParties = s.newParties
-	}
-	if err := s.validateInbound(in, allowedParties); err != nil {
-		if errors.Is(err, tss.ErrDuplicateMessage) {
-			return nil, tss.ErrDuplicateMessage
-		}
-		return nil, err
 	}
 
 	if env.Round != reshareStartRound {
@@ -381,6 +373,7 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 			if err := s.applyReshareShare(env.From, dd.pending.payload, dd.pending.raw); err != nil {
 				return nil, err
 			}
+			destroyPendingReshareShare(dd.pending)
 			dd.pending = nil
 		}
 	case payloadReshareShare:
@@ -406,11 +399,12 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		}
 		if dd.commitments == nil {
 			dd.pending = &pendingReshareShare{
-				payload: p.Clone(),
+				payload: p,
 				raw:     bytes.Clone(env.Payload),
 			}
 			return nil, nil
 		}
+		defer p.Share.Destroy()
 		if err := s.applyReshareShare(env.From, p, env.Payload); err != nil {
 			return nil, err
 		}
@@ -573,12 +567,7 @@ func (s *ReshareSession) abort() {
 			dd.share = nil
 		}
 		if dd.pending != nil {
-			if dd.pending.payload.Share != nil {
-				dd.pending.payload.Share.Destroy()
-				dd.pending.payload.Share = nil
-			}
-			clear(dd.pending.payload.DealerCommitmentHash)
-			clear(dd.pending.raw)
+			destroyPendingReshareShare(dd.pending)
 			dd.pending = nil
 		}
 	}
@@ -591,6 +580,19 @@ func (s *ReshareSession) abort() {
 		s.newShare = nil
 	}
 	s.completed = false
+}
+
+func destroyPendingReshareShare(pending *pendingReshareShare) {
+	if pending == nil {
+		return
+	}
+	if pending.payload.Share != nil {
+		pending.payload.Share.Destroy()
+		pending.payload.Share = nil
+	}
+	clear(pending.payload.DealerCommitmentHash)
+	clear(pending.payload.PlanHash)
+	clear(pending.raw)
 }
 
 // allReshareDealerDataReceived returns true when every dealer has submitted commitments and a share.

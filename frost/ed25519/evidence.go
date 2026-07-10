@@ -94,11 +94,12 @@ func frostSignBlame(env tss.Envelope, signers tss.PartySet, publicKey []byte) *t
 }
 
 // frostAggregateBlame builds Blame evidence for a failed aggregate Ed25519 signature.
-func frostAggregateBlame(sessionID tss.SessionID, signers tss.PartySet, publicKey, message, sig []byte) *tss.Blame {
+func frostAggregateBlame(sessionID tss.SessionID, self tss.PartyID, signers tss.PartySet, publicKey, message, sig []byte) *tss.Blame {
 	env, _ := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolFROSTEd25519,
 		SessionID:   sessionID,
 		Round:       signRound2,
+		From:        self,
 		PayloadType: payloadSignPartial,
 	})
 	return &tss.Blame{

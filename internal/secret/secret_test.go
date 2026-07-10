@@ -3,6 +3,7 @@ package secret
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"testing"
 )
 
@@ -125,10 +126,20 @@ func TestUnmarshalScalarRoundTrip(t *testing.T) {
 func TestScalarNoLeakVectors(t *testing.T) {
 	t.Parallel()
 	s, _ := NewScalar([]byte{0x42}, 32)
-	// String() is from the default struct formatter — ensure it doesn't leak bytes
-	str := `"` + string(s.FixedBytes()) + `"`
-	if len(str) < 10 {
-		t.Fatal("unexpected string representation")
+	copied := *s
+
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "pointer", value: s},
+		{name: "value", value: copied},
+	} {
+		for _, format := range []string{"%v", "%+v", "%#v", "%x"} {
+			if got := fmt.Sprintf(format, tc.value); got != scalarRedacted {
+				t.Fatalf("%s scalar formatted with %s without redaction", tc.name, format)
+			}
+		}
 	}
 	// JSON must fail
 	if _, err := json.Marshal(s); err == nil {

@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"cmp"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -210,7 +211,7 @@ func paillierPublicSharesHash(shares []PaillierPublicShare) []byte {
 	t := transcript.New(paillierPublicSharesHashLabel)
 	sorted := tss.CloneSlice(shares)
 	slices.SortFunc(sorted, func(a, b PaillierPublicShare) int {
-		return int(a.Party) - int(b.Party)
+		return cmp.Compare(a.Party, b.Party)
 	})
 	for _, share := range sorted {
 		t.AppendUint32("party", share.Party)

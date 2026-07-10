@@ -256,6 +256,9 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if err := proof.Validate(); err != nil {
 		return err
 	}
+	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
+		return fmt.Errorf("LogStarProof: invalid verifier aux: %w", err)
+	}
 
 	N := stmt.PaillierN
 	Nj := stmt.VerifierAux.N
@@ -270,10 +273,6 @@ func VerifyLogStar(params SecurityParams, state []byte, stmt LogStarStatement, p
 	if stmt.X == nil || stmt.B == nil {
 		return errors.New("LogStarProof: nil curve point")
 	}
-	if err := validateRPParamsForProof(params, stmt.VerifierAux); err != nil {
-		return fmt.Errorf("LogStarProof: invalid verifier aux: %w", err)
-	}
-
 	if _, err := RequireZNStar(proof.S, Nj); err != nil {
 		return fmt.Errorf("LogStarProof: S not in Z*_Nj: %w", err)
 	}
@@ -370,7 +369,10 @@ func (p *LogStarProof) MarshalWireValue() ([]byte, error) {
 // UnmarshalBinary decodes a canonical TLV LogStarProof.
 func (p *LogStarProof) UnmarshalBinary(in []byte) error {
 	var decoded LogStarProof
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(zkFieldLimits())); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxZKProofBytes)),
+		wire.WithFieldLimits(zkFieldLimits()),
+	); err != nil {
 		return err
 	}
 	if err := decoded.Validate(); err != nil {

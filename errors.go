@@ -57,6 +57,10 @@ var ErrSenderIdentityMismatch = errors.New("sender identity mismatch")
 // whether an envelope arrived over plaintext or confidential transport.
 var ErrMissingChannelProtection = errors.New("missing channel protection")
 
+// ErrInvalidChannelProtection is returned when the receive path reports an
+// undefined non-zero channel-protection value.
+var ErrInvalidChannelProtection = errors.New("invalid channel protection")
+
 // ErrMissingConfidentiality is returned when a confidential-required payload arrives over plaintext.
 var ErrMissingConfidentiality = errors.New("missing transport confidentiality")
 
@@ -90,6 +94,10 @@ var ErrMissingAckVerifier = errors.New("missing broadcast ack verifier")
 // ErrWrongRecipient is returned when a direct message is addressed to the wrong party.
 var ErrWrongRecipient = errors.New("wrong envelope recipient")
 
+// ErrSelfSender is returned when a local guard receives an envelope claiming
+// to have been sent by the same local party.
+var ErrSelfSender = errors.New("envelope sender is local party")
+
 // ErrExpectedDirectMessage is returned when a broadcast envelope arrives for a direct-only payload type.
 var ErrExpectedDirectMessage = errors.New("expected direct message")
 
@@ -101,6 +109,10 @@ var ErrUnknownPayloadPolicy = errors.New("unknown payload delivery policy")
 
 // ErrMissingReplayCache is returned when a session constructor receives a nil ReplayCache.
 var ErrMissingReplayCache = errors.New("missing replay cache")
+
+// ErrReplayCacheFull is returned when a bounded replay cache cannot record a
+// new message slot without forgetting previously accepted protocol traffic.
+var ErrReplayCacheFull = errors.New("replay cache full")
 
 // ErrInvalidSessionID is returned when a session is created with a zero or invalid session ID.
 var ErrInvalidSessionID = errors.New("invalid session id")

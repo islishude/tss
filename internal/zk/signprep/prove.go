@@ -8,6 +8,7 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/secret"
+	"github.com/islishude/tss/internal/wire"
 )
 
 // Prove generates a signprep proof binding KPoint and ChiPoint to the presign
@@ -141,7 +142,13 @@ func validateStatement(stmt Statement) error {
 	if len(stmt.Signers) == 0 {
 		return errors.New("signprep: missing signers")
 	}
-	if len(stmt.PlanHash) != 0 && len(stmt.PlanHash) != 32 {
+	if err := wire.ValidateStrictSortedIDs(stmt.Signers); err != nil {
+		return fmt.Errorf("signprep: invalid signers: %w", err)
+	}
+	if !stmt.Signers.Contains(stmt.Party) {
+		return errors.New("signprep: party is not in signer set")
+	}
+	if len(stmt.PlanHash) != 32 {
 		return errors.New("signprep: plan hash must be 32 bytes")
 	}
 	if len(stmt.ContextHash) != 32 {

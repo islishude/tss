@@ -403,6 +403,12 @@ func (s *KeygenSession) abort() {
 	if s.confirmations != nil {
 		s.confirmations.Destroy()
 	}
+	for id, confirmation := range s.pendingConfirmations {
+		if confirmation != nil {
+			clear(confirmation.ChainCode)
+		}
+		delete(s.pendingConfirmations, id)
+	}
 	if s.pending != nil {
 		s.pending.Destroy()
 		s.pending = nil

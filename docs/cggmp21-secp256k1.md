@@ -256,6 +256,11 @@ key. Only after the full set verifies does `Complete()`/`KeyShare()` return a
 evidence set; old records without this evidence or using the retired
 record-list key-share layout are invalid.
 
+A canonical confirmation that arrives before its sender's round-1 commitment
+is held in that sender's bounded pending slot. Commit-reveal and pending-share
+bindings are checked when the dependency arrives; asynchronous reordering does
+not abort keygen.
+
 ### Domain Separation
 
 ```
@@ -287,9 +292,9 @@ public encodings returned through metadata are deep copied. A shallow Go copy
 shares the same secret and consumed lifecycle state and cannot bypass
 `Destroy()` or one-use claiming.
 
-`PresignSession.Presign()` returns an independently owned completed record so
-callers can persist or hand it to the online signer without mutating
-session-owned material.
+`PresignSession.Presign()` transfers its one completed record to the caller for
+persistence or online signing. `PresignSession.Completed()` only observes the
+terminal status and does not retrieve or transfer that record.
 
 Each internal verify-share entry contains the signer ID, `KPoint_i = k_i·G`,
 `ChiPoint_i = χ_i·G`, and a signprep proof. The serialized presign also persists

@@ -111,7 +111,7 @@ The `tss.EncryptKeyShareWithPassphrase` and `tss.EncryptPresignWithPassphrase` h
 On process restart, load and decrypt the key share:
 
 ```go
-raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase)
+raw, _ := tss.DecryptKeyShareWithPassphrase(encrypted, passphrase, "key-1")
 share, err := secp256k1.UnmarshalKeyShare(raw)
 ```
 
@@ -119,12 +119,15 @@ For CGGMP21 presign records, serialized snapshots restore as consumed. They
 cannot start a new online signing attempt:
 
 ```go
-raw, _ := tss.DecryptPresignWithPassphrase(encrypted, passphrase)
+raw, _ := tss.DecryptPresignWithPassphrase(encrypted, passphrase, "presign-1")
 presign, _ := secp256k1.UnmarshalPresign(raw)
 if secp256k1.IsPresignConsumed(presign) {
     // Do not call StartSign with this snapshot.
 }
 ```
+
+The expected key ID is mandatory and is checked after AEAD authentication;
+storage lookup identity is therefore bound to the encrypted record.
 
 Restored CGGMP21 presign snapshots are recovery-only: provide
 `SignRuntime.AttemptStore` and call `ResumeSign` only when a durable sign
@@ -409,6 +412,9 @@ scheduler, err := tss.NewRefreshScheduler(tss.RefreshSchedulerOptions[*frost.Key
     SessionIDSource: func(ctx context.Context, current *frost.KeyShare) (tss.SessionID, error) {
         return coordinator.NextRefreshSession(ctx, current.PublicKeyBytes())
     },
+    ClaimSessionID: func(ctx context.Context, sessionID tss.SessionID) error {
+        return store.ClaimRefreshSessionID(ctx, sessionID)
+    },
     CommitKeyShare: func(ctx context.Context, previous, refreshed *frost.KeyShare) error {
         return store.CompareAndSwap(ctx, previous, refreshed)
     },
@@ -421,13 +427,22 @@ return scheduler.Run(ctx)
 
 Use `secp256k1.NewRefreshRunner` for CGGMP21 and configure its Paillier limits
 and security profile when required. All participants in one refresh must receive
-the same session ID, and every later run must use a new ID.
+the same session ID, and every later run must use a new ID. `ClaimSessionID`
+must be a durable atomic insert-if-absent operation shared by scheduler
+instances. A successful claim is never rolled back, including when the protocol
+run later fails.
 
 `CommitKeyShare` is the linearization point. It must atomically persist and
 install `refreshed` only while `previous` remains current. Normal commit errors
 cause the scheduler to destroy the candidate share. If storage cannot determine
 whether the commit succeeded, wrap `tss.ErrRefreshCommitOutcomeUnknown` and
 retain the candidate for reconciliation.
+
+After a claimed refresh run returns, the scheduler calls
+`ReplayCache.RetireSession` with the runner's protocol and session ID. Durable
+cache implementations must delete only that session's slots and report cleanup
+failures; the session ID claim remains permanent, so delayed envelopes cannot
+authorize reuse of the retired transcript.
 
 `Run` waits one interval before the first refresh; `RunOnce` starts immediately.
 Only one call may be active per scheduler. The scheduler exits on the first

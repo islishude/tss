@@ -3,6 +3,8 @@ package tssrun
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"errors"
 	"fmt"
 	"slices"
 	"sync"
@@ -171,6 +173,12 @@ func (s *MemoryRunStore) AcceptPlan(ctx context.Context, runID string, self tss.
 	if !ok {
 		return ErrRunNotFound
 	}
+	if !rec.intent.participants().Contains(self) {
+		return ErrRunPartyNotParticipant
+	}
+	if !bytes.Equal(digest, rec.intent.PlanDigest) {
+		return ErrPlanDigestConflict
+	}
 	rec.refreshStatus()
 	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
@@ -231,6 +239,9 @@ func (s *MemoryRunStore) MarkStarted(ctx context.Context, runID string, self tss
 	if !ok {
 		return ErrRunNotFound
 	}
+	if !rec.intent.participants().Contains(self) {
+		return ErrRunPartyNotParticipant
+	}
 	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
 	}
@@ -256,11 +267,23 @@ func (s *MemoryRunStore) MarkCompleted(ctx context.Context, runID string, self t
 	if !ok {
 		return ErrRunNotFound
 	}
+	if !rec.intent.participants().Contains(self) {
+		return ErrRunPartyNotParticipant
+	}
 	if _, ok := rec.aborted[self]; ok {
 		return ErrRunAborted
 	}
 	if _, ok := rec.started[self]; !ok {
 		return ErrRunNotAccepted
+	}
+	if err := validateLocalRunResult(rec.intent, result); err != nil {
+		return err
+	}
+	if old, ok := rec.completed[self]; ok {
+		if localRunResultsEqual(old, result) {
+			return nil
+		}
+		return ErrRunCompleted
 	}
 	rec.completed[self] = result.Clone()
 	rec.refreshStatus()
@@ -277,6 +300,9 @@ func (s *MemoryRunStore) AbortRun(ctx context.Context, runID string, self tss.Pa
 	rec, ok := s.byRunID[runID]
 	if !ok {
 		return ErrRunNotFound
+	}
+	if !rec.intent.participants().Contains(self) {
+		return ErrRunPartyNotParticipant
 	}
 	if _, ok := rec.completed[self]; ok {
 		return ErrRunCompleted
@@ -323,6 +349,9 @@ func AcceptPlanDigest(ctx context.Context, store RunStore, run RunIntent, self t
 	if store == nil {
 		return ErrRunNotFound
 	}
+	if !bytes.Equal(run.PlanDigest, digest) {
+		return ErrPlanDigestConflict
+	}
 	return store.AcceptPlan(ctx, run.RunID, self, digest)
 }
 
@@ -333,14 +362,84 @@ func RegisterStartedSession(ctx context.Context, store RunStore, registry Sessio
 		return ErrInvalidSessionKey
 	}
 	key := SessionKey{Protocol: run.Protocol, SessionID: run.SessionID, Party: self}
-	if err := registry.Put(ctx, key, session); err != nil {
+	gated := newStartGatedSession(session)
+	if err := registry.Put(ctx, key, gated); err != nil {
 		return err
 	}
 	if err := store.MarkStarted(ctx, run.RunID, self); err != nil {
-		_ = registry.Retire(ctx, key)
+		gated.fail(err)
+		if cleanupErr := registry.Retire(context.WithoutCancel(ctx), key); cleanupErr != nil {
+			return errors.Join(err, fmt.Errorf("retire unstarted session: %w", cleanupErr))
+		}
 		return err
 	}
+	gated.activate()
 	return nil
+}
+
+// startGatedSession keeps a registry-visible session inert until durable run
+// state records that the local party started it.
+type startGatedSession struct {
+	mu       sync.RWMutex
+	session  ProtocolSession
+	ready    chan struct{}
+	active   bool
+	startErr error
+}
+
+func newStartGatedSession(session ProtocolSession) *startGatedSession {
+	return &startGatedSession{session: session, ready: make(chan struct{})}
+}
+
+func (s *startGatedSession) activate() {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active || s.startErr != nil {
+		return
+	}
+	s.active = true
+	close(s.ready)
+}
+
+func (s *startGatedSession) fail(err error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.active || s.startErr != nil {
+		return
+	}
+	s.startErr = err
+	close(s.ready)
+}
+
+func (s *startGatedSession) target() (ProtocolSession, bool, error) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.session, s.active, s.startErr
+}
+
+// Handle waits for the durable-start decision so registry-visible messages are
+// neither processed early nor discarded during startup.
+func (s *startGatedSession) Handle(in tss.InboundEnvelope) ([]tss.Envelope, error) {
+	<-s.ready
+	target, active, err := s.target()
+	if err != nil {
+		return nil, err
+	}
+	if !active {
+		return nil, ErrRunNotAccepted
+	}
+	return target.Handle(in)
+}
+
+// Completed reports completion only after the durable-start gate is active.
+func (s *startGatedSession) Completed() bool {
+	target, active, _ := s.target()
+	return active && target.Completed()
+}
+
+// Destroy releases the wrapped session's secret state.
+func (s *startGatedSession) Destroy() {
+	s.session.Destroy()
 }
 
 func validateRunIntent(run RunIntent) error {
@@ -350,23 +449,56 @@ func validateRunIntent(run RunIntent) error {
 	if len(run.Parties) == 0 || run.Threshold <= 0 || run.Threshold > len(run.Parties) {
 		return fmt.Errorf("%w: invalid threshold or party set", ErrInvalidRunIntent)
 	}
+	if len(run.PlanDigest) != sha256.Size {
+		return fmt.Errorf("%w: plan digest must be %d bytes", ErrInvalidRunIntent, sha256.Size)
+	}
+	if run.Protocol != tss.ProtocolCGGMP21Secp256k1 && run.Protocol != tss.ProtocolFROSTEd25519 {
+		return fmt.Errorf("%w: unsupported protocol %q", ErrInvalidRunIntent, run.Protocol)
+	}
+	if len(run.ContextDigest) != 0 && len(run.ContextDigest) != sha256.Size {
+		return fmt.Errorf("%w: context digest must be empty or %d bytes", ErrInvalidRunIntent, sha256.Size)
+	}
 	if !isCanonicalPartySet(run.Parties) {
 		return fmt.Errorf("%w: parties must be sorted, unique, and non-zero", ErrInvalidRunIntent)
 	}
+	if run.KeyID == "" {
+		return fmt.Errorf("%w: key id required", ErrInvalidRunIntent)
+	}
 	switch run.Kind {
-	case RunPresign, RunSign:
-		if len(run.Signers) == 0 {
-			return fmt.Errorf("%w: signers required", ErrInvalidRunIntent)
+	case RunPresign:
+		if run.Protocol != tss.ProtocolCGGMP21Secp256k1 {
+			return fmt.Errorf("%w: presign is only supported by %q", ErrInvalidRunIntent, tss.ProtocolCGGMP21Secp256k1)
 		}
-		if !isCanonicalPartySet(run.Signers) {
-			return fmt.Errorf("%w: signers must be sorted, unique, and non-zero", ErrInvalidRunIntent)
+		if run.KeyGeneration == "" || run.PresignID == "" || len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: presign requires key generation, presign id, and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
 		}
-		for _, signer := range run.Signers {
-			if !run.Parties.Contains(signer) {
-				return fmt.Errorf("%w: signer %d is not a party", ErrInvalidRunIntent, signer)
+		if err := validateRunSigners(run); err != nil {
+			return err
+		}
+	case RunSign:
+		if run.KeyGeneration == "" || len(run.ContextDigest) != sha256.Size {
+			return fmt.Errorf("%w: sign requires key generation and %d-byte context digest", ErrInvalidRunIntent, sha256.Size)
+		}
+		switch run.Protocol {
+		case tss.ProtocolCGGMP21Secp256k1:
+			if run.PresignID == "" {
+				return fmt.Errorf("%w: CGGMP21 sign requires presign id", ErrInvalidRunIntent)
 			}
+		case tss.ProtocolFROSTEd25519:
+			if run.PresignID != "" {
+				return fmt.Errorf("%w: FROST sign does not use presign id", ErrInvalidRunIntent)
+			}
+		default:
+			return fmt.Errorf("%w: unsupported protocol %q", ErrInvalidRunIntent, run.Protocol)
 		}
-	case RunKeygen, RunRefresh, RunReshare:
+		if err := validateRunSigners(run); err != nil {
+			return err
+		}
+	case RunRefresh, RunReshare:
+		if run.KeyGeneration == "" {
+			return fmt.Errorf("%w: %s requires key generation", ErrInvalidRunIntent, run.Kind)
+		}
+	case RunKeygen:
 	default:
 		return fmt.Errorf("%w: unknown run kind %q", ErrInvalidRunIntent, run.Kind)
 	}
@@ -374,6 +506,64 @@ func validateRunIntent(run RunIntent) error {
 		return fmt.Errorf("%w: party id 0 is reserved", ErrInvalidRunIntent)
 	}
 	return nil
+}
+
+func validateRunSigners(run RunIntent) error {
+	if len(run.Signers) == 0 {
+		return fmt.Errorf("%w: signers required", ErrInvalidRunIntent)
+	}
+	if !isCanonicalPartySet(run.Signers) {
+		return fmt.Errorf("%w: signers must be sorted, unique, and non-zero", ErrInvalidRunIntent)
+	}
+	for _, signer := range run.Signers {
+		if !run.Parties.Contains(signer) {
+			return fmt.Errorf("%w: signer %d is not a party", ErrInvalidRunIntent, signer)
+		}
+	}
+	return nil
+}
+
+func (r RunIntent) participants() tss.PartySet {
+	switch r.Kind {
+	case RunPresign, RunSign:
+		return r.Signers
+	default:
+		return r.Parties
+	}
+}
+
+func validateLocalRunResult(intent RunIntent, result LocalRunResult) error {
+	if len(result.OutputDigest) != sha256.Size {
+		return fmt.Errorf("%w: output digest must be %d bytes", ErrInvalidRunResult, sha256.Size)
+	}
+	if result.KeyID != intent.KeyID {
+		return fmt.Errorf("%w: key id does not match run intent", ErrInvalidRunResult)
+	}
+	if result.PresignID != intent.PresignID {
+		return fmt.Errorf("%w: presign id does not match run intent", ErrInvalidRunResult)
+	}
+	switch intent.Kind {
+	case RunKeygen:
+		if result.KeyGeneration == "" {
+			return fmt.Errorf("%w: keygen output generation is required", ErrInvalidRunResult)
+		}
+	case RunRefresh, RunReshare:
+		if result.KeyGeneration == "" || result.KeyGeneration == intent.KeyGeneration {
+			return fmt.Errorf("%w: %s output generation must differ from the input generation", ErrInvalidRunResult, intent.Kind)
+		}
+	case RunPresign, RunSign:
+		if result.KeyGeneration != intent.KeyGeneration {
+			return fmt.Errorf("%w: key generation does not match run intent", ErrInvalidRunResult)
+		}
+	}
+	return nil
+}
+
+func localRunResultsEqual(a, b LocalRunResult) bool {
+	return a.KeyID == b.KeyID &&
+		a.KeyGeneration == b.KeyGeneration &&
+		a.PresignID == b.PresignID &&
+		bytes.Equal(a.OutputDigest, b.OutputDigest)
 }
 
 func isCanonicalPartySet(parties tss.PartySet) bool {

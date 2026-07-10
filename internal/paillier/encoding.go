@@ -44,9 +44,12 @@ func (pk *PublicKey) UnmarshalBinaryWithMaxModulusBits(in []byte, maxBits int) e
 		maxBits = tss.DefaultMaxPaillierModulusBits
 	}
 	var decoded PublicKey
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(wire.FieldLimits{
-		"paillier_modulus_bits": maxBits,
-	})); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(wire.FrameLimits{MaxTotalBytes: tss.DefaultMaxPaillierPublicKeyBytes}),
+		wire.WithFieldLimits(wire.FieldLimits{
+			"paillier_modulus_bits": maxBits,
+		}),
+	); err != nil {
 		return err
 	}
 	// Validate is called automatically by wire.Unmarshal after AfterUnmarshalWire
@@ -77,9 +80,12 @@ func (sk *PrivateKey) UnmarshalBinary(in []byte) error {
 		return errors.New("nil Paillier private key")
 	}
 	var decoded PrivateKey
-	if err := wire.Unmarshal(in, &decoded, wire.WithFieldLimits(wire.FieldLimits{
-		"paillier_modulus_bits": tss.DefaultMaxPaillierModulusBits,
-	})); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(wire.FrameLimits{MaxTotalBytes: tss.DefaultMaxPaillierPrivateKeyBytes}),
+		wire.WithFieldLimits(wire.FieldLimits{
+			"paillier_modulus_bits": tss.DefaultMaxPaillierModulusBits,
+		}),
+	); err != nil {
 		return err
 	}
 	*sk = decoded

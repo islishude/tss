@@ -173,6 +173,9 @@ func (e *BlameEvidence) ValidateWithLimits(l EvidenceLimits) error {
 	if e.Kind == "" {
 		return errors.New("missing evidence kind")
 	}
+	if !validEvidenceKind(e.Kind) {
+		return fmt.Errorf("unknown evidence kind %q", e.Kind)
+	}
 	if e.Reason == "" {
 		return errors.New("missing evidence reason")
 	}
@@ -228,6 +231,9 @@ func (e *BlameEvidence) MarshalBinaryWithLimits(l EvidenceLimits) ([]byte, error
 // codec with explicit limits. Fields are sorted into canonical order so that
 // logically equivalent evidence records produce identical hashes.
 func MarshalEvidenceWithLimits(e *BlameEvidence, l EvidenceLimits) ([]byte, error) {
+	if err := e.ValidateWithLimits(l); err != nil {
+		return nil, err
+	}
 	return wire.Marshal(e, wire.WithFieldLimitsForMarshal(evidenceFieldLimits(l)))
 }
 
@@ -267,9 +273,34 @@ func (e *BlameEvidence) UnmarshalBinaryWithLimits(in []byte, l EvidenceLimits) e
 	); err != nil {
 		return err
 	}
+	if err := evidence.ValidateWithLimits(l); err != nil {
+		return err
+	}
 
 	*e = evidence
 	return nil
+}
+
+func validEvidenceKind(kind EvidenceKind) bool {
+	switch kind {
+	case EvidenceKindKeygenCommitment,
+		EvidenceKindKeygenPaillier,
+		EvidenceKindKeygenShare,
+		EvidenceKindRefreshShare,
+		EvidenceKindReshareShare,
+		EvidenceKindPresignRound1,
+		EvidenceKindPresignRound2,
+		EvidenceKindPresignRound3,
+		EvidenceKindSignPartial,
+		EvidenceKindAggregateSign,
+		EvidenceKindFrostKeygenShare,
+		EvidenceKindFrostReshareShare,
+		EvidenceKindFrostPartialSignature,
+		EvidenceKindFrostAggregateSignature:
+		return true
+	default:
+		return false
+	}
 }
 
 // Hash returns the SHA-256 digest of the deterministic evidence encoding.

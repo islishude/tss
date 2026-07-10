@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/rand"
 	"encoding/binary"
+	"errors"
 	"testing"
 )
 
@@ -17,7 +18,7 @@ func TestEncryptDecryptKeyShareWithPassphrase(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase: %v", err)
 	}
 
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase, "key-1")
 	if err != nil {
 		t.Fatalf("DecryptKeyShareWithPassphrase: %v", err)
 	}
@@ -37,7 +38,7 @@ func TestEncryptDecryptKeyShareWithPassphraseWrongPassphrase(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase: %v", err)
 	}
 
-	_, err = DecryptKeyShareWithPassphrase(encrypted, []byte("wrong-passphrase"))
+	_, err = DecryptKeyShareWithPassphrase(encrypted, []byte("wrong-passphrase"), "")
 	if err == nil {
 		t.Fatal("expected decryption to fail with wrong passphrase")
 	}
@@ -72,7 +73,7 @@ func TestEncryptDecryptPresignWithPassphrase(t *testing.T) {
 		t.Fatalf("EncryptPresignWithPassphrase: %v", err)
 	}
 
-	decrypted, err := DecryptPresignWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptPresignWithPassphrase(encrypted, passphrase, "presign-1")
 	if err != nil {
 		t.Fatalf("DecryptPresignWithPassphrase: %v", err)
 	}
@@ -92,7 +93,7 @@ func TestEncryptDecryptPresignWithPassphraseWrongPassphrase(t *testing.T) {
 		t.Fatalf("EncryptPresignWithPassphrase: %v", err)
 	}
 
-	_, err = DecryptPresignWithPassphrase(encrypted, []byte("wrong"))
+	_, err = DecryptPresignWithPassphrase(encrypted, []byte("wrong"), "")
 	if err == nil {
 		t.Fatal("expected presign decryption to fail with wrong passphrase")
 	}
@@ -108,7 +109,7 @@ func TestEncryptDecryptSignAttemptWithPassphrase(t *testing.T) {
 	if err != nil {
 		t.Fatalf("EncryptSignAttemptWithPassphrase: %v", err)
 	}
-	decrypted, err := DecryptSignAttemptWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptSignAttemptWithPassphrase(encrypted, passphrase, "attempt-1")
 	if err != nil {
 		t.Fatalf("DecryptSignAttemptWithPassphrase: %v", err)
 	}
@@ -122,14 +123,14 @@ func TestEncryptDecryptSignAttemptWithPassphrase(t *testing.T) {
 	if !bytes.Equal(decrypted, plaintext) || keyID != "attempt-1" {
 		t.Fatal("sign attempt authenticated key ID mismatch")
 	}
-	if _, err := DecryptPresignWithPassphrase(encrypted, passphrase); err == nil {
+	if _, err := DecryptPresignWithPassphrase(encrypted, passphrase, "attempt-1"); err == nil {
 		t.Fatal("sign attempt ciphertext accepted as a presign record")
 	}
 }
 
 func TestDecryptWithPassphraseTooShort(t *testing.T) {
 	t.Parallel()
-	_, err := DecryptKeyShareWithPassphrase([]byte("short"), []byte("pw"))
+	_, err := DecryptKeyShareWithPassphrase([]byte("short"), []byte("pw"), "")
 	if err == nil {
 		t.Fatal("expected error for short input")
 	}
@@ -145,7 +146,7 @@ func TestEncryptDecryptWithPassphraseEmpty(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase empty: %v", err)
 	}
 
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase, "")
 	if err != nil {
 		t.Fatalf("DecryptKeyShareWithPassphrase empty: %v", err)
 	}
@@ -170,7 +171,7 @@ func TestEncryptDecryptWithPassphraseLargePayload(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase large: %v", err)
 	}
 
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase, "large")
 	if err != nil {
 		t.Fatalf("DecryptKeyShareWithPassphrase large: %v", err)
 	}
@@ -191,7 +192,7 @@ func TestEncryptKeyShareWithPassphraseKeyID(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase: %v", err)
 	}
 
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase, keyID)
 	if err != nil {
 		t.Fatalf("DecryptKeyShareWithPassphrase: %v", err)
 	}
@@ -216,7 +217,7 @@ func TestDecryptWithPassphraseUnknownVersion(t *testing.T) {
 	copy(tampered, encrypted)
 	tampered[0] = 99
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "")
 	if err == nil {
 		t.Fatal("expected error for unknown version")
 	}
@@ -237,7 +238,7 @@ func TestDecryptWithPassphraseUnknownAlgorithm(t *testing.T) {
 	copy(tampered, encrypted)
 	tampered[1] = 99
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "")
 	if err == nil {
 		t.Fatal("expected error for unknown KDF algorithm")
 	}
@@ -254,7 +255,7 @@ func TestDecryptWithPassphraseWrongRecordType(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase: %v", err)
 	}
 
-	_, err = DecryptPresignWithPassphrase(encrypted, passphrase)
+	_, err = DecryptPresignWithPassphrase(encrypted, passphrase, "")
 	if err == nil {
 		t.Fatal("expected error for wrong record type")
 	}
@@ -277,7 +278,7 @@ func TestDecryptWithPassphraseTamperedAAD(t *testing.T) {
 	copy(tampered, encrypted)
 	tampered[saltOffset] ^= 0x01
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "key-1")
 	if err == nil {
 		t.Fatal("expected AEAD authentication failure for tampered AAD (salt)")
 	}
@@ -299,7 +300,7 @@ func TestDecryptWithPassphraseTamperedKeyID(t *testing.T) {
 	copy(tampered, encrypted)
 	tampered[13] ^= 0x01
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "key-1")
 	if err == nil {
 		t.Fatal("expected AEAD authentication failure for tampered AAD (keyID)")
 	}
@@ -316,7 +317,7 @@ func TestEncryptDecryptWithPassphraseCustomParams(t *testing.T) {
 		t.Fatalf("EncryptKeyShareWithPassphrase: %v", err)
 	}
 
-	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptKeyShareWithPassphrase(encrypted, passphrase, "custom")
 	if err != nil {
 		t.Fatalf("DecryptKeyShareWithPassphrase: %v", err)
 	}
@@ -344,6 +345,29 @@ func TestEncryptWithPassphraseZeroParams(t *testing.T) {
 	_, err = EncryptKeyShareWithPassphrase(plaintext, passphrase, "", &PassphraseParams{Time: 1, Memory: 1024})
 	if err == nil {
 		t.Fatal("expected error for zero Threads")
+	}
+}
+
+func TestEncryptWithPassphraseRejectsExcessiveParams(t *testing.T) {
+	t.Parallel()
+	plaintext := []byte("test data")
+	passphrase := []byte("passphrase")
+
+	tests := []struct {
+		name   string
+		params *PassphraseParams
+	}{
+		{name: "time", params: &PassphraseParams{Time: maxKDFTime + 1, Memory: 1024, Threads: 1}},
+		{name: "memory", params: &PassphraseParams{Time: 1, Memory: maxKDFMemory + 1, Threads: 1}},
+		{name: "threads", params: &PassphraseParams{Time: 1, Memory: 1024, Threads: maxKDFThreads + 1}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if _, err := EncryptKeyShareWithPassphrase(plaintext, passphrase, "", tc.params); err == nil {
+				t.Fatal("expected error for excessive argon2id parameters")
+			}
+		})
 	}
 }
 
@@ -384,7 +408,7 @@ func TestEncryptDecryptPresignWithPassphraseKeyID(t *testing.T) {
 		t.Fatalf("EncryptPresignWithPassphrase: %v", err)
 	}
 
-	decrypted, err := DecryptPresignWithPassphrase(encrypted, passphrase)
+	decrypted, err := DecryptPresignWithPassphrase(encrypted, passphrase, keyID)
 	if err != nil {
 		t.Fatalf("DecryptPresignWithPassphrase: %v", err)
 	}
@@ -407,27 +431,51 @@ func TestDecryptWithPassphraseRejectsExcessiveParams(t *testing.T) {
 
 	tampered := make([]byte, len(encrypted))
 	copy(tampered, encrypted)
-	// Corrupt kdf_time (offset 2) to exceed maxKDFTime (1000).
-	binary.BigEndian.PutUint32(tampered[2:6], 1001)
+	// Corrupt kdf_time (offset 2) to exceed maxKDFTime.
+	binary.BigEndian.PutUint32(tampered[2:6], maxKDFTime+1)
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "")
 	if err == nil {
 		t.Fatal("expected error for excessive kdf_time")
 	}
 
 	copy(tampered, encrypted)
-	// Corrupt kdf_memory (offset 6) to exceed maxKDFMemory (1 GiB).
-	binary.BigEndian.PutUint32(tampered[6:10], 1024*1024+1)
+	// Corrupt kdf_memory (offset 6) to exceed maxKDFMemory.
+	binary.BigEndian.PutUint32(tampered[6:10], maxKDFMemory+1)
 
-	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase)
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "")
 	if err == nil {
 		t.Fatal("expected error for excessive kdf_memory")
 	}
 
 	copy(tampered, encrypted)
-	// Corrupt kdf_threads (offset 10) to exceed maxKDFThreads (255).
-	tampered[10] = 255 // uint8 max is already the limit — use 255+1 overflow: wraps to 0
-	// Since maxKDFThreads == 255 (uint8 max), we can't exceed it via uint8 wire field.
-	// But any tampering of the header causes AEAD auth failure. So this sub-case
-	// is covered by the general AAD tampering tests.
+	// Corrupt kdf_threads (offset 10) to exceed maxKDFThreads.
+	tampered[10] = maxKDFThreads + 1
+
+	_, err = DecryptKeyShareWithPassphrase(tampered, passphrase, "")
+	if err == nil {
+		t.Fatal("expected error for excessive kdf_threads")
+	}
+}
+
+func TestDecryptWithPassphraseRejectsAuthenticatedKeyIDSubstitution(t *testing.T) {
+	t.Parallel()
+	passphrase := []byte("shared-passphrase")
+	params := &PassphraseParams{Time: 1, Memory: 1024, Threads: 1}
+
+	keyShare, err := EncryptKeyShareWithPassphrase([]byte("key-a"), passphrase, "key-a", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecryptKeyShareWithPassphrase(keyShare, passphrase, "key-b"); !errors.Is(err, ErrStorageKeyIDMismatch) {
+		t.Fatalf("key-share substitution got %v, want ErrStorageKeyIDMismatch", err)
+	}
+
+	presign, err := EncryptPresignWithPassphrase([]byte("presign-a"), passphrase, "presign-a", params)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := DecryptPresignWithPassphrase(presign, passphrase, "presign-b"); !errors.Is(err, ErrStorageKeyIDMismatch) {
+		t.Fatalf("presign substitution got %v, want ErrStorageKeyIDMismatch", err)
+	}
 }

@@ -133,7 +133,7 @@ func guardReplayCacheEntries(t *testing.T, guard *EnvelopeGuard) int {
 	}
 	cache.mu.Lock()
 	defer cache.mu.Unlock()
-	return len(cache.order)
+	return len(cache.seen)
 }
 
 func TestNewEnvelopeGuardRejectsNilReplayCache(t *testing.T) {
@@ -165,6 +165,38 @@ func TestNewEnvelopeGuardRejectsEmptyParties(t *testing.T) {
 	_, err := NewEnvelopeGuard(1, NewPartySet(), "test-proto", testSessionID(t), testPolicySet(), NewInMemoryReplayCache())
 	if err == nil {
 		t.Fatal("expected error for empty parties")
+	}
+}
+
+func TestEnvelopeGuardRejectsSelfSenderBeforeReplayState(t *testing.T) {
+	t.Parallel()
+	session := testSessionID(t)
+	guard := NewTestEnvelopeGuard(1, PartySet{1, 2}, "test-proto", session, testPolicySet())
+	env, err := NewEnvelope(EnvelopeInput{
+		Protocol:    "test-proto",
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		To:          2,
+		PayloadType: "direct",
+		Payload:     []byte("reflected"),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	in, err := OpenEnvelope(raw, ReceiveInfo{Peer: 1, Protection: ChannelConfidential})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := guard.Validate(in); !errors.Is(err, ErrSelfSender) {
+		t.Fatalf("Validate got %v, want ErrSelfSender", err)
+	}
+	if got := guardReplayCacheEntries(t, guard); got != 0 {
+		t.Fatalf("self-sender envelope stored %d replay entries", got)
 	}
 }
 
@@ -916,6 +948,7 @@ func TestOpenEnvelopeRejectsInvalidReceiveInfo(t *testing.T) {
 	}{
 		{name: "zero peer", info: ReceiveInfo{Protection: ChannelPlaintext}, want: ErrUnauthenticatedTransport},
 		{name: "unknown protection", info: ReceiveInfo{Peer: 1}, want: ErrMissingChannelProtection},
+		{name: "undefined protection", info: ReceiveInfo{Peer: 1, Protection: ChannelProtection(255)}, want: ErrInvalidChannelProtection},
 		{name: "sender mismatch", info: ReceiveInfo{Peer: 2, Protection: ChannelPlaintext}, want: ErrSenderIdentityMismatch},
 	}
 	for _, tc := range tests {

@@ -317,6 +317,9 @@ func OpenEnvelope(raw []byte, info ReceiveInfo, opts ...OpenOption) (InboundEnve
 	if info.Protection == ChannelProtectionUnknown {
 		return InboundEnvelope{}, ErrMissingChannelProtection
 	}
+	if !validChannelProtection(info.Protection) {
+		return InboundEnvelope{}, fmt.Errorf("%w: %d", ErrInvalidChannelProtection, info.Protection)
+	}
 	if info.Peer != env.From {
 		return InboundEnvelope{}, fmt.Errorf("%w: authenticated %d, envelope from %d", ErrSenderIdentityMismatch, info.Peer, env.From)
 	}
@@ -364,6 +367,9 @@ func ValidateEnvelopePolicy(env InboundEnvelope, self PartyID, policies PolicySe
 	if err != nil {
 		return err
 	}
+	if !validChannelProtection(env.ReceiveInfo().Protection) {
+		return fmt.Errorf("%w: %d", ErrInvalidChannelProtection, env.ReceiveInfo().Protection)
+	}
 
 	// Delivery mode enforcement.
 	switch policy.Mode {
@@ -400,4 +406,8 @@ func ValidateEnvelopePolicy(env InboundEnvelope, self PartyID, policies PolicySe
 	}
 
 	return nil
+}
+
+func validChannelProtection(protection ChannelProtection) bool {
+	return protection == ChannelPlaintext || protection == ChannelConfidential
 }

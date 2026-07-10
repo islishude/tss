@@ -7,6 +7,7 @@ import (
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/wire"
 )
 
 func TestMTAProductShares(t *testing.T) {
@@ -109,5 +110,31 @@ func TestMTAProductShares(t *testing.T) {
 	response.Proof.TranscriptHash[0] ^= 1
 	if _, err := Finish(params, responseDomain, start.Message, *response, bCommit, skA, skB.PublicKey, rpA); err == nil {
 		t.Fatal("tampered response proof verified")
+	}
+}
+
+func TestStandaloneMessageDecodersRejectOversizedCiphertexts(t *testing.T) {
+	t.Parallel()
+	oversized := bytes.Repeat([]byte{1}, tss.DefaultMaxPaillierCiphertextBytes+1)
+
+	startRaw, err := wire.MarshalFields(startMessageWireVersion, startMessageWireType, []wire.Field{
+		{Tag: 1, Value: oversized},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinary[StartMessage](startRaw); err == nil {
+		t.Fatal("standalone start decoder accepted oversized ciphertext")
+	}
+
+	responseRaw, err := wire.MarshalFields(responseMessageWireVersion, responseMessageWireType, []wire.Field{
+		{Tag: 1, Value: oversized},
+		{Tag: 2, Value: []byte{1}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tss.DecodeBinary[ResponseMessage](responseRaw); err == nil {
+		t.Fatal("standalone response decoder accepted oversized ciphertext")
 	}
 }

@@ -109,6 +109,9 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	if !parties.Contains(base.From) {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("sender %d is not a participant", base.From))
 	}
+	if base.From == g.Self {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrSelfSender)
+	}
 
 	// 4. Transport authentication.
 	if info.Peer == BroadcastPartyId {
@@ -123,6 +126,9 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	// 6. Channel protection must be set.
 	if info.Protection == ChannelProtectionUnknown {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingChannelProtection)
+	}
+	if !validChannelProtection(info.Protection) {
+		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("%w: %d", ErrInvalidChannelProtection, info.Protection))
 	}
 
 	// 7. Recipient check for direct messages.

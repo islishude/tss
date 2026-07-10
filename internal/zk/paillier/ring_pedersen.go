@@ -467,9 +467,12 @@ func (params *RingPedersenParams) UnmarshalBinaryWithMaxModulusBits(in []byte, m
 	if maxBits <= 0 {
 		maxBits = tss.DefaultMaxPaillierModulusBits
 	}
-	return wire.Unmarshal(in, params, wire.WithFieldLimits(wire.FieldLimits{
-		"paillier_modulus_bits": maxBits,
-	}))
+	return wire.Unmarshal(in, params,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxRingPedersenParamsBytes)),
+		wire.WithFieldLimits(wire.FieldLimits{
+			"paillier_modulus_bits": maxBits,
+		}),
+	)
 }
 
 // Validate checks Ring-Pedersen parameter structure.
@@ -479,13 +482,16 @@ func (params *RingPedersenParams) Validate() error {
 
 // MarshalBinary encodes a Ring-Pedersen proof canonically.
 func (p *RingPedersenProof) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(p)
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalBinary decodes and structurally validates a Ring-Pedersen proof.
 func (p *RingPedersenProof) UnmarshalBinary(in []byte) error {
 	var decoded RingPedersenProof
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxPaillierProofBytes)),
+		wire.WithFieldLimits(zkFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded

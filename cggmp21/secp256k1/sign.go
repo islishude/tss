@@ -352,6 +352,9 @@ func (p *Presign) ValidateWithLimits(limits Limits) error {
 	if _, err := secp.PointFromBytes(p.state.Derivation.ChildPublicKey); err != nil {
 		return fmt.Errorf("invalid presign verification key binding: %w", err)
 	}
+	if err := validateSecp256k1DerivationBinding(p.state.PublicKey, p.state.Derivation); err != nil {
+		return fmt.Errorf("invalid presign verification key binding: %w", err)
+	}
 	if len(p.state.KeygenTranscriptHash) != sha256.Size {
 		return errors.New("invalid presign keygen transcript hash binding")
 	}

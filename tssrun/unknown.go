@@ -7,6 +7,11 @@ import (
 	"github.com/islishude/tss"
 )
 
+const (
+	defaultUnknownEnvelopeMaxEntries    = 4096
+	defaultUnknownEnvelopeMaxPerSession = 256
+)
+
 // RejectUnknownSession is the fail-closed default unknown-session policy.
 type RejectUnknownSession struct{}
 
@@ -40,6 +45,10 @@ type UnknownEnvelopeStore interface {
 type MemoryUnknownEnvelopeStore struct {
 	mu        sync.Mutex
 	envelopes map[unknownIndex][]tss.InboundEnvelope
+	total     int
+
+	maxEntries    int
+	maxPerSession int
 }
 
 type unknownIndex struct {
@@ -49,7 +58,27 @@ type unknownIndex struct {
 
 // NewMemoryUnknownEnvelopeStore returns an empty unknown-envelope store.
 func NewMemoryUnknownEnvelopeStore() *MemoryUnknownEnvelopeStore {
-	return &MemoryUnknownEnvelopeStore{envelopes: make(map[unknownIndex][]tss.InboundEnvelope)}
+	return NewBoundedMemoryUnknownEnvelopeStore(defaultUnknownEnvelopeMaxEntries, defaultUnknownEnvelopeMaxPerSession)
+}
+
+// NewBoundedMemoryUnknownEnvelopeStore returns an empty unknown-envelope store
+// with explicit global and per-session entry limits. Non-positive limits use
+// the default quota.
+func NewBoundedMemoryUnknownEnvelopeStore(maxEntries, maxPerSession int) *MemoryUnknownEnvelopeStore {
+	if maxEntries <= 0 {
+		maxEntries = defaultUnknownEnvelopeMaxEntries
+	}
+	if maxPerSession <= 0 {
+		maxPerSession = defaultUnknownEnvelopeMaxPerSession
+	}
+	if maxPerSession > maxEntries {
+		maxPerSession = maxEntries
+	}
+	return &MemoryUnknownEnvelopeStore{
+		envelopes:     make(map[unknownIndex][]tss.InboundEnvelope),
+		maxEntries:    maxEntries,
+		maxPerSession: maxPerSession,
+	}
 }
 
 // PutUnknown stores an opened inbound envelope for later revalidation.
@@ -63,7 +92,15 @@ func (s *MemoryUnknownEnvelopeStore) PutUnknown(ctx context.Context, in tss.Inbo
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.envelopes == nil {
+		s.envelopes = make(map[unknownIndex][]tss.InboundEnvelope)
+	}
+	maxEntries, maxPerSession := s.limits()
+	if len(s.envelopes[idx]) >= maxPerSession || s.total >= maxEntries {
+		return ErrUnknownSessionBufferFull
+	}
 	s.envelopes[idx] = append(s.envelopes[idx], in)
+	s.total++
 	return nil
 }
 
@@ -91,6 +128,28 @@ func (s *MemoryUnknownEnvelopeStore) DeleteBySession(ctx context.Context, protoc
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	delete(s.envelopes, unknownIndex{protocol: protocol, sessionID: sessionID})
+	idx := unknownIndex{protocol: protocol, sessionID: sessionID}
+	if buffered, ok := s.envelopes[idx]; ok {
+		s.total -= len(buffered)
+		if s.total < 0 {
+			s.total = 0
+		}
+		delete(s.envelopes, idx)
+	}
 	return nil
+}
+
+func (s *MemoryUnknownEnvelopeStore) limits() (int, int) {
+	maxEntries := s.maxEntries
+	if maxEntries <= 0 {
+		maxEntries = defaultUnknownEnvelopeMaxEntries
+	}
+	maxPerSession := s.maxPerSession
+	if maxPerSession <= 0 {
+		maxPerSession = defaultUnknownEnvelopeMaxPerSession
+	}
+	if maxPerSession > maxEntries {
+		maxPerSession = maxEntries
+	}
+	return maxEntries, maxPerSession
 }

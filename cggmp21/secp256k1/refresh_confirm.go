@@ -12,14 +12,14 @@ func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Enve
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh confirmation in wrong round"))
 	}
-	confirmation, err := tss.DecodeBinary[KeygenConfirmation](env.Payload)
-	if err != nil {
+	confirmation := new(KeygenConfirmation)
+	if err := confirmation.UnmarshalBinaryWithLimits(env.Payload, s.limits); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
 	if confirmation.Sender != env.From {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("keygen confirmation sender mismatch: env from %d, payload sender %d", env.From, confirmation.Sender))
 	}
-	canonical, err := confirmation.MarshalBinary()
+	canonical, err := confirmation.MarshalBinaryWithLimits(s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}

@@ -247,7 +247,7 @@ func runExampleFROSTSign(shares map[tss.PartyID]*frost.KeyShare, signers tss.Par
 		queue = append(queue, out...)
 	}
 	if err := security.route(queue, signers, func(tss.Envelope) tss.PartySet {
-		return partySet
+		return signers
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].Handle(env)
 	}); err != nil {

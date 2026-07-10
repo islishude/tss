@@ -110,6 +110,8 @@ type refreshTestRunner struct {
 	start func(context.Context, *refreshTestShare, RefreshRunConfig) (RefreshSession[*refreshTestShare], []Envelope, error)
 }
 
+func (*refreshTestRunner) Protocol() ProtocolID { return ProtocolFROSTEd25519 }
+
 func (r *refreshTestRunner) StartRefresh(ctx context.Context, current *refreshTestShare, config RefreshRunConfig) (RefreshSession[*refreshTestShare], []Envelope, error) {
 	return r.start(ctx, current, config)
 }
@@ -125,6 +127,7 @@ func refreshTestOptions(runner RefreshRunner[*refreshTestShare], transport Trans
 		SessionIDSource: func(context.Context, *refreshTestShare) (SessionID, error) {
 			return refreshTestSessionID(), nil
 		},
+		ClaimSessionID: func(context.Context, SessionID) error { return nil },
 		CommitKeyShare: refreshTestCommitOK,
 	}
 }
@@ -148,6 +151,7 @@ func TestNewRefreshSchedulerRejectsInvalidOptions(t *testing.T) {
 		{name: "ack verifier", mutate: func(o *RefreshSchedulerOptions[*refreshTestShare]) { o.AckVerifier = nil }, want: ErrMissingAckVerifier},
 		{name: "load callback", mutate: func(o *RefreshSchedulerOptions[*refreshTestShare]) { o.LoadKeyShare = nil }},
 		{name: "session callback", mutate: func(o *RefreshSchedulerOptions[*refreshTestShare]) { o.SessionIDSource = nil }},
+		{name: "session claim callback", mutate: func(o *RefreshSchedulerOptions[*refreshTestShare]) { o.ClaimSessionID = nil }},
 		{name: "commit callback", mutate: func(o *RefreshSchedulerOptions[*refreshTestShare]) { o.CommitKeyShare = nil }},
 	}
 	for _, tc := range tests {
@@ -161,6 +165,95 @@ func TestNewRefreshSchedulerRejectsInvalidOptions(t *testing.T) {
 			}
 			if tc.want != nil && !errors.Is(err, tc.want) {
 				t.Fatalf("error = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+func TestRefreshSchedulerRejectsSessionIDClaimedByPreviousInstance(t *testing.T) {
+	t.Parallel()
+	var mu sync.Mutex
+	claimed := make(map[SessionID]bool)
+	duplicateErr := errors.New("session id already claimed")
+	claim := func(_ context.Context, id SessionID) error {
+		mu.Lock()
+		defer mu.Unlock()
+		if claimed[id] {
+			return duplicateErr
+		}
+		claimed[id] = true
+		return nil
+	}
+	var starts atomic.Int32
+	runner := &refreshTestRunner{start: func(context.Context, *refreshTestShare, RefreshRunConfig) (RefreshSession[*refreshTestShare], []Envelope, error) {
+		starts.Add(1)
+		return &refreshTestSession{refreshed: &refreshTestShare{name: "refreshed"}, complete: true}, nil, nil
+	}}
+
+	newScheduler := func() *RefreshScheduler[*refreshTestShare] {
+		options := refreshTestOptions(runner, &refreshTestTransport{})
+		options.ClaimSessionID = claim
+		scheduler, err := NewRefreshScheduler(options)
+		if err != nil {
+			t.Fatalf("NewRefreshScheduler: %v", err)
+		}
+		return scheduler
+	}
+	if err := newScheduler().RunOnce(context.Background()); err != nil {
+		t.Fatalf("first RunOnce: %v", err)
+	}
+	if err := newScheduler().RunOnce(context.Background()); !errors.Is(err, duplicateErr) {
+		t.Fatalf("second RunOnce got %v, want duplicate claim error", err)
+	}
+	if got := starts.Load(); got != 1 {
+		t.Fatalf("runner started %d times, want 1", got)
+	}
+}
+
+func TestRefreshSchedulerRetiresReplayStateAtTerminalOutcome(t *testing.T) {
+	t.Parallel()
+	startErr := errors.New("start failed")
+	for _, tc := range []struct {
+		name     string
+		startErr error
+	}{
+		{name: "success"},
+		{name: "start failure", startErr: startErr},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			cache := NewBoundedReplayCache(1)
+			slot := MessageSlotKey{
+				Protocol:    ProtocolFROSTEd25519,
+				SessionID:   refreshTestSessionID(),
+				Round:       1,
+				From:        2,
+				PayloadType: "refresh-test",
+			}
+			runner := &refreshTestRunner{start: func(_ context.Context, _ *refreshTestShare, config RefreshRunConfig) (RefreshSession[*refreshTestShare], []Envelope, error) {
+				if err := config.ReplayCache.CheckAndStore(slot, [32]byte{1}); err != nil {
+					t.Fatalf("seed replay state: %v", err)
+				}
+				if tc.startErr != nil {
+					return nil, nil, tc.startErr
+				}
+				return &refreshTestSession{refreshed: &refreshTestShare{name: "refreshed"}, complete: true}, nil, nil
+			}}
+			options := refreshTestOptions(runner, &refreshTestTransport{})
+			options.ReplayCache = cache
+			scheduler, err := NewRefreshScheduler(options)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = scheduler.RunOnce(context.Background())
+			if tc.startErr == nil && err != nil {
+				t.Fatal(err)
+			}
+			if tc.startErr != nil && !errors.Is(err, tc.startErr) {
+				t.Fatalf("RunOnce error = %v, want %v", err, tc.startErr)
+			}
+			if err := cache.CheckAndStore(slot, [32]byte{1}); err != nil {
+				t.Fatalf("terminal replay state was not retired: %v", err)
 			}
 		})
 	}

@@ -26,6 +26,9 @@ func (tx *acceptKeygenCommitmentsTx) apply(s *KeygenSession) (sessionEffects, er
 	}
 	slot.commitments = &tx.commitments
 	slot.chainCodeCommit = tx.chainCodeCommit
+	if err := s.promotePendingKeygenConfirmation(tx.from); err != nil {
+		return sessionEffects{}, err
+	}
 	out, err := s.tryAdvance()
 	return sessionEffects{envelopes: out}, err
 }
@@ -72,11 +75,19 @@ type acceptKeygenConfirmationTx struct {
 	from         tss.PartyID
 	confirmation *KeygenConfirmation
 	duplicate    bool
+	pending      bool
 	committed    bool
 }
 
 func (tx *acceptKeygenConfirmationTx) apply(s *KeygenSession) (sessionEffects, error) {
 	if tx == nil || tx.duplicate {
+		return sessionEffects{}, nil
+	}
+	if tx.pending {
+		if s.pendingConfirmations == nil {
+			s.pendingConfirmations = make(map[tss.PartyID]*KeygenConfirmation)
+		}
+		s.pendingConfirmations[tx.from] = tx.confirmation
 		return sessionEffects{}, nil
 	}
 	s.confirmations.chainCodes[tx.from] = bytes.Clone(tx.confirmation.ChainCode)
@@ -205,6 +216,15 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 	if err := requirePlanHash("keygen confirmation", confirmation.PlanHash, s.planHash); err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}
+	if existing := s.pendingConfirmations[base.From]; existing != nil {
+		existingRaw, marshalErr := existing.MarshalBinary()
+		if marshalErr == nil && bytes.Equal(existingRaw, canonical) {
+			clear(confirmation.ChainCode)
+			return &acceptKeygenConfirmationTx{from: base.From, duplicate: true}, nil
+		}
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("conflicting pending keygen confirmation from party %d", base.From))
+	}
 	slot, err := s.round1.slot(base.From)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
@@ -218,6 +238,13 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 		}
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, fmt.Errorf("conflicting keygen confirmation from party %d", base.From))
+	}
+	if slot.chainCodeCommit == nil {
+		return &acceptKeygenConfirmationTx{
+			from:         base.From,
+			confirmation: confirmation,
+			pending:      true,
+		}, nil
 	}
 	if err := verifyFROSTKeygenCommitRevealChainCode(s.cfg.SessionID, base.From, confirmation.ChainCode, slot.chainCodeCommit); err != nil {
 		clear(confirmation.ChainCode)
@@ -233,4 +260,30 @@ func (s *KeygenSession) buildAcceptKeygenConfirmationTx(base tss.Envelope) (*acc
 		from:         base.From,
 		confirmation: confirmation,
 	}, nil
+}
+
+func (s *KeygenSession) promotePendingKeygenConfirmation(from tss.PartyID) error {
+	confirmation := s.pendingConfirmations[from]
+	if confirmation == nil {
+		return nil
+	}
+	slot, err := s.round1.slot(from)
+	if err != nil {
+		return err
+	}
+	if slot.chainCodeCommit == nil {
+		return nil
+	}
+	if err := verifyFROSTKeygenCommitRevealChainCode(s.cfg.SessionID, from, confirmation.ChainCode, slot.chainCodeCommit); err != nil {
+		return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, from, err)
+	}
+	if s.pending != nil {
+		if err := verifyKeygenConfirmationForPending(s.pending, confirmation); err != nil {
+			return tss.NewProtocolError(tss.ErrCodeVerification, keygenConfirmationRound, from, err)
+		}
+	}
+	s.confirmations.chainCodes[from] = bytes.Clone(confirmation.ChainCode)
+	s.confirmations.confirmations[from] = confirmation
+	delete(s.pendingConfirmations, from)
+	return nil
 }

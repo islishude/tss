@@ -9,6 +9,7 @@ import (
 	"io"
 	"math/big"
 
+	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -163,13 +164,16 @@ func VerifyModulus(domain []byte, pk *pai.PublicKey, party uint32, proof *Modulu
 
 // MarshalBinary encodes a modulus proof canonically.
 func (p *ModulusProof) MarshalBinary() ([]byte, error) {
-	return wire.Marshal(p)
+	return wire.Marshal(p, wire.WithFieldLimitsForMarshal(zkFieldLimits()))
 }
 
 // UnmarshalBinary decodes and structurally validates a modulus proof.
 func (p *ModulusProof) UnmarshalBinary(in []byte) error {
 	var decoded ModulusProof
-	if err := wire.Unmarshal(in, &decoded); err != nil {
+	if err := wire.Unmarshal(in, &decoded,
+		wire.WithFrameLimits(zkFrameLimits(tss.DefaultMaxPaillierProofBytes)),
+		wire.WithFieldLimits(zkFieldLimits()),
+	); err != nil {
 		return err
 	}
 	*p = decoded

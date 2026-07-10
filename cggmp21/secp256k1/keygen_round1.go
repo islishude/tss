@@ -193,15 +193,16 @@ func newKeygenSession(
 		return nil, err
 	}
 	return &KeygenSession{
-		cfg:            config,
-		limits:         limits,
-		securityParams: securityParams,
-		planHash:       bytes.Clone(planHash),
-		local:          local,
-		round1:         round1,
-		confirmations:  newKeygenConfirmationInbox(config.Parties),
-		state:          keygenCollectingRound1,
-		guard:          guard,
+		cfg:                  config,
+		limits:               limits,
+		securityParams:       securityParams,
+		planHash:             bytes.Clone(planHash),
+		local:                local,
+		round1:               round1,
+		confirmations:        newKeygenConfirmationInbox(config.Parties),
+		pendingConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		state:                keygenCollectingRound1,
+		guard:                guard,
 	}, nil
 }
 

@@ -98,6 +98,30 @@ func TestProofVerifiersRejectSmallRingPedersenAuxModulus(t *testing.T) {
 	}
 }
 
+func TestProofVerifiersRejectNilVerifierAuxWithoutPanic(t *testing.T) {
+	t.Run("enc", func(t *testing.T) {
+		params, stmt, _, proof := encProofFixture(t)
+		stmt.VerifierAux = nil
+		requireVerifyErrorNoPanic(t, func() error {
+			return VerifyEnc(params, []byte("nil aux"), stmt, proof)
+		})
+	})
+	t.Run("affg", func(t *testing.T) {
+		params, stmt, _, proof := affGProofFixture(t)
+		stmt.VerifierAux = nil
+		requireVerifyErrorNoPanic(t, func() error {
+			return VerifyAffG(params, []byte("nil aux"), stmt, proof)
+		})
+	})
+	t.Run("logstar", func(t *testing.T) {
+		params, stmt, _, proof := logStarProofFixture(t)
+		stmt.VerifierAux = nil
+		requireVerifyErrorNoPanic(t, func() error {
+			return VerifyLogStar(params, []byte("nil aux"), stmt, proof)
+		})
+	})
+}
+
 func TestRingPedersenVerifierRejectsSecurityParamFloorMismatch(t *testing.T) {
 	sk := testPaillierKey(t, 512)
 	params, lambda, err := GenerateRingPedersenParams(nil, sk)

@@ -2,6 +2,7 @@ package tss
 
 import (
 	"bytes"
+	"slices"
 	"strings"
 	"testing"
 
@@ -216,6 +217,63 @@ func TestBlameEvidenceRejectsMalformed(t *testing.T) {
 		{Key: "dup", Value: []byte{2}},
 	}); err == nil {
 		t.Fatal("duplicate evidence field accepted")
+	}
+}
+
+func TestBlameEvidenceRejectsUnknownKindAndInvalidDecodedSemantics(t *testing.T) {
+	t.Parallel()
+	session, err := NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := NewBlameEvidence(Envelope{
+		Protocol:    "test-protocol",
+		SessionID:   session,
+		Round:       1,
+		From:        1,
+		PayloadType: "test.payload",
+		Payload:     []byte("payload"),
+	}, EvidenceKindSignPartial, "invalid partial", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := evidence.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, blameWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	for _, tc := range []struct {
+		name  string
+		tag   uint16
+		value []byte
+	}{
+		{name: "unknown kind", tag: 9, value: []byte("future_kind")},
+		{name: "empty reason", tag: 10, value: []byte{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := slices.Clone(fields)
+			for i := range mutated {
+				if mutated[i].Tag == tc.tag {
+					mutated[i].Value = tc.value
+				}
+			}
+			encoded, err := wire.MarshalFields(version, blameWireType, mutated)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if _, err := DecodeBinary[BlameEvidence](encoded); err == nil {
+				t.Fatal("semantically invalid evidence decoded")
+			}
+		})
+	}
+
+	evidence.Kind = EvidenceKind("future_kind")
+	if _, err := evidence.MarshalBinary(); err == nil {
+		t.Fatal("unknown evidence kind encoded")
 	}
 }
 

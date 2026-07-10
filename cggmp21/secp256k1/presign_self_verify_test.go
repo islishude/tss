@@ -73,6 +73,10 @@ func TestThresholdECDSA_PresignCryptographicSelfVerificationTamperMatrix(t *test
 			p.state.VerifyShares[0].Proof.MPoint = replacementPointBytes
 			return nil
 		}},
+		{name: "child verification key", mutate: func(p *Presign) error {
+			p.state.Derivation.ChildPublicKey = replacementPointBytes
+			return nil
+		}},
 		{name: "transcript hash", mutate: func(p *Presign) error {
 			p.state.TranscriptHash[0] ^= 1
 			return nil

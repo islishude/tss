@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss/internal/wire"
@@ -72,6 +73,56 @@ func TestDerivationPathValidateNonHardened(t *testing.T) {
 	if err := (DerivationPath{HardenedKeyStart}).ValidateNonHardened(); err == nil {
 		t.Fatal("hardened path accepted")
 	}
+	if err := make(DerivationPath, MaxDerivationDepth+1).ValidateNonHardened(); !errors.Is(err, ErrDerivationDepthOverflow) {
+		t.Fatalf("oversized path got %v, want ErrDerivationDepthOverflow", err)
+	}
+	oversized := "m" + strings.Repeat("/0", MaxDerivationDepth+1)
+	if _, err := ParseDerivationPath(oversized); !errors.Is(err, ErrDerivationDepthOverflow) {
+		t.Fatalf("oversized parsed path got %v, want ErrDerivationDepthOverflow", err)
+	}
+}
+
+func TestSigningContextRejectsUnknownInvalidChildMode(t *testing.T) {
+	t.Parallel()
+	ctx := testSigningContext()
+	ctx.Derivation.InvalidChildMode = InvalidChildMode(255)
+	if err := ctx.Validate(); !errors.Is(err, ErrInvalidChildMode) {
+		t.Fatalf("Validate got %v, want ErrInvalidChildMode", err)
+	}
+	if _, err := ctx.MarshalBinary(); !errors.Is(err, ErrInvalidChildMode) {
+		t.Fatalf("MarshalBinary got %v, want ErrInvalidChildMode", err)
+	}
+
+	valid := testSigningContext()
+	raw, err := valid.MarshalBinary()
+	if err != nil {
+		t.Fatalf("MarshalBinary valid context: %v", err)
+	}
+	version, fields, err := wire.UnmarshalFields(raw, signingContextWireType)
+	if err != nil {
+		t.Fatal(err)
+	}
+	record, err := wire.UnmarshalRecordFieldsWithLimits(fields[2].Value, wire.DefaultFrameLimits(), "derivation")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range record {
+		if record[i].Tag == 3 {
+			record[i].Value = []byte{255}
+		}
+	}
+	fields[2].Value, err = wire.MarshalRecordFields(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err = wire.MarshalFields(version, signingContextWireType, fields)
+	if err != nil {
+		t.Fatalf("build raw unknown-mode context: %v", err)
+	}
+	var decoded SigningContext
+	if err := decoded.UnmarshalBinary(raw); !errors.Is(err, ErrInvalidChildMode) {
+		t.Fatalf("UnmarshalBinary got %v, want ErrInvalidChildMode", err)
+	}
 }
 
 func TestSentinelErrors(t *testing.T) {
@@ -84,6 +135,7 @@ func TestSentinelErrors(t *testing.T) {
 		ErrHardenedDerivationUnsupported,
 		ErrInvalidChild,
 		ErrDerivationDepthOverflow,
+		ErrInvalidChildMode,
 		ErrInvalidExtendedPublicKey,
 	}
 	for i, a := range errs {

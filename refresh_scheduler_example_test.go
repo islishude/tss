@@ -32,6 +32,8 @@ func (*exampleRefreshShare) Destroy()                       {}
 
 type exampleRefreshRunner struct{}
 
+func (exampleRefreshRunner) Protocol() tss.ProtocolID { return tss.ProtocolFROSTEd25519 }
+
 func (exampleRefreshRunner) StartRefresh(context.Context, *exampleRefreshShare, tss.RefreshRunConfig) (tss.RefreshSession[*exampleRefreshShare], []tss.Envelope, error) {
 	return exampleRefreshSession{refreshed: &exampleRefreshShare{generation: 2}}, nil, nil
 }
@@ -77,6 +79,9 @@ func ExampleRefreshScheduler_RunOnce() {
 		},
 		SessionIDSource: func(context.Context, *exampleRefreshShare) (tss.SessionID, error) {
 			return tss.SessionID{1}, nil
+		},
+		ClaimSessionID: func(context.Context, tss.SessionID) error {
+			return nil
 		},
 		CommitKeyShare: func(_ context.Context, previous, refreshed *exampleRefreshShare) error {
 			if current != previous {

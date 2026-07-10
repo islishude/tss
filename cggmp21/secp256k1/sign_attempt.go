@@ -178,9 +178,10 @@ type SignAttemptDeliveryUpdate struct {
 	Ack              *tss.BroadcastAck
 	Certificate      *tss.BroadcastCertificate
 	// AckVerifier verifies Ack and Certificate signatures before they are made
-	// durable. Certificate updates require a non-nil verifier.
+	// durable. Ack and Certificate updates require a non-nil verifier.
 	AckVerifier tss.BroadcastAckVerifier
 
+	ackVerified         bool
 	certificateVerified bool
 }
 
@@ -241,6 +242,23 @@ type SignAttemptRecord struct {
 	SignatureR          []byte `wire:"21,bytes,max_bytes=scalar"`
 	SignatureS          []byte `wire:"22,bytes,max_bytes=scalar"`
 	SignatureRecoveryID uint8  `wire:"23,u8"`
+}
+
+const signAttemptRecordRedacted = "<cggmp21.secp256k1.SignAttemptRecord:redacted>"
+
+// String returns a redacted representation.
+func (r *SignAttemptRecord) String() string {
+	return signAttemptRecordRedacted
+}
+
+// GoString returns a redacted representation.
+func (r *SignAttemptRecord) GoString() string {
+	return signAttemptRecordRedacted
+}
+
+// Format writes a redacted representation for all fmt verbs.
+func (r SignAttemptRecord) Format(state fmt.State, verb rune) {
+	_, _ = fmt.Fprint(state, signAttemptRecordRedacted)
 }
 
 // Clone returns an independent copy of the sign-attempt record.
@@ -640,9 +658,12 @@ func applySignAttemptDeliveryUpdate(record SignAttemptRecord, update SignAttempt
 	recipients := record.DeliveryPolicy.Recipients
 	updated := record.Clone()
 	if update.Ack != nil {
-		if update.AckVerifier != nil {
+		if !update.ackVerified {
+			if update.AckVerifier == nil {
+				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w", ErrSignAttemptCorrupt, tss.ErrMissingAckVerifier)
+			}
 			if err := tss.VerifyBroadcastAck(env, *update.Ack, update.AckVerifier); err != nil {
-				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w", ErrSignAttemptCorrupt, err)
+				return SignAttemptRecord{}, fmt.Errorf("%w: delivery ack: %w: %w", ErrSignAttemptCorrupt, tss.ErrInvalidBroadcastCertificate, err)
 			}
 		}
 		if err := addSignAttemptDeliveryAck(&updated, update.Ack.Clone(), env, recipients); err != nil {

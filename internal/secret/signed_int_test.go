@@ -80,12 +80,20 @@ func TestSignedIntRedactsAndRejectsSerialization(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer value.Destroy()
+	copied := *value
 
-	if got := fmt.Sprint(value); got != signedIntRedacted {
-		t.Fatal("String did not redact value")
-	}
-	if got := fmt.Sprintf("%#v", value); got != signedIntRedacted {
-		t.Fatal("GoString did not redact value")
+	for _, tc := range []struct {
+		name  string
+		value any
+	}{
+		{name: "pointer", value: value},
+		{name: "value", value: copied},
+	} {
+		for _, format := range []string{"%v", "%+v", "%#v", "%x"} {
+			if got := fmt.Sprintf(format, tc.value); got != signedIntRedacted {
+				t.Fatalf("%s SignedInt formatted with %s without redaction", tc.name, format)
+			}
+		}
 	}
 	if _, err := json.Marshal(value); err == nil {
 		t.Fatal("JSON encoding succeeded")
