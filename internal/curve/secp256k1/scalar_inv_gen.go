@@ -103,7 +103,7 @@ func scalarInvAddchain(x Scalar) Scalar {
 
 	t11 = ScalarMul(t11, t12)
 
-	for s := 0; s < 9; s++ {
+	for range 9 {
 		t11 = ScalarSquare(t11)
 	}
 
@@ -116,7 +116,7 @@ func scalarInvAddchain(x Scalar) Scalar {
 
 	t10 = ScalarMul(t10, t11)
 
-	for s := 0; s < 26; s++ {
+	for range 26 {
 		t10 = ScalarSquare(t10)
 	}
 
@@ -129,7 +129,7 @@ func scalarInvAddchain(x Scalar) Scalar {
 
 	t9 = ScalarMul(t9, t10)
 
-	for s := 0; s < 60; s++ {
+	for range 60 {
 		t9 = ScalarSquare(t9)
 	}
 
@@ -137,145 +137,145 @@ func scalarInvAddchain(x Scalar) Scalar {
 
 	t7 = ScalarMul(t7, t8)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t3, t7)
 
-	for s := 0; s < 3; s++ {
+	for range 3 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t6, t7)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t6, t7)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t5, t7)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t1, t7)
 
-	for s := 0; s < 2; s++ {
+	for range 2 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t2, t7)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t5, t7)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t1, t7)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t3, t7)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(t1, t7)
 
-	for s := 0; s < 3; s++ {
+	for range 3 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t7 = ScalarMul(x, t7)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t7 = ScalarSquare(t7)
 	}
 
 	t6 = ScalarMul(t6, t7)
 
-	for s := 0; s < 10; s++ {
+	for range 10 {
 		t6 = ScalarSquare(t6)
 	}
 
 	t6 = ScalarMul(t5, t6)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t6 = ScalarSquare(t6)
 	}
 
 	t5 = ScalarMul(t5, t6)
 
-	for s := 0; s < 9; s++ {
+	for range 9 {
 		t5 = ScalarSquare(t5)
 	}
 
 	t4 = ScalarMul(t4, t5)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t4 = ScalarSquare(t4)
 	}
 
 	t4 = ScalarMul(t0, t4)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t4 = ScalarSquare(t4)
 	}
 
 	t3 = ScalarMul(t3, t4)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t3 = ScalarSquare(t3)
 	}
 
 	t3 = ScalarMul(t1, t3)
 
-	for s := 0; s < 5; s++ {
+	for range 5 {
 		t3 = ScalarSquare(t3)
 	}
 
 	t2 = ScalarMul(t2, t3)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t2 = ScalarSquare(t2)
 	}
 
 	t2 = ScalarMul(t1, t2)
 
-	for s := 0; s < 10; s++ {
+	for range 10 {
 		t2 = ScalarSquare(t2)
 	}
 
 	t1 = ScalarMul(t1, t2)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t1 = ScalarSquare(t1)
 	}
 
 	t0 = ScalarMul(t0, t1)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t0 = ScalarSquare(t0)
 	}
 
 	t0 = ScalarMul(x, t0)
 
-	for s := 0; s < 8; s++ {
+	for range 8 {
 		t0 = ScalarSquare(t0)
 	}
 

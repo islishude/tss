@@ -197,7 +197,7 @@ func FUNC_NAME(x ELEM_TYPE) ELEM_TYPE {
 		{{ $i.Output }} = SQR_FUNC({{ $i.Output }})
 	}
 	{{- else }}
-	for s := 0; s < {{ .S }}; s++ {
+	for range {{ .S }} {
 		{{ $i.Output }} = SQR_FUNC({{ $i.Output }})
 	}
 	{{- end }}

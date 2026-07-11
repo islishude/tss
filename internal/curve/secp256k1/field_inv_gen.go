@@ -49,7 +49,7 @@ func fieldInvAddchain(x FieldElement) FieldElement {
 
 	t2 = FieldMul(t1, t2)
 
-	for s := 0; s < 4; s++ {
+	for range 4 {
 		t2 = FieldSquare(t2)
 	}
 
@@ -62,7 +62,7 @@ func fieldInvAddchain(x FieldElement) FieldElement {
 
 	t2 = FieldMul(t1, t2)
 
-	for s := 0; s < 10; s++ {
+	for range 10 {
 		t2 = FieldSquare(t2)
 	}
 
@@ -91,7 +91,7 @@ func fieldInvAddchain(x FieldElement) FieldElement {
 
 	t3 = FieldMul(t3, t4)
 
-	for s := 0; s < 46; s++ {
+	for range 46 {
 		t3 = FieldSquare(t3)
 	}
 
@@ -106,19 +106,19 @@ func fieldInvAddchain(x FieldElement) FieldElement {
 
 	t1 = FieldMul(t1, t2)
 
-	for s := 0; s < 23; s++ {
+	for range 23 {
 		t1 = FieldSquare(t1)
 	}
 
 	t0 = FieldMul(t0, t1)
 
-	for s := 0; s < 7; s++ {
+	for range 7 {
 		t0 = FieldSquare(t0)
 	}
 
 	t0 = FieldMul(z, t0)
 
-	for s := 0; s < 3; s++ {
+	for range 3 {
 		t0 = FieldSquare(t0)
 	}
 
@@ -219,25 +219,25 @@ func fieldSqrtAddchain(x FieldElement) FieldElement {
 
 	t2 = FieldMul(t2, t3)
 
-	for s := 0; s < 7; s++ {
+	for range 7 {
 		t2 = FieldSquare(t2)
 	}
 
 	t1 = FieldMul(t1, t2)
 
-	for s := 0; s < 23; s++ {
+	for range 23 {
 		t1 = FieldSquare(t1)
 	}
 
 	t0 = FieldMul(t0, t1)
 
-	for s := 0; s < 6; s++ {
+	for range 6 {
 		t0 = FieldSquare(t0)
 	}
 
 	z = FieldMul(z, t0)
 
-	for s := 0; s < 2; s++ {
+	for range 2 {
 		z = FieldSquare(z)
 	}
 
