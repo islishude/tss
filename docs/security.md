@@ -148,7 +148,9 @@ partials, additive-shift scalars, and any remaining session-owned material.
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point
 messages, reporting `ChannelConfidential` in `ReceiveInfo` so the guard enforces the policy. New HD reshare recipients must be provisioned
-with the old 32-byte chain code through an authorized metadata channel; the
+through an authorized metadata channel with the old public key, 32-byte chain
+code, party set, group commitments, lifecycle session ID, transcript hash, and
+plan hash. The reshare plan binds all of these source-generation anchors. The
 chain code is not a signing secret, but losing or substituting it changes child
 key derivation.
 
@@ -295,15 +297,21 @@ share, ok := kg.KeyShare() // FROST; CGGMP21 also exposes Complete()
 
 CGGMP21/secp256k1 key shares are not valid for signing until the full
 confirmation evidence set is embedded in the share and `Validate()` succeeds.
-FROST keygen shares produced by `KeygenSession` also embed and verify keygen
-confirmations; FROST reshare/refresh shares continue to rely on their own
-reshare transcript and group-key preservation checks.
+FROST keygen shares produced by `KeygenSession` embed and verify keygen
+confirmations. FROST reshare/refresh also has a mandatory target-holder
+confirmation round; its resulting shares are unavailable until the complete
+set agrees on the reshare transcript, new commitments, preserved group public
+key, and preserved chain code. Removed old dealers compute that same binding
+from public commitments and do not enter their terminal state until they have
+verified the full target confirmation set.
 
 Transport responsibilities:
 
 - bind every inbound envelope to an authenticated sender identity via `ReceiveInfo.Peer`;
 - never let a payload field override the transport-authenticated sender;
 - fan out broadcast envelopes to every party;
+- fan out FROST reshare confirmations across the old/new party union while
+  constructing their broadcast certificate against the target `newParties` set;
 - protect confidential share envelopes with point-to-point encryption or equivalent controls, and report `ChannelConfidential`;
 - supply `BroadcastCertificate` through `WithBroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (all broadcast-mode messages in CGGMP21 and FROST policy sets);
 - treat `ReceiveInfo` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;

@@ -56,6 +56,58 @@ func TestFROSTReshareStartRejectsNilPlan(t *testing.T) {
 	}
 }
 
+func TestFROSTRefreshPlanRejectsMixedSourceGenerations(t *testing.T) {
+	t.Parallel()
+
+	parties := tss.NewPartySet(1, 2)
+	original := frostKeygen(t, 2, 2)
+	firstRefreshID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstSessions := make(map[tss.PartyID]*ReshareSession, len(parties))
+	firstMessages := make([]tss.Envelope, 0)
+	for _, id := range parties {
+		session, out, err := startFROSTRefresh(original[id], tss.ThresholdConfig{
+			Threshold: 2, Parties: parties, Self: id, SessionID: firstRefreshID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		firstSessions[id] = session
+		firstMessages = append(firstMessages, out...)
+	}
+	deliverReshareMessages(t, parties, firstMessages, firstSessions)
+	refreshed := collectReshareShares(t, parties, firstSessions)
+
+	mixedRefreshID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	newGenerationSession, _, err := startFROSTRefresh(refreshed[1], tss.ThresholdConfig{
+		Threshold: 2, Parties: parties, Self: 1, SessionID: mixedRefreshID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer newGenerationSession.Destroy()
+	oldGenerationSession, oldOut, err := startFROSTRefresh(original[2], tss.ThresholdConfig{
+		Threshold: 2, Parties: parties, Self: 2, SessionID: mixedRefreshID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer oldGenerationSession.Destroy()
+
+	oldCommitment := mustFROSTEnvelope(t, oldOut, payloadReshareCommitments, tss.BroadcastPartyId)
+	if _, err := newGenerationSession.Handle(testutil.DeliverEnvelope(oldCommitment)); err == nil || !errors.Is(err, errPlanHashMismatch) {
+		t.Fatalf("expected mixed source generation plan mismatch, got %v", err)
+	}
+	if _, ok := newGenerationSession.commits[2]; ok {
+		t.Fatal("mixed-generation commitment mutated refresh state")
+	}
+}
+
 func TestFROSTPayloadDecodersRespectFrameLimits(t *testing.T) {
 	t.Parallel()
 	limits := testLimits()

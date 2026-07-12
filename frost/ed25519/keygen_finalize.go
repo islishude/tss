@@ -72,6 +72,7 @@ func (s *KeygenSession) buildFinalKeyShare(snap *frostKeygenConfirmationSnapshot
 		KeygenSessionID:      s.pending.keygenSessionID,
 		KeygenTranscriptHash: bytes.Clone(s.pending.keygenTranscriptHash),
 		PlanHash:             bytes.Clone(s.pending.planHash),
+		ConfirmationMode:     keyShareConfirmationModeKeygenContributions,
 	}}
 	if err := applyKeygenConfirmationSet(final, snap.confirmations); err != nil {
 		final.Destroy()

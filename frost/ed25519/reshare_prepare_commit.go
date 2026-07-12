@@ -63,22 +63,24 @@ func prepareReshareDealerStart(
 	}
 
 	session := &ReshareSession{
-		oldKey:       oldKey,
-		oldPublicKey: oldKey.state.PublicKey.Clone(),
-		chainCode:    bytes.Clone(oldKey.state.ChainCode),
-		oldParties:   oldParties.Clone(),
-		newParties:   newParties.Clone(),
-		newThreshold: newThreshold,
-		selfID:       oldKey.state.Party,
-		mode:         mode,
-		role:         role,
-		cfg:          config,
-		log:          config.Logger(),
-		limits:       limits,
-		planHash:     bytes.Clone(planHash),
-		commits:      map[tss.PartyID]reshareCommitments{oldKey.state.Party: commitments.Clone()},
-		shares:       make(map[tss.PartyID]*secret.Scalar),
-		guard:        guard,
+		oldKey:               oldKey,
+		oldPublicKey:         oldKey.state.PublicKey.Clone(),
+		chainCode:            bytes.Clone(oldKey.state.ChainCode),
+		oldParties:           oldParties.Clone(),
+		newParties:           newParties.Clone(),
+		newThreshold:         newThreshold,
+		selfID:               oldKey.state.Party,
+		mode:                 mode,
+		role:                 role,
+		cfg:                  config,
+		log:                  config.Logger(),
+		limits:               limits,
+		planHash:             bytes.Clone(planHash),
+		commits:              map[tss.PartyID]reshareCommitments{oldKey.state.Party: commitments.Clone()},
+		shares:               make(map[tss.PartyID]*secret.Scalar),
+		confirmations:        make(map[tss.PartyID]*KeygenConfirmation),
+		pendingConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		guard:                guard,
 	}
 	prepared := &preparedReshareDealerStart{session: session}
 	defer func() {
@@ -142,8 +144,11 @@ func prepareReshareDealerStart(
 			prepared.out = append(prepared.out, shareEnv)
 		}
 	}
-	if err = session.tryComplete(); err != nil {
+	completionOut, completeErr := session.tryComplete()
+	if completeErr != nil {
+		err = completeErr
 		return nil, err
 	}
+	prepared.out = append(prepared.out, completionOut...)
 	return prepared, nil
 }

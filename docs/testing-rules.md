@@ -182,6 +182,10 @@ Required behavior:
   HD, PaillierBits, signer set, path, context, presign, or message intent must
   fail closed at the first plan-bound payload without outbound messages or
   secret/state advancement.
+- Refresh and reshare plans must bind the exact source key generation, including
+  its lifecycle session, transcript, plan, and group commitments. Equal group
+  public keys are not sufficient evidence that local shares are from one
+  generation.
 
 Round transitions must be monotonic. Duplicates, replay, corruption, wrong
 recipients, non-signers, invalid thresholds, and invalid committee or reshare
@@ -288,6 +292,10 @@ Tests must verify:
 
 - refresh and reshare preserve the group public key unless explicitly specified;
 - epochs, plans, party sets, and thresholds are bound into transcripts and proofs;
+- FROST refresh/reshare output remains unavailable until every target key holder
+  confirms the same transcript, commitments, public key, and preserved chain code;
+- serialized lifecycle shares reject missing, partial, and fully stripped
+  confirmation sets;
 - interrupted operations do not leave two inconsistent usable shares;
 - incomplete refresh leaves only the old share usable;
 - completed refresh makes the new share usable without unsafe old/new mixing;

@@ -53,16 +53,27 @@ func verifyKeygenConfirmationSetAggregateChainCode(local *KeyShare, confirmation
 	if err := verifyKeygenConfirmationSetBinding(local, confirmations); err != nil {
 		return err
 	}
-	chainCodes := make(map[tss.PartyID][]byte, len(confirmations))
-	for _, confirmation := range confirmations {
-		chainCodes[confirmation.Sender] = slices.Clone(confirmation.ChainCode)
-	}
-	aggregate, err := bip32util.AggregateChainCode(local.state.Parties, chainCodes)
-	if err != nil {
-		return fmt.Errorf("keygen confirmation chain code set: %w", err)
-	}
-	if !bytes.Equal(aggregate, local.state.ChainCode) {
-		return errors.New("keygen confirmation aggregate chain code mismatch")
+	switch local.state.ConfirmationMode {
+	case keyShareConfirmationModeKeygenContributions:
+		chainCodes := make(map[tss.PartyID][]byte, len(confirmations))
+		for _, confirmation := range confirmations {
+			chainCodes[confirmation.Sender] = slices.Clone(confirmation.ChainCode)
+		}
+		aggregate, err := bip32util.AggregateChainCode(local.state.Parties, chainCodes)
+		if err != nil {
+			return fmt.Errorf("keygen confirmation chain code set: %w", err)
+		}
+		if !bytes.Equal(aggregate, local.state.ChainCode) {
+			return errors.New("keygen confirmation aggregate chain code mismatch")
+		}
+	case keyShareConfirmationModeLifecycleAggregate:
+		for _, confirmation := range confirmations {
+			if !bytes.Equal(confirmation.ChainCode, local.state.ChainCode) {
+				return fmt.Errorf("lifecycle confirmation chain code mismatch from party %d", confirmation.Sender)
+			}
+		}
+	default:
+		return errors.New("invalid lifecycle confirmation mode")
 	}
 	return nil
 }

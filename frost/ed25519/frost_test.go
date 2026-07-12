@@ -162,13 +162,15 @@ func startFROSTReshare(oldKey *KeyShare, newParties tss.PartySet, newThreshold i
 	return StartReshare(oldKey, plan, localConfigFromThresholdConfig(config), guard)
 }
 
-func startFROSTReshareRecipient(oldPublicKey, oldChainCode []byte, oldParties, newParties tss.PartySet, newThreshold int, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, error) {
+func startFROSTReshareRecipient(oldKey *KeyShare, oldParties, newParties tss.PartySet, newThreshold int, config tss.ThresholdConfig, guards ...*tss.EnvelopeGuard) (*ReshareSession, error) {
 	guard := chooseFROSTGuard(guards, func() *tss.EnvelopeGuard {
 		return testFROSTGuard(config.Self, testFROSTGuardParties(reshareGuardParties(oldParties, newParties), config.Self), config.SessionID)
 	})
 	limits := testLimits()
 	plan, err := NewPublicResharePlan(PublicResharePlanOption{
-		OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties,
+		OldPublicKey: oldKey.state.PublicKey.Bytes(), OldChainCode: oldKey.state.ChainCode, OldParties: oldParties,
+		OldGroupCommitments: oldKey.state.GroupCommitments.BytesList(), OldKeygenSessionID: oldKey.state.KeygenSessionID,
+		OldKeygenTranscriptHash: oldKey.state.KeygenTranscriptHash, OldPlanHash: oldKey.state.PlanHash,
 		SessionID: config.SessionID, NewParties: newParties, NewThreshold: newThreshold,
 		Limits: &limits,
 	})
@@ -825,7 +827,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			messages = append(messages, out...)
 		}
 		// Recipient-only: party 4 has no old KeyShare.
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.PublicKey.Bytes(), oldShares[1].state.ChainCode, tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
+		recipient, err := startFROSTReshareRecipient(oldShares[1], tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold, Parties: newParties, Self: 4, SessionID: sessionID})
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -903,7 +905,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.PublicKey.Bytes(), oldShares[1].state.ChainCode, tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
+		recipient, err := startFROSTReshareRecipient(oldShares[1], tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{Threshold: newThreshold,
 			Parties: newParties, Self: 4, SessionID: sessionID,
 		})
 		if err != nil {
@@ -946,7 +948,7 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 			reshareSessions[id] = session
 			messages = append(messages, out...)
 		}
-		recipient, err := startFROSTReshareRecipient(oldShares[1].state.PublicKey.Bytes(), oldShares[1].state.ChainCode, tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{
+		recipient, err := startFROSTReshareRecipient(oldShares[1], tss.NewPartySet(1, 2, 3), newParties, newThreshold, tss.ThresholdConfig{
 			Threshold: newThreshold,
 			Parties:   newParties,
 			Self:      4,
@@ -1013,16 +1015,20 @@ func TestFROSTReshareMembershipChange(t *testing.T) {
 // Callers must set guards on all sessions before calling this function.
 func deliverReshareMessages(t *testing.T, receivers tss.PartySet, messages []tss.Envelope, sessions map[tss.PartyID]*ReshareSession) {
 	t.Helper()
-	for _, env := range messages {
+	queue := append([]tss.Envelope(nil), messages...)
+	for len(queue) > 0 {
+		env := queue[0]
+		queue = queue[1:]
 		for _, id := range receivers {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
 			delivered := env
-			_, err := sessions[id].Handle(testutil.DeliverEnvelope(delivered))
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(delivered))
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
+			queue = append(queue, out...)
 		}
 	}
 }
@@ -1089,20 +1095,7 @@ func TestFROSTRefreshPreservesGroupKey(t *testing.T) {
 				messages = append(messages, out...)
 			}
 
-			for _, env := range messages {
-				for _, id := range parties {
-					if id == env.From {
-						continue
-					}
-					if env.To != 0 && env.To != id {
-						continue
-					}
-					_, err := refreshSessions[id].Handle(testutil.DeliverEnvelope(env))
-					if err != nil {
-						t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
-					}
-				}
-			}
+			deliverReshareMessages(t, parties, messages, refreshSessions)
 
 			newShares := make(map[tss.PartyID]*KeyShare, tc.parties)
 			for _, id := range parties {
@@ -1152,7 +1145,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	session, _, err := startFROSTRefresh(shares[1], tss.ThresholdConfig{Threshold: 2,
+	session, out1, err := startFROSTRefresh(shares[1], tss.ThresholdConfig{Threshold: 2,
 		Parties:   tss.NewPartySet(1, 2),
 		Self:      1,
 		SessionID: sessionID,
@@ -1164,7 +1157,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 		t.Fatal("StartRefresh returned nil session")
 	}
 
-	_, out2, err := startFROSTRefresh(shares[2], tss.ThresholdConfig{Threshold: 2,
+	session2, out2, err := startFROSTRefresh(shares[2], tss.ThresholdConfig{Threshold: 2,
 		Parties:   tss.NewPartySet(1, 2),
 		Self:      2,
 		SessionID: sessionID,
@@ -1172,11 +1165,7 @@ func TestFROSTStartRefreshConvenience(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, env := range out2 {
-		if _, err := session.Handle(testutil.DeliverEnvelope(env)); err != nil {
-			t.Fatal(err)
-		}
-	}
+	deliverReshareMessages(t, tss.NewPartySet(1, 2), append(out1, out2...), map[tss.PartyID]*ReshareSession{1: session, 2: session2})
 	newShare, ok := session.KeyShare()
 	if !ok {
 		t.Fatal("refresh did not complete")

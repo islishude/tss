@@ -99,10 +99,16 @@ func TestFROSTRefreshAndResharePlanSnapshotsReturnOwnedCopies(t *testing.T) {
 	refreshSnapshot.Parties[0] = 99
 	refreshSnapshot.PublicKey[0] ^= 0xff
 	refreshSnapshot.ChainCode[0] ^= 0xff
+	refreshSnapshot.OldKeygenTranscriptHash[0] ^= 0xff
+	refreshSnapshot.OldPlanHash[0] ^= 0xff
+	refreshSnapshot.OldCommitmentsHash[0] ^= 0xff
 	refreshAgain, ok := refresh.Snapshot()
 	if !ok || refreshAgain.Parties[0] != 1 ||
 		bytes.Equal(refreshAgain.PublicKey, refreshSnapshot.PublicKey) ||
-		bytes.Equal(refreshAgain.ChainCode, refreshSnapshot.ChainCode) {
+		bytes.Equal(refreshAgain.ChainCode, refreshSnapshot.ChainCode) ||
+		bytes.Equal(refreshAgain.OldKeygenTranscriptHash, refreshSnapshot.OldKeygenTranscriptHash) ||
+		bytes.Equal(refreshAgain.OldPlanHash, refreshSnapshot.OldPlanHash) ||
+		bytes.Equal(refreshAgain.OldCommitmentsHash, refreshSnapshot.OldCommitmentsHash) {
 		t.Fatal("refresh plan snapshot aliases internal state")
 	}
 
@@ -121,10 +127,16 @@ func TestFROSTRefreshAndResharePlanSnapshotsReturnOwnedCopies(t *testing.T) {
 	reshareSnapshot.NewParties[0] = 99
 	reshareSnapshot.OldPublicKey[0] ^= 0xff
 	reshareSnapshot.OldChainCode[0] ^= 0xff
+	reshareSnapshot.OldKeygenTranscriptHash[0] ^= 0xff
+	reshareSnapshot.OldPlanHash[0] ^= 0xff
+	reshareSnapshot.OldCommitmentsHash[0] ^= 0xff
 	reshareAgain, ok := reshare.Snapshot()
 	if !ok || reshareAgain.OldParties[0] != 1 || reshareAgain.NewParties[0] != 2 ||
 		bytes.Equal(reshareAgain.OldPublicKey, reshareSnapshot.OldPublicKey) ||
-		bytes.Equal(reshareAgain.OldChainCode, reshareSnapshot.OldChainCode) {
+		bytes.Equal(reshareAgain.OldChainCode, reshareSnapshot.OldChainCode) ||
+		bytes.Equal(reshareAgain.OldKeygenTranscriptHash, reshareSnapshot.OldKeygenTranscriptHash) ||
+		bytes.Equal(reshareAgain.OldPlanHash, reshareSnapshot.OldPlanHash) ||
+		bytes.Equal(reshareAgain.OldCommitmentsHash, reshareSnapshot.OldCommitmentsHash) {
 		t.Fatal("reshare plan snapshot aliases internal state")
 	}
 }

@@ -15,10 +15,22 @@ const (
 	keygenStartRound        = 1
 	keygenConfirmationRound = 2
 
-	signStartRound    = 1
-	signRound2        = 2
-	reshareStartRound = 1
+	signStartRound           = 1
+	signRound2               = 2
+	reshareStartRound        = 1
+	reshareConfirmationRound = 2
 )
+
+type keyShareConfirmationMode uint8
+
+const (
+	keyShareConfirmationModeKeygenContributions keyShareConfirmationMode = 1
+	keyShareConfirmationModeLifecycleAggregate  keyShareConfirmationMode = 2
+)
+
+func (m keyShareConfirmationMode) valid() bool {
+	return m == keyShareConfirmationModeKeygenContributions || m == keyShareConfirmationModeLifecycleAggregate
+}
 
 const (
 	payloadKeygenCommitments  tss.PayloadType = "frost.ed25519.keygen.commitments"
@@ -109,6 +121,7 @@ type keyShareState struct {
 	KeygenSessionID      tss.SessionID                     `wire:"9,bytes,len=32"`                   // Session that produced this key share.
 	KeygenTranscriptHash []byte                            `wire:"10,bytes"`                         // Transcript hash of completed keygen/reshare confirmation.
 	PlanHash             []byte                            `wire:"11,bytes,len=32"`                  // Lifecycle plan digest that authorized this key share.
+	ConfirmationMode     keyShareConfirmationMode          `wire:"12,u8"`                            // Chain-code interpretation for the mandatory completion confirmation set.
 }
 
 func scalarBytes(x *big.Int) ([]byte, error) {

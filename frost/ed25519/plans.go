@@ -149,11 +149,15 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type refreshPlanState struct {
-	sessionID tss.SessionID  // Refresh protocol session; every refresh envelope is scoped to it.
-	threshold int            // Existing signing threshold preserved by same-party refresh.
-	parties   tss.PartySet   // Canonical participant set preserved by same-party refresh.
-	publicKey publicKeyPoint // Parent group public key that must remain unchanged after refresh.
-	chainCode []byte         // HD chain code that must remain unchanged after refresh.
+	sessionID               tss.SessionID  // Refresh protocol session; every refresh envelope is scoped to it.
+	threshold               int            // Existing signing threshold preserved by same-party refresh.
+	parties                 tss.PartySet   // Canonical participant set preserved by same-party refresh.
+	publicKey               publicKeyPoint // Parent group public key that must remain unchanged after refresh.
+	chainCode               []byte         // HD chain code that must remain unchanged after refresh.
+	oldKeygenSessionID      tss.SessionID  // Lifecycle session that produced the source share generation.
+	oldKeygenTranscriptHash []byte         // Transcript hash that identifies the source share generation.
+	oldPlanHash             []byte         // Plan digest that authorized the source share generation.
+	oldCommitmentsHash      []byte         // Hash of the source generation's group commitments.
 }
 
 // RefreshPlan is the shared FROST same-party refresh intent.
@@ -164,21 +168,29 @@ type RefreshPlan struct {
 
 // RefreshPlanSnapshot is a caller-owned copy of refresh plan metadata.
 type RefreshPlanSnapshot struct {
-	SessionID tss.SessionID
-	Threshold int
-	Parties   tss.PartySet
-	PublicKey []byte
-	ChainCode []byte
+	SessionID               tss.SessionID
+	Threshold               int
+	Parties                 tss.PartySet
+	PublicKey               []byte
+	ChainCode               []byte
+	OldKeygenSessionID      tss.SessionID
+	OldKeygenTranscriptHash []byte
+	OldPlanHash             []byte
+	OldCommitmentsHash      []byte
 }
 
 // Clone returns a deep copy of the refresh plan snapshot.
 func (s RefreshPlanSnapshot) Clone() RefreshPlanSnapshot {
 	return RefreshPlanSnapshot{
-		SessionID: s.SessionID,
-		Threshold: s.Threshold,
-		Parties:   s.Parties.Clone(),
-		PublicKey: bytes.Clone(s.PublicKey),
-		ChainCode: bytes.Clone(s.ChainCode),
+		SessionID:               s.SessionID,
+		Threshold:               s.Threshold,
+		Parties:                 s.Parties.Clone(),
+		PublicKey:               bytes.Clone(s.PublicKey),
+		ChainCode:               bytes.Clone(s.ChainCode),
+		OldKeygenSessionID:      s.OldKeygenSessionID,
+		OldKeygenTranscriptHash: bytes.Clone(s.OldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(s.OldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(s.OldCommitmentsHash),
 	}
 }
 
@@ -206,11 +218,15 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
 	return &RefreshPlan{state: &refreshPlanState{
-		sessionID: option.SessionID,
-		threshold: oldKey.state.Threshold,
-		parties:   slices.Clone(oldKey.state.Parties),
-		publicKey: oldKey.state.PublicKey.Clone(),
-		chainCode: slices.Clone(oldKey.state.ChainCode),
+		sessionID:               option.SessionID,
+		threshold:               oldKey.state.Threshold,
+		parties:                 slices.Clone(oldKey.state.Parties),
+		publicKey:               oldKey.state.PublicKey.Clone(),
+		chainCode:               slices.Clone(oldKey.state.ChainCode),
+		oldKeygenSessionID:      oldKey.state.KeygenSessionID,
+		oldKeygenTranscriptHash: bytes.Clone(oldKey.state.KeygenTranscriptHash),
+		oldPlanHash:             bytes.Clone(oldKey.state.PlanHash),
+		oldCommitmentsHash:      keygenGroupCommitmentsHash(oldKey.state.GroupCommitments.BytesList()),
 	}, limits: limits}, nil
 }
 
@@ -236,11 +252,15 @@ func (p *RefreshPlan) Snapshot() (RefreshPlanSnapshot, bool) {
 		return RefreshPlanSnapshot{}, false
 	}
 	return RefreshPlanSnapshot{
-		SessionID: p.state.sessionID,
-		Threshold: p.state.threshold,
-		Parties:   p.state.parties.Clone(),
-		PublicKey: p.state.publicKey.Bytes(),
-		ChainCode: bytes.Clone(p.state.chainCode),
+		SessionID:               p.state.sessionID,
+		Threshold:               p.state.threshold,
+		Parties:                 p.state.parties.Clone(),
+		PublicKey:               p.state.publicKey.Bytes(),
+		ChainCode:               bytes.Clone(p.state.chainCode),
+		OldKeygenSessionID:      p.state.oldKeygenSessionID,
+		OldKeygenTranscriptHash: bytes.Clone(p.state.oldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(p.state.oldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(p.state.oldCommitmentsHash),
 	}, true
 }
 
@@ -255,6 +275,10 @@ func (p *RefreshPlan) Digest() ([]byte, error) {
 	t.AppendUint32List("parties", p.state.parties)
 	t.AppendBytes("public_key", p.state.publicKey.Bytes())
 	t.AppendBytes("chain_code", p.state.chainCode)
+	t.AppendBytes("old_keygen_session_id", p.state.oldKeygenSessionID[:])
+	t.AppendBytes("old_keygen_transcript_hash", p.state.oldKeygenTranscriptHash)
+	t.AppendBytes("old_plan_hash", p.state.oldPlanHash)
+	t.AppendBytes("old_commitments_hash", p.state.oldCommitmentsHash)
 	return t.Sum(), nil
 }
 
@@ -278,12 +302,16 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 }
 
 type resharePlanState struct {
-	sessionID    tss.SessionID  // Reshare protocol session; all reshare envelopes are scoped to it.
-	oldPublicKey publicKeyPoint // Existing parent group public key that resharing must preserve.
-	oldChainCode []byte         // Existing HD chain code preserved across reshare.
-	oldParties   tss.PartySet   // Canonical old dealer set.
-	newParties   tss.PartySet   // Canonical target key-holder set.
-	newThreshold int            // Target signing threshold for the reshared key.
+	sessionID               tss.SessionID  // Reshare protocol session; all reshare envelopes are scoped to it.
+	oldPublicKey            publicKeyPoint // Existing parent group public key that resharing must preserve.
+	oldChainCode            []byte         // Existing HD chain code preserved across reshare.
+	oldParties              tss.PartySet   // Canonical old dealer set.
+	newParties              tss.PartySet   // Canonical target key-holder set.
+	newThreshold            int            // Target signing threshold for the reshared key.
+	oldKeygenSessionID      tss.SessionID  // Lifecycle session that produced the source share generation.
+	oldKeygenTranscriptHash []byte         // Transcript hash that identifies the source share generation.
+	oldPlanHash             []byte         // Plan digest that authorized the source share generation.
+	oldCommitmentsHash      []byte         // Hash of the source generation's group commitments.
 }
 
 // ResharePlan is the shared FROST reshare intent.
@@ -294,23 +322,31 @@ type ResharePlan struct {
 
 // ResharePlanSnapshot is a caller-owned copy of reshare plan metadata.
 type ResharePlanSnapshot struct {
-	SessionID    tss.SessionID
-	OldPublicKey []byte
-	OldChainCode []byte
-	OldParties   tss.PartySet
-	NewParties   tss.PartySet
-	NewThreshold int
+	SessionID               tss.SessionID
+	OldPublicKey            []byte
+	OldChainCode            []byte
+	OldParties              tss.PartySet
+	NewParties              tss.PartySet
+	NewThreshold            int
+	OldKeygenSessionID      tss.SessionID
+	OldKeygenTranscriptHash []byte
+	OldPlanHash             []byte
+	OldCommitmentsHash      []byte
 }
 
 // Clone returns a deep copy of the reshare plan snapshot.
 func (s ResharePlanSnapshot) Clone() ResharePlanSnapshot {
 	return ResharePlanSnapshot{
-		SessionID:    s.SessionID,
-		OldPublicKey: bytes.Clone(s.OldPublicKey),
-		OldChainCode: bytes.Clone(s.OldChainCode),
-		OldParties:   s.OldParties.Clone(),
-		NewParties:   s.NewParties.Clone(),
-		NewThreshold: s.NewThreshold,
+		SessionID:               s.SessionID,
+		OldPublicKey:            bytes.Clone(s.OldPublicKey),
+		OldChainCode:            bytes.Clone(s.OldChainCode),
+		OldParties:              s.OldParties.Clone(),
+		NewParties:              s.NewParties.Clone(),
+		NewThreshold:            s.NewThreshold,
+		OldKeygenSessionID:      s.OldKeygenSessionID,
+		OldKeygenTranscriptHash: bytes.Clone(s.OldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(s.OldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(s.OldCommitmentsHash),
 	}
 }
 
@@ -325,13 +361,17 @@ type ResharePlanOption struct {
 
 // PublicResharePlanOption configures a public-only FROST reshare plan.
 type PublicResharePlanOption struct {
-	OldPublicKey []byte
-	OldChainCode []byte
-	OldParties   tss.PartySet
-	SessionID    tss.SessionID
-	NewParties   tss.PartySet
-	NewThreshold int
-	Limits       *Limits
+	OldPublicKey            []byte
+	OldChainCode            []byte
+	OldParties              tss.PartySet
+	OldGroupCommitments     [][]byte
+	OldKeygenSessionID      tss.SessionID
+	OldKeygenTranscriptHash []byte
+	OldPlanHash             []byte
+	SessionID               tss.SessionID
+	NewParties              tss.PartySet
+	NewThreshold            int
+	Limits                  *Limits
 }
 
 // NewResharePlan constructs a FROST reshare plan from an old key share.
@@ -344,13 +384,17 @@ func NewResharePlan(option ResharePlanOption) (*ResharePlan, error) {
 		return nil, invalidPlanConfig(oldKey.state.Party, err)
 	}
 	return NewPublicResharePlan(PublicResharePlanOption{
-		OldPublicKey: oldKey.state.PublicKey.Bytes(),
-		OldChainCode: oldKey.state.ChainCode,
-		OldParties:   oldKey.state.Parties,
-		SessionID:    option.SessionID,
-		NewParties:   option.NewParties,
-		NewThreshold: option.NewThreshold,
-		Limits:       option.Limits,
+		OldPublicKey:            oldKey.state.PublicKey.Bytes(),
+		OldChainCode:            oldKey.state.ChainCode,
+		OldParties:              oldKey.state.Parties,
+		OldGroupCommitments:     oldKey.state.GroupCommitments.BytesList(),
+		OldKeygenSessionID:      oldKey.state.KeygenSessionID,
+		OldKeygenTranscriptHash: oldKey.state.KeygenTranscriptHash,
+		OldPlanHash:             oldKey.state.PlanHash,
+		SessionID:               option.SessionID,
+		NewParties:              option.NewParties,
+		NewThreshold:            option.NewThreshold,
+		Limits:                  option.Limits,
 	})
 }
 
@@ -368,6 +412,25 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 	if len(option.OldChainCode) != bip32util.ChainCodeSize {
 		return nil, invalidPlanConfig(0, errors.New("old chain code must be 32 bytes"))
 	}
+	if !option.OldKeygenSessionID.Valid() {
+		return nil, invalidPlanConfig(0, errors.New("invalid old keygen/lifecycle session id"))
+	}
+	if len(option.OldKeygenTranscriptHash) != sha256.Size {
+		return nil, invalidPlanConfig(0, errors.New("old keygen transcript hash must be 32 bytes"))
+	}
+	if len(option.OldPlanHash) != sha256.Size {
+		return nil, invalidPlanConfig(0, errors.New("old lifecycle plan hash must be 32 bytes"))
+	}
+	if len(option.OldGroupCommitments) > limits.Threshold.MaxThreshold {
+		return nil, invalidPlanConfig(0, fmt.Errorf("old group commitments exceed local threshold limit: %d > %d", len(option.OldGroupCommitments), limits.Threshold.MaxThreshold))
+	}
+	oldCommitments, err := newGroupCommitmentsFromBytesList(option.OldGroupCommitments, len(option.OldGroupCommitments))
+	if err != nil {
+		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old group commitments: %w", err))
+	}
+	if !oldCommitments.PublicKey().Equal(oldPublicKey) {
+		return nil, invalidPlanConfig(0, errors.New("old group commitments do not match old public key"))
+	}
 	oldParties, err := validatePlanPartySet(option.OldParties, limits)
 	if err != nil {
 		return nil, invalidPlanConfig(0, fmt.Errorf("invalid old participant set: %w", err))
@@ -377,12 +440,16 @@ func NewPublicResharePlan(option PublicResharePlanOption) (*ResharePlan, error) 
 		return nil, invalidPlanConfig(0, err)
 	}
 	return &ResharePlan{state: &resharePlanState{
-		sessionID:    option.SessionID,
-		oldPublicKey: oldPublicKey,
-		oldChainCode: slices.Clone(option.OldChainCode),
-		oldParties:   oldParties,
-		newParties:   newParties,
-		newThreshold: option.NewThreshold,
+		sessionID:               option.SessionID,
+		oldPublicKey:            oldPublicKey,
+		oldChainCode:            slices.Clone(option.OldChainCode),
+		oldParties:              oldParties,
+		newParties:              newParties,
+		newThreshold:            option.NewThreshold,
+		oldKeygenSessionID:      option.OldKeygenSessionID,
+		oldKeygenTranscriptHash: bytes.Clone(option.OldKeygenTranscriptHash),
+		oldPlanHash:             bytes.Clone(option.OldPlanHash),
+		oldCommitmentsHash:      keygenGroupCommitmentsHash(option.OldGroupCommitments),
 	}, limits: limits}, nil
 }
 
@@ -400,12 +467,16 @@ func (p *ResharePlan) Snapshot() (ResharePlanSnapshot, bool) {
 		return ResharePlanSnapshot{}, false
 	}
 	return ResharePlanSnapshot{
-		SessionID:    p.state.sessionID,
-		OldPublicKey: p.state.oldPublicKey.Bytes(),
-		OldChainCode: bytes.Clone(p.state.oldChainCode),
-		OldParties:   p.state.oldParties.Clone(),
-		NewParties:   p.state.newParties.Clone(),
-		NewThreshold: p.state.newThreshold,
+		SessionID:               p.state.sessionID,
+		OldPublicKey:            p.state.oldPublicKey.Bytes(),
+		OldChainCode:            bytes.Clone(p.state.oldChainCode),
+		OldParties:              p.state.oldParties.Clone(),
+		NewParties:              p.state.newParties.Clone(),
+		NewThreshold:            p.state.newThreshold,
+		OldKeygenSessionID:      p.state.oldKeygenSessionID,
+		OldKeygenTranscriptHash: bytes.Clone(p.state.oldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(p.state.oldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(p.state.oldCommitmentsHash),
 	}, true
 }
 
@@ -429,6 +500,10 @@ func (p *ResharePlan) Digest() ([]byte, error) {
 	t.AppendUint32List("old_parties", p.state.oldParties)
 	t.AppendUint32List("new_parties", p.state.newParties)
 	t.AppendUint32("new_threshold", uint32(p.state.newThreshold))
+	t.AppendBytes("old_keygen_session_id", p.state.oldKeygenSessionID[:])
+	t.AppendBytes("old_keygen_transcript_hash", p.state.oldKeygenTranscriptHash)
+	t.AppendBytes("old_plan_hash", p.state.oldPlanHash)
+	t.AppendBytes("old_commitments_hash", p.state.oldCommitmentsHash)
 	return t.Sum(), nil
 }
 
