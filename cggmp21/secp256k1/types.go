@@ -19,29 +19,36 @@ const (
 	invalidRound = 0
 
 	keygenStartRound        = 1
-	keygenConfirmationRound = 2
+	keygenShareRound        = 2
+	keygenConfirmationRound = 3
 
-	presignStartRound = 1
-	presignRound2     = 2
-	presignRound3     = 3
+	presignStartRound          = 1
+	presignRound2              = 2
+	presignRound3              = 3
+	presignIdentificationRound = 4
 
 	refreshStartRound = 1
+	refreshShareRound = 2
 	reshareStartRound = 1
+	reshareShareRound = 2
 
-	signStartRound = 1
+	signStartRound          = 1
+	signIdentificationRound = 2
 )
 
 const (
-	payloadKeygenCommitments  tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
-	payloadKeygenShare        tss.PayloadType = "cggmp21.secp256k1.keygen.share"
-	payloadKeygenConfirmation tss.PayloadType = "cggmp21.secp256k1.keygen.confirmation"
-	payloadPresignRound1      tss.PayloadType = "cggmp21.secp256k1.presign.round1"
-	payloadPresignRound1Proof tss.PayloadType = "cggmp21.secp256k1.presign.round1-proof"
-	payloadPresignRound2      tss.PayloadType = "cggmp21.secp256k1.presign.round2"
-	payloadPresignRound3      tss.PayloadType = "cggmp21.secp256k1.presign.round3"
-	payloadSignPartial        tss.PayloadType = "cggmp21.secp256k1.sign.partial"
-	payloadRefreshCommitments tss.PayloadType = "cggmp21.secp256k1.refresh.commitments"
-	payloadRefreshShare       tss.PayloadType = "cggmp21.secp256k1.refresh.share"
+	payloadKeygenCommitments     tss.PayloadType = "cggmp21.secp256k1.keygen.commitments"
+	payloadKeygenShare           tss.PayloadType = "cggmp21.secp256k1.keygen.share"
+	payloadKeygenConfirmation    tss.PayloadType = "cggmp21.secp256k1.keygen.confirmation"
+	payloadPresignRound1         tss.PayloadType = "cggmp21.secp256k1.presign.round1"
+	payloadPresignRound1Proof    tss.PayloadType = "cggmp21.secp256k1.presign.round1-proof"
+	payloadPresignRound2         tss.PayloadType = "cggmp21.secp256k1.presign.round2"
+	payloadPresignRound3         tss.PayloadType = "cggmp21.secp256k1.presign.round3"
+	payloadPresignIdentification tss.PayloadType = "cggmp21.secp256k1.presign.identification"
+	payloadSignPartial           tss.PayloadType = "cggmp21.secp256k1.sign.partial"
+	payloadSignIdentification    tss.PayloadType = "cggmp21.secp256k1.sign.identification"
+	payloadRefreshCommitments    tss.PayloadType = "cggmp21.secp256k1.refresh.commitments"
+	payloadRefreshShare          tss.PayloadType = "cggmp21.secp256k1.refresh.share"
 )
 
 // generatePaillierKey creates a Paillier key using the production GenerateKey

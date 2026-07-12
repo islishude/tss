@@ -22,6 +22,13 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 		}
 		return nil, nil
 	}
+	shareOut, err := s.emitEncryptedRefreshShares()
+	if err != nil {
+		return nil, err
+	}
+	if len(shareOut) > 0 {
+		return shareOut, nil
+	}
 	if !s.allRefreshRound1Complete() {
 		return nil, nil
 	}
@@ -32,25 +39,8 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 			return nil, err
 		}
 		if err := secp.VerifyShare(pd.commitments, s.oldKey.state.Party, share); err != nil {
-			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.cfg, refreshStartRound, dealer, s.oldKey.state.Party, payloadRefreshShare, nil)
-			if evErr != nil {
-				return nil, evErr
-			}
-			return nil, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: refreshStartRound,
-				Party: dealer,
-				Blame: newBlame(
-					evidenceEnv,
-					tss.EvidenceKindRefreshShare,
-					"invalid refresh share",
-					tss.NewPartySet(dealer),
-					rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(refreshCommitmentsHashLabel, pd.commitments)),
-				),
-				Err: verifyErr,
-			}
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, refreshShareRound, dealer,
+				fmt.Errorf("verified encrypted refresh share failed completion recheck: %w", err))
 		}
 	}
 	newSecret, err := secpScalarFromSecret(s.oldKey.state.Secret)

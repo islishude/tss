@@ -78,6 +78,34 @@ func TestGoldenBlameEvidence(t *testing.T) {
 	testvectors.CheckHexGolden(t, "wire/v1/tss/BlameEvidence.golden", raw)
 }
 
+func TestGoldenIdentificationRecord(t *testing.T) {
+	t.Parallel()
+	record := IdentificationRecord{
+		FailureClass: "sign-identification-invalid-proof",
+		Accused:      2,
+		Statement:    bytes.Repeat([]byte{0x61}, 32),
+		Proof:        []byte{0x01, 0x02, 0x03},
+		TranscriptHashes: []EvidenceField{
+			{Key: "keygen_transcript_hash", Value: bytes.Repeat([]byte{0x62}, 32)},
+			{Key: "presign_transcript_hash", Value: bytes.Repeat([]byte{0x63}, 32)},
+		},
+	}
+	alert := record.ComputeAlertDigest()
+	record.AlertDigest = alert[:]
+	raw, err := record.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	testvectors.CheckHexGolden(t, "wire/v1/tss/IdentificationRecord.golden", raw)
+	var decoded IdentificationRecord
+	if err := decoded.UnmarshalBinary(raw); err != nil {
+		t.Fatal(err)
+	}
+	if err := decoded.UnmarshalBinary(append(raw, 0)); err == nil {
+		t.Fatal("accepted trailing IdentificationRecord bytes")
+	}
+}
+
 func TestGoldenSigningContext(t *testing.T) {
 	t.Parallel()
 	context := testSigningContext()

@@ -469,7 +469,7 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	// Verify X == x * B.
 	xBytes = w.X.FixedBytes()
 	defer clear(xBytes)
-	xScalar, err := secp.ScalarFromBytes(xBytes)
+	xScalar, err := secp.ScalarFromBytesAllowZero(xBytes)
 	if err != nil {
 		return errors.New("invalid witness x scalar")
 	}
@@ -515,7 +515,9 @@ func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarSta
 	if err := t.AppendBigInt("C", stmt.C); err != nil {
 		return nil, err
 	}
-	if err := t.AppendPoint("X", stmt.X); err != nil {
+	if stmt.X.Inf != 0 {
+		t.AppendBytes("X", nil)
+	} else if err := t.AppendPoint("X", stmt.X); err != nil {
 		return nil, err
 	}
 	if err := t.AppendPoint("B", stmt.B); err != nil {

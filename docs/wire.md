@@ -394,7 +394,9 @@ inside transcripts instead.
 - `cggmp21/secp256k1` presign round 1 proof payload
 - `cggmp21/secp256k1` presign round 2 payload
 - `cggmp21/secp256k1` presign round 3 payload
+- `cggmp21/secp256k1` presign identification payload
 - `cggmp21/secp256k1` online signing partial payload
+- `cggmp21/secp256k1` online-sign identification payload
 - `cggmp21/secp256k1` reshare dealer commitments payload
 - `cggmp21/secp256k1` reshare share payload (`dealer`, `receiver`, scalar share, dealer-commitment hash)
 - `cggmp21/secp256k1` reshare receiver material payload
@@ -418,6 +420,9 @@ inside transcripts instead.
 - `internal/zk/paillier.EncProof` (Πenc)
 - `internal/zk/paillier.AffGProof` (Πaff-g)
 - `internal/zk/paillier.LogStarProof` (Πlog\*)
+- `internal/zk/paillier.MulProof` (Πmul)
+- `internal/zk/paillier.MulStarProof` (Πmul\*)
+- `internal/zk/paillier.DecProof` (Πdec)
 - `internal/zk/paillier.KeygenConfirmation`
 - `internal/zk/schnorr.Proof`
 - `internal/zk/signprep.Proof` (Schnorr + multi-relation DLEQ, 10 fields,
@@ -435,13 +440,18 @@ JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
 
+Presign and online-sign identification payloads have a 384 KiB phase-specific
+cap. This leaves room to embed the payload's certified envelope and full ACK
+set while retaining the 1 MiB total blame-evidence hard cap.
+
 Current presign wire shapes are:
 
 - `mta.start-message`: field 1 is the Paillier ciphertext only.
 - `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`,
-  prover Paillier public key, `PlanHash`, and `KPoint`.
+  prover Paillier public key, `PlanHash`, `KPoint`, and `EncGamma`.
 - `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1
-  hash, verifier-specific `LogStarProof`, and `PlanHash`.
+  hash, verifier-specific `EncK` and `EncGamma` `LogStarProof` records, and
+  `PlanHash`.
 - `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
 - `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta`, `KPoint`,
   `ChiPoint`, canonical SignPrep proof bytes, `PlanHash`, ordered Round2 payload
@@ -463,8 +473,10 @@ public key, keygen transcript hash, and participant-set hash, and per-party
 `VerifyShares` (tag 16, a private canonical record list with one entry per
 signer: party ID, `KPoint`, `ChiPoint`, canonical signprep proof TLV bytes,
 Round2/MtA contribution hashes, and the sigma/delta relation base and offset
-points). Decoders
-require the complete 19-field presign set. The former opaque party-triple byte
+points), persisted public identification transcripts, and encrypted-storage-only
+sigma response opening records (tag 22). Runtime decoding marks the Presign
+consumed and does not recreate reusable sigma witness handles. Decoders
+require the complete 22-field presign set. The former opaque party-triple byte
 field and standalone sign-verify-share object are intentionally not accepted.
 
 `SignAttemptRecord` stores delivery acknowledgments directly as a canonical

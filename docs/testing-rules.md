@@ -215,6 +215,21 @@ Early messages are either:
 Completion, abort, and destruction are terminal states unless the public API
 explicitly defines otherwise.
 
+Conditional identifiable-abort phases are a distinct non-terminal state before
+abort. Tests must assert that `Identifying()` is true while `Completed()` and
+all output accessors remain false, then cover both terminal outcomes:
+
+- the first malformed or invalid public identification proof attributes only
+  its authenticated sender and carries a canonical `IdentificationRecord`; and
+- a complete set of valid proofs with the original failure still present
+  returns an unblamed invariant.
+
+Identification tests must also verify witness cleanup on success, attributed
+abort, invariant fallback, presign burn, serialization/restore, and explicit
+session destruction. Public evidence mutation tests cover the accused party,
+signed envelope or broadcast certificate, statement, proof, alert digest, and
+transcript hashes.
+
 ### 4. Domain Separation
 
 Proofs, commitments, challenges, transcript hashes, presigns, and signature shares

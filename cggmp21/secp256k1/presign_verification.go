@@ -29,6 +29,7 @@ type presignVerificationEntry struct {
 	XBarPoint         *secp.Point    `wire:"5,custom,len=33"`
 	Delta             *secp.Scalar   `wire:"6,custom,len=32"`
 	KPoint            []byte         `wire:"7,bytes,len=33"`
+	EncGamma          []byte         `wire:"8,bytes,max_bytes=paillier_ciphertext"`
 }
 
 func (v presignVerificationContext) clone() presignVerificationContext {
@@ -57,6 +58,7 @@ func (e presignVerificationEntry) clone() presignVerificationEntry {
 		XBarPoint:         secp.Clone(e.XBarPoint),
 		Delta:             delta,
 		KPoint:            bytes.Clone(e.KPoint),
+		EncGamma:          bytes.Clone(e.EncGamma),
 	}
 }
 
@@ -69,6 +71,7 @@ func (v *presignVerificationContext) destroy() {
 		clear(v.Entries[i].Gamma)
 		clear(v.Entries[i].EncK)
 		clear(v.Entries[i].KPoint)
+		clear(v.Entries[i].EncGamma)
 		if v.Entries[i].PaillierPublicKey != nil {
 			secret.ClearBigInt(v.Entries[i].PaillierPublicKey.N)
 			secret.ClearBigInt(v.Entries[i].PaillierPublicKey.G)
@@ -107,11 +110,17 @@ func validatePresignVerificationContext(signers tss.PartySet, context presignVer
 		if err := validatePositiveIntegerBytes(entry.EncK); err != nil {
 			return fmt.Errorf("invalid presign verification EncK for party %d: %w", entry.Party, err)
 		}
+		if err := validatePositiveIntegerBytes(entry.EncGamma); err != nil {
+			return fmt.Errorf("invalid presign verification EncGamma for party %d: %w", entry.Party, err)
+		}
 		if _, err := secp.PointFromBytes(entry.KPoint); err != nil {
 			return fmt.Errorf("invalid presign verification KPoint for party %d: %w", entry.Party, err)
 		}
 		if len(entry.EncK) > limits.Paillier.MaxCiphertextBytes {
 			return fmt.Errorf("presign verification EncK too large: %d > %d", len(entry.EncK), limits.Paillier.MaxCiphertextBytes)
+		}
+		if len(entry.EncGamma) > limits.Paillier.MaxCiphertextBytes {
+			return fmt.Errorf("presign verification EncGamma too large: %d > %d", len(entry.EncGamma), limits.Paillier.MaxCiphertextBytes)
 		}
 		if err := validatePaillierPublicKeyWithLimits(entry.PaillierPublicKey, limits); err != nil {
 			return fmt.Errorf("invalid presign verification Paillier key for party %d: %w", entry.Party, err)
@@ -129,7 +138,7 @@ func validatePresignVerificationContext(signers tss.PartySet, context presignVer
 		if err != nil {
 			return fmt.Errorf("encode presign verification Paillier key for party %d: %w", entry.Party, err)
 		}
-		entryBytes := len(entry.Gamma) + len(entry.EncK) + len(entry.KPoint) + len(publicKeyBytes) + 33 + 32 + 64
+		entryBytes := len(entry.Gamma) + len(entry.EncK) + len(entry.EncGamma) + len(entry.KPoint) + len(publicKeyBytes) + 33 + 32 + 64
 		if entryBytes > limits.SignPrep.MaxVerificationEntryBytes {
 			return fmt.Errorf("presign verification entry too large: %d > %d", entryBytes, limits.SignPrep.MaxVerificationEntryBytes)
 		}
@@ -159,6 +168,7 @@ func presignRound1EchoFromState(state *presignState, limits Limits) ([]byte, err
 		t.AppendUint32("signer", entry.Party)
 		t.AppendBytes("gamma", entry.Gamma)
 		t.AppendBytes("enc_k", entry.EncK)
+		t.AppendBytes("enc_gamma", entry.EncGamma)
 		t.AppendBytes("k_point", entry.KPoint)
 		t.AppendBytes("paillier_public_key", paillierPublicKeyBytes)
 	}
@@ -206,6 +216,7 @@ func presignTranscriptHashFromState(state *presignState, _ Limits) ([]byte, erro
 		t.AppendUint32("signer", id)
 		t.AppendBytes("gamma", entry.Gamma)
 		t.AppendBytes("enc_k", entry.EncK)
+		t.AppendBytes("enc_gamma", entry.EncGamma)
 		if entry.Delta == nil {
 			return nil, fmt.Errorf("nil presign verification delta for party %d", id)
 		}

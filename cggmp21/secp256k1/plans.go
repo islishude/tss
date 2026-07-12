@@ -157,14 +157,15 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 		return tss.ThresholdConfig{}, errors.New("local party is not in keygen plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.threshold,
-		Parties:      slices.Clone(p.parties),
-		Self:         local.Self,
-		SessionID:    p.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.threshold,
+		Parties:        slices.Clone(p.parties),
+		Self:           local.Self,
+		SessionID:      p.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		RoundTimeout:   local.RoundTimeout,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 
@@ -322,14 +323,15 @@ func (p *RefreshPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfi
 		return tss.ThresholdConfig{}, errors.New("local party is not in refresh plan")
 	}
 	return tss.ThresholdConfig{
-		Threshold:    p.state.threshold,
-		Parties:      slices.Clone(p.state.parties),
-		Self:         local.Self,
-		SessionID:    p.state.sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      p.state.threshold,
+		Parties:        slices.Clone(p.state.parties),
+		Self:           local.Self,
+		SessionID:      p.state.sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		RoundTimeout:   local.RoundTimeout,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}, nil
 }
 

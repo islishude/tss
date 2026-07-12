@@ -22,6 +22,8 @@ type EnvelopeGuard struct {
 	// [NewTestEnvelopeGuard] provides a no-op verifier for tests that do not
 	// exercise broadcast consistency.
 	AckVerifier BroadcastAckVerifier
+	// EnvelopeVerifier verifies portable sender signatures required by policy.
+	EnvelopeVerifier EnvelopeSignatureVerifier
 }
 
 // NewEnvelopeGuard constructs a guard with the required security configuration.
@@ -66,7 +68,14 @@ func NewTestEnvelopeGuard(self PartyID, parties PartySet, protocol ProtocolID, s
 		panic(fmt.Sprintf("NewTestEnvelopeGuard: %v", err))
 	}
 	g.AckVerifier = &noopAckVerifier{}
+	g.EnvelopeVerifier = noopEnvelopeSignatureVerifier{}
 	return g
+}
+
+// RequiresSenderSignatures reports whether any delivery policy configured on
+// the guard requires canonical sender signatures.
+func (g *EnvelopeGuard) RequiresSenderSignatures() bool {
+	return g != nil && g.Policies.requiresSenderSignature()
 }
 
 // noopAckVerifier is a BroadcastAckVerifier that accepts any signature.
@@ -76,6 +85,13 @@ type noopAckVerifier struct{}
 
 // VerifyAck implements BroadcastAckVerifier by accepting any signature.
 func (noopAckVerifier) VerifyAck(party PartyID, digest [32]byte, signature []byte) error {
+	return nil
+}
+
+type noopEnvelopeSignatureVerifier struct{}
+
+// VerifyEnvelopeSignature accepts signatures in test-only envelope guards.
+func (noopEnvelopeSignatureVerifier) VerifyEnvelopeSignature(PartyID, [32]byte, []byte) error {
 	return nil
 }
 
@@ -140,6 +156,14 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 	policy, err := g.Policies.Match(base.Protocol, base.Round, base.PayloadType)
 	if err != nil {
 		return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
+	}
+	if policy.RequireSenderSignature {
+		if g.EnvelopeVerifier == nil {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, ErrMissingEnvelopeSignatureVerifier)
+		}
+		if err := VerifyEnvelopeSignature(base, g.EnvelopeVerifier); err != nil {
+			return NewProtocolError(ErrCodeInvalidMessage, base.Round, base.From, err)
+		}
 	}
 
 	// 10. Delivery mode enforcement.

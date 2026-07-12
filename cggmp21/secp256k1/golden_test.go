@@ -18,7 +18,9 @@ import (
 func TestGoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
 
-	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	proof := testEncProof(1)
+	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
+	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)

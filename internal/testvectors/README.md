@@ -10,7 +10,7 @@ These categories have different meanings:
 - Fixtures are committed test-only caches used to avoid expensive setup during
   tests.
 
-Current inventory: 33 binary wire golden files, 2 protocol JSON files, and 1
+Current inventory: 34 binary wire golden files, 2 protocol JSON files, and 1
 fixture JSON file.
 
 ## Categories
@@ -28,8 +28,8 @@ Current files:
 ```text
 wire/v1/
   envelope/   1 file   Envelope.golden
-  tss/        4 files  BlameEvidence, SigningContext, BroadcastAck,
-                       BroadcastCertificate
+  tss/        5 files  BlameEvidence, IdentificationRecord, SigningContext,
+                       BroadcastAck, BroadcastCertificate
   frost/      6 files  KeyShare, VerificationShare, KeygenCommitmentsPayload,
                        KeygenSharePayload, NonceCommitmentPayload,
                        SignPartialPayload

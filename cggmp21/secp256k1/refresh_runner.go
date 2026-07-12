@@ -58,13 +58,14 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 		return nil, nil, errors.New("nil key share")
 	}
 	guard, err := (tss.GuardConfig{
-		Self:        current.PartyID(),
-		Parties:     current.state.Parties.Clone(),
-		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		SessionID:   config.SessionID,
-		Policies:    CGGMP21Policies(),
-		Cache:       config.ReplayCache,
-		AckVerifier: config.AckVerifier,
+		Self:             current.PartyID(),
+		Parties:          current.state.Parties.Clone(),
+		Protocol:         tss.ProtocolCGGMP21Secp256k1,
+		SessionID:        config.SessionID,
+		Policies:         CGGMP21Policies(),
+		Cache:            config.ReplayCache,
+		AckVerifier:      config.AckVerifier,
+		EnvelopeVerifier: config.EnvelopeVerifier,
 	}).BuildGuard()
 	if err != nil {
 		return nil, nil, err
@@ -80,11 +81,12 @@ func (r *refreshRunner) StartRefresh(ctx context.Context, current *KeyShare, con
 		return nil, nil, err
 	}
 	session, out, err := StartRefresh(current, plan, tss.LocalConfig{
-		Self:         current.PartyID(),
-		Rand:         r.rand,
-		Context:      ctx,
-		RoundTimeout: r.roundTimeout,
-		Log:          r.log,
+		Self:           current.PartyID(),
+		Rand:           r.rand,
+		Context:        ctx,
+		RoundTimeout:   r.roundTimeout,
+		Log:            r.log,
+		EnvelopeSigner: config.EnvelopeSigner,
 	}, guard)
 	if err != nil {
 		return nil, nil, err

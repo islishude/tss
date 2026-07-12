@@ -16,19 +16,23 @@ const (
 	proofDomainVersion = "cggmp21-secp256k1-proof-domain-v1"
 
 	// Domain labels identify the protocol phase for domain separation.
-	domainLabelKeygenModulus        = "keygen.modulus"
-	domainLabelKeygenRingPedersen   = "keygen.ring-pedersen"
-	domainLabelKeySharePaillier     = "keyshare.paillier-modulus"
-	domainLabelPresignMTAStartProof = "presign.mta-start.enc-proof"
-	domainLabelPresignMTADelta      = "presign.mta-response.Delta"
-	domainLabelPresignMTASigma      = "presign.mta-response.sigma"
-	domainLabelResharePaillier      = "reshare.paillier-modulus"
-	domainLabelReshareRingPedersen  = "reshare.ring-pedersen"
-	domainLabelRefreshPaillier      = "refresh.paillier-modulus"
-	domainLabelRefreshRingPedersen  = "refresh.ring-pedersen"
-	domainLabelKeyShareLogProof     = "keyshare.log-proof"
-	domainLabelReshareLogProof      = "reshare.log-proof"
-	domainLabelRefreshLogProof      = "refresh.log-proof"
+	domainLabelKeygenModulus         = "keygen.modulus"
+	domainLabelKeygenRingPedersen    = "keygen.ring-pedersen"
+	domainLabelKeygenEncryptedShare  = "keygen.encrypted-share"
+	domainLabelKeySharePaillier      = "keyshare.paillier-modulus"
+	domainLabelPresignMTAStartProof  = "presign.mta-start.enc-proof"
+	domainLabelPresignGammaProof     = "presign.gamma-start.enc-proof"
+	domainLabelPresignMTADelta       = "presign.mta-response.Delta"
+	domainLabelPresignMTASigma       = "presign.mta-response.sigma"
+	domainLabelResharePaillier       = "reshare.paillier-modulus"
+	domainLabelReshareRingPedersen   = "reshare.ring-pedersen"
+	domainLabelRefreshPaillier       = "refresh.paillier-modulus"
+	domainLabelRefreshRingPedersen   = "refresh.ring-pedersen"
+	domainLabelRefreshEncryptedShare = "refresh.encrypted-share"
+	domainLabelReshareEncryptedShare = "reshare.encrypted-share"
+	domainLabelKeyShareLogProof      = "keyshare.log-proof"
+	domainLabelReshareLogProof       = "reshare.log-proof"
+	domainLabelRefreshLogProof       = "refresh.log-proof"
 )
 
 type domainBuilder struct {
@@ -412,6 +416,87 @@ func keygenRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, pa
 	return ringPedersenDomain(domainLabelKeygenRingPedersen, lifecycleFromConfig(config, sender, planHash), params, limits)
 }
 
+func keygenEncryptedShareDomain(config tss.ThresholdConfig, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	return directEncryptedShareDomain(domainLabelKeygenEncryptedShare, config, sender, receiver, receiverPK, planHash, limits)
+}
+
+func refreshEncryptedShareDomain(config tss.ThresholdConfig, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	return directEncryptedShareDomain(domainLabelRefreshEncryptedShare, config, sender, receiver, receiverPK, planHash, limits)
+}
+
+func reshareEncryptedShareDomain(sessionID tss.SessionID, threshold int, dealers, receivers tss.PartySet, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	if err := validateDomainParticipants(threshold, receivers); err != nil {
+		return nil, err
+	}
+	if len(dealers) == 0 {
+		return nil, errors.New("empty reshare dealer set")
+	}
+	if err := requireDomainParty("sender", sender, dealers); err != nil {
+		return nil, err
+	}
+	if err := requireDomainParty("receiver", receiver, receivers); err != nil {
+		return nil, err
+	}
+	if err := requireHash32("plan hash", planHash); err != nil {
+		return nil, err
+	}
+	b, err := newDomainBuilder(domainLabelReshareEncryptedShare)
+	if err != nil {
+		return nil, err
+	}
+	b.t.AppendBytes("session_id", sessionID[:])
+	b.t.AppendUint32("threshold", uint32(threshold))
+	b.t.AppendUint32List("parties", dealers)
+	b.t.AppendUint32List("signers", receivers)
+	b.t.AppendUint32("sender", sender)
+	b.t.AppendUint32("receiver", receiver)
+	b.t.AppendBytes("public_key", nil)
+	b.t.AppendBytes("keygen_transcript_hash", nil)
+	if err := b.appendPaillierStatement(receiverPK, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(planHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func directEncryptedShareDomain(label string, config tss.ThresholdConfig, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
+	if err := validateDomainParticipants(config.Threshold, config.Parties); err != nil {
+		return nil, err
+	}
+	if err := requireDomainParty("sender", sender, config.Parties); err != nil {
+		return nil, err
+	}
+	if err := requireDomainParty("receiver", receiver, config.Parties); err != nil {
+		return nil, err
+	}
+	if err := requireHash32("plan hash", planHash); err != nil {
+		return nil, err
+	}
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	b.t.AppendBytes("session_id", config.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(config.Threshold))
+	b.t.AppendUint32List("parties", config.Parties)
+	b.t.AppendUint32List("signers", nil)
+	b.t.AppendUint32("sender", sender)
+	b.t.AppendUint32("receiver", receiver)
+	b.t.AppendBytes("public_key", nil)
+	b.t.AppendBytes("keygen_transcript_hash", nil)
+	if err := b.appendPaillierStatement(receiverPK, limits); err != nil {
+		return nil, err
+	}
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(planHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
 func keySharePaillierProofDomain(key *KeyShare, limits Limits) ([]byte, error) {
 	if key == nil || key.state == nil {
 		return nil, errors.New("nil key share")
@@ -476,6 +561,14 @@ func mtaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers tss.Par
 		return nil, err
 	}
 	return mtaPaillierDomain(domainLabelPresignMTAStartProof, binding, proverPaillierPublicKey, limits)
+}
+
+func gammaStartProofDomain(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet, prover, verifier tss.PartyID, proverPaillierPublicKey *pai.PublicKey, presignContextHash, planHash []byte, limits Limits) ([]byte, error) {
+	binding, err := presignDomainBinding(key, sessionID, signers, prover, verifier, presignContextHash, planHash)
+	if err != nil {
+		return nil, err
+	}
+	return mtaPaillierDomain(domainLabelPresignGammaProof, binding, proverPaillierPublicKey, limits)
 }
 
 func resharePaillierDomain(config tss.ThresholdConfig, sender tss.PartyID, pk *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {

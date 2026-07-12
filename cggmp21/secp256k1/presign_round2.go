@@ -51,6 +51,7 @@ func (s *PresignSession) buildAcceptPresignRound2Tx(env tss.Envelope) (*acceptPr
 	return &acceptPresignRound2Tx{
 		from:     env.From,
 		payload:  p,
+		envelope: env.Clone(),
 		material: material,
 	}, nil
 }
@@ -84,6 +85,9 @@ type preparedPresignRound2Peer struct {
 	payloadHash   []byte
 	outboundSigma mta.ResponseMessage
 	outboundDelta mta.ResponseMessage
+	envelope      tss.Envelope
+	deltaOpening  *mta.ResponseOpening
+	sigmaOpening  *mta.ResponseOpening
 }
 
 type preparedPresignRound2Outputs struct {
@@ -106,6 +110,13 @@ func (p *preparedPresignRound2Outputs) destroy() {
 		clear(p.peers[i].payloadHash)
 		p.peers[i].outboundSigma.Destroy()
 		p.peers[i].outboundDelta.Destroy()
+		if p.peers[i].deltaOpening != nil {
+			p.peers[i].deltaOpening.Destroy()
+		}
+		if p.peers[i].sigmaOpening != nil {
+			p.peers[i].sigmaOpening.Destroy()
+		}
+		clearEnvelope(&p.peers[i].envelope)
 	}
 	for i := range p.envelopes {
 		clear(p.envelopes[i].Payload)
@@ -167,7 +178,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		startProofPayload := peerState.round1.proof
 		startProof := &startProofPayload.EncKProof
 		// The delta MtA instance creates additive shares of k_i*gamma_j.
-		deltaResp, betaDelta, err := mta.Respond(
+		deltaResp, betaDelta, deltaOpening, err := mta.RespondWithOpening(
 			s.securityParams,
 			nil,
 			startProofDomain,
@@ -187,7 +198,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		}
 		// The sigma MtA instance creates additive shares of k_i*x_j, where x_j
 		// is already adjusted by the signer-set Lagrange coefficient.
-		sigmaResp, betaSigma, err := mta.Respond(
+		sigmaResp, betaSigma, sigmaOpening, err := mta.RespondWithOpening(
 			s.securityParams,
 			nil,
 			startProofDomain,
@@ -204,6 +215,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		)
 		if err != nil {
 			betaDelta.Destroy()
+			deltaOpening.Destroy()
 			return nil, false, err
 		}
 		prepared.peers = append(prepared.peers, preparedPresignRound2Peer{
@@ -212,6 +224,8 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			betaSigma:     betaSigma,
 			outboundSigma: sigmaResp.Clone(),
 			outboundDelta: deltaResp.Clone(),
+			deltaOpening:  deltaOpening,
+			sigmaOpening:  sigmaOpening,
 		})
 		payload, err := (presignRound2Payload{
 			Delta:      *deltaResp,
@@ -230,6 +244,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			return nil, false, err
 		}
 		prepared.envelopes = append(prepared.envelopes, round2Env)
+		prepared.peers[len(prepared.peers)-1].envelope = round2Env.Clone()
 	}
 	success = true
 	return prepared, true, nil
@@ -247,10 +262,13 @@ func (s *PresignSession) commitPresignRound2Outputs(p *preparedPresignRound2Outp
 		st.mta.betaDelta = p.peers[i].betaDelta
 		st.mta.betaSigma = p.peers[i].betaSigma
 		st.round2.outboundHash = bytes.Clone(p.peers[i].payloadHash)
+		st.round2.outboundEnvelope = p.peers[i].envelope.Clone()
 		st.round2.outboundSigma = p.peers[i].outboundSigma
 		st.round2.haveOutboundSigma = true
 		st.round2.outboundDelta = p.peers[i].outboundDelta
 		st.round2.haveOutboundDelta = true
+		st.mta.deltaOpening = p.peers[i].deltaOpening
+		st.mta.sigmaOpening = p.peers[i].sigmaOpening
 	}
 	s.round2Sent = true
 	p.committed = true

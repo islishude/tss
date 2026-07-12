@@ -22,18 +22,26 @@ const (
 	EvidenceKindKeygenShare EvidenceKind = "keygen_share"
 	// EvidenceKindRefreshShare marks a proactive refresh share that does not match commitments.
 	EvidenceKindRefreshShare EvidenceKind = "refresh_share"
+	// EvidenceKindRefreshCommitment marks invalid proactive-refresh polynomial commitments.
+	EvidenceKindRefreshCommitment EvidenceKind = "refresh_commitment"
 	// EvidenceKindReshareShare marks a CGGMP21 reshare share that does not match commitments.
 	EvidenceKindReshareShare EvidenceKind = "reshare_share"
+	// EvidenceKindReshareCommitment marks invalid CGGMP21 reshare dealer commitments.
+	EvidenceKindReshareCommitment EvidenceKind = "reshare_commitment"
 	// EvidenceKindPresignRound1 marks invalid presign nonce commitment material.
 	EvidenceKindPresignRound1 EvidenceKind = "presign_round1"
 	// EvidenceKindPresignRound2 marks invalid pairwise MtA response material.
 	EvidenceKindPresignRound2 EvidenceKind = "presign_round2"
 	// EvidenceKindPresignRound3 marks invalid presign delta broadcast material.
 	EvidenceKindPresignRound3 EvidenceKind = "presign_round3"
+	// EvidenceKindPresignIdentification marks an invalid conditional presign identification proof.
+	EvidenceKindPresignIdentification EvidenceKind = "presign_identification"
 	// EvidenceKindSignPartial marks invalid online signing partial material.
 	EvidenceKindSignPartial EvidenceKind = "sign_partial"
 	// EvidenceKindAggregateSign marks a final aggregate signature verification failure.
 	EvidenceKindAggregateSign EvidenceKind = "aggregate_signature"
+	// EvidenceKindSignIdentification marks an invalid conditional online-sign identification proof.
+	EvidenceKindSignIdentification EvidenceKind = "sign_identification"
 	// EvidenceKindFrostKeygenShare marks an invalid FROST DKG share.
 	EvidenceKindFrostKeygenShare EvidenceKind = "frost_keygen_share"
 	// EvidenceKindFrostReshareShare marks an invalid FROST reshare share.
@@ -286,13 +294,17 @@ func validEvidenceKind(kind EvidenceKind) bool {
 	case EvidenceKindKeygenCommitment,
 		EvidenceKindKeygenPaillier,
 		EvidenceKindKeygenShare,
+		EvidenceKindRefreshCommitment,
 		EvidenceKindRefreshShare,
+		EvidenceKindReshareCommitment,
 		EvidenceKindReshareShare,
 		EvidenceKindPresignRound1,
 		EvidenceKindPresignRound2,
 		EvidenceKindPresignRound3,
+		EvidenceKindPresignIdentification,
 		EvidenceKindSignPartial,
 		EvidenceKindAggregateSign,
+		EvidenceKindSignIdentification,
 		EvidenceKindFrostKeygenShare,
 		EvidenceKindFrostReshareShare,
 		EvidenceKindFrostPartialSignature,

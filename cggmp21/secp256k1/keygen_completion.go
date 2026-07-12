@@ -20,12 +20,17 @@ func (s *KeygenSession) tryAdvance() ([]tss.Envelope, error) {
 		return nil, nil
 	}
 	if s.pending == nil {
-		snap, ok, err := s.round1.snapshot()
-		if err != nil || !ok {
+		shareOut, err := s.emitEncryptedKeygenShares()
+		if err != nil {
 			return nil, err
 		}
+		snap, ok, err := s.round1.snapshot()
+		if err != nil || !ok {
+			return shareOut, err
+		}
 		defer snap.Destroy()
-		return s.completeRound1(snap)
+		completionOut, err := s.completeRound1(snap)
+		return append(shareOut, completionOut...), err
 	}
 	snap, ok, err := s.confirmations.snapshot()
 	if err != nil || !ok {
@@ -102,18 +107,8 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 	}
 	if err := verifyRound1Shares(s.cfg, snap); err != nil {
 		dealer := verificationDealer(err)
-		if dealer == tss.BroadcastPartyId {
-			return nil, err
-		}
-		s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share",
-			"party_id", s.cfg.Self,
-			"dealer", dealer,
-		)
-		protoErr, evErr := s.buildShareVerificationBlame(dealer, snap.commitments[dealer], err)
-		if evErr != nil {
-			return nil, evErr
-		}
-		return nil, protoErr
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, keygenShareRound, dealer,
+			fmt.Errorf("verified encrypted keygen share failed completion recheck: %w", err))
 	}
 	secretScalar, err := aggregateKeygenSecret(snap.parties, snap.shares)
 	if err != nil {
@@ -267,7 +262,7 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 
 func verifyRound1Shares(cfg tss.ThresholdConfig, snap *keygenRound1Snapshot) error {
 	for _, id := range snap.parties {
-		share, err := secpScalarFromSecret(snap.shares[id])
+		share, err := secpScalarFromSecretAllowZero(snap.shares[id])
 		if err != nil {
 			return err
 		}
@@ -303,7 +298,7 @@ func aggregateKeygenSecret(parties tss.PartySet, shares map[tss.PartyID]*secret.
 		if !ok || share == nil {
 			return nil, fmt.Errorf("missing keygen share from party %d", id)
 		}
-		scalar, err := secpScalarFromSecret(share)
+		scalar, err := secpScalarFromSecretAllowZero(share)
 		if err != nil {
 			return nil, err
 		}
@@ -356,31 +351,6 @@ func (s *KeygenSession) commitCGGMPPendingKeyShare(p *preparedCGGMPPendingKeySha
 		"public_key_hash", fmt.Sprintf("%x", pubKeyHash[:8]),
 	)
 	return sessionEffects{envelopes: []tss.Envelope{p.env}}, nil
-}
-
-// buildShareVerificationBlame constructs a ProtocolError with blame evidence
-// for a DKG share that fails verification against the sender's polynomial
-// commitments. Callers are responsible for logging the failure with the
-// appropriate path-specific context (eager or deferred).
-func (s *KeygenSession) buildShareVerificationBlame(dealer tss.PartyID, commits [][]byte, verifyErr error) (*tss.ProtocolError, error) {
-	evidenceEnv, evErr := newEnvelope(s.cfg, keygenStartRound, dealer, s.cfg.Self, payloadKeygenShare, nil)
-	if evErr != nil {
-		return nil, evErr
-	}
-	return &tss.ProtocolError{
-		Code:  tss.ErrCodeVerification,
-		Round: keygenStartRound,
-		Party: dealer,
-		Blame: newBlame(
-			evidenceEnv,
-			tss.EvidenceKindKeygenShare,
-			"invalid DKG share",
-			tss.NewPartySet(dealer),
-			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
-			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(keygenCommitmentsHashLabel, commits)),
-		),
-		Err: verifyErr,
-	}, nil
 }
 
 // abort marks the session aborted and clears all secret-bearing accumulated

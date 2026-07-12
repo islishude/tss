@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"bytes"
 	"crypto/rand"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/paillier/paillierct"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
@@ -120,6 +122,67 @@ func (o *StartOpening) String() string {
 // GoString returns a redacted representation of the MtA start opening.
 func (o *StartOpening) GoString() string {
 	return o.String()
+}
+
+// ProveProduct constructs H=Enc(a*b) from two retained start openings and
+// proves the multiplication relation with Πmul. The returned ciphertext and
+// proof are public; temporary product randomness is destroyed internally.
+func (o *StartOpening) ProveProduct(params zkpai.SecurityParams, reader io.Reader, state []byte, other *StartOpening, pk *pai.PublicKey) (*big.Int, *zkpai.MulProof, error) {
+	if o == nil || other == nil || o.k == nil || o.rho == nil || other.k == nil || other.rho == nil {
+		return nil, nil, errors.New("destroyed MtA start opening")
+	}
+	if pk == nil {
+		return nil, nil, errors.New("nil Paillier public key")
+	}
+	if reader == nil {
+		reader = rand.Reader
+	}
+	if !bytes.Equal(o.Message.Ciphertext, new(big.Int).SetBytes(o.Message.Ciphertext).Bytes()) ||
+		!bytes.Equal(other.Message.Ciphertext, new(big.Int).SetBytes(other.Message.Ciphertext).Bytes()) {
+		return nil, nil, errors.New("non-canonical MtA start ciphertext")
+	}
+	kBytes := o.k.FixedBytes()
+	defer clear(kBytes)
+	kSigned, err := secret.NewSignedInt(false, kBytes, len(kBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+	defer kSigned.Destroy()
+	product, err := zkpai.OMulCT(pk, kSigned, new(big.Int).SetBytes(other.Message.Ciphertext), len(kBytes))
+	if err != nil {
+		return nil, nil, err
+	}
+	zero, randomness, err := pk.Encrypt(reader, big.NewInt(0))
+	if err != nil {
+		return nil, nil, err
+	}
+	product, err = zkpai.OAdd(pk, product, zero)
+	if err != nil {
+		secret.ClearBigInt(randomness)
+		return nil, nil, err
+	}
+	nLen := (pk.N.BitLen() + 7) / 8
+	randomnessBytes, err := paillierct.FixedEncodeStrict(randomness, nLen)
+	secret.ClearBigInt(randomness)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer clear(randomnessBytes)
+	randomnessSecret, err := secret.NewScalar(randomnessBytes, nLen)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer randomnessSecret.Destroy()
+	proof, err := zkpai.ProveMul(params, state, zkpai.MulStatement{
+		PaillierN: pk,
+		X:         new(big.Int).SetBytes(o.Message.Ciphertext),
+		Y:         new(big.Int).SetBytes(other.Message.Ciphertext),
+		C:         product,
+	}, zkpai.MulWitness{X: o.k, RhoX: o.rho, RhoC: randomnessSecret}, reader)
+	if err != nil {
+		return nil, nil, err
+	}
+	return product, proof, nil
 }
 
 // ProveStartForVerifier proves an MtA start ciphertext for one verifier.

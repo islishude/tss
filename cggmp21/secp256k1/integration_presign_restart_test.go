@@ -198,6 +198,9 @@ func TestThresholdECDSA_SignAttemptCompletionSurvivesRestart(t *testing.T) {
 	if !ok || !bytes.Equal(signature.R, resumedSignature.R) || !bytes.Equal(signature.S, resumedSignature.S) {
 		t.Fatal("completed signature did not survive restart")
 	}
+	if len(restored.state.sigmaOpenings) != 0 || len(restored.state.SigmaOpeningRecords) != 0 {
+		t.Fatal("completed attempt recovery retained sigma identification witnesses")
+	}
 }
 
 func TestThresholdECDSA_SignAttemptCompletionIsDurableBeforeVisible(t *testing.T) {

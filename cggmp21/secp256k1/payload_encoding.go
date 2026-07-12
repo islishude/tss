@@ -10,39 +10,42 @@ import (
 
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 const (
-	keygenCommitmentsPayloadWireType  = "cggmp21.secp256k1.payload.keygen.commitments"
-	keygenSharePayloadWireType        = "cggmp21.secp256k1.payload.keygen.share"
-	presignRound1PayloadWireType      = "cggmp21.secp256k1.payload.presign.round1"
-	presignRound1ProofPayloadWireType = "cggmp21.secp256k1.payload.presign.round1-proof"
-	presignRound2PayloadWireType      = "cggmp21.secp256k1.payload.presign.round2"
-	presignRound3PayloadWireType      = "cggmp21.secp256k1.payload.presign.round3"
-	signPartialPayloadWireType        = "cggmp21.secp256k1.payload.sign.partial"
-	reshareDealerCommitmentsWireType  = "cggmp21.secp256k1.payload.reshare.dealer_commitments"
-	reshareSharePayloadWireType       = "cggmp21.secp256k1.payload.reshare.share"
-	reshareReceiverMaterialWireType   = "cggmp21.secp256k1.payload.reshare.receiver_material"
-	refreshCommitmentsPayloadWireType = "cggmp21.secp256k1.payload.refresh.commitments"
-	refreshSharePayloadWireType       = "cggmp21.secp256k1.payload.refresh.share"
+	keygenCommitmentsPayloadWireType     = "cggmp21.secp256k1.payload.keygen.commitments"
+	keygenSharePayloadWireType           = "cggmp21.secp256k1.payload.keygen.share"
+	presignRound1PayloadWireType         = "cggmp21.secp256k1.payload.presign.round1"
+	presignRound1ProofPayloadWireType    = "cggmp21.secp256k1.payload.presign.round1-proof"
+	presignRound2PayloadWireType         = "cggmp21.secp256k1.payload.presign.round2"
+	presignRound3PayloadWireType         = "cggmp21.secp256k1.payload.presign.round3"
+	presignIdentificationPayloadWireType = "cggmp21.secp256k1.payload.presign.identification"
+	signIdentificationPayloadWireType    = "cggmp21.secp256k1.payload.sign.identification"
+	signPartialPayloadWireType           = "cggmp21.secp256k1.payload.sign.partial"
+	reshareDealerCommitmentsWireType     = "cggmp21.secp256k1.payload.reshare.dealer_commitments"
+	reshareSharePayloadWireType          = "cggmp21.secp256k1.payload.reshare.share"
+	reshareReceiverMaterialWireType      = "cggmp21.secp256k1.payload.reshare.receiver_material"
+	refreshCommitmentsPayloadWireType    = "cggmp21.secp256k1.payload.refresh.commitments"
+	refreshSharePayloadWireType          = "cggmp21.secp256k1.payload.refresh.share"
 )
 
 const (
-	keygenCommitmentsPayloadWireVersion  uint16 = 1
-	keygenSharePayloadWireVersion        uint16 = 1
-	presignRound1PayloadWireVersion      uint16 = 1
-	presignRound1ProofPayloadWireVersion uint16 = 1
-	presignRound2PayloadWireVersion      uint16 = 1
-	presignRound3PayloadWireVersion      uint16 = 1
-	signPartialPayloadWireVersion        uint16 = 1
-	reshareDealerCommitmentsWireVersion  uint16 = 1
-	reshareSharePayloadWireVersion       uint16 = 1
-	reshareReceiverMaterialWireVersion   uint16 = 1
-	refreshCommitmentsPayloadWireVersion uint16 = 1
-	refreshSharePayloadWireVersion       uint16 = 1
+	keygenCommitmentsPayloadWireVersion     uint16 = 1
+	keygenSharePayloadWireVersion           uint16 = 1
+	presignRound1PayloadWireVersion         uint16 = 1
+	presignRound1ProofPayloadWireVersion    uint16 = 1
+	presignRound2PayloadWireVersion         uint16 = 1
+	presignRound3PayloadWireVersion         uint16 = 1
+	presignIdentificationPayloadWireVersion uint16 = 1
+	signIdentificationPayloadWireVersion    uint16 = 1
+	signPartialPayloadWireVersion           uint16 = 1
+	reshareDealerCommitmentsWireVersion     uint16 = 1
+	reshareSharePayloadWireVersion          uint16 = 1
+	reshareReceiverMaterialWireVersion      uint16 = 1
+	refreshCommitmentsPayloadWireVersion    uint16 = 1
+	refreshSharePayloadWireVersion          uint16 = 1
 )
 
 type payloadValidatorWithLimits interface {
@@ -189,7 +192,10 @@ func (p *keygenSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits)
 
 // Validate checks the keygen share payload structure.
 func (p keygenSharePayload) Validate() error {
-	if err := validateSecretScalarStrict(p.Share); err != nil {
+	if err := validatePositiveIntegerBytes(p.Ciphertext); err != nil {
+		return err
+	}
+	if err := p.Proof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -227,6 +233,9 @@ func (p presignRound1Payload) Validate() error {
 		return err
 	}
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
+		return err
+	}
+	if err := validatePositiveIntegerBytes(p.EncGamma); err != nil {
 		return err
 	}
 	if p.PaillierPublicKey == nil {
@@ -272,6 +281,9 @@ func (p presignRound1ProofPayload) Validate() error {
 		return errors.New("round1 public hash must be 32 bytes")
 	}
 	if err := p.EncKProof.Validate(); err != nil {
+		return err
+	}
+	if err := p.EncGammaProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -384,6 +396,9 @@ func (p presignRound3Payload) Validate() error {
 		}
 		if err := contribution.OutboundDelta.Validate(); err != nil {
 			return fmt.Errorf("invalid outbound delta contribution: %w", err)
+		}
+		if len(contribution.InboundEnvelope) == 0 || len(contribution.OutboundEnvelope) == 0 {
+			return errors.New("presign MTA contribution is missing signed round2 envelopes")
 		}
 		previous = contribution.Peer
 	}
@@ -535,8 +550,11 @@ func (p reshareSharePayload) Validate() error {
 	if p.Receiver == 0 {
 		return errors.New("reshare share receiver is zero")
 	}
-	if err := validateSecretScalarStrict(p.Share); err != nil {
-		return err
+	if len(p.Ciphertext) == 0 {
+		return errors.New("reshare share ciphertext is empty")
+	}
+	if err := p.Proof.Validate(); err != nil {
+		return fmt.Errorf("invalid reshare share proof: %w", err)
 	}
 	if len(p.DealerCommitmentHash) != sha256.Size {
 		return errors.New("reshare share commitment hash must be 32 bytes")
@@ -613,8 +631,9 @@ func (refreshCommitmentsPayload) WireVersion() uint16 {
 }
 
 type refreshSharePayload struct {
-	Share    *secret.Scalar `wire:"1,custom,len=32"`
-	PlanHash []byte         `wire:"2,bytes,len=32"`
+	Ciphertext []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
+	Proof      zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash   []byte             `wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for refreshSharePayload.
@@ -708,7 +727,10 @@ func (p *refreshSharePayload) UnmarshalBinaryWithLimits(in []byte, limits Limits
 
 // Validate checks the refresh share payload structure.
 func (p refreshSharePayload) Validate() error {
-	if err := validateSecretScalarAllowZero(p.Share); err != nil {
+	if err := validatePositiveIntegerBytes(p.Ciphertext); err != nil {
+		return err
+	}
+	if err := p.Proof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -719,7 +741,7 @@ func (p refreshSharePayload) Validate() error {
 
 // newEnvelope creates a protocol envelope with the cggmp21-secp256k1 protocol ID.
 func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, payloadType tss.PayloadType, payload []byte) (tss.Envelope, error) {
-	return tss.NewEnvelope(tss.EnvelopeInput{
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   config.SessionID,
 		Round:       round,
@@ -728,4 +750,18 @@ func newEnvelope(config tss.ThresholdConfig, round uint8, from, to tss.PartyID, 
 		PayloadType: payloadType,
 		Payload:     payload,
 	})
+	if err != nil {
+		return tss.Envelope{}, err
+	}
+	if config.EnvelopeSigner == nil {
+		return env, nil
+	}
+	return tss.SignEnvelope(env, config.EnvelopeSigner)
+}
+
+func requireLocalEnvelopeSigner(guard *tss.EnvelopeGuard, signer tss.EnvelopeSigner) error {
+	if guard != nil && guard.RequiresSenderSignatures() && signer == nil {
+		return tss.ErrMissingEnvelopeSigner
+	}
+	return nil
 }

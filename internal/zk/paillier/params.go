@@ -18,6 +18,10 @@ const (
 const (
 	maxSecurityParameterBits uint32 = tss.DefaultMaxPaillierModulusBits
 	proofResponseSlackBits   uint32 = 2
+	// Πdec reconstructs a sum of pairwise affine terms before multiplying by
+	// an ECDSA scalar. This covers aggregation carry bits for the protocol's
+	// bounded signer set instead of assuming a single EllPrime-bit term.
+	decAggregationSlackBits uint32 = 16
 )
 
 // SecurityParams collects the statistical and computational security parameters
@@ -101,6 +105,9 @@ func (sp SecurityParams) Validate() error {
 	if sp.EllPrime > maxRange-bonus {
 		return fmt.Errorf("SecurityParams affine range must not exceed %d bits", maxRange)
 	}
+	if sp.Ell > maxRange-sp.EllPrime || bonus > maxRange-sp.EllPrime-sp.Ell {
+		return fmt.Errorf("SecurityParams decryption range must not exceed %d bits", maxRange)
+	}
 	return nil
 }
 
@@ -155,6 +162,19 @@ func (sp SecurityParams) EncRange() uint32 {
 func (sp SecurityParams) AffGRange() uint32 {
 	bonus := max(sp.ChallengeBits, sp.Epsilon)
 	return boundedProofRange(sp.EllPrime, bonus)
+}
+
+// DecPlaintextRange returns the public bound for online decryption witnesses.
+// The sigma ciphertext contains an affine plaintext multiplied by an ECDSA
+// scalar and sums multiple pairwise terms, so its bound includes conservative
+// aggregation carry slack in addition to EllPrime + Ell.
+func (sp SecurityParams) DecPlaintextRange() uint32 {
+	return boundedProofRange(sp.EllPrime, sp.Ell+decAggregationSlackBits)
+}
+
+// DecRange returns the response-mask bound for Πdec.
+func (sp SecurityParams) DecRange() uint32 {
+	return sp.DecPlaintextRange() + max(sp.Epsilon, sp.ChallengeBits)
 }
 
 func boundedProofRange(base, bonus uint32) uint32 {

@@ -263,6 +263,39 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 	return params, stmt, witness, proof
 }
 
+func TestLogStarProofAcceptsZeroPlaintextAndIdentityCommitment(t *testing.T) {
+	t.Parallel()
+	params := fastProofParams()
+	sk := testPaillierKey(t, 512)
+	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lambda.Destroy()
+	zero, err := secret.NewScalar(make([]byte, secp.ScalarSize), secp.ScalarSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zero.Destroy()
+	ciphertext, randomness, err := sk.EncryptSecret(nil, zero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer randomness.Destroy()
+	statement := LogStarStatement{
+		PaillierN: sk.PublicKey, C: ciphertext, X: secp.NewInfinity(),
+		B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: aux,
+	}
+	proof, err := ProveLogStar(params, []byte("zero-share"), statement, LogStarWitness{X: zero, Rho: randomness}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof.Destroy()
+	if err := VerifyLogStar(params, []byte("zero-share"), statement, proof); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func fastProofParams() SecurityParams {
 	return SecurityParams{Ell: 256, EllPrime: 512, Epsilon: 64, ChallengeBits: 128, MinPaillierBits: 512}
 }

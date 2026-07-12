@@ -19,16 +19,20 @@ func TestCGGMP21KeygenEnvelopeFailClosed(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2)
-	kg1, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	kg1, out1, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
+	kg2, out2, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	commit := out2[0]
-	share := out2[1]
+	shareOut, err := kg2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	share := mustCGGMPEnvelope(t, shareOut, payloadKeygenShare, 1)
 	t.Run("wrong session", func(t *testing.T) {
 		mutated := commit
 		mutated.SessionID, err = tss.NewSessionID(nil)

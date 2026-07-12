@@ -108,7 +108,12 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 		sessions[id] = kg
 		messages = append(messages, out...)
 	}
-	for _, env := range messages {
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
+		if env.PayloadType == payloadKeygenConfirmation {
+			continue
+		}
 		for _, id := range parties {
 			if id == env.From {
 				continue
@@ -116,9 +121,11 @@ func secpKeygenWithoutConfirmation(t testing.TB, threshold, n int) map[tss.Party
 			if env.To != 0 && env.To != id {
 				continue
 			}
-			if _, err := sessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
+			messages = append(messages, out...)
 		}
 	}
 	out := make(map[tss.PartyID]*KeyShare, n)

@@ -241,6 +241,101 @@ func (sk PrivateKey) Decrypt(ciphertext *big.Int) (*big.Int, error) {
 	return m, nil
 }
 
+// RecoverOpening decrypts ciphertext and recovers the Paillier randomness for
+// the canonical signed plaintext representative. It is intended only for
+// identifiable-abort proof generation; callers must destroy both returned
+// secrets immediately after proving.
+func (sk PrivateKey) RecoverOpening(ciphertext *big.Int) (*secret.SignedInt, *secret.Scalar, error) {
+	plaintext, err := sk.Decrypt(ciphertext)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer secret.ClearBigInt(plaintext)
+
+	halfN := new(big.Int).Rsh(new(big.Int).Set(sk.N), 1)
+	negative := plaintext.Cmp(halfN) > 0
+	magnitude := new(big.Int).Set(plaintext)
+	if negative {
+		magnitude.Sub(sk.N, plaintext)
+	}
+	defer secret.ClearBigInt(magnitude)
+	nLen := (sk.N.BitLen() + 7) / 8
+	magnitudeBytes, err := paillierct.FixedEncodeStrict(magnitude, nLen)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer clear(magnitudeBytes)
+	signed, err := secret.NewSignedInt(negative, magnitudeBytes, nLen)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	// Remove G^m, leaving rho^N. Reducing modulo N gives rho^N in Z*_N;
+	// raising it to N^{-1} mod lambda(N) recovers rho. The recovery exponent
+	// depends on the private key and therefore always uses paillierct.ExpCT.
+	gm, err := sk.EncryptWithRandomness(plaintext, big.NewInt(1))
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	gmInverse := new(big.Int).ModInverse(gm, sk.NSquared)
+	if gmInverse == nil {
+		signed.Destroy()
+		return nil, nil, errors.New("paillier message component is not invertible")
+	}
+	z := new(big.Int).Mul(ciphertext, gmInverse)
+	z.Mod(z, sk.NSquared)
+	base := new(big.Int).Mod(z, sk.N)
+	if base.Sign() == 0 {
+		signed.Destroy()
+		return nil, nil, errors.New("invalid Paillier randomness component")
+	}
+	lambda := scalarToBig(sk.Lambda)
+	defer secret.ClearBigInt(lambda)
+	recoveryExponent := new(big.Int).ModInverse(new(big.Int).Mod(sk.N, lambda), lambda)
+	if recoveryExponent == nil {
+		signed.Destroy()
+		return nil, nil, errors.New("paillier randomness recovery exponent unavailable")
+	}
+	defer secret.ClearBigInt(recoveryExponent)
+	modulusBytes, err := paillierct.FixedEncodeStrict(sk.N, nLen)
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	baseBytes, err := paillierct.FixedEncodeStrict(base, nLen)
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	exponentBytes, err := paillierct.FixedEncodeStrict(recoveryExponent, nLen)
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	defer clear(exponentBytes)
+	randomnessBytes, err := paillierct.ExpCT(modulusBytes, baseBytes, exponentBytes)
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	defer clear(randomnessBytes)
+	randomness, err := secret.NewScalar(randomnessBytes, nLen)
+	if err != nil {
+		signed.Destroy()
+		return nil, nil, err
+	}
+	randomnessBig := scalarToBig(randomness)
+	defer secret.ClearBigInt(randomnessBig)
+	reencrypted, err := sk.EncryptWithRandomness(plaintext, randomnessBig)
+	if err != nil || reencrypted.Cmp(ciphertext) != 0 {
+		signed.Destroy()
+		randomness.Destroy()
+		return nil, nil, errors.New("recovered Paillier opening does not match ciphertext")
+	}
+	return signed, randomness, nil
+}
+
 // ValidateCiphertext checks ciphertext membership in Z*_{n^2}.
 func (pk PublicKey) ValidateCiphertext(ciphertext *big.Int) error {
 	if err := pk.Validate(); err != nil {

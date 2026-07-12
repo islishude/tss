@@ -2,6 +2,7 @@ package paillier
 
 import (
 	"context"
+	"crypto/rand"
 	"math/big"
 	"testing"
 )
@@ -301,6 +302,34 @@ func TestEncryptWithRandomnessRejectsInvalidInputs(t *testing.T) {
 	// r = N (divisible by N, not coprime).
 	if _, err := pk.EncryptWithRandomness(big.NewInt(1), new(big.Int).Set(sk.N)); err == nil {
 		t.Fatal("r=N accepted")
+	}
+}
+
+func TestRecoverOpeningRoundTrip(t *testing.T) {
+	t.Parallel()
+	sk, err := GenerateKeyForTest(context.Background(), nil, 512)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer sk.Destroy()
+	for _, message := range []*big.Int{big.NewInt(0), big.NewInt(19), big.NewInt(-23)} {
+		ciphertext, _, err := sk.Encrypt(rand.Reader, message)
+		if err != nil {
+			t.Fatal(err)
+		}
+		plaintext, randomness, err := sk.RecoverOpening(ciphertext)
+		if err != nil {
+			t.Fatal(err)
+		}
+		reencrypted, err := sk.EncryptSignedWithSecretRandomness(plaintext, randomness)
+		plaintext.Destroy()
+		randomness.Destroy()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if reencrypted.Cmp(ciphertext) != 0 {
+			t.Fatal("recovered opening did not reproduce ciphertext")
+		}
 	}
 }
 

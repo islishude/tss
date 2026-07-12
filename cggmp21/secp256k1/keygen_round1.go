@@ -6,10 +6,12 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math/big"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/bip32util"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/sessiontx"
 	"github.com/islishude/tss/internal/shamir"
 	"github.com/islishude/tss/internal/transcript"
@@ -53,7 +55,6 @@ func StartKeygen(plan *KeygenPlan, local tss.LocalConfig, guard *tss.EnvelopeGua
 		return nil, nil, err
 	}
 	prepared.out = out
-	localMaterial.clearPolynomial()
 	completionOut, err := s.tryAdvance()
 	if err != nil {
 		return nil, nil, err
@@ -85,6 +86,10 @@ func resolveKeygenStart(
 			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
+		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
+			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
+	}
+	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
 		return tss.ThresholdConfig{}, Limits{}, SecurityParams{}, nil,
 			tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
@@ -218,7 +223,7 @@ func emitKeygenRound1(s *KeygenSession, local *keygenLocalMaterial) (out []tss.E
 			out = nil
 		}
 	}()
-	out = make([]tss.Envelope, 0, len(s.cfg.Parties))
+	out = make([]tss.Envelope, 0, 1)
 	commitPayload, err := (keygenCommitmentsPayload{
 		Commitments:        local.commitments,
 		PaillierPublicKey:  local.paillier.PublicKey,
@@ -237,26 +242,66 @@ func emitKeygenRound1(s *KeygenSession, local *keygenLocalMaterial) (out []tss.E
 		return nil, err
 	}
 	out = append(out, commitEnv)
-	for _, id := range s.cfg.Parties {
-		if id == s.cfg.Self {
+	return out, nil
+}
+
+func (s *KeygenSession) emitEncryptedKeygenShares() ([]tss.Envelope, error) {
+	if s.sharesSent || s.local == nil || len(s.local.polynomial) == 0 || !s.round1.commitmentsComplete() {
+		return nil, nil
+	}
+	out := make([]tss.Envelope, 0, len(s.cfg.Parties)-1)
+	for _, receiver := range s.cfg.Parties {
+		if receiver == s.cfg.Self {
 			continue
 		}
-		share, err := secpSecretScalarFromScalar(shamir.Eval(local.polynomial, id))
+		slot, err := s.round1.slot(receiver)
 		if err != nil {
 			return nil, err
 		}
-		payload, err := (keygenSharePayload{Share: share, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		shareScalar := shamir.Eval(s.local.polynomial, receiver)
+		share, err := secpSecretScalarFromScalarAllowZero(shareScalar)
+		if err != nil {
+			return nil, err
+		}
+		ciphertext, randomness, err := slot.paillierPub.PublicKey.EncryptSecret(s.cfg.Reader(), share)
+		if err != nil {
+			share.Destroy()
+			return nil, err
+		}
+		evaluation, err := secp.EvalCommitments(s.local.commitments, receiver)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		domain, err := keygenEncryptedShareDomain(s.cfg, s.cfg.Self, receiver, slot.paillierPub.PublicKey, s.planHash, s.limits)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		proof, err := zkpai.ProveLogStar(s.securityParams, domain, zkpai.LogStarStatement{
+			PaillierN: slot.paillierPub.PublicKey, C: ciphertext, X: evaluation,
+			B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: slot.ringPedersen.Params,
+		}, zkpai.LogStarWitness{X: share, Rho: randomness}, s.cfg.Reader())
 		share.Destroy()
+		randomness.Destroy()
 		if err != nil {
 			return nil, err
 		}
-		shareEnv, err := newEnvelope(s.cfg, keygenStartRound, s.cfg.Self, id, payloadKeygenShare, payload)
+		payload, err := (keygenSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		env, err := newEnvelope(s.cfg, keygenShareRound, s.cfg.Self, receiver, payloadKeygenShare, payload)
 		clear(payload)
 		if err != nil {
 			return nil, err
 		}
-		out = append(out, shareEnv)
+		out = append(out, env)
 	}
+	s.sharesSent = true
+	s.local.clearPolynomial()
 	return out, nil
 }
 
@@ -404,46 +449,64 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
 	}
-	if p.Share == nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, errors.New("missing keygen share"))
-	}
-
 	// ---- 2. POLICY VALIDATE ----
 	// (direct-confidential, duplicate checks done in dispatcher)
 	if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-		p.Share.Destroy()
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
-	share, err := secpScalarFromSecret(p.Share)
-	if err != nil {
-		p.Share.Destroy()
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+	if slot.commitments == nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("encrypted keygen share arrived before dealer commitments"))
 	}
-
-	// Eagerly verify the share against the sender's polynomial commitments
-	// when they are already available. If the commitments have not arrived
-	// yet, defer verification to tryComplete (which re-checks all shares
-	// once every party's commitments are in).
-	if slot.commitments != nil {
-		if err := secp.VerifyShare(slot.commitments, s.cfg.Self, share); err != nil {
-			s.cfg.Logger().Warn(s.cfg.Ctx(), "invalid DKG share (eager verification)",
-				"party_id", s.cfg.Self,
-				"dealer", env.From,
-			)
-			protoErr, evErr := s.buildShareVerificationBlame(env.From, slot.commitments, err)
-			if evErr != nil {
-				p.Share.Destroy()
-				return nil, evErr
-			}
-			p.Share.Destroy()
-			return nil, protoErr
-		}
+	localSlot, err := s.round1.slot(s.cfg.Self)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	evaluation, err := secp.EvalCommitments(slot.commitments, s.cfg.Self)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	domain, err := keygenEncryptedShareDomain(s.cfg, env.From, s.cfg.Self, localSlot.paillierPub.PublicKey, s.planHash, s.limits)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	ciphertext := new(big.Int).SetBytes(p.Ciphertext)
+	if err := zkpai.VerifyLogStar(s.securityParams, domain, zkpai.LogStarStatement{
+		PaillierN: localSlot.paillierPub.PublicKey, C: ciphertext, X: evaluation,
+		B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: localSlot.ringPedersen.Params,
+	}, &p.Proof); err != nil {
+		p.Proof.Destroy()
+		return nil, verificationErrorWithEvidence(env, tss.EvidenceKindKeygenShare,
+			"invalid encrypted keygen share proof", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(keygenCommitmentsHashLabel, slot.commitments)),
+			hashEvidenceField("encrypted_share_ciphertext_hash", p.Ciphertext))
+	}
+	p.Proof.Destroy()
+	plaintext, err := s.local.paillier.Decrypt(ciphertext)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, fmt.Errorf("verified encrypted keygen share decryption failed: %w", err))
+	}
+	defer secret.ClearBigInt(plaintext)
+	if plaintext.Sign() < 0 || plaintext.Cmp(secp.Order()) >= 0 {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, errors.New("verified encrypted keygen share plaintext is outside scalar field"))
+	}
+	shareBytes := make([]byte, secp.ScalarSize)
+	plaintext.FillBytes(shareBytes)
+	share, err := newSecpSecretScalarAllowZero(shareBytes)
+	clear(shareBytes)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, err)
+	}
+	shareScalar, err := secpScalarFromSecretAllowZero(share)
+	if err != nil || secp.VerifyShare(slot.commitments, s.cfg.Self, shareScalar) != nil {
+		share.Destroy()
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, errors.New("verified encrypted share decrypted inconsistently"))
 	}
 	return &acceptCGGMPKeygenShareTx{
 		from:  env.From,
-		share: p.Share,
+		share: share,
 	}, nil
 }
 

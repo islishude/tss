@@ -20,6 +20,13 @@ import (
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
+type testEnvelopeIdentity struct{}
+
+func (testEnvelopeIdentity) SignEnvelopeDigest([32]byte) ([]byte, error) { return []byte{1}, nil }
+func (testEnvelopeIdentity) VerifyEnvelopeSignature(tss.PartyID, [32]byte, []byte) error {
+	return nil
+}
+
 // testCGGMP21Guard is a helper that creates an EnvelopeGuard for CGGMP21 protocol tests.
 // It uses the production policy set but relaxes broadcast consistency requirements
 // since test harnesses don't coordinate BroadcastCertificates.
@@ -135,6 +142,7 @@ func testCGGMP21Policies() tss.PolicySet {
 	for i, p := range entries {
 		relaxed[i] = p
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+		relaxed[i].RequireSenderSignature = false
 	}
 	ps, err := tss.NewPolicySet(relaxed...)
 	if err != nil {
@@ -310,11 +318,12 @@ func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Read
 
 func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
 	return tss.LocalConfig{
-		Self:         config.Self,
-		Rand:         config.Rand,
-		Context:      config.Context,
-		RoundTimeout: config.RoundTimeout,
-		Log:          config.Log,
+		Self:           config.Self,
+		Rand:           config.Rand,
+		Context:        config.Context,
+		RoundTimeout:   config.RoundTimeout,
+		Log:            config.Log,
+		EnvelopeSigner: config.EnvelopeSigner,
 	}
 }
 
@@ -656,6 +665,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 				Party:             1,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
+				EncGamma:          []byte{1},
 				PaillierPublicKey: paillier65,
 				XBarPoint:         secp.Clone(RPoint),
 				Delta:             &one,
@@ -664,6 +674,7 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 				Party:             2,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
+				EncGamma:          []byte{1},
 				PaillierPublicKey: paillier77,
 				XBarPoint:         secp.Clone(RPoint),
 				Delta:             &otherOne,

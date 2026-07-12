@@ -20,6 +20,10 @@ type DeliveryPolicy struct {
 	Confidentiality ConfidentialityPolicy
 
 	BroadcastConsistency BroadcastConsistencyPolicy
+
+	// RequireSenderSignature requires portable sender authentication in
+	// addition to transport authentication.
+	RequireSenderSignature bool
 }
 
 // policyKey is the lookup key for the policy index.
@@ -63,6 +67,15 @@ func (ps PolicySet) ValidateBroadcastConsistency() error {
 		}
 	}
 	return nil
+}
+
+func (ps PolicySet) requiresSenderSignature() bool {
+	for _, p := range ps.entries {
+		if p.RequireSenderSignature {
+			return true
+		}
+	}
+	return false
 }
 
 // MustNewPolicySet is like [NewPolicySet] but panics on duplicate keys or when
@@ -120,6 +133,8 @@ type GuardConfig struct {
 	// AckVerifier, when non-nil, enables broadcast ack signature verification
 	// during guard validation. Production deployments SHOULD set this.
 	AckVerifier BroadcastAckVerifier
+	// EnvelopeVerifier verifies portable sender signatures required by policy.
+	EnvelopeVerifier EnvelopeSignatureVerifier
 }
 
 // BuildGuard constructs an EnvelopeGuard from the configuration or returns an error.
@@ -129,11 +144,15 @@ func (c GuardConfig) BuildGuard() (*EnvelopeGuard, error) {
 	if c.AckVerifier == nil {
 		return nil, ErrMissingAckVerifier
 	}
+	if c.Policies.requiresSenderSignature() && c.EnvelopeVerifier == nil {
+		return nil, ErrMissingEnvelopeSignatureVerifier
+	}
 	g, err := NewEnvelopeGuard(c.Self, c.Parties, c.Protocol, c.SessionID, c.Policies, c.Cache)
 	if err != nil {
 		return nil, err
 	}
 	g.AckVerifier = c.AckVerifier
+	g.EnvelopeVerifier = c.EnvelopeVerifier
 	return g, nil
 }
 
@@ -152,14 +171,15 @@ func TestGuardConfig(self PartyID, parties PartySet, protocol ProtocolID, sessio
 
 // ThresholdConfig contains local participant configuration for a protocol run.
 type ThresholdConfig struct {
-	Threshold    int
-	Parties      PartySet
-	Self         PartyID
-	SessionID    SessionID
-	Rand         io.Reader       `json:"-"`
-	Context      context.Context `json:"-"`
-	RoundTimeout time.Duration   `json:"-"`
-	Log          Logger          `json:"-"`
+	Threshold      int
+	Parties        PartySet
+	Self           PartyID
+	SessionID      SessionID
+	Rand           io.Reader       `json:"-"`
+	Context        context.Context `json:"-"`
+	RoundTimeout   time.Duration   `json:"-"`
+	Log            Logger          `json:"-"`
+	EnvelopeSigner EnvelopeSigner  `json:"-"`
 }
 
 // LocalConfig contains per-process runtime configuration for one protocol
@@ -167,11 +187,12 @@ type ThresholdConfig struct {
 // signer set, derivation context, and HD enablement belong in protocol-specific
 // plan objects, not in LocalConfig.
 type LocalConfig struct {
-	Self         PartyID
-	Rand         io.Reader       `json:"-"`
-	Context      context.Context `json:"-"`
-	RoundTimeout time.Duration   `json:"-"`
-	Log          Logger          `json:"-"`
+	Self           PartyID
+	Rand           io.Reader       `json:"-"`
+	Context        context.Context `json:"-"`
+	RoundTimeout   time.Duration   `json:"-"`
+	Log            Logger          `json:"-"`
+	EnvelopeSigner EnvelopeSigner  `json:"-"`
 }
 
 // Ctx returns the local configuration context or context.Background when unset.

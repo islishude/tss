@@ -25,10 +25,11 @@ func buildTestConfig(parties tss.PartySet, threshold int, sessionID tss.SessionI
 	out := make(map[tss.PartyID]tss.ThresholdConfig, len(parties))
 	for _, id := range parties {
 		out[id] = tss.ThresholdConfig{
-			Threshold: threshold,
-			Parties:   parties,
-			Self:      id,
-			SessionID: sessionID,
+			Threshold:      threshold,
+			Parties:        parties,
+			Self:           id,
+			SessionID:      sessionID,
+			EnvelopeSigner: testEnvelopeIdentity{},
 		}
 	}
 	return out
@@ -53,7 +54,7 @@ func TestCGGMP21KeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	commitEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       1,
+		Round:       keygenStartRound,
 		From:        12,
 		To:          0,
 		PayloadType: payloadKeygenCommitments,
@@ -86,7 +87,7 @@ func TestCGGMP21KeygenRejectsPlaintextShare(t *testing.T) {
 	shareEnv, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol:    tss.ProtocolCGGMP21Secp256k1,
 		SessionID:   sessionID,
-		Round:       1,
+		Round:       keygenShareRound,
 		From:        22,
 		To:          21,
 		PayloadType: payloadKeygenShare,

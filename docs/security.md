@@ -65,6 +65,13 @@ to the protocol `Start*` call that creates the session. Startup returns
 nil-guard fail-closed check for defense in depth.
 Production `GuardConfig.BuildGuard` requires a non-nil `AckVerifier`
 (`BroadcastAckVerifier`) for broadcast ack signature verification.
+CGGMP21 policies also require canonical sender signatures on every direct
+envelope. Production guards therefore require `EnvelopeVerifier`, and CGGMP21
+keygen, refresh, reshare, and presign starts require `LocalConfig.EnvelopeSigner`.
+The signature binds protocol, semantic version, session, round, sender,
+recipient, payload type, and payload hash. Two different valid signatures for
+the same message slot are portable equivocation evidence; an invalid signature
+is a transport-authentication failure and is never converted into blame.
 
 Before passing an inbound envelope to any state machine, the caller must open raw
 wire bytes with `OpenEnvelope`. The receive path must authenticate the peer and
@@ -283,12 +290,28 @@ not yet received independent cryptographic review. See
 `docs/audit-guide.md` for the proof-to-paper mapping designed to facilitate such
 a review.
 
-The three-round SignPrep path binds every accepted round-2 payload and proves
-the delta and sigma correction equations. A final aggregate verification
-failure after all partials verify is therefore an internal invariant failure.
-The implementation still does not claim the paper's complete identifiable-abort
-protocol: conflicting contribution views between two remote parties are rejected
-without blaming whichever message happened to arrive second.
+The three-round SignPrep path binds every accepted signed round-2 payload and
+proves the delta and sigma correction equations. Signed Round-2 equivocation is
+attributed from the two envelopes. A nonce/delta aggregate alert enters the
+conditional O(n²) presign identification round and verifies fresh Πaff-g,
+Πmul, and Πdec proofs. A final ECDSA self-check alert similarly enters the
+online identification round and verifies fresh sigma Πaff-g, Πmul\*, and Πdec
+proofs. The first invalid identification payload is attributed only to its
+sender. If every identification proof verifies while the original failure
+persists, the session clears all retained witnesses, enters a terminal failed
+state, and returns an unblamed `ErrCodeInvariant`.
+
+Portable proof-backed blame includes a canonical `IdentificationRecord`.
+`VerifyBlameEvidence` fails closed unless `EvidenceContext` supplies the
+authenticated envelope/broadcast verifiers and an `IdentificationVerifier`
+that replays the proof against the caller's trusted public transcript. No
+private share, nonce, Paillier key, mask, or randomness belongs in that context
+or record. Attributable broadcast failures carry the exact accepted envelope
+and its broadcast ACK certificate; attributable direct failures carry the
+sender-signed envelope. Transport authentication failures remain unblamed.
+Conditional identification payloads have a 384 KiB phase-specific cap so the
+payload, certified envelope, and ACK set always fit within the 1 MiB public
+evidence hard cap; oversized payloads fail before replay or session mutation.
 
 ## Keygen Broadcast Consistency
 

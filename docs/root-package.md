@@ -183,10 +183,11 @@ Unregistered payload types are **rejected by default** (fail-closed). See `cggmp
 6. Channel protection is set
 7. Recipient correctness
 8. Policy lookup (fail-closed for unknown payloads)
-9. Delivery mode enforcement (direct vs broadcast)
-10. Confidentiality enforcement against policy
-11. Broadcast consistency certificate verification with `VerifyFull` (when required)
-12. Replay and equivocation detection via `ReplayCache.CheckAndStore`
+9. Canonical sender-signature verification when required by policy
+10. Delivery mode enforcement (direct vs broadcast)
+11. Confidentiality enforcement against policy
+12. Broadcast consistency certificate verification with `VerifyFull` (when required)
+13. Replay and equivocation detection via `ReplayCache.CheckAndStore`
 
 Each protocol session must be constructed with an `EnvelopeGuard` passed to its
 `Start*` entry point, and handlers call `Validate(inbound)` as their first step.
@@ -194,6 +195,11 @@ A nil guard returns `ErrMissingEnvelopeGuard`. Production deployments use
 `GuardConfig.BuildGuard`; tests use `NewTestEnvelopeGuard`, which panics when
 not running under `go test` to prevent accidental production use. Sessions expose
 `Guard()` as a read-only accessor for transport adapters.
+
+Direct CGGMP21 policies set `RequireSenderSignature`. Their senders use
+`LocalConfig.EnvelopeSigner`, while guards use
+`EnvelopeSignatureVerifier`. `EnvelopeSigningDigest` excludes the signature
+itself and binds the complete canonical message slot and payload.
 
 The guard's configured `Parties` field is the construction-time party universe.
 Protocol handlers that have lifecycle-specific sender sets call

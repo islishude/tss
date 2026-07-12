@@ -54,8 +54,27 @@ type exampleCGGMPSecurity struct {
 	// private contains the example transport identities used to acknowledge
 	// broadcasts. These keys authenticate transport metadata only; they are
 	// independent from the threshold ECDSA shares produced by CGGMP21.
-	private  map[tss.PartyID]stded25519.PrivateKey
-	verifier tss.BroadcastAckVerifier
+	private          map[tss.PartyID]stded25519.PrivateKey
+	verifier         tss.BroadcastAckVerifier
+	envelopeVerifier tss.EnvelopeSignatureVerifier
+}
+
+type exampleEnvelopeSigner struct{ private stded25519.PrivateKey }
+
+func (s exampleEnvelopeSigner) SignEnvelopeDigest(digest [32]byte) ([]byte, error) {
+	return stded25519.Sign(s.private, digest[:]), nil
+}
+
+type exampleEnvelopeVerifier struct {
+	public map[tss.PartyID]stded25519.PublicKey
+}
+
+func (v exampleEnvelopeVerifier) VerifyEnvelopeSignature(party tss.PartyID, digest [32]byte, signature []byte) error {
+	public, ok := v.public[party]
+	if !ok || !stded25519.Verify(public, digest[:], signature) {
+		return errors.New("invalid envelope sender signature")
+	}
+	return nil
 }
 
 // newExampleCGGMPSecurity builds a deterministic transport-security fixture for
@@ -91,9 +110,18 @@ func newExampleCGGMPSecurity(parties tss.PartySet) *exampleCGGMPSecurity {
 		return nil
 	})
 	return &exampleCGGMPSecurity{
-		private:  privateKeys,
-		verifier: verifier,
+		private:          privateKeys,
+		verifier:         verifier,
+		envelopeVerifier: exampleEnvelopeVerifier{public: publicKeys},
 	}
+}
+
+func (s *exampleCGGMPSecurity) envelopeSigner(party tss.PartyID) (tss.EnvelopeSigner, error) {
+	private, ok := s.private[party]
+	if !ok {
+		return nil, fmt.Errorf("missing envelope signer for party %d", party)
+	}
+	return exampleEnvelopeSigner{private: private}, nil
 }
 
 func exampleKeyShareMetadata(share *cggmp.KeyShare) cggmp.KeySharePublicMetadata {
@@ -114,13 +142,14 @@ func exampleKeyShareMetadata(share *cggmp.KeyShare) cggmp.KeySharePublicMetadata
 // the same example transport trust registry.
 func (s *exampleCGGMPSecurity) guard(self tss.PartyID, parties tss.PartySet, sessionID tss.SessionID) (*tss.EnvelopeGuard, error) {
 	return (tss.GuardConfig{
-		Self:        self,
-		Parties:     parties,
-		Protocol:    tss.ProtocolCGGMP21Secp256k1,
-		SessionID:   sessionID,
-		Policies:    cggmp.CGGMP21Policies(),
-		Cache:       tss.NewInMemoryReplayCache(),
-		AckVerifier: s.verifier,
+		Self:             self,
+		Parties:          parties,
+		Protocol:         tss.ProtocolCGGMP21Secp256k1,
+		SessionID:        sessionID,
+		Policies:         cggmp.CGGMP21Policies(),
+		Cache:            tss.NewInMemoryReplayCache(),
+		AckVerifier:      s.verifier,
+		EnvelopeVerifier: s.envelopeVerifier,
 	}).BuildGuard()
 }
 
@@ -290,7 +319,11 @@ func startExampleCGGMPKeygenParty(job exampleKeygenJob, self tss.PartyID, securi
 	if err != nil {
 		return nil, nil, err
 	}
-	return cggmp.StartKeygen(plan, tss.LocalConfig{Self: self}, guard)
+	signer, err := security.envelopeSigner(self)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartKeygen(plan, tss.LocalConfig{Self: self, EnvelopeSigner: signer}, guard)
 }
 
 // runExampleCGGMPKeygen executes a complete dealerless key-generation lifecycle
@@ -373,7 +406,11 @@ func startExampleCGGMPPresignParty(job examplePresignJob, share *cggmp.KeyShare,
 	if err != nil {
 		return nil, nil, err
 	}
-	return cggmp.StartPresign(share, plan, tss.LocalConfig{Self: self}, guard)
+	signer, err := security.envelopeSigner(self)
+	if err != nil {
+		return nil, nil, err
+	}
+	return cggmp.StartPresign(share, plan, tss.LocalConfig{Self: self, EnvelopeSigner: signer}, guard)
 }
 
 // runExampleCGGMPPresign performs the offline phase for the selected signer set.

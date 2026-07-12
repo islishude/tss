@@ -10,6 +10,7 @@ import (
 
 func testLimits() Limits {
 	limits := DefaultLimits()
+	limits.Payload.MaxMessageBytes = tss.DefaultMaxEnvelopePayloadBytes
 	limits.Threshold = tss.ThresholdLimits{
 		MaxParties:              8,
 		MaxThreshold:            8,

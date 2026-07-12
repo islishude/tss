@@ -33,6 +33,9 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, plan.state.sessionID, local.Self); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
+	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, err)
+	}
 	if err := key.requireMPCMaterial(plan.limits); err != nil {
 		return nil, nil, invalidPlanConfig(local.Self, err)
 	}
@@ -68,14 +71,15 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		}
 	}()
 	config := tss.ThresholdConfig{
-		Threshold:    key.state.Threshold,
-		Parties:      signers,
-		Self:         local.Self,
-		SessionID:    sessionID,
-		Rand:         local.Rand,
-		Context:      local.Context,
-		RoundTimeout: local.RoundTimeout,
-		Log:          local.Log,
+		Threshold:      key.state.Threshold,
+		Parties:        signers,
+		Self:           local.Self,
+		SessionID:      sessionID,
+		Rand:           local.Rand,
+		Context:        local.Context,
+		RoundTimeout:   local.RoundTimeout,
+		Log:            local.Log,
+		EnvelopeSigner: local.EnvelopeSigner,
 	}
 	// k_i and gamma_i are local nonce scalars. Only Enc(k_i) and Gamma_i leave
 	// the process; the raw nonce scalars stay inside the local presign record.
@@ -151,6 +155,11 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
+	gammaOpening, err := mta.Start(config.Reader(), gammaSecret, paillierKey.PublicKey)
+	if err != nil {
+		startOpening.Destroy()
+		return nil, nil, err
+	}
 	paillierPub, err := key.paillierPublicFor(key.state.Party, limits)
 	if err != nil {
 		return nil, nil, err
@@ -159,6 +168,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	defer func() {
 		if !openingReturned {
 			startOpening.Destroy()
+			gammaOpening.Destroy()
 		}
 	}()
 	presignPayload := presignRound1Payload{
@@ -167,6 +177,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		PaillierPublicKey: paillierPub,
 		PlanHash:          slices.Clone(planHash),
 		KPoint:            kPoint,
+		EncGamma:          slices.Clone(gammaOpening.Message.Ciphertext),
 	}
 	payload, err := presignPayload.MarshalBinaryWithLimits(limits)
 	if err != nil {
@@ -206,6 +217,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		partyIndex:     partyIndex,
 		parties:        parties,
 		startOpening:   startOpening,
+		gammaOpening:   gammaOpening,
 		guard:          guard,
 	}
 	derivationOwned = true
@@ -238,10 +250,19 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
+		gammaDomain, err := gammaStartProofDomain(key, sessionID, signers, key.state.Party, peer, paillierKey.PublicKey, contextHash, planHash, limits)
+		if err != nil {
+			return nil, nil, err
+		}
+		gammaProof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), gammaDomain, s.gammaOpening, gammaComm, s.paillier.PublicKey, peerRP)
+		if err != nil {
+			return nil, nil, err
+		}
 		proofPayload, err := (presignRound1ProofPayload{
 			PublicRound1Hash: publicHash,
 			EncKProof:        *proof,
 			PlanHash:         slices.Clone(planHash),
+			EncGammaProof:    *gammaProof,
 		}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, nil, err
@@ -253,15 +274,6 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		out = append(out, proofEnv)
 		prepared.out = out
 	}
-	// Clear startOpening after all per-verifier proofs are generated.
-	// The MtA Finish path in round 2 only uses the Paillier private key and the
-	// StartMessage ciphertext — the StartOpening witness (k, rho) is never read
-	// after the proofs are generated. Clear it early to reduce the window of
-	// secret material exposure.
-	s.startOpening.Destroy()
-	s.startOpening = nil
-	startOpening = nil
-
 	round2, err := s.tryEmitRound2()
 	if err != nil {
 		return nil, nil, err
@@ -399,6 +411,7 @@ func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presign
 		rawEvidenceField("round1_public_hash", publicHash),
 		hashEvidenceField("gamma_hash", p.Gamma),
 		hashEvidenceField("enc_k_hash", p.EncK),
+		hashEvidenceField("enc_gamma_hash", p.EncGamma),
 	)
 	if expected, err := s.key.paillierPublicFor(from, s.limits); err == nil {
 		if encoded, err := expected.MarshalBinary(); err == nil {
@@ -411,9 +424,11 @@ func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presign
 func (s *PresignSession) presignRound1ProofEvidenceFields(from tss.PartyID, public presignRound1Payload, proof presignRound1ProofPayload) []tss.EvidenceField {
 	fields := s.presignRound1EvidenceFields(from, public)
 	proofBytes, _ := canonicalWireMessageBytes(&proof.EncKProof, s.limits)
+	gammaProofBytes, _ := canonicalWireMessageBytes(&proof.EncGammaProof, s.limits)
 	return append(fields,
 		rawEvidenceField("proof_public_round1_hash", proof.PublicRound1Hash),
 		hashEvidenceField("enc_k_proof_hash", proofBytes),
+		hashEvidenceField("enc_gamma_proof_hash", gammaProofBytes),
 	)
 }
 
@@ -443,6 +458,10 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 	if err := expectedPK.ValidateCiphertext(ciphertext); err != nil {
 		return fmt.Errorf("invalid encrypted nonce ciphertext: %w", err)
 	}
+	gammaCiphertext := new(big.Int).SetBytes(p.EncGamma)
+	if err := expectedPK.ValidateCiphertext(gammaCiphertext); err != nil {
+		return fmt.Errorf("invalid encrypted gamma ciphertext: %w", err)
+	}
 	return nil
 }
 
@@ -467,7 +486,14 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if err != nil {
 		return err
 	}
-	return mta.VerifyStart(s.securityParams, domain, start, public.KPoint, proverPK, localRP, &proof.EncKProof)
+	if err := mta.VerifyStart(s.securityParams, domain, start, public.KPoint, proverPK, localRP, &proof.EncKProof); err != nil {
+		return err
+	}
+	gammaDomain, err := gammaStartProofDomain(s.key, s.sessionID, s.signers, from, s.key.state.Party, public.PaillierPublicKey, s.contextHash, s.planHash, s.limits)
+	if err != nil {
+		return err
+	}
+	return mta.VerifyStart(s.securityParams, gammaDomain, mta.StartMessage{Ciphertext: public.EncGamma}, public.Gamma, proverPK, localRP, &proof.EncGammaProof)
 }
 
 func presignRound1PublicHash(p presignRound1Payload, limits Limits) ([]byte, error) {

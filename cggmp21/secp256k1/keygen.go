@@ -7,7 +7,6 @@ import (
 
 	"github.com/islishude/tss"
 	pai "github.com/islishude/tss/internal/paillier"
-	"github.com/islishude/tss/internal/secret"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -38,6 +37,7 @@ type KeygenSession struct {
 	round1               *keygenRound1Inbox                  // Accepted round-1 material keyed by dealer.
 	confirmations        *keygenConfirmationInbox            // Accepted confirmation material keyed by sender.
 	pendingConfirmations map[tss.PartyID]*KeygenConfirmation // Confirmations awaiting sender round-1 commitments.
+	sharesSent           bool                                // Encrypted share messages were emitted after all public material arrived.
 	completed            bool                                // Terminal success flag after the key share is confirmed.
 	aborted              bool                                // Terminal failure/destruction flag.
 	state                keygenState                         // Phase marker for collection, confirmation, success, or abort.
@@ -65,8 +65,9 @@ func (keygenCommitmentsPayload) WireVersion() uint16 {
 }
 
 type keygenSharePayload struct {
-	Share    *secret.Scalar `wire:"1,custom,len=32"`
-	PlanHash []byte         `wire:"2,bytes,len=32"`
+	Ciphertext []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
+	Proof      zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash   []byte             `wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.
@@ -95,6 +96,7 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 		return nil, abortedSessionError(base.Round, base.From)
 	}
 	defer func() {
+		err = bindInboundAuthenticationEvidence(err, env)
 		if shouldAbortSession(err) {
 			s.abort()
 		}
@@ -113,13 +115,16 @@ func (s *KeygenSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err
 		}
 		tx, err = s.buildAcceptCGGMPKeygenConfirmationTx(base)
 	} else {
-		if base.Round != keygenStartRound {
-			return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen only accepts round 1 messages"))
-		}
 		switch base.PayloadType {
 		case payloadKeygenCommitments:
+			if base.Round != keygenStartRound {
+				return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen commitments in wrong round"))
+			}
 			tx, err = s.buildAcceptCGGMPKeygenCommitmentsTx(base)
 		case payloadKeygenShare:
+			if base.Round != keygenShareRound {
+				return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("keygen encrypted share in wrong round"))
+			}
 			tx, err = s.buildAcceptCGGMPKeygenShareTx(base)
 		default:
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))

@@ -17,8 +17,8 @@ var manifest = []target{
 		Kind:     "wire",
 		Tier:     "0",
 		Packages: []string{"."},
-		Update:   runSpec{Run: "^TestGolden(BlameEvidence|SigningContext|BroadcastAck|BroadcastCertificate)$", Env: map[string]string{"UPDATE_GOLDEN": "1"}},
-		Verify:   runSpec{Run: "^TestGolden(BlameEvidence|SigningContext|BroadcastAck|BroadcastCertificate)$"},
+		Update:   runSpec{Run: "^TestGolden(BlameEvidence|IdentificationRecord|SigningContext|BroadcastAck|BroadcastCertificate)$", Env: map[string]string{"UPDATE_GOLDEN": "1"}},
+		Verify:   runSpec{Run: "^TestGolden(BlameEvidence|IdentificationRecord|SigningContext|BroadcastAck|BroadcastCertificate)$"},
 		Outputs: []string{
 			"wire/v1/tss/BlameEvidence.golden",
 			"wire/v1/tss/SigningContext.golden",

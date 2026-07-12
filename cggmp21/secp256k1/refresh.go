@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/big"
 	"slices"
 	"sync"
 
@@ -12,6 +13,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
+	"github.com/islishude/tss/internal/transcript"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
@@ -39,18 +41,20 @@ type refreshPartyData struct {
 type RefreshSession struct {
 	mu sync.Mutex
 
-	oldKey         *KeyShare                         // Caller-owned share being refreshed; not destroyed with the session.
-	cfg            tss.ThresholdConfig               // Local threshold runtime view fixed by the refresh plan.
-	log            tss.Logger                        // Optional protocol logger.
-	limits         Limits                            // Local fail-closed resource policy.
-	securityParams SecurityParams                    // Cryptographic profile inherited from oldKey.
-	planHash       []byte                            // Digest every refresh payload must echo.
-	partyData      map[tss.PartyID]*refreshPartyData // Per-party refresh state keyed by sender.
-	completed      bool                              // Terminal success flag after newShare is confirmed.
-	aborted        bool                              // Terminal failure/destruction flag.
-	guard          *tss.EnvelopeGuard                // Transport replay, identity, and policy guard.
-	newShare       *KeyShare                         // Refreshed key share produced on completion.
-	newPaillier    *pai.PrivateKey                   // Fresh local Paillier private key for rotated auxiliary material.
+	oldKey          *KeyShare                         // Caller-owned share being refreshed; not destroyed with the session.
+	cfg             tss.ThresholdConfig               // Local threshold runtime view fixed by the refresh plan.
+	log             tss.Logger                        // Optional protocol logger.
+	limits          Limits                            // Local fail-closed resource policy.
+	securityParams  SecurityParams                    // Cryptographic profile inherited from oldKey.
+	planHash        []byte                            // Digest every refresh payload must echo.
+	partyData       map[tss.PartyID]*refreshPartyData // Per-party refresh state keyed by sender.
+	completed       bool                              // Terminal success flag after newShare is confirmed.
+	aborted         bool                              // Terminal failure/destruction flag.
+	guard           *tss.EnvelopeGuard                // Transport replay, identity, and policy guard.
+	newShare        *KeyShare                         // Refreshed key share produced on completion.
+	newPaillier     *pai.PrivateKey                   // Fresh local Paillier private key for rotated auxiliary material.
+	localPolynomial shamir.Polynomial                 // Zero-constant polynomial retained until encrypted shares are emitted.
+	sharesSent      bool                              // Round-2 encrypted shares have been emitted.
 }
 
 // StartRefresh starts CGGMP21 key-share refresh with Paillier key rotation.
@@ -89,6 +93,9 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	}
 	if err := tss.RequireEnvelopeGuard(guard, tss.ProtocolCGGMP21Secp256k1, config.SessionID, config.Self); err != nil {
 		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, 0, config.Self, err)
+	}
+	if err := requireLocalEnvelopeSigner(guard, local.EnvelopeSigner); err != nil {
+		return nil, nil, tss.NewProtocolError(tss.ErrCodeInvalidConfig, invalidRound, config.Self, err)
 	}
 	if err := oldKey.requireMPCMaterial(limits); err != nil {
 		return nil, nil, err
@@ -130,7 +137,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
-	defer clearSecpPolynomial(poly)
+	polynomialOwned := true
+	defer func() {
+		if polynomialOwned {
+			clearSecpPolynomial(poly)
+		}
+	}()
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		if coeff.IsZero() {
@@ -181,8 +193,9 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 			}
 			return pd
 		}(),
-		newPaillier: newPaillierKey,
-		guard:       guard,
+		newPaillier:     newPaillierKey,
+		localPolynomial: poly,
+		guard:           guard,
 	}
 	commitPayload, err := (refreshCommitmentsPayload{
 		Commitments:        commitments,
@@ -200,25 +213,6 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		return nil, nil, err
 	}
 	out := []tss.Envelope{commitEnv}
-	for _, id := range oldKey.state.Parties {
-		if id == oldKey.state.Party {
-			continue
-		}
-		share, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, id))
-		if err != nil {
-			return nil, nil, err
-		}
-		payload, err := (refreshSharePayload{Share: share, PlanHash: planHash}).MarshalBinaryWithLimits(s.limits)
-		share.Destroy()
-		if err != nil {
-			return nil, nil, err
-		}
-		shareEnv, err := newEnvelope(config, refreshStartRound, oldKey.state.Party, id, payloadRefreshShare, payload)
-		if err != nil {
-			return nil, nil, err
-		}
-		out = append(out, shareEnv)
-	}
 	completionOut, err := s.tryComplete()
 	if err != nil {
 		return nil, nil, err
@@ -226,6 +220,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	out = append(out, completionOut...)
 	paillierOwned = false
 	localShareOwned = false
+	polynomialOwned = false
 	return s, out, nil
 }
 
@@ -266,6 +261,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		return nil, abortedSessionError(env.Round, env.From)
 	}
 	defer func() {
+		err = bindInboundAuthenticationEvidence(err, in)
 		if shouldAbortSession(err) {
 			s.abort()
 		}
@@ -279,11 +275,11 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	if env.PayloadType == payloadKeygenConfirmation {
 		return s.handleRefreshConfirmation(env)
 	}
-	if env.Round != refreshStartRound {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh only accepts refresh start round messages"))
-	}
 	switch env.PayloadType {
 	case payloadRefreshCommitments:
+		if env.Round != refreshStartRound {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh commitments in wrong round"))
+		}
 		pd, err := s.partyEntry(env.From)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -293,13 +289,18 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		}
 		p, err := tss.DecodeBinaryWithLimits[refreshCommitmentsPayload](env.Payload, s.limits)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			fields := append(keyContextEvidenceFields(s.oldKey), hashEvidenceField("refresh_commitment_payload_hash", env.Payload))
+			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindRefreshCommitment,
+				"malformed refresh commitments", tss.NewPartySet(env.From), err, fields...)
 		}
 		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
 		if err := validateRefreshCommitments(p.Commitments, s.cfg.Threshold); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			fields := append(keyContextEvidenceFields(s.oldKey),
+				rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(refreshCommitmentsHashLabel, p.Commitments)))
+			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindRefreshCommitment,
+				"invalid refresh commitments", tss.NewPartySet(env.From), err, fields...)
 		}
 		observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
 		if err != nil {
@@ -373,6 +374,9 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 			Proof:  p.RingPedersenProof.Clone(),
 		}
 	case payloadRefreshShare:
+		if env.Round != refreshShareRound {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh encrypted share in wrong round"))
+		}
 		pd, err := s.partyEntry(env.From)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
@@ -387,7 +391,41 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
 		}
-		pd.share = p.Share.Clone()
+		if pd.commitments == nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh share arrived before commitments"))
+		}
+		selfPD := s.partyData[s.cfg.Self]
+		evaluation, err := secp.EvalCommitments(pd.commitments, s.cfg.Self)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+		}
+		domain, err := refreshEncryptedShareDomain(s.cfg, env.From, s.cfg.Self, selfPD.paillierPub.PublicKey, s.planHash, s.limits)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+		}
+		ciphertext := new(big.Int).SetBytes(p.Ciphertext)
+		if err := zkpai.VerifyLogStar(s.securityParams, domain, zkpai.LogStarStatement{PaillierN: selfPD.paillierPub.PublicKey, C: ciphertext, X: evaluation, B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: selfPD.ringPedersen.Params}, &p.Proof); err != nil {
+			p.Proof.Destroy()
+			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindRefreshShare, "invalid encrypted refresh share proof", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)),
+				hashEvidenceField("encrypted_share_ciphertext_hash", p.Ciphertext))
+		}
+		p.Proof.Destroy()
+		plaintext, err := s.newPaillier.Decrypt(ciphertext)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, fmt.Errorf("verified refresh share decryption failed: %w", err))
+		}
+		defer secret.ClearBigInt(plaintext)
+		if plaintext.Sign() < 0 || plaintext.Cmp(secp.Order()) >= 0 {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, errors.New("verified refresh share plaintext is out of range"))
+		}
+		encoded := plaintext.FillBytes(make([]byte, secp.ScalarSize))
+		share, err := newSecpSecretScalarAllowZero(encoded)
+		clear(encoded)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, err)
+		}
+		pd.share = share
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -436,6 +474,8 @@ func (s *RefreshSession) abort() {
 		s.newPaillier.Destroy()
 		s.newPaillier = nil
 	}
+	clearSecpPolynomial(s.localPolynomial)
+	s.localPolynomial = nil
 	if s.newShare != nil {
 		s.newShare.Destroy()
 		s.newShare = nil
@@ -454,6 +494,70 @@ func (s *RefreshSession) allRefreshRound1Complete() bool {
 		}
 	}
 	return true
+}
+
+func (s *RefreshSession) allRefreshCommitmentsComplete() bool {
+	for _, id := range s.oldKey.state.Parties {
+		pd := s.partyData[id]
+		if pd == nil || pd.commitments == nil || pd.paillierPub.PublicKey == nil || pd.ringPedersen.Params == nil {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *RefreshSession) emitEncryptedRefreshShares() ([]tss.Envelope, error) {
+	if s.sharesSent || len(s.localPolynomial) == 0 || !s.allRefreshCommitmentsComplete() {
+		return nil, nil
+	}
+	out := make([]tss.Envelope, 0, len(s.oldKey.state.Parties)-1)
+	for _, receiver := range s.oldKey.state.Parties {
+		if receiver == s.cfg.Self {
+			continue
+		}
+		receiverData := s.partyData[receiver]
+		share, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(s.localPolynomial, receiver))
+		if err != nil {
+			return nil, err
+		}
+		ciphertext, randomness, err := receiverData.paillierPub.PublicKey.EncryptSecret(s.cfg.Reader(), share)
+		if err != nil {
+			share.Destroy()
+			return nil, err
+		}
+		evaluation, err := secp.EvalCommitments(s.partyData[s.cfg.Self].commitments, receiver)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		domain, err := refreshEncryptedShareDomain(s.cfg, s.cfg.Self, receiver, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		proof, err := zkpai.ProveLogStar(s.securityParams, domain, zkpai.LogStarStatement{PaillierN: receiverData.paillierPub.PublicKey, C: ciphertext, X: evaluation, B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: receiverData.ringPedersen.Params}, zkpai.LogStarWitness{X: share, Rho: randomness}, s.cfg.Reader())
+		share.Destroy()
+		randomness.Destroy()
+		if err != nil {
+			return nil, err
+		}
+		payload, err := (refreshSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		env, err := newEnvelope(s.cfg, refreshShareRound, s.cfg.Self, receiver, payloadRefreshShare, payload)
+		clear(payload)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, env)
+	}
+	s.sharesSent = true
+	clearSecpPolynomial(s.localPolynomial)
+	s.localPolynomial = nil
+	return out, nil
 }
 
 // allRefreshConfirmationsReceived returns true when every party has submitted a confirmation.

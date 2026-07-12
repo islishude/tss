@@ -148,6 +148,19 @@ func (in *keygenRound1Inbox) recordShare(id tss.PartyID, share *secret.Scalar) e
 	return nil
 }
 
+func (in *keygenRound1Inbox) commitmentsComplete() bool {
+	if in == nil {
+		return false
+	}
+	for _, id := range in.parties {
+		slot := in.slots[id]
+		if slot == nil || slot.commitments == nil || slot.paillierPub.PublicKey == nil || slot.ringPedersen.Params == nil {
+			return false
+		}
+	}
+	return true
+}
+
 type keygenRound1Snapshot struct {
 	parties          tss.PartySet
 	shares           map[tss.PartyID]*secret.Scalar

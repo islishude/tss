@@ -76,9 +76,6 @@ that all Paillier arithmetic is constant-time.
 ## Blockers Before Production Use
 
 - Review the outer proof-domain fields against the final CGGMP21 message schedule.
-- Confirm identifiable-abort evidence contains enough public context to blame
-  malformed proof senders without leaking private shares, nonces, or Paillier
-  secret-key material.
 - Complete an independent cryptographic review of the Paillier/ZK layer and
   identifiable-abort behavior.
 

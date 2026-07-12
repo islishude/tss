@@ -78,6 +78,7 @@ func (m *round2VerifiedMaterial) destroy() {
 type acceptPresignRound2Tx struct {
 	from     tss.PartyID
 	payload  presignRound2Payload
+	envelope tss.Envelope
 	material *round2VerifiedMaterial
 }
 
@@ -87,6 +88,7 @@ func (tx *acceptPresignRound2Tx) apply(s *PresignSession) (sessionEffects, error
 		return sessionEffects{}, tss.NewProtocolError(tss.ErrCodeInvalidMessage, 2, tx.from, errPresignSignerMissing)
 	}
 	st.round2.payload = tx.payload
+	st.round2.payloadEnvelope = tx.envelope.Clone()
 	st.round2.havePayload = true
 	st.mta.alphaDelta = tx.material.alphaDelta
 	st.mta.alphaSigma = tx.material.alphaSigma
@@ -122,7 +124,8 @@ func (tx *acceptPresignRound3Tx) apply(s *PresignSession) (sessionEffects, error
 	st.round3.verifyShare = tx.verifyShare
 	st.round3.haveDelta = true
 	st.round3.haveVerifyShare = true
-	return sessionEffects{}, s.tryComplete()
+	out, err := s.tryComplete()
+	return sessionEffects{envelopes: out}, err
 }
 
 func (tx *acceptPresignRound3Tx) cleanupOnReject() {

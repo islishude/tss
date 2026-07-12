@@ -56,7 +56,7 @@ if err := runStore.AcceptRun(job.RunID, job.SessionID, planHash); err != nil {
     return err
 }
 
-local := tss.LocalConfig{Self: 1}
+local := tss.LocalConfig{Self: 1, EnvelopeSigner: envelopeSigner}
 guard, err := (tss.GuardConfig{
     Self:        local.Self,
     Parties:     job.Parties,
@@ -65,6 +65,7 @@ guard, err := (tss.GuardConfig{
     Policies:    secp256k1.CGGMP21Policies(),
     Cache:       replayCache,
     AckVerifier: ackVerifier,
+    EnvelopeVerifier: envelopeVerifier,
 }).BuildGuard()
 session, envelopes, err := secp256k1.StartKeygen(plan, local, guard)
 // Route envelopes to other parties via authenticated transport. Keep routing
@@ -426,7 +427,10 @@ return scheduler.Run(ctx)
 ```
 
 Use `secp256k1.NewRefreshRunner` for CGGMP21 and configure its Paillier limits
-and security profile when required. All participants in one refresh must receive
+and security profile when required. CGGMP21 scheduler options must also provide
+`EnvelopeSigner` and `EnvelopeVerifier`, because encrypted direct refresh shares
+carry portable sender signatures; FROST runners ignore those optional hooks.
+All participants in one refresh must receive
 the same session ID, and every later run must use a new ID. `ClaimSessionID`
 must be a durable atomic insert-if-absent operation shared by scheduler
 instances. A successful claim is never rolled back, including when the protocol

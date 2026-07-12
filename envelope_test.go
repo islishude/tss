@@ -127,10 +127,10 @@ func TestEnvelopeDigestIsComputedOutsideWireSchema(t *testing.T) {
 	if version != envelopeWireVersion {
 		t.Fatalf("wire version = %d, want %d", version, envelopeWireVersion)
 	}
-	if len(fields) != 7 {
-		t.Fatalf("wire field count = %d, want 7", len(fields))
+	if len(fields) != 8 {
+		t.Fatalf("wire field count = %d, want 8", len(fields))
 	}
-	wantTags := []uint16{1, 2, 3, 4, 5, 6, 7}
+	wantTags := []uint16{1, 2, 3, 4, 5, 6, 7, 8}
 	for i, field := range fields {
 		if want := wantTags[i]; field.Tag != want {
 			t.Fatalf("wire field %d tag = %d, want %d", i, field.Tag, want)
@@ -172,7 +172,6 @@ func TestEnvelopeUnmarshalRejectsRetiredFieldsAndWrongFrameVersion(t *testing.T)
 	if err != nil {
 		t.Fatal(err)
 	}
-	digest := env.Digest()
 	oldFields := []wire.Field{
 		{Tag: 1, Value: fields[0].Value},
 		{Tag: 2, Value: wire.Uint16(envelopeWireVersion)},
@@ -194,9 +193,9 @@ func TestEnvelopeUnmarshalRejectsRetiredFieldsAndWrongFrameVersion(t *testing.T)
 			fields:  oldFields,
 		},
 		{
-			name:    "transcript hash field",
+			name:    "unexpected trailing field",
 			version: version,
-			fields:  append(fields, wire.Field{Tag: 8, Value: digest[:]}),
+			fields:  append(fields, wire.Field{Tag: 9, Value: []byte{1}}),
 		},
 		{
 			name:    "wrong frame version",
