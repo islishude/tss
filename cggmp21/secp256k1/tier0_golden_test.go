@@ -73,7 +73,9 @@ func TestFast_GoldenRingPedersenPublicShare(t *testing.T) {
 // keygen share payloads. No keygen or crypto is required.
 func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
-	payload := keygenSharePayload{Share: testSecretScalar(t, 1), PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	proof := testEncProof(1)
+	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
+	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -101,7 +103,9 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 // refresh share payloads. No refresh protocol run is required.
 func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 	t.Parallel()
-	payload := refreshSharePayload{Share: testSecretScalar(t, 2), PlanHash: bytes.Repeat([]byte{0x91}, 32)}
+	proof := testEncProof(2)
+	proof.TranscriptHash = bytes.Repeat([]byte{0x92}, 32)
+	payload := refreshSharePayload{Ciphertext: []byte{2}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x91}, 32)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -129,10 +133,13 @@ func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 // reshare dealer-to-receiver share payloads.
 func TestFast_GoldenReshareSharePayload(t *testing.T) {
 	t.Parallel()
+	proof := testEncProof(3)
+	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
 	payload := reshareSharePayload{
 		Dealer:               1,
 		Receiver:             2,
-		Share:                testSecretScalar(t, 3),
+		Ciphertext:           []byte{3},
+		Proof:                proof,
 		DealerCommitmentHash: bytes.Repeat([]byte{0x92}, 32),
 		PlanHash:             bytes.Repeat([]byte{0x93}, 32),
 	}

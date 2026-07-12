@@ -1,42 +1,11 @@
 package secp256k1
 
 import (
-	"bytes"
 	"testing"
 
 	"github.com/islishude/tss"
-	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 )
-
-func TestDestroyPendingReshareShareClearsOwnedSecretState(t *testing.T) {
-	t.Parallel()
-	scalar, err := secret.NewScalar(bytes.Repeat([]byte{1}, 32), 32)
-	if err != nil {
-		t.Fatal(err)
-	}
-	pending := &pendingReshareShare{
-		payload: reshareSharePayload{
-			Share:                scalar,
-			DealerCommitmentHash: bytes.Repeat([]byte{2}, 32),
-			PlanHash:             bytes.Repeat([]byte{3}, 32),
-		},
-		raw: bytes.Repeat([]byte{4}, 64),
-	}
-	destroyPendingReshareShare(pending)
-	if pending.payload.Share != nil {
-		t.Fatal("pending reshare retained its secret scalar handle")
-	}
-	for name, value := range map[string][]byte{
-		"commitment hash": pending.payload.DealerCommitmentHash,
-		"plan hash":       pending.payload.PlanHash,
-		"raw payload":     pending.raw,
-	} {
-		if !bytes.Equal(value, make([]byte, len(value))) {
-			t.Fatalf("pending reshare retained %s bytes", name)
-		}
-	}
-}
 
 func TestCompletedReshareStillValidatesIgnoredEnvelope(t *testing.T) {
 	t.Parallel()

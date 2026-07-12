@@ -30,6 +30,10 @@ func (tx *acceptSignPartialTx) apply(s *SignSession) (sessionEffects, error) {
 		return sessionEffects{}, errors.New("nil sign session")
 	}
 	s.partials[tx.from] = tx.partial.scalar
+	if s.partialEnvelopes == nil {
+		s.partialEnvelopes = make(map[tss.PartyID]tss.Envelope, len(s.presign.state.Signers))
+	}
+	s.partialEnvelopes[tx.from] = tx.partial.envelope.Clone()
 	return sessionEffects{}, nil
 }
 
@@ -140,11 +144,7 @@ func (s *SignSession) prepareFinalSignature() (*preparedFinalSignature, bool, er
 		return nil, false, err
 	}
 	if !secp.VerifyECDSA(public, s.digest, r, normalizedS) {
-		return nil, false, &tss.ProtocolError{
-			Code:  tss.ErrCodeInvariant,
-			Round: signStartRound,
-			Err:   errors.New("all partials individually verified but aggregate ECDSA signature verification failed"),
-		}
+		return nil, false, &aggregateSignAlertError{err: errors.New("all partials individually verified but aggregate ECDSA signature verification failed")}
 	}
 	return &preparedFinalSignature{
 		signature: Signature{
@@ -163,6 +163,7 @@ func (s *SignSession) commitFinalSignature(ctx context.Context, prepared *prepar
 		RecoveryID: prepared.signature.RecoveryID,
 	}
 	s.completed = true
+	s.destroyOnlineIdentificationOpenings()
 	prepared.committed = true
 	s.log.Info(ctx, "signing complete",
 		"party_id", s.key.state.Party,
@@ -170,25 +171,32 @@ func (s *SignSession) commitFinalSignature(ctx context.Context, prepared *prepar
 	)
 }
 
-func (s *SignSession) tryCompleteSign(ctx context.Context) error {
+func (s *SignSession) tryCompleteSign(ctx context.Context) ([]tss.Envelope, error) {
 	prepared, ready, err := s.prepareFinalSignature()
-	if err != nil || !ready {
-		return err
+	if err != nil {
+		var alert *aggregateSignAlertError
+		if errors.As(err, &alert) {
+			return s.startSignIdentification(alert.err)
+		}
+		return nil, err
+	}
+	if !ready {
+		return nil, nil
 	}
 	defer prepared.destroy()
 	if s.coordinator == nil {
-		return errors.New("sign attempt coordinator unavailable during completion")
+		return nil, errors.New("sign attempt coordinator unavailable during completion")
 	}
 	completed, err := s.coordinator.complete(ctx, prepared.signature)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !s.attempt.SameAttempt(completed) ||
 		!bytes.Equal(completed.SignatureR, prepared.signature.R) ||
 		!bytes.Equal(completed.SignatureS, prepared.signature.S) ||
 		completed.SignatureRecoveryID != prepared.signature.RecoveryID {
-		return fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
+		return nil, fmt.Errorf("%w: completion record mismatch", ErrSignAttemptCorrupt)
 	}
 	s.commitFinalSignature(ctx, prepared, completed)
-	return nil
+	return nil, nil
 }

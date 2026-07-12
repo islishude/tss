@@ -60,22 +60,34 @@ func seedEncProof() *EncProof {
 func seedAffGProof(tb proofFataler) *AffGProof {
 	tb.Helper()
 	return &AffGProof{
-		A:              big.NewInt(41),
-		Bx:             seedCurvePoint(42),
-		By:             big.NewInt(43),
-		E:              big.NewInt(44),
-		S:              big.NewInt(45),
-		F:              big.NewInt(46),
-		T:              big.NewInt(47),
-		Y:              big.NewInt(48),
-		Z1:             big.NewInt(-49),
-		Z2:             big.NewInt(50),
-		Z3:             big.NewInt(-51),
-		Z4:             big.NewInt(52),
-		W:              big.NewInt(53),
-		WY:             big.NewInt(54),
-		TranscriptHash: proofSeedHash(55),
+		A:                      big.NewInt(41),
+		Bx:                     seedCurvePoint(42),
+		By:                     big.NewInt(43),
+		E:                      big.NewInt(44),
+		S:                      big.NewInt(45),
+		F:                      big.NewInt(46),
+		T:                      big.NewInt(47),
+		Y:                      big.NewInt(48),
+		Z1:                     big.NewInt(-49),
+		Z2:                     big.NewInt(50),
+		Z3:                     big.NewInt(-51),
+		Z4:                     big.NewInt(52),
+		W:                      big.NewInt(53),
+		WY:                     big.NewInt(54),
+		TranscriptHash:         proofSeedHash(55),
+		YPoint:                 seedCurvePointBytes(56),
+		BetaPointCommitment:    seedCurvePointBytes(57),
+		AlphaPoint:             seedCurvePointBytes(58),
+		ProductPointCommitment: seedCurvePointBytes(59),
 	}
+}
+
+func seedCurvePointBytes(seed int64) []byte {
+	encoded, err := secp.PointBytes(seedCurvePoint(seed))
+	if err != nil {
+		panic(err)
+	}
+	return encoded
 }
 
 func seedLogStarProof() *LogStarProof {

@@ -201,12 +201,13 @@ func TestEncProofRejectsZeroWitnessValue(t *testing.T) {
 		D:                 dZero,
 		Y:                 encYZero,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xVal)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(xVal)),
 		VerifierAux:       aux,
 	}
 	// Witness: Rho is the randomness for Enc_Nj(y; rho) inside D, which is encYZero's rhoYZero.
 	witnessAffGZero := AffGWitness{
 		X:    testSecpSecretScalar(t, xVal),
-		Y:    testSecpSecretScalar(t, zeroY),
+		Y:    testSignedSecret(t, zeroY, signedPowerOfTwoBytes(params.EllPrime)),
 		Rho:  testSecretScalarFixed(t, rhoYZero, modulusBytes(sk.N)),
 		RhoY: testSecretScalarFixed(t, rhoYZero, modulusBytes(sk.N)),
 	}

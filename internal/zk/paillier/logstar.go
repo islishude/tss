@@ -90,6 +90,21 @@ func (p *LogStarProof) Validate() error {
 	return nil
 }
 
+// Destroy clears witness-derived integer material retained by the proof.
+func (p *LogStarProof) Destroy() {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.D)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	clear(p.TranscriptHash)
+	*p = LogStarProof{}
+}
+
 // ProveLogStar creates a Πlog* proof.
 func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
 	var lastErr error
@@ -454,7 +469,7 @@ func validateLogStarStatement(params SecurityParams, stmt LogStarStatement, w Lo
 	// Verify X == x * B.
 	xBytes = w.X.FixedBytes()
 	defer clear(xBytes)
-	xScalar, err := secp.ScalarFromBytes(xBytes)
+	xScalar, err := secp.ScalarFromBytesAllowZero(xBytes)
 	if err != nil {
 		return errors.New("invalid witness x scalar")
 	}
@@ -500,7 +515,9 @@ func buildLogStarTranscript(params SecurityParams, state []byte, stmt LogStarSta
 	if err := t.AppendBigInt("C", stmt.C); err != nil {
 		return nil, err
 	}
-	if err := t.AppendPoint("X", stmt.X); err != nil {
+	if stmt.X.Inf != 0 {
+		t.AppendBytes("X", nil)
+	} else if err := t.AppendPoint("X", stmt.X); err != nil {
 		return nil, err
 	}
 	if err := t.AppendPoint("B", stmt.B); err != nil {

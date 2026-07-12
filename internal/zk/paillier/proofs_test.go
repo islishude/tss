@@ -92,11 +92,12 @@ func TestNewProofUnmarshalRejectsNonCanonicalPositiveIntegers(t *testing.T) {
 		D:                 responseD,
 		Y:                 encYProver,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	affGProof, err := ProveAffG(params, []byte("affg canonical"), affGStmt, AffGWitness{
 		X:    testSecpSecretScalar(t, x),
-		Y:    testSecpSecretScalar(t, y),
+		Y:    testSignedSecret(t, y, signedPowerOfTwoBytes(params.EllPrime)),
 		Rho:  testSecretScalarFixed(t, rhoYReceiver, modulusBytes(sk.N)),
 		RhoY: testSecretScalarFixed(t, rhoYProver, modulusBytes(sk.N)),
 	}, nil)

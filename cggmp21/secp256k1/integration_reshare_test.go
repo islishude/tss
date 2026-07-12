@@ -5,6 +5,7 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -50,19 +51,7 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareScalar, err := secpScalarFromSecret(payload.Share)
-	if err != nil {
-		t.Fatal(err)
-	}
-	badScalar := secp.ScalarAdd(shareScalar, secp.ScalarOne())
-	if badScalar.IsZero() {
-		badScalar = secp.ScalarOne()
-	}
-	badShare, err := secpSecretScalarFromScalar(badScalar)
-	if err != nil {
-		t.Fatal(err)
-	}
-	payload.Share = badShare
+	payload.Proof.TranscriptHash[0] ^= 1
 	dealer2Out[1].Payload, err = marshalReshareSharePayload(payload)
 	if err != nil {
 		t.Fatal(err)
@@ -71,7 +60,66 @@ func TestThresholdECDSAReshareInvalidShareCarriesEvidence(t *testing.T) {
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
-func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
+func TestThresholdECDSAReshareInvalidCommitmentCarriesEvidence(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	parties := tss.NewPartySet(1, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey: shares[1], SessionID: sessionID, DealerParties: parties,
+		NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, out1, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session2, _, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	out2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var commitment tss.Envelope
+	for _, env := range out2 {
+		if env.PayloadType == payloadReshareDealerCommitments {
+			commitment = env
+			break
+		}
+	}
+	if commitment.Payload == nil {
+		t.Fatal("dealer 2 omitted reshare commitments")
+	}
+	payload, err := tss.DecodeBinaryValueWithLimits[reshareDealerCommitmentsPayload](commitment.Payload, testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Commitments[0], err = secp.PointBytes(secp.G)
+	if err != nil {
+		t.Fatal(err)
+	}
+	commitment.Payload, err = payload.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = session1.Handle(testutil.DeliverEnvelope(commitment))
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Blame == nil || !protocolErr.Blame.Parties.Contains(2) {
+		t.Fatalf("invalid reshare commitment = %v, want public blame for party 2", err)
+	}
+	if err := VerifyBlameEvidence(protocolErr.Blame.Evidence, EvidenceContext{SessionID: sessionID, Parties: parties}); err != nil {
+		t.Fatalf("verify reshare commitment evidence: %v", err)
+	}
+}
+
+func TestThresholdECDSAReshareRejectsShareBeforeCommitments(t *testing.T) {
 	t.Parallel()
 
 	shares := CachedKeygenShares(t, 2, 2)
@@ -88,7 +136,7 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	session2, out2, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
+	session2, _, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -113,23 +161,8 @@ func TestThresholdECDSAReshareBuffersShareBeforeCommitments(t *testing.T) {
 	if commitment.Payload == nil || share.Payload == nil {
 		t.Fatal("missing dealer 2 commitment or share")
 	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err != nil {
-		t.Fatalf("share before commitments should be buffered: %v", err)
-	}
-	if pendingDealerCount(session1) != 1 {
-		t.Fatalf("got %d pending shares, want 1", pendingDealerCount(session1))
-	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
-		t.Fatal(err)
-	}
-	if _, err := session1.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
-		t.Fatal(err)
-	}
-	if pendingDealerCount(session1) != 0 {
-		t.Fatalf("got %d pending shares after commitment, want 0", pendingDealerCount(session1))
-	}
-	if dd, ok := session1.dealerData[2]; !ok || dd.share == nil {
-		t.Fatal("pending share was not applied after commitment arrived")
+	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err == nil {
+		t.Fatal("accepted reshare share before dealer commitments")
 	}
 }
 
@@ -354,15 +387,4 @@ func collectShares(t *testing.T, shares map[tss.PartyID]*KeyShare, ids tss.Party
 		out = append(out, share)
 	}
 	return out
-}
-
-// pendingDealerCount returns the number of dealer parties with pending shares.
-func pendingDealerCount(s *ReshareSession) int {
-	n := 0
-	for _, dd := range s.dealerData {
-		if dd.pending != nil {
-			n++
-		}
-	}
-	return n
 }

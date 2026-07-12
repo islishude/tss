@@ -219,6 +219,21 @@ Early messages are either:
 Completion, abort, and destruction are terminal states unless the public API
 explicitly defines otherwise.
 
+Conditional identifiable-abort phases are a distinct non-terminal state before
+abort. Tests must assert that `Identifying()` is true while `Completed()` and
+all output accessors remain false, then cover both terminal outcomes:
+
+- the first malformed or invalid public identification proof attributes only
+  its authenticated sender and carries a canonical `IdentificationRecord`; and
+- a complete set of valid proofs with the original failure still present
+  returns an unblamed invariant.
+
+Identification tests must also verify witness cleanup on success, attributed
+abort, invariant fallback, presign burn, serialization/restore, and explicit
+session destruction. Public evidence mutation tests cover the accused party,
+signed envelope or broadcast certificate, statement, proof, alert digest, and
+transcript hashes.
+
 ### 4. Domain Separation
 
 Proofs, commitments, challenges, transcript hashes, presigns, and signature shares
@@ -263,6 +278,17 @@ Required behavior:
 - Online completion always emits canonical low-S signatures; public verification
   rejects the mathematically equivalent high-S form, and recovery ID parity
   reflects any `S -> n-S` normalization.
+- MtA responder masks occupy the configured `EllPrime` integer range rather
+  than the curve-scalar range; a malicious initiator choice such as `a=q-1`
+  must not reduce the responder multiplier to a constant-size candidate set.
+- Presign round 3 binds the canonical ordered round-2 payload commitments, and
+  changing the commitment for the local receiver rejects without accepting the
+  delta or verification share.
+- Round1 Πlog\* binds `EncK` to `KPoint`; Πaff-g binds each affine mask to its
+  public curve point; and SignPrep rejects any `MTASum` or `Delta` that does not
+  satisfy the canonical pairwise contribution equations.
+- Conflicting MtA contribution views between two remote parties fail closed
+  without automatically blaming whichever valid message arrived second.
 - Shallow copies and test-only deep copies cannot create independent claims.
 - Marshal/unmarshal and encrypt/decrypt must not create a reusable presign; a
   serialized CGGMP21 presign restores consumed.

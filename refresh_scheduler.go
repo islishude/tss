@@ -11,9 +11,11 @@ import (
 
 // RefreshRunConfig carries the security configuration for one refresh run.
 type RefreshRunConfig struct {
-	SessionID   SessionID
-	ReplayCache ReplayCache
-	AckVerifier BroadcastAckVerifier
+	SessionID        SessionID
+	ReplayCache      ReplayCache
+	AckVerifier      BroadcastAckVerifier
+	EnvelopeSigner   EnvelopeSigner
+	EnvelopeVerifier EnvelopeSignatureVerifier
 }
 
 // RefreshSession is the protocol-independent surface needed to drive one
@@ -49,6 +51,10 @@ type RefreshSchedulerOptions[K KeyShare] struct {
 	ReplayCache ReplayCache
 	// AckVerifier verifies broadcast consistency certificates.
 	AckVerifier BroadcastAckVerifier
+	// EnvelopeSigner authenticates local direct refresh envelopes.
+	EnvelopeSigner EnvelopeSigner
+	// EnvelopeVerifier authenticates direct refresh envelopes from peers.
+	EnvelopeVerifier EnvelopeSignatureVerifier
 	// LoadKeyShare returns the current key share at the start of each run.
 	LoadKeyShare func(context.Context) (K, error)
 	// SessionIDSource returns the externally coordinated unique session ID for
@@ -186,9 +192,11 @@ func (s *RefreshScheduler[K]) runOnce(ctx context.Context) (runErr error) {
 		}
 	}()
 	session, out, err := s.opts.Runner.StartRefresh(ctx, current, RefreshRunConfig{
-		SessionID:   sessionID,
-		ReplayCache: s.opts.ReplayCache,
-		AckVerifier: s.opts.AckVerifier,
+		SessionID:        sessionID,
+		ReplayCache:      s.opts.ReplayCache,
+		AckVerifier:      s.opts.AckVerifier,
+		EnvelopeSigner:   s.opts.EnvelopeSigner,
+		EnvelopeVerifier: s.opts.EnvelopeVerifier,
 	})
 	if err != nil {
 		return fmt.Errorf("start refresh: %w", err)

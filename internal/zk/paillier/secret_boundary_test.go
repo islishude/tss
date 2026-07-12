@@ -78,7 +78,7 @@ func TestSecretBearingFieldsUseFixedSecretTypes(t *testing.T) {
 			path:   "internal/zk/paillier/affg.go",
 			typeID: "AffGWitness",
 			fields: map[string]string{
-				"X": "*secret.Scalar", "Y": "*secret.Scalar",
+				"X": "*secret.Scalar", "Y": "*secret.SignedInt",
 				"Rho": "*secret.Scalar", "RhoY": "*secret.Scalar",
 			},
 		},

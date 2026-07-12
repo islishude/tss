@@ -22,6 +22,9 @@ type Envelope struct {
 	To          PartyID     `wire:"5,u32"` // zero means broadcast
 	PayloadType PayloadType `wire:"6,string"`
 	Payload     []byte      `wire:"7,bytes"`
+	// SenderSignature authenticates EnvelopeSigningDigest. The optional field
+	// remains absent for protocols whose policy does not require it.
+	SenderSignature []byte `wire:"8,bytes"`
 }
 
 // ChannelProtection describes the channel protection actually observed by the
@@ -73,6 +76,7 @@ func (e Envelope) Clone() Envelope {
 		PayloadType: e.PayloadType,
 		Payload:     append([]byte(nil), e.Payload...),
 	}
+	clone.SenderSignature = bytes.Clone(e.SenderSignature)
 	return clone
 }
 
@@ -140,6 +144,7 @@ func defaultEnvelopeLimits() EnvelopeLimits {
 		MaxPayloadBytes:      DefaultMaxEnvelopePayloadBytes,
 		MaxPayloadTypeBytes:  DefaultMaxPayloadTypeBytes,
 		MaxProtocolNameBytes: DefaultMaxProtocolNameBytes,
+		MaxSignatureBytes:    DefaultMaxEnvelopeSignatureBytes,
 		TLV: TLVLimits{
 			MaxFields:     DefaultMaxWireFields,
 			MaxFieldBytes: DefaultMaxWireFieldBytes,
@@ -164,6 +169,9 @@ func validateEnvelopeFields(env *Envelope, limits EnvelopeLimits) error {
 	}
 	if len(env.Payload) > limits.MaxPayloadBytes {
 		return fmt.Errorf("envelope payload too large: %d > %d", len(env.Payload), limits.MaxPayloadBytes)
+	}
+	if len(env.SenderSignature) > limits.MaxSignatureBytes {
+		return fmt.Errorf("envelope sender signature too large: %d > %d", len(env.SenderSignature), limits.MaxSignatureBytes)
 	}
 	if !env.SessionID.Valid() {
 		return errors.New("invalid session id")
@@ -270,6 +278,10 @@ func NewEnvelopeWithLimits(input EnvelopeInput, limits EnvelopeLimits) (Envelope
 		PayloadType: input.PayloadType,
 		Payload:     bytes.Clone(input.Payload),
 	}
+	e.SenderSignature = bytes.Clone(input.SenderSignature)
+	if err := validateEnvelopeFields(&e, limits); err != nil {
+		return Envelope{}, err
+	}
 	return e, nil
 }
 
@@ -353,6 +365,9 @@ func (e Envelope) Digest() EnvelopeDigest {
 	t.AppendUint32("to", e.To)
 	t.AppendString("payload_type", string(e.PayloadType))
 	t.AppendBytes("payload", e.Payload)
+	if len(e.SenderSignature) > 0 {
+		t.AppendBytes("sender_signature", e.SenderSignature)
+	}
 	return t.Sum32()
 }
 

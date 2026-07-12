@@ -317,6 +317,7 @@ func simulationCGGMP21Policies() (tss.PolicySet, error) {
 	for i, p := range entries {
 		relaxed[i] = p
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+		relaxed[i].RequireSenderSignature = false
 	}
 	ps, err := tss.NewPolicySet(relaxed...)
 	if err != nil {

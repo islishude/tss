@@ -144,7 +144,7 @@ func TestFast_PresignStateRejectsNonCanonicalFieldSet(t *testing.T) {
 	if _, err := tss.DecodeBinaryWithLimits[Presign](missing, testLimits()); err == nil {
 		t.Fatal("presign state accepted missing field")
 	}
-	fields[len(fields)-1].Tag = 21
+	fields[len(fields)-1].Tag = 23
 	unknown, err := wire.MarshalFields(version, presignWireType, fields)
 	if err != nil {
 		t.Fatal(err)

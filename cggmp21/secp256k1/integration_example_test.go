@@ -106,11 +106,15 @@ func ExampleStartRefresh() {
 		if err != nil {
 			panic(err)
 		}
+		signer, err := security.envelopeSigner(id)
+		if err != nil {
+			panic(err)
+		}
 		plan, err := cggmp.NewRefreshPlan(cggmp.RefreshPlanOption{OldKey: shares[id], SessionID: sessionID})
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartRefresh(shares[id], plan, tss.LocalConfig{Self: id}, guard)
+		session, out, err := cggmp.StartRefresh(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -190,7 +194,11 @@ func ExampleStartReshareDealer() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareDealer(shares[id], plan, tss.LocalConfig{Self: id}, guard)
+		signer, err := security.envelopeSigner(id)
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := cggmp.StartReshareDealer(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
 		if err != nil {
 			panic(err)
 		}
@@ -202,7 +210,11 @@ func ExampleStartReshareDealer() {
 		if err != nil {
 			panic(err)
 		}
-		session, out, err := cggmp.StartReshareReceiver(plan, tss.LocalConfig{Self: id}, guard)
+		signer, err := security.envelopeSigner(id)
+		if err != nil {
+			panic(err)
+		}
+		session, out, err := cggmp.StartReshareReceiver(plan, tss.LocalConfig{Self: id, EnvelopeSigner: signer}, guard)
 		if err != nil {
 			panic(err)
 		}

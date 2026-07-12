@@ -3,12 +3,14 @@
 package secp256k1
 
 import (
+	"bytes"
 	"crypto/sha256"
 	"errors"
 	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testutil"
 )
 
@@ -80,6 +82,101 @@ func TestThresholdECDSATamperedRound2ProofBlamesSender(t *testing.T) {
 			}
 			_ = assertBlameEvidence(t, err, secpEvidenceContext(shares[1], tss.NewPartySet(1, 2), nil))
 		})
+	}
+}
+
+func TestThresholdECDSARound3RejectsUnboundRound2Commitment(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, out1, err := startTestPresign(shares[1], sessionID, tss.NewPartySet(1, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, out2, err := startTestPresign(shares[2], sessionID, tss.NewPartySet(1, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	round2From1 := deliverPresignMessagesTo(t, s1, 1, out2)
+	round2From2 := deliverPresignMessagesTo(t, s2, 2, out1)
+	round3From2, err := s2.Handle(testutil.DeliverEnvelope(round2From1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s1.Handle(testutil.DeliverEnvelope(round2From2[0])); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalPresignRound3Payload(round3From2[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.Round2Commitments[0].Hash[0] ^= 1
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	round3From2[0].Payload = mutated
+	_, err = s1.Handle(testutil.DeliverEnvelope(round3From2[0]))
+	if err == nil {
+		t.Fatal("round3 accepted a commitment that did not match verified round2")
+	}
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Party != 2 {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestThresholdECDSARound3RejectsTamperedSigmaContributionPoint(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s1, out1, err := startTestPresign(shares[1], sessionID, tss.NewPartySet(1, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s2, out2, err := startTestPresign(shares[2], sessionID, tss.NewPartySet(1, 2))
+	if err != nil {
+		t.Fatal(err)
+	}
+	round2From1 := deliverPresignMessagesTo(t, s1, 1, out2)
+	round2From2 := deliverPresignMessagesTo(t, s2, 2, out1)
+	round3From2, err := s2.Handle(testutil.DeliverEnvelope(round2From1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s1.Handle(testutil.DeliverEnvelope(round2From2[0])); err != nil {
+		t.Fatal(err)
+	}
+	payload, err := unmarshalPresignRound3Payload(round3From2[0].Payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(payload.MTAContributions) != 1 {
+		t.Fatalf("got %d sigma contributions, want 1", len(payload.MTAContributions))
+	}
+	kPointBytes, err := secp.PointBytes(payload.KPoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	payload.MTAContributions[0].Outbound.Proof.YPoint = bytes.Clone(kPointBytes)
+	mutated, err := payload.MarshalBinaryWithLimits(testLimits())
+	if err != nil {
+		t.Fatal(err)
+	}
+	round3From2[0].Payload = mutated
+	_, err = s1.Handle(testutil.DeliverEnvelope(round3From2[0]))
+	if err == nil {
+		t.Fatal("round3 accepted a sigma mask point detached from its AffG proof")
+	}
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Party != 2 {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 

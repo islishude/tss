@@ -55,6 +55,8 @@ func TestCGGMP21RefreshRunnerCompletesThroughSharedScheduler(t *testing.T) {
 		AckVerifier: tss.NewInMemoryAckVerifier(func(tss.PartyID, [32]byte, []byte) error {
 			return nil
 		}),
+		EnvelopeSigner:   testEnvelopeIdentity{},
+		EnvelopeVerifier: testEnvelopeIdentity{},
 		LoadKeyShare: func(context.Context) (*KeyShare, error) {
 			return current, nil
 		},

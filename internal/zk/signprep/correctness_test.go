@@ -309,25 +309,29 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 	chiPoint := signPrepPointBytes(two)
 
 	stmt := Statement{
-		Protocol:             "cggmp21-secp256k1",
-		SessionID:            tss.SessionID{byte(seed)},
-		Party:                tss.PartyID(seed),
-		Signers:              tss.NewPartySet(tss.PartyID(seed)),
-		PlanHash:             bytes.Repeat([]byte{0x99}, 32),
-		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
-		PublicKey:            kPoint,
-		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),
-		PartiesHash:          bytes.Repeat([]byte{0xcc}, 32),
-		EncK:                 make([]byte, 256),
-		PaillierPublicKey:    make([]byte, 256),
-		Round1Echo:           bytes.Repeat([]byte{0xdd}, 32),
-		Gamma:                kPoint,
-		Delta:                scalarFixedBytes(one),
-		LittleR:              scalarFixedBytes(one),
-		R:                    kPoint,
-		KPoint:               kPoint,
-		ChiPoint:             chiPoint,
-		XBarPoint:            kPoint,
+		Protocol:              "cggmp21-secp256k1",
+		SessionID:             tss.SessionID{byte(seed)},
+		Party:                 tss.PartyID(seed),
+		Signers:               tss.NewPartySet(tss.PartyID(seed)),
+		PlanHash:              bytes.Repeat([]byte{0x99}, 32),
+		ContextHash:           bytes.Repeat([]byte{0xaa}, 32),
+		PublicKey:             kPoint,
+		KeygenTranscriptHash:  bytes.Repeat([]byte{0xbb}, 32),
+		PartiesHash:           bytes.Repeat([]byte{0xcc}, 32),
+		EncK:                  make([]byte, 256),
+		PaillierPublicKey:     make([]byte, 256),
+		Round1Echo:            bytes.Repeat([]byte{0xdd}, 32),
+		Round2CommitmentsHash: bytes.Repeat([]byte{0xde}, 32),
+		MTAContributionsHash:  bytes.Repeat([]byte{0xdf}, 32),
+		MTABasePoint:          kPoint,
+		DeltaBasePoint:        kPoint,
+		Gamma:                 kPoint,
+		Delta:                 scalarFixedBytes(one),
+		LittleR:               scalarFixedBytes(one),
+		R:                     kPoint,
+		KPoint:                kPoint,
+		ChiPoint:              chiPoint,
+		XBarPoint:             kPoint,
 	}
 	wit := Witness{
 		KShare:   witnessScalarForTest(one),
@@ -348,6 +352,38 @@ func newSignPrepProofFixture(t *testing.T, seed int64, opts ...signPrepFixtureOp
 	return signPrepProofFixture{stmt: stmt, wit: wit, proof: proof}
 }
 
+func TestSignPrepProveRejectsWitnessPointMismatch(t *testing.T) {
+	t.Parallel()
+
+	fixture := newSignPrepProofFixture(t, 91)
+	badK := fixture.wit.Clone()
+	badK.KShare.Destroy()
+	badK.KShare = witnessScalarForTest(big.NewInt(2))
+	if _, err := Prove(testutil.DeterministicReader(92), fixture.stmt, badK); err == nil {
+		t.Fatal("signprep accepted a KShare that did not match KPoint")
+	}
+	badK.KShare.Destroy()
+	badChi := fixture.wit.Clone()
+	badChi.ChiShare.Destroy()
+	badChi.ChiShare = witnessScalarForTest(big.NewInt(3))
+	if _, err := Prove(testutil.DeterministicReader(93), fixture.stmt, badChi); err == nil {
+		t.Fatal("signprep accepted a ChiShare that did not match ChiPoint")
+	}
+	badChi.ChiShare.Destroy()
+	badMTA := fixture.wit.Clone()
+	badMTA.MTASum.Destroy()
+	badMTA.MTASum = witnessScalarForTest(big.NewInt(2))
+	if _, err := Prove(testutil.DeterministicReader(94), fixture.stmt, badMTA); err == nil {
+		t.Fatal("signprep accepted an MTA sum unrelated to the bound contributions")
+	}
+	badMTA.MTASum.Destroy()
+	badDelta := fixture.stmt.Clone()
+	badDelta.Delta = scalarFixedBytes(big.NewInt(2))
+	if _, err := Prove(testutil.DeterministicReader(95), badDelta, fixture.wit); err == nil {
+		t.Fatal("signprep accepted a delta share unrelated to the bound MtA contributions")
+	}
+}
+
 func withSignPrepParty(party tss.PartyID, signers tss.PartySet) signPrepFixtureOption {
 	return func(stmt *Statement, _ *Witness) {
 		stmt.SessionID = tss.SessionID{byte(party)}
@@ -364,6 +400,7 @@ func withSignPrepAdditiveShift() signPrepFixtureOption {
 
 		stmt.AdditiveShift = scalarFixedBytes(one)
 		stmt.ChiPoint = signPrepPointBytes(five)
+		stmt.MTABasePoint = signPrepPointBytes(three)
 		wit.MTASum = witnessScalarForTest(three)
 		wit.ChiShare = witnessScalarForTest(five)
 	}

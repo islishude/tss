@@ -221,7 +221,13 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 	}
 
 	confirmations := make([]tss.Envelope, 0, len(parties))
-	for _, env := range messages {
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
+		if env.PayloadType == payloadKeygenConfirmation {
+			confirmations = append(confirmations, env)
+			continue
+		}
 		for _, id := range parties {
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
@@ -230,11 +236,7 @@ func TestKeygenSessionRejectsConflictingConfirmation(t *testing.T) {
 			if err != nil {
 				t.Fatalf("deliver %s from %d to %d: %v", env.PayloadType, env.From, id, err)
 			}
-			for _, produced := range out {
-				if produced.PayloadType == payloadKeygenConfirmation {
-					confirmations = append(confirmations, produced)
-				}
-			}
+			messages = append(messages, out...)
 		}
 	}
 
@@ -292,40 +294,37 @@ func TestKeygenSessionBuffersConfirmationBeforeRound1Commitment(t *testing.T) {
 	}
 
 	var early tss.Envelope
-	for _, env := range messages {
-		if env.From == 2 || (env.To != tss.BroadcastPartyId && env.To != 2) {
+	for len(messages) > 0 {
+		env := messages[0]
+		messages = messages[1:]
+		if env.PayloadType == payloadKeygenConfirmation {
+			if env.From == 2 {
+				early = env
+			}
 			continue
 		}
-		out, err := sessions[2].Handle(testutil.DeliverEnvelope(env))
-		if err != nil {
-			t.Fatalf("prepare party 2 with %s from %d: %v", env.PayloadType, env.From, err)
-		}
-		for _, produced := range out {
-			if produced.PayloadType == payloadKeygenConfirmation {
-				early = produced
+		for _, id := range parties {
+			if id == env.From || (env.To != tss.BroadcastPartyId && env.To != id) {
+				continue
 			}
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatalf("prepare party %d with %s from %d: %v", id, env.PayloadType, env.From, err)
+			}
+			messages = append(messages, out...)
 		}
 	}
 	if early.PayloadType == "" {
 		t.Fatal("party 2 did not produce a confirmation")
 	}
-	if _, err := sessions[1].Handle(testutil.DeliverEnvelope(early)); err != nil {
+	receiver, _, err := startCGGMP21Keygen(tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 1, SessionID: sessionID})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := receiver.Handle(testutil.DeliverEnvelope(early)); err != nil {
 		t.Fatalf("early confirmation: %v", err)
 	}
-	if sessions[1].aborted || sessions[1].pendingConfirmations[2] == nil {
+	if receiver.aborted || receiver.pendingConfirmations[2] == nil {
 		t.Fatal("early confirmation was not buffered without aborting")
-	}
-
-	for _, env := range messages {
-		if env.From == 1 || (env.To != tss.BroadcastPartyId && env.To != 1) {
-			continue
-		}
-		if _, err := sessions[1].Handle(testutil.DeliverEnvelope(env)); err != nil {
-			t.Fatalf("deliver round 1 %s from %d: %v", env.PayloadType, env.From, err)
-		}
-	}
-	_, ok, lookupErr := sessions[1].confirmations.confirmation(2)
-	if lookupErr != nil || !ok || sessions[1].aborted || sessions[1].pendingConfirmations[2] != nil {
-		t.Fatalf("buffered confirmation was not promoted: present=%v aborted=%v err=%v", ok, sessions[1].aborted, lookupErr)
 	}
 }

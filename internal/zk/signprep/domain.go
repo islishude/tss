@@ -11,7 +11,7 @@ const signPrepProofDomainLabel = "cggmp21-secp256k1-signprep-proof"
 
 var errZeroChallenge = errors.New("signprep: zero challenge — re-run with fresh nonces")
 
-func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte) (secp.Scalar, error) {
+func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mtaRelationCommitment, deltaRelationCommitment, mPoint []byte) (secp.Scalar, error) {
 	t := transcriptpkg.New(signPrepProofDomainLabel)
 	t.AppendString("protocol", string(stmt.Protocol))
 	t.AppendBytes("session_id", stmt.SessionID[:])
@@ -26,6 +26,12 @@ func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte)
 	t.AppendBytes("enc_k", stmt.EncK)
 	t.AppendBytes("paillier_public_key", stmt.PaillierPublicKey)
 	t.AppendBytes("round1_echo", stmt.Round1Echo)
+	t.AppendBytes("round2_commitments_hash", stmt.Round2CommitmentsHash)
+	t.AppendBytes("mta_contributions_hash", stmt.MTAContributionsHash)
+	t.AppendBytes("mta_base_point", stmt.MTABasePoint)
+	t.AppendBytes("mta_offset_point", stmt.MTAOffsetPoint)
+	t.AppendBytes("delta_base_point", stmt.DeltaBasePoint)
+	t.AppendBytes("delta_offset_point", stmt.DeltaOffsetPoint)
 	t.AppendBytes("gamma", stmt.Gamma)
 	t.AppendBytes("delta", stmt.Delta)
 	t.AppendBytes("little_r", stmt.LittleR)
@@ -38,6 +44,8 @@ func transcript(stmt Statement, kCommit, mCommit, dleqA1, dleqA2, mPoint []byte)
 	t.AppendBytes("m_commitment", mCommit)
 	t.AppendBytes("dleq_a1", dleqA1)
 	t.AppendBytes("dleq_a2", dleqA2)
+	t.AppendBytes("mta_relation_commitment", mtaRelationCommitment)
+	t.AppendBytes("delta_relation_commitment", deltaRelationCommitment)
 
 	challenge, err := secp.ScalarFromBytesModOrder(t.Sum())
 	if err != nil {

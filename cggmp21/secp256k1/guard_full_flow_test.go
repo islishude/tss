@@ -21,6 +21,10 @@ func (s *ed25519Signer) SignAck(digest [32]byte) ([]byte, error) {
 	return ed25519.Sign(s.priv, digest[:]), nil
 }
 
+func (s *ed25519Signer) SignEnvelopeDigest(digest [32]byte) ([]byte, error) {
+	return ed25519.Sign(s.priv, digest[:]), nil
+}
+
 // ed25519Verifier implements tss.BroadcastAckVerifier for a set of parties.
 type ed25519Verifier struct {
 	pubs map[tss.PartyID]ed25519.PublicKey
@@ -35,6 +39,10 @@ func (v *ed25519Verifier) VerifyAck(party tss.PartyID, digest [32]byte, sig []by
 		return errors.New("invalid ack signature")
 	}
 	return nil
+}
+
+func (v *ed25519Verifier) VerifyEnvelopeSignature(party tss.PartyID, digest [32]byte, sig []byte) error {
+	return v.VerifyAck(party, digest, sig)
 }
 
 // keyMaterial holds per-party long-term signing keys for broadcast acks.
@@ -144,16 +152,18 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	// Start keygen for each party with guard.
 	for _, id := range parties {
 		cfg := tss.ThresholdConfig{
-			Threshold: threshold,
-			Parties:   parties,
-			Self:      id,
-			SessionID: kgSessionID,
+			Threshold:      threshold,
+			Parties:        parties,
+			Self:           id,
+			SessionID:      kgSessionID,
+			EnvelopeSigner: km.signerFor(id).(*ed25519Signer),
 		}
 		g, err := tss.NewEnvelopeGuard(id, parties, tss.ProtocolCGGMP21Secp256k1, kgSessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 		if err != nil {
 			t.Fatal(err)
 		}
 		g.AckVerifier = km.verifier
+		g.EnvelopeVerifier = km.verifier
 		session, out, err := startCGGMP21Keygen(cfg, g)
 		if err != nil {
 			t.Fatal(err)
@@ -204,7 +214,12 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			t.Fatal(err)
 		}
 		g.AckVerifier = km.verifier
-		session, out, err := startCGGMP21PresignWithContext(shares[id], presignSessionID, signers, testPresignContext(), g)
+		g.EnvelopeVerifier = km.verifier
+		plan, err := NewPresignPlan(PresignPlanOption{Key: shares[id], SessionID: presignSessionID, Signers: signers, Context: testPresignContext(), Limits: testLimitsPtr(), SecurityParams: testSecurityParamsPtr()})
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, out, err := StartPresign(shares[id], plan, tss.LocalConfig{Self: id, EnvelopeSigner: km.signerFor(id).(*ed25519Signer)}, g)
 		if err != nil {
 			t.Fatal(err)
 		}
@@ -251,6 +266,7 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 			t.Fatal(err)
 		}
 		g.AckVerifier = km.verifier
+		g.EnvelopeVerifier = km.verifier
 		session, out, err := startCGGMP21Sign(shares[id], presigns[id], signSessionID, SignRequest{
 			Context: testPresignContext(),
 			Message: []byte("hello guard-protected world"),
@@ -289,6 +305,11 @@ func TestCGGMP21FullGuardProtectedKeygenSign(t *testing.T) {
 	}, sig) {
 		t.Fatal("produced ECDSA signature failed verification")
 	}
+	for _, id := range signers {
+		if len(signSessions[id].presign.state.sigmaOpenings) != 0 || len(signSessions[id].presign.state.SigmaOpeningRecords) != 0 {
+			t.Fatalf("party %d retained sigma identification witnesses after successful signing", id)
+		}
+	}
 
 	t.Logf("Full guard-protected flow completed: keygen→presign→sign with broadcast certificates")
 }
@@ -303,12 +324,13 @@ func TestCGGMP21GuardRejectsBroadcastWithWrongCertificate(t *testing.T) {
 	}
 	km := newKeyMaterial(t, parties)
 
-	cfg := tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 71, SessionID: sessionID}
+	cfg := tss.ThresholdConfig{Threshold: 2, Parties: parties, Self: 71, SessionID: sessionID, EnvelopeSigner: km.signerFor(71).(*ed25519Signer)}
 	g, err := tss.NewEnvelopeGuard(71, parties, tss.ProtocolCGGMP21Secp256k1, sessionID, CGGMP21Policies(), tss.NewInMemoryReplayCache())
 	if err != nil {
 		t.Fatal(err)
 	}
 	g.AckVerifier = km.verifier
+	g.EnvelopeVerifier = km.verifier
 	session, _, err := startCGGMP21Keygen(cfg, g)
 	if err != nil {
 		t.Fatal(err)

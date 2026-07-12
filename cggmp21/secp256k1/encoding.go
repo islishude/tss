@@ -217,7 +217,7 @@ func presignCodecLimits(fieldLimits wire.FieldLimits) (Limits, error) {
 	}
 	limits.SignPrep.MaxVerificationEntryBytes =
 		limits.Curve.MaxPointBytes*2 +
-			limits.Paillier.MaxCiphertextBytes +
+			limits.Paillier.MaxCiphertextBytes*2 +
 			limits.Paillier.MaxPublicKeyBytes + 64
 	limits.SignPrep.MaxVerificationContextBytes =
 		4 + limits.Threshold.MaxSigners*(4+limits.SignPrep.MaxVerificationEntryBytes)

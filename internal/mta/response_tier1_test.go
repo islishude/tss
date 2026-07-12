@@ -24,7 +24,11 @@ func TestRespondErrors(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, skA.PublicKey, rpB)
+	aCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(a)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, aCommit, skA.PublicKey, rpB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -34,13 +38,13 @@ func TestRespondErrors(t *testing.T) {
 	}
 
 	t.Run("nil b", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, nil, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, aCommit, nil, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for nil b")
 		}
 	})
 	t.Run("zero b", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(t, big.NewInt(0)), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, aCommit, testSecretScalar(t, big.NewInt(0)), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for zero b")
 		}
@@ -51,26 +55,26 @@ func TestRespondErrors(t *testing.T) {
 			t.Fatal(scalarErr)
 		}
 		defer wrongWidth.Destroy()
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, wrongWidth, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, aCommit, wrongWidth, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for wrong-width b")
 		}
 	})
 	t.Run("b at order", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(t, secp.Order()), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, aCommit, testSecretScalar(t, secp.Order()), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for b at order")
 		}
 	})
 	t.Run("invalid start message", func(t *testing.T) {
 		badStart := StartMessage{Ciphertext: nil}
-		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), badStart, startProof, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("start"), []byte("response"), badStart, startProof, aCommit, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for invalid start message")
 		}
 	})
 	t.Run("wrong start proof domain", func(t *testing.T) {
-		_, _, err := Respond(params, nil, []byte("wrong-domain"), []byte("response"), start.Message, startProof, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+		_, _, err := Respond(params, nil, []byte("wrong-domain"), []byte("response"), start.Message, startProof, aCommit, bSecret, bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 		if err == nil {
 			t.Fatal("expected error for wrong start proof domain")
 		}
@@ -89,7 +93,11 @@ func TestRespondBoundaryValues(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	startProof, err := ProveStartForVerifier(params, nil, startProofDomain, start, skA.PublicKey, rpB)
+	aCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(a)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	startProof, err := ProveStartForVerifier(params, nil, startProofDomain, start, aCommit, skA.PublicKey, rpB)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -108,7 +116,7 @@ func TestRespondBoundaryValues(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			response, betaShare, err := Respond(params, nil, startProofDomain, responseDomain, start.Message, startProof, testSecretScalar(t, bv.b), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+			response, betaShare, err := Respond(params, nil, startProofDomain, responseDomain, start.Message, startProof, aCommit, testSecretScalar(t, bv.b), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 			if err != nil {
 				t.Fatalf("unexpected error: %v", err)
 			}

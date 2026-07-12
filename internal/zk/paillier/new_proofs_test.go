@@ -121,9 +121,14 @@ func TestSecretWitnessesRejectMalformedFixedScalars(t *testing.T) {
 
 	t.Run("affg", func(t *testing.T) {
 		params, stmt, witness, _ := affGProofFixture(t)
+		wrongYWidth := testSignedSecret(t, big.NewInt(1), signedPowerOfTwoBytes(params.EllPrime)-1)
+		defer wrongYWidth.Destroy()
+		outOfRangeY := testSignedSecret(t, new(big.Int).Lsh(big.NewInt(1), uint(params.EllPrime+1)), signedPowerOfTwoBytes(params.EllPrime)+1)
+		defer outOfRangeY.Destroy()
 		for _, bad := range []AffGWitness{
 			{X: wrongWidth, Y: witness.Y, Rho: witness.Rho, RhoY: witness.RhoY},
-			{X: witness.X, Y: outOfRange, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: wrongYWidth, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: outOfRangeY, Rho: witness.Rho, RhoY: witness.RhoY},
 			{X: witness.X, Y: witness.Y, Rho: wrongWidth, RhoY: witness.RhoY},
 		} {
 			if _, err := ProveAffG(params, []byte("affg matrix"), stmt, bad, nil); err == nil {
@@ -187,6 +192,7 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 	y := big.NewInt(29)
 	xSecret := testSecpSecretScalar(t, x)
 	ySecret := testSecpSecretScalar(t, y)
+	ySigned := testSignedSecret(t, y, signedPowerOfTwoBytes(params.EllPrime))
 	c, _, err := sk.EncryptSecret(nil, xSecret)
 	if err != nil {
 		t.Fatal(err)
@@ -215,9 +221,10 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
-	witness := AffGWitness{X: xSecret, Y: ySecret, Rho: rho, RhoY: rhoY}
+	witness := AffGWitness{X: xSecret, Y: ySigned, Rho: rho, RhoY: rhoY}
 	proof, err := ProveAffG(params, []byte("affg matrix"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)
@@ -254,6 +261,39 @@ func logStarProofFixture(t *testing.T) (SecurityParams, LogStarStatement, LogSta
 		t.Fatal(err)
 	}
 	return params, stmt, witness, proof
+}
+
+func TestLogStarProofAcceptsZeroPlaintextAndIdentityCommitment(t *testing.T) {
+	t.Parallel()
+	params := fastProofParams()
+	sk := testPaillierKey(t, 512)
+	aux, lambda, err := GenerateRingPedersenParams(nil, sk)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lambda.Destroy()
+	zero, err := secret.NewScalar(make([]byte, secp.ScalarSize), secp.ScalarSize)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer zero.Destroy()
+	ciphertext, randomness, err := sk.EncryptSecret(nil, zero)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer randomness.Destroy()
+	statement := LogStarStatement{
+		PaillierN: sk.PublicKey, C: ciphertext, X: secp.NewInfinity(),
+		B: secp.ScalarBaseMult(secp.ScalarOne()), VerifierAux: aux,
+	}
+	proof, err := ProveLogStar(params, []byte("zero-share"), statement, LogStarWitness{X: zero, Rho: randomness}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer proof.Destroy()
+	if err := VerifyLogStar(params, []byte("zero-share"), statement, proof); err != nil {
+		t.Fatal(err)
+	}
 }
 
 func fastProofParams() SecurityParams {

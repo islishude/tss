@@ -270,6 +270,10 @@ func buildSignAttemptRecord(ctx context.Context, key *KeyShare, presign *Presign
 	if err != nil {
 		return SignAttemptRecord{}, fmt.Errorf("local sign partial self-verification failed: %w", err)
 	}
+	// signSessionFromAttempt borrows the caller-owned presign. The temporary
+	// validation session must not destroy the sigma identification openings
+	// needed by the real attempt.
+	validationSession.presign = nil
 	validationSession.Destroy()
 	return record, nil
 }
@@ -365,25 +369,27 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 	defer payload.S.Destroy()
 	verifyKey := presign.verificationKey()
 	s := &SignSession{
-		key:            key,
-		presign:        presign,
-		sessionID:      record.SessionID,
-		log:            tss.NopLogger(),
-		limits:         limits,
-		digest:         slices.Clone(record.Digest),
-		planHash:       slices.Clone(record.SignPlanHash),
-		publicKey:      verifyKey,
-		partials:       make(map[tss.PartyID]secp.Scalar),
-		guard:          guard,
-		attempt:        record.Clone(),
-		coordinator:    coordinator,
-		coordinatorCtx: context.WithoutCancel(ctx),
+		key:              key,
+		presign:          presign,
+		sessionID:        record.SessionID,
+		log:              tss.NopLogger(),
+		limits:           limits,
+		digest:           slices.Clone(record.Digest),
+		planHash:         slices.Clone(record.SignPlanHash),
+		publicKey:        verifyKey,
+		partials:         make(map[tss.PartyID]secp.Scalar),
+		partialEnvelopes: make(map[tss.PartyID]tss.Envelope),
+		guard:            guard,
+		attempt:          record.Clone(),
+		coordinator:      coordinator,
+		coordinatorCtx:   context.WithoutCancel(ctx),
 	}
 	partial, err := s.verifySignPartial(key.state.Party, payload)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: local sign partial verification failed: %w", ErrSignAttemptCorrupt, err)
 	}
 	s.partials[key.state.Party] = partial
+	s.partialEnvelopes[key.state.Party] = env.Clone()
 	if record.Completed {
 		sig := &Signature{R: slices.Clone(record.SignatureR), S: slices.Clone(record.SignatureS), RecoveryID: record.SignatureRecoveryID}
 		if !VerifyDigest(verifyKey, record.Digest, sig) {
@@ -391,14 +397,19 @@ func signSessionFromAttempt(ctx context.Context, key *KeyShare, presign *Presign
 		}
 		s.signature = sig
 		s.completed = true
+		s.destroyOnlineIdentificationOpenings()
 		if record.DeliveryState.DeliveryComplete {
 			return s, nil, nil
 		}
 		return s, []tss.Envelope{env}, nil
 	}
 	if coordinator != nil {
-		if err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
+		identificationOut, err := s.tryCompleteSign(s.coordinatorCtx)
+		if err != nil {
 			return nil, nil, err
+		}
+		if len(identificationOut) > 0 {
+			return s, append([]tss.Envelope{env}, identificationOut...), nil
 		}
 		if s.completed {
 			if s.attempt.DeliveryState.DeliveryComplete {
@@ -512,11 +523,30 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 	if s.aborted {
 		return nil, abortedSessionError(base.Round, base.From)
 	}
+	if base.PayloadType == payloadSignIdentification {
+		if err := validateIdentificationPayloadSize(base); err != nil {
+			return nil, err
+		}
+	}
 	defer func() {
+		err = bindInboundAuthenticationEvidence(err, env)
 		if shouldAbortSession(err) {
 			s.abort()
 		}
 	}()
+	if base.PayloadType == payloadSignIdentification {
+		tx, err := s.buildAcceptSignIdentificationTx(env)
+		if err != nil {
+			return nil, err
+		}
+		defer tx.cleanupOnReject()
+		effects, err := tx.apply(s)
+		if err != nil {
+			return nil, err
+		}
+		tx.markCommitted()
+		return effects.envelopes, nil
+	}
 	tx, err := s.buildAcceptSignPartialTx(env)
 	if err != nil {
 		return nil, err
@@ -527,10 +557,11 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 		return nil, err
 	}
 	tx.markCommitted()
-	if err := s.tryCompleteSign(s.coordinatorCtx); err != nil {
+	identificationOut, err := s.tryCompleteSign(s.coordinatorCtx)
+	if err != nil {
 		return nil, err
 	}
-	return effects.envelopes, nil
+	return append(effects.envelopes, identificationOut...), nil
 }
 
 // Signature returns the completed ECDSA signature.
@@ -540,7 +571,7 @@ func (s *SignSession) Signature() (*Signature, bool) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if !s.completed {
+	if !s.completed || s.identifying {
 		return nil, false
 	}
 	return &Signature{
@@ -606,7 +637,8 @@ func (s *SignSession) RetryCompletion(ctx context.Context) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.tryCompleteSign(ctx)
+	_, err := s.tryCompleteSign(ctx)
+	return err
 }
 
 // VerifyDigest verifies a canonical low-S secp256k1 ECDSA signature over a

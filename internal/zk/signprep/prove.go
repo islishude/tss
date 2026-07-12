@@ -20,9 +20,23 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 	if err := validateStatement(stmt); err != nil {
 		return nil, err
 	}
-	kScalar, mScalar, _, err := witnessScalars(wit)
+	kScalar, mScalar, chiScalar, err := witnessScalars(wit)
 	if err != nil {
 		return nil, err
+	}
+	kPoint, err := secp.PointFromBytes(stmt.KPoint)
+	if err != nil {
+		return nil, err
+	}
+	if !secp.Equal(secp.ScalarBaseMult(kScalar), kPoint) {
+		return nil, errors.New("signprep: k share does not match KPoint")
+	}
+	chiPoint, err := secp.PointFromBytes(stmt.ChiPoint)
+	if err != nil {
+		return nil, err
+	}
+	if !secp.Equal(secp.ScalarBaseMult(chiScalar), chiPoint) {
+		return nil, errors.New("signprep: chi share does not match ChiPoint")
 	}
 	mtaIsZero := mScalar.IsZero()
 
@@ -35,6 +49,37 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 		if err != nil {
 			return nil, err
 		}
+	}
+	mtaBase, err := optionalPointFromBytes(stmt.MTABasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("signprep: invalid MTA base point: %w", err)
+	}
+	mtaOffset, err := optionalPointFromBytes(stmt.MTAOffsetPoint)
+	if err != nil {
+		return nil, fmt.Errorf("signprep: invalid MTA offset point: %w", err)
+	}
+	mPointValue := secp.NewInfinity()
+	if !mtaIsZero {
+		mPointValue = secp.ScalarBaseMult(mScalar)
+	}
+	if !secp.Equal(subtractPoints(mPointValue, mtaOffset), secp.ScalarMult(mtaBase, kScalar)) {
+		return nil, errors.New("signprep: MTA sum does not match bound contributions")
+	}
+	deltaBase, err := optionalPointFromBytes(stmt.DeltaBasePoint)
+	if err != nil {
+		return nil, fmt.Errorf("signprep: invalid delta base point: %w", err)
+	}
+	deltaOffset, err := optionalPointFromBytes(stmt.DeltaOffsetPoint)
+	if err != nil {
+		return nil, fmt.Errorf("signprep: invalid delta offset point: %w", err)
+	}
+	deltaScalar, err := secp.ScalarFromBytesAllowZero(stmt.Delta)
+	if err != nil {
+		return nil, fmt.Errorf("signprep: invalid delta scalar: %w", err)
+	}
+	deltaTarget := subtractPoints(secp.ScalarBaseMult(deltaScalar), deltaOffset)
+	if !secp.Equal(deltaTarget, secp.ScalarMult(deltaBase, kScalar)) {
+		return nil, errors.New("signprep: delta share does not match bound MtA contributions")
 	}
 
 	// Generate nonces.
@@ -91,10 +136,24 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 	if err != nil {
 		return nil, err
 	}
+	var mtaRelationCommitment []byte
+	if mtaBase.Inf == 0 {
+		mtaRelationCommitment, err = secp.PointBytes(secp.ScalarMult(mtaBase, dleqNonce))
+		if err != nil {
+			return nil, err
+		}
+	}
+	var deltaRelationCommitment []byte
+	if deltaBase.Inf == 0 {
+		deltaRelationCommitment, err = secp.PointBytes(secp.ScalarMult(deltaBase, dleqNonce))
+		if err != nil {
+			return nil, err
+		}
+	}
 
 	// Derive challenge. nil mCommit/mPoint are identity elements and contribute
 	// the same length-prefixed zero bytes to the transcript.
-	challengeScalar, err := transcript(stmt, kCommit, mCommit, dleqA1, dleqA2, mPoint)
+	challengeScalar, err := transcript(stmt, kCommit, mCommit, dleqA1, dleqA2, mtaRelationCommitment, deltaRelationCommitment, mPoint)
 	if err != nil {
 		return nil, err
 	}
@@ -118,14 +177,16 @@ func Prove(rng io.Reader, stmt Statement, wit Witness) (*Proof, error) {
 		return nil, err
 	}
 	return &Proof{
-		MPoint:       mPoint,
-		KCommitment:  kCommit,
-		MCommitment:  mCommit,
-		DLEQA1:       dleqA1,
-		DLEQA2:       dleqA2,
-		KResponse:    kRespScalar,
-		MResponse:    mResponse,
-		DLEQResponse: dleqRespScalar,
+		MPoint:                  mPoint,
+		KCommitment:             kCommit,
+		MCommitment:             mCommit,
+		DLEQA1:                  dleqA1,
+		DLEQA2:                  dleqA2,
+		KResponse:               kRespScalar,
+		MResponse:               mResponse,
+		DLEQResponse:            dleqRespScalar,
+		MTARelationCommitment:   mtaRelationCommitment,
+		DeltaRelationCommitment: deltaRelationCommitment,
 	}, nil
 }
 
@@ -162,6 +223,32 @@ func validateStatement(stmt Statement) error {
 	}
 	if len(stmt.PartiesHash) != 32 {
 		return errors.New("signprep: parties hash must be 32 bytes")
+	}
+	if len(stmt.Round2CommitmentsHash) != 32 {
+		return errors.New("signprep: round2 commitments hash must be 32 bytes")
+	}
+	if len(stmt.MTAContributionsHash) != 32 {
+		return errors.New("signprep: MTA contributions hash must be 32 bytes")
+	}
+	if len(stmt.MTABasePoint) > 0 {
+		if _, err := secp.PointFromBytes(stmt.MTABasePoint); err != nil {
+			return errors.New("signprep: invalid MTA base point")
+		}
+	}
+	if len(stmt.MTAOffsetPoint) > 0 {
+		if _, err := secp.PointFromBytes(stmt.MTAOffsetPoint); err != nil {
+			return errors.New("signprep: invalid MTA offset point")
+		}
+	}
+	if len(stmt.DeltaBasePoint) > 0 {
+		if _, err := secp.PointFromBytes(stmt.DeltaBasePoint); err != nil {
+			return errors.New("signprep: invalid delta base point")
+		}
+	}
+	if len(stmt.DeltaOffsetPoint) > 0 {
+		if _, err := secp.PointFromBytes(stmt.DeltaOffsetPoint); err != nil {
+			return errors.New("signprep: invalid delta offset point")
+		}
 	}
 	if len(stmt.EncK) == 0 {
 		return errors.New("signprep: missing enc k")

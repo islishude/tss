@@ -5,6 +5,7 @@ package secp256k1
 import (
 	"bytes"
 	"crypto/sha256"
+	"errors"
 	"strings"
 	"testing"
 
@@ -114,38 +115,32 @@ func TestThresholdECDSARefreshInvalidShareCarriesEvidence(t *testing.T) {
 		t.Fatal(err)
 	}
 	parties := tss.NewPartySet(1, 2)
-	session, _, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
+	session, out1, err := startCGGMP21Refresh(shares[1], tss.ThresholdConfig{Threshold: 2, Self: 1, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
-	_, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
+	session2, out2, err := startCGGMP21Refresh(shares[2], tss.ThresholdConfig{Threshold: 2, Self: 2, SessionID: sessionID})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, err := session.Handle(testutil.DeliverEnvelope(out2[0])); err != nil {
 		t.Fatal(err)
 	}
-	payload, err := unmarshalRefreshSharePayload(out2[1].Payload)
+	sharesFrom2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	shareScalar, err := secpScalarFromSecret(payload.Share)
+	shareEnv := mustCGGMPEnvelope(t, sharesFrom2, payloadRefreshShare, 1)
+	payload, err := unmarshalRefreshSharePayload(shareEnv.Payload)
 	if err != nil {
 		t.Fatal(err)
 	}
-	badScalar := secp.ScalarAdd(shareScalar, secp.ScalarOne())
-	if badScalar.IsZero() {
-		badScalar = secp.ScalarOne()
-	}
-	badShare, err := secpSecretScalarFromScalar(badScalar)
+	payload.Proof.TranscriptHash[0] ^= 1
+	shareEnv.Payload, err = payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
 	}
-	out2[1].Payload, err = (refreshSharePayload{Share: badShare, PlanHash: payload.PlanHash}).MarshalBinaryWithLimits(testLimits())
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = session.Handle(testutil.DeliverEnvelope(out2[1]))
+	_, err = session.Handle(testutil.DeliverEnvelope(shareEnv))
 	_ = assertBlameEvidence(t, err, EvidenceContext{SessionID: sessionID, Parties: parties})
 }
 
@@ -200,6 +195,13 @@ func TestThresholdECDSARefreshRejectsNonzeroConstantCommitment(t *testing.T) {
 	_, err = session.Handle(testutil.DeliverEnvelope(out2[0]))
 	if err == nil || !strings.Contains(err.Error(), "constant commitment") {
 		t.Fatalf("expected nonzero constant commitment rejection, got %v", err)
+	}
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Blame == nil || !protocolErr.Blame.Parties.Contains(2) {
+		t.Fatalf("invalid refresh commitment = %v, want public blame for party 2", err)
+	}
+	if err := VerifyBlameEvidence(protocolErr.Blame.Evidence, EvidenceContext{SessionID: sessionID, Parties: tss.NewPartySet(1, 2)}); err != nil {
+		t.Fatalf("verify refresh commitment evidence: %v", err)
 	}
 }
 

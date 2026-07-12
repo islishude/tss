@@ -146,6 +146,29 @@ func TestFast_PresignVerifySharesAggregateLimit(t *testing.T) {
 	}
 }
 
+func TestFast_SignVerifyShareLimitCountsAllVariableFields(t *testing.T) {
+	t.Parallel()
+
+	share := mustPresignVerifyShare(t, minimalCGGMP21Presign(t), 1)
+	kPoint, chiPoint, proof, err := signVerifyShareBytes(share)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exact := signVerifyShareRecordFixedBytes + len(kPoint) + len(chiPoint) + len(proof) +
+		len(share.Round2CommitmentsHash) + len(share.MTAContributionsHash) +
+		len(share.MTABasePoint) + len(share.MTAOffsetPoint) +
+		len(share.DeltaBasePoint) + len(share.DeltaOffsetPoint)
+	limits := testLimits()
+	limits.SignPrep.MaxVerifyShareBytes = exact - 1
+	if err := validateSignVerifyShares(tss.NewPartySet(1), []signVerifyShare{share}, limits); err == nil {
+		t.Fatal("verify share exceeded the configured byte limit through an uncounted field")
+	}
+	limits.SignPrep.MaxVerifyShareBytes = exact
+	if err := validateSignVerifyShares(tss.NewPartySet(1), []signVerifyShare{share}, limits); err != nil {
+		t.Fatalf("exact verify-share byte limit rejected: %v", err)
+	}
+}
+
 func TestFast_PresignVerifySharesRequireCanonicalSignerOrder(t *testing.T) {
 	t.Parallel()
 

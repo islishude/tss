@@ -213,21 +213,29 @@ Each party broadcasts:
 
 All bundled in a single `keygenCommitmentsPayload`.
 
-### Phase 3: Private Share Distribution
+### Phase 3: Encrypted Share Distribution
 
-Each party sends private Shamir shares to every other party:
+After all public commitments and receiver auxiliary keys are known, each party
+encrypts the receiver-specific Shamir evaluation under that receiver's
+Paillier key:
 
 ```
 s_{i→j} = f_i(j)  mod q
 ```
 
-Sent as a direct confidential message (`To != 0`, transport must report `ChannelConfidential` in `ReceiveInfo`).
+The direct Round-2 payload carries the ciphertext and a verifier-specific
+Πlog\* proving that its plaintext matches the public polynomial evaluation at
+the receiver index. The proof permits a legitimate zero share/identity
+evaluation. The envelope is confidential and must carry a valid canonical
+sender signature.
 
 ### Phase 4: Completion
 
 When all `n` parties' commitments and shares are received and verified:
 
-1. **Share verification**: Each `s_{i→j}` checked against `C_{i,k}` via the standard Shamir commitment check.
+1. **Share verification**: Verify Πlog\* before decrypting. A verified proof
+   followed by local decryption failure or a mismatching plaintext is an
+   implementation invariant, not remote blame.
 
 2. **Secret aggregation**: `x_j = Σ_i s_{i→j} mod q`.
 
@@ -247,7 +255,7 @@ At this point the session has only local pending material. It is not a usable `K
 
 ### Phase 5: Keygen Confirmation
 
-Each party broadcasts `cggmp21.secp256k1.keygen.confirmation` in keygen round 2. The payload is a canonical binary `KeygenConfirmation` binding the session ID, sender, threshold, ordered party set, group public key, keygen transcript hash, and commitments hash.
+Each party broadcasts `cggmp21.secp256k1.keygen.confirmation` in keygen round 3. The payload is a canonical binary `KeygenConfirmation` binding the session ID, sender, threshold, ordered party set, group public key, keygen transcript hash, and commitments hash.
 
 The keygen session stores one canonical confirmation under each sender's party
 key. Only after the full set verifies does `Complete()`/`KeyShare()` return a
@@ -316,14 +324,20 @@ and broadcasts:
 
 - `Γ_i = γ_i · G` (gamma commitment)
 - `Enc_i(k_i)` — Paillier encryption of `k_i` under party `i`'s public key
+- `Enc_i(γ_i)` — Paillier encryption of `γ_i` under party `i`'s public key
+- `KPoint_i = k_i · G`
 - party `i`'s Paillier public key
 
 For each verifier `j != i`, signer `i` also sends a confidential Round 1 proof payload containing:
 
 - a hash of the canonical public Round 1 payload
-- `Πenc` (`EncProof`) proving `Enc_i(k_i)` encrypts a value in range under party `i`'s Paillier key
+- `Πlog*` (`LogStarProof`) proving that `Enc_i(k_i)` and `KPoint_i` contain the same scalar
+- a second `Πlog*` proving that `Enc_i(γ_i)` and `Γ_i` contain the same scalar
 
-The `Πenc` proof is verifier-specific because its statement includes verifier `j`'s Ring-Pedersen auxiliary parameters. A proof generated for one verifier is rejected by another verifier. Round 2 is not emitted until both the peer's public Round 1 payload and the peer-to-local `Πenc` proof verify.
+The `Πlog*` proof is verifier-specific because its statement includes verifier
+`j`'s Ring-Pedersen auxiliary parameters. A proof generated for one verifier is
+rejected by another verifier. Round 2 is not emitted until both the peer's
+public Round 1 payload and the peer-to-local proof verify.
 
 Internally, each signer computes the Lagrange-adjusted secret:
 
@@ -355,6 +369,18 @@ For every ordered pair of distinct signers `(i, j)`, two MtA exchanges run in pa
 
 The MtA domain binds `(protocol, version, session, threshold, all_parties, signers, initiator, responder, mta_kind, group_pk, keygen_transcript, initiator_paillier_pk)`.
 
+The additive mask is sampled as an `EllPrime`-bit fixed-width secret integer,
+not as a curve scalar. The implementation rejects Paillier moduli that cannot
+hold `k_i·b_j + β` without plaintext wraparound. Only the responder's final
+additive share is reduced modulo the curve order. This width is required to
+statistically hide `b_j` from an initiator that chooses its MtA input
+maliciously.
+
+Each Πaff-g proof additionally publishes and proves the curve relations
+`YPoint = β·G` and `AlphaPoint = b·KPoint + YPoint`, using the same integer
+responses as the Paillier equations. These relations let SignPrep bind both
+the delta and sigma correction sums without revealing their scalar shares.
+
 Each signer accumulates:
 
 ```
@@ -364,7 +390,13 @@ Each signer accumulates:
 
 ### Round 3: Delta Broadcast with Signprep Proof
 
-Each signer broadcasts a payload containing `δ_i`, `KPoint_i`, `ChiPoint_i`, and a `signprep proof`. After collecting all deltas:
+Each signer broadcasts a payload containing `δ_i`, `KPoint_i`, `ChiPoint_i`, a
+`signprep proof`, and the canonically ordered SHA-256 commitments to every
+round-2 payload it sent. It also carries the canonically ordered inbound and
+outbound delta/sigma MtA response records used by the proof. Receivers verify
+every Πaff-g proof, compare their own round-2 exchange, and require both parties'
+views of each pairwise response to agree before accepting round 3. After
+collecting all deltas:
 
 ```
 δ = Σ_i δ_i  mod q
@@ -375,13 +407,27 @@ r = x(R) mod q
 
 The `Presign` record stores fixed-length secret scalars `(k_i, χ_i, δ)`, public values `(R, r)`, private per-party verification material (`KPoint`, `ChiPoint`, and a signprep proof), the presign transcript hash, the presign context hash, additive HD shift, and key binding metadata `(group public key, keygen transcript hash, participant-set hash)`. It is local-only and must not be shared with other parties.
 
+If all Round-3 proofs verify but `g^δ != ∏Δ_i`, the session enters Round 4
+identification. Each signer re-proves every delta MtA response, proves
+`H_i = Enc_i(k_i·γ_i)` with Πmul, reconstructs `Cδ_i`, and proves with Πdec
+that its broadcast `δ_i` is the decryption modulo the curve order. Outputs stay
+unavailable while `Identifying()` is true. All nonce/gamma/opening witnesses are
+destroyed on success, attributable abort, invariant fallback, or `Destroy()`.
+
 ### Signprep Proof (Πsignprep)
 
 During presign round 3, each signer generates a `signprep proof` (`internal/zk/signprep`) that binds the published `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` to the presign transcript.
 
-#### Design simplification vs. design spec
-
-The design spec (5.1) called for `Round2SigmaDigests` and `Round2DeltaDigests` fields in the statement. The implementation simplifies this by aggregating MTA contributions into a single scalar `M_i = Σ α̂_{ij} + Σ β̂_{ji}` and proving `ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i` via a DLEQ proof. This is cryptographically equivalent: the same `k_i` must be used consistently across KPoint and ChiPoint derivation, and the MTA sum is bound into the proof transcript. The simplification avoids per-digest bookkeeping without weakening the security guarantees.
+The implementation aggregates the local sigma MtA contributions into
+`M_i = Σ α̂_{ij} + Σ β̂_{ji}` and proves
+`ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i`. Using the verified Πaff-g
+curve points, it also proves
+`MPoint_i - sigmaOffset_i = k_i·Σ_{j≠i}X̄Point_j` and
+`DeltaPoint_i - deltaOffset_i = k_i·Γ`, where
+`DeltaPoint_i = δ_i·G`. The same DLEQ response is used for all relations, so the
+nonce opening, sigma correction, delta share, `KPoint`, and `ChiPoint` cannot be
+chosen independently. The statement binds digests of both the ordered round-2
+commitments and the complete MtA contribution view.
 
 #### Proof structure
 
@@ -389,9 +435,15 @@ The proof uses a unified Fiat-Shamir transcript with three components:
 
 1. **Schnorr**: `KPoint_i = k_i·G` — knowledge of the nonce scalar.
 2. **Schnorr** (when `M_i ≠ 0`): `MPoint_i = M_i·G` — knowledge of the MTA correction sum. When `M_i = 0` (e.g., 1-of-1 signing with no MTA contributions), MPoint is the point at infinity and no Schnorr sub-proof is generated.
-3. **DLEQ** (Chaum-Pedersen): `ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i` — proving the same `k_i` is used in the ChiPoint derivation, where `X̄Point_i = λ_i·V_i` (publicly computable from the verification share and Lagrange coefficient). When `M_i = 0`, the DLEQ simplifies to `ChiPoint_i = k_i·(X̄Point_i + shift·G)`.
+3. **Multi-relation DLEQ** (Chaum-Pedersen): the same `k_i` opens `KPoint_i`, the ChiPoint relation, the sigma correction relation, and the delta relation. Identity bases and offsets use the canonical empty point encoding.
 
-The proof transcript binds labeled entries for `(protocol, session ID, party, signer set, context hash, additive shift, public key, keygen transcript hash, party-set hash, EncK, Paillier public key, round1 echo, Gamma, Delta, KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session, cross-context, cross-signer, cross-keygen, and proof-substitution attacks.
+The proof transcript binds labeled entries for `(protocol, session ID, party,
+signer set, context hash, additive shift, public key, keygen transcript hash,
+party-set hash, EncK, Paillier public key, round1 echo, ordered round2 commitment
+hash, MtA contribution hash, sigma base/offset, delta base/offset, Gamma, Delta,
+KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session,
+cross-context, cross-signer, cross-keygen, round-2-substitution, correction-share
+substitution, and proof-substitution attacks.
 
 Receivers verify the signprep proof during presign round 3 **before** accepting the delta share or writing any session state. An invalid proof produces `EvidenceKindPresignRound3` blame with the sender.
 
@@ -426,6 +478,14 @@ Where `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` are taken from the internal
 
 Any failing check (transcript mismatch, context mismatch, digest hash mismatch, equation hash mismatch, or equation verification failure) returns `ProtocolError` with `ErrCodeVerification` and `EvidenceKindSignPartial` blame **only on the sender of the invalid partial**.
 
+If all partial equations verify but the final ECDSA self-check fails, signing
+enters a conditional identification round. Every signer re-proves its sigma MtA
+responses, proves `Hhat_i = Enc_i(k_i·xbar_i)` with Πmul\*, reconstructs
+`Cσ_i = K_i^m · Cχ_i^r`, and proves its partial with Πdec. Sigma response
+openings are private one-attempt state: they are included only in the encrypted
+private Presign record, are never restored as reusable handles after a wire
+round trip, and are destroyed on success, abort, burn, or session destruction.
+
 Before any outbound partial is constructed, `StartSign` verifies that the
 presign is bound to the same security parameters, key public key, keygen
 transcript hash, participant set, context hash, and derivation result (including
@@ -445,7 +505,11 @@ s = Σ_i s_i  mod q
 
 Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the bound verification key, including the derived child public key when a derivation path is set, before being returned.
 
-Since every partial is independently verified before aggregation, a failure at this stage is an **implementation invariant violation** (`ErrCodeInvariant`), not a protocol-level blame event. It carries no blame parties. This replaces the previous behavior where aggregate verification failure blamed all signers as a suspect set.
+Because Round1 binds `EncK_i` to `KPoint_i`, Πaff-g binds every pairwise mask to
+public curve points, and SignPrep binds both delta and sigma correction sums,
+all accepted partial equations imply the aggregate ECDSA equation. A failure of
+the final self-check after every partial verifies is therefore an implementation
+or storage invariant failure (`ErrCodeInvariant`) and carries no remote blame.
 
 ### HD Derivation
 
@@ -584,7 +648,9 @@ Each party:
 2. Produces Π^fac and Π^prm for the new key.
 3. Samples a polynomial `g_i(x)` with `g_i(0) = 0`.
 4. Broadcasts commitments + new Paillier public key + proofs.
-5. Sends private refresh shares `g_i(j)` to each party.
+5. In Round 2, encrypts each `g_i(j)` under receiver `j`'s new Paillier key
+   and sends the ciphertext with a verifier-specific Πlog\* binding it to the
+   public commitment evaluation.
 
 Receivers verify shares, then:
 
@@ -627,16 +693,18 @@ Each dealer waits until all receiver auxiliary material has been collected, then
 1. Computes `λ_i` for interpolation at zero over the dealer set.
 2. Samples `g_i(x)` with `g_i(0) = λ_i · x_i` and degree = `threshold_new - 1`.
 3. Broadcasts dealer commitments for `g_i`, with `C_i0 = λ_i · V_i`.
-4. Sends private shares `g_i(j)` to each party in the **new** participant set. The direct share payload binds the dealer, receiver, scalar share, and hash of the accepted dealer commitments.
+4. In Round 2, encrypts each `g_i(j)` under receiver `j`'s new Paillier key and
+   sends the ciphertext with Πlog\*. The direct payload binds dealer, receiver,
+   ciphertext, proof, accepted dealer-commitment hash, and plan hash.
 
 Each new receiver:
 
 1. Verifies each dealer commitment constant against the old verification share.
-2. Verifies every dealer share against dealer commitments.
+2. Verifies Πlog\* against the dealer commitments before decrypting locally.
 3. Aggregates `x'_j = Σ_i g_i(j) mod q`.
 4. Aggregates dealer commitments and checks the degree-zero commitment equals the old group public key.
 
-New-only participants call `StartReshareReceiver(plan, localParty, rng, guard)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng, guard)` and complete without a new `KeyShare` only after observing every new receiver's final confirmation for the same transcript, public key, commitment hash, and preserved chain code. Overlap parties call `StartReshareOverlap(oldShare, plan, rng, guard)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Receiver sessions buffer an otherwise-valid dealer share that arrives before that dealer's commitment and apply it once the commitment arrives.
+New-only participants call `StartReshareReceiver(plan, localParty, rng, guard)`. Old-only dealers call `StartReshareDealer(oldShare, plan, rng, guard)` and complete without a new `KeyShare` only after observing every new receiver's final confirmation for the same transcript, public key, commitment hash, and preserved chain code. Overlap parties call `StartReshareOverlap(oldShare, plan, rng, guard)` and keep old and new secret material separate. `StartReshare` remains a convenience wrapper for old participants when a plan can be derived from the old key share. Round-2 encrypted shares arriving before the corresponding Round-1 dealer commitment are rejected as out of order rather than buffered.
 
 Reshare does not cryptographically erase or invalidate already distributed old
 shares. A threshold of old shares can still sign for the same group public key
@@ -653,24 +721,32 @@ HD derivation is implemented via `KeyShare.Derive(path)`, `DeriveNonHardenedBIP3
 
 CGGMP21 evidence covers every attributable failure point:
 
-| Phase           | Evidence Kind         | When                                                            |
-| --------------- | --------------------- | --------------------------------------------------------------- |
-| Keygen          | `keygen_commitment`   | Invalid keygen public commitment.                               |
-| Keygen          | `keygen_paillier`     | Invalid Paillier key or modulus proof.                          |
-| Keygen          | `keygen_share`        | DKG share fails commitment verification.                        |
-| Presign round 1 | `presign_round1`      | Invalid nonce commitment or encryption proof.                   |
-| Presign round 2 | `presign_round2`      | Invalid MtA response or proof.                                  |
-| Presign round 3 | `presign_round3`      | Invalid delta broadcast or signprep proof verification failure. |
-| Online sign     | `sign_partial`        | Invalid online partial signature (per-party verification).      |
-| Aggregation     | `aggregate_signature` | Final ECDSA signature fails verification.                       |
-| Refresh         | `refresh_share`       | Refresh share fails commitment verification.                    |
-| Reshare         | `reshare_share`       | Reshare share fails commitment verification.                    |
+| Phase            | Evidence Kind            | When                                                            |
+| ---------------- | ------------------------ | --------------------------------------------------------------- |
+| Keygen           | `keygen_commitment`      | Invalid keygen public commitment.                               |
+| Keygen           | `keygen_paillier`        | Invalid Paillier key or modulus proof.                          |
+| Keygen           | `keygen_share`           | DKG share fails commitment verification.                        |
+| Presign round 1  | `presign_round1`         | Invalid nonce commitment or encryption proof.                   |
+| Presign round 2  | `presign_round2`         | Invalid MtA response or proof.                                  |
+| Presign round 3  | `presign_round3`         | Invalid delta broadcast or signprep proof verification failure. |
+| Presign identify | `presign_identification` | Invalid conditional delta identification payload or proof.      |
+| Online sign      | `sign_partial`           | Invalid online partial signature (per-party verification).      |
+| Sign identify    | `sign_identification`    | Invalid conditional sigma identification payload or proof.      |
+| Refresh          | `refresh_share`          | Refresh share fails commitment verification.                    |
+| Refresh          | `refresh_commitment`     | Invalid zero-polynomial refresh commitments.                    |
+| Reshare          | `reshare_share`          | Reshare share fails commitment verification.                    |
+| Reshare          | `reshare_commitment`     | Invalid dealer commitments or old-share binding.                |
 
 Evidence records are deterministic binary (canonical TLV) binding protocol
 context, payload hash, envelope digest, and public input hashes. They **never**
 contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence`
 validates evidence against trusted session context (parties, signer set, public
-key, Paillier public keys, transcript hashes).
+key, Paillier public keys, transcript hashes). Identification evidence carries
+the fixed `IdentificationRecord` input; proof-backed records additionally
+require the caller's public-transcript `IdentificationVerifier`. Direct-message
+failures embed the sender-signed envelope; broadcast failures embed the accepted
+envelope and its full ACK certificate, so external verification does not depend
+on the reporting party's transport log.
 
 Per-party signpartial evidence includes:
 
@@ -683,16 +759,18 @@ Per-party signpartial evidence includes:
 | Payload Type                                   | Direction      | Confidential | Content                                                                     |
 | ---------------------------------------------- | -------------- | ------------ | --------------------------------------------------------------------------- |
 | `cggmp21.secp256k1.keygen.commitments`         | broadcast      | no           | Polynomial commitments + Paillier key + proofs                              |
-| `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Scalar share for one recipient                                              |
-| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), PaillierPK)`                                             |
-| `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific Πenc proof                           |
+| `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Receiver Paillier ciphertext + verifier-specific Πlog\*                     |
+| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), Enc_i(γ_i), KPoint_i, PaillierPK)`                       |
+| `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific EncK/EncGamma Πlog\* proofs          |
 | `cggmp21.secp256k1.presign.round2`             | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof)                        |
-| `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i`, `KPoint_i`, `ChiPoint_i`, and signprep proof                         |
+| `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i`, `KPoint_i`, `ChiPoint_i`, MtA views, and signprep proof              |
+| `cggmp21.secp256k1.presign.identification`     | broadcast      | no           | Delta Πaff-g reproofs, Πmul, reconstructed ciphertext, and Πdec             |
 | `cggmp21.secp256k1.sign.partial`               | broadcast      | no           | `s_i`, presign transcript, context hash, digest hash, partial equation hash |
+| `cggmp21.secp256k1.sign.identification`        | broadcast      | no           | Sigma Πaff-g reproofs, Πmul\*, reconstructed ciphertext, and Πdec           |
 | `cggmp21.secp256k1.refresh.commitments`        | broadcast      | no           | Refresh polynomial commitments + new Paillier                               |
-| `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Refresh scalar share                                                        |
+| `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Receiver Paillier ciphertext + verifier-specific Πlog\*                     |
 | `cggmp21.secp256k1.reshare.dealer_commitments` | broadcast      | no           | Old dealer weighted polynomial commitments                                  |
-| `cggmp21.secp256k1.reshare.share`              | point-to-point | yes          | Old dealer scalar share for one new receiver                                |
+| `cggmp21.secp256k1.reshare.share`              | point-to-point | yes          | Old dealer ciphertext + receiver-specific Πlog\*                            |
 | `cggmp21.secp256k1.reshare.receiver_material`  | broadcast      | no           | New receiver Paillier/Ring-Pedersen material                                |
 
 ## Sequence Diagrams
@@ -709,11 +787,13 @@ Keygen ──→ Presign (Offline) ──→ Sign (Online)
            Refresh / Reshare (maintenance, PK preserved)
 ```
 
-### Keygen (2 Rounds)
+### Keygen (3 Rounds)
 
-Round 1: each party broadcasts polynomial commitments, Paillier key material, and ZK proofs, then delivers private Shamir shares point-to-point.
+Round 1: each party broadcasts polynomial commitments, Paillier key material, and ZK proofs.
 
-Round 2: keygen confirmations are broadcast and cross-verified.
+Round 2: encrypted Shamir evaluations and receiver-specific Πlog\* proofs are delivered point-to-point.
+
+Round 3: keygen confirmations are broadcast and cross-verified.
 
 ```mermaid
 sequenceDiagram
@@ -733,11 +813,11 @@ sequenceDiagram
     P1-->>PN: C_{1,k}, PaillierPK₁, Πmod, Πprm, chain-code-commit
     P2-->>PN: C_{2,k}, PaillierPK₂, Πmod, Πprm, chain-code-commit
 
-    Note over P1,PN: Round 1 — Private Share Distribution (confidential)
-    P1->>P2: s_{1→2}=f₁(2) mod q
-    P1->>PN: s_{1→N}=f₁(N) mod q
-    P2->>P1: s_{2→1}=f₂(1) mod q
-    P2->>PN: s_{2→N}=f₂(N) mod q
+    Note over P1,PN: Round 2 — Encrypted Share Distribution (confidential + signed)
+    P1->>P2: Enc₂(f₁(2)), Πlog*
+    P1->>PN: Enc_N(f₁(N)), Πlog*
+    P2->>P1: Enc₁(f₂(1)), Πlog*
+    P2->>PN: Enc_N(f₂(N)), Πlog*
 
     Note over P1,PN: Local Completion (after all round-1 messages received)
     P1->>P1: Verify shares against C_{j,k}
@@ -746,7 +826,7 @@ sequenceDiagram
     P2->>P2: x₂=Σ s_{j→2}, PK=Σ C_{j,0}
     P2->>P2: V₂, ShareProof, Πlog*
 
-    Note over P1,PN: Round 2 — Keygen Confirmation Broadcast
+    Note over P1,PN: Round 3 — Keygen Confirmation Broadcast
     P1-->>PN: KeygenConfirmation (session, PK, transcript hash)
     P2-->>PN: KeygenConfirmation (session, PK, transcript hash)
     PN-->>P1: KeygenConfirmation (session, PK, transcript hash)
@@ -754,15 +834,18 @@ sequenceDiagram
     Note over P1,PN: Verify all confirmations → KeyShare ready
 ```
 
-### Presign — Offline (3 Rounds)
+### Presign — Offline (3 Rounds + Conditional Identification)
 
 **Offline phase**: Pre-computation independent of the message to sign. Produces a one-use `Presign` record that must be persisted securely until online signing. No message digest is involved.
 
-Round 1: nonce commitments with verifier-specific Πenc proofs.
+Round 1: nonce commitments with verifier-specific Πlog\* proofs binding `EncK` to `KPoint`.
 
 Round 2: pairwise MtA exchanges.
 
 Round 3: delta broadcast with signprep proof.
+
+Round 4 is emitted only after the nonce/delta aggregate alert and carries the
+public identification proofs described above.
 
 ```mermaid
 sequenceDiagram
@@ -777,13 +860,13 @@ sequenceDiagram
     S2-->>S3: Broadcast Γ₂, Enc₂(k₂), PaillierPK₂
     S3-->>S1: Broadcast Γ₃, Enc₃(k₃), PaillierPK₃
 
-    Note over S1,S3: Round 1 — Πenc Proofs (confidential, verifier-specific)
-    S1->>S2: Πenc₁₂ (hash of public R1, verifier=j) for S2 RP params
-    S1->>S3: Πenc₁₃ (hash of public R1, verifier=j) for S3 RP params
-    S2->>S1: Πenc₂₁ for S1 RP params
-    S2->>S3: Πenc₂₃ for S3 RP params
-    S3->>S1: Πenc₃₁ for S1 RP params
-    S3->>S2: Πenc₃₂ for S2 RP params
+    Note over S1,S3: Round 1 — Πlog* Proofs (confidential, verifier-specific)
+    S1->>S2: Πlog*₁₂ (EncK₁ ↔ KPoint₁, verifier=j) for S2 RP params
+    S1->>S3: Πlog*₁₃ for S3 RP params
+    S2->>S1: Πlog*₂₁ for S1 RP params
+    S2->>S3: Πlog*₂₃ for S3 RP params
+    S3->>S1: Πlog*₃₁ for S1 RP params
+    S3->>S2: Πlog*₃₂ for S2 RP params
 
     Note over S1,S3: 【Offline】 Round 1 Echo (local)
     S1->>S1: Echo₁ = Hash(all Round-1 broadcasts)
@@ -804,9 +887,9 @@ sequenceDiagram
     Note over S1: Accumulate: δ₁=k₁γ₁+Σα+Σβ, χ₁=k₁x̄₁+Σα̂+Σβ̂
 
     Note over S1,S3: 【Offline】 Round 3 — Delta Broadcast
-    S1-->>S3: δ₁, KPoint₁, ChiPoint₁, SignprepProof
-    S2-->>S3: δ₂, KPoint₂, ChiPoint₂, SignprepProof
-    S3-->>S1: δ₃, KPoint₃, ChiPoint₃, SignprepProof
+    S1-->>S3: δ₁, KPoint₁, ChiPoint₁, MtA views, SignprepProof
+    S2-->>S3: δ₂, KPoint₂, ChiPoint₂, MtA views, SignprepProof
+    S3-->>S1: δ₃, KPoint₃, ChiPoint₃, MtA views, SignprepProof
 
     Note over S1,S3: Verify signprep proofs → δ=Σδᵢ → R=δ⁻¹·Γ → Presign stored
 ```

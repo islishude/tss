@@ -11,14 +11,20 @@ const (
 	maxCGGMPThreshold = 16
 	maxCGGMPSigners   = 16
 
-	maxSignPrepProofBytes            = 512 << 10
-	maxSignVerifyShareRecordBytes    = signVerifyShareRecordFixedBytes + 65*2 + maxSignPrepProofBytes
-	maxSignVerifyShareBytes          = maxSignVerifyShareRecordBytes
-	maxSignVerifySharesBytes         = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
-	maxSignPartialPayloadBytes       = 32*6 + maxSignPrepProofBytes + 256
-	maxPresignVerificationEntryBytes = tss.DefaultMaxPaillierCiphertextBytes +
+	maxSignPrepProofBytes         = 512 << 10
+	maxSignVerifyShareRecordBytes = signVerifyShareRecordFixedBytes + 65*6 + 32*2 + maxSignPrepProofBytes
+	maxSignVerifyShareBytes       = maxSignVerifyShareRecordBytes
+	maxSignVerifySharesBytes      = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
+	maxSignPartialPayloadBytes    = 32*6 + maxSignPrepProofBytes + 256
+	// Identification evidence carries both the proof payload and its certified
+	// envelope inside the 1 MiB public-evidence hard cap. Keep the phase payload
+	// below half that budget, leaving room for sixteen maximum-size ACKs and TLV
+	// framing without accepting a message that cannot later be attributed.
+	maxIdentificationPayloadBytes    = 384 << 10
+	maxPresignVerificationEntryBytes = tss.DefaultMaxPaillierCiphertextBytes*2 +
 		tss.DefaultMaxPaillierPublicKeyBytes + 256
-	maxPresignVerificationContextBytes = 4 + maxCGGMPSigners*(4+maxPresignVerificationEntryBytes)
+	maxPresignVerificationContextBytes          = 4 + maxCGGMPSigners*(4+maxPresignVerificationEntryBytes)
+	maxSerializedPresignWithIdentificationBytes = 16 << 20
 )
 
 // StateLimits caps serialized CGGMP21 key material.
@@ -93,12 +99,12 @@ func DefaultLimits() Limits {
 		},
 		State: StateLimits{
 			MaxSerializedKeyShareBytes:    tss.DefaultMaxSerializedKeyShareBytes,
-			MaxSerializedPresignBytes:     tss.DefaultMaxSerializedPresignBytes,
+			MaxSerializedPresignBytes:     maxSerializedPresignWithIdentificationBytes,
 			MaxSerializedResharePlanBytes: tss.DefaultMaxSerializedResharePlanBytes,
 			MaxSerializedSignAttemptBytes: tss.DefaultMaxEnvelopeBytes + 4096,
 		},
 		Payload: PayloadLimits{
-			MaxMessageBytes: 65536,
+			MaxMessageBytes: tss.DefaultMaxEnvelopePayloadBytes,
 		},
 		Curve: CurveLimits{
 			MaxPointBytes:  65,

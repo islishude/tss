@@ -20,6 +20,13 @@ import (
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
+type testEnvelopeIdentity struct{}
+
+func (testEnvelopeIdentity) SignEnvelopeDigest([32]byte) ([]byte, error) { return []byte{1}, nil }
+func (testEnvelopeIdentity) VerifyEnvelopeSignature(tss.PartyID, [32]byte, []byte) error {
+	return nil
+}
+
 // testCGGMP21Guard is a helper that creates an EnvelopeGuard for CGGMP21 protocol tests.
 // It uses the production policy set but relaxes broadcast consistency requirements
 // since test harnesses don't coordinate BroadcastCertificates.
@@ -135,6 +142,7 @@ func testCGGMP21Policies() tss.PolicySet {
 	for i, p := range entries {
 		relaxed[i] = p
 		relaxed[i].BroadcastConsistency = tss.BroadcastConsistencyNone
+		relaxed[i].RequireSenderSignature = false
 	}
 	ps, err := tss.NewPolicySet(relaxed...)
 	if err != nil {
@@ -310,11 +318,12 @@ func startCGGMP21ReshareOverlap(oldKey *KeyShare, plan *ResharePlan, rng io.Read
 
 func localConfigFromThresholdConfig(config tss.ThresholdConfig) tss.LocalConfig {
 	return tss.LocalConfig{
-		Self:         config.Self,
-		Rand:         config.Rand,
-		Context:      config.Context,
-		RoundTimeout: config.RoundTimeout,
-		Log:          config.Log,
+		Self:           config.Self,
+		Rand:           config.Rand,
+		Context:        config.Context,
+		RoundTimeout:   config.RoundTimeout,
+		Log:            config.Log,
+		EnvelopeSigner: config.EnvelopeSigner,
 	}
 }
 
@@ -631,15 +640,23 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 		KeygenTranscriptHash: transcript[:],
 		PartiesHash:          tss.PartySetHash(tss.NewPartySet(1, 2), partySetHashLabel),
 		VerifyShares: []signVerifyShare{{
-			Party:    1,
-			KPoint:   secp.Clone(RPoint),
-			ChiPoint: secp.Clone(RPoint),
-			Proof:    minimalProof,
+			Party:                 1,
+			KPoint:                secp.Clone(RPoint),
+			ChiPoint:              secp.Clone(RPoint),
+			Proof:                 minimalProof,
+			Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
+			MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
+			MTABasePoint:          slices.Clone(R),
+			DeltaBasePoint:        slices.Clone(R),
 		}, {
-			Party:    2,
-			KPoint:   secp.Clone(RPoint),
-			ChiPoint: secp.Clone(RPoint),
-			Proof:    minimalProof.Clone(),
+			Party:                 2,
+			KPoint:                secp.Clone(RPoint),
+			ChiPoint:              secp.Clone(RPoint),
+			Proof:                 minimalProof.Clone(),
+			Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
+			MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
+			MTABasePoint:          slices.Clone(R),
+			DeltaBasePoint:        slices.Clone(R),
 		}},
 		Verification: presignVerificationContext{
 			SessionID:  verificationSessionID,
@@ -648,16 +665,20 @@ func minimalCGGMP21Presign(tb testing.TB) *Presign {
 				Party:             1,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
+				EncGamma:          []byte{1},
 				PaillierPublicKey: paillier65,
 				XBarPoint:         secp.Clone(RPoint),
 				Delta:             &one,
+				KPoint:            slices.Clone(R),
 			}, {
 				Party:             2,
 				Gamma:             slices.Clone(R),
 				EncK:              []byte{1},
+				EncGamma:          []byte{1},
 				PaillierPublicKey: paillier77,
 				XBarPoint:         secp.Clone(RPoint),
 				Delta:             &otherOne,
+				KPoint:            slices.Clone(R),
 			}},
 		},
 		KShare:         kShare,
@@ -685,22 +706,26 @@ func mustMinimalSignPrepProofForTest(tb testing.TB) *signprep.Proof {
 	xBarPoint := kPoint
 	chiPoint, _ := secp.PointBytes(secp.ScalarBaseMult(twoScalar))
 	stmt := signprep.Statement{
-		Protocol:             tss.ProtocolCGGMP21Secp256k1,
-		SessionID:            tss.SessionID{1},
-		Party:                1,
-		Signers:              tss.NewPartySet(1),
-		PlanHash:             bytes.Repeat([]byte{0x99}, 32),
-		ContextHash:          bytes.Repeat([]byte{0xaa}, 32),
-		PublicKey:            kPoint,
-		KeygenTranscriptHash: bytes.Repeat([]byte{0xbb}, 32),
-		PartiesHash:          bytes.Repeat([]byte{0xcc}, 32),
-		KPoint:               kPoint,
-		ChiPoint:             chiPoint,
-		XBarPoint:            xBarPoint,
-		EncK:                 make([]byte, 256),
-		PaillierPublicKey:    make([]byte, 256),
-		Gamma:                kPoint,
-		Delta:                kScalar.Bytes(),
+		Protocol:              tss.ProtocolCGGMP21Secp256k1,
+		SessionID:             tss.SessionID{1},
+		Party:                 1,
+		Signers:               tss.NewPartySet(1),
+		PlanHash:              bytes.Repeat([]byte{0x99}, 32),
+		ContextHash:           bytes.Repeat([]byte{0xaa}, 32),
+		PublicKey:             kPoint,
+		KeygenTranscriptHash:  bytes.Repeat([]byte{0xbb}, 32),
+		PartiesHash:           bytes.Repeat([]byte{0xcc}, 32),
+		Round2CommitmentsHash: bytes.Repeat([]byte{0x33}, 32),
+		MTAContributionsHash:  bytes.Repeat([]byte{0x34}, 32),
+		MTABasePoint:          kPoint,
+		DeltaBasePoint:        kPoint,
+		KPoint:                kPoint,
+		ChiPoint:              chiPoint,
+		XBarPoint:             xBarPoint,
+		EncK:                  make([]byte, 256),
+		PaillierPublicKey:     make([]byte, 256),
+		Gamma:                 kPoint,
+		Delta:                 kScalar.Bytes(),
 	}
 	wit := signprep.Witness{
 		KShare:   testSecretScalar(tb, 1),

@@ -27,6 +27,8 @@ const (
 	DefaultMaxPayloadTypeBytes = 128
 	// DefaultMaxProtocolNameBytes caps the protocol name length inside envelopes.
 	DefaultMaxProtocolNameBytes = 64
+	// DefaultMaxEnvelopeSignatureBytes caps a portable sender signature.
+	DefaultMaxEnvelopeSignatureBytes = 4096
 )
 
 const (
@@ -110,6 +112,7 @@ type EnvelopeLimits struct {
 	MaxPayloadBytes      int
 	MaxPayloadTypeBytes  int
 	MaxProtocolNameBytes int
+	MaxSignatureBytes    int
 	TLV                  TLVLimits
 }
 

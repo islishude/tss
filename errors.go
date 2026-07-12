@@ -91,6 +91,19 @@ var ErrMissingEnvelopeGuard = errors.New("missing envelope guard")
 // verifier is configured.
 var ErrMissingAckVerifier = errors.New("missing broadcast ack verifier")
 
+// ErrMissingEnvelopeSignature is returned when policy requires portable sender authentication.
+var ErrMissingEnvelopeSignature = errors.New("missing envelope sender signature")
+
+// ErrMissingEnvelopeSignatureVerifier is returned when signature policy has no verifier.
+var ErrMissingEnvelopeSignatureVerifier = errors.New("missing envelope signature verifier")
+
+// ErrMissingEnvelopeSigner indicates that a protocol requiring portable direct
+// message signatures was started without a local transport-identity signer.
+var ErrMissingEnvelopeSigner = errors.New("missing envelope signer")
+
+// ErrInvalidEnvelopeSignature is returned when portable sender authentication fails.
+var ErrInvalidEnvelopeSignature = errors.New("invalid envelope sender signature")
+
 // ErrWrongRecipient is returned when a direct message is addressed to the wrong party.
 var ErrWrongRecipient = errors.New("wrong envelope recipient")
 

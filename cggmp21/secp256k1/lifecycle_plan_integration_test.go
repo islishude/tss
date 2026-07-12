@@ -13,13 +13,13 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	sessionID := cggmpPlanTestSession(0x61)
 	parties := tss.NewPartySet(1, 2, 3)
 	plan1Security := testSecurityParams()
-	plan1, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, SecurityParams: &plan1Security})
+	plan1, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, Limits: testLimitsPtr(), SecurityParams: &plan1Security})
 	if err != nil {
 		t.Fatal(err)
 	}
 	plan2Security := testSecurityParams()
 	plan2Security.MinPaillierBits = 1024
-	plan2, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, SecurityParams: &plan2Security})
+	plan2, err := NewKeygenPlan(KeygenPlanOption{SessionID: sessionID, Parties: parties, Threshold: 2, Limits: testLimitsPtr(), SecurityParams: &plan2Security})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -33,10 +33,7 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	env, ok := findCGGMPEnvelopeTo(out2, 1, payloadKeygenShare)
-	if !ok {
-		t.Fatal("missing keygen share from party 2 to party 1")
-	}
+	env := out2[0]
 	beforeShares := countNonNilShares(s1.round1)
 	beforeCommits := countNonNilCommits(s1.round1)
 	beforePaillier := countNonNilPaillierPubs(s1.round1)
@@ -51,15 +48,6 @@ func TestCGGMP21KeygenMixedPlanHashRejectsWithoutStateMutation(t *testing.T) {
 	if s1.aborted {
 		t.Fatal("plan mismatch aborted keygen session")
 	}
-}
-
-func findCGGMPEnvelopeTo(envelopes []tss.Envelope, to tss.PartyID, payloadType tss.PayloadType) (tss.Envelope, bool) {
-	for _, env := range envelopes {
-		if env.To == to && env.PayloadType == payloadType {
-			return env, true
-		}
-	}
-	return tss.Envelope{}, false
 }
 
 func countNonNilShares(in *keygenRound1Inbox) int {

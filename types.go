@@ -114,6 +114,9 @@ type EnvelopeInput struct {
 	To          PartyID
 	PayloadType PayloadType
 	Payload     []byte
+	// SenderSignature is optional at generic construction time. Delivery
+	// policies decide whether portable sender authentication is required.
+	SenderSignature []byte
 }
 
 // KeyShare is the common interface implemented by algorithm-specific shares.

@@ -54,35 +54,17 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	}
 	for _, dealer := range s.dealerParties {
 		dd := s.dealerData[dealer]
-		share, err := secpScalarFromSecret(dd.share)
+		share, err := secpScalarFromSecretAllowZero(dd.share)
 		if err != nil {
 			return nil, err
 		}
 		if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
-			verifyErr := err
-			evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, dealer, s.selfID, payloadReshareShare, nil)
-			if evErr != nil {
-				return nil, evErr
-			}
-			return nil, &tss.ProtocolError{
-				Code:  tss.ErrCodeVerification,
-				Round: reshareStartRound,
-				Party: dealer,
-				Blame: newBlame(
-					evidenceEnv,
-					tss.EvidenceKindReshareShare,
-					"invalid reshare share",
-					tss.NewPartySet(dealer),
-					rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
-					rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
-				),
-				Err: verifyErr,
-			}
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, fmt.Errorf("verified reshare share no longer matches commitments for dealer %d: %w", dealer, err))
 		}
 	}
 	newSecret := secp.ScalarZero()
 	for _, dealer := range s.dealerParties {
-		share, err := secpScalarFromSecret(s.dealerData[dealer].share)
+		share, err := secpScalarFromSecretAllowZero(s.dealerData[dealer].share)
 		if err != nil {
 			return nil, err
 		}

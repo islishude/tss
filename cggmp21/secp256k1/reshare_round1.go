@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"fmt"
+	"math/big"
 
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
@@ -53,6 +54,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clearSecpPolynomial(poly)
 	commitments, err := polynomialCommitments(poly)
 	if err != nil {
 		return nil, err
@@ -64,7 +66,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	defer cleanup.Run()
 	var selfShare *secret.Scalar
 	if s.isReceiver {
-		selfShare, err = secpSecretScalarFromScalar(shamir.Eval(poly, s.selfID))
+		selfShare, err = secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, s.selfID))
 		if err != nil {
 			return nil, err
 		}
@@ -88,22 +90,56 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 		if id == s.selfID {
 			continue
 		}
-		share, err := secpSecretScalarFromScalar(shamir.Eval(poly, id))
+		receiverData := s.newPartyData[id]
+		if receiverData == nil || receiverData.paillierPub.PublicKey == nil || receiverData.ringPedersen.Params == nil {
+			return nil, fmt.Errorf("missing reshare receiver material for party %d", id)
+		}
+		share, err := secpSecretScalarFromScalarAllowZero(shamir.Eval(poly, id))
+		if err != nil {
+			return nil, err
+		}
+		ciphertext, randomness, err := receiverData.paillierPub.PublicKey.EncryptSecret(s.cfg.Reader(), share)
+		if err != nil {
+			share.Destroy()
+			return nil, err
+		}
+		evaluation, err := secp.EvalCommitments(commitments, id)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, s.selfID, id, receiverData.paillierPub.PublicKey, s.planHash, s.limits)
+		if err != nil {
+			share.Destroy()
+			randomness.Destroy()
+			return nil, err
+		}
+		proof, err := zkpai.ProveLogStar(s.securityParams, domain, zkpai.LogStarStatement{
+			PaillierN:   receiverData.paillierPub.PublicKey,
+			C:           ciphertext,
+			X:           evaluation,
+			B:           secp.ScalarBaseMult(secp.ScalarOne()),
+			VerifierAux: receiverData.ringPedersen.Params,
+		}, zkpai.LogStarWitness{X: share, Rho: randomness}, s.cfg.Reader())
+		share.Destroy()
+		randomness.Destroy()
 		if err != nil {
 			return nil, err
 		}
 		sharePayload, err := (reshareSharePayload{
 			Dealer:               s.selfID,
 			Receiver:             id,
-			Share:                share,
+			Ciphertext:           ciphertext.Bytes(),
+			Proof:                *proof,
 			DealerCommitmentHash: commitmentsHash,
 			PlanHash:             s.planHash,
 		}).MarshalBinaryWithLimits(s.limits)
-		share.Destroy()
+		proof.Destroy()
 		if err != nil {
 			return nil, err
 		}
-		shareEnv, err := newEnvelope(dealerConfig, reshareStartRound, s.selfID, id, payloadReshareShare, sharePayload)
+		shareEnv, err := newEnvelope(dealerConfig, reshareShareRound, s.selfID, id, payloadReshareShare, sharePayload)
 		if err != nil {
 			return nil, err
 		}
@@ -133,6 +169,12 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
+	owned := true
+	defer func() {
+		if owned {
+			newPaillierKey.Destroy()
+		}
+	}()
 	proofConfig := s.receiverConfig()
 	modDomain, err := resharePaillierDomain(proofConfig, s.selfID, newPaillierKey.PublicKey, s.planHash, s.limits)
 	if err != nil {
@@ -156,6 +198,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	s.newPaillier = newPaillierKey
+	owned = false
 	s.newPartyData[s.selfID] = &reshareNewPartyData{
 		paillierPub: paillierPublicMaterial{
 			Party:     s.selfID,
@@ -246,47 +289,63 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	return nil
 }
 
-func (s *ReshareSession) applyReshareShare(from tss.PartyID, p reshareSharePayload, rawPayload []byte) error {
+func (s *ReshareSession) applyReshareShare(env tss.Envelope, p reshareSharePayload) error {
+	from := env.From
 	if p.Dealer != from {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload sender mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareShareRound, from, errors.New("dealer share payload sender mismatch"))
 	}
 	if p.Receiver != s.selfID {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share payload receiver mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareShareRound, from, errors.New("dealer share payload receiver mismatch"))
 	}
 	dd, ok := s.dealerData[from]
 	if !ok || dd.commitments == nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share has no dealer commitments"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareShareRound, from, errors.New("dealer share has no dealer commitments"))
 	}
 	if !bytes.Equal(p.DealerCommitmentHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)) {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, errors.New("dealer share commitment hash mismatch"))
+		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareShareRound, from, errors.New("dealer share commitment hash mismatch"))
 	}
-	share, err := secpScalarFromSecret(p.Share)
+	selfData := s.newPartyData[s.selfID]
+	if selfData == nil || selfData.paillierPub.PublicKey == nil || selfData.ringPedersen.Params == nil || s.newPaillier == nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, errors.New("missing local reshare receiver material"))
+	}
+	evaluation, err := secp.EvalCommitments(dd.commitments, s.selfID)
 	if err != nil {
-		return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, err)
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
 	}
-	if err := secp.VerifyShare(dd.commitments, s.selfID, share); err != nil {
-		verifyErr := err
-		evidenceEnv, evErr := newEnvelope(s.dealerConfig(), reshareStartRound, from, s.selfID, payloadReshareShare, rawPayload)
-		if evErr != nil {
-			return tss.NewProtocolError(tss.ErrCodeInvalidMessage, reshareStartRound, from, evErr)
-		}
-		return &tss.ProtocolError{
-			Code:  tss.ErrCodeVerification,
-			Round: reshareStartRound,
-			Party: from,
-			Blame: newBlame(
-				evidenceEnv,
-				tss.EvidenceKindReshareShare,
-				"invalid reshare share",
-				tss.NewPartySet(from),
-				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
-				rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
-				hashEvidenceField("dealer_share_payload_hash", rawPayload),
-			),
-			Err: verifyErr,
-		}
+	domain, err := reshareEncryptedShareDomain(s.cfg.SessionID, s.newThreshold, s.dealerParties, s.newParties, from, s.selfID, selfData.paillierPub.PublicKey, s.planHash, s.limits)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
 	}
-	dd.share = p.Share.Clone()
+	ciphertext := new(big.Int).SetBytes(p.Ciphertext)
+	if err := zkpai.VerifyLogStar(s.securityParams, domain, zkpai.LogStarStatement{
+		PaillierN:   selfData.paillierPub.PublicKey,
+		C:           ciphertext,
+		X:           evaluation,
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
+		VerifierAux: selfData.ringPedersen.Params,
+	}, &p.Proof); err != nil {
+		p.Proof.Destroy()
+		return verificationErrorWithEvidence(env, tss.EvidenceKindReshareShare, "invalid encrypted reshare share proof", tss.NewPartySet(from), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.dealerParties, partySetHashLabel)),
+			rawEvidenceField(evidenceFieldCommitmentsHash, transcript.ByteSlicesHash(reshareCommitmentsHashLabel, dd.commitments)),
+			hashEvidenceField("encrypted_share_ciphertext_hash", p.Ciphertext))
+	}
+	p.Proof.Destroy()
+	plaintext, err := s.newPaillier.Decrypt(ciphertext)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, fmt.Errorf("verified reshare share decryption failed: %w", err))
+	}
+	defer secret.ClearBigInt(plaintext)
+	if plaintext.Sign() < 0 || plaintext.Cmp(secp.Order()) >= 0 {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, errors.New("verified reshare share plaintext is out of range"))
+	}
+	encoded := plaintext.FillBytes(make([]byte, secp.ScalarSize))
+	share, err := newSecpSecretScalarAllowZero(encoded)
+	clear(encoded)
+	if err != nil {
+		return tss.NewProtocolError(tss.ErrCodeInvariant, reshareShareRound, 0, err)
+	}
+	dd.share = share
 	return nil
 }
 
