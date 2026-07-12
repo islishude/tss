@@ -84,9 +84,16 @@ recipients need public reshare metadata out of band before starting the
 recipient flow: old public key, chain code, party set, group commitments,
 lifecycle session ID, transcript hash, and lifecycle plan hash. All roles route
 `ReshareSession.Handle`, including the round-2 confirmations returned by it.
+An old-only dealer remains active after round 1: it derives the public
+confirmation binding from the complete dealer commitment set and completes only
+after verifying confirmations from every target key holder. It never receives
+a secret share or exposes a new `KeyShare`.
 
 The control plane owns old/new generation cutover and must not retire the old
-generation until the required new-generation commit condition is satisfied.
+generation until the required new-generation commit condition is satisfied. It
+must keep old-only dealer sessions registered through the confirmation round;
+new-holder completion itself does not depend on every removed dealer observing
+that final round.
 
 ## KeyShare API and Ownership
 
@@ -372,7 +379,10 @@ party set and threshold, preserved public key and chain code, transcript hash,
 and new commitments hash. `ReshareSession.KeyShare()` remains unavailable until
 confirmations from every target key holder agree. Serialized key shares require
 this complete confirmation set; removing every confirmation is rejected rather
-than treated as an older valid shape.
+than treated as an older valid shape. Removed old dealers derive the same
+confirmation binding from public commitments and remain incomplete until they
+have verified the full target confirmation set; their `KeyShare()` accessor
+always remains unavailable.
 
 ## BIP32 HD Derivation
 

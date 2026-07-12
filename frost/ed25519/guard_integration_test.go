@@ -3,6 +3,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"testing"
 
@@ -100,6 +101,103 @@ func TestFROSTKeygenRejectsRound1WithoutBroadcastCert(t *testing.T) {
 	_, err = session.Handle(testutil.DeliverEnvelope(commitEnv))
 	if !errors.Is(err, tss.ErrMissingBroadcastCertificate) {
 		t.Fatalf("expected ErrMissingBroadcastCertificate, got %v", err)
+	}
+}
+
+func TestFROSTReshareDealerOnlyAcceptsTargetScopedConfirmationCertificate(t *testing.T) {
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
+	allParties := tss.MergePartySet(oldParties, newParties)
+	oldShares := frostKeygen(t, 2, 3)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewResharePlan(ResharePlanOption{
+		OldKey:       oldShares[1],
+		SessionID:    sessionID,
+		NewParties:   newParties,
+		NewThreshold: 2,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := tss.NewInMemoryAckVerifier(func(tss.PartyID, [32]byte, []byte) error { return nil })
+	guard, err := (tss.GuardConfig{
+		Self:        1,
+		Parties:     allParties,
+		Protocol:    tss.ProtocolFROSTEd25519,
+		SessionID:   sessionID,
+		Policies:    FROSTPolicies(),
+		Cache:       tss.NewInMemoryReplayCache(),
+		AckVerifier: verifier,
+	}).BuildGuard()
+	if err != nil {
+		t.Fatal(err)
+	}
+	session, _, err := StartReshare(oldShares[1], plan, tss.LocalConfig{Self: 1}, guard)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Destroy()
+	planHash, err := plan.Digest()
+	if err != nil {
+		t.Fatal(err)
+	}
+	confirmation := KeygenConfirmation{
+		SessionID:       sessionID,
+		Sender:          2,
+		Threshold:       2,
+		Parties:         newParties,
+		PublicKey:       oldShares[1].state.PublicKey.Clone(),
+		TranscriptHash:  make([]byte, 32),
+		CommitmentsHash: make([]byte, 32),
+		ChainCode:       bytes.Clone(oldShares[1].state.ChainCode),
+		PlanHash:        planHash,
+	}
+	payload, err := confirmation.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    tss.ProtocolFROSTEd25519,
+		SessionID:   sessionID,
+		Round:       reshareConfirmationRound,
+		From:        2,
+		To:          tss.BroadcastPartyId,
+		PayloadType: payloadReshareConfirmation,
+		Payload:     payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	acks := make([]tss.BroadcastAck, 0, len(newParties))
+	for _, id := range newParties {
+		signer := tss.NewInMemoryAckSigner(id, func(digest [32]byte) ([]byte, error) {
+			return bytes.Clone(digest[:]), nil
+		})
+		ack, err := tss.SignBroadcastAck(env, id, signer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acks = append(acks, ack)
+	}
+	certificate, err := tss.NewBroadcastCertificate(env, newParties, acks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound, err := testutil.OpenInboundEnvelope(env, tss.ReceiveInfo{
+		Peer:       2,
+		Protection: tss.ChannelPlaintext,
+	}, certificate)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := session.Handle(inbound); err != nil {
+		t.Fatalf("dealer-only session rejected target-scoped confirmation broadcast: %v", err)
+	}
+	if session.pendingConfirmations[2] == nil {
+		t.Fatal("dealer-only session did not buffer the early target confirmation")
 	}
 }
 

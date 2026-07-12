@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"testing"
 
 	fed "filippo.io/edwards25519"
@@ -304,7 +305,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 	assertFROSTSnapshotUnchanged(t, before, after)
 }
 
-func TestFROSTReshareDealerOnlyCompletionNeedsOnlyCommitments(t *testing.T) {
+func TestFROSTReshareDealerOnlyWaitsForTargetConfirmations(t *testing.T) {
 	t.Parallel()
 
 	oldShares := frostKeygen(t, 2, 3)
@@ -314,8 +315,9 @@ func TestFROSTReshareDealerOnlyCompletionNeedsOnlyCommitments(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	sessions := make(map[tss.PartyID]*ReshareSession, len(oldParties))
-	outputs := make(map[tss.PartyID][]tss.Envelope, len(oldParties))
+	allParties := tss.MergePartySet(oldParties, newParties)
+	sessions := make(map[tss.PartyID]*ReshareSession, len(allParties))
+	messages := make([]tss.Envelope, 0)
 	for _, id := range oldParties {
 		session, out, err := startFROSTReshare(oldShares[id], newParties, 2, tss.ThresholdConfig{
 			Threshold: 2,
@@ -328,21 +330,186 @@ func TestFROSTReshareDealerOnlyCompletionNeedsOnlyCommitments(t *testing.T) {
 		}
 		defer session.Destroy()
 		sessions[id] = session
-		outputs[id] = out
+		messages = append(messages, out...)
 	}
+	recipient, err := startFROSTReshareRecipient(oldShares[1], oldParties, newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   newParties,
+		Self:      4,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer recipient.Destroy()
+	sessions[4] = recipient
+
 	dealerOnly := sessions[1]
 	if len(dealerOnly.shares) != 0 {
 		t.Fatal("dealer-only session retained an unnecessary local share")
 	}
-	for _, id := range tss.NewPartySet(2, 3) {
-		env := mustFROSTEnvelope(t, outputs[id], payloadReshareCommitments, tss.BroadcastPartyId)
-		if _, err := dealerOnly.Handle(testutil.DeliverEnvelope(env)); err != nil {
-			t.Fatal(err)
+	confirmations := make([]tss.Envelope, 0, len(newParties))
+	for _, env := range messages {
+		for _, id := range allParties {
+			if id == env.From || (env.To != tss.BroadcastPartyId && env.To != id) {
+				continue
+			}
+			out, err := sessions[id].Handle(testutil.DeliverEnvelope(env))
+			if err != nil {
+				t.Fatalf("deliver round 1 %s from %d to %d: %v", env.PayloadType, env.From, id, err)
+			}
+			for _, produced := range out {
+				if produced.PayloadType == payloadReshareConfirmation {
+					confirmations = append(confirmations, produced)
+				}
+			}
+		}
+	}
+	if dealerOnly.completed || dealerOnly.confirmationBinding == nil || dealerOnly.newShare != nil {
+		t.Fatal("dealer-only session did not wait on the public target confirmation binding")
+	}
+	if len(confirmations) != len(newParties) {
+		t.Fatalf("got %d target confirmations, want %d", len(confirmations), len(newParties))
+	}
+	for _, env := range confirmations {
+		for _, id := range allParties {
+			if id == env.From {
+				continue
+			}
+			if _, err := sessions[id].Handle(testutil.DeliverEnvelope(env)); err != nil {
+				t.Fatalf("deliver confirmation from %d to %d: %v", env.From, id, err)
+			}
 		}
 	}
 	if !dealerOnly.completed || dealerOnly.newShare != nil {
-		t.Fatal("dealer-only session did not complete from commitments alone")
+		t.Fatal("dealer-only session did not complete after all target confirmations")
 	}
+	if _, ok := dealerOnly.KeyShare(); ok {
+		t.Fatal("dealer-only session exposed a key share")
+	}
+}
+
+func TestFROSTReshareDealerOnlyConfirmationBindingRejectsMismatches(t *testing.T) {
+	t.Parallel()
+
+	oldShares := frostKeygen(t, 2, 3)
+	oldParties := tss.NewPartySet(1, 2, 3)
+	newParties := tss.NewPartySet(2, 3, 4)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	dealerOnly, _, err := startFROSTReshare(oldShares[1], newParties, 2, tss.ThresholdConfig{
+		Threshold: 2,
+		Parties:   oldParties,
+		Self:      1,
+		SessionID: sessionID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer dealerOnly.Destroy()
+	for _, id := range tss.NewPartySet(2, 3) {
+		remote, out, err := startFROSTReshare(oldShares[id], newParties, 2, tss.ThresholdConfig{
+			Threshold: 2,
+			Parties:   oldParties,
+			Self:      id,
+			SessionID: sessionID,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer remote.Destroy()
+		commitment := mustFROSTEnvelope(t, out, payloadReshareCommitments, tss.BroadcastPartyId)
+		if _, err := dealerOnly.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if dealerOnly.confirmationBinding == nil || dealerOnly.completed {
+		t.Fatal("dealer-only session did not stage a public confirmation binding")
+	}
+
+	tests := []struct {
+		name   string
+		mutate func(*KeygenConfirmation)
+	}{
+		{name: "transcript hash", mutate: func(c *KeygenConfirmation) {
+			c.TranscriptHash = bytes.Clone(c.TranscriptHash)
+			c.TranscriptHash[0] ^= 1
+		}},
+		{name: "commitments hash", mutate: func(c *KeygenConfirmation) {
+			c.CommitmentsHash = bytes.Clone(c.CommitmentsHash)
+			c.CommitmentsHash[0] ^= 1
+		}},
+		{name: "target set", mutate: func(c *KeygenConfirmation) {
+			c.Parties = tss.NewPartySet(2, 3, 5)
+		}},
+		{name: "chain code", mutate: func(c *KeygenConfirmation) {
+			c.ChainCode = bytes.Clone(c.ChainCode)
+			c.ChainCode[0] ^= 1
+		}},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			confirmation := dealerOnly.confirmationBinding.confirmation(2)
+			tc.mutate(confirmation)
+			before := snapshotFROSTReshareSession(dealerOnly)
+			if err := dealerOnly.confirmationBinding.verify(confirmation); err == nil {
+				t.Fatal("mismatched target confirmation was accepted")
+			}
+			after := snapshotFROSTReshareSession(dealerOnly)
+			assertFROSTSnapshotUnchanged(t, before, after)
+			clear(confirmation.ChainCode)
+		})
+	}
+
+	valid := dealerOnly.confirmationBinding.confirmation(2)
+	payload, err := valid.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, err := tss.NewEnvelope(tss.EnvelopeInput{
+		Protocol:    tss.ProtocolFROSTEd25519,
+		SessionID:   sessionID,
+		Round:       reshareConfirmationRound,
+		From:        2,
+		To:          tss.BroadcastPartyId,
+		PayloadType: payloadReshareConfirmation,
+		Payload:     payload,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx, err := dealerOnly.buildAcceptReshareConfirmationTx(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := tx.apply(dealerOnly); err != nil {
+		t.Fatal(err)
+	}
+	tx.markCommitted()
+	before := snapshotFROSTReshareSession(dealerOnly)
+	duplicate, err := dealerOnly.buildAcceptReshareConfirmationTx(env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !duplicate.duplicate {
+		t.Fatal("identical target confirmation was not classified as a duplicate")
+	}
+	conflicting := valid.Clone()
+	conflicting.TranscriptHash[0] ^= 1
+	conflictingPayload, err := conflicting.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	env.Payload = conflictingPayload
+	if _, err := dealerOnly.buildAcceptReshareConfirmationTx(env); err == nil {
+		t.Fatal("conflicting target confirmation was accepted")
+	}
+	after := snapshotFROSTReshareSession(dealerOnly)
+	assertFROSTSnapshotUnchanged(t, before, after)
+	clear(valid.ChainCode)
+	clear(conflicting.ChainCode)
 }
 
 func TestFROSTReshareCompletionPrepareDoesNotMutateAndDestroysStagedShare(t *testing.T) {

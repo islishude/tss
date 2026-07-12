@@ -301,13 +301,17 @@ FROST keygen shares produced by `KeygenSession` embed and verify keygen
 confirmations. FROST reshare/refresh also has a mandatory target-holder
 confirmation round; its resulting shares are unavailable until the complete
 set agrees on the reshare transcript, new commitments, preserved group public
-key, and preserved chain code.
+key, and preserved chain code. Removed old dealers compute that same binding
+from public commitments and do not enter their terminal state until they have
+verified the full target confirmation set.
 
 Transport responsibilities:
 
 - bind every inbound envelope to an authenticated sender identity via `ReceiveInfo.Peer`;
 - never let a payload field override the transport-authenticated sender;
 - fan out broadcast envelopes to every party;
+- fan out FROST reshare confirmations across the old/new party union while
+  constructing their broadcast certificate against the target `newParties` set;
 - protect confidential share envelopes with point-to-point encryption or equivalent controls, and report `ChannelConfidential`;
 - supply `BroadcastCertificate` through `WithBroadcastCertificate` when the protocol policy requires `BroadcastConsistencyRequired` (all broadcast-mode messages in CGGMP21 and FROST policy sets);
 - treat `ReceiveInfo` as transport-verified facts, not self-declared metadata; this library enforces confidentiality and broadcast consistency through `EnvelopeGuard`;

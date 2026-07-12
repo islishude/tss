@@ -389,13 +389,18 @@ For FROST, keep routing every envelope returned by `ReshareSession.Handle`.
 Target key holders exchange a second-round confirmation, and `KeyShare()` stays
 unavailable until the complete target set agrees. Public-only reshare recipients
 must receive authenticated source-generation metadata, not only the old public
-key and chain code.
+key and chain code. Reshare confirmation broadcasts are physically routed over
+the old/new party union, while their `BroadcastCertificate.Recipients` remains
+the target `newParties` set.
 
 Old-only dealers, new-only receivers, and overlap parties have different
 startup functions. Production systems must assign roles from the same
-`ReshareRun` metadata before any party starts. The control plane must not retire
-the old key generation until the required new-generation commit condition is
-satisfied.
+`ReshareRun` metadata before any party starts. Keep old-only dealer sessions
+registered through round 2; they derive and verify the public target-holder
+confirmation binding but never expose a new key share. The control plane must
+not retire the old key generation until the required new-generation commit
+condition is satisfied, and target-holder cutover does not require every removed
+dealer to report local completion.
 
 ## Proactive Refresh Scheduling
 

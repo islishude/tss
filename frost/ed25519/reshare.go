@@ -39,8 +39,9 @@ type ReshareSession struct {
 	shares               map[tss.PartyID]*secret.Scalar      // Secret dealer contributions received by this receiver.
 	confirmations        map[tss.PartyID]*KeygenConfirmation // Round-2 confirmations from target key holders.
 	pendingConfirmations map[tss.PartyID]*KeygenConfirmation // Confirmations received before local round-1 completion.
+	confirmationBinding  *reshareConfirmationBinding         // Public round-2 binding derived from all dealer commitments.
 
-	completed    bool               // Terminal success flag after newShare is available or a dealer-only role finishes.
+	completed    bool               // Terminal success after every target-holder confirmation is verified.
 	aborted      bool               // Terminal failure/destruction flag.
 	pendingShare *KeyShare          // Locally derived share awaiting confirmations from all target key holders.
 	newShare     *KeyShare          // New key share produced for recipient participants.

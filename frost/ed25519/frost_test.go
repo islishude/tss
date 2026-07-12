@@ -1023,9 +1023,6 @@ func deliverReshareMessages(t *testing.T, receivers tss.PartySet, messages []tss
 			if id == env.From || (env.To != 0 && env.To != id) {
 				continue
 			}
-			if env.PayloadType == payloadReshareConfirmation && !sessions[id].isRecipient() {
-				continue
-			}
 			delivered := env
 			out, err := sessions[id].Handle(testutil.DeliverEnvelope(delivered))
 			if err != nil {

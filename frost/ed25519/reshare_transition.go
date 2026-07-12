@@ -143,9 +143,6 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 	if base.Round != reshareConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare confirmation in wrong round"))
 	}
-	if !s.isRecipient() {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("dealer-only reshare role does not accept confirmations"))
-	}
 	confirmation, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](base.Payload, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
@@ -184,10 +181,10 @@ func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*a
 			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare confirmation"))
 		}
 	}
-	if s.pendingShare == nil {
+	if s.confirmationBinding == nil {
 		return &acceptReshareConfirmationTx{from: base.From, confirmation: confirmation, pending: true}, nil
 	}
-	if err := verifyReshareConfirmationForShare(s.pendingShare, confirmation); err != nil {
+	if err := s.confirmationBinding.verify(confirmation); err != nil {
 		clear(confirmation.ChainCode)
 		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
 	}

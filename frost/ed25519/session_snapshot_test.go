@@ -35,12 +35,16 @@ type frostReshareSnapshot struct {
 	Completed bool
 	Aborted   bool
 
-	HasNewShare bool
-	IsRecipient bool
-	RefreshMode bool
+	HasNewShare            bool
+	HasPendingShare        bool
+	HasConfirmationBinding bool
+	IsRecipient            bool
+	RefreshMode            bool
 
-	CommitSenders []tss.PartyID
-	ShareSenders  []tss.PartyID
+	CommitSenders              []tss.PartyID
+	ShareSenders               []tss.PartyID
+	ConfirmationSenders        []tss.PartyID
+	PendingConfirmationSenders []tss.PartyID
 }
 
 func snapshotFROSTSignSession(s *SignSession) frostSignSnapshot {
@@ -105,13 +109,17 @@ func snapshotFROSTReshareSession(s *ReshareSession) frostReshareSnapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return frostReshareSnapshot{
-		Completed:     s.completed,
-		Aborted:       s.aborted,
-		HasNewShare:   s.newShare != nil,
-		IsRecipient:   s.isRecipient(),
-		RefreshMode:   s.isRefresh(),
-		CommitSenders: frostSnapshotMapKeys(s.commits),
-		ShareSenders:  frostSnapshotMapKeys(s.shares),
+		Completed:                  s.completed,
+		Aborted:                    s.aborted,
+		HasNewShare:                s.newShare != nil,
+		HasPendingShare:            s.pendingShare != nil,
+		HasConfirmationBinding:     s.confirmationBinding != nil,
+		IsRecipient:                s.isRecipient(),
+		RefreshMode:                s.isRefresh(),
+		CommitSenders:              frostSnapshotMapKeys(s.commits),
+		ShareSenders:               frostSnapshotMapKeys(s.shares),
+		ConfirmationSenders:        frostSnapshotMapKeys(s.confirmations),
+		PendingConfirmationSenders: frostSnapshotMapKeys(s.pendingConfirmations),
 	}
 }
 

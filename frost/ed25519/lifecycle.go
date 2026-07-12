@@ -88,6 +88,7 @@ func (s *ReshareSession) abort() {
 	}
 	s.aborted = true
 	s.clearSensitive()
+	s.clearReshareConfirmationState()
 	if s.pendingShare != nil {
 		s.pendingShare.Destroy()
 		s.pendingShare = nil
