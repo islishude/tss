@@ -42,10 +42,13 @@ Ring-Pedersen Πprm semantics.
 
 ## Negative Tests
 
-| Scenario                                                                              | Test Location                                             |
-| ------------------------------------------------------------------------------------- | --------------------------------------------------------- |
-| Πmod Jacobi, round count, missing equations, invalid `Z*_N` elements, extra fields    | `internal/zk/paillier/proofs_test.go`                     |
-| Invalid Ring-Pedersen params, response bounds, wrong transcript/party/domain          | `internal/zk/paillier/proofs_test.go`, `encoding_test.go` |
-| Invalid ciphertexts, malformed points, non-canonical responses                        | `internal/zk/paillier/proofs_test.go`                     |
-| MtA proof domain binds presign context                                                | `domain_test.go`                                          |
-| Presign reuse across key id, chain id, derivation path, policy domain, message domain | `presign_policy_test.go`                                  |
+| Scenario                                                                              | Test Location                                                |
+| ------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Πmod Jacobi, round count, missing equations, invalid `Z*_N` elements, extra fields    | `internal/zk/paillier/proofs_test.go`                        |
+| Invalid Ring-Pedersen params, response bounds, wrong transcript/party/domain          | `internal/zk/paillier/proofs_test.go`, `encoding_test.go`    |
+| Invalid ciphertexts, malformed points, non-canonical responses                        | `internal/zk/paillier/proofs_test.go`                        |
+| MtA proof domain binds presign context                                                | `domain_test.go`                                             |
+| MtA additive masks use EllPrime-width fixed secret integers                           | `internal/mta/helpers_test.go`                               |
+| SignPrep binds ordered round-2 payload commitments                                    | `integration_presign_adversary_test.go`                      |
+| Round1 Πlog\* binds EncK to KPoint; SignPrep binds delta and sigma MtA equations      | `domain_test.go`, `internal/zk/signprep/correctness_test.go` |
+| Presign reuse across key id, chain id, derivation path, policy domain, message domain | `presign_policy_test.go`                                     |

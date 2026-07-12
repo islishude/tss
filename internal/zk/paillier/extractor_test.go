@@ -172,11 +172,12 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	witness := AffGWitness{
 		X:    testSecpSecretScalar(t, x),
-		Y:    testSecpSecretScalar(t, y),
+		Y:    testSignedSecret(t, y, signedPowerOfTwoBytes(params.EllPrime)),
 		Rho:  testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
 		RhoY: testSecretScalarFixed(t, rhoY, modulusBytes(sk.N)),
 	}
@@ -207,13 +208,15 @@ func TestAffGProofSpecialSoundness(t *testing.T) {
 	}
 
 	transcript1, err := buildAffGTranscript(params, []byte("extract-1"), stmt, proof1.Y,
-		proof1.A, proof1.Bx, proof1.By, proof1.E, proof1.S, proof1.F, proof1.T)
+		proof1.A, proof1.Bx, proof1.By, proof1.E, proof1.S, proof1.F, proof1.T,
+		proof1.YPoint, proof1.BetaPointCommitment, proof1.AlphaPoint, proof1.ProductPointCommitment)
 	if err != nil {
 		t.Fatal(err)
 	}
 	e1, _ := transcript1.ChallengeSigned(params.ChallengeBits)
 	transcript2, err := buildAffGTranscript(params, []byte("extract-2"), stmt, proof2.Y,
-		proof2.A, proof2.Bx, proof2.By, proof2.E, proof2.S, proof2.F, proof2.T)
+		proof2.A, proof2.Bx, proof2.By, proof2.E, proof2.S, proof2.F, proof2.T,
+		proof2.YPoint, proof2.BetaPointCommitment, proof2.AlphaPoint, proof2.ProductPointCommitment)
 	if err != nil {
 		t.Fatal(err)
 	}

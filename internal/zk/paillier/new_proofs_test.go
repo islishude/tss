@@ -121,9 +121,14 @@ func TestSecretWitnessesRejectMalformedFixedScalars(t *testing.T) {
 
 	t.Run("affg", func(t *testing.T) {
 		params, stmt, witness, _ := affGProofFixture(t)
+		wrongYWidth := testSignedSecret(t, big.NewInt(1), signedPowerOfTwoBytes(params.EllPrime)-1)
+		defer wrongYWidth.Destroy()
+		outOfRangeY := testSignedSecret(t, new(big.Int).Lsh(big.NewInt(1), uint(params.EllPrime+1)), signedPowerOfTwoBytes(params.EllPrime)+1)
+		defer outOfRangeY.Destroy()
 		for _, bad := range []AffGWitness{
 			{X: wrongWidth, Y: witness.Y, Rho: witness.Rho, RhoY: witness.RhoY},
-			{X: witness.X, Y: outOfRange, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: wrongYWidth, Rho: witness.Rho, RhoY: witness.RhoY},
+			{X: witness.X, Y: outOfRangeY, Rho: witness.Rho, RhoY: witness.RhoY},
 			{X: witness.X, Y: witness.Y, Rho: wrongWidth, RhoY: witness.RhoY},
 		} {
 			if _, err := ProveAffG(params, []byte("affg matrix"), stmt, bad, nil); err == nil {
@@ -187,6 +192,7 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 	y := big.NewInt(29)
 	xSecret := testSecpSecretScalar(t, x)
 	ySecret := testSecpSecretScalar(t, y)
+	ySigned := testSignedSecret(t, y, signedPowerOfTwoBytes(params.EllPrime))
 	c, _, err := sk.EncryptSecret(nil, xSecret)
 	if err != nil {
 		t.Fatal(err)
@@ -215,9 +221,10 @@ func affGProofFixture(t *testing.T) (SecurityParams, AffGStatement, AffGWitness,
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
-	witness := AffGWitness{X: xSecret, Y: ySecret, Rho: rho, RhoY: rhoY}
+	witness := AffGWitness{X: xSecret, Y: ySigned, Rho: rho, RhoY: rhoY}
 	proof, err := ProveAffG(params, []byte("affg matrix"), stmt, witness, nil)
 	if err != nil {
 		t.Fatal(err)

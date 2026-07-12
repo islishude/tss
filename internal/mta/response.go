@@ -27,6 +27,28 @@ type ResponseMessage struct {
 	Proof      zkpai.AffGProof `json:"proof" wire:"2,nested,max_bytes=zk_proof"`
 }
 
+// Clone returns an independent copy of the public MtA response.
+func (m ResponseMessage) Clone() ResponseMessage {
+	proof := m.Proof.Clone()
+	if proof == nil {
+		return ResponseMessage{Ciphertext: append([]byte(nil), m.Ciphertext...)}
+	}
+	return ResponseMessage{
+		Ciphertext: append([]byte(nil), m.Ciphertext...),
+		Proof:      *proof,
+	}
+}
+
+// Destroy clears witness-derived response material retained in memory.
+func (m *ResponseMessage) Destroy() {
+	if m == nil {
+		return
+	}
+	clear(m.Ciphertext)
+	m.Proof.Destroy()
+	*m = ResponseMessage{}
+}
+
 // WireType returns the canonical wire type identifier for ResponseMessage.
 func (ResponseMessage) WireType() string { return responseMessageWireType }
 
@@ -82,14 +104,14 @@ func responseMessageFieldLimits() wire.FieldLimits {
 // Parameters:
 //   - pkA: initiator's Paillier public key (Nj in Πaff-g)
 //   - pkB: responder's own Paillier public key (Ni in Πaff-g)
-//   - startVerifierAux: responder's Ring-Pedersen parameters for checking Πenc
+//   - startVerifierAux: responder's Ring-Pedersen parameters for checking Πlog*
 //   - affGVerifierAux: initiator's Ring-Pedersen parameters for Πaff-g
 //
 // Returns the response message and the negated local beta share (-beta mod q).
 func Respond(
 	params zkpai.SecurityParams, reader io.Reader,
 	startProofDomain, responseDomain []byte,
-	start StartMessage, startProof *zkpai.EncProof,
+	start StartMessage, startProof *zkpai.LogStarProof, aCommitment []byte,
 	b *secret.Scalar, bCommitment []byte,
 	pkA, pkB *pai.PublicKey,
 	startVerifierAux, affGVerifierAux *zkpai.RingPedersenParams,
@@ -100,7 +122,14 @@ func Respond(
 	if startVerifierAux == nil || affGVerifierAux == nil {
 		return nil, nil, errors.New("nil RingPedersenParams")
 	}
-	if err := VerifyStart(params, startProofDomain, start, pkA, startVerifierAux, startProof); err != nil {
+	plaintextBits := max(params.Ell*2, params.EllPrime) + 1
+	if pkA == nil || pkA.N == nil || uint32(pkA.N.BitLen()) <= plaintextBits {
+		return nil, nil, errors.New("initiator Paillier modulus is too small for unwrapped MtA plaintext")
+	}
+	if pkB == nil || pkB.N == nil || uint32(pkB.N.BitLen()) <= params.EllPrime {
+		return nil, nil, errors.New("responder Paillier modulus is too small for affine mask")
+	}
+	if err := VerifyStart(params, startProofDomain, start, aCommitment, pkA, startVerifierAux, startProof); err != nil {
 		return nil, nil, err
 	}
 	bScalar, err := secpScalarFromSecret(b)
@@ -109,12 +138,12 @@ func Respond(
 	}
 
 	encA := new(big.Int).SetBytes(start.Ciphertext)
-	beta, err := randomSecretScalar(reader)
+	beta, err := randomWideMask(reader, params.EllPrime)
 	if err != nil {
 		return nil, nil, err
 	}
 	defer beta.Destroy()
-	encBeta, betaRandomness, err := pkA.EncryptSecret(reader, beta)
+	encBeta, betaRandomness, err := pkA.EncryptSignedSecret(reader, beta)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -145,7 +174,7 @@ func Respond(
 	response.Mod(response, pkA.NSquared)
 
 	// Encrypt beta under the responder's own key for the Y commitment.
-	yCiphertext, yRandomness, err := pkB.EncryptSecret(reader, beta)
+	yCiphertext, yRandomness, err := pkB.EncryptSignedSecret(reader, beta)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -153,6 +182,10 @@ func Respond(
 
 	// Curve commitment X = b * G.
 	X := secp.ScalarBaseMult(bScalar)
+	K, err := secp.PointFromBytes(aCommitment)
+	if err != nil {
+		return nil, nil, fmt.Errorf("invalid initiator commitment: %w", err)
+	}
 
 	stmt := zkpai.AffGStatement{
 		ReceiverPaillierN: pkA,
@@ -161,6 +194,7 @@ func Respond(
 		D:                 response,
 		Y:                 yCiphertext,
 		X:                 X,
+		K:                 K,
 		VerifierAux:       affGVerifierAux,
 	}
 	witness := zkpai.AffGWitness{
@@ -174,7 +208,11 @@ func Respond(
 	if err != nil {
 		return nil, nil, err
 	}
-	betaShareScalar := secp.ScalarNeg(mustSecpScalar(beta))
+	betaScalar, err := signedSecretScalarModOrder(beta)
+	if err != nil {
+		return nil, nil, err
+	}
+	betaShareScalar := secp.ScalarNeg(betaScalar)
 	betaShare, err := secret.NewScalar(betaShareScalar.Bytes(), secp.ScalarSize)
 	if err != nil {
 		return nil, nil, err

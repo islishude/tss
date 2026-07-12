@@ -17,7 +17,7 @@ import (
 //   - skA: initiator's Paillier private key
 //   - pkB: responder's Paillier public key (Ni in Πaff-g)
 //   - verifierAux: initiator's own Ring-Pedersen parameters
-func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*secret.Scalar, error) {
+func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, skA *pai.PrivateKey, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*secret.Scalar, error) {
 	if skA == nil {
 		return nil, errors.New("nil Paillier private key")
 	}
@@ -27,33 +27,10 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 	if verifierAux == nil {
 		return nil, errors.New("nil RingPedersenParams")
 	}
-	if err := start.Validate(); err != nil {
+	if err := VerifyResponse(params, responseDomain, start, response, aCommitment, bCommitment, skA.PublicKey, pkB, verifierAux); err != nil {
 		return nil, err
 	}
-	if err := response.Validate(); err != nil {
-		return nil, err
-	}
-	encA := new(big.Int).SetBytes(start.Ciphertext)
 	resp := new(big.Int).SetBytes(response.Ciphertext)
-
-	bCommit, err := secp.PointFromBytes(bCommitment)
-	if err != nil {
-		return nil, fmt.Errorf("invalid b commitment: %w", err)
-	}
-
-	stmt := zkpai.AffGStatement{
-		ReceiverPaillierN: skA.PublicKey,
-		ProverPaillierN:   pkB,
-		C:                 encA,
-		D:                 resp,
-		Y:                 response.Proof.Y, // Y is carried in the proof
-		X:                 bCommit,
-		VerifierAux:       verifierAux,
-	}
-
-	if err := zkpai.VerifyAffG(params, responseDomain, stmt, &response.Proof); err != nil {
-		return nil, fmt.Errorf("invalid MtA response proof: %w", err)
-	}
 	alpha, err := skA.Decrypt(resp)
 	if err != nil {
 		return nil, err
@@ -61,4 +38,42 @@ func Finish(params zkpai.SecurityParams, responseDomain []byte, start StartMessa
 	defer secret.ClearBigInt(alpha)
 	alpha.Mod(alpha, secp.Order())
 	return secret.NewScalar(alpha.FillBytes(make([]byte, secp.ScalarSize)), secp.ScalarSize)
+}
+
+// VerifyResponse verifies an MtA affine response without decrypting it.
+func VerifyResponse(params zkpai.SecurityParams, responseDomain []byte, start StartMessage, response ResponseMessage, aCommitment, bCommitment []byte, pkA, pkB *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) error {
+	if pkA == nil || pkB == nil {
+		return errors.New("nil Paillier public key")
+	}
+	if verifierAux == nil {
+		return errors.New("nil RingPedersenParams")
+	}
+	if err := start.Validate(); err != nil {
+		return err
+	}
+	if err := response.Validate(); err != nil {
+		return err
+	}
+	bCommit, err := secp.PointFromBytes(bCommitment)
+	if err != nil {
+		return fmt.Errorf("invalid b commitment: %w", err)
+	}
+	aCommit, err := secp.PointFromBytes(aCommitment)
+	if err != nil {
+		return fmt.Errorf("invalid a commitment: %w", err)
+	}
+	stmt := zkpai.AffGStatement{
+		ReceiverPaillierN: pkA,
+		ProverPaillierN:   pkB,
+		C:                 new(big.Int).SetBytes(start.Ciphertext),
+		D:                 new(big.Int).SetBytes(response.Ciphertext),
+		Y:                 response.Proof.Y,
+		X:                 bCommit,
+		K:                 aCommit,
+		VerifierAux:       verifierAux,
+	}
+	if err := zkpai.VerifyAffG(params, responseDomain, stmt, &response.Proof); err != nil {
+		return fmt.Errorf("invalid MtA response proof: %w", err)
+	}
+	return nil
 }

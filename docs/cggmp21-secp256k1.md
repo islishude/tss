@@ -316,14 +316,18 @@ and broadcasts:
 
 - `Γ_i = γ_i · G` (gamma commitment)
 - `Enc_i(k_i)` — Paillier encryption of `k_i` under party `i`'s public key
+- `KPoint_i = k_i · G`
 - party `i`'s Paillier public key
 
 For each verifier `j != i`, signer `i` also sends a confidential Round 1 proof payload containing:
 
 - a hash of the canonical public Round 1 payload
-- `Πenc` (`EncProof`) proving `Enc_i(k_i)` encrypts a value in range under party `i`'s Paillier key
+- `Πlog*` (`LogStarProof`) proving that `Enc_i(k_i)` and `KPoint_i` contain the same scalar
 
-The `Πenc` proof is verifier-specific because its statement includes verifier `j`'s Ring-Pedersen auxiliary parameters. A proof generated for one verifier is rejected by another verifier. Round 2 is not emitted until both the peer's public Round 1 payload and the peer-to-local `Πenc` proof verify.
+The `Πlog*` proof is verifier-specific because its statement includes verifier
+`j`'s Ring-Pedersen auxiliary parameters. A proof generated for one verifier is
+rejected by another verifier. Round 2 is not emitted until both the peer's
+public Round 1 payload and the peer-to-local proof verify.
 
 Internally, each signer computes the Lagrange-adjusted secret:
 
@@ -355,6 +359,18 @@ For every ordered pair of distinct signers `(i, j)`, two MtA exchanges run in pa
 
 The MtA domain binds `(protocol, version, session, threshold, all_parties, signers, initiator, responder, mta_kind, group_pk, keygen_transcript, initiator_paillier_pk)`.
 
+The additive mask is sampled as an `EllPrime`-bit fixed-width secret integer,
+not as a curve scalar. The implementation rejects Paillier moduli that cannot
+hold `k_i·b_j + β` without plaintext wraparound. Only the responder's final
+additive share is reduced modulo the curve order. This width is required to
+statistically hide `b_j` from an initiator that chooses its MtA input
+maliciously.
+
+Each Πaff-g proof additionally publishes and proves the curve relations
+`YPoint = β·G` and `AlphaPoint = b·KPoint + YPoint`, using the same integer
+responses as the Paillier equations. These relations let SignPrep bind both
+the delta and sigma correction sums without revealing their scalar shares.
+
 Each signer accumulates:
 
 ```
@@ -364,7 +380,13 @@ Each signer accumulates:
 
 ### Round 3: Delta Broadcast with Signprep Proof
 
-Each signer broadcasts a payload containing `δ_i`, `KPoint_i`, `ChiPoint_i`, and a `signprep proof`. After collecting all deltas:
+Each signer broadcasts a payload containing `δ_i`, `KPoint_i`, `ChiPoint_i`, a
+`signprep proof`, and the canonically ordered SHA-256 commitments to every
+round-2 payload it sent. It also carries the canonically ordered inbound and
+outbound delta/sigma MtA response records used by the proof. Receivers verify
+every Πaff-g proof, compare their own round-2 exchange, and require both parties'
+views of each pairwise response to agree before accepting round 3. After
+collecting all deltas:
 
 ```
 δ = Σ_i δ_i  mod q
@@ -379,9 +401,16 @@ The `Presign` record stores fixed-length secret scalars `(k_i, χ_i, δ)`, publi
 
 During presign round 3, each signer generates a `signprep proof` (`internal/zk/signprep`) that binds the published `KPoint_i = k_i·G` and `ChiPoint_i = χ_i·G` to the presign transcript.
 
-#### Design simplification vs. design spec
-
-The design spec (5.1) called for `Round2SigmaDigests` and `Round2DeltaDigests` fields in the statement. The implementation simplifies this by aggregating MTA contributions into a single scalar `M_i = Σ α̂_{ij} + Σ β̂_{ji}` and proving `ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i` via a DLEQ proof. This is cryptographically equivalent: the same `k_i` must be used consistently across KPoint and ChiPoint derivation, and the MTA sum is bound into the proof transcript. The simplification avoids per-digest bookkeeping without weakening the security guarantees.
+The implementation aggregates the local sigma MtA contributions into
+`M_i = Σ α̂_{ij} + Σ β̂_{ji}` and proves
+`ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i`. Using the verified Πaff-g
+curve points, it also proves
+`MPoint_i - sigmaOffset_i = k_i·Σ_{j≠i}X̄Point_j` and
+`DeltaPoint_i - deltaOffset_i = k_i·Γ`, where
+`DeltaPoint_i = δ_i·G`. The same DLEQ response is used for all relations, so the
+nonce opening, sigma correction, delta share, `KPoint`, and `ChiPoint` cannot be
+chosen independently. The statement binds digests of both the ordered round-2
+commitments and the complete MtA contribution view.
 
 #### Proof structure
 
@@ -389,9 +418,15 @@ The proof uses a unified Fiat-Shamir transcript with three components:
 
 1. **Schnorr**: `KPoint_i = k_i·G` — knowledge of the nonce scalar.
 2. **Schnorr** (when `M_i ≠ 0`): `MPoint_i = M_i·G` — knowledge of the MTA correction sum. When `M_i = 0` (e.g., 1-of-1 signing with no MTA contributions), MPoint is the point at infinity and no Schnorr sub-proof is generated.
-3. **DLEQ** (Chaum-Pedersen): `ChiPoint_i = k_i·(X̄Point_i + shift·G) + MPoint_i` — proving the same `k_i` is used in the ChiPoint derivation, where `X̄Point_i = λ_i·V_i` (publicly computable from the verification share and Lagrange coefficient). When `M_i = 0`, the DLEQ simplifies to `ChiPoint_i = k_i·(X̄Point_i + shift·G)`.
+3. **Multi-relation DLEQ** (Chaum-Pedersen): the same `k_i` opens `KPoint_i`, the ChiPoint relation, the sigma correction relation, and the delta relation. Identity bases and offsets use the canonical empty point encoding.
 
-The proof transcript binds labeled entries for `(protocol, session ID, party, signer set, context hash, additive shift, public key, keygen transcript hash, party-set hash, EncK, Paillier public key, round1 echo, Gamma, Delta, KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session, cross-context, cross-signer, cross-keygen, and proof-substitution attacks.
+The proof transcript binds labeled entries for `(protocol, session ID, party,
+signer set, context hash, additive shift, public key, keygen transcript hash,
+party-set hash, EncK, Paillier public key, round1 echo, ordered round2 commitment
+hash, MtA contribution hash, sigma base/offset, delta base/offset, Gamma, Delta,
+KPoint, ChiPoint, XBarPoint, MPoint)`. This prevents cross-session,
+cross-context, cross-signer, cross-keygen, round-2-substitution, correction-share
+substitution, and proof-substitution attacks.
 
 Receivers verify the signprep proof during presign round 3 **before** accepting the delta share or writing any session state. An invalid proof produces `EvidenceKindPresignRound3` blame with the sender.
 
@@ -445,7 +480,11 @@ s = Σ_i s_i  mod q
 
 Low-S normalization is applied by default (`s = min(s, q-s)`). The final ECDSA signature `(r, s)` is verified against the bound verification key, including the derived child public key when a derivation path is set, before being returned.
 
-Since every partial is independently verified before aggregation, a failure at this stage is an **implementation invariant violation** (`ErrCodeInvariant`), not a protocol-level blame event. It carries no blame parties. This replaces the previous behavior where aggregate verification failure blamed all signers as a suspect set.
+Because Round1 binds `EncK_i` to `KPoint_i`, Πaff-g binds every pairwise mask to
+public curve points, and SignPrep binds both delta and sigma correction sums,
+all accepted partial equations imply the aggregate ECDSA equation. A failure of
+the final self-check after every partial verifies is therefore an implementation
+or storage invariant failure (`ErrCodeInvariant`) and carries no remote blame.
 
 ### HD Derivation
 
@@ -684,10 +723,10 @@ Per-party signpartial evidence includes:
 | ---------------------------------------------- | -------------- | ------------ | --------------------------------------------------------------------------- |
 | `cggmp21.secp256k1.keygen.commitments`         | broadcast      | no           | Polynomial commitments + Paillier key + proofs                              |
 | `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Scalar share for one recipient                                              |
-| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), PaillierPK)`                                             |
-| `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific Πenc proof                           |
+| `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), KPoint_i, PaillierPK)`                                   |
+| `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific Πlog\* proof                         |
 | `cggmp21.secp256k1.presign.round2`             | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof)                        |
-| `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i`, `KPoint_i`, `ChiPoint_i`, and signprep proof                         |
+| `cggmp21.secp256k1.presign.round3`             | broadcast      | no           | `δ_i`, `KPoint_i`, `ChiPoint_i`, MtA views, and signprep proof              |
 | `cggmp21.secp256k1.sign.partial`               | broadcast      | no           | `s_i`, presign transcript, context hash, digest hash, partial equation hash |
 | `cggmp21.secp256k1.refresh.commitments`        | broadcast      | no           | Refresh polynomial commitments + new Paillier                               |
 | `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Refresh scalar share                                                        |
@@ -758,7 +797,7 @@ sequenceDiagram
 
 **Offline phase**: Pre-computation independent of the message to sign. Produces a one-use `Presign` record that must be persisted securely until online signing. No message digest is involved.
 
-Round 1: nonce commitments with verifier-specific Πenc proofs.
+Round 1: nonce commitments with verifier-specific Πlog\* proofs binding `EncK` to `KPoint`.
 
 Round 2: pairwise MtA exchanges.
 
@@ -777,13 +816,13 @@ sequenceDiagram
     S2-->>S3: Broadcast Γ₂, Enc₂(k₂), PaillierPK₂
     S3-->>S1: Broadcast Γ₃, Enc₃(k₃), PaillierPK₃
 
-    Note over S1,S3: Round 1 — Πenc Proofs (confidential, verifier-specific)
-    S1->>S2: Πenc₁₂ (hash of public R1, verifier=j) for S2 RP params
-    S1->>S3: Πenc₁₃ (hash of public R1, verifier=j) for S3 RP params
-    S2->>S1: Πenc₂₁ for S1 RP params
-    S2->>S3: Πenc₂₃ for S3 RP params
-    S3->>S1: Πenc₃₁ for S1 RP params
-    S3->>S2: Πenc₃₂ for S2 RP params
+    Note over S1,S3: Round 1 — Πlog* Proofs (confidential, verifier-specific)
+    S1->>S2: Πlog*₁₂ (EncK₁ ↔ KPoint₁, verifier=j) for S2 RP params
+    S1->>S3: Πlog*₁₃ for S3 RP params
+    S2->>S1: Πlog*₂₁ for S1 RP params
+    S2->>S3: Πlog*₂₃ for S3 RP params
+    S3->>S1: Πlog*₃₁ for S1 RP params
+    S3->>S2: Πlog*₃₂ for S2 RP params
 
     Note over S1,S3: 【Offline】 Round 1 Echo (local)
     S1->>S1: Echo₁ = Hash(all Round-1 broadcasts)
@@ -804,9 +843,9 @@ sequenceDiagram
     Note over S1: Accumulate: δ₁=k₁γ₁+Σα+Σβ, χ₁=k₁x̄₁+Σα̂+Σβ̂
 
     Note over S1,S3: 【Offline】 Round 3 — Delta Broadcast
-    S1-->>S3: δ₁, KPoint₁, ChiPoint₁, SignprepProof
-    S2-->>S3: δ₂, KPoint₂, ChiPoint₂, SignprepProof
-    S3-->>S1: δ₃, KPoint₃, ChiPoint₃, SignprepProof
+    S1-->>S3: δ₁, KPoint₁, ChiPoint₁, MtA views, SignprepProof
+    S2-->>S3: δ₂, KPoint₂, ChiPoint₂, MtA views, SignprepProof
+    S3-->>S1: δ₃, KPoint₃, ChiPoint₃, MtA views, SignprepProof
 
     Note over S1,S3: Verify signprep proofs → δ=Σδᵢ → R=δ⁻¹·Γ → Presign stored
 ```

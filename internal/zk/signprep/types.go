@@ -10,26 +10,32 @@ import (
 
 // Statement is the public input for a signprep proof.
 type Statement struct {
-	Protocol             tss.ProtocolID
-	SessionID            tss.SessionID
-	Party                tss.PartyID
-	Signers              tss.PartySet
-	PlanHash             []byte
-	ContextHash          []byte
-	AdditiveShift        []byte
-	PublicKey            []byte
-	KeygenTranscriptHash []byte
-	PartiesHash          []byte
-	EncK                 []byte
-	PaillierPublicKey    []byte
-	Round1Echo           []byte
-	Gamma                []byte
-	Delta                []byte
-	LittleR              []byte
-	R                    []byte
-	KPoint               []byte
-	ChiPoint             []byte
-	XBarPoint            []byte
+	Protocol              tss.ProtocolID
+	SessionID             tss.SessionID
+	Party                 tss.PartyID
+	Signers               tss.PartySet
+	PlanHash              []byte
+	ContextHash           []byte
+	AdditiveShift         []byte
+	PublicKey             []byte
+	KeygenTranscriptHash  []byte
+	PartiesHash           []byte
+	EncK                  []byte
+	PaillierPublicKey     []byte
+	Round1Echo            []byte
+	Round2CommitmentsHash []byte
+	MTAContributionsHash  []byte
+	MTABasePoint          []byte
+	MTAOffsetPoint        []byte
+	DeltaBasePoint        []byte
+	DeltaOffsetPoint      []byte
+	Gamma                 []byte
+	Delta                 []byte
+	LittleR               []byte
+	R                     []byte
+	KPoint                []byte
+	ChiPoint              []byte
+	XBarPoint             []byte
 }
 
 // Clone returns a deep copy of Statement
@@ -44,6 +50,12 @@ func (stmt Statement) Clone() Statement {
 	stmt.EncK = bytes.Clone(stmt.EncK)
 	stmt.PaillierPublicKey = bytes.Clone(stmt.PaillierPublicKey)
 	stmt.Round1Echo = bytes.Clone(stmt.Round1Echo)
+	stmt.Round2CommitmentsHash = bytes.Clone(stmt.Round2CommitmentsHash)
+	stmt.MTAContributionsHash = bytes.Clone(stmt.MTAContributionsHash)
+	stmt.MTABasePoint = bytes.Clone(stmt.MTABasePoint)
+	stmt.MTAOffsetPoint = bytes.Clone(stmt.MTAOffsetPoint)
+	stmt.DeltaBasePoint = bytes.Clone(stmt.DeltaBasePoint)
+	stmt.DeltaOffsetPoint = bytes.Clone(stmt.DeltaOffsetPoint)
 	stmt.Gamma = bytes.Clone(stmt.Gamma)
 	stmt.Delta = bytes.Clone(stmt.Delta)
 	stmt.LittleR = bytes.Clone(stmt.LittleR)
@@ -72,14 +84,16 @@ func (w Witness) Clone() Witness {
 
 // Proof is a CGGMP21 signprep proof.
 type Proof struct {
-	MPoint       []byte         `wire:"1,bytes,max_bytes=point"`
-	KCommitment  []byte         `wire:"2,bytes,max_bytes=point"`
-	MCommitment  []byte         `wire:"3,bytes,max_bytes=point"`
-	DLEQA1       []byte         `wire:"4,bytes,max_bytes=point"`
-	DLEQA2       []byte         `wire:"5,bytes,max_bytes=point"`
-	KResponse    *secret.Scalar `wire:"6,custom,len=32"`
-	MResponse    []byte         `wire:"7,bytes,max_bytes=scalar"`
-	DLEQResponse *secret.Scalar `wire:"8,custom,len=32"`
+	MPoint                  []byte         `wire:"1,bytes,max_bytes=point"`
+	KCommitment             []byte         `wire:"2,bytes,max_bytes=point"`
+	MCommitment             []byte         `wire:"3,bytes,max_bytes=point"`
+	DLEQA1                  []byte         `wire:"4,bytes,max_bytes=point"`
+	DLEQA2                  []byte         `wire:"5,bytes,max_bytes=point"`
+	KResponse               *secret.Scalar `wire:"6,custom,len=32"`
+	MResponse               []byte         `wire:"7,bytes,max_bytes=scalar"`
+	DLEQResponse            *secret.Scalar `wire:"8,custom,len=32"`
+	MTARelationCommitment   []byte         `wire:"9,bytes,max_bytes=point"`
+	DeltaRelationCommitment []byte         `wire:"10,bytes,max_bytes=point"`
 }
 
 // Clone returns an independently owned copy of the proof, or nil for nil.
@@ -88,14 +102,16 @@ func (p *Proof) Clone() *Proof {
 		return nil
 	}
 	return &Proof{
-		MPoint:       slices.Clone(p.MPoint),
-		KCommitment:  slices.Clone(p.KCommitment),
-		MCommitment:  slices.Clone(p.MCommitment),
-		DLEQA1:       slices.Clone(p.DLEQA1),
-		DLEQA2:       slices.Clone(p.DLEQA2),
-		KResponse:    p.KResponse.Clone(),
-		MResponse:    slices.Clone(p.MResponse),
-		DLEQResponse: p.DLEQResponse.Clone(),
+		MPoint:                  slices.Clone(p.MPoint),
+		KCommitment:             slices.Clone(p.KCommitment),
+		MCommitment:             slices.Clone(p.MCommitment),
+		DLEQA1:                  slices.Clone(p.DLEQA1),
+		DLEQA2:                  slices.Clone(p.DLEQA2),
+		KResponse:               p.KResponse.Clone(),
+		MResponse:               slices.Clone(p.MResponse),
+		DLEQResponse:            p.DLEQResponse.Clone(),
+		MTARelationCommitment:   slices.Clone(p.MTARelationCommitment),
+		DeltaRelationCommitment: slices.Clone(p.DeltaRelationCommitment),
 	}
 }
 

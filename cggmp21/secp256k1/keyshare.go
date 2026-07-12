@@ -461,7 +461,7 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	localData := k.state.PartyData[k.state.Party]
 	pk := localData.PaillierPublicKey
 	sk := k.state.PaillierPrivateKey
-	if err := sk.PublicKey.Validate(); err != nil {
+	if err := sk.Validate(); err != nil {
 		return fmt.Errorf("invalid paillier private key: %w", err)
 	}
 	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
@@ -470,6 +470,17 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	verificationShare, ok := k.verificationShare(k.state.Party)
 	if !ok {
 		return errors.New("missing local verification share")
+	}
+	secretScalar, err := secpScalarFromSecret(k.state.Secret)
+	if err != nil {
+		return fmt.Errorf("invalid secret scalar: %w", err)
+	}
+	verificationPoint, err := secp.PointFromBytes(verificationShare)
+	if err != nil {
+		return fmt.Errorf("invalid verification share: %w", err)
+	}
+	if !secp.Equal(secp.ScalarBaseMult(secretScalar), verificationPoint) {
+		return errors.New("local secret scalar does not match verification share")
 	}
 	if !schnorr.Verify(k.state.KeygenTranscriptHash, verificationShare, k.state.ShareProof) {
 		return errors.New("invalid local share proof")
@@ -480,10 +491,6 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	rp, err := k.ringPedersenPublicFor(k.state.Party, limits)
 	if err != nil {
 		return fmt.Errorf("missing RP params for log proof: %w", err)
-	}
-	verificationPoint, err := secp.PointFromBytes(verificationShare)
-	if err != nil {
-		return fmt.Errorf("invalid verification share: %w", err)
 	}
 	logDomain, err := logProofDomain(k, pk, verificationShare, k.state.KeygenTranscriptHash, limits)
 	if err != nil {
@@ -782,6 +789,9 @@ func (k *KeyShare) paillierPublic(limits Limits) (*pai.PublicKey, error) {
 func (k *KeyShare) paillierPrivate() (*pai.PrivateKey, error) {
 	if k.state.PaillierPrivateKey == nil {
 		return nil, errors.New("missing local Paillier private key")
+	}
+	if err := k.state.PaillierPrivateKey.Validate(); err != nil {
+		return nil, fmt.Errorf("invalid local Paillier private key: %w", err)
 	}
 	return k.state.PaillierPrivateKey.Clone(), nil
 }

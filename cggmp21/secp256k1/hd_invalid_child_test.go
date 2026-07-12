@@ -14,14 +14,6 @@ func TestDeriveNonHardenedBIP32InvalidChildErrorMode(t *testing.T) {
 
 	valid := mustParseXPub(t, xpubTV2Master)
 
-	t.Run("IL=0", func(t *testing.T) {
-		_, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0},
-			tss.WithHMACFunc(fakeHMACForInvalidChild(make([]byte, 32))))
-		if !errors.Is(err, tss.ErrInvalidChild) {
-			t.Errorf("expected tss.ErrInvalidChild for IL==0, got %v", err)
-		}
-	})
-
 	t.Run("IL>=order", func(t *testing.T) {
 		orderBytes := secp.Order().Bytes()
 		ilOrder := make([]byte, 32)
@@ -39,6 +31,7 @@ func TestDeriveNonHardenedBIP32InvalidChildSkipMode(t *testing.T) {
 	t.Parallel()
 
 	valid := mustParseXPub(t, xpubTV2Master)
+	orderBytes := secp.Order().FillBytes(make([]byte, 32))
 
 	callCount := 0
 	result, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0},
@@ -46,7 +39,7 @@ func TestDeriveNonHardenedBIP32InvalidChildSkipMode(t *testing.T) {
 		tss.WithHMACFunc(func(key, data []byte) []byte {
 			callCount++
 			if callCount == 1 {
-				return make([]byte, 64) // all zeros triggers invalid child (IL == 0)
+				return fakeHMACForInvalidChild(orderBytes)(key, data)
 			}
 			return bip32util.HMACSHA512(key, data)
 		}))
@@ -68,10 +61,11 @@ func TestDeriveNonHardenedBIP32InvalidChildSkipModeStopsBeforeHardenedRange(t *t
 	t.Parallel()
 
 	valid := mustParseXPub(t, xpubTV2Master)
+	orderBytes := secp.Order().FillBytes(make([]byte, 32))
 
 	_, err := DeriveNonHardenedBIP32(valid.PublicKey, valid.ChainCode[:], []uint32{0x7FFFFFFF},
 		tss.WithInvalidChildMode(tss.SkipInvalidChild),
-		tss.WithHMACFunc(fakeHMACForInvalidChild(make([]byte, 32))))
+		tss.WithHMACFunc(fakeHMACForInvalidChild(orderBytes)))
 	if !errors.Is(err, tss.ErrHardenedDerivationUnsupported) {
 		t.Errorf("expected tss.ErrHardenedDerivationUnsupported, got %v", err)
 	}

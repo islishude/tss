@@ -53,6 +53,7 @@ func (s *ReshareSession) dealerMessages() ([]tss.Envelope, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer clearSecpPolynomial(poly)
 	commitments, err := polynomialCommitments(poly)
 	if err != nil {
 		return nil, err
@@ -133,6 +134,12 @@ func (s *ReshareSession) initReceiverMaterial() error {
 	if err != nil {
 		return err
 	}
+	owned := true
+	defer func() {
+		if owned {
+			newPaillierKey.Destroy()
+		}
+	}()
 	proofConfig := s.receiverConfig()
 	modDomain, err := resharePaillierDomain(proofConfig, s.selfID, newPaillierKey.PublicKey, s.planHash, s.limits)
 	if err != nil {
@@ -156,6 +163,7 @@ func (s *ReshareSession) initReceiverMaterial() error {
 		return err
 	}
 	s.newPaillier = newPaillierKey
+	owned = false
 	s.newPartyData[s.selfID] = &reshareNewPartyData{
 		paillierPub: paillierPublicMaterial{
 			Party:     s.selfID,

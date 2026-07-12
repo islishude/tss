@@ -1,6 +1,8 @@
 package secp256k1
 
 import (
+	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -9,22 +11,36 @@ import (
 	"github.com/islishude/tss/internal/zk/signprep"
 )
 
-const signVerifyShareRecordFixedBytes = 2 + 4*(2+4) + 4
+const signVerifyShareRecordFixedBytes = 2 + 10*(2+4) + 4
 
 type signVerifyShare struct {
-	Party    tss.PartyID     `wire:"1,u32"`
-	KPoint   *secp.Point     `wire:"2,custom,len=33"`
-	ChiPoint *secp.Point     `wire:"3,custom,len=33"`
-	Proof    *signprep.Proof `wire:"4,custom,max_bytes=signprep_proof"`
+	Party                 tss.PartyID     `wire:"1,u32"`
+	KPoint                *secp.Point     `wire:"2,custom,len=33"`
+	ChiPoint              *secp.Point     `wire:"3,custom,len=33"`
+	Proof                 *signprep.Proof `wire:"4,custom,max_bytes=signprep_proof"`
+	Round2CommitmentsHash []byte          `wire:"5,bytes,len=32"`
+	MTAContributionsHash  []byte          `wire:"6,bytes,len=32"`
+	MTABasePoint          []byte          `wire:"7,bytes,max_bytes=point"`
+	MTAOffsetPoint        []byte          `wire:"8,bytes,max_bytes=point"`
+	DeltaBasePoint        []byte          `wire:"9,bytes,max_bytes=point"`
+	DeltaOffsetPoint      []byte          `wire:"10,bytes,max_bytes=point"`
+	mtaContributions      []presignMTAContribution
 }
 
 // Clone returns a deep copy of signVerifyShare
 func (s signVerifyShare) Clone() signVerifyShare {
 	return signVerifyShare{
-		Party:    s.Party,
-		KPoint:   secp.Clone(s.KPoint),
-		ChiPoint: secp.Clone(s.ChiPoint),
-		Proof:    s.Proof.Clone(),
+		Party:                 s.Party,
+		KPoint:                secp.Clone(s.KPoint),
+		ChiPoint:              secp.Clone(s.ChiPoint),
+		Proof:                 s.Proof.Clone(),
+		Round2CommitmentsHash: bytes.Clone(s.Round2CommitmentsHash),
+		MTAContributionsHash:  bytes.Clone(s.MTAContributionsHash),
+		MTABasePoint:          bytes.Clone(s.MTABasePoint),
+		MTAOffsetPoint:        bytes.Clone(s.MTAOffsetPoint),
+		DeltaBasePoint:        bytes.Clone(s.DeltaBasePoint),
+		DeltaOffsetPoint:      bytes.Clone(s.DeltaOffsetPoint),
+		mtaContributions:      cloneMTAContributions(s.mtaContributions),
 	}
 }
 
@@ -38,6 +54,8 @@ func (s *signVerifyShare) destroy() {
 		clear(s.Proof.MCommitment)
 		clear(s.Proof.DLEQA1)
 		clear(s.Proof.DLEQA2)
+		clear(s.Proof.MTARelationCommitment)
+		clear(s.Proof.DeltaRelationCommitment)
 		if s.Proof.KResponse != nil {
 			s.Proof.KResponse.Destroy()
 		}
@@ -46,6 +64,13 @@ func (s *signVerifyShare) destroy() {
 			s.Proof.DLEQResponse.Destroy()
 		}
 	}
+	clear(s.Round2CommitmentsHash)
+	clear(s.MTAContributionsHash)
+	clear(s.MTABasePoint)
+	clear(s.MTAOffsetPoint)
+	clear(s.DeltaBasePoint)
+	clear(s.DeltaOffsetPoint)
+	destroyMTAContributions(s.mtaContributions)
 	*s = signVerifyShare{}
 }
 
@@ -74,6 +99,32 @@ func (s signVerifyShare) Validate() error {
 	}
 	if err := s.Proof.Validate(); err != nil {
 		return fmt.Errorf("sign verify share: invalid proof: %w", err)
+	}
+	if len(s.Round2CommitmentsHash) != sha256.Size {
+		return errors.New("sign verify share: round2 commitments hash must be 32 bytes")
+	}
+	if len(s.MTAContributionsHash) != sha256.Size {
+		return errors.New("sign verify share: MTA contributions hash must be 32 bytes")
+	}
+	if len(s.MTABasePoint) > 0 {
+		if _, err := secp.PointFromBytes(s.MTABasePoint); err != nil {
+			return fmt.Errorf("sign verify share: invalid MTA base point: %w", err)
+		}
+	}
+	if len(s.MTAOffsetPoint) > 0 {
+		if _, err := secp.PointFromBytes(s.MTAOffsetPoint); err != nil {
+			return fmt.Errorf("sign verify share: invalid MTA offset point: %w", err)
+		}
+	}
+	if len(s.DeltaBasePoint) > 0 {
+		if _, err := secp.PointFromBytes(s.DeltaBasePoint); err != nil {
+			return fmt.Errorf("sign verify share: invalid delta base point: %w", err)
+		}
+	}
+	if len(s.DeltaOffsetPoint) > 0 {
+		if _, err := secp.PointFromBytes(s.DeltaOffsetPoint); err != nil {
+			return fmt.Errorf("sign verify share: invalid delta offset point: %w", err)
+		}
 	}
 	return nil
 }
@@ -111,7 +162,10 @@ func validateSignVerifyShares(signers tss.PartySet, shares []signVerifyShare, li
 		if len(proof) > limits.SignPrep.MaxProofBytes {
 			return fmt.Errorf("sign verify share proof too large: %d > %d", len(proof), limits.SignPrep.MaxProofBytes)
 		}
-		size := signVerifyShareRecordFixedBytes + len(kPoint) + len(chiPoint) + len(proof)
+		size := signVerifyShareRecordFixedBytes + len(kPoint) + len(chiPoint) + len(proof) +
+			len(share.Round2CommitmentsHash) + len(share.MTAContributionsHash) +
+			len(share.MTABasePoint) + len(share.MTAOffsetPoint) +
+			len(share.DeltaBasePoint) + len(share.DeltaOffsetPoint)
 		if size > limits.SignPrep.MaxVerifyShareBytes {
 			return fmt.Errorf("sign verify share too large: %d > %d", size, limits.SignPrep.MaxVerifyShareBytes)
 		}

@@ -420,7 +420,8 @@ inside transcripts instead.
 - `internal/zk/paillier.LogStarProof` (Πlog\*)
 - `internal/zk/paillier.KeygenConfirmation`
 - `internal/zk/schnorr.Proof`
-- `internal/zk/signprep.Proof` (Schnorr + DLEQ, 8 fields: MPoint, KCommitment, MCommitment, DLEQA1, DLEQA2, KResponse, MResponse, DLEQResponse)
+- `internal/zk/signprep.Proof` (Schnorr + multi-relation DLEQ, 10 fields,
+  including the sigma-MtA and delta relation commitments)
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
 all active Paillier ZK proof types (Πmod, Πprm, Πenc, Πaff-g, Πlog\*), and
@@ -437,10 +438,14 @@ where integers appear.
 Current presign wire shapes are:
 
 - `mta.start-message`: field 1 is the Paillier ciphertext only.
-- `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`, and prover Paillier public key.
-- `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1 hash and verifier-specific `EncProof`.
+- `cggmp21.secp256k1.payload.presign.round1`: fields are `Gamma`, `EncK`,
+  prover Paillier public key, `PlanHash`, and `KPoint`.
+- `cggmp21.secp256k1.payload.presign.round1-proof`: fields are public Round1
+  hash, verifier-specific `LogStarProof`, and `PlanHash`.
 - `cggmp21.secp256k1.payload.presign.round2`: fields are typed MtA `ResponseMessage` records for `Delta` and `Sigma`, plus the round-1 echo hash. Each response carries a typed `AffGProof`.
-- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta` (scalar), `KPoint` (compressed point), `ChiPoint` (compressed point), and `Proof` (canonical signprep proof TLV bytes).
+- `cggmp21.secp256k1.payload.presign.round3`: fields are `Delta`, `KPoint`,
+  `ChiPoint`, canonical SignPrep proof bytes, `PlanHash`, ordered Round2 payload
+  commitments, and ordered inbound/outbound delta/sigma MtA contribution records.
 - `cggmp21.secp256k1.payload.sign.partial`: fields are `S` (scalar), `PresignTranscript` (32 bytes), `PresignContext`/context hash (32 bytes), `DigestHash` (32 bytes), `SignPlanHash` (32 bytes), and `PartialEquationHash` (32 bytes).
 
 Retired `EncryptionProof`, `MTAResponseProof`, `LogProof`, and standalone
@@ -456,7 +461,9 @@ secret scalars `k_i`, `χ_i`, and `δ`, public `(R, r)`, transcript/context
 hashes, additive HD shift, consumed flag, key binding fields for the group
 public key, keygen transcript hash, and participant-set hash, and per-party
 `VerifyShares` (tag 16, a private canonical record list with one entry per
-signer: party ID, `KPoint`, `ChiPoint`, and canonical signprep proof TLV bytes). Decoders
+signer: party ID, `KPoint`, `ChiPoint`, canonical signprep proof TLV bytes,
+Round2/MtA contribution hashes, and the sigma/delta relation base and offset
+points). Decoders
 require the complete 19-field presign set. The former opaque party-triple byte
 field and standalone sign-verify-share object are intentionally not accepted.
 

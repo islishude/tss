@@ -90,6 +90,21 @@ func (p *LogStarProof) Validate() error {
 	return nil
 }
 
+// Destroy clears witness-derived integer material retained by the proof.
+func (p *LogStarProof) Destroy() {
+	if p == nil {
+		return
+	}
+	secret.ClearBigInt(p.S)
+	secret.ClearBigInt(p.A)
+	secret.ClearBigInt(p.D)
+	secret.ClearBigInt(p.Z1)
+	secret.ClearBigInt(p.Z2)
+	secret.ClearBigInt(p.Z3)
+	clear(p.TranscriptHash)
+	*p = LogStarProof{}
+}
+
 // ProveLogStar creates a Πlog* proof.
 func ProveLogStar(params SecurityParams, state []byte, stmt LogStarStatement, w LogStarWitness, rng io.Reader) (*LogStarProof, error) {
 	var lastErr error

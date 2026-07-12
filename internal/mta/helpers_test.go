@@ -1,6 +1,7 @@
 package mta
 
 import (
+	"bytes"
 	"context"
 	"math/big"
 	"testing"
@@ -11,6 +12,39 @@ import (
 	"github.com/islishude/tss/internal/testutil"
 	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
+
+func TestMTAWideMaskDefeatsScalarIntervalExtraction(t *testing.T) {
+	t.Parallel()
+
+	const bits = uint32(512)
+	mask, err := randomWideMask(bytes.NewReader(bytes.Repeat([]byte{0xff}, int((bits+8)/8))), bits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer mask.Destroy()
+	if mask.FixedLen() <= secp.ScalarSize {
+		t.Fatal("MtA mask retained curve-scalar width")
+	}
+	magnitude := mask.FixedMagnitude()
+	defer clear(magnitude)
+	beta := new(big.Int).SetBytes(magnitude)
+	defer secret.ClearBigInt(beta)
+	if beta.Cmp(secp.Order()) <= 0 {
+		t.Fatal("test mask did not exceed the old scalar interval")
+	}
+	b := big.NewInt(7)
+	a := new(big.Int).Sub(secp.Order(), big.NewInt(1))
+	alpha := new(big.Int).Mul(a, b)
+	alpha.Add(alpha, beta)
+	lower := new(big.Int).Sub(alpha, new(big.Int).Sub(secp.Order(), big.NewInt(1)))
+	lower.Add(lower, new(big.Int).Sub(a, big.NewInt(1)))
+	lower.Div(lower, a)
+	upper := new(big.Int).Sub(alpha, big.NewInt(1))
+	upper.Div(upper, a)
+	if b.Cmp(lower) >= 0 && b.Cmp(upper) <= 0 {
+		t.Fatal("wide MtA mask remained recoverable from the old scalar interval")
+	}
+}
 
 func testSecurityParams() zkpai.SecurityParams {
 	return zkpai.SecurityParams{
@@ -84,16 +118,20 @@ func seedMessages(tb testing.TB) (*StartMessage, *ResponseMessage) {
 	if err != nil {
 		tb.Fatal(err)
 	}
+	aCommit, err := secp.PointBytes(secp.ScalarBaseMult(secp.ScalarFromBigInt(a)))
+	if err != nil {
+		tb.Fatal(err)
+	}
 	start, err := Start(nil, testSecretScalar(tb, a), skA.PublicKey)
 	if err != nil {
 		tb.Fatal(err)
 	}
 	params := testSecurityParams()
-	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, skA.PublicKey, rpB)
+	startProof, err := ProveStartForVerifier(params, nil, []byte("start"), start, aCommit, skA.PublicKey, rpB)
 	if err != nil {
 		tb.Fatal(err)
 	}
-	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, testSecretScalar(tb, b), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
+	response, _, err := Respond(params, nil, []byte("start"), []byte("response"), start.Message, startProof, aCommit, testSecretScalar(tb, b), bCommit, skA.PublicKey, skB.PublicKey, rpB, rpA)
 	if err != nil {
 		tb.Fatal(err)
 	}

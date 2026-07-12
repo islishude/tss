@@ -472,8 +472,13 @@ type presignRound1State struct {
 }
 
 type presignRound2State struct {
-	payload     presignRound2Payload
-	havePayload bool
+	payload           presignRound2Payload
+	havePayload       bool
+	outboundHash      []byte
+	outboundSigma     mta.ResponseMessage
+	haveOutboundSigma bool
+	outboundDelta     mta.ResponseMessage
+	haveOutboundDelta bool
 }
 
 type presignRound3State struct {
@@ -565,13 +570,14 @@ func (r *presignRound1State) destroy() {
 	}
 	clear(r.payload.Gamma)
 	clear(r.payload.EncK)
+	clear(r.payload.KPoint)
 	if r.payload.PaillierPublicKey != nil {
 		secret.ClearBigInt(r.payload.PaillierPublicKey.N)
 		secret.ClearBigInt(r.payload.PaillierPublicKey.G)
 		secret.ClearBigInt(r.payload.PaillierPublicKey.NSquared)
 	}
 	clear(r.proof.PublicRound1Hash)
-	r.proof.EncKProof.Desstroy()
+	r.proof.EncKProof.Destroy()
 	*r = presignRound1State{}
 }
 
@@ -584,6 +590,9 @@ func (r *presignRound2State) destroy() {
 	clear(r.payload.Sigma.Ciphertext)
 	r.payload.Sigma.Proof.Destroy()
 	clear(r.payload.Round1Echo)
+	clear(r.outboundHash)
+	r.outboundSigma.Destroy()
+	r.outboundDelta.Destroy()
 	*r = presignRound2State{}
 }
 
@@ -594,6 +603,7 @@ func (r *presignRound3State) destroy() {
 	if r.delta != nil {
 		r.delta.Destroy()
 	}
+	r.verifyShare.destroy()
 	*r = presignRound3State{}
 }
 
@@ -655,6 +665,7 @@ type presignRound1Payload struct {
 	EncK              []byte         `json:"enc_k" wire:"2,bytes,max_bytes=paillier_ciphertext"`
 	PaillierPublicKey *pai.PublicKey `json:"paillier_public_key" wire:"3,nested,max_bytes=paillier_public_key"`
 	PlanHash          []byte         `json:"plan_hash" wire:"4,bytes,len=32"`
+	KPoint            []byte         `json:"k_point" wire:"5,bytes,len=33"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1Payload.
@@ -664,9 +675,9 @@ func (presignRound1Payload) WireType() string { return presignRound1PayloadWireT
 func (presignRound1Payload) WireVersion() uint16 { return presignRound1PayloadWireVersion }
 
 type presignRound1ProofPayload struct {
-	PublicRound1Hash []byte         `json:"public_round1_hash" wire:"1,bytes,len=32"`
-	EncKProof        zkpai.EncProof `json:"enc_k_proof" wire:"2,nested,max_bytes=zk_proof"`
-	PlanHash         []byte         `json:"plan_hash" wire:"3,bytes,len=32"`
+	PublicRound1Hash []byte             `json:"public_round1_hash" wire:"1,bytes,len=32"`
+	EncKProof        zkpai.LogStarProof `json:"enc_k_proof" wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash         []byte             `json:"plan_hash" wire:"3,bytes,len=32"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound1ProofPayload.
@@ -691,11 +702,26 @@ func (presignRound2Payload) WireType() string { return presignRound2PayloadWireT
 func (presignRound2Payload) WireVersion() uint16 { return presignRound2PayloadWireVersion }
 
 type presignRound3Payload struct {
-	Delta    *secret.Scalar  `json:"-" wire:"1,custom,len=32"`
-	KPoint   *secp.Point     `json:"k_point" wire:"2,custom,len=33"`
-	ChiPoint *secp.Point     `json:"chi_point" wire:"3,custom,len=33"`
-	Proof    *signprep.Proof `json:"proof" wire:"4,custom,max_bytes=signprep_proof"`
-	PlanHash []byte          `json:"plan_hash" wire:"5,bytes,len=32"`
+	Delta             *secret.Scalar            `json:"-" wire:"1,custom,len=32"`
+	KPoint            *secp.Point               `json:"k_point" wire:"2,custom,len=33"`
+	ChiPoint          *secp.Point               `json:"chi_point" wire:"3,custom,len=33"`
+	Proof             *signprep.Proof           `json:"proof" wire:"4,custom,max_bytes=signprep_proof"`
+	PlanHash          []byte                    `json:"plan_hash" wire:"5,bytes,len=32"`
+	Round2Commitments []presignRound2Commitment `json:"round2_commitments" wire:"6,recordlist,max_items=signers"`
+	MTAContributions  []presignMTAContribution  `json:"mta_contributions" wire:"7,recordlist,max_items=signers"`
+}
+
+type presignRound2Commitment struct {
+	Recipient tss.PartyID `wire:"1,u32"`
+	Hash      []byte      `wire:"2,bytes,len=32"`
+}
+
+type presignMTAContribution struct {
+	Peer          tss.PartyID         `wire:"1,u32"`
+	Inbound       mta.ResponseMessage `wire:"2,nested,max_bytes=mta_response"`
+	Outbound      mta.ResponseMessage `wire:"3,nested,max_bytes=mta_response"`
+	InboundDelta  mta.ResponseMessage `wire:"4,nested,max_bytes=mta_response"`
+	OutboundDelta mta.ResponseMessage `wire:"5,nested,max_bytes=mta_response"`
 }
 
 // WireType returns the canonical wire type identifier for presignRound3Payload.

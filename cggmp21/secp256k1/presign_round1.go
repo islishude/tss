@@ -91,6 +91,10 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 	if err != nil {
 		return nil, nil, err
 	}
+	kPoint, err := secp.PointBytes(secp.ScalarBaseMult(kShare))
+	if err != nil {
+		return nil, nil, err
+	}
 	lambda, err := shamir.LagrangeCoefficient(key.state.Party, signers)
 	if err != nil {
 		return nil, nil, err
@@ -142,7 +146,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		return nil, nil, err
 	}
 	// Round 1 publishes Enc_i(k_i); each peer receives a verifier-specific
-	// Πenc proof bound to that public payload and the peer's RP parameters.
+	// Πlog* proof binding Enc(k_i) to KPoint_i and the peer's RP parameters.
 	startOpening, err := mta.Start(config.Reader(), kShareSecret, paillierKey.PublicKey)
 	if err != nil {
 		return nil, nil, err
@@ -162,6 +166,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		EncK:              slices.Clone(startOpening.Message.Ciphertext),
 		PaillierPublicKey: paillierPub,
 		PlanHash:          slices.Clone(planHash),
+		KPoint:            kPoint,
 	}
 	payload, err := presignPayload.MarshalBinaryWithLimits(limits)
 	if err != nil {
@@ -229,7 +234,7 @@ func StartPresign(key *KeyShare, plan *PresignPlan, local tss.LocalConfig, guard
 		if err != nil {
 			return nil, nil, err
 		}
-		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, s.paillier.PublicKey, peerRP)
+		proof, err := mta.ProveStartForVerifier(plan.securityParams, config.Reader(), proofDomain, s.startOpening, kPoint, s.paillier.PublicKey, peerRP)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -416,6 +421,9 @@ func (s *PresignSession) validateRound1Public(from tss.PartyID, p presignRound1P
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return fmt.Errorf("invalid gamma: %w", err)
 	}
+	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
+		return fmt.Errorf("invalid KPoint: %w", err)
+	}
 	expectedPK, err := s.key.paillierPublicFor(from, s.limits)
 	if err != nil {
 		return err
@@ -459,7 +467,7 @@ func (s *PresignSession) validateRound1Proof(from tss.PartyID, public presignRou
 	if err != nil {
 		return err
 	}
-	return mta.VerifyStart(s.securityParams, domain, start, proverPK, localRP, &proof.EncKProof)
+	return mta.VerifyStart(s.securityParams, domain, start, public.KPoint, proverPK, localRP, &proof.EncKProof)
 }
 
 func presignRound1PublicHash(p presignRound1Payload, limits Limits) ([]byte, error) {

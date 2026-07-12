@@ -34,6 +34,60 @@ func Verify(stmt Statement, proof *Proof) error {
 		if err != nil {
 			return err
 		}
+	} else {
+		mPoint = secp.NewInfinity()
+	}
+	mtaBase, err := optionalPointFromBytes(stmt.MTABasePoint)
+	if err != nil {
+		return err
+	}
+	mtaOffset, err := optionalPointFromBytes(stmt.MTAOffsetPoint)
+	if err != nil {
+		return err
+	}
+	mtaTarget := subtractPoints(mPoint, mtaOffset)
+	var mtaRelationCommitment *secp.Point
+	if mtaBase.Inf != 0 {
+		if len(proof.MTARelationCommitment) != 0 || mtaTarget.Inf == 0 {
+			return errors.New("signprep: invalid zero-base MTA relation")
+		}
+		mtaRelationCommitment = secp.NewInfinity()
+	} else {
+		if len(proof.MTARelationCommitment) == 0 {
+			return errors.New("signprep: missing MTA relation commitment")
+		}
+		mtaRelationCommitment, err = secp.PointFromBytes(proof.MTARelationCommitment)
+		if err != nil {
+			return err
+		}
+	}
+	deltaBase, err := optionalPointFromBytes(stmt.DeltaBasePoint)
+	if err != nil {
+		return err
+	}
+	deltaOffset, err := optionalPointFromBytes(stmt.DeltaOffsetPoint)
+	if err != nil {
+		return err
+	}
+	deltaScalar, err := secp.ScalarFromBytesAllowZero(stmt.Delta)
+	if err != nil {
+		return err
+	}
+	deltaTarget := subtractPoints(secp.ScalarBaseMult(deltaScalar), deltaOffset)
+	var deltaRelationCommitment *secp.Point
+	if deltaBase.Inf != 0 {
+		if len(proof.DeltaRelationCommitment) != 0 || deltaTarget.Inf == 0 {
+			return errors.New("signprep: invalid zero-base delta relation")
+		}
+		deltaRelationCommitment = secp.NewInfinity()
+	} else {
+		if len(proof.DeltaRelationCommitment) == 0 {
+			return errors.New("signprep: missing delta relation commitment")
+		}
+		deltaRelationCommitment, err = secp.PointFromBytes(proof.DeltaRelationCommitment)
+		if err != nil {
+			return err
+		}
 	}
 
 	kCommitPoint, err := secp.PointFromBytes(proof.KCommitment)
@@ -86,7 +140,7 @@ func Verify(stmt Statement, proof *Proof) error {
 		}
 	}
 
-	challengeScalar, err := transcript(stmt, proof.KCommitment, proof.MCommitment, proof.DLEQA1, proof.DLEQA2, proof.MPoint)
+	challengeScalar, err := transcript(stmt, proof.KCommitment, proof.MCommitment, proof.DLEQA1, proof.DLEQA2, proof.MTARelationCommitment, proof.DeltaRelationCommitment, proof.MPoint)
 	if err != nil {
 		return err
 	}
@@ -128,6 +182,21 @@ func Verify(stmt Statement, proof *Proof) error {
 	rhsD2 := secp.Add(dleqA2Point, secp.ScalarMult(chiMinusM, challengeScalar))
 	if !secp.Equal(lhsD2, rhsD2) {
 		return errors.New("signprep: DLEQ combined-base verification failed")
+	}
+
+	if mtaBase.Inf == 0 {
+		lhsMTA := secp.ScalarMult(mtaBase, dleqResponse)
+		rhsMTA := secp.Add(mtaRelationCommitment, secp.ScalarMult(mtaTarget, challengeScalar))
+		if !secp.Equal(lhsMTA, rhsMTA) {
+			return errors.New("signprep: MTA contribution relation failed")
+		}
+	}
+	if deltaBase.Inf == 0 {
+		lhsDelta := secp.ScalarMult(deltaBase, dleqResponse)
+		rhsDelta := secp.Add(deltaRelationCommitment, secp.ScalarMult(deltaTarget, challengeScalar))
+		if !secp.Equal(lhsDelta, rhsDelta) {
+			return errors.New("signprep: delta contribution relation failed")
+		}
 	}
 
 	return nil

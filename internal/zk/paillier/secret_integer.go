@@ -30,17 +30,7 @@ func resizeSignedSecret(x *secret.SignedInt, fixedLen int) (*secret.SignedInt, e
 }
 
 func encRandomSecrets(pk *pai.PublicKey, message *secret.SignedInt, randomness *secret.Scalar) (*big.Int, error) {
-	messageBig, err := signedSecretBig(message)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(messageBig)
-	randomnessBig, err := secretScalarBig(randomness)
-	if err != nil {
-		return nil, err
-	}
-	defer secret.ClearBigInt(randomnessBig)
-	return EncRandom(pk, messageBig, randomnessBig)
+	return pk.EncryptSignedWithSecretRandomness(message, randomness)
 }
 
 func secretScalarFromBig(x *big.Int, fixedLen int) (*secret.Scalar, error) {

@@ -263,9 +263,17 @@ operations may remain variable-time.
 
 The Paillier/ZK proof layer has been rewritten to use CGGMP-compatible constructions:
 
-- **Πenc**: Paillier encryption in range with Ring-Pedersen commitments, large integer masks sampled from ±2^(Ell+Epsilon), and strict ciphertext membership and response range checks. Presign Round 1 uses verifier-specific Πenc proofs because the statement binds the verifier's Ring-Pedersen auxiliary parameters.
-- **Πaff-g**: Paillier affine operation with group commitment in range. Uses Ring-Pedersen commitments and binds the prover's Paillier key, the verifier's auxiliary parameters, and all statement fields into the Fiat-Shamir challenge.
-- **Πlog\***: Group element vs Paillier encryption in range. Uses Ring-Pedersen commitment to hide the integer witness and binds the Paillier ciphertext, curve points, and base point into the challenge.
+- **Πenc**: Paillier encryption in range with Ring-Pedersen commitments, large integer masks sampled from ±2^(Ell+Epsilon), and strict ciphertext membership and response range checks.
+- **Πaff-g**: Paillier affine operation with group commitments in range. In
+  addition to the Paillier equations, it binds the additive mask to `YPoint`
+  and proves `AlphaPoint = x·KPoint + YPoint` with the same responses.
+- MtA affine masks use fixed-width `EllPrime`-bit secret integers rather than
+  curve scalars. The responder reduces only its final additive share modulo the
+  curve order, and rejects a Paillier modulus too small to avoid plaintext
+  wraparound.
+- **Πlog\***: Group element vs Paillier encryption in range. Presign Round 1
+  uses verifier-specific Πlog\* proofs to bind `EncK` to `KPoint`; keygen,
+  refresh, and reshare use the same primitive for stored-share validation.
 
 All three proofs use the canonical typed transcript API; the Fiat-Shamir challenge is never reduced modulo the secp256k1 order for Paillier-integer proofs.
 
@@ -274,6 +282,13 @@ not yet received independent cryptographic review. See
 `docs/paillier-zk-proofs.md` for the current status and production blockers, and
 `docs/audit-guide.md` for the proof-to-paper mapping designed to facilitate such
 a review.
+
+The three-round SignPrep path binds every accepted round-2 payload and proves
+the delta and sigma correction equations. A final aggregate verification
+failure after all partials verify is therefore an internal invariant failure.
+The implementation still does not claim the paper's complete identifiable-abort
+protocol: conflicting contribution views between two remote parties are rejected
+without blaming whichever message happened to arrive second.
 
 ## Keygen Broadcast Consistency
 
@@ -335,6 +350,9 @@ share to the caller because durable replacement may already have succeeded.
 CGGMP21 presigns include nonce-derived local material. Reusing a presign can
 break ECDSA security. Serialized presigns persist enough public context to replay
 every signprep proof and recompute the round-1 echo and presign transcript.
+SignPrep statements bind the ordered commitments and canonical delta/sigma MtA
+contribution views. Every Πaff-g response is reverified publicly, pairwise views
+must agree, and the resulting curve points constrain both `MPoint` and `Delta`.
 `UnmarshalBinary` is structural only; importers should explicitly call
 `VerifyCryptographicMaterialWithLimits`. `StartSign` and `ResumeSign` enforce
 the same full self-verification before durable attempt work. `StartSign` then

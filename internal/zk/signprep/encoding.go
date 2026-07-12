@@ -45,6 +45,16 @@ func (p *Proof) Validate() error {
 	if _, err := secp.PointFromBytes(p.DLEQA2); err != nil {
 		return fmt.Errorf("signprep: invalid DLEQA2: %w", err)
 	}
+	if len(p.MTARelationCommitment) > 0 {
+		if _, err := secp.PointFromBytes(p.MTARelationCommitment); err != nil {
+			return fmt.Errorf("signprep: invalid MTA relation commitment: %w", err)
+		}
+	}
+	if len(p.DeltaRelationCommitment) > 0 {
+		if _, err := secp.PointFromBytes(p.DeltaRelationCommitment); err != nil {
+			return fmt.Errorf("signprep: invalid delta relation commitment: %w", err)
+		}
+	}
 	if _, err := secp.ScalarFromBytes(p.KResponse.FixedBytes()); err != nil {
 		return fmt.Errorf("signprep: invalid KResponse: %w", err)
 	}
@@ -71,7 +81,7 @@ func (p *Proof) UnmarshalBinary(in []byte) error {
 	if err := wire.Unmarshal(in, &decoded,
 		wire.WithFrameLimits(wire.FrameLimits{
 			MaxTotalBytes: proofMaxBytes,
-			MaxFields:     8,
+			MaxFields:     10,
 			MaxFieldBytes: proofMaxPointBytes,
 		}),
 		wire.WithFieldLimits(proofFieldLimits()),

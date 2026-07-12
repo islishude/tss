@@ -17,6 +17,46 @@ func randomSecretScalar(reader io.Reader) (*secret.Scalar, error) {
 	return secret.NewScalar(x.Bytes(), secp.ScalarSize)
 }
 
+func randomWideMask(reader io.Reader, bits uint32) (*secret.SignedInt, error) {
+	if bits == 0 {
+		return nil, errors.New("wide mask bit length must be positive")
+	}
+	// One extra sign-capacity bit keeps the representation compatible with the
+	// inclusive signed range used by the AffG proof implementation.
+	fixedLen := int((bits + 8) / 8)
+	encoded := make([]byte, fixedLen)
+	if _, err := io.ReadFull(reader, encoded); err != nil {
+		clear(encoded)
+		return nil, err
+	}
+	if excess := uint(fixedLen*8) - uint(bits); excess > 0 {
+		encoded[0] &= byte(0xff >> excess)
+	}
+	defer clear(encoded)
+	return secret.NewSignedInt(false, encoded, fixedLen)
+}
+
+func signedSecretScalarModOrder(value *secret.SignedInt) (secp.Scalar, error) {
+	if value == nil || value.FixedLen() == 0 {
+		return secp.Scalar{}, errors.New("nil or destroyed signed secret")
+	}
+	magnitude := value.FixedMagnitude()
+	defer clear(magnitude)
+	reduced := new(big.Int).SetBytes(magnitude)
+	defer secret.ClearBigInt(reduced)
+	reduced.Mod(reduced, secp.Order())
+	out := secp.ScalarFromBigInt(reduced)
+	negative, err := value.SelectBySign([]byte{0}, []byte{1})
+	if err != nil {
+		return secp.Scalar{}, err
+	}
+	defer clear(negative)
+	if negative[0] == 1 {
+		out = secp.ScalarNeg(out)
+	}
+	return out, nil
+}
+
 func secpScalarFromSecret(x *secret.Scalar) (secp.Scalar, error) {
 	if x == nil {
 		return secp.Scalar{}, errors.New("nil secret scalar")
@@ -24,14 +64,6 @@ func secpScalarFromSecret(x *secret.Scalar) (secp.Scalar, error) {
 	fixed := x.FixedBytes()
 	defer clear(fixed)
 	return secp.ScalarFromBytes(fixed)
-}
-
-func mustSecpScalar(x *secret.Scalar) secp.Scalar {
-	out, err := secpScalarFromSecret(x)
-	if err != nil {
-		panic("mta: invalid internal secret scalar")
-	}
-	return out
 }
 
 func validatePositiveIntegerBytes(in []byte) error {

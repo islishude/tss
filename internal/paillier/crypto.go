@@ -57,6 +57,36 @@ func (pk PublicKey) EncryptSecret(reader io.Reader, message *secret.Scalar) (*bi
 	return ciphertext, randomnessSecret, nil
 }
 
+// EncryptSignedSecret encrypts a fixed-width signed secret message and returns
+// the Paillier randomness as fixed-width secret material. Negative messages are
+// represented by their canonical residue modulo N.
+func (pk PublicKey) EncryptSignedSecret(reader io.Reader, message *secret.SignedInt) (*big.Int, *secret.Scalar, error) {
+	if message == nil || message.FixedLen() == 0 {
+		return nil, nil, errors.New("nil or destroyed signed secret message")
+	}
+	messageBig, err := signedSecretToBig(message)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer secret.ClearBigInt(messageBig)
+	ciphertext, randomness, err := pk.Encrypt(reader, messageBig)
+	if err != nil {
+		return nil, nil, err
+	}
+	defer secret.ClearBigInt(randomness)
+	nLen := (pk.N.BitLen() + 7) / 8
+	randomnessBytes, err := paillierct.FixedEncodeStrict(randomness, nLen)
+	if err != nil {
+		return nil, nil, fmt.Errorf("encode randomness: %w", err)
+	}
+	defer clear(randomnessBytes)
+	randomnessSecret, err := secret.NewScalar(randomnessBytes, nLen)
+	if err != nil {
+		return nil, nil, err
+	}
+	return ciphertext, randomnessSecret, nil
+}
+
 // EncryptWithSecretRandomness encrypts a fixed-width non-negative secret
 // message using fixed-width secret Paillier randomness.
 func (pk PublicKey) EncryptWithSecretRandomness(message, randomness *secret.Scalar) (*big.Int, error) {
@@ -68,6 +98,41 @@ func (pk PublicKey) EncryptWithSecretRandomness(message, randomness *secret.Scal
 	randomnessBig := scalarToBig(randomness)
 	defer secret.ClearBigInt(randomnessBig)
 	return pk.EncryptWithRandomness(messageBig, randomnessBig)
+}
+
+// EncryptSignedWithSecretRandomness encrypts a fixed-width signed secret
+// message using fixed-width secret Paillier randomness.
+func (pk PublicKey) EncryptSignedWithSecretRandomness(message *secret.SignedInt, randomness *secret.Scalar) (*big.Int, error) {
+	if message == nil || message.FixedLen() == 0 || randomness == nil {
+		return nil, errors.New("nil or destroyed signed encryption input")
+	}
+	messageBig, err := signedSecretToBig(message)
+	if err != nil {
+		return nil, err
+	}
+	defer secret.ClearBigInt(messageBig)
+	randomnessBig := scalarToBig(randomness)
+	defer secret.ClearBigInt(randomnessBig)
+	return pk.EncryptWithRandomness(messageBig, randomnessBig)
+}
+
+func signedSecretToBig(value *secret.SignedInt) (*big.Int, error) {
+	if value == nil || value.FixedLen() == 0 {
+		return nil, errors.New("nil or destroyed signed secret integer")
+	}
+	magnitude := value.FixedMagnitude()
+	defer clear(magnitude)
+	out := new(big.Int).SetBytes(magnitude)
+	sign, err := value.SelectBySign([]byte{0}, []byte{1})
+	if err != nil {
+		secret.ClearBigInt(out)
+		return nil, err
+	}
+	defer clear(sign)
+	if sign[0] == 1 {
+		out.Neg(out)
+	}
+	return out, nil
 }
 
 // EncryptWithRandomness encrypts message using caller-provided randomness r.

@@ -187,14 +187,14 @@ func deriveSecp256k1Child(parentPub, parentChain []byte, idx uint32, cfg tss.Der
 		}
 		iL, iR := I[:32], I[32:]
 
-		tweak, err := secp.ScalarFromBytes(iL)
-		if err != nil || tweak.IsZero() {
+		tweak, err := secp.ScalarFromBytesAllowZero(iL)
+		if err != nil {
 			if cfg.InvalidChildMode == tss.SkipInvalidChild {
 				idx++
 				continue
 			}
 			return nil, secp.Scalar{}, nil, idx, fmt.Errorf(
-				"%w: zero or out-of-range scalar at index %d", tss.ErrInvalidChild, idx,
+				"%w: out-of-range scalar at index %d", tss.ErrInvalidChild, idx,
 			)
 		}
 

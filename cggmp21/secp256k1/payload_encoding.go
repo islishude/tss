@@ -223,6 +223,9 @@ func (p presignRound1Payload) Validate() error {
 	if _, err := secp.PointFromBytes(p.Gamma); err != nil {
 		return err
 	}
+	if _, err := secp.PointFromBytes(p.KPoint); err != nil {
+		return err
+	}
 	if err := validatePositiveIntegerBytes(p.EncK); err != nil {
 		return err
 	}
@@ -347,6 +350,42 @@ func (p presignRound3Payload) Validate() error {
 	}
 	if len(p.PlanHash) != sha256.Size {
 		return errors.New("presign round3 plan hash must be 32 bytes")
+	}
+	var previous tss.PartyID
+	for i, commitment := range p.Round2Commitments {
+		if commitment.Recipient == 0 {
+			return errors.New("presign round3 commitment recipient must be non-zero")
+		}
+		if i > 0 && commitment.Recipient <= previous {
+			return errors.New("presign round3 commitments must be strictly sorted")
+		}
+		if len(commitment.Hash) != sha256.Size {
+			return errors.New("presign round3 commitment hash must be 32 bytes")
+		}
+		previous = commitment.Recipient
+	}
+	previous = 0
+	for i := range p.MTAContributions {
+		contribution := &p.MTAContributions[i]
+		if contribution.Peer == 0 {
+			return errors.New("presign MTA contribution peer must be non-zero")
+		}
+		if i > 0 && contribution.Peer <= previous {
+			return errors.New("presign MTA contributions must be strictly sorted")
+		}
+		if err := contribution.Inbound.Validate(); err != nil {
+			return fmt.Errorf("invalid inbound sigma contribution: %w", err)
+		}
+		if err := contribution.Outbound.Validate(); err != nil {
+			return fmt.Errorf("invalid outbound sigma contribution: %w", err)
+		}
+		if err := contribution.InboundDelta.Validate(); err != nil {
+			return fmt.Errorf("invalid inbound delta contribution: %w", err)
+		}
+		if err := contribution.OutboundDelta.Validate(); err != nil {
+			return fmt.Errorf("invalid outbound delta contribution: %w", err)
+		}
+		previous = contribution.Peer
 	}
 	return nil
 }

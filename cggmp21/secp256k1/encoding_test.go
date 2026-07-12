@@ -5,11 +5,14 @@ package secp256k1
 import (
 	"bytes"
 	"math"
+	"math/big"
 	"slices"
 	"testing"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/mta"
+	pai "github.com/islishude/tss/internal/paillier"
+	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/testutil"
 	"github.com/islishude/tss/internal/wire"
 )
@@ -293,6 +296,46 @@ func TestCGGMP21KeyShareRejectsLocalPaillierKeyMismatch(t *testing.T) {
 	if err := mismatched.ValidateWithLimits(testLimits()); err == nil {
 		t.Fatal("key share accepted local Paillier private key from another party")
 	}
+}
+
+func TestCGGMP21KeyShareRejectsTamperedLocalSecrets(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 3)
+
+	wrongShare := cloneKeyShareValue(shares[1])
+	wrongShare.state.Secret.Destroy()
+	wrongShare.state.Secret = shares[2].state.Secret.Clone()
+	if err := wrongShare.ValidateWithLimits(testLimits()); err == nil {
+		t.Fatal("key share accepted a secret scalar from another party")
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(*pai.PrivateKey)
+	}{
+		{name: "lambda", mutate: func(sk *pai.PrivateKey) { sk.Lambda.Destroy(); sk.Lambda = zeroSecretScalar(t, sk.N) }},
+		{name: "mu", mutate: func(sk *pai.PrivateKey) { sk.Mu.Destroy(); sk.Mu = zeroSecretScalar(t, sk.N) }},
+		{name: "p", mutate: func(sk *pai.PrivateKey) { sk.P.Destroy(); sk.P = nil }},
+		{name: "q", mutate: func(sk *pai.PrivateKey) { sk.Q.Destroy(); sk.Q = nil }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mutated := cloneKeyShareValue(shares[1])
+			tc.mutate(mutated.state.PaillierPrivateKey)
+			if err := mutated.ValidateWithLimits(testLimits()); err == nil {
+				t.Fatal("key share accepted tampered Paillier private material")
+			}
+		})
+	}
+}
+
+func zeroSecretScalar(t *testing.T, modulus *big.Int) *secret.Scalar {
+	t.Helper()
+	fixedLen := (modulus.BitLen() + 7) / 8
+	value, err := secret.NewScalar(make([]byte, fixedLen), fixedLen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return value
 }
 
 func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {

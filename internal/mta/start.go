@@ -8,6 +8,7 @@ import (
 	"math/big"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/wire"
@@ -122,7 +123,7 @@ func (o *StartOpening) GoString() string {
 }
 
 // ProveStartForVerifier proves an MtA start ciphertext for one verifier.
-func ProveStartForVerifier(params zkpai.SecurityParams, reader io.Reader, domain []byte, opening *StartOpening, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*zkpai.EncProof, error) {
+func ProveStartForVerifier(params zkpai.SecurityParams, reader io.Reader, domain []byte, opening *StartOpening, aCommitment []byte, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams) (*zkpai.LogStarProof, error) {
 	if reader == nil {
 		reader = rand.Reader
 	}
@@ -138,24 +139,27 @@ func ProveStartForVerifier(params zkpai.SecurityParams, reader io.Reader, domain
 	if err := opening.Message.Validate(); err != nil {
 		return nil, err
 	}
-	stmt := zkpai.EncStatement{
-		ProverPaillierN: proverPK,
-		CiphertextK:     new(big.Int).SetBytes(opening.Message.Ciphertext),
-		VerifierAux:     verifierAux,
+	aPoint, err := secp.PointFromBytes(aCommitment)
+	if err != nil {
+		return nil, fmt.Errorf("invalid MtA start commitment: %w", err)
 	}
-	witness := zkpai.EncWitness{
-		K:   opening.k,
-		Rho: opening.rho,
+	stmt := zkpai.LogStarStatement{
+		PaillierN:   proverPK,
+		C:           new(big.Int).SetBytes(opening.Message.Ciphertext),
+		X:           aPoint,
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
+		VerifierAux: verifierAux,
 	}
-	proof, err := zkpai.ProveEnc(params, domain, stmt, witness, reader)
+	witness := zkpai.LogStarWitness{X: opening.k, Rho: opening.rho}
+	proof, err := zkpai.ProveLogStar(params, domain, stmt, witness, reader)
 	if err != nil {
 		return nil, err
 	}
 	return proof, nil
 }
 
-// VerifyStart checks a verifier-specific Πenc proof for an MtA start message.
-func VerifyStart(params zkpai.SecurityParams, domain []byte, msg StartMessage, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, proof *zkpai.EncProof) error {
+// VerifyStart checks a verifier-specific Πlog* relation for an MtA start message.
+func VerifyStart(params zkpai.SecurityParams, domain []byte, msg StartMessage, aCommitment []byte, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, proof *zkpai.LogStarProof) error {
 	if proof == nil {
 		return errors.New("missing MtA start proof")
 	}
@@ -168,12 +172,18 @@ func VerifyStart(params zkpai.SecurityParams, domain []byte, msg StartMessage, p
 	if err := proof.Validate(); err != nil {
 		return fmt.Errorf("invalid MtA start proof: %w", err)
 	}
-	stmt := zkpai.EncStatement{
-		ProverPaillierN: proverPK,
-		CiphertextK:     new(big.Int).SetBytes(msg.Ciphertext),
-		VerifierAux:     verifierAux,
+	aPoint, err := secp.PointFromBytes(aCommitment)
+	if err != nil {
+		return fmt.Errorf("invalid MtA start commitment: %w", err)
 	}
-	if err := zkpai.VerifyEnc(params, domain, stmt, proof); err != nil {
+	stmt := zkpai.LogStarStatement{
+		PaillierN:   proverPK,
+		C:           new(big.Int).SetBytes(msg.Ciphertext),
+		X:           aPoint,
+		B:           secp.ScalarBaseMult(secp.ScalarOne()),
+		VerifierAux: verifierAux,
+	}
+	if err := zkpai.VerifyLogStar(params, domain, stmt, proof); err != nil {
 		return fmt.Errorf("invalid MtA start proof: %w", err)
 	}
 	return nil

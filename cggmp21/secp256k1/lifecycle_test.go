@@ -108,11 +108,12 @@ func testPaillierPrivateKey(t *testing.T) *pai.PrivateKey {
 	}
 }
 
-func testEncProof(seed int64) zkpai.EncProof {
-	return zkpai.EncProof{
+func testEncProof(seed int64) zkpai.LogStarProof {
+	return zkpai.LogStarProof{
 		S:              big.NewInt(seed),
 		A:              big.NewInt(seed + 1),
-		C:              big.NewInt(seed + 2),
+		Y:              secp.ScalarBaseMult(secp.ScalarOne()),
+		D:              big.NewInt(seed + 2),
 		Z1:             big.NewInt(seed + 3),
 		Z2:             big.NewInt(seed + 4),
 		Z3:             big.NewInt(seed + 5),

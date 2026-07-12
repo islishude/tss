@@ -173,6 +173,33 @@ func TestDeriveSecp256k1EmptyPathReturnsParent(t *testing.T) {
 	}
 }
 
+func TestDeriveSecp256k1ZeroTweakKeepsParentKey(t *testing.T) {
+	t.Parallel()
+
+	parent := mustParseTestXPub(t, xpubTV2Master)
+	chain := bytes.Repeat([]byte{0x5a}, ChainCodeSize)
+	result, err := DeriveSecp256k1(
+		parent.PublicKey,
+		parent.ChainCode[:],
+		[]uint32{7},
+		tss.WithHMACFunc(func(_, _ []byte) []byte {
+			return append(make([]byte, 32), chain...)
+		}),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(result.ChildPublicKey, parent.PublicKey) {
+		t.Fatal("zero BIP32 tweak changed the parent public key")
+	}
+	if !bytes.Equal(result.ChildChainCode, chain) {
+		t.Fatal("zero BIP32 tweak did not install the derived chain code")
+	}
+	if !testutil.IsZeroBytes(result.AdditiveShift) {
+		t.Fatal("zero BIP32 tweak produced a non-zero additive shift")
+	}
+}
+
 func TestDeriveSecp256k1MetadataAndSerialization(t *testing.T) {
 	t.Parallel()
 

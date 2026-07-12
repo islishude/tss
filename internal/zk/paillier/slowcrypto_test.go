@@ -137,11 +137,12 @@ func slowAffGProof(t *testing.T, params SecurityParams, sk *pai.PrivateKey, aux 
 		D:                 d,
 		Y:                 proverY,
 		X:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
+		K:                 secp.ScalarBaseMult(secp.ScalarFromBigInt(x)),
 		VerifierAux:       aux,
 	}
 	witness := AffGWitness{
 		X:    testSecpSecretScalar(t, x),
-		Y:    testSecpSecretScalar(t, y),
+		Y:    testSignedSecret(t, y, signedPowerOfTwoBytes(params.EllPrime)),
 		Rho:  testSecretScalarFixed(t, rho, modulusBytes(sk.N)),
 		RhoY: testSecretScalarFixed(t, rhoY, modulusBytes(sk.N)),
 	}

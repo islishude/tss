@@ -98,6 +98,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	paillierOwned := true
+	defer func() {
+		if paillierOwned {
+			newPaillierKey.Destroy()
+		}
+	}()
 	modDomain, err := refreshPaillierDomain(config, config.Self, newPaillierKey.PublicKey, planHash, limits)
 	if err != nil {
 		return nil, nil, err
@@ -124,6 +130,7 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	defer clearSecpPolynomial(poly)
 	commitments := make([][]byte, len(poly))
 	for i, coeff := range poly {
 		if coeff.IsZero() {
@@ -140,6 +147,12 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if err != nil {
 		return nil, nil, err
 	}
+	localShareOwned := true
+	defer func() {
+		if localShareOwned {
+			localShare.Destroy()
+		}
+	}()
 	s := &RefreshSession{
 		oldKey:         oldKey,
 		cfg:            config,
@@ -211,6 +224,8 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 		return nil, nil, err
 	}
 	out = append(out, completionOut...)
+	paillierOwned = false
+	localShareOwned = false
 	return s, out, nil
 }
 

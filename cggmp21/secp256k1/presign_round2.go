@@ -2,6 +2,7 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 
@@ -77,9 +78,12 @@ func (s *PresignSession) tryEmitRound2() ([]tss.Envelope, error) {
 }
 
 type preparedPresignRound2Peer struct {
-	party     tss.PartyID
-	betaDelta *secret.Scalar
-	betaSigma *secret.Scalar
+	party         tss.PartyID
+	betaDelta     *secret.Scalar
+	betaSigma     *secret.Scalar
+	payloadHash   []byte
+	outboundSigma mta.ResponseMessage
+	outboundDelta mta.ResponseMessage
 }
 
 type preparedPresignRound2Outputs struct {
@@ -99,6 +103,9 @@ func (p *preparedPresignRound2Outputs) destroy() {
 		if p.peers[i].betaSigma != nil {
 			p.peers[i].betaSigma.Destroy()
 		}
+		clear(p.peers[i].payloadHash)
+		p.peers[i].outboundSigma.Destroy()
+		p.peers[i].outboundDelta.Destroy()
 	}
 	for i := range p.envelopes {
 		clear(p.envelopes[i].Payload)
@@ -167,6 +174,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			deltaDomain,
 			start,
 			startProof,
+			peerRound1.KPoint,
 			s.gamma,
 			s.gammaComm,
 			peerPK,
@@ -186,6 +194,7 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			sigmaDomain,
 			start,
 			startProof,
+			peerRound1.KPoint,
 			s.xBar,
 			s.xBarComm,
 			peerPK,
@@ -198,9 +207,11 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 			return nil, false, err
 		}
 		prepared.peers = append(prepared.peers, preparedPresignRound2Peer{
-			party:     peer,
-			betaDelta: betaDelta,
-			betaSigma: betaSigma,
+			party:         peer,
+			betaDelta:     betaDelta,
+			betaSigma:     betaSigma,
+			outboundSigma: sigmaResp.Clone(),
+			outboundDelta: deltaResp.Clone(),
 		})
 		payload, err := (presignRound2Payload{
 			Delta:      *deltaResp,
@@ -211,6 +222,8 @@ func (s *PresignSession) preparePresignRound2Outputs() (*preparedPresignRound2Ou
 		if err != nil {
 			return nil, false, err
 		}
+		payloadHash := sha256.Sum256(payload)
+		prepared.peers[len(prepared.peers)-1].payloadHash = payloadHash[:]
 		round2Env, err := newEnvelope(s.config, presignRound2, s.key.state.Party, peer, payloadPresignRound2, payload)
 		clear(payload)
 		if err != nil {
@@ -233,6 +246,11 @@ func (s *PresignSession) commitPresignRound2Outputs(p *preparedPresignRound2Outp
 		}
 		st.mta.betaDelta = p.peers[i].betaDelta
 		st.mta.betaSigma = p.peers[i].betaSigma
+		st.round2.outboundHash = bytes.Clone(p.peers[i].payloadHash)
+		st.round2.outboundSigma = p.peers[i].outboundSigma
+		st.round2.haveOutboundSigma = true
+		st.round2.outboundDelta = p.peers[i].outboundDelta
+		st.round2.haveOutboundDelta = true
 	}
 	s.round2Sent = true
 	p.committed = true
@@ -274,6 +292,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		deltaDomain,
 		start,
 		p.Delta,
+		selfState.round1.payload.KPoint,
 		gammaCommit,
 		s.paillier,
 		responderPK,
@@ -297,6 +316,7 @@ func (s *PresignSession) verifyPresignRound2(from tss.PartyID, p presignRound2Pa
 		sigmaDomain,
 		start,
 		p.Sigma,
+		selfState.round1.payload.KPoint,
 		xBarCommit,
 		s.paillier,
 		responderPK,
