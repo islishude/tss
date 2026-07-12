@@ -19,6 +19,10 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	key.state.Threshold = 2
 	key.state.Parties = tss.NewPartySet(1, 2)
 	key.state.SecurityParams = DefaultSecurityParams()
+	oldCommitmentsHash, err := keygenCommitmentsHash(key.state.GroupCommitments)
+	if err != nil {
+		t.Fatal(err)
+	}
 	minimalPresign := func() *Presign {
 		return &Presign{state: &presignState{Consumed: NewAtomicBoolWire(false), attempt: newPresignAttemptBinding(false)}}
 	}
@@ -33,12 +37,16 @@ func TestCGGMP21StartRequiresEnvelopeGuard(t *testing.T) {
 	presignPlan := &PresignPlan{state: &presignPlanState{sessionID: sessionID}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
 	signPlan := &SignPlan{state: &signPlanState{sessionID: sessionID}, limits: DefaultLimits()}
 	refreshPlan := &RefreshPlan{state: &refreshPlanState{
-		sessionID:    sessionID,
-		threshold:    2,
-		parties:      tss.NewPartySet(1, 2),
-		publicKey:    key.state.PublicKey,
-		chainCode:    key.state.ChainCode,
-		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
+		sessionID:               sessionID,
+		threshold:               2,
+		parties:                 tss.NewPartySet(1, 2),
+		publicKey:               key.state.PublicKey,
+		chainCode:               key.state.ChainCode,
+		paillierBits:            int(DefaultSecurityParams().MinPaillierBits),
+		oldPaillierProofSession: key.state.PaillierProofSessionID,
+		oldKeygenTranscriptHash: key.state.KeygenTranscriptHash,
+		oldPlanHash:             key.state.PlanHash,
+		oldCommitmentsHash:      oldCommitmentsHash,
 	}, limits: DefaultLimits(), securityParams: DefaultSecurityParams()}
 	plan := &ResharePlan{state: &resharePlanState{
 		SessionID:             sessionID,

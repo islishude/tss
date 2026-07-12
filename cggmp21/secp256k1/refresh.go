@@ -77,10 +77,18 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if local.Self != oldKey.state.Party {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("local self must match the old key's party ID"))
 	}
+	oldCommitmentsHash, err := keygenCommitmentsHash(oldKey.state.GroupCommitments)
+	if err != nil {
+		return nil, nil, invalidPlanConfig(local.Self, fmt.Errorf("hash old group commitments: %w", err))
+	}
 	if plan.state.threshold != oldKey.state.Threshold ||
 		!bytes.Equal(plan.state.publicKey, oldKey.state.PublicKey) ||
 		!bytes.Equal(plan.state.chainCode, oldKey.state.ChainCode) ||
-		!slices.Equal(plan.state.parties, oldKey.state.Parties) {
+		!slices.Equal(plan.state.parties, oldKey.state.Parties) ||
+		plan.state.oldPaillierProofSession != oldKey.state.PaillierProofSessionID ||
+		!bytes.Equal(plan.state.oldKeygenTranscriptHash, oldKey.state.KeygenTranscriptHash) ||
+		!bytes.Equal(plan.state.oldPlanHash, oldKey.state.PlanHash) ||
+		!bytes.Equal(plan.state.oldCommitmentsHash, oldCommitmentsHash) {
 		return nil, nil, invalidPlanConfig(local.Self, errors.New("refresh plan does not match old key share"))
 	}
 	limits := plan.limits

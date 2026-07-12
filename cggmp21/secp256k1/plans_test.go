@@ -101,6 +101,39 @@ func TestCGGMP21KeygenPlanZeroValueIsInvalid(t *testing.T) {
 	}
 }
 
+func TestCGGMP21RefreshPlanDigestBindsSourceGeneration(t *testing.T) {
+	t.Parallel()
+
+	newPlan := func(oldSession, oldTranscript, oldPlan, oldCommitments byte) *RefreshPlan {
+		return &RefreshPlan{
+			state: &refreshPlanState{
+				sessionID:               cggmpPlanTestSession(0x50),
+				threshold:               2,
+				parties:                 tss.NewPartySet(1, 2),
+				publicKey:               []byte{0x02, 0x01},
+				chainCode:               bytes.Repeat([]byte{0x02}, 32),
+				paillierBits:            int(DefaultSecurityParams().MinPaillierBits),
+				oldPaillierProofSession: cggmpPlanTestSession(oldSession),
+				oldKeygenTranscriptHash: bytes.Repeat([]byte{oldTranscript}, 32),
+				oldPlanHash:             bytes.Repeat([]byte{oldPlan}, 32),
+				oldCommitmentsHash:      bytes.Repeat([]byte{oldCommitments}, 32),
+			},
+			securityParams: DefaultSecurityParams(),
+		}
+	}
+
+	base := newPlan(0x11, 0x12, 0x13, 0x14)
+	assertSameCGGMPPlanDigest(t, base, newPlan(0x11, 0x12, 0x13, 0x14))
+	for name, other := range map[string]*RefreshPlan{
+		"old Paillier proof session": newPlan(0x21, 0x12, 0x13, 0x14),
+		"old keygen transcript":      newPlan(0x11, 0x22, 0x13, 0x14),
+		"old lifecycle plan":         newPlan(0x11, 0x12, 0x23, 0x14),
+		"old commitments":            newPlan(0x11, 0x12, 0x13, 0x24),
+	} {
+		assertDifferentCGGMPPlanDigest(t, name, base, other)
+	}
+}
+
 func TestCGGMP21SignPlanDigestExcludesRuntimeDependencies(t *testing.T) {
 	t.Parallel()
 
@@ -191,21 +224,40 @@ func TestCGGMP21LifecyclePlanGettersReturnCopies(t *testing.T) {
 	t.Parallel()
 
 	refresh := &RefreshPlan{state: &refreshPlanState{
-		sessionID:    cggmpPlanTestSession(0x51),
-		threshold:    2,
-		parties:      tss.NewPartySet(1, 2, 3),
-		publicKey:    []byte{0x02, 0x01},
-		chainCode:    []byte{0x03, 0x04},
-		paillierBits: int(DefaultSecurityParams().MinPaillierBits),
+		sessionID:               cggmpPlanTestSession(0x51),
+		threshold:               2,
+		parties:                 tss.NewPartySet(1, 2, 3),
+		publicKey:               []byte{0x02, 0x01},
+		chainCode:               []byte{0x03, 0x04},
+		paillierBits:            int(DefaultSecurityParams().MinPaillierBits),
+		oldPaillierProofSession: cggmpPlanTestSession(0x54),
+		oldKeygenTranscriptHash: []byte{0x05, 0x06},
+		oldPlanHash:             []byte{0x07, 0x08},
+		oldCommitmentsHash:      []byte{0x09, 0x0a},
 	}}
 	refreshSnapshot, ok := refresh.Snapshot()
 	if !ok {
 		t.Fatal("missing refresh plan snapshot")
 	}
+	refreshClone := refreshSnapshot.Clone()
+	refreshClone.Parties[0] = 98
+	refreshClone.PublicKey[0] ^= 0xff
+	refreshClone.ChainCode[0] ^= 0xff
+	refreshClone.OldKeygenTranscriptHash[0] ^= 0xff
+	refreshClone.OldPlanHash[0] ^= 0xff
+	refreshClone.OldCommitmentsHash[0] ^= 0xff
+	if refreshSnapshot.Parties[0] != 1 || refreshSnapshot.PublicKey[0] != 0x02 || refreshSnapshot.ChainCode[0] != 0x03 ||
+		refreshSnapshot.OldKeygenTranscriptHash[0] != 0x05 || refreshSnapshot.OldPlanHash[0] != 0x07 || refreshSnapshot.OldCommitmentsHash[0] != 0x09 {
+		t.Fatal("refresh plan snapshot clone aliases source")
+	}
 	refreshSnapshot.Parties[0] = 99
 	refreshSnapshot.PublicKey[0] ^= 0xff
 	refreshSnapshot.ChainCode[0] ^= 0xff
-	if refresh.state.parties[0] != 1 || refresh.state.publicKey[0] != 0x02 || refresh.state.chainCode[0] != 0x03 {
+	refreshSnapshot.OldKeygenTranscriptHash[0] ^= 0xff
+	refreshSnapshot.OldPlanHash[0] ^= 0xff
+	refreshSnapshot.OldCommitmentsHash[0] ^= 0xff
+	if refresh.state.parties[0] != 1 || refresh.state.publicKey[0] != 0x02 || refresh.state.chainCode[0] != 0x03 ||
+		refresh.state.oldKeygenTranscriptHash[0] != 0x05 || refresh.state.oldPlanHash[0] != 0x07 || refresh.state.oldCommitmentsHash[0] != 0x09 {
 		t.Fatal("refresh plan snapshot aliases internal state")
 	}
 

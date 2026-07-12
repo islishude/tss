@@ -116,7 +116,12 @@ Public run metadata:
 - Current generation public metadata.
 
 Each party reconstructs `NewRefreshPlan` from its current local `KeyShare` and
-the shared session ID, calls `StartRefresh`, routes
+the shared session ID. The plan digest binds the source generation's lifecycle
+session, keygen transcript hash, lifecycle plan hash, and group commitments
+hash. Equal group public keys, party sets, thresholds, and chain codes are not
+sufficient evidence that shares belong to the same generation; a mixed-source
+commitment fails at the first plan-hash check before mutating refresh state.
+Each party then calls `StartRefresh`, routes
 `RefreshSession.Handle`, and obtains the staged output through
 `RefreshSession.KeyShare()`.
 

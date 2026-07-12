@@ -168,10 +168,13 @@ hash, and old party set. Substituting any of that metadata can produce a share
 for the wrong key context even when the final public-key preservation check
 passes.
 
-CGGMP21 refresh and reshare preserve the existing chain code. Their final
-confirmation evidence must repeat the preserved chain code exactly; callers
-should treat the chain code as authenticated key metadata, not as an optional
-display field.
+CGGMP21 refresh binds the source generation's lifecycle session, keygen
+transcript hash, lifecycle plan hash, and group commitments hash into its plan.
+Equal group public keys and chain codes are not sufficient to admit shares into
+one refresh run. CGGMP21 refresh and reshare preserve the existing chain code.
+Their final confirmation evidence must repeat the preserved chain code exactly;
+callers should treat the chain code as authenticated key metadata, not as an
+optional display field.
 
 CGGMP21 reshare plans must be exchanged or persisted through
 `ResharePlan.MarshalBinary()` and `UnmarshalResharePlan()`. The strict canonical

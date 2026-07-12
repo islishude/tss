@@ -170,12 +170,16 @@ func (p *KeygenPlan) thresholdConfig(local tss.LocalConfig) (tss.ThresholdConfig
 }
 
 type refreshPlanState struct {
-	sessionID    tss.SessionID // Refresh protocol session; every refresh message must echo this through the envelope.
-	threshold    int           // Existing signing threshold preserved by same-party refresh.
-	parties      tss.PartySet  // Canonical participant set preserved by same-party refresh.
-	publicKey    []byte        // Parent group public key that must remain unchanged after refresh.
-	chainCode    []byte        // HD chain code that must remain unchanged after refresh.
-	paillierBits int           // Shared modulus size for the fresh Paillier keys generated during refresh.
+	sessionID               tss.SessionID // Refresh protocol session; every refresh message must echo this through the envelope.
+	threshold               int           // Existing signing threshold preserved by same-party refresh.
+	parties                 tss.PartySet  // Canonical participant set preserved by same-party refresh.
+	publicKey               []byte        // Parent group public key that must remain unchanged after refresh.
+	chainCode               []byte        // HD chain code that must remain unchanged after refresh.
+	paillierBits            int           // Shared modulus size for the fresh Paillier keys generated during refresh.
+	oldPaillierProofSession tss.SessionID // Lifecycle session that produced the source share generation.
+	oldKeygenTranscriptHash []byte        // Transcript hash that identifies the source share generation.
+	oldPlanHash             []byte        // Lifecycle plan digest that authorized the source share generation.
+	oldCommitmentsHash      []byte        // Hash of the source generation's group commitments.
 }
 
 // RefreshPlan is the shared CGGMP21 refresh intent. It fixes the old key
@@ -188,25 +192,33 @@ type RefreshPlan struct {
 
 // RefreshPlanSnapshot is a caller-owned copy of refresh plan metadata.
 type RefreshPlanSnapshot struct {
-	SessionID      tss.SessionID
-	Threshold      int
-	Parties        tss.PartySet
-	PublicKey      []byte
-	ChainCode      []byte
-	PaillierBits   int
-	SecurityParams SecurityParams
+	SessionID               tss.SessionID
+	Threshold               int
+	Parties                 tss.PartySet
+	PublicKey               []byte
+	ChainCode               []byte
+	PaillierBits            int
+	OldPaillierProofSession tss.SessionID
+	OldKeygenTranscriptHash []byte
+	OldPlanHash             []byte
+	OldCommitmentsHash      []byte
+	SecurityParams          SecurityParams
 }
 
 // Clone returns a deep copy of the refresh plan snapshot.
 func (s RefreshPlanSnapshot) Clone() RefreshPlanSnapshot {
 	return RefreshPlanSnapshot{
-		SessionID:      s.SessionID,
-		Threshold:      s.Threshold,
-		Parties:        s.Parties.Clone(),
-		PublicKey:      bytes.Clone(s.PublicKey),
-		ChainCode:      bytes.Clone(s.ChainCode),
-		PaillierBits:   s.PaillierBits,
-		SecurityParams: s.SecurityParams,
+		SessionID:               s.SessionID,
+		Threshold:               s.Threshold,
+		Parties:                 s.Parties.Clone(),
+		PublicKey:               bytes.Clone(s.PublicKey),
+		ChainCode:               bytes.Clone(s.ChainCode),
+		PaillierBits:            s.PaillierBits,
+		OldPaillierProofSession: s.OldPaillierProofSession,
+		OldKeygenTranscriptHash: bytes.Clone(s.OldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(s.OldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(s.OldCommitmentsHash),
+		SecurityParams:          s.SecurityParams,
 	}
 }
 
@@ -249,13 +261,21 @@ func NewRefreshPlan(option RefreshPlanOption) (*RefreshPlan, error) {
 	if limits.Paillier.MaxModulusBits > 0 && paillierBits > limits.Paillier.MaxModulusBits {
 		return nil, invalidPlanConfig(oldKey.state.Party, fmt.Errorf("paillier key size %d exceeds max %d", paillierBits, limits.Paillier.MaxModulusBits))
 	}
+	oldCommitmentsHash, err := keygenCommitmentsHash(oldKey.state.GroupCommitments)
+	if err != nil {
+		return nil, invalidPlanConfig(oldKey.state.Party, fmt.Errorf("hash old group commitments: %w", err))
+	}
 	return &RefreshPlan{state: &refreshPlanState{
-		sessionID:    option.SessionID,
-		threshold:    oldKey.state.Threshold,
-		parties:      slices.Clone(oldKey.state.Parties),
-		publicKey:    slices.Clone(oldKey.state.PublicKey),
-		chainCode:    slices.Clone(oldKey.state.ChainCode),
-		paillierBits: paillierBits,
+		sessionID:               option.SessionID,
+		threshold:               oldKey.state.Threshold,
+		parties:                 slices.Clone(oldKey.state.Parties),
+		publicKey:               slices.Clone(oldKey.state.PublicKey),
+		chainCode:               slices.Clone(oldKey.state.ChainCode),
+		paillierBits:            paillierBits,
+		oldPaillierProofSession: oldKey.state.PaillierProofSessionID,
+		oldKeygenTranscriptHash: bytes.Clone(oldKey.state.KeygenTranscriptHash),
+		oldPlanHash:             bytes.Clone(oldKey.state.PlanHash),
+		oldCommitmentsHash:      oldCommitmentsHash,
 	}, limits: limits, securityParams: securityParams}, nil
 }
 
@@ -281,13 +301,17 @@ func (p *RefreshPlan) Snapshot() (RefreshPlanSnapshot, bool) {
 		return RefreshPlanSnapshot{}, false
 	}
 	return RefreshPlanSnapshot{
-		SessionID:      p.state.sessionID,
-		Threshold:      p.state.threshold,
-		Parties:        p.state.parties.Clone(),
-		PublicKey:      bytes.Clone(p.state.publicKey),
-		ChainCode:      bytes.Clone(p.state.chainCode),
-		PaillierBits:   p.state.paillierBits,
-		SecurityParams: p.securityParams,
+		SessionID:               p.state.sessionID,
+		Threshold:               p.state.threshold,
+		Parties:                 p.state.parties.Clone(),
+		PublicKey:               bytes.Clone(p.state.publicKey),
+		ChainCode:               bytes.Clone(p.state.chainCode),
+		PaillierBits:            p.state.paillierBits,
+		OldPaillierProofSession: p.state.oldPaillierProofSession,
+		OldKeygenTranscriptHash: bytes.Clone(p.state.oldKeygenTranscriptHash),
+		OldPlanHash:             bytes.Clone(p.state.oldPlanHash),
+		OldCommitmentsHash:      bytes.Clone(p.state.oldCommitmentsHash),
+		SecurityParams:          p.securityParams,
 	}, true
 }
 
@@ -312,6 +336,10 @@ func (p *RefreshPlan) Digest() ([]byte, error) {
 	t.AppendBytes("chain_code", p.state.chainCode)
 	t.AppendUint32("paillier_bits", uint32(p.state.paillierBits))
 	appendSecurityParamsTranscript(t, p.securityParams)
+	t.AppendBytes("old_paillier_proof_session", p.state.oldPaillierProofSession[:])
+	t.AppendBytes("old_keygen_transcript_hash", p.state.oldKeygenTranscriptHash)
+	t.AppendBytes("old_plan_hash", p.state.oldPlanHash)
+	t.AppendBytes("old_commitments_hash", p.state.oldCommitmentsHash)
 	return t.Sum(), nil
 }
 
