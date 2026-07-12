@@ -215,10 +215,15 @@ func GenerateRingPedersenParams(reader io.Reader, sk *pai.PrivateKey) (*RingPede
 		secret.ClearBigInt(v)
 	}
 	for {
-		t, err := randomCoprime(reader, sk.N)
+		tau, err := randomCoprime(reader, sk.N)
 		if err != nil {
 			return nil, nil, err
 		}
+		// CGGMP provisioning samples T as a square. This keeps T in the
+		// quadratic-residue subgroup instead of merely in Z*_N.
+		t := new(big.Int).Mul(tau, tau)
+		t.Mod(t, sk.N)
+		secret.ClearBigInt(tau)
 		if t.Cmp(big.NewInt(1)) <= 0 {
 			secret.ClearBigInt(t)
 			continue
@@ -428,6 +433,9 @@ func ValidateRingPedersenParams(params *RingPedersenParams) error {
 	}
 	if params.S.Cmp(big.NewInt(1)) <= 0 || params.T.Cmp(big.NewInt(1)) <= 0 {
 		return errors.New("degenerate Ring-Pedersen parameters")
+	}
+	if big.Jacobi(params.S, params.N) != 1 || big.Jacobi(params.T, params.N) != 1 {
+		return errors.New("Ring-Pedersen parameters must have Jacobi symbol +1")
 	}
 	return nil
 }

@@ -27,3 +27,10 @@ func TestPayloadDecodersEnforceMessageFrameLimit(t *testing.T) {
 		}
 	}
 }
+
+func TestCGGMPFieldLimitsKeepFactorResponsesBounded(t *testing.T) {
+	t.Parallel()
+	if got := DefaultLimits().fieldLimits()["factor_response"]; got != maxFactorResponseBytes {
+		t.Fatalf("factor response limit = %d, want %d", got, maxFactorResponseBytes)
+	}
+}

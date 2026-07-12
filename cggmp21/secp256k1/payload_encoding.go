@@ -27,6 +27,7 @@ const (
 	reshareDealerCommitmentsWireType     = "cggmp21.secp256k1.payload.reshare.dealer_commitments"
 	reshareSharePayloadWireType          = "cggmp21.secp256k1.payload.reshare.share"
 	reshareReceiverMaterialWireType      = "cggmp21.secp256k1.payload.reshare.receiver_material"
+	reshareFactorProofWireType           = "cggmp21.secp256k1.payload.reshare.factor-proof"
 	refreshCommitmentsPayloadWireType    = "cggmp21.secp256k1.payload.refresh.commitments"
 	refreshSharePayloadWireType          = "cggmp21.secp256k1.payload.refresh.share"
 )
@@ -44,6 +45,7 @@ const (
 	reshareDealerCommitmentsWireVersion     uint16 = 1
 	reshareSharePayloadWireVersion          uint16 = 1
 	reshareReceiverMaterialWireVersion      uint16 = 1
+	reshareFactorProofWireVersion           uint16 = 1
 	refreshCommitmentsPayloadWireVersion    uint16 = 1
 	refreshSharePayloadWireVersion          uint16 = 1
 )
@@ -196,6 +198,9 @@ func (p keygenSharePayload) Validate() error {
 		return err
 	}
 	if err := p.Proof.Validate(); err != nil {
+		return err
+	}
+	if err := p.FactorProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {
@@ -631,9 +636,10 @@ func (refreshCommitmentsPayload) WireVersion() uint16 {
 }
 
 type refreshSharePayload struct {
-	Ciphertext []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
-	Proof      zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
-	PlanHash   []byte             `wire:"3,bytes,len=32"`
+	Ciphertext  []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
+	Proof       zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash    []byte             `wire:"3,bytes,len=32"`
+	FactorProof zkpai.FactorProof  `wire:"4,nested,max_bytes=zk_proof"`
 }
 
 // WireType returns the canonical wire type identifier for refreshSharePayload.
@@ -731,6 +737,9 @@ func (p refreshSharePayload) Validate() error {
 		return err
 	}
 	if err := p.Proof.Validate(); err != nil {
+		return err
+	}
+	if err := p.FactorProof.Validate(); err != nil {
 		return err
 	}
 	if len(p.PlanHash) != sha256.Size {

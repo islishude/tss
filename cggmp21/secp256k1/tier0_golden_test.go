@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 	secp "github.com/islishude/tss/internal/curve/secp256k1"
 	"github.com/islishude/tss/internal/testvectors"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // TestFast_GoldenPresignMarshalBinary verifies deterministic wire encoding of
@@ -75,7 +76,7 @@ func TestFast_GoldenKeygenSharePayload(t *testing.T) {
 	t.Parallel()
 	proof := testEncProof(1)
 	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
-	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32), FactorProof: testFactorProof(10)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -105,7 +106,7 @@ func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 	t.Parallel()
 	proof := testEncProof(2)
 	proof.TranscriptHash = bytes.Repeat([]byte{0x92}, 32)
-	payload := refreshSharePayload{Ciphertext: []byte{2}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x91}, 32)}
+	payload := refreshSharePayload{Ciphertext: []byte{2}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x91}, 32), FactorProof: testFactorProof(30)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)
@@ -126,6 +127,14 @@ func TestFast_GoldenRefreshSharePayload(t *testing.T) {
 	}
 	if _, err := unmarshalRefreshSharePayload(append(raw, 0)); err == nil {
 		t.Error("accepted trailing byte")
+	}
+}
+
+func testFactorProof(seed int64) zkpai.FactorProof {
+	return zkpai.FactorProof{
+		P: big.NewInt(seed), Q: big.NewInt(seed + 1), A: big.NewInt(seed + 2), B: big.NewInt(seed + 3),
+		T: big.NewInt(seed + 4), Sigma: big.NewInt(seed + 5), Z1: big.NewInt(seed + 6), Z2: big.NewInt(seed + 7),
+		W1: big.NewInt(seed + 8), W2: big.NewInt(seed + 9), V: big.NewInt(seed + 10), TranscriptHash: bytes.Repeat([]byte{byte(seed)}, 32),
 	}
 }
 

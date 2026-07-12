@@ -65,9 +65,10 @@ func (keygenCommitmentsPayload) WireVersion() uint16 {
 }
 
 type keygenSharePayload struct {
-	Ciphertext []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
-	Proof      zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
-	PlanHash   []byte             `wire:"3,bytes,len=32"`
+	Ciphertext  []byte             `wire:"1,bytes,max_bytes=paillier_ciphertext"`
+	Proof       zkpai.LogStarProof `wire:"2,nested,max_bytes=zk_proof"`
+	PlanHash    []byte             `wire:"3,bytes,len=32"`
+	FactorProof zkpai.FactorProof  `wire:"4,nested,max_bytes=zk_proof"`
 }
 
 // WireType returns the canonical wire type identifier for keygenSharePayload.

@@ -4,6 +4,8 @@ package secp256k1
 
 import (
 	"bytes"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"testing"
 
@@ -61,11 +63,27 @@ func TestThresholdECDSAOnlineIdentificationInvariantFallback(t *testing.T) {
 	s1.publicKey = bytes.Clone(wrongPublic)
 	s2.publicKey = bytes.Clone(wrongPublic)
 
-	idFrom1, err := s2.Handle(testutil.DeliverEnvelope(out1[0]))
+	idFrom2, err := s1.Handle(testutil.DeliverEnvelope(out2[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
-	idFrom2, err := s1.Handle(testutil.DeliverEnvelope(out2[0]))
+	bad := idFrom2[0].Clone()
+	badPayload, err := tss.DecodeBinaryValueWithLimits[signIdentificationPayload](bad.Payload, s2.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPayload.MulProofs[0].Proof.TranscriptHash[0] ^= 1
+	bad.Payload, err = badPayload.MarshalBinaryWithLimits(s2.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badInbound, ackVerifier := certifiedIdentificationInbound(t, bad, signers)
+	earlyOut, earlyErr := s2.Handle(badInbound)
+	var earlyProtocolErr *tss.ProtocolError
+	if !errors.As(earlyErr, &earlyProtocolErr) || earlyProtocolErr.Code != tss.ErrCodeRound || len(earlyOut) != 0 || s2.Identifying() || s2.aborted {
+		t.Fatalf("early sign identification = out:%d err:%v identifying:%v aborted:%v", len(earlyOut), earlyErr, s2.Identifying(), s2.aborted)
+	}
+	idFrom1, err := s2.Handle(testutil.DeliverEnvelope(out1[0]))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,18 +96,7 @@ func TestThresholdECDSAOnlineIdentificationInvariantFallback(t *testing.T) {
 	if len(idFrom1) != 1 || len(idFrom2) != 1 || idFrom1[0].PayloadType != payloadSignIdentification || idFrom2[0].PayloadType != payloadSignIdentification {
 		t.Fatal("missing online identification payload")
 	}
-
-	bad := idFrom2[0].Clone()
-	badPayload, err := tss.DecodeBinaryValueWithLimits[signIdentificationPayload](bad.Payload, s2.limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	badPayload.MulProofs[0].Proof.TranscriptHash[0] ^= 1
-	bad.Payload, err = badPayload.MarshalBinaryWithLimits(s2.limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s2.Handle(testutil.DeliverEnvelope(bad))
+	_, err = s2.Handle(badInbound)
 	var badProofErr *tss.ProtocolError
 	if !errors.As(err, &badProofErr) || badProofErr.Code != tss.ErrCodeVerification || badProofErr.Blame == nil {
 		t.Fatalf("invalid sign identification proof = %v, want blamed verification error", err)
@@ -98,9 +105,24 @@ func TestThresholdECDSAOnlineIdentificationInvariantFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := evidence.Field(tss.IdentificationRecordEvidenceKey); !ok {
+	recordBytes, ok := evidence.Field(tss.IdentificationRecordEvidenceKey)
+	if !ok {
 		t.Fatal("invalid sign identification proof omitted IdentificationRecord")
 	}
+	var record tss.IdentificationRecord
+	if err := record.UnmarshalBinary(recordBytes); err != nil {
+		t.Fatal(err)
+	}
+	if len(record.Proof) != 0 || len(record.SignedEnvelopeA) == 0 {
+		t.Fatal("portable sign evidence duplicated the proof outside its authenticated envelope")
+	}
+	ctx := secpEvidenceContext(shares[2], signers, presigns[2])
+	ctx.SessionID = sessionID
+	ctx.BroadcastACKVerifier = ackVerifier
+	if err := VerifyBlameEvidence(badProofErr.Blame.Evidence, ctx); err != nil {
+		t.Fatalf("portable sign identification evidence did not verify: %v", err)
+	}
+	assertPortableIdentificationMutationsRejected(t, badProofErr.Blame.Evidence, ctx)
 
 	_, err = s1.Handle(testutil.DeliverEnvelope(idFrom1[0]))
 	var invariant *tss.ProtocolError
@@ -198,6 +220,27 @@ func TestThresholdECDSAPresignIdentificationInvariantFallback(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	bad := idFrom2[0].Clone()
+	badPayload, err := tss.DecodeBinaryValueWithLimits[presignIdentificationPayload](bad.Payload, s2.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badPayload.MulProof.TranscriptHash[0] ^= 1
+	bad.Payload, err = badPayload.MarshalBinaryWithLimits(s2.limits)
+	if err != nil {
+		t.Fatal(err)
+	}
+	badInbound, ackVerifier := certifiedIdentificationInbound(t, bad, signers)
+	trustedContextHash := bytes.Clone(s2.contextHash)
+	var trustedDerivationShift []byte
+	if s2.derivation != nil {
+		trustedDerivationShift = bytes.Clone(s2.derivation.AdditiveShift)
+	}
+	earlyOut, earlyErr := s2.Handle(badInbound)
+	var earlyProtocolErr *tss.ProtocolError
+	if !errors.As(earlyErr, &earlyProtocolErr) || earlyProtocolErr.Code != tss.ErrCodeRound || len(earlyOut) != 0 || s2.Identifying() || s2.aborted {
+		t.Fatalf("early presign identification = out:%d err:%v identifying:%v aborted:%v", len(earlyOut), earlyErr, s2.Identifying(), s2.aborted)
+	}
 	idFrom1, err := s2.Handle(testutil.DeliverEnvelope(round3From1[0]))
 	if err != nil {
 		t.Fatal(err)
@@ -214,17 +257,7 @@ func TestThresholdECDSAPresignIdentificationInvariantFallback(t *testing.T) {
 	if len(idFrom1) != 1 || len(idFrom2) != 1 || idFrom1[0].PayloadType != payloadPresignIdentification || idFrom2[0].PayloadType != payloadPresignIdentification {
 		t.Fatalf("identification output cardinality/type mismatch")
 	}
-	bad := idFrom2[0].Clone()
-	badPayload, err := tss.DecodeBinaryValueWithLimits[presignIdentificationPayload](bad.Payload, s2.limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	badPayload.MulProof.TranscriptHash[0] ^= 1
-	bad.Payload, err = badPayload.MarshalBinaryWithLimits(s2.limits)
-	if err != nil {
-		t.Fatal(err)
-	}
-	_, err = s2.Handle(testutil.DeliverEnvelope(bad))
+	_, err = s2.Handle(badInbound)
 	var badProofErr *tss.ProtocolError
 	if !errors.As(err, &badProofErr) || badProofErr.Code != tss.ErrCodeVerification || badProofErr.Blame == nil {
 		t.Fatalf("invalid identification proof = %v, want blamed verification error", err)
@@ -244,6 +277,18 @@ func TestThresholdECDSAPresignIdentificationInvariantFallback(t *testing.T) {
 	if record.Accused != 1 || record.FailureClass != "presign-identification-invalid-proof" {
 		t.Fatalf("unexpected identification record: accused=%d class=%q", record.Accused, record.FailureClass)
 	}
+	if len(record.Proof) != 0 || len(record.SignedEnvelopeA) == 0 {
+		t.Fatal("portable presign evidence duplicated the proof outside its authenticated envelope")
+	}
+	ctx := secpEvidenceContext(shares[2], signers, nil)
+	ctx.SessionID = sessionID
+	ctx.ContextHash = trustedContextHash
+	ctx.DerivationShift = trustedDerivationShift
+	ctx.BroadcastACKVerifier = ackVerifier
+	if err := VerifyBlameEvidence(badProofErr.Blame.Evidence, ctx); err != nil {
+		t.Fatalf("portable presign identification evidence did not verify: %v", err)
+	}
+	assertPortableIdentificationMutationsRejected(t, badProofErr.Blame.Evidence, ctx)
 
 	_, err = s1.Handle(testutil.DeliverEnvelope(idFrom1[0]))
 	var protocolErr *tss.ProtocolError
@@ -267,6 +312,184 @@ func identificationKeyShares(t testing.TB) map[tss.PartyID]*KeyShare {
 	// wraparound for that exceptional path.
 	params.MinPaillierBits = 1024
 	return secpKeygenWithPlanOption(t, 2, 2, KeygenPlanOption{Limits: testLimitsPtr(), SecurityParams: &params})
+}
+
+func certifiedIdentificationInbound(t testing.TB, env tss.Envelope, parties tss.PartySet) (tss.InboundEnvelope, tss.BroadcastAckVerifier) {
+	t.Helper()
+	publicKeys := make(map[tss.PartyID]ed25519.PublicKey, len(parties))
+	acks := make([]tss.BroadcastAck, 0, len(parties))
+	for _, id := range parties {
+		publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+		publicKeys[id] = publicKey
+		signer := tss.NewInMemoryAckSigner(id, func(digest [32]byte) ([]byte, error) {
+			return ed25519.Sign(privateKey, digest[:]), nil
+		})
+		ack, err := tss.SignBroadcastAck(env, id, signer)
+		if err != nil {
+			t.Fatal(err)
+		}
+		acks = append(acks, ack)
+	}
+	certificate, err := tss.NewBroadcastCertificate(env, parties, acks)
+	if err != nil {
+		t.Fatal(err)
+	}
+	raw, err := env.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	inbound, err := tss.OpenEnvelope(raw, tss.ReceiveInfo{Peer: env.From, Protection: tss.ChannelConfidential}, tss.WithBroadcastCertificate(certificate))
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier := tss.NewInMemoryAckVerifier(func(id tss.PartyID, digest [32]byte, signature []byte) error {
+		if !ed25519.Verify(publicKeys[id], digest[:], signature) {
+			return errors.New("invalid identification acknowledgment")
+		}
+		return nil
+	})
+	return inbound, verifier
+}
+
+func assertPortableIdentificationMutationsRejected(t testing.TB, encoded []byte, ctx EvidenceContext) {
+	t.Helper()
+	original, err := tss.DecodeBinary[tss.BlameEvidence](encoded)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rawRecord, ok := original.Field(tss.IdentificationRecordEvidenceKey)
+	if !ok {
+		t.Fatal("portable evidence omitted identification record")
+	}
+	var base tss.IdentificationRecord
+	if err := base.UnmarshalBinary(rawRecord); err != nil {
+		t.Fatal(err)
+	}
+	mutations := map[string]func(*tss.IdentificationRecord){
+		"accused": func(record *tss.IdentificationRecord) {
+			if record.Accused == 1 {
+				record.Accused = 2
+			} else {
+				record.Accused = 1
+			}
+		},
+		"statement": func(record *tss.IdentificationRecord) {
+			var statement portableIdentificationStatement
+			if err := statement.UnmarshalBinary(record.Statement); err != nil {
+				t.Fatal(err)
+			}
+			statement.ContextHash[0] ^= 1
+			record.Statement, err = statement.MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+		},
+		"proof": func(record *tss.IdentificationRecord) {
+			envelope, err := tss.UnmarshalEnvelopeWithLimits(record.SignedEnvelopeA, defaultEnvelopeLimitsForEvidence())
+			if err != nil {
+				t.Fatal(err)
+			}
+			record.Proof = bytes.Clone(envelope.Payload)
+			record.Proof[0] ^= 1
+		},
+		"protocol alert": func(record *tss.IdentificationRecord) {
+			for i := range record.TranscriptHashes {
+				if record.TranscriptHashes[i].Key == "protocol_alert_digest" {
+					record.TranscriptHashes[i].Value[0] ^= 1
+					return
+				}
+			}
+			t.Fatal("portable record omitted protocol alert")
+		},
+		"transcript": func(record *tss.IdentificationRecord) {
+			for i := range record.TranscriptHashes {
+				if record.TranscriptHashes[i].Key != "protocol_alert_digest" {
+					record.TranscriptHashes[i].Value[0] ^= 1
+					return
+				}
+			}
+			t.Fatal("portable record omitted transcript hash")
+		},
+		"certificate": func(record *tss.IdentificationRecord) { record.BroadcastCertificate[0] ^= 1 },
+	}
+	var portable portableIdentificationStatement
+	if err := portable.UnmarshalBinary(base.Statement); err != nil {
+		t.Fatal(err)
+	}
+	if portable.Kind == portableIdentificationSign {
+		mutations["sign verification context"] = func(record *tss.IdentificationRecord) {
+			var statement portableIdentificationStatement
+			if err := statement.UnmarshalBinary(record.Statement); err != nil {
+				t.Fatal(err)
+			}
+			encK := statement.Verification.Entries[0].EncK
+			encK[len(encK)-1] ^= 1
+			record.Statement, err = statement.MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		mutations["sign compact MtA transcript"] = func(record *tss.IdentificationRecord) {
+			var statement portableIdentificationStatement
+			if err := statement.UnmarshalBinary(record.Statement); err != nil {
+				t.Fatal(err)
+			}
+			ciphertext := statement.Identification.Contributions[0].InboundCiphertext
+			ciphertext[len(ciphertext)-1] ^= 1
+			hash, hashErr := portableSignIdentificationTranscriptHash(statement.Identification)
+			if hashErr != nil {
+				t.Fatal(hashErr)
+			}
+			for i := range statement.IdentificationHashes {
+				if statement.IdentificationHashes[i].Party == statement.Identification.Party {
+					statement.IdentificationHashes[i].Hash = hash
+				}
+			}
+			record.Statement, err = statement.MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+		mutations["sign little-r"] = func(record *tss.IdentificationRecord) {
+			var statement portableIdentificationStatement
+			if err := statement.UnmarshalBinary(record.Statement); err != nil {
+				t.Fatal(err)
+			}
+			statement.LittleR[len(statement.LittleR)-1] ^= 1
+			record.Statement, err = statement.MarshalBinary()
+			if err != nil {
+				t.Fatal(err)
+			}
+		}
+	}
+	for name, mutate := range mutations {
+		record := base.Clone()
+		mutate(&record)
+		alert := record.ComputeAlertDigest()
+		record.AlertDigest = alert[:]
+		mutatedRecord, err := record.MarshalBinary()
+		if err != nil {
+			t.Fatalf("marshal %s mutation: %v", name, err)
+		}
+		candidate := *original
+		candidate.PublicInputs = make([]tss.EvidenceField, len(original.PublicInputs))
+		for i := range original.PublicInputs {
+			candidate.PublicInputs[i] = original.PublicInputs[i].Clone()
+			if candidate.PublicInputs[i].Key == tss.IdentificationRecordEvidenceKey {
+				candidate.PublicInputs[i].Value = mutatedRecord
+			}
+		}
+		candidateBytes, err := candidate.MarshalBinary()
+		if err != nil {
+			t.Fatalf("marshal evidence %s mutation: %v", name, err)
+		}
+		if err := VerifyBlameEvidence(candidateBytes, ctx); err == nil {
+			t.Fatalf("portable identification %s mutation verified", name)
+		}
+	}
 }
 
 func startIdentificationPresign(key *KeyShare, sessionID tss.SessionID, signers tss.PartySet) (*PresignSession, []tss.Envelope, error) {

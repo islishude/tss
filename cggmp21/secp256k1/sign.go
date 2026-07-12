@@ -952,6 +952,12 @@ func (s *PresignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, er
 			s.abort()
 		}
 	}()
+	if base.PayloadType == payloadPresignIdentification && !s.identifying {
+		if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.signers, s.key.state.Party); err != nil {
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("presign identification is not active"))
+	}
 	if err := s.validateInbound(env); err != nil {
 		if errors.Is(err, tss.ErrDuplicateMessage) {
 			return nil, tss.ErrDuplicateMessage

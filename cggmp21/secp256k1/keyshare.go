@@ -464,6 +464,29 @@ func (k *KeyShare) validateWithoutConfirmations(limits Limits) error {
 	if err := sk.Validate(); err != nil {
 		return fmt.Errorf("invalid paillier private key: %w", err)
 	}
+	if err := zkpai.ValidateFactorPrivateKey(k.state.SecurityParams, sk); err != nil {
+		return fmt.Errorf("local Paillier factors do not meet Pi-fac bounds: %w", err)
+	}
+	localRP := localData.RingPedersenParams
+	for _, id := range k.state.Parties {
+		data := k.state.PartyData[id]
+		if id == k.state.Party {
+			if data.PaillierFactorProof != nil {
+				return errors.New("local party must not store a self factor proof")
+			}
+			continue
+		}
+		if data.PaillierFactorProof == nil {
+			return fmt.Errorf("missing Paillier factor proof for party %d", id)
+		}
+		factorDomain, err := keyShareFactorProofDomain(k, id, data.PaillierPublicKey, localRP, limits)
+		if err != nil {
+			return err
+		}
+		if err := zkpai.VerifyFactor(k.state.SecurityParams, factorDomain, zkpai.FactorStatement{ProverPaillierN: data.PaillierPublicKey, VerifierAux: localRP}, data.PaillierFactorProof); err != nil {
+			return fmt.Errorf("invalid Paillier factor proof for party %d: %w", id, err)
+		}
+	}
 	if sk.N.Cmp(pk.N) != 0 || sk.G.Cmp(pk.G) != 0 || sk.NSquared.Cmp(pk.NSquared) != 0 {
 		return errors.New("paillier public/private key mismatch")
 	}
@@ -614,6 +637,15 @@ func (k *KeyShare) validateResourceLimits(limits Limits) error {
 		}
 		if len(paillierProofBytes) > limits.ZK.MaxProofBytes {
 			return fmt.Errorf("paillier proof for party %d too large: %d > %d", id, len(paillierProofBytes), limits.ZK.MaxProofBytes)
+		}
+		if id != k.state.Party {
+			factorProofBytes, err := canonicalWireMessageBytes(data.PaillierFactorProof, limits)
+			if err != nil {
+				return fmt.Errorf("paillier factor proof for party %d: %w", id, err)
+			}
+			if len(factorProofBytes) > limits.ZK.MaxProofBytes {
+				return fmt.Errorf("paillier factor proof for party %d too large: %d > %d", id, len(factorProofBytes), limits.ZK.MaxProofBytes)
+			}
 		}
 		ringPedersenParamsBytes, err := canonicalWireMessageBytes(data.RingPedersenParams, limits)
 		if err != nil {

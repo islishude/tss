@@ -154,11 +154,12 @@ func (s *RefreshSession) tryComplete() ([]tss.Envelope, error) {
 			partyProof = paillierProof
 		}
 		partyData[id] = keySharePartyData{
-			VerificationShare:  bytes.Clone(verificationShare),
-			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			PaillierProof:      partyProof.Clone(),
-			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:   bytes.Clone(verificationShare),
+			PaillierPublicKey:   sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:       partyProof.Clone(),
+			RingPedersenParams:  sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:   sessionData.ringPedersen.Proof.Clone(),
+			PaillierFactorProof: sessionData.factorProof.Clone(),
 		}
 	}
 	s.newShare = &KeyShare{state: &keyShareState{

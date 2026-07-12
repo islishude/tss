@@ -415,6 +415,7 @@ inside transcripts instead.
 - `internal/paillier.PublicKey`
 - `internal/paillier.PrivateKey`
 - `internal/zk/paillier.ModulusProof`
+- `internal/zk/paillier.FactorProof`
 - `internal/zk/paillier.RingPedersenParams`
 - `internal/zk/paillier.RingPedersenProof`
 - `internal/zk/paillier.EncProof` (Πenc)
@@ -429,7 +430,7 @@ inside transcripts instead.
   including the sigma-MtA and delta relation commitments)
 
 Protocol payloads, MtA messages, Paillier public keys, Paillier private keys,
-all active Paillier ZK proof types (Πmod, Πprm, Πenc, Πaff-g, Πlog\*), and
+all active Paillier ZK proof types (Πmod, Πfac, Πprm, Πenc, Πaff-g, Πlog\*), and
 Schnorr share proofs all use the same strict TLV encoding as other binary
 records. CGGMP21 keygen, refresh, reshare, and presign payloads carry
 Paillier public keys, Ring-Pedersen parameters, and Paillier/MtA proofs as
@@ -440,9 +441,39 @@ JSON fallback, trailing bytes, duplicate tags, wrong type identifiers,
 malformed curve points, malformed scalars, and non-minimal integer encodings
 where integers appear.
 
+`FactorProof` is a canonical receiver-specific Πfac record. Keygen and refresh
+direct-share payloads require it as their final field. Reshare round 2 also has
+the direct `cggmp21.secp256k1.reshare.factor-proof` payload, containing prover,
+verifier, the canonical prover Paillier key, Πfac, and the reshare plan hash.
+The corresponding receiver-material broadcast may arrive later, but its
+Paillier key must then match byte-for-byte. Key-share party data stores Πfac
+only for remote parties; the local entry is checked directly against its
+private factors. Records made before Πfac became mandatory are rejected.
+
+Ring-Pedersen wire shape remains `(N,S,T)`. New parameters are generated with
+`T=τ² mod N` and `S=T^λ mod N`; public decoding/validation additionally
+requires `Jacobi(S,N)=Jacobi(T,N)=+1`. This public check does not prove QR
+membership without the factors; that guarantee comes from local parameter
+generation by the verifier.
+
 Presign and online-sign identification payloads have a 384 KiB phase-specific
-cap. This leaves room to embed the payload's certified envelope and full ACK
-set while retaining the 1 MiB total blame-evidence hard cap.
+cap. The certified envelope is the canonical proof carrier; once transport
+authentication is attached, `IdentificationRecord.Proof` is omitted instead of
+duplicating the same payload. This leaves room for the public statement and full
+ACK set while retaining the 1 MiB total blame-evidence hard cap.
+
+Built-in sign/presign identification evidence uses the version-1 canonical
+`cggmp21.secp256k1.identification-statement`. It contains only public session,
+plan, security-profile, participant, transcript, verification-share,
+Paillier/Ring-Pedersen, MtA contribution, delta, partial, digest, and derivation
+material. Sign statements carry the complete verification context, a compact
+two-ciphertext MtA record for the accused signer, and ordered hashes for every
+signer's compact record. The sign alert binds those values and `little-r`, so a
+reporter cannot alter replay inputs while retaining an authenticated alert. This
+linear representation is size-tested at the supported 16-signer production
+profile. Portable evidence must also contain the exact authenticated envelope
+and, for a broadcast, its complete ACK certificate. Bare proof records are not
+portable and are rejected.
 
 Current presign wire shapes are:
 

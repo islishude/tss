@@ -49,7 +49,7 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		s.completed = true
 		return nil, nil
 	}
-	if !s.allReshareDealerDataReceived() || !s.allReshareReceiverMaterialReceived() {
+	if !s.allReshareDealerDataReceived() || !s.allReshareReceiverMaterialReceived() || !s.allReshareFactorProofsReceived() {
 		return nil, nil
 	}
 	for _, dealer := range s.dealerParties {
@@ -153,11 +153,12 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 			partyProof = paillierProof
 		}
 		partyData[id] = keySharePartyData{
-			VerificationShare:  bytes.Clone(verificationShare),
-			PaillierPublicKey:  sessionData.paillierPub.PublicKey.Clone(),
-			PaillierProof:      partyProof.Clone(),
-			RingPedersenParams: sessionData.ringPedersen.Params.Clone(),
-			RingPedersenProof:  sessionData.ringPedersen.Proof.Clone(),
+			VerificationShare:   bytes.Clone(verificationShare),
+			PaillierPublicKey:   sessionData.paillierPub.PublicKey.Clone(),
+			PaillierProof:       partyProof.Clone(),
+			RingPedersenParams:  sessionData.ringPedersen.Params.Clone(),
+			RingPedersenProof:   sessionData.ringPedersen.Proof.Clone(),
+			PaillierFactorProof: sessionData.factorProof.Clone(),
 		}
 	}
 	s.newShare = &KeyShare{state: &keyShareState{
@@ -233,6 +234,19 @@ func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 		}
 	}
 	return out, nil
+}
+
+func (s *ReshareSession) allReshareFactorProofsReceived() bool {
+	for _, id := range s.newParties {
+		if id == s.selfID {
+			continue
+		}
+		data := s.newPartyData[id]
+		if data == nil || data.factorProof == nil || data.factorKey == nil {
+			return false
+		}
+	}
+	return true
 }
 
 func (s *ReshareSession) aggregateCommitments() ([]*secp.Point, error) {

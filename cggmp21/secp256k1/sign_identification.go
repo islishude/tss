@@ -129,11 +129,25 @@ func (p *signIdentificationPayload) destroy() {
 	*p = signIdentificationPayload{}
 }
 
-func (s *SignSession) signIdentificationAlertDigest() []byte {
+func (s *SignSession) signIdentificationAlertDigest() ([]byte, error) {
+	identificationHashes, err := portableSignIdentificationHashes(s.presign)
+	if err != nil {
+		return nil, err
+	}
+	littleR := s.presign.state.LittleR.Bytes()
+	publicStateHash, err := portableSignPublicStateHash(&s.presign.state.Verification, identificationHashes, littleR, s.limits)
+	if err != nil {
+		return nil, err
+	}
+	return s.signIdentificationAlertDigestWithPublicState(publicStateHash), nil
+}
+
+func (s *SignSession) signIdentificationAlertDigestWithPublicState(publicStateHash []byte) []byte {
 	t := transcript.New("cggmp21-secp256k1-sign-identification-alert-v1")
 	t.AppendBytes("session_id", s.sessionID[:])
 	t.AppendBytes("plan_hash", s.planHash)
 	t.AppendBytes("presign_transcript", s.presign.state.TranscriptHash)
+	t.AppendBytes("public_state_hash", publicStateHash)
 	t.AppendBytes("digest", s.digest)
 	for _, party := range s.presign.state.Signers {
 		t.AppendUint32("party", party)
@@ -389,7 +403,10 @@ func (s *SignSession) startSignIdentification(cause error) ([]tss.Envelope, erro
 	if s.identifying {
 		return nil, nil
 	}
-	alert := s.signIdentificationAlertDigest()
+	alert, err := s.signIdentificationAlertDigest()
+	if err != nil {
+		return nil, fmt.Errorf("bind signing identification public state after %w: %w", cause, err)
+	}
 	payload, err := s.buildLocalSignIdentificationPayload(alert)
 	if err != nil {
 		return nil, fmt.Errorf("prepare signing identification after %w: %w", cause, err)
@@ -510,7 +527,10 @@ func (s *SignSession) verifySignIdentificationPayload(from tss.PartyID, payload 
 		if err := addIdentificationCiphertext(pk.NSquared, cChi, contribution.Inbound.Ciphertext); err != nil {
 			return err
 		}
-		inverse, err := inverseIdentificationCiphertext(pk.NSquared, contribution.Outbound.Proof.Y)
+		// The reproof is verified against the original outbound ciphertext above,
+		// so its Y value is the authenticated public value needed by the aggregate
+		// ciphertext equation. Portable evidence need not duplicate the old proof.
+		inverse, err := inverseIdentificationCiphertext(pk.NSquared, item.Proof.Y)
 		if err != nil {
 			return err
 		}
@@ -609,8 +629,13 @@ func (s *SignSession) buildAcceptSignIdentificationTx(in tss.InboundEnvelope) (*
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[signIdentificationPayload](env.Payload, s.limits)
 	if err != nil {
+		statement, statementErr := s.portableSignIdentificationStatement(env)
+		if statementErr != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, statementErr)
+		}
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.state.Signers)...)
-		recordField, recordErr := identificationProofEvidenceField(env, "sign-identification-malformed", s.identificationAlert, s.key.state.KeygenTranscriptHash, s.presign.state.TranscriptHash)
+		fields = append(fields, rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.state.TranscriptHash))
+		recordField, recordErr := identificationProofEvidenceField(env, "sign-identification-malformed", statement, s.identificationAlert, s.key.state.KeygenTranscriptHash, s.presign.state.TranscriptHash)
 		if recordErr != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, recordErr)
 		}
@@ -619,8 +644,13 @@ func (s *SignSession) buildAcceptSignIdentificationTx(in tss.InboundEnvelope) (*
 	}
 	if err := s.verifySignIdentificationPayload(env.From, payload); err != nil {
 		payload.destroy()
+		statement, statementErr := s.portableSignIdentificationStatement(env)
+		if statementErr != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, statementErr)
+		}
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.presign.state.Signers)...)
-		recordField, recordErr := identificationProofEvidenceField(env, "sign-identification-invalid-proof", s.identificationAlert, s.key.state.KeygenTranscriptHash, s.presign.state.TranscriptHash)
+		fields = append(fields, rawEvidenceField(evidenceFieldPresignTranscriptHash, s.presign.state.TranscriptHash))
+		recordField, recordErr := identificationProofEvidenceField(env, "sign-identification-invalid-proof", statement, s.identificationAlert, s.key.state.KeygenTranscriptHash, s.presign.state.TranscriptHash)
 		if recordErr != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, recordErr)
 		}

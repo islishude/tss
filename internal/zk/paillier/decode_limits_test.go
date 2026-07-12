@@ -30,6 +30,13 @@ func TestStandaloneProofDecodersEnforceObjectByteCaps(t *testing.T) {
 				return proof.UnmarshalBinary(in)
 			},
 		},
+		"factor": {
+			maxBytes: tss.DefaultMaxPaillierProofBytes,
+			decode: func(in []byte) error {
+				var proof FactorProof
+				return proof.UnmarshalBinary(in)
+			},
+		},
 		"enc": {
 			maxBytes: tss.DefaultMaxZKProofBytes,
 			decode: func(in []byte) error {

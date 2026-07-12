@@ -289,7 +289,15 @@ func (s *KeygenSession) emitEncryptedKeygenShares() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		payload, err := (keygenSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		factorDomain, err := keygenFactorProofDomain(s.cfg, s.cfg.Self, receiver, s.local.paillier.PublicKey, slot.ringPedersen.Params, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		factorProof, err := zkpai.ProveFactor(s.securityParams, factorDomain, s.local.paillier, slot.ringPedersen.Params, s.cfg.Reader())
+		if err != nil {
+			return nil, err
+		}
+		payload, err := (keygenSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash, FactorProof: *factorProof}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, err
 		}
@@ -355,7 +363,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return nil, verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"Paillier modulus does not meet security requirements",
 			tss.NewPartySet(env.From),
 			err,
@@ -374,7 +382,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 		)
 		return nil, verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"invalid Paillier modulus proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid Paillier modulus proof"),
@@ -386,7 +394,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 	if ringParams.N.Cmp(pk.N) != 0 {
 		return nil, verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"Ring-Pedersen modulus mismatch",
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
@@ -406,7 +414,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 		)
 		return nil, verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"invalid Ring-Pedersen proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid Ring-Pedersen proof"),
@@ -447,12 +455,16 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 	// ---- 1. PARSE ----
 	p, err := tss.DecodeBinaryWithLimits[keygenSharePayload](env.Payload, s.limits)
 	if err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+		return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+			"malformed keygen share or Paillier factor proof", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)))
 	}
 	// ---- 2. POLICY VALIDATE ----
 	// (direct-confidential, duplicate checks done in dispatcher)
 	if err := requirePlanHash("keygen", p.PlanHash, s.planHash); err != nil {
-		return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+		return nil, protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
+			"keygen share factor proof plan mismatch", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)))
 	}
 
 	// ---- 3. CRYPTOGRAPHIC VERIFY ----
@@ -462,6 +474,14 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 	localSlot, err := s.round1.slot(s.cfg.Self)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	factorDomain, err := keygenFactorProofDomain(s.cfg, env.From, s.cfg.Self, slot.paillierPub.PublicKey, localSlot.ringPedersen.Params, s.planHash, s.limits)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+	}
+	if err := zkpai.VerifyFactor(s.securityParams, factorDomain, zkpai.FactorStatement{ProverPaillierN: slot.paillierPub.PublicKey, VerifierAux: localSlot.ringPedersen.Params}, &p.FactorProof); err != nil {
+		return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "invalid Paillier factor proof", tss.NewPartySet(env.From), err,
+			rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.cfg.Parties, partySetHashLabel)))
 	}
 	evaluation, err := secp.EvalCommitments(slot.commitments, s.cfg.Self)
 	if err != nil {
@@ -505,8 +525,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenShareTx(env tss.Envelope) (*accept
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, errors.New("verified encrypted share decrypted inconsistently"))
 	}
 	return &acceptCGGMPKeygenShareTx{
-		from:  env.From,
-		share: share,
+		from: env.From, share: share, factorProof: p.FactorProof.Clone(),
 	}, nil
 }
 

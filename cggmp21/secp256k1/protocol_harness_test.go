@@ -265,15 +265,36 @@ func secpEvidenceContext(share *KeyShare, signers tss.PartySet, presign *Presign
 	if err != nil {
 		panic(err)
 	}
+	verificationShares := make([]VerificationShare, 0, len(share.state.Parties))
+	ringPedersenParams := make([]RingPedersenPublicShare, 0, len(share.state.Parties))
+	for _, id := range share.state.Parties {
+		verification, ok := share.VerificationShare(id)
+		if !ok {
+			panic("missing verification share")
+		}
+		ringPedersen, ok := share.RingPedersenPublicShare(id)
+		if !ok {
+			panic("missing Ring-Pedersen parameters")
+		}
+		verificationShares = append(verificationShares, verification)
+		ringPedersenParams = append(ringPedersenParams, ringPedersen)
+	}
+	params := share.state.SecurityParams
 	ctx := EvidenceContext{
+		Threshold:            share.state.Threshold,
 		Parties:              share.state.Parties.Clone(),
 		PublicKey:            append([]byte(nil), share.state.PublicKey...),
+		SecurityParams:       &params,
+		VerificationShares:   verificationShares,
 		PaillierPublicKeys:   paillierPublicKeys,
+		RingPedersenParams:   ringPedersenParams,
 		Signers:              signers.Clone(),
 		KeygenTranscriptHash: append([]byte(nil), share.state.KeygenTranscriptHash...),
 	}
 	if presign != nil {
 		ctx.PresignTranscriptHash = append([]byte(nil), presign.state.TranscriptHash...)
+		ctx.ContextHash = append([]byte(nil), presign.state.ContextHash...)
+		ctx.DerivationShift = append([]byte(nil), presign.state.Derivation.AdditiveShift...)
 	}
 	return ctx
 }

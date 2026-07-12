@@ -10,6 +10,7 @@ import (
 	pai "github.com/islishude/tss/internal/paillier"
 	"github.com/islishude/tss/internal/secret"
 	"github.com/islishude/tss/internal/shamir"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 // keygenLocalMaterial owns locally generated secret material until it is
@@ -67,6 +68,7 @@ type keygenRound1Slot struct {
 	chainCodeCommit []byte
 	paillierPub     paillierPublicMaterial
 	ringPedersen    ringPedersenPublicMaterial
+	factorProof     *zkpai.FactorProof
 }
 
 func newKeygenRound1Inbox(parties tss.PartySet) *keygenRound1Inbox {
@@ -136,7 +138,7 @@ func (in *keygenRound1Inbox) recordCommitments(
 	return nil
 }
 
-func (in *keygenRound1Inbox) recordShare(id tss.PartyID, share *secret.Scalar) error {
+func (in *keygenRound1Inbox) recordShare(id tss.PartyID, share *secret.Scalar, factorProof *zkpai.FactorProof) error {
 	slot, err := in.slot(id)
 	if err != nil {
 		return err
@@ -145,6 +147,7 @@ func (in *keygenRound1Inbox) recordShare(id tss.PartyID, share *secret.Scalar) e
 		return fmt.Errorf("duplicate share from party %d", id)
 	}
 	slot.share = share
+	slot.factorProof = factorProof
 	return nil
 }
 
@@ -168,6 +171,7 @@ type keygenRound1Snapshot struct {
 	chainCodeCommits map[tss.PartyID][]byte
 	paillier         map[tss.PartyID]paillierPublicMaterial
 	ringPedersen     map[tss.PartyID]ringPedersenPublicMaterial
+	factorProofs     map[tss.PartyID]*zkpai.FactorProof
 }
 
 func (in *keygenRound1Inbox) snapshot() (*keygenRound1Snapshot, bool, error) {
@@ -181,6 +185,7 @@ func (in *keygenRound1Inbox) snapshot() (*keygenRound1Snapshot, bool, error) {
 		chainCodeCommits: make(map[tss.PartyID][]byte, len(in.parties)),
 		paillier:         make(map[tss.PartyID]paillierPublicMaterial, len(in.parties)),
 		ringPedersen:     make(map[tss.PartyID]ringPedersenPublicMaterial, len(in.parties)),
+		factorProofs:     make(map[tss.PartyID]*zkpai.FactorProof, len(in.parties)),
 	}
 	for _, id := range in.parties {
 		slot, ok := in.slots[id]
@@ -196,6 +201,9 @@ func (in *keygenRound1Inbox) snapshot() (*keygenRound1Snapshot, bool, error) {
 			slot.ringPedersen.Params == nil || slot.ringPedersen.Proof == nil {
 			snap.Destroy()
 			return nil, false, nil
+		}
+		if id != 0 && slot.factorProof != nil {
+			snap.factorProofs[id] = slot.factorProof.Clone()
 		}
 		snap.shares[id] = slot.share.Clone()
 		snap.commitments[id] = tss.CloneByteSlices(slot.commitments)

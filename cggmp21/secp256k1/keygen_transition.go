@@ -3,6 +3,7 @@ package secp256k1
 import (
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 type acceptCGGMPKeygenCommitmentsTx struct {
@@ -35,13 +36,14 @@ func (*acceptCGGMPKeygenCommitmentsTx) cleanupOnReject() {}
 func (*acceptCGGMPKeygenCommitmentsTx) markCommitted() {}
 
 type acceptCGGMPKeygenShareTx struct {
-	from      tss.PartyID
-	share     *secret.Scalar
-	committed bool
+	from        tss.PartyID
+	share       *secret.Scalar
+	factorProof *zkpai.FactorProof
+	committed   bool
 }
 
 func (tx *acceptCGGMPKeygenShareTx) apply(s *KeygenSession) (sessionEffects, error) {
-	if err := s.round1.recordShare(tx.from, tx.share); err != nil {
+	if err := s.round1.recordShare(tx.from, tx.share, tx.factorProof); err != nil {
 		return sessionEffects{}, err
 	}
 	out, err := s.tryAdvance()
@@ -54,6 +56,7 @@ func (tx *acceptCGGMPKeygenShareTx) cleanupOnReject() {
 	}
 	tx.share.Destroy()
 	tx.share = nil
+	tx.factorProof = nil
 }
 
 func (tx *acceptCGGMPKeygenShareTx) markCommitted() {

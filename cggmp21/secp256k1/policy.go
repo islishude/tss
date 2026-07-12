@@ -133,6 +133,15 @@ var cggmp21Policies = tss.MustNewPolicySet(
 	tss.DeliveryPolicy{
 		Protocol:               tss.ProtocolCGGMP21Secp256k1,
 		Round:                  reshareShareRound,
+		PayloadType:            payloadReshareFactorProof,
+		Mode:                   tss.DeliveryDirect,
+		Confidentiality:        tss.ConfidentialityOptional,
+		BroadcastConsistency:   tss.BroadcastConsistencyNone,
+		RequireSenderSignature: true,
+	},
+	tss.DeliveryPolicy{
+		Protocol:               tss.ProtocolCGGMP21Secp256k1,
+		Round:                  reshareShareRound,
 		PayloadType:            payloadReshareShare,
 		Mode:                   tss.DeliveryDirect,
 		Confidentiality:        tss.ConfidentialityRequired,

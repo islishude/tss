@@ -304,7 +304,7 @@ func installCGGMPKeygenShare(t *testing.T, session *KeygenSession, remoteOut []t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := session.round1.recordShare(shareTx.from, shareTx.share); err != nil {
+	if err := session.round1.recordShare(shareTx.from, shareTx.share, shareTx.factorProof); err != nil {
 		t.Fatal(err)
 	}
 	shareTx.markCommitted()

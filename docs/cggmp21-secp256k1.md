@@ -196,6 +196,11 @@ Each party `i`:
    - **Πmod** — CGGMP24 Paillier-Blum modulus proof.
    - **Πprm** — CGGMP24 Ring-Pedersen parameter proof for `(N_i,s_i,t_i)`.
 
+   Ring-Pedersen generation samples `τ∈Z*_N`, sets `T=τ² mod N` and
+   `S=T^λ mod N`, and rejects degenerate bases. Public validation requires
+   `Jacobi(S,N)=Jacobi(T,N)=+1`; full QR membership follows from honest local
+   generation by the verifier, not from that public Jacobi check alone.
+
 3. **Shamir polynomial**: Samples a random degree `t-1` polynomial:
 
    ```
@@ -212,7 +217,7 @@ Each party broadcasts:
 
 - Polynomial commitments `C_{i,k} = a_{i,k}·G` for `k ∈ [0, t-1]`.
 - Paillier public key (TLV-encoded).
-- Π^fac proof.
+- Πmod proof.
 - Π^prm proof.
 - Optional chain-code share.
 
@@ -230,7 +235,11 @@ s_{i→j} = f_i(j)  mod q
 
 The direct Round-2 payload carries the ciphertext and a verifier-specific
 Πlog\* proving that its plaintext matches the public polynomial evaluation at
-the receiver index. The proof permits a legitimate zero share/identity
+the receiver index. It also carries receiver-specific Πfac for the sender's
+Paillier modulus relative to the receiver's Ring-Pedersen parameters. Πfac
+proves `2^Ell < p,q < 2^Ell·sqrt(N_i)` and binds the lifecycle, security
+profile, session, plan, prover, verifier, both moduli, and first messages. Πfac
+is verified before Πlog\* and before share decryption. The proof permits a legitimate zero share/identity
 evaluation. The envelope is confidential and must carry a valid canonical
 sender signature.
 
@@ -252,7 +261,10 @@ When all `n` parties' commitments and shares are received and verified:
 
 6. **Chain code** (HD): `chain = XOR_i chainCode_i`.
 
-7. **Paillier proof domain**: The persisted local Π^fac is re-proved against `(PK, keygen_transcript_hash)` for out-of-context detection.
+7. **Paillier factor proofs**: The KeyShare stores each remote party's Πfac
+   relative to the local party's Ring-Pedersen parameters. The local entry has
+   no self-proof; its private factors are checked directly. Decode, refresh,
+   reshare, and presign startup revalidate the complete remote proof set.
 
 8. **Πlog\* proof**: Each party encrypts its aggregated secret share `x_j` under its own Paillier key and produces a Πlog\* proof (LogStarProof) binding the ciphertext to the party's verification share `V_j`, using the party's own Ring-Pedersen parameters for the commitment. This allows re-verification on load to detect out-of-context or tampered share material.
 
@@ -729,7 +741,7 @@ CGGMP21 evidence covers every attributable failure point:
 | Phase            | Evidence Kind            | When                                                            |
 | ---------------- | ------------------------ | --------------------------------------------------------------- |
 | Keygen           | `keygen_commitment`      | Invalid keygen public commitment.                               |
-| Keygen           | `keygen_paillier`        | Invalid Paillier key or modulus proof.                          |
+| Auxiliary setup  | `paillier_aux`           | Invalid Paillier, Ring-Pedersen, or receiver Πfac material.     |
 | Keygen           | `keygen_share`           | DKG share fails commitment verification.                        |
 | Presign round 1  | `presign_round1`         | Invalid nonce commitment or encryption proof.                   |
 | Presign round 2  | `presign_round2`         | Invalid MtA response or proof.                                  |
@@ -748,7 +760,13 @@ contain private shares, nonces, or Paillier secret keys. `VerifyBlameEvidence`
 validates evidence against trusted session context (parties, signer set, public
 key, Paillier public keys, transcript hashes). Identification evidence carries
 the fixed `IdentificationRecord` input; proof-backed records additionally
-require the caller's public-transcript `IdentificationVerifier`. Direct-message
+are verified by the built-in `VerifyIdentificationFailure`; a caller verifier
+cannot override built-in sign/presign results. The versioned statement contains
+only public transcript material and is checked against trusted verification,
+Paillier, and Ring-Pedersen snapshots. Online-sign statements additionally bind
+the complete verification context, `little-r`, and ordered hashes of the compact
+MtA inputs used by proof replay; only the accused signer's compact ciphertext
+record is carried, keeping evidence linear in the signer count. Direct-message
 failures embed the sender-signed envelope; broadcast failures embed the accepted
 envelope and its full ACK certificate, so external verification does not depend
 on the reporting party's transport log.
@@ -764,7 +782,7 @@ Per-party signpartial evidence includes:
 | Payload Type                                   | Direction      | Confidential | Content                                                                     |
 | ---------------------------------------------- | -------------- | ------------ | --------------------------------------------------------------------------- |
 | `cggmp21.secp256k1.keygen.commitments`         | broadcast      | no           | Polynomial commitments + Paillier key + proofs                              |
-| `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Receiver Paillier ciphertext + verifier-specific Πlog\*                     |
+| `cggmp21.secp256k1.keygen.share`               | point-to-point | yes          | Receiver ciphertext + verifier-specific Πlog\* and Πfac                     |
 | `cggmp21.secp256k1.presign.round1`             | broadcast      | no           | `(Γ_i, Enc_i(k_i), Enc_i(γ_i), KPoint_i, PaillierPK)`                       |
 | `cggmp21.secp256k1.presign.round1-proof`       | point-to-point | yes          | Public Round1 hash + verifier-specific EncK/EncGamma Πlog\* proofs          |
 | `cggmp21.secp256k1.presign.round2`             | point-to-point | yes          | MtA response ciphertexts + Πaff-g proofs (AffGProof)                        |
@@ -773,10 +791,16 @@ Per-party signpartial evidence includes:
 | `cggmp21.secp256k1.sign.partial`               | broadcast      | no           | `s_i`, presign transcript, context hash, digest hash, partial equation hash |
 | `cggmp21.secp256k1.sign.identification`        | broadcast      | no           | Sigma Πaff-g reproofs, Πmul\*, reconstructed ciphertext, and Πdec           |
 | `cggmp21.secp256k1.refresh.commitments`        | broadcast      | no           | Refresh polynomial commitments + new Paillier                               |
-| `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Receiver Paillier ciphertext + verifier-specific Πlog\*                     |
+| `cggmp21.secp256k1.refresh.share`              | point-to-point | yes          | Receiver ciphertext + verifier-specific Πlog\* and Πfac                     |
 | `cggmp21.secp256k1.reshare.dealer_commitments` | broadcast      | no           | Old dealer weighted polynomial commitments                                  |
 | `cggmp21.secp256k1.reshare.share`              | point-to-point | yes          | Old dealer ciphertext + receiver-specific Πlog\*                            |
 | `cggmp21.secp256k1.reshare.receiver_material`  | broadcast      | no           | New receiver Paillier/Ring-Pedersen material                                |
+| `cggmp21.secp256k1.reshare.factor-proof`       | point-to-point | no           | Receiver-to-receiver Πfac + canonical prover key + plan hash                |
+
+Identification messages received before the conditional phase is active are
+fully authenticated and policy-checked without committing replay state, then
+rejected with `ErrCodeRound`. The exact message can be retried after activation;
+once accepted, normal duplicate/equivocation semantics apply.
 
 ## Sequence Diagrams
 

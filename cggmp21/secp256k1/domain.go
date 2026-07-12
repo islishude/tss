@@ -18,6 +18,7 @@ const (
 	// Domain labels identify the protocol phase for domain separation.
 	domainLabelKeygenModulus         = "keygen.modulus"
 	domainLabelKeygenRingPedersen    = "keygen.ring-pedersen"
+	domainLabelKeygenFactor          = "keygen.factor"
 	domainLabelKeygenEncryptedShare  = "keygen.encrypted-share"
 	domainLabelKeySharePaillier      = "keyshare.paillier-modulus"
 	domainLabelPresignMTAStartProof  = "presign.mta-start.enc-proof"
@@ -26,8 +27,10 @@ const (
 	domainLabelPresignMTASigma       = "presign.mta-response.sigma"
 	domainLabelResharePaillier       = "reshare.paillier-modulus"
 	domainLabelReshareRingPedersen   = "reshare.ring-pedersen"
+	domainLabelReshareFactor         = "reshare.factor"
 	domainLabelRefreshPaillier       = "refresh.paillier-modulus"
 	domainLabelRefreshRingPedersen   = "refresh.ring-pedersen"
+	domainLabelRefreshFactor         = "refresh.factor"
 	domainLabelRefreshEncryptedShare = "refresh.encrypted-share"
 	domainLabelReshareEncryptedShare = "reshare.encrypted-share"
 	domainLabelKeyShareLogProof      = "keyshare.log-proof"
@@ -418,6 +421,80 @@ func keygenRingPedersenDomain(config tss.ThresholdConfig, sender tss.PartyID, pa
 
 func keygenEncryptedShareDomain(config tss.ThresholdConfig, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {
 	return directEncryptedShareDomain(domainLabelKeygenEncryptedShare, config, sender, receiver, receiverPK, planHash, limits)
+}
+
+func factorProofDomain(label string, config tss.ThresholdConfig, prover, verifier tss.PartyID, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	if err := validateDomainParticipants(config.Threshold, config.Parties); err != nil {
+		return nil, err
+	}
+	if err := requireDomainParty("prover", prover, config.Parties); err != nil {
+		return nil, err
+	}
+	if err := requireDomainParty("verifier", verifier, config.Parties); err != nil {
+		return nil, err
+	}
+	if prover == verifier {
+		return nil, errors.New("factor proof prover and verifier must differ")
+	}
+	if err := requireHash32("plan hash", planHash); err != nil {
+		return nil, err
+	}
+	b, err := newDomainBuilder(label)
+	if err != nil {
+		return nil, err
+	}
+	b.t.AppendBytes("session_id", config.SessionID[:])
+	b.t.AppendUint32("threshold", uint32(config.Threshold))
+	b.t.AppendUint32List("parties", config.Parties)
+	b.t.AppendUint32List("signers", nil)
+	b.t.AppendUint32("sender", prover)
+	b.t.AppendUint32("receiver", verifier)
+	b.t.AppendBytes("public_key", nil)
+	b.t.AppendBytes("keygen_transcript_hash", nil)
+	pkRaw, err := canonicalWireMessageBytes(proverPK, limits)
+	if err != nil {
+		return nil, err
+	}
+	rpRaw, err := canonicalWireMessageBytes(verifierAux, limits)
+	if err != nil {
+		return nil, err
+	}
+	b.t.AppendBytes("paillier_public_key", pkRaw)
+	b.t.AppendBytes("ring_pedersen_params", rpRaw)
+	b.appendNoPresignContext()
+	if err := b.appendLifecyclePlanHash(planHash); err != nil {
+		return nil, err
+	}
+	return b.sum(), nil
+}
+
+func keygenFactorProofDomain(config tss.ThresholdConfig, prover, verifier tss.PartyID, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return factorProofDomain(domainLabelKeygenFactor, config, prover, verifier, proverPK, verifierAux, planHash, limits)
+}
+
+func refreshFactorProofDomain(config tss.ThresholdConfig, prover, verifier tss.PartyID, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return factorProofDomain(domainLabelRefreshFactor, config, prover, verifier, proverPK, verifierAux, planHash, limits)
+}
+
+func reshareFactorProofDomain(config tss.ThresholdConfig, prover, verifier tss.PartyID, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, planHash []byte, limits Limits) ([]byte, error) {
+	return factorProofDomain(domainLabelReshareFactor, config, prover, verifier, proverPK, verifierAux, planHash, limits)
+}
+
+func keyShareFactorProofDomain(key *KeyShare, prover tss.PartyID, proverPK *pai.PublicKey, verifierAux *zkpai.RingPedersenParams, limits Limits) ([]byte, error) {
+	if key == nil || key.state == nil {
+		return nil, errors.New("nil key share")
+	}
+	config := tss.ThresholdConfig{Threshold: key.state.Threshold, Parties: key.state.Parties, Self: key.state.Party, SessionID: key.state.PaillierProofSessionID}
+	switch key.state.PaillierProofDomain {
+	case domainLabelKeygenModulus:
+		return keygenFactorProofDomain(config, prover, key.state.Party, proverPK, verifierAux, key.state.PlanHash, limits)
+	case domainLabelRefreshPaillier:
+		return refreshFactorProofDomain(config, prover, key.state.Party, proverPK, verifierAux, key.state.PlanHash, limits)
+	case domainLabelResharePaillier:
+		return reshareFactorProofDomain(config, prover, key.state.Party, proverPK, verifierAux, key.state.PlanHash, limits)
+	default:
+		return nil, fmt.Errorf("unsupported factor proof domain %q", key.state.PaillierProofDomain)
+	}
 }
 
 func refreshEncryptedShareDomain(config tss.ThresholdConfig, sender, receiver tss.PartyID, receiverPK *pai.PublicKey, planHash []byte, limits Limits) ([]byte, error) {

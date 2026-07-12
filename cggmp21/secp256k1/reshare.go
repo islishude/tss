@@ -18,6 +18,7 @@ const (
 	payloadReshareDealerCommitments = "cggmp21.secp256k1.reshare.dealer_commitments"
 	payloadReshareShare             = "cggmp21.secp256k1.reshare.share"
 	payloadReshareReceiverMaterial  = "cggmp21.secp256k1.reshare.receiver_material"
+	payloadReshareFactorProof       = "cggmp21.secp256k1.reshare.factor-proof"
 	reshareCommitmentsHashLabel     = "cggmp21-secp256k1-reshare-commitments-v1"
 	reshareTranscriptHashLabel      = "cggmp21-secp256k1-reshare-transcript-v1"
 )
@@ -36,6 +37,8 @@ type reshareDealerPartyData struct {
 type reshareNewPartyData struct {
 	paillierPub  paillierPublicMaterial
 	ringPedersen ringPedersenPublicMaterial
+	factorProof  *zkpai.FactorProof
+	factorKey    *pai.PublicKey
 	confirmation *KeygenConfirmation
 }
 
@@ -72,9 +75,10 @@ type ReshareSession struct {
 	aborted        bool                                    // Terminal failure/destruction flag.
 	newShare       *KeyShare                               // New key share produced for receiver participants.
 
-	newPaillier *pai.PrivateKey    // Fresh local Paillier private key for receiver auxiliary material.
-	dealerSent  bool               // Whether this dealer has already emitted commitments and shares.
-	guard       *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
+	newPaillier      *pai.PrivateKey    // Fresh local Paillier private key for receiver auxiliary material.
+	dealerSent       bool               // Whether this dealer has already emitted commitments and shares.
+	factorProofsSent bool               // Whether this receiver emitted pairwise Pi-fac proofs.
+	guard            *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
 }
 
 type reshareDealerCommitmentsPayload struct {
@@ -113,6 +117,57 @@ type reshareSharePayload struct {
 	Proof                zkpai.LogStarProof `wire:"4,nested,max_bytes=zk_proof"`
 	DealerCommitmentHash []byte             `wire:"5,bytes,len=32"`
 	PlanHash             []byte             `wire:"6,bytes,len=32"`
+}
+
+type reshareFactorProofPayload struct {
+	Prover            tss.PartyID       `wire:"1,u32"`
+	Verifier          tss.PartyID       `wire:"2,u32"`
+	PaillierPublicKey pai.PublicKey     `wire:"3,nested,max_bytes=paillier_public_key"`
+	Proof             zkpai.FactorProof `wire:"4,nested,max_bytes=zk_proof"`
+	PlanHash          []byte            `wire:"5,bytes,len=32"`
+}
+
+// WireType returns the reshare factor-proof payload wire type.
+func (reshareFactorProofPayload) WireType() string { return reshareFactorProofWireType }
+
+// WireVersion returns the reshare factor-proof payload wire version.
+func (reshareFactorProofPayload) WireVersion() uint16 { return reshareFactorProofWireVersion }
+
+// Validate checks the reshare factor-proof payload's public invariants.
+func (p reshareFactorProofPayload) Validate() error {
+	if p.Prover == 0 || p.Verifier == 0 || p.Prover == p.Verifier {
+		return errors.New("invalid reshare factor proof identities")
+	}
+	if err := p.PaillierPublicKey.Validate(); err != nil {
+		return err
+	}
+	if err := p.Proof.Validate(); err != nil {
+		return err
+	}
+	if len(p.PlanHash) != 32 {
+		return errors.New("reshare factor proof plan hash must be 32 bytes")
+	}
+	return nil
+}
+
+// MarshalBinary returns the canonical reshare factor-proof payload.
+func (p reshareFactorProofPayload) MarshalBinary() ([]byte, error) {
+	return p.MarshalBinaryWithLimits(DefaultLimits())
+}
+
+// MarshalBinaryWithLimits returns the canonical payload under explicit limits.
+func (p reshareFactorProofPayload) MarshalBinaryWithLimits(limits Limits) ([]byte, error) {
+	return marshalPayloadWithLimits(p, limits)
+}
+
+// UnmarshalBinary decodes a canonical reshare factor-proof payload.
+func (p *reshareFactorProofPayload) UnmarshalBinary(in []byte) error {
+	return p.UnmarshalBinaryWithLimits(in, DefaultLimits())
+}
+
+// UnmarshalBinaryWithLimits decodes a canonical payload under explicit limits.
+func (p *reshareFactorProofPayload) UnmarshalBinaryWithLimits(in []byte, limits Limits) error {
+	return unmarshalPayloadWithLimits(p, in, limits)
 }
 
 // Clone returns a deep copy of reshareSharePayload
@@ -319,7 +374,7 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	allowedParties := s.dealerParties
-	if env.PayloadType == payloadReshareReceiverMaterial || env.PayloadType == payloadKeygenConfirmation {
+	if env.PayloadType == payloadReshareReceiverMaterial || env.PayloadType == payloadReshareFactorProof || env.PayloadType == payloadKeygenConfirmation {
 		allowedParties = s.newParties
 	}
 	if err := s.validateInbound(in, allowedParties); err != nil {
@@ -428,6 +483,48 @@ func (s *ReshareSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if err != nil {
 			return nil, err
 		}
+		factorOut, err := s.maybeSendReceiverFactorProofs()
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, factorOut...)
+	case payloadReshareFactorProof:
+		if env.Round != reshareShareRound || !s.isReceiver {
+			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("unexpected reshare factor proof"))
+		}
+		p, err := tss.DecodeBinaryValueWithLimits[reshareFactorProofPayload](env.Payload, s.limits)
+		if err != nil {
+			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+				"malformed reshare Paillier factor proof", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+		}
+		if p.Prover != env.From || p.Verifier != s.selfID || !s.newParties.Contains(p.Prover) {
+			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+				"reshare factor proof identity mismatch", tss.NewPartySet(env.From), errors.New("reshare factor proof identity mismatch"),
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+		}
+		if err := requirePlanHash("reshare", p.PlanHash, s.planHash); err != nil {
+			return nil, protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
+				"reshare factor proof plan mismatch", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.newParties, partySetHashLabel)))
+		}
+		npd := s.newPartyData[env.From]
+		if npd.factorProof != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeDuplicate, env.Round, env.From, errors.New("duplicate reshare factor proof"))
+		}
+		selfRP := s.newPartyData[s.selfID].ringPedersen.Params
+		domain, err := reshareFactorProofDomain(s.receiverConfig(), env.From, s.selfID, &p.PaillierPublicKey, selfRP, s.planHash, s.limits)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+		}
+		if err := zkpai.VerifyFactor(s.securityParams, domain, zkpai.FactorStatement{ProverPaillierN: &p.PaillierPublicKey, VerifierAux: selfRP}, &p.Proof); err != nil {
+			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "invalid reshare Paillier factor proof", tss.NewPartySet(env.From), err)
+		}
+		if npd.paillierPub.PublicKey != nil && npd.paillierPub.PublicKey.N.Cmp(p.PaillierPublicKey.N) != 0 {
+			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "reshare factor proof key mismatch", tss.NewPartySet(env.From), errors.New("factor proof Paillier key differs from receiver broadcast"))
+		}
+		npd.factorProof = p.Proof.Clone()
+		npd.factorKey = p.PaillierPublicKey.Clone()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}

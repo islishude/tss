@@ -30,6 +30,7 @@ type refreshPartyData struct {
 	share        *secret.Scalar
 	paillierPub  paillierPublicMaterial
 	ringPedersen ringPedersenPublicMaterial
+	factorProof  *zkpai.FactorProof
 	confirmation *KeygenConfirmation
 }
 
@@ -319,7 +320,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 			return nil, verificationErrorWithEvidence(
 				env,
-				tss.EvidenceKindKeygenPaillier,
+				tss.EvidenceKindPaillierAux,
 				"refresh Paillier modulus does not meet security requirements",
 				tss.NewPartySet(env.From),
 				err,
@@ -334,7 +335,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if !zkpai.VerifyModulus(modDomain, pk, env.From, proof) {
 			return nil, verificationErrorWithEvidence(
 				env,
-				tss.EvidenceKindKeygenPaillier,
+				tss.EvidenceKindPaillierAux,
 				"invalid refresh Paillier modulus proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Paillier modulus proof"),
@@ -346,7 +347,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if ringParams.N.Cmp(pk.N) != 0 {
 			return nil, verificationErrorWithEvidence(
 				env,
-				tss.EvidenceKindKeygenPaillier,
+				tss.EvidenceKindPaillierAux,
 				"refresh Ring-Pedersen modulus mismatch",
 				tss.NewPartySet(env.From),
 				errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
@@ -362,7 +363,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		if !zkpai.VerifyRingPedersen(s.securityParams, ringDomain, ringParams, env.From, ringProof) {
 			return nil, verificationErrorWithEvidence(
 				env,
-				tss.EvidenceKindKeygenPaillier,
+				tss.EvidenceKindPaillierAux,
 				"invalid refresh Ring-Pedersen proof",
 				tss.NewPartySet(env.From),
 				errors.New("invalid refresh Ring-Pedersen proof"),
@@ -394,15 +395,27 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 		}
 		p, err := tss.DecodeBinaryValueWithLimits[refreshSharePayload](env.Payload, s.limits)
 		if err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, err)
+			return nil, protocolErrorWithEvidence(tss.ErrCodeInvalidMessage, env, tss.EvidenceKindPaillierAux,
+				"malformed refresh share or Paillier factor proof", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)))
 		}
 		if err := requirePlanHash("refresh", p.PlanHash, s.planHash); err != nil {
-			return nil, tss.NewProtocolError(tss.ErrCodeVerification, env.Round, env.From, err)
+			return nil, protocolErrorWithEvidence(tss.ErrCodeVerification, env, tss.EvidenceKindPaillierAux,
+				"refresh share factor proof plan mismatch", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)))
 		}
 		if pd.commitments == nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh share arrived before commitments"))
 		}
 		selfPD := s.partyData[s.cfg.Self]
+		factorDomain, err := refreshFactorProofDomain(s.cfg, env.From, s.cfg.Self, pd.paillierPub.PublicKey, selfPD.ringPedersen.Params, s.planHash, s.limits)
+		if err != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
+		}
+		if err := zkpai.VerifyFactor(s.securityParams, factorDomain, zkpai.FactorStatement{ProverPaillierN: pd.paillierPub.PublicKey, VerifierAux: selfPD.ringPedersen.Params}, &p.FactorProof); err != nil {
+			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "invalid refresh Paillier factor proof", tss.NewPartySet(env.From), err,
+				rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(s.oldKey.state.Parties, partySetHashLabel)))
+		}
 		evaluation, err := secp.EvalCommitments(pd.commitments, s.cfg.Self)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
@@ -434,6 +447,7 @@ func (s *RefreshSession) Handle(in tss.InboundEnvelope) (out []tss.Envelope, err
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, 0, err)
 		}
 		pd.share = share
+		pd.factorProof = p.FactorProof.Clone()
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, env.Round, env.From, fmt.Errorf("unexpected payload type %q", env.PayloadType))
 	}
@@ -497,7 +511,8 @@ func (s *RefreshSession) allRefreshRound1Complete() bool {
 		pd := s.partyData[id]
 		if pd == nil || pd.commitments == nil || pd.share == nil ||
 			pd.paillierPub.PublicKey == nil || pd.paillierPub.Proof == nil ||
-			pd.ringPedersen.Params == nil || pd.ringPedersen.Proof == nil {
+			pd.ringPedersen.Params == nil || pd.ringPedersen.Proof == nil ||
+			(id != s.cfg.Self && pd.factorProof == nil) {
 			return false
 		}
 	}
@@ -551,7 +566,15 @@ func (s *RefreshSession) emitEncryptedRefreshShares() ([]tss.Envelope, error) {
 		if err != nil {
 			return nil, err
 		}
-		payload, err := (refreshSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		factorDomain, err := refreshFactorProofDomain(s.cfg, s.cfg.Self, receiver, s.newPaillier.PublicKey, receiverData.ringPedersen.Params, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		factorProof, err := zkpai.ProveFactor(s.securityParams, factorDomain, s.newPaillier, receiverData.ringPedersen.Params, s.cfg.Reader())
+		if err != nil {
+			return nil, err
+		}
+		payload, err := (refreshSharePayload{Ciphertext: ciphertext.Bytes(), Proof: *proof, PlanHash: s.planHash, FactorProof: *factorProof}).MarshalBinaryWithLimits(s.limits)
 		if err != nil {
 			return nil, err
 		}

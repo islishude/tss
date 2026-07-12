@@ -534,6 +534,12 @@ func (s *SignSession) Handle(env tss.InboundEnvelope) (out []tss.Envelope, err e
 			s.abort()
 		}
 	}()
+	if base.PayloadType == payloadSignIdentification && !s.identifying {
+		if err := tss.ValidateInboundWithoutReplay(s.guard, env, tss.ProtocolCGGMP21Secp256k1, s.sessionID, s.presign.state.Signers, s.key.state.Party); err != nil {
+			return nil, err
+		}
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("sign identification is not active"))
+	}
 	if base.PayloadType == payloadSignIdentification {
 		tx, err := s.buildAcceptSignIdentificationTx(env)
 		if err != nil {

@@ -107,6 +107,18 @@ func (g *EnvelopeGuard) Validate(env InboundEnvelope) error {
 // configured set. This is used by sessions (e.g. reshare) that accept messages
 // from different participant subsets depending on payload type.
 func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySet) error {
+	return g.validateWithParties(env, parties, true)
+}
+
+// ValidateWithoutReplay performs all transport, identity, delivery-policy,
+// confidentiality, signature, and broadcast-certificate checks without
+// reserving a replay slot. It is intended only for protocol messages that are
+// explicitly rejected as too early and may be retried after readiness changes.
+func (g *EnvelopeGuard) ValidateWithoutReplay(env InboundEnvelope, parties PartySet) error {
+	return g.validateWithParties(env, parties, false)
+}
+
+func (g *EnvelopeGuard) validateWithParties(env InboundEnvelope, parties PartySet, commitReplay bool) error {
 	base := env.Envelope()
 	info := env.ReceiveInfo()
 
@@ -207,6 +219,10 @@ func (g *EnvelopeGuard) ValidateWithParties(env InboundEnvelope, parties PartySe
 		}
 	}
 
+	if !commitReplay {
+		return nil
+	}
+
 	// 13. Replay and equivocation detection.
 	// Duplicate messages (same slot, same payload hash) return
 	// [ErrDuplicateMessage] so handlers can drop them before parsing
@@ -279,4 +295,17 @@ func ValidateInbound(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol
 		return errors.New("allowed senders must not be empty")
 	}
 	return guard.ValidateForRound(env, allowedSenders)
+}
+
+// ValidateInboundWithoutReplay validates a retryable early message without
+// mutating the guard's replay cache. Once the protocol becomes ready, callers
+// must pass the message through [ValidateInbound] before processing it.
+func ValidateInboundWithoutReplay(guard *EnvelopeGuard, env InboundEnvelope, expectedProtocol ProtocolID, expectedSession SessionID, allowedSenders PartySet, self PartyID) error {
+	if err := RequireEnvelopeGuard(guard, expectedProtocol, expectedSession, self); err != nil {
+		return err
+	}
+	if len(allowedSenders) == 0 {
+		return errors.New("allowed senders must not be empty")
+	}
+	return guard.ValidateWithoutReplay(env, allowedSenders)
 }

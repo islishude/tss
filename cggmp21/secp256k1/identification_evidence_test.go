@@ -6,9 +6,13 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
+	secp "github.com/islishude/tss/internal/curve/secp256k1"
+	pai "github.com/islishude/tss/internal/paillier"
+	zkpai "github.com/islishude/tss/internal/zk/paillier"
 )
 
 type evidenceEnvelopeSigner struct{ private ed25519.PrivateKey }
@@ -32,23 +36,13 @@ func (acceptingEvidenceEnvelopeVerifier) VerifyEnvelopeSignature(tss.PartyID, [3
 	return nil
 }
 
-type acceptingIdentificationVerifier struct{ calls int }
-
-func (v *acceptingIdentificationVerifier) VerifyIdentificationFailure(evidence tss.BlameEvidence, record tss.IdentificationRecord) error {
-	if evidence.From != record.Accused || record.FailureClass != "sign-identification-invalid-proof" {
-		return errors.New("unexpected identification accusation")
-	}
-	v.calls++
-	return nil
-}
-
 type identificationVerifierFunc func(tss.BlameEvidence, tss.IdentificationRecord) error
 
 func (f identificationVerifierFunc) VerifyIdentificationFailure(evidence tss.BlameEvidence, record tss.IdentificationRecord) error {
 	return f(evidence, record)
 }
 
-func TestVerifyBlameEvidenceProofBackedIdentificationRecord(t *testing.T) {
+func TestVerifyBlameEvidenceRejectsBareIdentificationRecord(t *testing.T) {
 	t.Parallel()
 	sessionID, err := tss.NewSessionID(nil)
 	if err != nil {
@@ -66,7 +60,7 @@ func TestVerifyBlameEvidenceProofBackedIdentificationRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	recordField, err := identificationProofEvidenceField(env, "sign-identification-invalid-proof", protocolAlert, keygenHash, presignHash)
+	recordField, err := identificationProofEvidenceField(env, "sign-identification-invalid-proof", []byte("portable statement"), protocolAlert, keygenHash, presignHash)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -84,58 +78,13 @@ func TestVerifyBlameEvidenceProofBackedIdentificationRecord(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	verifier := &acceptingIdentificationVerifier{}
 	ctx := EvidenceContext{
 		SessionID: sessionID, Parties: parties, Signers: parties,
 		KeygenTranscriptHash: keygenHash, PresignTranscriptHash: presignHash,
-		IdentificationVerifier: verifier,
+		IdentificationVerifier: identificationVerifierFunc(func(tss.BlameEvidence, tss.IdentificationRecord) error { return nil }),
 	}
-	if err := VerifyBlameEvidence(encoded, ctx); err != nil {
-		t.Fatal(err)
-	}
-	if verifier.calls != 1 {
-		t.Fatalf("identification verifier called %d times, want 1", verifier.calls)
-	}
-
-	mutations := []func(*tss.IdentificationRecord){
-		func(r *tss.IdentificationRecord) { r.Accused = 1 },
-		func(r *tss.IdentificationRecord) { r.Statement[0] ^= 1 },
-		func(r *tss.IdentificationRecord) { r.Proof[0] ^= 1 },
-		func(r *tss.IdentificationRecord) { r.TranscriptHashes[0].Value[0] ^= 1 },
-	}
-	for i, mutate := range mutations {
-		candidate := *evidence
-		candidate.PublicInputs = make([]tss.EvidenceField, len(evidence.PublicInputs))
-		for j := range evidence.PublicInputs {
-			candidate.PublicInputs[j] = evidence.PublicInputs[j].Clone()
-		}
-		rawRecord, ok := candidate.Field(tss.IdentificationRecordEvidenceKey)
-		if !ok {
-			t.Fatal("missing identification record")
-		}
-		var record tss.IdentificationRecord
-		if err := record.UnmarshalBinary(rawRecord); err != nil {
-			t.Fatal(err)
-		}
-		mutate(&record)
-		alert := record.ComputeAlertDigest()
-		record.AlertDigest = alert[:]
-		encodedRecord, err := record.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		for j := range candidate.PublicInputs {
-			if candidate.PublicInputs[j].Key == tss.IdentificationRecordEvidenceKey {
-				candidate.PublicInputs[j].Value = encodedRecord
-			}
-		}
-		candidateBytes, err := candidate.MarshalBinary()
-		if err != nil {
-			t.Fatal(err)
-		}
-		if err := VerifyBlameEvidence(candidateBytes, ctx); err == nil {
-			t.Fatalf("identification record mutation %d verified", i)
-		}
+	if err := VerifyBlameEvidence(encoded, ctx); err == nil {
+		t.Fatal("bare identification record verified")
 	}
 }
 
@@ -396,7 +345,7 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 	}
 	env, err := tss.NewEnvelope(tss.EnvelopeInput{
 		Protocol: tss.ProtocolCGGMP21Secp256k1, SessionID: sessionID,
-		Round: signIdentificationRound, From: 2, PayloadType: payloadSignIdentification,
+		Round: signStartRound, From: 2, PayloadType: payloadSignPartial,
 		Payload: []byte("invalid certified identification payload"),
 	})
 	if err != nil {
@@ -433,7 +382,7 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	protocolErr := verificationErrorWithEvidence(env, tss.EvidenceKindSignIdentification, "invalid certified identification proof", parties, errors.New("invalid proof"),
+	protocolErr := verificationErrorWithEvidence(env, tss.EvidenceKindSignPartial, "invalid certified sign partial", parties, errors.New("invalid partial"),
 		rawEvidenceField(evidenceFieldPartiesHash, tss.PartySetHash(parties, partySetHashLabel)),
 		rawEvidenceField(evidenceFieldSignerSetHash, tss.PartySetHash(parties, partySetHashLabel)))
 	boundErr := bindInboundAuthenticationEvidence(protocolErr, inbound)
@@ -464,5 +413,97 @@ func TestCertifiedBroadcastFailureCarriesPortableCertificate(t *testing.T) {
 	ctx.BroadcastACKVerifier = nil
 	if err := VerifyBlameEvidence(bound.Blame.Evidence, ctx); !errors.Is(err, tss.ErrMissingAckVerifier) {
 		t.Fatalf("verification without ACK verifier = %v, want %v", err, tss.ErrMissingAckVerifier)
+	}
+}
+
+func TestPortableSignEvidenceFitsProductionSixteenSignerBudget(t *testing.T) {
+	t.Parallel()
+	parties := make(tss.PartySet, maxCGGMPSigners)
+	for i := range parties {
+		parties[i] = tss.PartyID(i + 1)
+	}
+	var sessionID, presignSessionID tss.SessionID
+	sessionID[len(sessionID)-1] = 1
+	presignSessionID[len(presignSessionID)-1] = 2
+
+	// A structurally valid composite close to the production 3072-bit profile.
+	// Its obvious factor keeps this Tier-0 size test deterministic and fast.
+	q := new(big.Int).Add(new(big.Int).Lsh(big.NewInt(1), 3068), big.NewInt(1))
+	n := new(big.Int).Mul(big.NewInt(5), q)
+	pk := &pai.PublicKey{N: n, G: new(big.Int).Add(n, big.NewInt(1)), NSquared: new(big.Int).Mul(new(big.Int).Set(n), n)}
+	rp := &zkpai.RingPedersenParams{N: new(big.Int).Set(n), S: big.NewInt(4), T: big.NewInt(4)}
+	point := secp.ScalarBaseMult(secp.ScalarOne())
+	pointBytes, err := secp.PointBytes(point)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ciphertext := bytes.Repeat([]byte{0xa5}, 768) // N^2 at the 3072-bit profile.
+	hash32 := func(value byte) []byte { return bytes.Repeat([]byte{value}, sha256.Size) }
+
+	statement := &portableIdentificationStatement{
+		Kind: portableIdentificationSign, SessionID: sessionID, Threshold: maxCGGMPThreshold,
+		EnvelopeDigest: hash32(8),
+		Parties:        parties.Clone(), Signers: parties.Clone(), PlanHash: hash32(1), SecurityParams: testSecurityParams(),
+		PublicKey: pointBytes, KeygenTranscriptHash: hash32(2), AlertDigest: hash32(3), ContextHash: hash32(4),
+		PresignSessionID: presignSessionID, PresignTranscriptHash: hash32(5), LittleR: secp.ScalarOne().Bytes(), Digest: hash32(6),
+		Verification:   &presignVerificationContext{SessionID: presignSessionID, Round1Echo: hash32(7)},
+		Identification: &portableSignIdentificationTranscript{Party: parties[0]},
+	}
+	for _, party := range parties {
+		delta := secp.ScalarOne()
+		statement.KeyParties = append(statement.KeyParties, portableIdentificationKeyParty{Party: party, VerificationShare: pointBytes, PaillierPublicKey: pk.Clone(), RingPedersenParams: rp.Clone()})
+		statement.Verification.Entries = append(statement.Verification.Entries, presignVerificationEntry{Party: party, Gamma: pointBytes, EncK: bytes.Clone(ciphertext), PaillierPublicKey: pk.Clone(), XBarPoint: secp.Clone(point), Delta: &delta, KPoint: pointBytes, EncGamma: bytes.Clone(ciphertext)})
+		statement.IdentificationHashes = append(statement.IdentificationHashes, portableSignIdentificationHash{Party: party, Hash: hash32(byte(party))})
+		partial, envelopeErr := tss.NewEnvelope(tss.EnvelopeInput{Protocol: tss.ProtocolCGGMP21Secp256k1, SessionID: sessionID, Round: signStartRound, From: party, PayloadType: payloadSignPartial, Payload: bytes.Repeat([]byte{byte(party)}, 256)})
+		if envelopeErr != nil {
+			t.Fatal(envelopeErr)
+		}
+		partialBytes, marshalErr := partial.MarshalBinary()
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
+		}
+		statement.Partials = append(statement.Partials, portableIdentificationPartial{Party: party, Scalar: secp.ScalarOne().Bytes(), Envelope: partialBytes})
+		if party != statement.Identification.Party {
+			statement.Identification.Contributions = append(statement.Identification.Contributions, portableSignMTAContribution{Peer: party, InboundCiphertext: bytes.Clone(ciphertext), OutboundCiphertext: bytes.Clone(ciphertext)})
+		}
+	}
+	identificationHash, err := portableSignIdentificationTranscriptHash(statement.Identification)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statement.IdentificationHashes[0].Hash = identificationHash
+	statementBytes, err := statement.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(statementBytes) > tss.DefaultMaxZKProofBytes {
+		t.Fatalf("portable statement size %d exceeds %d", len(statementBytes), tss.DefaultMaxZKProofBytes)
+	}
+
+	accused, err := tss.NewEnvelope(tss.EnvelopeInput{Protocol: tss.ProtocolCGGMP21Secp256k1, SessionID: sessionID, Round: signIdentificationRound, From: parties[0], PayloadType: payloadSignIdentification, Payload: bytes.Repeat([]byte{0x5a}, maxIdentificationPayloadBytes)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	accusedBytes, err := accused.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	record := &tss.IdentificationRecord{FailureClass: "sign-identification-invalid-proof", Accused: parties[0], SignedEnvelopeA: accusedBytes, BroadcastCertificate: bytes.Repeat([]byte{0x33}, maxCGGMPSigners*(tss.DefaultMaxEnvelopeSignatureBytes+128)), Statement: statementBytes}
+	alert := record.ComputeAlertDigest()
+	record.AlertDigest = alert[:]
+	recordField, err := tss.IdentificationEvidenceField(record)
+	if err != nil {
+		t.Fatal(err)
+	}
+	evidence, err := tss.NewBlameEvidence(accused, tss.EvidenceKindSignIdentification, "invalid sign identification proof", []tss.EvidenceField{recordField})
+	if err != nil {
+		t.Fatal(err)
+	}
+	encoded, err := evidence.MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(encoded) > tss.DefaultMaxBlameEvidenceBytes {
+		t.Fatalf("portable evidence size %d exceeds %d", len(encoded), tss.DefaultMaxBlameEvidenceBytes)
 	}
 }

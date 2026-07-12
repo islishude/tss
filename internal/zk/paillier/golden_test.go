@@ -39,6 +39,17 @@ func TestGoldenProofPayloads(t *testing.T) {
 			},
 		},
 		{
+			name: "FactorProof",
+			marshal: func(t *testing.T) []byte {
+				t.Helper()
+				return mustMarshalBinary(t, seedFactorProof())
+			},
+			roundTrip: func(t *testing.T, raw []byte) {
+				t.Helper()
+				assertBinaryProofWireRoundTrip(t, raw, tss.DecodeBinary[FactorProof])
+			},
+		},
+		{
 			name: "RingPedersenParams",
 			marshal: func(t *testing.T) []byte {
 				t.Helper()
@@ -113,6 +124,14 @@ func TestGoldenProofPayloads(t *testing.T) {
 			testvectors.CheckHexGolden(t, "wire/v1/zk/"+tc.name+".golden", raw)
 			tc.roundTrip(t, raw)
 		})
+	}
+}
+
+func seedFactorProof() *FactorProof {
+	return &FactorProof{
+		P: big.NewInt(2), Q: big.NewInt(3), A: big.NewInt(4), B: big.NewInt(5), T: big.NewInt(6),
+		Sigma: big.NewInt(-7), Z1: big.NewInt(8), Z2: big.NewInt(-9), W1: big.NewInt(10),
+		W2: big.NewInt(-11), V: big.NewInt(12), TranscriptHash: bytes.Repeat([]byte{0xfa}, 32),
 	}
 }
 

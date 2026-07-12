@@ -10,16 +10,21 @@ const (
 	maxCGGMPParties   = 16
 	maxCGGMPThreshold = 16
 	maxCGGMPSigners   = 16
+	// Πfac responses are products of at most the prover and verifier moduli
+	// plus the public mask/challenge widths. Four KiB covers the largest
+	// supported profile without permitting attacker-selected multi-megabit
+	// exponents to reach big.Int modular exponentiation.
+	maxFactorResponseBytes = 4096
 
 	maxSignPrepProofBytes         = 512 << 10
 	maxSignVerifyShareRecordBytes = signVerifyShareRecordFixedBytes + 65*6 + 32*2 + maxSignPrepProofBytes
 	maxSignVerifyShareBytes       = maxSignVerifyShareRecordBytes
 	maxSignVerifySharesBytes      = 4 + maxCGGMPSigners*(4+maxSignVerifyShareRecordBytes)
 	maxSignPartialPayloadBytes    = 32*6 + maxSignPrepProofBytes + 256
-	// Identification evidence carries both the proof payload and its certified
-	// envelope inside the 1 MiB public-evidence hard cap. Keep the phase payload
-	// below half that budget, leaving room for sixteen maximum-size ACKs and TLV
-	// framing without accepting a message that cannot later be attributed.
+	// Identification evidence uses the certified envelope as its canonical proof
+	// carrier inside the 1 MiB public-evidence hard cap. Keep the phase payload
+	// below half that budget, leaving room for the compact public statement,
+	// sixteen maximum-size ACKs, and TLV framing.
 	maxIdentificationPayloadBytes    = 384 << 10
 	maxPresignVerificationEntryBytes = tss.DefaultMaxPaillierCiphertextBytes*2 +
 		tss.DefaultMaxPaillierPublicKeyBytes + 256
@@ -181,6 +186,7 @@ func (l Limits) fieldLimits() wire.FieldLimits {
 		"paillier_modulus":           l.Paillier.MaxCiphertextBytes,
 		"signed_response":            l.Paillier.MaxCiphertextBytes,
 		"paillier_signed":            l.Paillier.MaxCiphertextBytes,
+		"factor_response":            maxFactorResponseBytes,
 		"proof_rounds":               128,
 		"signprep_proof":             l.SignPrep.MaxProofBytes,
 		"signprep_partial_signature": l.SignPrep.MaxSignPartialPayloadBytes,

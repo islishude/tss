@@ -228,11 +228,29 @@ all output accessors remain false, then cover both terminal outcomes:
 - a complete set of valid proofs with the original failure still present
   returns an unblamed invariant.
 
+An otherwise valid identification envelope that arrives before identification
+is active is checked with the stateless guard path and rejected with
+`ErrCodeRound`. That rejection must not change replay state, protocol state, or
+outbound effects. After activation, the exact envelope must remain acceptable;
+only then do exact duplicates and same-slot conflicts retain the ordinary
+duplicate/equivocation behavior.
+
 Identification tests must also verify witness cleanup on success, attributed
 abort, invariant fallback, presign burn, serialization/restore, and explicit
 session destruction. Public evidence mutation tests cover the accused party,
 signed envelope or broadcast certificate, statement, proof, alert digest, and
-transcript hashes.
+transcript hashes. Online-sign evidence additionally mutates the verification
+context, compact accused MtA record, its ordered hash list, and `little-r`; the
+maximum 16-signer production shape must remain within both the statement and
+total evidence hard caps.
+
+CGGMP21 keygen, refresh, and reshare tests must also cover receiver-specific
+Πfac lifecycle binding: missing or mutated proofs, wrong prover/verifier,
+wrong lifecycle/session/plan/security profile, a small-factor modulus, direct
+proof versus receiver-broadcast reordering/equivocation, and KeyShare
+marshal/unmarshal revalidation. Ring-Pedersen generation tests use known local
+factors to confirm that both generated bases are quadratic residues; public
+validation separately tests the mandatory Jacobi `+1` checks.
 
 ### 4. Domain Separation
 

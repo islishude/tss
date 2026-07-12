@@ -215,6 +215,10 @@ func (s *ReshareSession) initReceiverMaterial() error {
 }
 
 func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p reshareReceiverMaterialPayload) error {
+	existing := s.newPartyData[env.From]
+	if existing != nil && existing.factorKey != nil && existing.factorKey.N.Cmp(p.PaillierPublicKey.N) != 0 {
+		return verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "reshare receiver material conflicts with factor proof", tss.NewPartySet(env.From), errors.New("receiver Paillier key equivocation"))
+	}
 	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
@@ -224,7 +228,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if err := checkPaillierModulusBounds(pk, s.limits, s.securityParams); err != nil {
 		return verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"reshare Paillier modulus does not meet security requirements",
 			tss.NewPartySet(env.From),
 			err,
@@ -239,7 +243,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if !zkpai.VerifyModulus(modDomain, pk, env.From, proof) {
 		return verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"invalid reshare Paillier modulus proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid reshare Paillier modulus proof"),
@@ -251,7 +255,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if ringParams.N.Cmp(pk.N) != 0 {
 		return verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"reshare Ring-Pedersen modulus mismatch",
 			tss.NewPartySet(env.From),
 			errors.New("Ring-Pedersen modulus does not match Paillier modulus"),
@@ -267,7 +271,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if !zkpai.VerifyRingPedersen(s.securityParams, ringDomain, ringParams, env.From, ringProof) {
 		return verificationErrorWithEvidence(
 			env,
-			tss.EvidenceKindKeygenPaillier,
+			tss.EvidenceKindPaillierAux,
 			"invalid reshare Ring-Pedersen proof",
 			tss.NewPartySet(env.From),
 			errors.New("invalid reshare Ring-Pedersen proof"),
@@ -285,8 +289,44 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 			Params: p.RingPedersenParams.Clone(),
 			Proof:  p.RingPedersenProof.Clone(),
 		},
+		factorProof: existing.factorProof.Clone(),
+		factorKey:   existing.factorKey.Clone(),
 	}
 	return nil
+}
+
+func (s *ReshareSession) maybeSendReceiverFactorProofs() ([]tss.Envelope, error) {
+	if !s.isReceiver || s.factorProofsSent || !s.allReshareReceiverMaterialReceived() {
+		return nil, nil
+	}
+	selfData := s.newPartyData[s.selfID]
+	out := make([]tss.Envelope, 0, len(s.newParties)-1)
+	for _, verifier := range s.newParties {
+		if verifier == s.selfID {
+			continue
+		}
+		verifierRP := s.newPartyData[verifier].ringPedersen.Params
+		domain, err := reshareFactorProofDomain(s.receiverConfig(), s.selfID, verifier, selfData.paillierPub.PublicKey, verifierRP, s.planHash, s.limits)
+		if err != nil {
+			return nil, err
+		}
+		proof, err := zkpai.ProveFactor(s.securityParams, domain, s.newPaillier, verifierRP, s.cfg.Reader())
+		if err != nil {
+			return nil, err
+		}
+		payload, err := (reshareFactorProofPayload{Prover: s.selfID, Verifier: verifier, PaillierPublicKey: *selfData.paillierPub.PublicKey.Clone(), Proof: *proof, PlanHash: s.planHash}).MarshalBinaryWithLimits(s.limits)
+		if err != nil {
+			return nil, err
+		}
+		env, err := newEnvelope(s.receiverConfig(), reshareShareRound, s.selfID, verifier, payloadReshareFactorProof, payload)
+		clear(payload)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, env)
+	}
+	s.factorProofsSent = true
+	return out, nil
 }
 
 func (s *ReshareSession) applyReshareShare(env tss.Envelope, p reshareSharePayload) error {

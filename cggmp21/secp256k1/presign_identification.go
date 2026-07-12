@@ -155,6 +155,10 @@ func (s *PresignSession) presignIdentificationAlert() []byte {
 		delta := state.round3.delta.FixedBytes()
 		t.AppendBytes("delta", delta)
 		clear(delta)
+		contributionsHash, err := mtaContributionsDigest(state.round3.verifyShare.mtaContributions)
+		if err == nil {
+			t.AppendBytes("mta_contributions_hash", contributionsHash)
+		}
 	}
 	return t.Sum()
 }
@@ -468,8 +472,12 @@ func (s *PresignSession) buildAcceptPresignIdentificationTx(env tss.Envelope) (*
 	}
 	payload, err := tss.DecodeBinaryValueWithLimits[presignIdentificationPayload](env.Payload, s.limits)
 	if err != nil {
+		statement, statementErr := s.portablePresignIdentificationStatement(env)
+		if statementErr != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, statementErr)
+		}
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-		recordField, recordErr := identificationProofEvidenceField(env, "presign-identification-malformed", s.identificationAlert, s.key.state.KeygenTranscriptHash, nil)
+		recordField, recordErr := identificationProofEvidenceField(env, "presign-identification-malformed", statement, s.identificationAlert, s.key.state.KeygenTranscriptHash, nil)
 		if recordErr != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, recordErr)
 		}
@@ -480,8 +488,12 @@ func (s *PresignSession) buildAcceptPresignIdentificationTx(env tss.Envelope) (*
 	}
 	if err := s.verifyPresignIdentificationPayload(env.From, payload); err != nil {
 		payload.destroy()
+		statement, statementErr := s.portablePresignIdentificationStatement(env)
+		if statementErr != nil {
+			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, statementErr)
+		}
 		fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
-		recordField, recordErr := identificationProofEvidenceField(env, "presign-identification-invalid-proof", s.identificationAlert, s.key.state.KeygenTranscriptHash, nil)
+		recordField, recordErr := identificationProofEvidenceField(env, "presign-identification-invalid-proof", statement, s.identificationAlert, s.key.state.KeygenTranscriptHash, nil)
 		if recordErr != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, recordErr)
 		}

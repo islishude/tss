@@ -53,6 +53,15 @@ func TestRingPedersenProofChecks(t *testing.T) {
 		if VerifyRingPedersen(securityParams, domain, bad, party, proof) {
 			t.Fatal("Ring-Pedersen proof verified against invalid parameters")
 		}
+		jacobiMinusOne := big.NewInt(2)
+		for big.Jacobi(jacobiMinusOne, params.N) != -1 {
+			jacobiMinusOne.Add(jacobiMinusOne, big.NewInt(1))
+		}
+		bad = params.Clone()
+		bad.T = jacobiMinusOne
+		if ValidateRingPedersenParams(bad) == nil {
+			t.Fatal("Ring-Pedersen parameters accepted a Jacobi -1 base")
+		}
 	})
 	t.Run("out of range response", func(t *testing.T) {
 		tampered := proof.Clone()

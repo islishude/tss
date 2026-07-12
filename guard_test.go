@@ -136,6 +136,34 @@ func guardReplayCacheEntries(t *testing.T, guard *EnvelopeGuard) int {
 	return len(cache.seen)
 }
 
+func TestEnvelopeGuardValidateWithoutReplayAllowsExactRetry(t *testing.T) {
+	t.Parallel()
+	testEnv := newGuardTestEnv(t)
+	env := testEnv.envelope(t, "test.direct.plain", 1)
+	in := testEnv.inbound(env, ReceiveInfo{}, nil)
+
+	if err := testEnv.guard.ValidateWithoutReplay(in, PartySet{1, 2, 3}); err != nil {
+		t.Fatal(err)
+	}
+	if got := guardReplayCacheEntries(t, testEnv.guard); got != 0 {
+		t.Fatalf("stateless validation stored %d replay entries", got)
+	}
+	if err := testEnv.guard.Validate(in); err != nil {
+		t.Fatalf("exact retry after stateless validation: %v", err)
+	}
+	if got := guardReplayCacheEntries(t, testEnv.guard); got != 1 {
+		t.Fatalf("accepted retry stored %d replay entries, want 1", got)
+	}
+	if err := testEnv.guard.Validate(in); !errors.Is(err, ErrDuplicateMessage) {
+		t.Fatalf("accepted duplicate = %v, want %v", err, ErrDuplicateMessage)
+	}
+	conflict := env.Clone()
+	conflict.Payload = []byte("conflicting-payload")
+	if err := testEnv.guard.Validate(testEnv.inbound(conflict, ReceiveInfo{}, nil)); !errors.Is(err, ErrEquivocation) {
+		t.Fatalf("accepted conflict = %v, want %v", err, ErrEquivocation)
+	}
+}
+
 func TestNewEnvelopeGuardRejectsNilReplayCache(t *testing.T) {
 	t.Parallel()
 	_, err := NewEnvelopeGuard(1, PartySet{1, 2}, "test-proto", testSessionID(t), testPolicySet(), nil)

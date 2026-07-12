@@ -183,11 +183,12 @@ func (s *KeygenSession) preparePendingKeyShare(snap *keygenRound1Snapshot) (*pre
 			paillierProof = localPaillierProof
 		}
 		partyData[id] = keySharePartyData{
-			VerificationShare:  bytes.Clone(verificationShare),
-			PaillierPublicKey:  snap.paillier[id].PublicKey.Clone(),
-			PaillierProof:      paillierProof.Clone(),
-			RingPedersenParams: snap.ringPedersen[id].Params.Clone(),
-			RingPedersenProof:  snap.ringPedersen[id].Proof.Clone(),
+			VerificationShare:   bytes.Clone(verificationShare),
+			PaillierPublicKey:   snap.paillier[id].PublicKey.Clone(),
+			PaillierProof:       paillierProof.Clone(),
+			RingPedersenParams:  snap.ringPedersen[id].Params.Clone(),
+			RingPedersenProof:   snap.ringPedersen[id].Proof.Clone(),
+			PaillierFactorProof: snap.factorProofs[id].Clone(),
 		}
 	}
 	share := &KeyShare{state: &keyShareState{

@@ -11,12 +11,53 @@ const proofTranscriptVersion = 1
 
 const (
 	modulusProofWireType         = "zk.paillier.modulus-proof"
+	factorProofWireType          = "zk.paillier.factor-proof"
 	ringPedersenParamsType       = "zk.paillier.ring-pedersen-params"
 	ringPedersenProofWireType    = "zk.paillier.ring-pedersen-proof"
 	modulusProofWireVersion      = 1
+	factorProofWireVersion       = 1
 	ringPedersenParamsVersion    = 1
 	ringPedersenProofWireVersion = 1
 )
+
+// FactorProof is CGGMP Pi-fac for proving that a Paillier modulus has no
+// small or severely unbalanced factors. The commitments live in the
+// verifier's Ring-Pedersen group; all responses are public masked integers.
+type FactorProof struct {
+	P              *big.Int `wire:"1,bigpos,max_bytes=paillier_modulus"`
+	Q              *big.Int `wire:"2,bigpos,max_bytes=paillier_modulus"`
+	A              *big.Int `wire:"3,bigpos,max_bytes=paillier_modulus"`
+	B              *big.Int `wire:"4,bigpos,max_bytes=paillier_modulus"`
+	T              *big.Int `wire:"5,bigpos,max_bytes=paillier_modulus"`
+	Sigma          *big.Int `wire:"6,bigint,max_bytes=factor_response"`
+	Z1             *big.Int `wire:"7,bigint,max_bytes=factor_response"`
+	Z2             *big.Int `wire:"8,bigint,max_bytes=factor_response"`
+	W1             *big.Int `wire:"9,bigint,max_bytes=factor_response"`
+	W2             *big.Int `wire:"10,bigint,max_bytes=factor_response"`
+	V              *big.Int `wire:"11,bigint,max_bytes=factor_response"`
+	TranscriptHash []byte   `wire:"12,bytes,len=32"`
+}
+
+// WireType returns the canonical wire type identifier for FactorProof.
+func (FactorProof) WireType() string { return factorProofWireType }
+
+// WireVersion returns the wire version for FactorProof.
+func (FactorProof) WireVersion() uint16 { return factorProofWireVersion }
+
+// Clone returns a deep copy of the proof.
+func (p *FactorProof) Clone() *FactorProof {
+	if p == nil {
+		return nil
+	}
+	return &FactorProof{
+		P: tss.CloneBigInt(p.P), Q: tss.CloneBigInt(p.Q),
+		A: tss.CloneBigInt(p.A), B: tss.CloneBigInt(p.B),
+		T: tss.CloneBigInt(p.T), Sigma: tss.CloneBigInt(p.Sigma),
+		Z1: tss.CloneBigInt(p.Z1), Z2: tss.CloneBigInt(p.Z2),
+		W1: tss.CloneBigInt(p.W1), W2: tss.CloneBigInt(p.W2),
+		V: tss.CloneBigInt(p.V), TranscriptHash: bytes.Clone(p.TranscriptHash),
+	}
+}
 
 const (
 	proofTranscriptLabel       = "cggmp24-paillier-proof-transcript-v1"

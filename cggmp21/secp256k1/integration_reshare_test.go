@@ -6,6 +6,7 @@ import (
 	"bytes"
 	"crypto/sha256"
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -163,6 +164,147 @@ func TestThresholdECDSAReshareRejectsShareBeforeCommitments(t *testing.T) {
 	}
 	if _, err := session1.Handle(testutil.DeliverEnvelope(share)); err == nil {
 		t.Fatal("accepted reshare share before dealer commitments")
+	}
+}
+
+func TestThresholdECDSAReshareFactorProofMayPrecedeReceiverBroadcast(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	parties := tss.NewPartySet(1, 2)
+
+	for _, tc := range []struct {
+		name     string
+		conflict bool
+	}{
+		{name: "matching broadcast"},
+		{name: "conflicting broadcast", conflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			sessionID, err := tss.NewSessionID(nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
+			if err != nil {
+				t.Fatal(err)
+			}
+			session1, out1, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			session2, out2, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			from2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var factor tss.Envelope
+			for _, env := range from2 {
+				if env.PayloadType == payloadReshareFactorProof && env.To == 1 {
+					factor = env
+					break
+				}
+			}
+			if factor.Payload == nil {
+				t.Fatal("receiver 2 omitted factor proof for receiver 1")
+			}
+			if _, err := session1.Handle(testutil.DeliverEnvelope(factor)); err != nil {
+				t.Fatalf("early factor proof: %v", err)
+			}
+			if data := session1.newPartyData[2]; data.factorProof == nil || data.factorKey == nil || data.paillierPub.PublicKey != nil {
+				t.Fatal("early factor proof was not retained independently of receiver material")
+			}
+
+			receiverMaterial := out2[0].Clone()
+			if tc.conflict {
+				payload, err := tss.DecodeBinaryValueWithLimits[reshareReceiverMaterialPayload](receiverMaterial.Payload, testLimits())
+				if err != nil {
+					t.Fatal(err)
+				}
+				for {
+					payload.PaillierPublicKey.N.Add(payload.PaillierPublicKey.N, big.NewInt(4))
+					payload.PaillierPublicKey.G.Add(payload.PaillierPublicKey.N, big.NewInt(1))
+					payload.PaillierPublicKey.NSquared.Mul(payload.PaillierPublicKey.N, payload.PaillierPublicKey.N)
+					if payload.PaillierPublicKey.Validate() == nil {
+						break
+					}
+				}
+				receiverMaterial.Payload, err = payload.MarshalBinaryWithLimits(testLimits())
+				if err != nil {
+					t.Fatal(err)
+				}
+			}
+			_, err = session1.Handle(testutil.DeliverEnvelope(receiverMaterial))
+			if tc.conflict {
+				var protocolErr *tss.ProtocolError
+				if !errors.As(err, &protocolErr) || protocolErr.Blame == nil {
+					t.Fatalf("conflicting receiver material = %v, want blame", err)
+				}
+				evidence, decodeErr := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
+				if decodeErr != nil || evidence.Kind != tss.EvidenceKindPaillierAux {
+					t.Fatalf("conflicting receiver evidence = %#v, %v", evidence, decodeErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("matching receiver material after factor proof: %v", err)
+			}
+			if session1.newPartyData[2].paillierPub.PublicKey == nil {
+				t.Fatal("matching receiver material was not stored")
+			}
+		})
+	}
+}
+
+func TestThresholdECDSAReshareMalformedFactorProofCarriesPaillierEvidence(t *testing.T) {
+	t.Parallel()
+	shares := CachedKeygenShares(t, 2, 2)
+	parties := tss.NewPartySet(1, 2)
+	sessionID, err := tss.NewSessionID(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := NewResharePlan(ResharePlanOption{OldKey: shares[1], SessionID: sessionID, DealerParties: parties, NewParties: parties, NewThreshold: 2, Limits: testLimitsPtr()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	session1, out1, err := startCGGMP21ReshareOverlap(shares[1], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	session2, _, err := startCGGMP21ReshareOverlap(shares[2], plan, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	from2, err := session2.Handle(testutil.DeliverEnvelope(out1[0]))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var factor tss.Envelope
+	for _, env := range from2 {
+		if env.PayloadType == payloadReshareFactorProof && env.To == 1 {
+			factor = env
+			break
+		}
+	}
+	if factor.Payload == nil {
+		t.Fatal("receiver 2 omitted factor proof for receiver 1")
+	}
+	malformed := factor.Clone()
+	malformed.Payload = append(bytes.Clone(malformed.Payload), 0)
+	out, err := session1.Handle(testutil.DeliverEnvelope(malformed))
+	var protocolErr *tss.ProtocolError
+	if !errors.As(err, &protocolErr) || protocolErr.Code != tss.ErrCodeInvalidMessage || protocolErr.Blame == nil || len(out) != 0 {
+		t.Fatalf("malformed factor proof = out:%d err:%v, want blamed invalid-message", len(out), err)
+	}
+	evidence, decodeErr := tss.DecodeBinary[tss.BlameEvidence](protocolErr.Blame.Evidence)
+	if decodeErr != nil || evidence.Kind != tss.EvidenceKindPaillierAux || evidence.From != 2 {
+		t.Fatalf("malformed factor evidence = %#v, %v", evidence, decodeErr)
+	}
+	if data := session1.newPartyData[2]; data.factorProof != nil || data.factorKey != nil {
+		t.Fatal("malformed factor proof mutated receiver state")
 	}
 }
 

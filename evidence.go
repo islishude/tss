@@ -16,8 +16,9 @@ type EvidenceKind string
 const (
 	// EvidenceKindKeygenCommitment marks an invalid keygen public commitment.
 	EvidenceKindKeygenCommitment EvidenceKind = "keygen_commitment"
-	// EvidenceKindKeygenPaillier marks invalid Paillier key material or proof.
-	EvidenceKindKeygenPaillier EvidenceKind = "keygen_paillier"
+	// EvidenceKindPaillierAux marks invalid Paillier, Ring-Pedersen, or
+	// receiver-specific factor-proof auxiliary material in any lifecycle.
+	EvidenceKindPaillierAux EvidenceKind = "paillier_aux"
 	// EvidenceKindKeygenShare marks a DKG share that does not match commitments.
 	EvidenceKindKeygenShare EvidenceKind = "keygen_share"
 	// EvidenceKindRefreshShare marks a proactive refresh share that does not match commitments.
@@ -292,7 +293,7 @@ func (e *BlameEvidence) UnmarshalBinaryWithLimits(in []byte, l EvidenceLimits) e
 func validEvidenceKind(kind EvidenceKind) bool {
 	switch kind {
 	case EvidenceKindKeygenCommitment,
-		EvidenceKindKeygenPaillier,
+		EvidenceKindPaillierAux,
 		EvidenceKindKeygenShare,
 		EvidenceKindRefreshCommitment,
 		EvidenceKindRefreshShare,

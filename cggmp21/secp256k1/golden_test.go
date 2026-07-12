@@ -20,7 +20,7 @@ func TestGoldenKeygenSharePayload(t *testing.T) {
 
 	proof := testEncProof(1)
 	proof.TranscriptHash = bytes.Repeat([]byte{0x91}, 32)
-	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32)}
+	payload := keygenSharePayload{Ciphertext: []byte{1}, Proof: proof, PlanHash: bytes.Repeat([]byte{0x90}, 32), FactorProof: testFactorProof(10)}
 	raw, err := payload.MarshalBinaryWithLimits(testLimits())
 	if err != nil {
 		t.Fatal(err)

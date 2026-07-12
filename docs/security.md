@@ -308,15 +308,18 @@ state, and returns an unblamed `ErrCodeInvariant`.
 
 Portable proof-backed blame includes a canonical `IdentificationRecord`.
 `VerifyBlameEvidence` fails closed unless `EvidenceContext` supplies the
-authenticated envelope/broadcast verifiers and an `IdentificationVerifier`
-that replays the proof against the caller's trusted public transcript. No
+authenticated envelope/broadcast verifiers and trusted public transcript
+snapshots. Built-in CGGMP21 sign and presign identification is replayed by the
+library; `IdentificationVerifier` is only a fallback for unknown extensions. No
 private share, nonce, Paillier key, mask, or randomness belongs in that context
 or record. Attributable broadcast failures carry the exact accepted envelope
 and its broadcast ACK certificate; attributable direct failures carry the
 sender-signed envelope. Transport authentication failures remain unblamed.
-Conditional identification payloads have a 384 KiB phase-specific cap so the
-payload, certified envelope, and ACK set always fit within the 1 MiB public
-evidence hard cap; oversized payloads fail before replay or session mutation.
+Conditional identification payloads have a 384 KiB phase-specific cap. The
+certified envelope is retained as the sole payload carrier, and sign evidence
+uses an accused-only compact MtA record plus per-signer hashes, so the statement,
+envelope, and ACK set fit within the 1 MiB public evidence hard cap at 16
+signers. Oversized payloads fail before replay or session mutation.
 
 ## Keygen Broadcast Consistency
 

@@ -357,6 +357,28 @@ func TestCGGMP21KeyShareValidatesStoredPeerPaillierProofs(t *testing.T) {
 	if err := badRingPedersenProof.Validate(); err == nil {
 		t.Fatal("key share accepted swapped peer Ring-Pedersen proof")
 	}
+
+	badFactorProof := cloneKeyShareValue(shares[1])
+	factorData := badFactorProof.state.PartyData[2]
+	factorData.PaillierFactorProof = badFactorProof.state.PartyData[3].PaillierFactorProof.Clone()
+	badFactorProof.state.PartyData[2] = factorData
+	if err := badFactorProof.Validate(); err == nil {
+		t.Fatal("key share accepted a factor proof for another receiver/prover context")
+	}
+
+	raw, err := shares[1].MarshalBinary()
+	if err != nil {
+		t.Fatal(err)
+	}
+	restored, err := tss.DecodeBinary[KeyShare](raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range restored.state.Parties {
+		if id != restored.state.Party && restored.state.PartyData[id].PaillierFactorProof == nil {
+			t.Fatalf("round-trip omitted receiver-specific factor proof for party %d", id)
+		}
+	}
 }
 
 func TestCGGMP21PresignCanonicalEncoding(t *testing.T) {

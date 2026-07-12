@@ -213,18 +213,20 @@ type keySharePartyData struct {
 	RingPedersenParams *zkpai.RingPedersenParams `wire:"4,nested,max_bytes=ring_pedersen_params"`
 	RingPedersenProof  *zkpai.RingPedersenProof  `wire:"5,nested,max_bytes=paillier_proof"`
 
-	KeygenConfirmation *KeygenConfirmation `wire:"6,record"`
+	KeygenConfirmation  *KeygenConfirmation `wire:"6,record"`
+	PaillierFactorProof *zkpai.FactorProof  `wire:"7,nested,optional,max_bytes=zk_proof"`
 }
 
 // Clone returns a deep copy of the keySharePartyData.
 func (in keySharePartyData) Clone() keySharePartyData {
 	return keySharePartyData{
-		VerificationShare:  bytes.Clone(in.VerificationShare),
-		PaillierPublicKey:  in.PaillierPublicKey.Clone(),
-		PaillierProof:      in.PaillierProof.Clone(),
-		RingPedersenParams: in.RingPedersenParams.Clone(),
-		RingPedersenProof:  in.RingPedersenProof.Clone(),
-		KeygenConfirmation: in.KeygenConfirmation.Clone(),
+		VerificationShare:   bytes.Clone(in.VerificationShare),
+		PaillierPublicKey:   in.PaillierPublicKey.Clone(),
+		PaillierProof:       in.PaillierProof.Clone(),
+		RingPedersenParams:  in.RingPedersenParams.Clone(),
+		RingPedersenProof:   in.RingPedersenProof.Clone(),
+		KeygenConfirmation:  in.KeygenConfirmation.Clone(),
+		PaillierFactorProof: in.PaillierFactorProof.Clone(),
 	}
 }
 
