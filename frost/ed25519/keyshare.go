@@ -77,7 +77,7 @@ func (k *KeyShare) KeygenSessionID() tss.SessionID {
 	return k.state.KeygenSessionID
 }
 
-// KeygenConfirmation returns a caller-owned keygen confirmation for party.
+// KeygenConfirmation returns a caller-owned lifecycle confirmation for party.
 func (k *KeyShare) KeygenConfirmation(party tss.PartyID) (*KeygenConfirmation, bool) {
 	data, err := k.partyDataFor(party)
 	if err != nil || data.KeygenConfirmation == nil {
@@ -218,6 +218,9 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	if len(k.state.PlanHash) != sha256.Size {
 		return errors.New("key share has no lifecycle plan hash")
 	}
+	if !k.state.ConfirmationMode.valid() {
+		return errors.New("key share has invalid completion confirmation mode")
+	}
 	if _, err := edScalarFromSecret(k.state.Secret); err != nil {
 		return fmt.Errorf("invalid secret scalar: %w", err)
 	}
@@ -236,9 +239,8 @@ func (k *KeyShare) validateWithoutConfirmations() error {
 	return nil
 }
 
-// Validate checks share structure and canonical scalar/point encodings. When a
-// share carries keygen confirmation evidence, the complete confirmation set is
-// verified as well.
+// Validate checks share structure, canonical scalar/point encodings, and the
+// mandatory complete lifecycle confirmation set.
 func (k *KeyShare) Validate() error {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return err
@@ -249,11 +251,8 @@ func (k *KeyShare) Validate() error {
 			confirmationCount++
 		}
 	}
-	if confirmationCount == 0 {
-		return nil
-	}
 	if confirmationCount != len(k.state.Parties) {
-		return fmt.Errorf("keygen confirmation count %d != party count %d", confirmationCount, len(k.state.Parties))
+		return fmt.Errorf("lifecycle confirmation count %d != party count %d", confirmationCount, len(k.state.Parties))
 	}
 	confirmations, err := k.orderedKeygenConfirmations()
 	if err != nil {
@@ -406,5 +405,6 @@ func cloneKeyShareValue(k *KeyShare) *KeyShare {
 		KeygenSessionID:      k.state.KeygenSessionID,
 		KeygenTranscriptHash: slices.Clone(k.state.KeygenTranscriptHash),
 		PlanHash:             slices.Clone(k.state.PlanHash),
+		ConfirmationMode:     k.state.ConfirmationMode,
 	}}
 }

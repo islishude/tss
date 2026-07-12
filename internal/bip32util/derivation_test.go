@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/hex"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/islishude/tss"
@@ -288,6 +289,24 @@ func TestDeriveEd25519KhovratovichLawRejectsInvalidInputs(t *testing.T) {
 				t.Errorf("expected %v, got %v", tc.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestDeriveEd25519KhovratovichLawRejectsShortChainCodeHMACOutput(t *testing.T) {
+	t.Parallel()
+
+	pub := testutil.MustDecodeHex(t, ed25519HDVectorParentPubHex)
+	chain := testutil.MustDecodeHex(t, ed25519HDVectorChainCodeHex)
+	calls := 0
+	_, err := DeriveEd25519KhovratovichLaw(pub, chain, []uint32{0}, tss.WithHMACFunc(func(key, data []byte) []byte {
+		calls++
+		if calls == 2 {
+			return make([]byte, 31)
+		}
+		return HMACSHA512(key, data)
+	}))
+	if err == nil || !strings.Contains(err.Error(), "got 31 bytes, want 64") {
+		t.Fatalf("expected short HMAC output rejection, got %v", err)
 	}
 }
 

@@ -252,6 +252,9 @@ func deriveEd25519Child(parentPub, parentChain []byte, idx uint32, cfg tss.Deriv
 		}
 
 		cc := cfg.HMACFunc(parentChain, slices.Concat([]byte{0x03}, parentPub, idxBytes[:]))
+		if len(cc) != sha512.Size {
+			return nil, nil, idx, fmt.Errorf("HMACFunc: got %d bytes, want 64", len(cc))
+		}
 		return candidate, bytes.Clone(cc[32:]), idx, nil
 	}
 }

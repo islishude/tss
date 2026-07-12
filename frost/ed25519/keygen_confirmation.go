@@ -15,7 +15,8 @@ const keygenConfirmationWireVersion = 1
 
 const keygenConfirmationWireType = "frost.ed25519.keygen-confirmation"
 
-// KeygenConfirmation is a post-keygen consistency artifact.
+// KeygenConfirmation is a lifecycle-completion consistency artifact used by
+// keygen, refresh, and reshare.
 type KeygenConfirmation struct {
 	SessionID       tss.SessionID  `wire:"1,bytes,len=32"`
 	Sender          tss.PartyID    `wire:"2,u32"`
@@ -38,6 +39,16 @@ func (KeygenConfirmation) WireVersion() uint16 { return keygenConfirmationWireVe
 func (k *KeyShare) NewConfirmation() (*KeygenConfirmation, error) {
 	if err := k.validateWithoutConfirmations(); err != nil {
 		return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
+	}
+	if k.state.ConfirmationMode == keyShareConfirmationModeKeygenContributions {
+		data, err := k.partyDataFor(k.state.Party)
+		if err != nil {
+			return nil, fmt.Errorf("cannot build keygen confirmation: %w", err)
+		}
+		if data.KeygenConfirmation == nil {
+			return nil, errors.New("cannot build keygen confirmation: missing local chain-code contribution")
+		}
+		return data.KeygenConfirmation.Clone(), nil
 	}
 	return k.keygenConfirmationReferenceUnchecked()
 }

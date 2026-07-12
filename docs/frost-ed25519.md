@@ -8,7 +8,7 @@ The `frost/ed25519` package implements a dealerless FROST-style threshold Ed2551
 | --------- | ------ | --------------------------------------------------------- |
 | DKG       | 2      | Dealerless distributed key generation plus confirmation.  |
 | Signing   | 2      | Nonce commitment (round 1), partial signature (round 2).  |
-| Resharing | 1      | Zero-coefficient polynomial refresh; group key preserved. |
+| Resharing | 2      | Reshare/refresh shares, then target-holder confirmations. |
 | BIP32 HD  | local  | Khovratovich-Law non-hardened child key derivation.       |
 
 The group public key is a standard Ed25519 verification key. Signatures are standard 64-byte `R || S` Ed25519 values verifiable with `crypto/ed25519.Verify`.
@@ -63,7 +63,10 @@ signing run must bind the resolved derivation context.
 ### FROST RefreshRun
 
 Public run metadata includes a fresh refresh session ID, current key generation
-ID, and the current public key metadata. Each party reconstructs
+ID, and the current public key metadata. The plan digest binds the source
+lifecycle session ID, transcript hash, lifecycle plan hash, and group
+commitments hash, so shares from different source generations cannot enter the
+same run. Each party reconstructs
 `NewRefreshPlan` from its current local `KeyShare`, calls `StartRefresh`, routes
 `ReshareSession.Handle`, and obtains the staged output through
 `ReshareSession.KeyShare()`.
@@ -78,7 +81,9 @@ Public run metadata includes a fresh reshare session ID, old key generation ID,
 old parties, new parties, and new threshold. Old parties act as dealers and call
 `StartReshare`. New-only recipients call `StartReshareRecipient`. New-only
 recipients need public reshare metadata out of band before starting the
-recipient flow. All roles route `ReshareSession.Handle`.
+recipient flow: old public key, chain code, party set, group commitments,
+lifecycle session ID, transcript hash, and lifecycle plan hash. All roles route
+`ReshareSession.Handle`, including the round-2 confirmations returned by it.
 
 The control plane owns old/new generation cutover and must not retire the old
 generation until the required new-generation commit condition is satisfied.
@@ -122,7 +127,7 @@ where `t` is the threshold and `q` is the Ed25519 scalar order (`2^252 + 2774231
 
 ### Commitments
 
-Each party publishes Pedersen commitments to its polynomial coefficients:
+Each party publishes Feldman-style coefficient commitments:
 
 ```
 C_{i,k} = a_{i,k} · B          for k ∈ [0, t-1]
@@ -158,8 +163,8 @@ When all `n` dealers' commitments and shares are collected and verified:
 2. **Group commitments:** For each degree `k`, `GC_k = Σ_{i=1}^{n} C_{i,k}`
 3. **Group public key:** `PK = GC_0` (the aggregated degree-zero commitment)
 4. **Verification shares:** For each party `p`, `V_p = Σ_{k=0}^{t-1} (p^k · GC_k)`
-5. **Chain code:** If HD is enabled, `chain = XOR_{i=1}^{n} chainCode_i`
-6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, aggregate chain code, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
+5. **Chain code:** After the round-2 commit/reveal check, `chain = XOR_{i=1}^{n} chainCode_i`.
+6. **Transcript hash:** Labeled, domain-separated SHA-256 binding the ciphersuite context, protocol, version, session ID, threshold, sorted parties, the aggregate of the round-1 chain-code commitments, every dealer commitment set, group commitments, and verification shares. This value is identical for every party in the completed DKG.
 
 At this point the session has only local pending material. It then broadcasts a
 round-2 `KeygenConfirmation` payload binding the session ID, sender, threshold,
@@ -206,8 +211,9 @@ e_i = H3(random32 || SerializeScalar(x_i) || nonce_context("binding"))
 `nonce_context` binds the signing session ID, message, signing-context hash,
 sign-plan hash, and nonce role. This prevents repeated `NonceReader` output from
 reusing the same nonce across different signing intents. `random32` comes from
-`SignOptions.NonceReader` or `crypto/rand.Reader`; custom readers must still be
-CSPRNGs and must not intentionally repeat output.
+`SignRuntime.Local.Rand` or `crypto/rand.Reader`; custom readers must still be
+CSPRNGs and must not intentionally repeat output. `SignOptions.NonceReader`
+serves the in-memory simulation helper.
 The session stores the canonical nonce bytes only until the round-2 partial is
 constructed. After that point the nonce bytes are cleared and set to `nil`.
 
@@ -357,8 +363,16 @@ metadata. The reshare/refresh transcript hash is global across recipients and
 binds old and new party sets, the old public key, chain code, refresh mode, all
 dealer commitments, new commitments, and verification shares. `StartRefresh`
 requires `config.Self` to match the supplied old key's party id. A new recipient
-that does not hold an old `KeyShare` must receive the old 32-byte chain code out
-of band and pass it to `StartReshareRecipient`.
+that does not hold an old `KeyShare` must receive the authenticated source
+metadata listed under FROST ReshareRun and pass it to `NewPublicResharePlan`.
+
+After round 1, each target key holder stages its locally derived share and
+broadcasts a round-2 confirmation binding the reshare session, plan, target
+party set and threshold, preserved public key and chain code, transcript hash,
+and new commitments hash. `ReshareSession.KeyShare()` remains unavailable until
+confirmations from every target key holder agree. Serialized key shares require
+this complete confirmation set; removing every confirmation is rejected rather
+than treated as an older valid shape.
 
 ## BIP32 HD Derivation
 
@@ -372,11 +386,11 @@ child chain code, resolved path, and internal additive shift.
 
 For each path index `i`:
 
-1. `Z = F(c_par, 0x02 || A_par || ser_32(i))` where `F(k, x) = HMAC-SHA512(k, HMAC-SHA512(k, x))`
+1. `Z = HMAC-SHA512(c_par, 0x02 || A_par || ser_32(i))`
 2. `zL = 8 · LE_OS2IP(Z[0:28]) mod q` (cofactor clearing)
 3. `cumulativeShift += zL mod q`
 4. `childPub = A_par + cumShift · B`
-5. `childChain = F(c_par, 0x03 || A_par || ser_32(i))[32:64]`
+5. `childChain = HMAC-SHA512(c_par, 0x03 || A_par || ser_32(i))[32:64]`
 
 Only non-hardened indices (`i < 2^31`) are supported since hardened derivation requires the full private key, which no single party holds.
 
@@ -432,14 +446,16 @@ crypto/ed25519.Verify(plan.VerificationKeyBytes(), message, sig) // true
 
 ## Payload Types
 
-| Payload Type                        | Direction      | Confidential | Content                             |
-| ----------------------------------- | -------------- | ------------ | ----------------------------------- |
-| `frost.ed25519.keygen.commitments`  | broadcast      | no           | Polynomial commitments + chain code |
-| `frost.ed25519.keygen.share`        | point-to-point | yes          | Scalar share for one recipient      |
-| `frost.ed25519.sign.commitment`     | broadcast      | no           | `(D, E)` nonce commitments          |
-| `frost.ed25519.sign.partial`        | broadcast      | no           | Partial signature scalar `z_i`      |
-| `frost.ed25519.reshare.commitments` | broadcast      | no           | Reshare polynomial commitments      |
-| `frost.ed25519.reshare.share`       | point-to-point | yes          | Reshare scalar for one recipient    |
+| Payload Type                         | Direction      | Confidential | Content                                   |
+| ------------------------------------ | -------------- | ------------ | ----------------------------------------- |
+| `frost.ed25519.keygen.commitments`   | broadcast      | no           | Polynomial commitments + chain code       |
+| `frost.ed25519.keygen.share`         | point-to-point | yes          | Scalar share for one recipient            |
+| `frost.ed25519.keygen.confirmation`  | broadcast      | no           | Completed DKG binding + chain-code reveal |
+| `frost.ed25519.sign.commitment`      | broadcast      | no           | `(D, E)` nonce commitments                |
+| `frost.ed25519.sign.partial`         | broadcast      | no           | Partial signature scalar `z_i`            |
+| `frost.ed25519.reshare.commitments`  | broadcast      | no           | Reshare polynomial commitments            |
+| `frost.ed25519.reshare.share`        | point-to-point | yes          | Reshare scalar for one recipient          |
+| `frost.ed25519.reshare.confirmation` | broadcast      | no           | Completed reshare/refresh binding         |
 
 ## Sequence Diagrams
 
@@ -540,7 +556,7 @@ sequenceDiagram
     Note over S1,S3: Aggregate: z=Σzⱼ → sig=R‖z → Ed25519.Verify(PK, msg, sig)
 ```
 
-### Resharing (1 Round)
+### Resharing (2 Rounds)
 
 Changes participant set and/or threshold while preserving the group public key. Dealers (old parties) sample weighted polynomials and distribute shares to new receivers.
 
@@ -573,14 +589,14 @@ sequenceDiagram
     R2->>R2: Verify gⱼ(2) against C'_{j,k}
     R2->>R2: x₂'=Σ gⱼ(2), verify PK'=PK
 
-    Note over R1,R2: Broadcast Confirmations
-    R1-->>D1: KeygenConfirmation (preserved chain code)
-    R2-->>D2: KeygenConfirmation (preserved chain code)
+    Note over R1,R2: Round 2 — Broadcast Confirmations
+    R1-->>R2: KeygenConfirmation (transcript, commitments, preserved chain code)
+    R2-->>R1: KeygenConfirmation (transcript, commitments, preserved chain code)
 
-    Note over D1,R2: New KeyShare ready. Σ gᵢ(0) reconstructs old group secret → PK preserved
+    Note over R1,R2: All target-holder confirmations verified → new KeyShare ready
 ```
 
-### Same-Party Refresh
+### Same-Party Refresh (2 Rounds)
 
 Proactive refresh preserving the participant set and threshold. Each party samples a zero-constant polynomial and adds shares to the existing key.
 
@@ -608,11 +624,11 @@ sequenceDiagram
     P1->>P1: x₁'=x₁+Σ gⱼ(1), verify PK'=PK
     P2->>P2: x₂'=x₂+Σ gⱼ(2), verify PK'=PK
 
-    Note over P1,PN: Broadcast Confirmations
+    Note over P1,PN: Round 2 — Broadcast Confirmations
     P1-->>PN: KeygenConfirmation (preserved chain code)
     P2-->>PN: KeygenConfirmation (preserved chain code)
 
-    Note over P1,PN: Old commitments summed with refresh commitments → new KeyShare
+    Note over P1,PN: All confirmations verified → new KeyShare; old commitments were summed with refresh commitments
 ```
 
 ### BIP32 HD Derivation (Local)
@@ -685,6 +701,10 @@ plan, err := NewResharePlan(ResharePlanOption{
 sess, out, err := StartReshare(oldShare, plan, tss.LocalConfig{Self: oldShare.PartyID(), Rand: rng}, guard)
 recipientPlan, err := NewPublicResharePlan(PublicResharePlanOption{
     OldPublicKey: oldPublicKey, OldChainCode: oldChainCode, OldParties: oldParties,
+    OldGroupCommitments: oldGroupCommitments,
+    OldKeygenSessionID: oldKeygenSessionID,
+    OldKeygenTranscriptHash: oldKeygenTranscriptHash,
+    OldPlanHash: oldPlanHash,
     SessionID: sessionID, NewParties: newParties, NewThreshold: newThreshold,
 })
 recipient, err := StartReshareRecipient(recipientPlan, tss.LocalConfig{Self: self}, guard)
@@ -696,7 +716,7 @@ newShare, ok := sess.KeyShare()
 
 Old committee members call `StartReshare` and act as dealers. A participant
 that is only in the new committee calls `StartReshareRecipient` with the old
-group public key and old chain code so the completed share can verify
+authenticated source-generation public metadata so the completed share can verify
 `oldPK == newPK` and preserve HD derivation metadata. Same-party proactive
 refresh uses `StartRefresh`, which preserves the participant set and threshold.
 

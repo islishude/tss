@@ -148,7 +148,9 @@ partials, additive-shift scalars, and any remaining session-owned material.
 FROST resharing share envelopes carry confidential scalar shares.
 Transports must authenticate the sender and encrypt these point-to-point
 messages, reporting `ChannelConfidential` in `ReceiveInfo` so the guard enforces the policy. New HD reshare recipients must be provisioned
-with the old 32-byte chain code through an authorized metadata channel; the
+through an authorized metadata channel with the old public key, 32-byte chain
+code, party set, group commitments, lifecycle session ID, transcript hash, and
+plan hash. The reshare plan binds all of these source-generation anchors. The
 chain code is not a signing secret, but losing or substituting it changes child
 key derivation.
 
@@ -295,9 +297,11 @@ share, ok := kg.KeyShare() // FROST; CGGMP21 also exposes Complete()
 
 CGGMP21/secp256k1 key shares are not valid for signing until the full
 confirmation evidence set is embedded in the share and `Validate()` succeeds.
-FROST keygen shares produced by `KeygenSession` also embed and verify keygen
-confirmations; FROST reshare/refresh shares continue to rely on their own
-reshare transcript and group-key preservation checks.
+FROST keygen shares produced by `KeygenSession` embed and verify keygen
+confirmations. FROST reshare/refresh also has a mandatory target-holder
+confirmation round; its resulting shares are unavailable until the complete
+set agrees on the reshare transcript, new commitments, preserved group public
+key, and preserved chain code.
 
 Transport responsibilities:
 

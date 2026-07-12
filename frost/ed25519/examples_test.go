@@ -205,6 +205,8 @@ func ExampleStartReshare() {
 	}
 	recipientPlan, err := frost.NewPublicResharePlan(frost.PublicResharePlanOption{
 		OldPublicKey: oldPublicKey.Bytes(), OldChainCode: oldChainCode, OldParties: oldParties, SessionID: sessionID,
+		OldGroupCommitments: metadata.GroupCommitments, OldKeygenSessionID: metadata.KeygenSessionID,
+		OldKeygenTranscriptHash: metadata.KeygenTranscriptHash, OldPlanHash: metadata.PlanHash,
 		NewParties: newParties, NewThreshold: 2,
 	})
 	if err != nil {
@@ -214,7 +216,10 @@ func ExampleStartReshare() {
 	if err != nil {
 		panic(err)
 	}
-	if err := security.route(queue, allParties, func(tss.Envelope) tss.PartySet {
+	if err := security.route(queue, allParties, func(env tss.Envelope) tss.PartySet {
+		if env.Round == 2 {
+			return newParties
+		}
 		return oldParties
 	}, func(id tss.PartyID, env tss.InboundEnvelope) ([]tss.Envelope, error) {
 		return sessions[id].Handle(env)

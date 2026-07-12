@@ -342,7 +342,18 @@ func rfc9591KeyShare(t *testing.T, party tss.PartyID, secret []byte, v rfc9591Ve
 		KeygenTranscriptHash: []byte("rfc9591-appendix-e1"),
 		KeygenSessionID:      tss.SessionID(bytes.Repeat([]byte{0x01}, 32)),
 		PlanHash:             bytes.Repeat([]byte{0x95}, 32),
+		ConfirmationMode:     keyShareConfirmationModeLifecycleAggregate,
 	}}
+	for _, id := range parties {
+		confirmation, err := key.keygenConfirmationReferenceUnchecked()
+		if err != nil {
+			t.Fatal(err)
+		}
+		confirmation.Sender = id
+		data := key.state.PartyData[id]
+		data.KeygenConfirmation = confirmation
+		key.state.PartyData[id] = data
+	}
 	if err := key.ValidateConsistency(); err != nil {
 		t.Fatal(err)
 	}

@@ -68,8 +68,8 @@ guard, err := (tss.GuardConfig{
 }).BuildGuard()
 session, envelopes, err := secp256k1.StartKeygen(plan, local, guard)
 // Route envelopes to other parties via authenticated transport. Keep routing
-// any envelopes returned by session.Handle; keygen emits a confirmation
-// round before KeyShare() becomes available.
+// any envelopes returned by session.Handle; keygen and FROST refresh/reshare
+// emit confirmation rounds before KeyShare() becomes available.
 ```
 
 After all parties exchange messages, each obtains a `KeyShare`:
@@ -384,6 +384,12 @@ rejected or durably buffered and revalidated after the matching run is accepted.
 Refresh and reshare are not direct overwrites. Treat completion as a staged
 output. Install with compare-and-swap against the expected current key
 generation.
+
+For FROST, keep routing every envelope returned by `ReshareSession.Handle`.
+Target key holders exchange a second-round confirmation, and `KeyShare()` stays
+unavailable until the complete target set agrees. Public-only reshare recipients
+must receive authenticated source-generation metadata, not only the old public
+key and chain code.
 
 Old-only dealers, new-only receivers, and overlap parties have different
 startup functions. Production systems must assign roles from the same

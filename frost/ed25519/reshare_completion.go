@@ -1,6 +1,7 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 
@@ -9,25 +10,28 @@ import (
 	edcurve "github.com/islishude/tss/internal/curve/edwards25519"
 )
 
-func (s *ReshareSession) tryComplete() error {
+func (s *ReshareSession) tryComplete() ([]tss.Envelope, error) {
 	if s.completed {
-		return nil
+		return nil, nil
 	}
 	prepared, ok, err := s.maybePrepareReshareCompletion()
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if !ok {
-		return nil
+		return nil, nil
 	}
 	defer prepared.destroy()
-	s.commitReshareCompletion(prepared)
-	return nil
+	out := s.commitReshareCompletion(prepared)
+	return out, nil
 }
 
 type preparedReshareCompletion struct {
 	newShare           *KeyShare
 	dealerOnlyComplete bool
+	confirmations      map[tss.PartyID]*KeygenConfirmation
+	confirmationEnv    tss.Envelope
+	finalComplete      bool
 	committed          bool
 }
 
@@ -39,6 +43,13 @@ func (p *preparedReshareCompletion) destroy() {
 		p.newShare.Destroy()
 		p.newShare = nil
 	}
+	for id, confirmation := range p.confirmations {
+		if confirmation != nil {
+			clear(confirmation.ChainCode)
+		}
+		delete(p.confirmations, id)
+	}
+	clear(p.confirmationEnv.Payload)
 }
 
 func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareCompletion, bool, error) {
@@ -169,28 +180,166 @@ func (s *ReshareSession) maybePrepareReshareCompletion() (*preparedReshareComple
 		KeygenSessionID:      s.cfg.SessionID,
 		KeygenTranscriptHash: reshareTranscriptHash,
 		PlanHash:             append([]byte(nil), s.planHash...),
+		ConfirmationMode:     keyShareConfirmationModeLifecycleAggregate,
 	}}
-	if err := newShare.ValidateConsistency(); err != nil {
+	if err := newShare.validateConsistencyWithoutConfirmations(); err != nil {
 		newShare.Destroy()
 		return nil, false, err
 	}
-	return &preparedReshareCompletion{newShare: newShare}, true, nil
+	confirmation, err := newShare.keygenConfirmationReferenceUnchecked()
+	if err != nil {
+		newShare.Destroy()
+		return nil, false, err
+	}
+	encoded, err := confirmation.MarshalBinary()
+	if err != nil {
+		clear(confirmation.ChainCode)
+		newShare.Destroy()
+		return nil, false, err
+	}
+	confirmationEnv, err := newEnvelope(s.cfg, reshareConfirmationRound, s.selfID, tss.BroadcastPartyId, payloadReshareConfirmation, encoded)
+	clear(encoded)
+	if err != nil {
+		clear(confirmation.ChainCode)
+		newShare.Destroy()
+		return nil, false, err
+	}
+	confirmations := make(map[tss.PartyID]*KeygenConfirmation, len(s.pendingConfirmations)+1)
+	confirmations[s.selfID] = confirmation
+	for id, pendingConfirmation := range s.pendingConfirmations {
+		if id == s.selfID {
+			continue
+		}
+		if err := verifyReshareConfirmationForShare(newShare, pendingConfirmation); err != nil {
+			for _, staged := range confirmations {
+				clear(staged.ChainCode)
+			}
+			clear(confirmationEnv.Payload)
+			newShare.Destroy()
+			return nil, false, tss.NewProtocolError(tss.ErrCodeVerification, reshareConfirmationRound, id, err)
+		}
+		confirmations[id] = pendingConfirmation.Clone()
+	}
+	finalComplete := len(confirmations) == len(s.newParties)
+	if finalComplete {
+		ordered, err := orderedReshareConfirmations(s.newParties, confirmations)
+		if err != nil {
+			newShare.Destroy()
+			return nil, false, err
+		}
+		if err := applyKeygenConfirmationSet(newShare, ordered); err != nil {
+			newShare.Destroy()
+			return nil, false, err
+		}
+		if err := newShare.ValidateConsistency(); err != nil {
+			newShare.Destroy()
+			return nil, false, err
+		}
+	}
+	return &preparedReshareCompletion{
+		newShare:        newShare,
+		confirmations:   confirmations,
+		confirmationEnv: confirmationEnv,
+		finalComplete:   finalComplete,
+	}, true, nil
 }
 
-func (s *ReshareSession) commitReshareCompletion(p *preparedReshareCompletion) {
+func (s *ReshareSession) commitReshareCompletion(p *preparedReshareCompletion) []tss.Envelope {
 	if p == nil {
-		return
+		return nil
 	}
-	if !p.dealerOnlyComplete {
+	if p.dealerOnlyComplete {
+		s.completed = true
+		s.clearSensitive()
+		s.log.Info(s.cfg.Ctx(), "reshare complete",
+			"party_id", s.selfID,
+			"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+		)
+		p.committed = true
+		return nil
+	}
+	s.confirmations = p.confirmations
+	s.clearPendingConfirmations()
+	s.pendingConfirmations = nil
+	if p.finalComplete {
 		s.newShare = p.newShare
+		s.completed = true
+	} else {
+		s.pendingShare = p.newShare
 	}
-	s.completed = true
 	s.clearSensitive()
-	s.log.Info(s.cfg.Ctx(), "reshare complete",
+	s.log.Info(s.cfg.Ctx(), "reshare local material complete",
 		"party_id", s.selfID,
 		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
 	)
 	p.committed = true
+	return []tss.Envelope{p.confirmationEnv}
+}
+
+func verifyReshareConfirmationForShare(share *KeyShare, confirmation *KeygenConfirmation) error {
+	if share == nil || share.state == nil {
+		return errors.New("nil pending reshare key share")
+	}
+	if confirmation == nil {
+		return errors.New("nil reshare confirmation")
+	}
+	if err := confirmation.Validate(); err != nil {
+		return err
+	}
+	reference, err := share.keygenConfirmationReferenceUnchecked()
+	if err != nil {
+		return err
+	}
+	if err := compareKeygenConfirmationBindingFields(reference, confirmation); err != nil {
+		return err
+	}
+	if !bytes.Equal(confirmation.ChainCode, share.state.ChainCode) {
+		return fmt.Errorf("reshare confirmation chain code mismatch from party %d", confirmation.Sender)
+	}
+	return nil
+}
+
+func orderedReshareConfirmations(parties tss.PartySet, confirmations map[tss.PartyID]*KeygenConfirmation) ([]*KeygenConfirmation, error) {
+	if len(confirmations) != len(parties) {
+		return nil, fmt.Errorf("got %d reshare confirmations, want %d", len(confirmations), len(parties))
+	}
+	ordered := make([]*KeygenConfirmation, 0, len(parties))
+	for _, id := range parties {
+		confirmation := confirmations[id]
+		if confirmation == nil {
+			return nil, fmt.Errorf("missing reshare confirmation from party %d", id)
+		}
+		ordered = append(ordered, confirmation)
+	}
+	return ordered, nil
+}
+
+func (s *ReshareSession) tryFinalizeReshareConfirmations() error {
+	if s.pendingShare == nil || len(s.confirmations) != len(s.newParties) {
+		return nil
+	}
+	ordered, err := orderedReshareConfirmations(s.newParties, s.confirmations)
+	if err != nil {
+		return err
+	}
+	candidate := cloneKeyShareValue(s.pendingShare)
+	if err := applyKeygenConfirmationSet(candidate, ordered); err != nil {
+		candidate.Destroy()
+		return err
+	}
+	if err := candidate.ValidateConsistency(); err != nil {
+		candidate.Destroy()
+		return err
+	}
+	s.pendingShare.Destroy()
+	s.pendingShare = nil
+	s.newShare = candidate
+	s.completed = true
+	s.log.Info(s.cfg.Ctx(), "reshare complete",
+		"party_id", s.selfID,
+		"session_id", fmt.Sprintf("%x", s.cfg.SessionID[:8]),
+	)
+	return nil
 }
 
 func (s *ReshareSession) aggregateCommitments() (groupCommitments, error) {

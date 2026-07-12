@@ -72,6 +72,14 @@ var frostPolicies = tss.MustNewPolicySet(
 		Confidentiality:      tss.ConfidentialityRequired,
 		BroadcastConsistency: tss.BroadcastConsistencyNone,
 	},
+	tss.DeliveryPolicy{
+		Protocol:             tss.ProtocolFROSTEd25519,
+		Round:                reshareConfirmationRound,
+		PayloadType:          payloadReshareConfirmation,
+		Mode:                 tss.DeliveryBroadcast,
+		Confidentiality:      tss.ConfidentialityOptional,
+		BroadcastConsistency: tss.BroadcastConsistencyRequired,
+	},
 )
 
 // FROSTPolicies returns the read-only delivery policy set for the FROST Ed25519

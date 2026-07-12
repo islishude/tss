@@ -259,6 +259,20 @@ func TestFROSTKeyShareRejectsMalformedPartyData(t *testing.T) {
 			t.Fatal("key share accepted partial confirmation set")
 		}
 	})
+
+	t.Run("stripped confirmation set", func(t *testing.T) {
+		stripped := cloneKeyShareValue(shares[1])
+		for id, data := range stripped.state.PartyData {
+			data.KeygenConfirmation = nil
+			stripped.state.PartyData[id] = data
+		}
+		if err := stripped.Validate(); err == nil {
+			t.Fatal("key share accepted a stripped lifecycle confirmation set")
+		}
+		if _, err := stripped.MarshalBinary(); err == nil {
+			t.Fatal("key share serialized without lifecycle confirmations")
+		}
+	})
 }
 
 func TestFROSTKeyShareStateRejectsMalformedRawPointAndPartyData(t *testing.T) {
@@ -551,7 +565,7 @@ func TestFROSTKeyShareStateRejectsNonCanonicalTopLevelTags(t *testing.T) {
 		t.Fatal("key share accepted missing field")
 	}
 
-	unknown := mutateFROSTWireFieldTag(t, raw, len(fields)-1, 12)
+	unknown := mutateFROSTWireFieldTag(t, raw, len(fields)-1, 13)
 	if _, err := tss.DecodeBinary[KeyShare](unknown); err == nil {
 		t.Fatal("key share accepted unknown field")
 	}

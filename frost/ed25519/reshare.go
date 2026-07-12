@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	payloadReshareCommitments tss.PayloadType = "frost.ed25519.reshare.commitments"
-	payloadReshareShare       tss.PayloadType = "frost.ed25519.reshare.share"
+	payloadReshareCommitments  tss.PayloadType = "frost.ed25519.reshare.commitments"
+	payloadReshareShare        tss.PayloadType = "frost.ed25519.reshare.share"
+	payloadReshareConfirmation tss.PayloadType = "frost.ed25519.reshare.confirmation"
 )
 
 // ReshareSession tracks a FROST key resharing exchange.
@@ -31,16 +32,19 @@ type ReshareSession struct {
 	role         frostReshareRole
 	planHash     []byte // Digest every reshare payload must echo.
 
-	cfg     tss.ThresholdConfig                // Local threshold runtime view for this role.
-	log     tss.Logger                         // Optional protocol logger.
-	limits  Limits                             // Local fail-closed resource policy.
-	commits map[tss.PartyID]reshareCommitments // Public dealer polynomial commitments by dealer.
-	shares  map[tss.PartyID]*secret.Scalar     // Secret dealer contributions received by this receiver.
+	cfg                  tss.ThresholdConfig                 // Local threshold runtime view for this role.
+	log                  tss.Logger                          // Optional protocol logger.
+	limits               Limits                              // Local fail-closed resource policy.
+	commits              map[tss.PartyID]reshareCommitments  // Public dealer polynomial commitments by dealer.
+	shares               map[tss.PartyID]*secret.Scalar      // Secret dealer contributions received by this receiver.
+	confirmations        map[tss.PartyID]*KeygenConfirmation // Round-2 confirmations from target key holders.
+	pendingConfirmations map[tss.PartyID]*KeygenConfirmation // Confirmations received before local round-1 completion.
 
-	completed bool               // Terminal success flag after newShare is available.
-	aborted   bool               // Terminal failure/destruction flag.
-	newShare  *KeyShare          // New key share produced for recipient participants.
-	guard     *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
+	completed    bool               // Terminal success flag after newShare is available or a dealer-only role finishes.
+	aborted      bool               // Terminal failure/destruction flag.
+	pendingShare *KeyShare          // Locally derived share awaiting confirmations from all target key holders.
+	newShare     *KeyShare          // New key share produced for recipient participants.
+	guard        *tss.EnvelopeGuard // Transport replay, identity, and policy guard.
 }
 
 type reshareCommitmentsPayload struct {
@@ -86,7 +90,11 @@ func (s *ReshareSession) Guard() *tss.EnvelopeGuard {
 
 // validateInbound runs envelope validation through the shared ValidateInbound helper.
 func (s *ReshareSession) validateInbound(env tss.InboundEnvelope) error {
-	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, s.oldParties, s.selfID)
+	parties := s.oldParties
+	if env.Envelope().PayloadType == payloadReshareConfirmation {
+		parties = s.newParties
+	}
+	return tss.ValidateInbound(s.guard, env, tss.ProtocolFROSTEd25519, s.cfg.SessionID, parties, s.selfID)
 }
 
 func reshareGuardParties(oldParties, newParties tss.PartySet) tss.PartySet {
@@ -124,6 +132,18 @@ func validateResharePlanMatchesOldKey(plan *ResharePlan, oldKey *KeyShare) error
 	}
 	if !slices.Equal(plan.state.oldParties, oldKey.state.Parties) {
 		return errors.New("old key party set does not match reshare plan")
+	}
+	if plan.state.oldKeygenSessionID != oldKey.state.KeygenSessionID {
+		return errors.New("old key lifecycle session does not match reshare plan")
+	}
+	if !bytes.Equal(plan.state.oldKeygenTranscriptHash, oldKey.state.KeygenTranscriptHash) {
+		return errors.New("old key transcript does not match reshare plan")
+	}
+	if !bytes.Equal(plan.state.oldPlanHash, oldKey.state.PlanHash) {
+		return errors.New("old key lifecycle plan hash does not match reshare plan")
+	}
+	if !bytes.Equal(plan.state.oldCommitmentsHash, keygenGroupCommitmentsHash(oldKey.state.GroupCommitments.BytesList())) {
+		return errors.New("old key commitments do not match reshare plan")
 	}
 	return nil
 }
@@ -257,21 +277,23 @@ func StartReshareRecipient(plan *ResharePlan, local tss.LocalConfig, guard *tss.
 	config.Parties = plan.state.oldParties.Clone()
 	config.Threshold = len(plan.state.oldParties)
 	return &ReshareSession{
-		oldPublicKey: plan.state.oldPublicKey.Clone(),
-		chainCode:    append([]byte(nil), plan.state.oldChainCode...),
-		oldParties:   plan.state.oldParties.Clone(),
-		newParties:   plan.state.newParties.Clone(),
-		newThreshold: plan.state.newThreshold,
-		selfID:       config.Self,
-		mode:         frostReshareModeReshare,
-		role:         frostReshareRoleRecipientOnly,
-		cfg:          config,
-		log:          config.Logger(),
-		limits:       limits,
-		planHash:     append([]byte(nil), planHash...),
-		commits:      make(map[tss.PartyID]reshareCommitments),
-		shares:       make(map[tss.PartyID]*secret.Scalar),
-		guard:        guard,
+		oldPublicKey:         plan.state.oldPublicKey.Clone(),
+		chainCode:            append([]byte(nil), plan.state.oldChainCode...),
+		oldParties:           plan.state.oldParties.Clone(),
+		newParties:           plan.state.newParties.Clone(),
+		newThreshold:         plan.state.newThreshold,
+		selfID:               config.Self,
+		mode:                 frostReshareModeReshare,
+		role:                 frostReshareRoleRecipientOnly,
+		cfg:                  config,
+		log:                  config.Logger(),
+		limits:               limits,
+		planHash:             append([]byte(nil), planHash...),
+		commits:              make(map[tss.PartyID]reshareCommitments),
+		shares:               make(map[tss.PartyID]*secret.Scalar),
+		confirmations:        make(map[tss.PartyID]*KeygenConfirmation),
+		pendingConfirmations: make(map[tss.PartyID]*KeygenConfirmation),
+		guard:                guard,
 	}, nil
 }
 
@@ -307,7 +329,14 @@ func StartRefresh(oldKey *KeyShare, plan *RefreshPlan, local tss.LocalConfig, gu
 	if config.Self != oldKey.state.Party {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("config.Self must match the old key's party ID"))
 	}
-	if plan.state.threshold != oldKey.state.Threshold || !plan.state.publicKey.Equal(oldKey.state.PublicKey) || !bytes.Equal(plan.state.chainCode, oldKey.state.ChainCode) || !slices.Equal(plan.state.parties, oldKey.state.Parties) {
+	if plan.state.threshold != oldKey.state.Threshold ||
+		!plan.state.publicKey.Equal(oldKey.state.PublicKey) ||
+		!bytes.Equal(plan.state.chainCode, oldKey.state.ChainCode) ||
+		!slices.Equal(plan.state.parties, oldKey.state.Parties) ||
+		plan.state.oldKeygenSessionID != oldKey.state.KeygenSessionID ||
+		!bytes.Equal(plan.state.oldKeygenTranscriptHash, oldKey.state.KeygenTranscriptHash) ||
+		!bytes.Equal(plan.state.oldPlanHash, oldKey.state.PlanHash) ||
+		!bytes.Equal(plan.state.oldCommitmentsHash, keygenGroupCommitmentsHash(oldKey.state.GroupCommitments.BytesList())) {
 		return nil, nil, invalidPlanConfig(config.Self, errors.New("refresh plan does not match old key share"))
 	}
 	planHash, err := plan.Digest()
@@ -384,6 +413,19 @@ func (s *ReshareSession) clearSensitive() {
 		return
 	}
 	clearSecretScalarMap(s.shares)
+	s.clearPendingConfirmations()
+}
+
+func (s *ReshareSession) clearPendingConfirmations() {
+	if s == nil {
+		return
+	}
+	for id, confirmation := range s.pendingConfirmations {
+		if confirmation != nil {
+			clear(confirmation.ChainCode)
+		}
+		delete(s.pendingConfirmations, id)
+	}
 }
 
 // KeyShare returns the reshared key share when resharing completes.

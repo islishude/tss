@@ -1,8 +1,10 @@
 package ed25519
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
+	"slices"
 
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/secret"
@@ -19,7 +21,12 @@ func (tx *acceptReshareCommitmentsTx) apply(s *ReshareSession) (sessionEffects, 
 		return sessionEffects{}, nil
 	}
 	s.commits[tx.from] = tx.commitments
-	return sessionEffects{}, s.tryComplete()
+	out, err := s.tryComplete()
+	if err != nil {
+		delete(s.commits, tx.from)
+		return sessionEffects{}, err
+	}
+	return sessionEffects{envelopes: out}, nil
 }
 
 func (*acceptReshareCommitmentsTx) cleanupOnReject() {}
@@ -41,7 +48,60 @@ func (tx *acceptReshareShareTx) apply(s *ReshareSession) (sessionEffects, error)
 		s.shares = make(map[tss.PartyID]*secret.Scalar)
 	}
 	s.shares[tx.from] = tx.share
-	return sessionEffects{}, s.tryComplete()
+	out, err := s.tryComplete()
+	if err != nil {
+		delete(s.shares, tx.from)
+		return sessionEffects{}, err
+	}
+	return sessionEffects{envelopes: out}, nil
+}
+
+type acceptReshareConfirmationTx struct {
+	from         tss.PartyID
+	confirmation *KeygenConfirmation
+	pending      bool
+	duplicate    bool
+	committed    bool
+}
+
+func (tx *acceptReshareConfirmationTx) apply(s *ReshareSession) (sessionEffects, error) {
+	if tx == nil || tx.duplicate {
+		return sessionEffects{}, nil
+	}
+	target := s.confirmations
+	if tx.pending {
+		target = s.pendingConfirmations
+	}
+	if target == nil {
+		target = make(map[tss.PartyID]*KeygenConfirmation)
+		if tx.pending {
+			s.pendingConfirmations = target
+		} else {
+			s.confirmations = target
+		}
+	}
+	target[tx.from] = tx.confirmation
+	if !tx.pending {
+		if err := s.tryFinalizeReshareConfirmations(); err != nil {
+			delete(target, tx.from)
+			return sessionEffects{}, tss.NewProtocolError(tss.ErrCodeVerification, reshareConfirmationRound, tx.from, err)
+		}
+	}
+	return sessionEffects{}, nil
+}
+
+func (tx *acceptReshareConfirmationTx) cleanupOnReject() {
+	if tx == nil || tx.committed || tx.confirmation == nil {
+		return
+	}
+	clear(tx.confirmation.ChainCode)
+	tx.confirmation = nil
+}
+
+func (tx *acceptReshareConfirmationTx) markCommitted() {
+	if tx != nil {
+		tx.committed = true
+	}
 }
 
 func (tx *acceptReshareShareTx) cleanupOnReject() {
@@ -63,8 +123,11 @@ func (s *ReshareSession) buildReshareTransition(env tss.InboundEnvelope) (sessio
 		return nil, err
 	}
 	base := env.Envelope()
+	if base.PayloadType == payloadReshareConfirmation {
+		return s.buildAcceptReshareConfirmationTx(base)
+	}
 	if base.Round != reshareStartRound {
-		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare only accepts round 1 messages"))
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare only accepts round 1 messages and round 2 confirmations"))
 	}
 	switch base.PayloadType {
 	case payloadReshareCommitments:
@@ -74,6 +137,61 @@ func (s *ReshareSession) buildReshareTransition(env tss.InboundEnvelope) (sessio
 	default:
 		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, fmt.Errorf("unexpected payload type %q", base.PayloadType))
 	}
+}
+
+func (s *ReshareSession) buildAcceptReshareConfirmationTx(base tss.Envelope) (*acceptReshareConfirmationTx, error) {
+	if base.Round != reshareConfirmationRound {
+		return nil, tss.NewProtocolError(tss.ErrCodeRound, base.Round, base.From, errors.New("reshare confirmation in wrong round"))
+	}
+	if !s.isRecipient() {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("dealer-only reshare role does not accept confirmations"))
+	}
+	confirmation, err := tss.DecodeBinaryWithLimits[KeygenConfirmation](base.Payload, s.limits)
+	if err != nil {
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+	}
+	if confirmation.Sender != base.From {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("reshare confirmation sender mismatch"))
+	}
+	canonical, err := confirmation.MarshalBinary()
+	if err != nil {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, err)
+	}
+	if !bytes.Equal(canonical, base.Payload) {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeInvalidMessage, base.Round, base.From, errors.New("non-canonical reshare confirmation"))
+	}
+	if err := requirePlanHash("reshare confirmation", confirmation.PlanHash, s.planHash); err != nil {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
+	}
+	if confirmation.SessionID != s.cfg.SessionID || confirmation.Threshold != s.newThreshold ||
+		!slices.Equal(confirmation.Parties, s.newParties) || !confirmation.PublicKey.Equal(s.oldPublicKey) ||
+		!bytes.Equal(confirmation.ChainCode, s.chainCode) {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("reshare confirmation does not match public plan metadata"))
+	}
+	for _, existing := range []map[tss.PartyID]*KeygenConfirmation{s.pendingConfirmations, s.confirmations} {
+		if prior := existing[base.From]; prior != nil {
+			priorRaw, marshalErr := prior.MarshalBinary()
+			if marshalErr == nil && bytes.Equal(priorRaw, canonical) {
+				clear(confirmation.ChainCode)
+				return &acceptReshareConfirmationTx{from: base.From, duplicate: true}, nil
+			}
+			clear(confirmation.ChainCode)
+			return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, errors.New("conflicting reshare confirmation"))
+		}
+	}
+	if s.pendingShare == nil {
+		return &acceptReshareConfirmationTx{from: base.From, confirmation: confirmation, pending: true}, nil
+	}
+	if err := verifyReshareConfirmationForShare(s.pendingShare, confirmation); err != nil {
+		clear(confirmation.ChainCode)
+		return nil, tss.NewProtocolError(tss.ErrCodeVerification, base.Round, base.From, err)
+	}
+	return &acceptReshareConfirmationTx{from: base.From, confirmation: confirmation}, nil
 }
 
 func (s *ReshareSession) buildAcceptReshareCommitmentsTx(base tss.Envelope) (*acceptReshareCommitmentsTx, error) {

@@ -3,6 +3,7 @@ package ed25519
 import (
 	"testing"
 
+	fed "filippo.io/edwards25519"
 	"github.com/islishude/tss"
 	"github.com/islishude/tss/internal/testutil"
 )
@@ -50,8 +51,7 @@ func TestFROSTReshareModeAndRoleAreExplicit(t *testing.T) {
 	}
 
 	recipientOnly, err := startFROSTReshareRecipient(
-		oldShares[1].state.PublicKey.Bytes(),
-		oldShares[1].state.ChainCode,
+		oldShares[1],
 		oldParties,
 		newParties,
 		2,
@@ -136,6 +136,79 @@ func TestFROSTReshareShareBuildOwnsAndClearsDecodedSecret(t *testing.T) {
 	}
 }
 
+func TestFROSTReshareShareApplyRollsBackOnCompletionError(t *testing.T) {
+	t.Parallel()
+
+	session1, _, session2, out2 := frostTwoPartyRefreshSessions(t)
+	defer session1.Destroy()
+	defer session2.Destroy()
+	commitment := mustFROSTEnvelope(t, out2, payloadReshareCommitments, tss.BroadcastPartyId)
+	if _, err := session1.Handle(testutil.DeliverEnvelope(commitment)); err != nil {
+		t.Fatal(err)
+	}
+
+	// Force a non-ProtocolError completion failure after the decoded share has
+	// been staged. The transition must remove the staged map entry before its
+	// rejection cleanup destroys the scalar.
+	session1.oldPublicKey = publicKeyPoint{p: fed.NewGeneratorPoint()}
+	share := mustFROSTEnvelope(t, out2, payloadReshareShare, session1.selfID)
+	genericTx, err := session1.buildReshareTransition(testutil.DeliverEnvelope(share))
+	if err != nil {
+		t.Fatal(err)
+	}
+	tx := genericTx.(*acceptReshareShareTx)
+	staged := tx.share
+	if _, err := tx.apply(session1); err == nil {
+		t.Fatal("expected completion failure")
+	}
+	if _, ok := session1.shares[share.From]; ok {
+		t.Fatal("failed reshare transition retained the staged share")
+	}
+	tx.cleanupOnReject()
+	if !testutil.IsZeroBytes(staged.FixedBytes()) {
+		t.Fatal("failed reshare transition did not destroy the staged share")
+	}
+}
+
+func TestFROSTReshareBuffersConfirmationUntilRound1Completes(t *testing.T) {
+	t.Parallel()
+
+	session1, out1, session2, out2 := frostTwoPartyRefreshSessions(t)
+	defer session1.Destroy()
+	defer session2.Destroy()
+
+	var confirmation tss.Envelope
+	for _, env := range out1 {
+		out, err := session2.Handle(testutil.DeliverEnvelope(env))
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, produced := range out {
+			if produced.PayloadType == payloadReshareConfirmation {
+				confirmation = produced
+			}
+		}
+	}
+	if confirmation.PayloadType == "" {
+		t.Fatal("remote refresh session did not emit a confirmation")
+	}
+	if _, err := session1.Handle(testutil.DeliverEnvelope(confirmation)); err != nil {
+		t.Fatal(err)
+	}
+	if session1.pendingConfirmations[2] == nil {
+		t.Fatal("early reshare confirmation was not buffered")
+	}
+
+	for _, env := range out2 {
+		if _, err := session1.Handle(testutil.DeliverEnvelope(env)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, ok := session1.KeyShare(); !ok {
+		t.Fatal("buffered confirmation was not revalidated to complete refresh")
+	}
+}
+
 func TestFROSTReshareDealerOnlyRejectsInboundShareWithoutMutation(t *testing.T) {
 	t.Parallel()
 
@@ -191,8 +264,7 @@ func TestFROSTReshareRejectsShareFromNonDealerWithoutMutation(t *testing.T) {
 		t.Fatal(err)
 	}
 	recipient, err := startFROSTReshareRecipient(
-		oldShares[1].state.PublicKey.Bytes(),
-		oldShares[1].state.ChainCode,
+		oldShares[1],
 		oldParties,
 		newParties,
 		2,
