@@ -158,13 +158,21 @@ func TestRingPedersenChallengeDistribution(t *testing.T) {
 		t.Errorf("challenge distribution deviates from uniform: z=%.2f (>5σ)", zScore)
 	}
 
-	// Check per-round distribution across proofs.
+	// Check per-round distribution across proofs. These are 128 simultaneous
+	// comparisons, so the threshold must control the family-wise false-positive
+	// rate rather than treating each round as an isolated hypothesis. With 100
+	// proofs, the old >4σ threshold rejected 29/71 ones and had an exact
+	// two-sided binomial tail of 3.22e-5 per round, producing a Bonferroni
+	// family-wise bound of about 0.41%. A strict >5σ threshold rejects only
+	// 24/76 ones; its Bonferroni family-wise bound is below 2.4e-5.
+	const perRoundZLimit = 5.0
 	for i, ones := range roundOnes {
 		expected := float64(nProofs) / 2.0
 		stdDev := math.Sqrt(float64(nProofs) * 0.25)
 		zScore := (float64(ones) - expected) / stdDev
-		if math.Abs(zScore) > 4.0 {
-			t.Errorf("round %d: %d ones / %d proofs (z=%.2f, >4σ)", i, ones, nProofs, zScore)
+		if math.Abs(zScore) > perRoundZLimit {
+			t.Errorf("round %d: %d ones / %d proofs (z=%.2f, >%.0fσ)",
+				i, ones, nProofs, zScore, perRoundZLimit)
 		}
 	}
 }
