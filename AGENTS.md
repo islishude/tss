@@ -10,6 +10,7 @@ For testing rules, required invariants, test tiers, fuzzing, golden vectors, and
 
 - Do not read, copy, port, or derive code from public TSS implementations in Go or any other language.
 - Papers, RFCs, standards, and public test vectors or test scenarios are acceptable references.
+- For the original CGGMP21 paper, use the bundled 2024 revision at [`docs/cggmp21.pdf`](docs/cggmp21.pdf). Do not search for or download the original paper from the network; read this local PDF instead.
 - Keep protocol boundaries explicit:
   - `cggmp21/secp256k1` is threshold ECDSA over secp256k1.
   - `frost/ed25519` is FROST-style EdDSA over Ed25519.
