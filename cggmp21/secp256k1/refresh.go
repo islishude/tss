@@ -378,7 +378,7 @@ func (s *RefreshSession) applyValidatedInbound(env tss.Envelope) ([]tss.Envelope
 			return nil, verificationErrorWithEvidence(env, tss.EvidenceKindRefreshCommitment,
 				"invalid refresh commitments", tss.NewPartySet(env.From), err, fields...)
 		}
-		observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
+		observedPaillierKeyHash, err := hashObservedPaillierKeyEvidenceField(p.PaillierPublicKey, s.limits)
 		if err != nil {
 			return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 		}

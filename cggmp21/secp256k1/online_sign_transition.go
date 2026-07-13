@@ -22,6 +22,7 @@ type acceptSignPartialTx struct {
 	committed bool
 }
 
+//nolint:unparam // All transition apply methods return sessionEffects; this transition intentionally emits none.
 func (tx *acceptSignPartialTx) apply(s *SignSession) (sessionEffects, error) {
 	if tx == nil {
 		return sessionEffects{}, errors.New("nil sign partial transition")

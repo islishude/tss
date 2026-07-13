@@ -103,13 +103,12 @@ func generateKeygenLocalMaterial(
 	securityParams SecurityParams,
 	planHash []byte,
 ) (*keygenLocalMaterial, error) {
-	return generateKeygenLocalMaterialWithContribution(config, limits, securityParams, planHash, nil, nil, int(securityParams.MinPaillierBits))
+	return generateKeygenLocalMaterialWithContribution(config, limits, planHash, nil, nil, int(securityParams.MinPaillierBits))
 }
 
 func generateKeygenLocalMaterialWithContribution(
 	config tss.ThresholdConfig,
 	limits Limits,
-	securityParams SecurityParams,
 	planHash []byte,
 	constant *secp.Scalar,
 	chainContribution []byte,
@@ -386,7 +385,7 @@ func (s *KeygenSession) buildAcceptCGGMPKeygenCommitmentsTx(env tss.Envelope) (*
 			)
 		}
 	}
-	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
+	observedPaillierKeyHash, err := hashObservedPaillierKeyEvidenceField(p.PaillierPublicKey, s.limits)
 	if err != nil {
 		return nil, tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}

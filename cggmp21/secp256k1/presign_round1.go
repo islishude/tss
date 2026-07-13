@@ -412,7 +412,7 @@ func (s *PresignSession) buildAcceptPresignRound1ProofTx(env tss.Envelope) (*acc
 func (s *PresignSession) presignRound1EvidenceFields(from tss.PartyID, p presignRound1Payload) []tss.EvidenceField {
 	fields := append(keyContextEvidenceFields(s.key), signerEvidenceFields(s.signers)...)
 	publicHash, _ := presignRound1PublicHash(p, s.limits)
-	observedPaillierField, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, p.PaillierPublicKey, s.limits)
+	observedPaillierField, err := hashObservedPaillierKeyEvidenceField(p.PaillierPublicKey, s.limits)
 	if err != nil {
 		observedPaillierField = rawEvidenceField(evidenceFieldObservedPaillierKeyHash, hashBytes(nil))
 	}

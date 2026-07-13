@@ -260,7 +260,6 @@ func StartTrustedDealerImport(plan *TrustedDealerImportPlan, contribution *Trust
 	material, err := generateKeygenLocalMaterialWithContribution(
 		config,
 		plan.limits,
-		plan.state.SecurityParams,
 		planHash,
 		&constant,
 		claimedChainCode,

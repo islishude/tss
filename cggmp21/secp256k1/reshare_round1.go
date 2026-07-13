@@ -219,7 +219,7 @@ func (s *ReshareSession) verifyAndStoreReceiverMaterial(env tss.Envelope, p resh
 	if existing != nil && existing.factorKey != nil && existing.factorKey.N.Cmp(p.PaillierPublicKey.N) != 0 {
 		return verificationErrorWithEvidence(env, tss.EvidenceKindPaillierAux, "reshare receiver material conflicts with factor proof", tss.NewPartySet(env.From), errors.New("receiver Paillier key equivocation"))
 	}
-	observedPaillierKeyHash, err := hashWireEvidenceField(evidenceFieldObservedPaillierKeyHash, &p.PaillierPublicKey, s.limits)
+	observedPaillierKeyHash, err := hashObservedPaillierKeyEvidenceField(&p.PaillierPublicKey, s.limits)
 	if err != nil {
 		return tss.NewProtocolError(tss.ErrCodeInvariant, env.Round, env.From, err)
 	}

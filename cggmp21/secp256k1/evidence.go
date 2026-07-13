@@ -497,12 +497,12 @@ func canonicalWireMessageBytes(msg wire.Message, limits Limits) ([]byte, error) 
 	return wire.Marshal(msg, wire.WithFieldLimitsForMarshal(limits.fieldLimits()))
 }
 
-func hashWireEvidenceField(key string, msg wire.Message, limits Limits) (tss.EvidenceField, error) {
+func hashObservedPaillierKeyEvidenceField(msg wire.Message, limits Limits) (tss.EvidenceField, error) {
 	raw, err := canonicalWireMessageBytes(msg, limits)
 	if err != nil {
-		return tss.EvidenceField{}, fmt.Errorf("%s: %w", key, err)
+		return tss.EvidenceField{}, fmt.Errorf("%s: %w", evidenceFieldObservedPaillierKeyHash, err)
 	}
-	return hashEvidenceField(key, raw), nil
+	return hashEvidenceField(evidenceFieldObservedPaillierKeyHash, raw), nil
 }
 
 func hashBytes(value []byte) []byte {

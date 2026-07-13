@@ -8,6 +8,7 @@ import (
 	"github.com/islishude/tss"
 )
 
+//nolint:unparam // Refresh handlers share the session Handle result shape; confirmations intentionally emit no envelopes.
 func (s *RefreshSession) handleRefreshConfirmation(env tss.Envelope) ([]tss.Envelope, error) {
 	if env.Round != keygenConfirmationRound {
 		return nil, tss.NewProtocolError(tss.ErrCodeRound, env.Round, env.From, errors.New("refresh confirmation in wrong round"))

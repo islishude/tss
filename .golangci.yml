@@ -22,6 +22,7 @@ linters:
     - nilnil
     - nilnesserr
     - nolintlint
+    - unparam
     - unconvert
     - wastedassign
     - whitespace
@@ -33,6 +34,13 @@ linters:
     gosec:
       excludes:
         - G115
+  exclusions:
+    rules:
+      # Keep unparam focused on production code; constant-only test-helper
+      # arguments are common and do not affect the shipped API or protocol.
+      - path: _test\.go
+        linters:
+          - unparam
 
 issues:
   max-issues-per-linter: 0

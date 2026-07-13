@@ -588,6 +588,7 @@ type acceptSignIdentificationTx struct {
 	committed bool
 }
 
+//nolint:unparam // All transition apply methods return sessionEffects; this transition intentionally emits none.
 func (tx *acceptSignIdentificationTx) apply(s *SignSession) (sessionEffects, error) {
 	if s.identificationPayloads == nil {
 		s.identificationPayloads = make(map[tss.PartyID]signIdentificationPayload, len(s.presign.state.Signers))

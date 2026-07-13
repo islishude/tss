@@ -89,7 +89,7 @@ func (t *InMemoryTransport) Send(_ context.Context, env Envelope) error {
 		return fmt.Errorf("no route to party %d", env.To)
 	}
 
-	inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory", nil)
+	inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory")
 	if err != nil {
 		return err
 	}
@@ -127,7 +127,7 @@ func (t *InMemoryTransport) Broadcast(_ context.Context, env Envelope) error {
 		if !ok {
 			return fmt.Errorf("no route to party %d", id)
 		}
-		inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory", nil)
+		inbound, err := openInMemoryEnvelope(env, env.From, protectionFromPolicy(policy), "inmemory")
 		if err != nil {
 			return err
 		}
@@ -157,7 +157,7 @@ func protectionFromPolicy(policy DeliveryPolicy) ChannelProtection {
 	return ChannelPlaintext
 }
 
-func openInMemoryEnvelope(env Envelope, peer PartyID, protection ChannelProtection, channelID string, cert *BroadcastCertificate) (InboundEnvelope, error) {
+func openInMemoryEnvelope(env Envelope, peer PartyID, protection ChannelProtection, channelID string) (InboundEnvelope, error) {
 	raw, err := env.MarshalBinary()
 	if err != nil {
 		return InboundEnvelope{}, err
@@ -168,7 +168,7 @@ func openInMemoryEnvelope(env Envelope, peer PartyID, protection ChannelProtecti
 		ChannelID:  channelID,
 		PeerKeyID:  fmt.Sprintf("party-%d", peer),
 		ReceivedAt: time.Now(),
-	}, WithBroadcastCertificate(cert))
+	})
 }
 
 // AttackMode specifies a type of transport-layer attack for testing.
@@ -252,7 +252,7 @@ func (m *MaliciousTransport) sendWithReceiveFacts(env Envelope, peer PartyID, pr
 	if !ok {
 		return fmt.Errorf("no route to party %d", env.To)
 	}
-	inbound, err := openInMemoryEnvelope(env, peer, protection, channelID, nil)
+	inbound, err := openInMemoryEnvelope(env, peer, protection, channelID)
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (m *MaliciousTransport) broadcastEquivocation(env Envelope) error {
 		} else {
 			delivered = tampered.Clone()
 		}
-		inbound, err := openInMemoryEnvelope(delivered, env.From, protectionFromPolicy(policy), "inmemory-equivocation", nil)
+		inbound, err := openInMemoryEnvelope(delivered, env.From, protectionFromPolicy(policy), "inmemory-equivocation")
 		if err != nil {
 			return err
 		}
