@@ -33,6 +33,9 @@ jobs:
           version: latest
           install-only: true
 
+      - name: Install ripgrep
+        run: sudo apt-get update && sudo apt-get install -y ripgrep
+
       - run: make check
 
   test-tier1:
